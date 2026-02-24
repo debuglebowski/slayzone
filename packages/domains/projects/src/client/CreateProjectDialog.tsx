@@ -5,7 +5,8 @@ import { Button } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import { ColorPicker } from '@slayzone/ui'
-import type { Project } from '@slayzone/projects/shared'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
+import type { Project, ProjectTaskStorage } from '@slayzone/projects/shared'
 
 interface CreateProjectDialogProps {
   open: boolean
@@ -19,6 +20,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const [name, setName] = useState('')
   const [color, setColor] = useState(() => DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)])
   const [path, setPath] = useState('')
+  const [taskStorage, setTaskStorage] = useState<ProjectTaskStorage>('database')
   const [loading, setLoading] = useState(false)
 
   const handleBrowse = async () => {
@@ -45,11 +47,18 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
       const project = await window.api.db.createProject({
         name: name.trim(),
         color,
-        path: path || undefined
+        path: path || undefined,
+        taskStorage
       })
+      if (taskStorage === 'repository' && path) {
+        await window.api.db.syncTasksFromProject(project.id)
+        const refreshData = (window as { __slayzone_refreshData?: () => void }).__slayzone_refreshData
+        refreshData?.()
+      }
       onCreated(project)
       setName('')
       setPath('')
+      setTaskStorage('database')
       setColor(DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)])
     } finally {
       setLoading(false)
@@ -92,6 +101,21 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
             </p>
           </div>
           <div className="space-y-2">
+            <Label htmlFor="task-storage">Task Storage</Label>
+            <Select value={taskStorage} onValueChange={(value) => setTaskStorage(value as ProjectTaskStorage)}>
+              <SelectTrigger id="task-storage">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="database">Database (SQLite)</SelectItem>
+                <SelectItem value="repository">Repository (`docs/tasks/*.json`)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Repository mode reads and writes task files in <code>docs/tasks</code>.
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label>Color</Label>
             <ColorPicker value={color} onChange={setColor} />
           </div>
@@ -99,7 +123,10 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!name.trim() || loading}>
+            <Button
+              type="submit"
+              disabled={!name.trim() || loading || (taskStorage === 'repository' && !path.trim())}
+            >
               Create
             </Button>
           </div>

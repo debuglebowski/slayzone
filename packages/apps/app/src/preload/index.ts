@@ -30,6 +30,7 @@ const api: ElectronAPI = {
     getTasksByProject: (projectId) => ipcRenderer.invoke('db:tasks:getByProject', projectId),
     getTask: (id) => ipcRenderer.invoke('db:tasks:get', id),
     getSubTasks: (parentId) => ipcRenderer.invoke('db:tasks:getSubTasks', parentId),
+    syncTasksFromProject: (projectId) => ipcRenderer.invoke('db:tasks:syncFromProject', projectId),
     createTask: (data) => ipcRenderer.invoke('db:tasks:create', data),
     updateTask: (data) => ipcRenderer.invoke('db:tasks:update', data),
     deleteTask: (id) => ipcRenderer.invoke('db:tasks:delete', id),

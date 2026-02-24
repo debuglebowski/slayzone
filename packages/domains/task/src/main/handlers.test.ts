@@ -5,13 +5,17 @@
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerTaskHandlers, updateTask } from './handlers.js'
 import type { Task, ProviderConfig } from '../shared/types.js'
+import fs from 'fs'
+import path from 'path'
 
 const h = await createTestHarness()
 registerTaskHandlers(h.ipcMain as never, h.db)
 
 // Seed a project
 const projectId = crypto.randomUUID()
-h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(projectId, 'TestProject', '#000', '/tmp/test')
+const projectPath = h.tmpDir()
+h.db.prepare('INSERT INTO projects (id, name, color, path, task_storage) VALUES (?, ?, ?, ?, ?)')
+  .run(projectId, 'TestProject', '#000', projectPath, 'repository')
 
 // Helper
 function createTask(title: string, extra?: Record<string, unknown>): Task {
@@ -56,6 +60,25 @@ describe('db:tasks:create', () => {
     const child = createTask('Child', { parentId: parent.id })
     expect(child.parent_id).toBe(parent.id)
   })
+
+  test('writes task files to docs/tasks', () => {
+    const t = createTask('File Write')
+    const taskJson = path.join(projectPath, 'docs', 'tasks', `${t.id}.json`)
+    expect(fs.existsSync(taskJson)).toBe(true)
+    const json = JSON.parse(fs.readFileSync(taskJson, 'utf8')) as { id: string; title: string }
+    expect(json.id).toBe(t.id)
+    expect(json.title).toBe('File Write')
+  })
+
+  test('does not write repo files for database storage project', () => {
+    const dbProjectId = crypto.randomUUID()
+    const dbProjectPath = h.tmpDir()
+    h.db.prepare('INSERT INTO projects (id, name, color, path, task_storage) VALUES (?, ?, ?, ?, ?)')
+      .run(dbProjectId, 'DbBacked', '#222', dbProjectPath, 'database')
+    const t = h.invoke('db:tasks:create', { projectId: dbProjectId, title: 'DB only' }) as Task
+    const taskJson = path.join(dbProjectPath, 'docs', 'tasks', `${t.id}.json`)
+    expect(fs.existsSync(taskJson)).toBe(false)
+  })
 })
 
 describe('db:tasks:get', () => {
@@ -84,6 +107,30 @@ describe('db:tasks:getByProject', () => {
       expect(t.project_id).toBe(projectId)
       expect(t.archived_at).toBeNull()
     }
+  })
+
+  test('imports tasks from docs/tasks json', () => {
+    const fileProjectId = crypto.randomUUID()
+    const fileProjectPath = h.tmpDir()
+    h.db.prepare('INSERT INTO projects (id, name, color, path, task_storage) VALUES (?, ?, ?, ?, ?)')
+      .run(fileProjectId, 'FileBacked', '#111', fileProjectPath, 'repository')
+
+    const tasksDir = path.join(fileProjectPath, 'docs', 'tasks')
+    fs.mkdirSync(tasksDir, { recursive: true })
+    fs.writeFileSync(path.join(tasksDir, 'task-from-file.json'), JSON.stringify({
+      id: 'task-from-file',
+      title: 'Task From File',
+      description: 'Description from json',
+      status: 'todo',
+      priority: 2
+    }, null, 2))
+
+    const tasks = h.invoke('db:tasks:getByProject', fileProjectId) as Task[]
+    const imported = tasks.find((task) => task.id === 'task-from-file')
+    expect(imported?.title).toBe('Task From File')
+    expect(imported?.description).toBe('Description from json')
+    expect(imported?.status).toBe('todo')
+    expect(imported?.priority).toBe(2)
   })
 })
 

@@ -325,7 +325,12 @@ export const test = base.extend<ElectronFixtures>({
 /** Seed helpers — call window.api methods to create test data without UI interaction */
 export function seed(page: Page) {
   return {
-    createProject: (data: { name: string; color: string; path?: string }) =>
+    createProject: (data: {
+      name: string
+      color: string
+      path?: string
+      taskStorage?: 'database' | 'repository'
+    }) =>
       page.evaluate((d) => window.api.db.createProject(d), data),
 
     createTask: (data: {

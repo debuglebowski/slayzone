@@ -11,10 +11,10 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
   ipcMain.handle('db:projects:create', (_, data: CreateProjectInput) => {
     const id = crypto.randomUUID()
     const stmt = db.prepare(`
-      INSERT INTO projects (id, name, color, path)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO projects (id, name, color, path, task_storage)
+      VALUES (?, ?, ?, ?, ?)
     `)
-    stmt.run(id, data.name, data.color, data.path ?? null)
+    stmt.run(id, data.name, data.color, data.path ?? null, data.taskStorage ?? 'database')
     return db.prepare('SELECT * FROM projects WHERE id = ?').get(id)
   })
 
@@ -33,6 +33,10 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
     if (data.path !== undefined) {
       fields.push('path = ?')
       values.push(data.path)
+    }
+    if (data.taskStorage !== undefined) {
+      fields.push('task_storage = ?')
+      values.push(data.taskStorage)
     }
     if (data.autoCreateWorktreeOnTaskCreate !== undefined) {
       fields.push('auto_create_worktree_on_task_create = ?')

@@ -139,6 +139,7 @@ export interface ElectronAPI {
     getTasksByProject: (projectId: string) => Promise<Task[]>
     getTask: (id: string) => Promise<Task | null>
     getSubTasks: (parentId: string) => Promise<Task[]>
+    syncTasksFromProject: (projectId: string) => Promise<void>
     createTask: (data: CreateTaskInput) => Promise<Task>
     updateTask: (data: UpdateTaskInput) => Promise<Task>
     deleteTask: (id: string) => Promise<boolean>

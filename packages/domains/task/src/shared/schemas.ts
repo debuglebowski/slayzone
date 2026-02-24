@@ -32,7 +32,8 @@ export const updateTaskSchema = z.object({
 // Project creation schema
 export const createProjectSchema = z.object({
   name: z.string().min(1, 'Name required').max(100, 'Name too long'),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid hex color')
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid hex color'),
+  taskStorage: z.enum(['database', 'repository']).optional()
 })
 
 // Project update schema
@@ -42,7 +43,8 @@ export const updateProjectSchema = z.object({
   color: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
-    .optional()
+    .optional(),
+  taskStorage: z.enum(['database', 'repository']).optional()
 })
 
 // Form data types - explicit for forms

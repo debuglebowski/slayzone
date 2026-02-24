@@ -1,11 +1,16 @@
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { CreateTaskInput, UpdateTaskInput, Task, ProviderConfig } from '@slayzone/task/shared'
-import { PROVIDER_DEFAULTS } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import path from 'path'
 import { removeWorktree, createWorktree, getCurrentBranch, isGitRepo } from '@slayzone/worktrees/main'
 import { killPtysByTaskId } from '@slayzone/terminal/main'
+import {
+  buildDefaultProviderConfig,
+  deleteTaskFromFilesystem,
+  syncProjectTasksFromFilesystem,
+  writeTaskToFilesystem
+} from './task-files'
 
 function safeJsonParse(value: unknown): unknown {
   if (!value || typeof value !== 'string') return null
@@ -43,6 +48,14 @@ function parseTask(row: Record<string, unknown> | undefined): Task | null {
 
 function parseTasks(rows: Record<string, unknown>[]): Task[] {
   return rows.map((row) => parseTask(row)!)
+}
+
+function safeSyncProjectTasks(db: Database, projectId: string): void {
+  try {
+    syncProjectTasksFromFilesystem(db, projectId)
+  } catch (error) {
+    console.error(`[tasks] failed to sync project ${projectId} from filesystem`, error)
+  }
 }
 
 function cleanupTask(db: Database, taskId: string): void {
@@ -201,6 +214,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   const existing = db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(data.id) as
     | { project_id: string }
     | undefined
+  const existingProjectId = existing?.project_id ?? null
   const projectChanged = data.projectId !== undefined && existing?.project_id !== data.projectId
 
   const fields: string[] = []
@@ -291,7 +305,14 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   }
 
   const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as Record<string, unknown> | undefined
-  return parseTask(row)
+  const parsed = parseTask(row)
+  if (projectChanged) {
+    deleteTaskFromFilesystem(db, data.id, existingProjectId)
+  }
+  if (parsed) {
+    writeTaskToFilesystem(db, parsed)
+  }
+  return parsed
 }
 
 export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
@@ -308,6 +329,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
   })
 
   ipcMain.handle('db:tasks:getByProject', (_, projectId: string) => {
+    safeSyncProjectTasks(db, projectId)
     const rows = db
       .prepare(
         `SELECT t.*, el.external_url AS linear_url
@@ -338,16 +360,11 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       ?? 'claude-code'
 
     // Build provider_config from defaults + overrides
-    const providerConfig: ProviderConfig = {}
     const legacyOverrides: Record<string, string | undefined> = {
       'claude-code': data.claudeFlags, 'codex': data.codexFlags,
       'cursor-agent': data.cursorFlags, 'gemini': data.geminiFlags, 'opencode': data.opencodeFlags,
     }
-    for (const [mode, def] of Object.entries(PROVIDER_DEFAULTS)) {
-      const dbDefault = (db.prepare('SELECT value FROM settings WHERE key = ?')
-        .get(def.settingsKey) as { value: string } | undefined)?.value ?? def.fallback
-      providerConfig[mode] = { flags: legacyOverrides[mode] ?? dbDefault }
-    }
+    const providerConfig = buildDefaultProviderConfig(db, legacyOverrides)
 
     const stmt = db.prepare(`
       INSERT INTO tasks (
@@ -371,7 +388,11 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
     )
     maybeAutoCreateWorktree(db, id, data.projectId, data.title)
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    return parseTask(row)
+    const parsed = parseTask(row)
+    if (parsed) {
+      writeTaskToFilesystem(db, parsed)
+    }
+    return parsed
   })
 
   ipcMain.handle('db:tasks:getSubTasks', (_, parentId: string) => {
@@ -389,9 +410,29 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('db:tasks:update', (_, data: UpdateTaskInput) => updateTask(db, data))
 
+  ipcMain.handle('db:tasks:syncFromProject', (_, projectId: string) => {
+    safeSyncProjectTasks(db, projectId)
+  })
+
   ipcMain.handle('db:tasks:delete', (_, id: string) => {
+    const affected = db.prepare(`
+      WITH RECURSIVE descendants(id, project_id) AS (
+        SELECT id, project_id FROM tasks WHERE id = ?
+        UNION ALL
+        SELECT t.id, t.project_id
+        FROM tasks t
+        JOIN descendants d ON t.parent_id = d.id
+      )
+      SELECT id, project_id FROM descendants
+    `).all(id) as Array<{ id: string; project_id: string }>
+
     cleanupTask(db, id)
     const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+    if (result.changes > 0) {
+      for (const task of affected) {
+        deleteTaskFromFilesystem(db, task.id, task.project_id)
+      }
+    }
     return result.changes > 0
   })
 
@@ -406,7 +447,14 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       WHERE id = ? OR parent_id = ?
     `).run(id, id)
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    return parseTask(row)
+    const archived = parseTask(row)
+    if (archived) writeTaskToFilesystem(db, archived)
+    for (const childId of childIds) {
+      const childRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(childId) as Record<string, unknown> | undefined
+      const child = parseTask(childRow)
+      if (child) writeTaskToFilesystem(db, child)
+    }
+    return archived
   })
 
   ipcMain.handle('db:tasks:archiveMany', (_, ids: string[]) => {
@@ -424,6 +472,10 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, updated_at = datetime('now')
       WHERE id IN (${placeholders})
     `).run(...allIds)
+    const rows = db.prepare(`SELECT * FROM tasks WHERE id IN (${placeholders})`).all(...allIds) as Record<string, unknown>[]
+    for (const task of parseTasks(rows)) {
+      writeTaskToFilesystem(db, task)
+    }
   })
 
   ipcMain.handle('db:tasks:unarchive', (_, id: string) => {
@@ -432,7 +484,9 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       WHERE id = ?
     `).run(id)
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    return parseTask(row)
+    const task = parseTask(row)
+    if (task) writeTaskToFilesystem(db, task)
+    return task
   })
 
   ipcMain.handle('db:tasks:getArchived', () => {
@@ -450,6 +504,12 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
         stmt.run(index, id)
       })
     })()
+    if (taskIds.length === 0) return
+    const placeholders = taskIds.map(() => '?').join(',')
+    const rows = db.prepare(`SELECT * FROM tasks WHERE id IN (${placeholders})`).all(...taskIds) as Record<string, unknown>[]
+    for (const task of parseTasks(rows)) {
+      writeTaskToFilesystem(db, task)
+    }
   })
 
   // Task Dependencies

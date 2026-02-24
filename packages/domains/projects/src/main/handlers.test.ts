@@ -10,16 +10,33 @@ registerProjectHandlers(h.ipcMain as never, h.db)
 
 describe('db:projects:create', () => {
   test('creates with defaults', () => {
-    const p = h.invoke('db:projects:create', { name: 'Alpha', color: '#ff0000' }) as { id: string; name: string; color: string; path: null }
+    const p = h.invoke('db:projects:create', { name: 'Alpha', color: '#ff0000' }) as {
+      id: string
+      name: string
+      color: string
+      path: null
+      task_storage: string
+    }
     expect(p.name).toBe('Alpha')
     expect(p.color).toBe('#ff0000')
     expect(p.path).toBeNull()
+    expect(p.task_storage).toBe('database')
     expect(p.id).toBeTruthy()
   })
 
   test('creates with path', () => {
     const p = h.invoke('db:projects:create', { name: 'Beta', color: '#00f', path: '/tmp/beta' }) as { path: string }
     expect(p.path).toBe('/tmp/beta')
+  })
+
+  test('creates with repository task storage', () => {
+    const p = h.invoke('db:projects:create', {
+      name: 'Repo',
+      color: '#0f0',
+      path: '/tmp/repo',
+      taskStorage: 'repository'
+    }) as { task_storage: string }
+    expect(p.task_storage).toBe('repository')
   })
 })
 
@@ -61,6 +78,14 @@ describe('db:projects:update', () => {
     const gamma = all.find(p => p.name === 'Gamma')!
     const p = h.invoke('db:projects:update', { id: gamma.id }) as { name: string }
     expect(p.name).toBe('Gamma')
+  })
+
+  test('updates task storage mode', () => {
+    const all = h.invoke('db:projects:getAll') as { id: string }[]
+    const p = h.invoke('db:projects:update', { id: all[0].id, taskStorage: 'repository' }) as {
+      task_storage: string
+    }
+    expect(p.task_storage).toBe('repository')
   })
 })
 
