@@ -168,6 +168,7 @@ export function AgentListView({
                   key={task.id}
                   task={task}
                   onClick={(e) => onTaskClick?.(task, { metaKey: e.metaKey })}
+                  onDelete={onDeleteTask}
                   project={showProjectDot ? projectsMap?.get(task.project_id) : undefined}
                   showProject={showProjectDot}
                   isBlocked={blockedTaskIds?.has(task.id)}
