@@ -22,6 +22,7 @@
     "@slayzone/tags": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/worktrees": "workspace:*",
     "lucide-react": "^0.562.0"
   },
   "peerDependencies": {

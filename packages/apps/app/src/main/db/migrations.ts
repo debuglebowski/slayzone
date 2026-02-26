@@ -716,6 +716,15 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(`DROP TABLE IF EXISTS diagnostics_events`)
     }
+  },
+  {
+    version: 42,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE projects
+          ADD COLUMN worktree_source_branch TEXT DEFAULT NULL;
+      `)
+    }
   }
 ]
 

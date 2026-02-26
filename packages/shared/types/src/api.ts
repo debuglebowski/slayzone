@@ -4,7 +4,7 @@ import type { Tag, CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
 import type { TerminalMode, TerminalState, CodeMode, PtyInfo, PromptInfo, BufferSinceResult, ProviderUsage, ValidationResult } from '@slayzone/terminal/shared'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '@slayzone/task-terminals/shared'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
-import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary } from '@slayzone/worktrees/shared'
+import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, WorktreeCopyEntry } from '@slayzone/worktrees/shared'
 import type { MergeContext } from '@slayzone/task/shared'
 import type {
   AiConfigItem,
@@ -275,7 +275,7 @@ export interface ElectronAPI {
   git: {
     isGitRepo: (path: string) => Promise<boolean>
     detectWorktrees: (repoPath: string) => Promise<DetectedWorktree[]>
-    createWorktree: (repoPath: string, targetPath: string, branch?: string) => Promise<void>
+    createWorktree: (repoPath: string, targetPath: string, branch?: string, copyEntries?: WorktreeCopyEntry[], sourceBranch?: string) => Promise<void>
     removeWorktree: (repoPath: string, worktreePath: string) => Promise<void>
     init: (path: string) => Promise<void>
     getCurrentBranch: (path: string) => Promise<string | null>

@@ -37,7 +37,7 @@ import {
   getStatusSummary
 } from './git-worktree'
 import { runAiCommand } from './merge-ai'
-import type { MergeWithAIResult, ConflictAnalysis } from '../shared/types'
+import type { MergeWithAIResult, ConflictAnalysis, WorktreeCopyEntry } from '../shared/types'
 
 export function registerWorktreeHandlers(ipcMain: IpcMain): void {
   // Git operations
@@ -49,9 +49,19 @@ export function registerWorktreeHandlers(ipcMain: IpcMain): void {
     return detectWorktrees(repoPath)
   })
 
-  ipcMain.handle('git:createWorktree', (_, repoPath: string, targetPath: string, branch?: string) => {
-    createWorktree(repoPath, targetPath, branch)
-  })
+  ipcMain.handle(
+    'git:createWorktree',
+    (
+      _,
+      repoPath: string,
+      targetPath: string,
+      branch?: string,
+      copyEntries?: WorktreeCopyEntry[],
+      sourceBranch?: string
+    ) => {
+      createWorktree(repoPath, targetPath, branch, copyEntries, sourceBranch)
+    }
+  )
 
   ipcMain.handle('git:removeWorktree', (_, repoPath: string, worktreePath: string) => {
     removeWorktree(repoPath, worktreePath)

@@ -1,3 +1,10 @@
+export interface WorktreeCopyEntry {
+  /** Path relative to repo root (e.g. '.env', 'node_modules') */
+  path: string
+  /** Whether to copy the file/dir or create a symlink */
+  mode: 'copy' | 'symlink'
+}
+
 export interface DetectedWorktree {
   path: string
   branch: string | null

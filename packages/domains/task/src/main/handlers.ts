@@ -5,6 +5,7 @@ import { PROVIDER_DEFAULTS } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import path from 'path'
 import { removeWorktree, createWorktree, getCurrentBranch, isGitRepo } from '@slayzone/worktrees/main'
+import type { WorktreeCopyEntry } from '@slayzone/worktrees/shared'
 import { killPtysByTaskId } from '@slayzone/terminal/main'
 
 function safeJsonParse(value: unknown): unknown {
@@ -121,8 +122,8 @@ function maybeAutoCreateWorktree(
 ): void {
   if (!isAutoCreateWorktreeEnabled(db, projectId)) return
 
-  const projectRow = db.prepare('SELECT path FROM projects WHERE id = ?').get(projectId) as
-    | { path: string | null }
+  const projectRow = db.prepare('SELECT path, worktree_source_branch FROM projects WHERE id = ?').get(projectId) as
+    | { path: string | null; worktree_source_branch: string | null }
     | undefined
   if (!projectRow?.path) {
     recordDiagnosticEvent({
@@ -155,15 +156,28 @@ function maybeAutoCreateWorktree(
   const basePath = resolveWorktreeBasePathTemplate(baseTemplate, projectRow.path)
   const branch = slugify(taskTitle) || `task-${taskId.slice(0, 8)}`
   const worktreePath = path.join(basePath, branch)
-  const parentBranch = getCurrentBranch(projectRow.path)
+  const currentBranch = getCurrentBranch(projectRow.path)
+  const sourceBranch = projectRow.worktree_source_branch?.trim() || currentBranch
+
+  let copyEntries: WorktreeCopyEntry[] | undefined
+  try {
+    const projectCopyRaw = (db.prepare(
+      "SELECT value FROM settings WHERE key = ?"
+    ).get(`worktree_copy_files:${projectRow.path}`) as { value: string } | undefined)?.value
+    const globalCopyRaw = (db.prepare(
+      "SELECT value FROM settings WHERE key = 'worktree_copy_files'"
+    ).get() as { value: string } | undefined)?.value
+    const raw = projectCopyRaw || globalCopyRaw
+    if (raw) copyEntries = JSON.parse(raw) as WorktreeCopyEntry[]
+  } catch { /* ignore malformed setting */ }
 
   try {
-    createWorktree(projectRow.path, worktreePath, branch)
+    createWorktree(projectRow.path, worktreePath, branch, copyEntries, sourceBranch || undefined)
     db.prepare(`
       UPDATE tasks
       SET worktree_path = ?, worktree_parent_branch = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(worktreePath, parentBranch, taskId)
+    `).run(worktreePath, sourceBranch, taskId)
     recordDiagnosticEvent({
       level: 'info',
       source: 'task',
@@ -174,7 +188,9 @@ function maybeAutoCreateWorktree(
         projectPath: projectRow.path,
         worktreePath,
         branch,
-        parentBranch
+        parentBranch: sourceBranch,
+        copyEntriesCount: copyEntries?.length ?? 0,
+        copyEntries: copyEntries ?? []
       }
     })
   } catch (err) {

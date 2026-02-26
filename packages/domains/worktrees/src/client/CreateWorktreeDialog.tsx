@@ -4,11 +4,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Button } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
+import type { WorktreeCopyEntry } from '../shared/types'
 
 interface CreateWorktreeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectPath: string
+  /** When set, new worktrees branch from this; when empty, use current branch. */
+  worktreeSourceBranch?: string | null
   onCreated: (worktreePath: string, parentBranch: string | null) => void
 }
 
@@ -16,6 +19,7 @@ export function CreateWorktreeDialog({
   open,
   onOpenChange,
   projectPath,
+  worktreeSourceBranch,
   onCreated
 }: CreateWorktreeDialogProps) {
   const [path, setPath] = useState('')
@@ -41,12 +45,20 @@ export function CreateWorktreeDialog({
     setError(null)
 
     try {
-      // Capture parent branch before creating worktree
-      const parentBranch = await window.api.git.getCurrentBranch(projectPath)
+      const currentBranch = await window.api.git.getCurrentBranch(projectPath)
+      const sourceBranch = worktreeSourceBranch?.trim() || currentBranch
+
+      let copyEntries: WorktreeCopyEntry[] | undefined
+      try {
+        const projectRaw = await window.api.settings.get(`worktree_copy_files:${projectPath}`)
+        const globalRaw = await window.api.settings.get('worktree_copy_files')
+        const raw = projectRaw || globalRaw
+        copyEntries = raw ? JSON.parse(raw) : undefined
+      } catch { /* ignore */ }
 
       // Create git worktree
-      await window.api.git.createWorktree(projectPath, path, branch || undefined)
-      onCreated(path.trim(), parentBranch)
+      await window.api.git.createWorktree(projectPath, path, branch || undefined, copyEntries, sourceBranch)
+      onCreated(path.trim(), sourceBranch)
       resetForm()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create worktree')

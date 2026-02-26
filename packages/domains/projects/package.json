@@ -17,6 +17,7 @@
   "dependencies": {
     "@slayzone/integrations": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@slayzone/worktrees": "workspace:*",
     "lucide-react": "^0.562.0"
   },
   "peerDependencies": {

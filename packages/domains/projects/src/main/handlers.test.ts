@@ -56,6 +56,18 @@ describe('db:projects:update', () => {
     expect(p.auto_create_worktree_on_task_create).toBeNull()
   })
 
+  test('updates worktreeSourceBranch', () => {
+    const all = h.invoke('db:projects:getAll') as { id: string }[]
+    const p = h.invoke('db:projects:update', { id: all[0].id, worktreeSourceBranch: 'main' }) as { worktree_source_branch: string }
+    expect(p.worktree_source_branch).toBe('main')
+  })
+
+  test('sets worktreeSourceBranch to null when empty string', () => {
+    const all = h.invoke('db:projects:getAll') as { id: string }[]
+    const p = h.invoke('db:projects:update', { id: all[0].id, worktreeSourceBranch: '' }) as { worktree_source_branch: null }
+    expect(p.worktree_source_branch).toBeNull()
+  })
+
   test('no-op returns current row', () => {
     const all = h.invoke('db:projects:getAll') as { id: string; name: string }[]
     const gamma = all.find(p => p.name === 'Gamma')!

@@ -16,6 +16,8 @@ const gitDiffShortcut = isMac ? '⌘⇧G' : 'Ctrl+Shift+G'
 
 type UnifiedGitPanelProps = {
   projectPath: string | null
+  /** When set, new worktrees branch from this; when empty, use current branch. */
+  worktreeSourceBranch?: string | null
   visible: boolean
   pollIntervalMs?: number
   defaultTab?: GitTabId
@@ -40,6 +42,7 @@ export interface UnifiedGitPanelHandle {
 export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanelProps>(function UnifiedGitPanel({
   task,
   projectPath,
+  worktreeSourceBranch,
   visible,
   pollIntervalMs,
   defaultTab = 'general',
@@ -177,6 +180,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
             <GeneralTabContent
               task={task}
               projectPath={projectPath}
+              worktreeSourceBranch={worktreeSourceBranch}
               visible={visible && activeTab === 'general'}
               pollIntervalMs={pollIntervalMs}
               onUpdateTask={onUpdateTask}

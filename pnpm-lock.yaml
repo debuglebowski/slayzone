@@ -411,6 +411,9 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@slayzone/worktrees':
+        specifier: workspace:*
+        version: link:../worktrees
       electron:
         specifier: ^39.0.0
         version: 39.4.0
@@ -454,6 +457,9 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@slayzone/worktrees':
+        specifier: workspace:*
+        version: link:../worktrees
       electron:
         specifier: ^39.0.0
         version: 39.4.0

@@ -1844,6 +1844,7 @@ export function TaskDetailPage({
               ref={gitPanelRef}
               task={task}
               projectPath={project?.path ?? null}
+              worktreeSourceBranch={project?.worktree_source_branch ?? null}
               visible={panelVisibility.diff}
               defaultTab={gitDefaultTab}
               pollIntervalMs={5000}

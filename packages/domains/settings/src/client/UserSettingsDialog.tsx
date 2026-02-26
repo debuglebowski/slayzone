@@ -148,7 +148,7 @@ export function UserSettingsDialog({
         window.api.settings.get('terminal_font_size'),
         window.api.settings.get('editor_font_size'),
         window.api.settings.get('reduce_motion'),
-        window.api.settings.get('leaderboard_enabled'),
+        window.api.settings.get('leaderboard_enabled')
       ])
       if (isStale()) return
 

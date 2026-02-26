@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen, Copy, Link, Trash2, Plus } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
 import { Button } from '@slayzone/ui'
@@ -19,6 +19,7 @@ import type {
   LinearProject,
   LinearTeam
 } from '@slayzone/integrations/shared'
+import type { WorktreeCopyEntry } from '@slayzone/worktrees/shared'
 
 interface ProjectSettingsDialogProps {
   project: Project | null
@@ -38,6 +39,7 @@ export function ProjectSettingsDialog({
   const [color, setColor] = useState('')
   const [path, setPath] = useState('')
   const [autoCreateWorktreeOverride, setAutoCreateWorktreeOverride] = useState<'inherit' | 'on' | 'off'>('inherit')
+  const [worktreeSourceBranch, setWorktreeSourceBranch] = useState('')
   const [loading, setLoading] = useState(false)
   const [connections, setConnections] = useState<IntegrationConnectionPublic[]>([])
   const [teams, setTeams] = useState<LinearTeam[]>([])
@@ -53,6 +55,9 @@ export function ProjectSettingsDialog({
   const [issueOptions, setIssueOptions] = useState<LinearIssueSummary[]>([])
   const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(new Set())
   const [loadingIssues, setLoadingIssues] = useState(false)
+  const [worktreeCopyFiles, setWorktreeCopyFiles] = useState<WorktreeCopyEntry[]>([])
+  const [newCopyPath, setNewCopyPath] = useState('')
+  const [newCopyMode, setNewCopyMode] = useState<'copy' | 'symlink'>('copy')
 
   useEffect(() => {
     if (project) {
@@ -66,12 +71,23 @@ export function ProjectSettingsDialog({
             ? 'off'
             : 'inherit'
       )
+      setWorktreeSourceBranch(project.worktree_source_branch ?? '')
     }
   }, [project])
 
   useEffect(() => {
     if (open) setActiveTab('general')
   }, [open, project?.id])
+
+  useEffect(() => {
+    if (!open || !project?.path) { setWorktreeCopyFiles([]); return }
+    ;(async () => {
+      try {
+        const raw = await window.api.settings.get(`worktree_copy_files:${project.path}`)
+        setWorktreeCopyFiles(raw ? JSON.parse(raw) : [])
+      } catch { setWorktreeCopyFiles([]) }
+    })()
+  }, [open, project?.path])
 
   useEffect(() => {
     const loadIntegrationState = async () => {
@@ -122,6 +138,12 @@ export function ProjectSettingsDialog({
     void loadLinearProjects()
   }, [connectionId, teamId])
 
+  const saveCopyFiles = (entries: WorktreeCopyEntry[]) => {
+    if (!project?.path) return
+    setWorktreeCopyFiles(entries)
+    window.api.settings.set(`worktree_copy_files:${project.path}`, JSON.stringify(entries))
+  }
+
   const handleBrowse = async () => {
     const result = await window.api.dialog.showOpenDialog({
       title: 'Select Project Directory',
@@ -147,7 +169,8 @@ export function ProjectSettingsDialog({
         autoCreateWorktreeOnTaskCreate:
           autoCreateWorktreeOverride === 'inherit'
             ? null
-            : autoCreateWorktreeOverride === 'on'
+            : autoCreateWorktreeOverride === 'on',
+        worktreeSourceBranch: worktreeSourceBranch.trim() || null
       })
 
       onUpdated(updated)
@@ -308,6 +331,91 @@ export function ProjectSettingsDialog({
                     Overrides the global Git setting for this project only.
                   </p>
                 </div>
+                <div className="space-y-1">
+                  <Label htmlFor="worktree-source-branch">Branch to create new worktrees from</Label>
+                  <Input
+                    id="worktree-source-branch"
+                    value={worktreeSourceBranch}
+                    onChange={(e) => setWorktreeSourceBranch(e.target.value)}
+                    placeholder="main"
+                    className="max-w-sm font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    When creating a new worktree, branch from this branch. Leave empty to use the current branch.
+                  </p>
+                </div>
+                {path && (
+                  <div className="space-y-2">
+                    <Label>Copy files to new worktrees</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Files and directories listed here will be copied or symlinked from the source repo into each new worktree. Paths are relative to the repo root (e.g. <code className="font-mono">.env</code>, <code className="font-mono">node_modules</code>).
+                    </p>
+                    <div className="space-y-1">
+                      {worktreeCopyFiles.map((entry, i) => (
+                        <div key={i} className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-1.5">
+                          {entry.mode === 'symlink' ? (
+                            <Link className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          )}
+                          <span className="flex-1 font-mono text-xs truncate">{entry.path}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">{entry.mode}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0"
+                            onClick={() => saveCopyFiles(worktreeCopyFiles.filter((_, j) => j !== i))}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <div
+                      className="flex gap-2 items-center"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          const trimmed = newCopyPath.trim()
+                          if (!trimmed) return
+                          saveCopyFiles([...worktreeCopyFiles, { path: trimmed, mode: newCopyMode }])
+                          setNewCopyPath('')
+                        }
+                      }}
+                    >
+                      <Input
+                        className="flex-1 h-8 text-sm font-mono"
+                        placeholder=".env"
+                        value={newCopyPath}
+                        onChange={(e) => setNewCopyPath(e.target.value)}
+                      />
+                      <Select value={newCopyMode} onValueChange={(v) => setNewCopyMode(v as 'copy' | 'symlink')}>
+                        <SelectTrigger className="h-8 w-28">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="copy">Copy</SelectItem>
+                          <SelectItem value="symlink">Symlink</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!newCopyPath.trim()}
+                        onClick={() => {
+                          const trimmed = newCopyPath.trim()
+                          if (!trimmed) return
+                          saveCopyFiles([...worktreeCopyFiles, { path: trimmed, mode: newCopyMode }])
+                          setNewCopyPath('')
+                        }}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <Label>Color</Label>
                   <ColorPicker value={color} onChange={setColor} />
