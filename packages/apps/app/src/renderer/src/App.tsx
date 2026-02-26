@@ -447,6 +447,7 @@ function App(): React.JSX.Element {
   // Sync tab titles/status and remove tabs for deleted tasks
   useEffect(() => {
     const taskIds = new Set(tasks.map((t) => t.id))
+    const currentIdx = activeTabIndex
     setTabs((prev) => {
       for (const tab of prev) {
         if (tab.type === 'task' && !taskIds.has(tab.taskId)) {
@@ -456,7 +457,14 @@ function App(): React.JSX.Element {
       }
       const filtered = prev.filter((tab) => tab.type !== 'task' || taskIds.has(tab.taskId))
       if (filtered.length < prev.length) {
-        setActiveTabIndex((idx) => Math.min(idx, filtered.length - 1))
+        const activeTab = prev[currentIdx]
+        const activeTabWasRemoved = activeTab?.type === 'task' && !taskIds.has(activeTab.taskId)
+        if (activeTabWasRemoved) {
+          const homeIndex = filtered.findIndex((t) => t.type === 'home')
+          setActiveTabIndex(() => (homeIndex >= 0 ? homeIndex : 0))
+        } else {
+          setActiveTabIndex((idx) => Math.min(idx, filtered.length - 1))
+        }
       }
       return filtered.map((tab) => {
         if (tab.type !== 'task') return tab
@@ -471,7 +479,7 @@ function App(): React.JSX.Element {
         return tab
       })
     })
-  }, [tasks, setTabs, setActiveTabIndex])
+  }, [tasks, setTabs, setActiveTabIndex, activeTabIndex])
 
   // Startup cleanup: delete orphaned temporary tasks (no open tab)
   const didCleanupRef = useRef(false)
