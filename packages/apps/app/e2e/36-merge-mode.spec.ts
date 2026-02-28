@@ -212,7 +212,7 @@ test.describe('Phase 1 — uncommitted changes', () => {
     await expect(mainWindow.getByTestId('task-git-panel').last()).toBeVisible({ timeout: 5_000 })
   })
 
-  test.fixme('clicking merge enters merge mode with uncommitted state', async ({ mainWindow }) => {
+  test('clicking merge enters merge mode with uncommitted state', async ({ mainWindow }) => {
     const main = getMainBranch()
     await mainWindow.getByRole('button', { name: new RegExp(`Merge into ${main}`) }).click()
 
@@ -222,18 +222,18 @@ test.describe('Phase 1 — uncommitted changes', () => {
     const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
     expect(task?.merge_state).toBe('uncommitted')
 
-    // MergePanel header should be visible
-    await expect(mainWindow.getByText('Merge Mode — Uncommitted Changes')).toBeVisible()
+    // Auto-switches to changes tab showing merge-mode banner
+    await expect(mainWindow.getByText('Stage and commit your changes to continue the merge')).toBeVisible()
   })
 
-  test.fixme('Cancel exits merge mode', async ({ mainWindow }) => {
+  test('Cancel exits merge mode', async ({ mainWindow }) => {
     await mainWindow.getByRole('button', { name: 'Cancel' }).click()
 
     const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
     expect(task?.merge_state).toBeNull()
 
-    // MergePanel should be gone
-    await expect(mainWindow.getByText('Merge Mode — Uncommitted Changes')).not.toBeVisible()
+    // Merge-mode banner should be gone
+    await expect(mainWindow.getByText('Stage and commit your changes to continue the merge')).not.toBeVisible()
   })
 })
 
@@ -272,7 +272,7 @@ test.describe('Phase 2 — conflict resolution', () => {
     await expect(mainWindow.getByTestId('task-git-panel').last()).toBeVisible({ timeout: 5_000 })
   })
 
-  test.fixme('enters conflict merge mode', async ({ mainWindow }) => {
+  test('enters conflict merge mode', async ({ mainWindow }) => {
     await expect
       .poll(async () => {
         const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
@@ -285,36 +285,35 @@ test.describe('Phase 2 — conflict resolution', () => {
     const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
     expect(task?.merge_state).toBe('conflicts')
 
-    // MergePanel conflict header visible
-    await expect(mainWindow.getByText(/Merge Mode — Resolve Conflicts/)).toBeVisible()
+    // Auto-switches to conflicts tab — Abort button visible in toolbar
+    const gitPanel = mainWindow.getByTestId('task-git-panel').last()
+    await expect(gitPanel.getByRole('button', { name: 'Abort' })).toBeVisible()
   })
 
-  const activeConflictPanel = (page: import('@playwright/test').Page) =>
-    page.locator('div').filter({ has: page.getByText(/Merge Mode — Resolve Conflicts/) }).last()
-
-  test.fixme('conflicted file list shows files', async ({ mainWindow }) => {
+  test('conflicted file list shows files', async ({ mainWindow }) => {
     await ensureConflictReady(mainWindow, taskId)
-    const panel = activeConflictPanel(mainWindow)
-    const fileItem = panel.locator('span.truncate').first()
+    const gitPanel = mainWindow.getByTestId('task-git-panel').last()
+    const fileItem = gitPanel.locator('span.truncate').first()
     await expect(fileItem).toBeVisible({ timeout: 10_000 })
   })
 
-  test.fixme('Accept Ours resolves the file', async ({ mainWindow }) => {
+  test('Accept Ours resolves the file', async ({ mainWindow }) => {
     await ensureConflictReady(mainWindow, taskId)
-    const panel = activeConflictPanel(mainWindow)
-    const fileItem = panel.locator('span.truncate').first()
+    const gitPanel = mainWindow.getByTestId('task-git-panel').last()
+    const fileItem = gitPanel.locator('span.truncate').first()
     await fileItem.click()
 
-    // Click Accept Ours
-    await panel.getByRole('button', { name: 'Accept Ours' }).click()
+    // Button uses dynamic branch name: "Accept {targetBranch}"
+    const main = getMainBranch()
+    await gitPanel.getByRole('button', { name: new RegExp(`Accept ${main}`) }).click()
 
     // File should be marked resolved
-    await expect(panel.getByText('File resolved and staged')).toBeVisible()
+    await expect(gitPanel.getByText('File resolved and staged')).toBeVisible()
   })
 
-  test.fixme('Complete Merge finishes and marks done', async ({ mainWindow }) => {
-    const panel = activeConflictPanel(mainWindow)
-    await panel.getByRole('button', { name: 'Complete Merge' }).click()
+  test('Complete Merge finishes and marks done', async ({ mainWindow }) => {
+    const gitPanel = mainWindow.getByTestId('task-git-panel').last()
+    await gitPanel.getByRole('button', { name: 'Complete Merge' }).click()
 
     await expect
       .poll(async () => {
@@ -354,18 +353,23 @@ test.describe('Accept Theirs resolution', () => {
     await s.refreshData()
 
     await openTaskViaSearch(mainWindow, 'MM theirs task')
+
+    // Toggle git panel on — conflicts tab auto-activates
+    await mainWindow.keyboard.press('Meta+g')
+    await expect(mainWindow.getByTestId('task-git-panel').last()).toBeVisible({ timeout: 5_000 })
   })
 
-  test.fixme('Accept Theirs resolves with incoming content', async ({ mainWindow }) => {
-    const panel = mainWindow.locator('div').filter({ has: mainWindow.getByText(/Merge Mode — Resolve Conflicts/) }).last()
-    await panel.locator('span.truncate').first().click()
+  test('Accept Theirs resolves with incoming content', async ({ mainWindow }) => {
+    const gitPanel = mainWindow.getByTestId('task-git-panel').last()
+    await gitPanel.locator('span.truncate').first().click()
 
-    await mainWindow.getByRole('button', { name: /Accept Theirs/ }).click()
+    // Button uses dynamic branch name: "Accept {sourceBranch}"
+    await gitPanel.getByRole('button', { name: /Accept test-branch/ }).click()
 
-    await expect(mainWindow.getByText('File resolved and staged')).toBeVisible()
+    await expect(gitPanel.getByText('File resolved and staged')).toBeVisible()
 
     // Complete merge
-    await mainWindow.getByRole('button', { name: 'Complete Merge' }).click()
+    await gitPanel.getByRole('button', { name: 'Complete Merge' }).click()
 
     // Verify theirs content on main
     await expect.poll(async () => {
@@ -409,18 +413,19 @@ test.describe('Abort merge', () => {
     await mainWindow.getByRole('button', { name: 'Start Merge' }).click()
   })
 
-  test.fixme('Abort Merge clears merge state', async ({ mainWindow }) => {
-    // Should be in conflict phase
-    await expect(mainWindow.getByText(/Merge Mode — Resolve Conflicts/).first()).toBeVisible()
+  test('Abort Merge clears merge state', async ({ mainWindow }) => {
+    // Should be in conflict phase — Abort button visible in toolbar
+    const gitPanel = mainWindow.getByTestId('task-git-panel').last()
+    await expect(gitPanel.getByRole('button', { name: 'Abort' })).toBeVisible()
 
-    await mainWindow.getByRole('button', { name: 'Abort Merge' }).click()
+    await gitPanel.getByRole('button', { name: 'Abort' }).click()
 
     // merge_state cleared
     const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
     expect(task?.merge_state).toBeNull()
 
-    // MergePanel gone
-    await expect(mainWindow.getByText(/Merge Mode/)).not.toBeVisible()
+    // Abort button gone (conflicts tab removed)
+    await expect(gitPanel.getByRole('button', { name: 'Abort' })).not.toBeVisible()
 
     // Git merge not in progress
     const inProgress = await mainWindow.evaluate(
@@ -454,7 +459,7 @@ test.describe('Merge badge on kanban', () => {
     await s.refreshData()
   })
 
-  test.fixme('merge badge appears when task is in merge mode', async ({ mainWindow }) => {
+  test('merge badge appears when task is in merge mode', async ({ mainWindow }) => {
     // Set merge_state directly
     await mainWindow.evaluate(
       (d) => window.api.db.updateTask(d),
@@ -472,7 +477,7 @@ test.describe('Merge badge on kanban', () => {
     await expect(mergeIcon).toBeVisible()
   })
 
-  test.fixme('merge badge disappears when merge_state cleared', async ({ mainWindow }) => {
+  test('merge badge disappears when merge_state cleared', async ({ mainWindow }) => {
     await mainWindow.evaluate(
       (d) => window.api.db.updateTask(d),
       { id: taskId, mergeState: null }
