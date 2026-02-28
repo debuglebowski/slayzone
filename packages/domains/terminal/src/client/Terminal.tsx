@@ -728,14 +728,14 @@ export function Terminal({
       <div
         ref={containerRef}
         tabIndex={0}
-        className={`h-full w-full bg-white dark:bg-[#0a0a0a] rounded-lg outline-none overflow-hidden transition-colors ${
+        className={`h-full w-full bg-terminal-bg rounded-lg outline-none overflow-hidden transition-colors ${
           isDragOver ? 'ring-2 ring-blue-500/50 ring-inset' : ''
         }`}
         style={{ padding: '8px' }}
         onClick={() => terminalRef.current?.focus()}
       >
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white dark:bg-[#0a0a0a] z-10">
+          <div className="absolute inset-0 flex items-center justify-center bg-terminal-bg z-10">
             <div className="flex items-center gap-2 text-neutral-500">
               <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -746,12 +746,12 @@ export function Terminal({
           </div>
         )}
         {initError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white dark:bg-[#0a0a0a] z-10 p-4">
+          <div className="absolute inset-0 flex items-center justify-center bg-terminal-bg z-10 p-4">
             <div className="text-red-400 text-sm text-center">Failed to start terminal: {initError}</div>
           </div>
         )}
         {showDeadOverlay && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-[#0a0a0a] z-10 p-6 gap-4 overflow-y-auto">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-terminal-bg z-10 p-6 gap-4 overflow-y-auto">
             {deadCrashOutput && (
               <pre className="text-xs text-neutral-500 dark:text-neutral-400 max-h-32 overflow-y-auto w-full max-w-lg bg-neutral-50 dark:bg-neutral-900 rounded p-3 font-mono whitespace-pre-wrap break-all">
                 {stripAnsi(deadCrashOutput).split('\n').slice(-20).join('\n')}

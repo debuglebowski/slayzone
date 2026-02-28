@@ -61,6 +61,8 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
+  --color-terminal-bg: var(--terminal-bg);
+  --panel-focus-shadow: var(--panel-focus-glow);
 
   --animate-collapsible-down: collapsible-down 0.15s ease-out;
   --animate-collapsible-up: collapsible-up 0.15s ease-out;
@@ -114,6 +116,8 @@
   --sidebar-ring: #007acc;
   --surface-1: #f3f3f3;
   --surface-2: #ffffff;
+  --terminal-bg: #ffffff;
+  --panel-focus-glow: 0 0 18px rgba(0, 122, 204, 0.25);
 }
 
 .dark {
@@ -150,6 +154,8 @@
   --sidebar-ring: oklch(0.556 0 0);
   --surface-1: oklch(0.205 0 0);
   --surface-2: oklch(0.27 0 0);
+  --terminal-bg: oklch(0.07 0 0);
+  --panel-focus-glow: 0 0 18px rgba(249, 115, 22, 0.25);
 }
 
 @layer base {

@@ -113,7 +113,7 @@ export function NotificationPanel({
                       {!filterCurrentProject && (
                         <span
                           className={cn('w-2 h-2 rounded-full flex-shrink-0 mt-1.5')}
-                          style={{ backgroundColor: getProjectColor(task.project_id) || '#888' }}
+                          style={{ backgroundColor: getProjectColor(task.project_id) || 'var(--muted-foreground)' }}
                         />
                       )}
                       <div className="flex-1 min-w-0">

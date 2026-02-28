@@ -250,7 +250,7 @@ export function AppSidebar({
                           {group.items.map((s) => (
                             <div key={s.label} className="flex items-center justify-between px-3 py-2">
                               <span className="text-sm">{s.label}</span>
-                              <span className="text-base text-foreground bg-sidebar-accent border border-sidebar-border/70 px-2.5 py-0.5 rounded-md font-[system-ui] shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">{s.keys}</span>
+                              <span className="text-base text-foreground bg-sidebar-accent border border-sidebar-border/70 px-2.5 py-0.5 rounded-md font-[system-ui] shadow-xs">{s.keys}</span>
                             </div>
                           ))}
                         </div>

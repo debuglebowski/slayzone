@@ -1468,7 +1468,7 @@ export function TaskDetailPage({
           className={cn(
             "min-w-0 shrink-0 overflow-hidden flex flex-col transition-shadow duration-200",
             !compact && "rounded-md bg-surface-1 border border-border",
-            !compact && multipleVisiblePanels && focusedPanel === 'terminal' && "shadow-[0_0_18px_rgba(249,115,22,0.25)]"
+            !compact && multipleVisiblePanels && focusedPanel === 'terminal' && "shadow-[var(--panel-focus-shadow)]"
           )}
           style={compact ? { flex: 1 } : containerWidth > 0 ? { width: resolvedWidths.terminal } : { flex: 1 }}
         >
@@ -1751,7 +1751,7 @@ export function TaskDetailPage({
 
         {/* Browser Panel */}
         {!compact && panelVisibility.browser && (
-          <div data-panel-id="browser" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'browser' && "shadow-[0_0_18px_rgba(249,115,22,0.25)]")} style={{ width: resolvedWidths.browser }}>
+          <div data-panel-id="browser" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'browser' && "shadow-[var(--panel-focus-shadow)]")} style={{ width: resolvedWidths.browser }}>
             <BrowserPanel
               ref={browserPanelRef}
               className="h-full"
@@ -1780,7 +1780,7 @@ export function TaskDetailPage({
 
         {/* File Editor Panel */}
         {!compact && panelVisibility.editor && project?.path && (
-          <div data-panel-id="editor" className={cn("shrink-0 overflow-hidden rounded-md bg-surface-1 border border-border transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'editor' && "shadow-[0_0_18px_rgba(249,115,22,0.25)]")} style={{ width: resolvedWidths.editor }}>
+          <div data-panel-id="editor" className={cn("shrink-0 overflow-hidden rounded-md bg-surface-1 border border-border transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'editor' && "shadow-[var(--panel-focus-shadow)]")} style={{ width: resolvedWidths.editor }}>
             <FileEditorView
               ref={fileEditorRefCallback}
               projectPath={task.worktree_path || project.path}
@@ -1808,7 +1808,7 @@ export function TaskDetailPage({
                   onReset={resetAllPanels}
                 />
               )}
-              <div data-panel-id={wp.id} className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === wp.id && "shadow-[0_0_18px_rgba(249,115,22,0.25)]")} style={{ width: resolvedWidths[wp.id] }}>
+              <div data-panel-id={wp.id} className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === wp.id && "shadow-[var(--panel-focus-shadow)]")} style={{ width: resolvedWidths[wp.id] }}>
                 <WebPanelView
                   panelId={wp.id}
                   url={task.web_panel_urls?.[wp.id] || wp.baseUrl}
@@ -1840,7 +1840,7 @@ export function TaskDetailPage({
 
         {/* Git Panel */}
         {!compact && panelVisibility.diff && (
-          <div data-panel-id="diff" data-testid="task-git-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'diff' && "shadow-[0_0_18px_rgba(249,115,22,0.25)]")} style={{ width: resolvedWidths.diff }}>
+          <div data-panel-id="diff" data-testid="task-git-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'diff' && "shadow-[var(--panel-focus-shadow)]")} style={{ width: resolvedWidths.diff }}>
             <UnifiedGitPanel
               ref={gitPanelRef}
               task={task}
@@ -1869,7 +1869,7 @@ export function TaskDetailPage({
 
         {/* Settings Panel */}
         {!compact && panelVisibility.settings && (
-        <div data-panel-id="settings" data-testid="task-settings-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border p-3 flex flex-col gap-4 overflow-y-auto transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'settings' && "shadow-[0_0_18px_rgba(249,115,22,0.25)]")} style={{ width: resolvedWidths.settings }}>
+        <div data-panel-id="settings" data-testid="task-settings-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border p-3 flex flex-col gap-4 overflow-y-auto transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'settings' && "shadow-[var(--panel-focus-shadow)]")} style={{ width: resolvedWidths.settings }}>
           {/* Description */}
           <div className="flex flex-col min-h-0 relative">
             <RichTextEditor
@@ -2003,7 +2003,7 @@ export function TaskDetailPage({
 
         {/* Processes Panel — dev mode only */}
         {import.meta.env.DEV && !compact && panelVisibility.processes && (
-          <div data-panel-id="processes" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'processes' && "shadow-[0_0_18px_rgba(249,115,22,0.25)]")} style={{ width: resolvedWidths.processes }}>
+          <div data-panel-id="processes" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'processes' && "shadow-[var(--panel-focus-shadow)]")} style={{ width: resolvedWidths.processes }}>
             <ProcessesPanel taskId={task.id} cwd={task.worktree_path || project?.path} terminalSessionId={getMainSessionId(task.id)} />
           </div>
         )}

@@ -235,7 +235,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
 
   if (isLoading || !activeGroup) {
     return (
-      <div className="h-full flex items-center justify-center bg-white dark:bg-[#0a0a0a]">
+      <div className="h-full flex items-center justify-center bg-terminal-bg">
         <div className="text-neutral-500 text-sm">Loading terminal...</div>
       </div>
     )
