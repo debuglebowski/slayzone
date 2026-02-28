@@ -20,6 +20,7 @@ import type {
   LinearTeam
 } from '@slayzone/integrations/shared'
 import type { WorktreeCopyEntry } from '@slayzone/worktrees/shared'
+import { copyEntriesKey, legacyCopyEntriesKey, parseCopyEntries } from '@slayzone/worktrees/shared'
 
 interface ProjectSettingsDialogProps {
   project: Project | null
@@ -80,14 +81,24 @@ export function ProjectSettingsDialog({
   }, [open, project?.id])
 
   useEffect(() => {
-    if (!open || !project?.path) { setWorktreeCopyFiles([]); return }
+    if (!open || !project) { setWorktreeCopyFiles([]); return }
     ;(async () => {
       try {
-        const raw = await window.api.settings.get(`worktree_copy_files:${project.path}`)
-        setWorktreeCopyFiles(raw ? JSON.parse(raw) : [])
+        // Try new project-id key first (stable)
+        let raw = await window.api.settings.get(copyEntriesKey(project.id))
+        if (!raw && project.path) {
+          // Fallback: legacy path-based key — migrate forward if found
+          const legacyRaw = await window.api.settings.get(legacyCopyEntriesKey(project.path))
+          if (legacyRaw) {
+            window.api.settings.set(copyEntriesKey(project.id), legacyRaw)
+            raw = legacyRaw
+          }
+        }
+        const { entries } = parseCopyEntries(raw)
+        setWorktreeCopyFiles(entries)
       } catch { setWorktreeCopyFiles([]) }
     })()
-  }, [open, project?.path])
+  }, [open, project?.id])
 
   useEffect(() => {
     const loadIntegrationState = async () => {
@@ -138,13 +149,10 @@ export function ProjectSettingsDialog({
     void loadLinearProjects()
   }, [connectionId, teamId])
 
-  const getCopyFilesKey = (repoPath: string) => `worktree_copy_files:${repoPath}`
-
   const saveCopyFiles = (entries: WorktreeCopyEntry[]) => {
-    const repoPath = path || project?.path
-    if (!repoPath) return
+    if (!project) return
     setWorktreeCopyFiles(entries)
-    window.api.settings.set(getCopyFilesKey(repoPath), JSON.stringify(entries))
+    window.api.settings.set(copyEntriesKey(project.id), JSON.stringify(entries))
   }
 
   const handleBrowse = async () => {
@@ -164,27 +172,13 @@ export function ProjectSettingsDialog({
 
     setLoading(true)
     try {
-      const nextPath = path || null
-      const previousPath = project.path
-      if (previousPath && nextPath && previousPath !== nextPath) {
-        try {
-          const nextKey = getCopyFilesKey(nextPath)
-          const previousKey = getCopyFilesKey(previousPath)
-          const existingNext = await window.api.settings.get(nextKey)
-          if (!existingNext) {
-            const previousValue = await window.api.settings.get(previousKey)
-            if (previousValue) {
-              await window.api.settings.set(nextKey, previousValue)
-            }
-          }
-        } catch { /* best effort migration */ }
-      }
+      // No copy-files migration needed on path change — project-id keys are stable
 
       const updated = await window.api.db.updateProject({
         id: project.id,
         name: name.trim(),
         color,
-        path: nextPath,
+        path: path || null,
         autoCreateWorktreeOnTaskCreate:
           autoCreateWorktreeOverride === 'inherit'
             ? null

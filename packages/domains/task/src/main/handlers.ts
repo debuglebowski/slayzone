@@ -6,6 +6,7 @@ import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import path from 'path'
 import { removeWorktree, createWorktree, getCurrentBranch, isGitRepo } from '@slayzone/worktrees/main'
 import type { WorktreeCopyEntry } from '@slayzone/worktrees/shared'
+import { copyEntriesKey, legacyCopyEntriesKey, parseCopyEntries } from '@slayzone/worktrees/shared'
 import { killPtysByTaskId } from '@slayzone/terminal/main'
 
 function safeJsonParse(value: unknown): unknown {
@@ -161,14 +162,28 @@ function maybeAutoCreateWorktree(
 
   let copyEntries: WorktreeCopyEntry[] | undefined
   try {
-    const projectCopyRaw = (db.prepare(
+    // Try new project-id key first, then legacy path-based key, then global
+    let raw = (db.prepare(
       "SELECT value FROM settings WHERE key = ?"
-    ).get(`worktree_copy_files:${projectRow.path}`) as { value: string } | undefined)?.value
-    const globalCopyRaw = (db.prepare(
-      "SELECT value FROM settings WHERE key = 'worktree_copy_files'"
-    ).get() as { value: string } | undefined)?.value
-    const raw = projectCopyRaw || globalCopyRaw
-    if (raw) copyEntries = JSON.parse(raw) as WorktreeCopyEntry[]
+    ).get(copyEntriesKey(projectId)) as { value: string } | undefined)?.value
+    if (!raw) {
+      const legacyRaw = (db.prepare(
+        "SELECT value FROM settings WHERE key = ?"
+      ).get(legacyCopyEntriesKey(projectRow.path)) as { value: string } | undefined)?.value
+      if (legacyRaw) {
+        // Migrate forward to project-id key
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(
+          copyEntriesKey(projectId), legacyRaw
+        )
+        raw = legacyRaw
+      } else {
+        raw = (db.prepare(
+          "SELECT value FROM settings WHERE key = 'worktree_copy_files'"
+        ).get() as { value: string } | undefined)?.value
+      }
+    }
+    const { entries } = parseCopyEntries(raw)
+    copyEntries = entries.length > 0 ? entries : undefined
   } catch { /* ignore malformed setting */ }
 
   try {

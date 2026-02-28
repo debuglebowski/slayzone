@@ -27,6 +27,7 @@ import {
 } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { MergeResult, CommitInfo, AheadBehind, StatusSummary, WorktreeCopyEntry } from '../shared/types'
+import { copyEntriesKey, legacyCopyEntriesKey, parseCopyEntries } from '../shared/copy-entry-schema'
 import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
   joinWorktreePath,
@@ -86,20 +87,35 @@ export function GeneralTabContent({
 
   useEffect(() => {
     if (!projectPath) return
+    const projectId = task.project_id
     ;(async () => {
       try {
-        const projectRaw = await window.api.settings.get(`worktree_copy_files:${projectPath}`)
-        if (projectRaw) { setCopyFiles(JSON.parse(projectRaw)); return }
-        const globalRaw = await window.api.settings.get('worktree_copy_files')
-        setCopyFiles(globalRaw ? JSON.parse(globalRaw) : [])
+        // Try new project-id key first (stable)
+        let raw = await window.api.settings.get(copyEntriesKey(projectId))
+        if (!raw) {
+          // Fallback: legacy path-based key — migrate forward if found
+          const legacyRaw = await window.api.settings.get(legacyCopyEntriesKey(projectPath))
+          if (legacyRaw) {
+            window.api.settings.set(copyEntriesKey(projectId), legacyRaw)
+            raw = legacyRaw
+          } else {
+            // Global fallback
+            raw = await window.api.settings.get('worktree_copy_files')
+          }
+        }
+        const { entries, skipped } = parseCopyEntries(raw)
+        if (skipped.length > 0) {
+          toast(`${skipped.length} copy ${skipped.length === 1 ? 'entry' : 'entries'} skipped (invalid)`)
+        }
+        setCopyFiles(entries)
       } catch { setCopyFiles([]) }
     })()
-  }, [projectPath])
+  }, [projectPath, task.project_id])
 
   const saveCopyFiles = (entries: WorktreeCopyEntry[]) => {
     if (!projectPath) return
     setCopyFiles(entries)
-    window.api.settings.set(`worktree_copy_files:${projectPath}`, JSON.stringify(entries))
+    window.api.settings.set(copyEntriesKey(task.project_id), JSON.stringify(entries))
   }
 
   // Worktree
@@ -219,21 +235,30 @@ export function GeneralTabContent({
     setCreating(true)
     setError(null)
     try {
-      const [basePathTemplate, projectCopyRaw, globalCopyRaw] = await Promise.all([
+      const projectId = task.project_id
+      const [basePathTemplate, projectCopyRaw, legacyCopyRaw, globalCopyRaw] = await Promise.all([
         window.api.settings.get('worktree_base_path'),
-        window.api.settings.get(`worktree_copy_files:${projectPath}`),
+        window.api.settings.get(copyEntriesKey(projectId)),
+        window.api.settings.get(legacyCopyEntriesKey(projectPath)),
         window.api.settings.get('worktree_copy_files')
       ])
+      // Migrate legacy key forward if new key is empty
+      let raw = projectCopyRaw
+      if (!raw && legacyCopyRaw) {
+        window.api.settings.set(copyEntriesKey(projectId), legacyCopyRaw)
+        raw = legacyCopyRaw
+      }
+      if (!raw) raw = globalCopyRaw
+
       const basePath = resolveWorktreeBasePathTemplate(basePathTemplate || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE, projectPath)
       const branch = slugify(task.title) || `task-${task.id.slice(0, 8)}`
       const worktreePath = joinWorktreePath(basePath, branch)
-      let copyEntries: WorktreeCopyEntry[] | undefined
-      try {
-        const raw = projectCopyRaw || globalCopyRaw
-        copyEntries = raw ? JSON.parse(raw) : undefined
-      } catch { /* ignore */ }
+      const { entries: copyEntries, skipped } = parseCopyEntries(raw)
+      if (skipped.length > 0) {
+        toast(`${skipped.length} copy ${skipped.length === 1 ? 'entry' : 'entries'} skipped (invalid)`)
+      }
       const sourceBranch = worktreeSourceBranch?.trim() || currentBranch
-      await window.api.git.createWorktree(projectPath, worktreePath, branch, copyEntries, sourceBranch || undefined)
+      await window.api.git.createWorktree(projectPath, worktreePath, branch, copyEntries.length > 0 ? copyEntries : undefined, sourceBranch || undefined)
       await onUpdateTask({ id: task.id, worktreePath, worktreeParentBranch: sourceBranch || currentBranch })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

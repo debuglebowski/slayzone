@@ -5,11 +5,13 @@ import { Button } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import type { WorktreeCopyEntry } from '../shared/types'
+import { copyEntriesKey, legacyCopyEntriesKey, parseCopyEntries } from '../shared/copy-entry-schema'
 
 interface CreateWorktreeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectPath: string
+  projectId: string
   /** When set, new worktrees branch from this; when empty, use current branch. */
   worktreeSourceBranch?: string | null
   onCreated: (worktreePath: string, parentBranch: string | null) => void
@@ -19,6 +21,7 @@ export function CreateWorktreeDialog({
   open,
   onOpenChange,
   projectPath,
+  projectId,
   worktreeSourceBranch,
   onCreated
 }: CreateWorktreeDialogProps) {
@@ -50,10 +53,18 @@ export function CreateWorktreeDialog({
 
       let copyEntries: WorktreeCopyEntry[] | undefined
       try {
-        const projectRaw = await window.api.settings.get(`worktree_copy_files:${projectPath}`)
-        const globalRaw = await window.api.settings.get('worktree_copy_files')
-        const raw = projectRaw || globalRaw
-        copyEntries = raw ? JSON.parse(raw) : undefined
+        let raw = await window.api.settings.get(copyEntriesKey(projectId))
+        if (!raw) {
+          const legacyRaw = await window.api.settings.get(legacyCopyEntriesKey(projectPath))
+          if (legacyRaw) {
+            window.api.settings.set(copyEntriesKey(projectId), legacyRaw)
+            raw = legacyRaw
+          } else {
+            raw = await window.api.settings.get('worktree_copy_files')
+          }
+        }
+        const { entries } = parseCopyEntries(raw)
+        copyEntries = entries.length > 0 ? entries : undefined
       } catch { /* ignore */ }
 
       // Create git worktree
