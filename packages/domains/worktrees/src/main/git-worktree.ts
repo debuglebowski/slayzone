@@ -1,6 +1,6 @@
 import { execSync, spawnSync } from 'child_process'
 import { platform } from 'os'
-import { existsSync, readFileSync, writeFileSync, cpSync, symlinkSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, cpSync, symlinkSync, mkdirSync, statSync } from 'fs'
 import path from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, WorktreeCopyEntry } from '../shared/types'
@@ -257,7 +257,7 @@ function applyWorktreeCopyEntries(
       if (entry.mode === 'copy') {
         cpSync(sourcePath, destPath, { recursive: true })
       } else {
-        const stats = fs.statSync(sourcePath)
+        const stats = statSync(sourcePath)
         symlinkSync(sourcePath, destPath, stats.isDirectory() ? 'dir' : 'file')
       }
       recordDiagnosticEvent({

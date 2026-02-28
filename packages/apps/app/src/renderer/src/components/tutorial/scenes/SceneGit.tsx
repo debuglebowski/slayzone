@@ -131,7 +131,7 @@ function DiffTab(): React.JSX.Element {
                   <span className={`font-bold w-3 shrink-0 ${f.status === '?' ? 'text-green-500' : 'text-yellow-500'}`}>{f.status}</span>
                   <span className="truncate flex-1">{f.name}</span>
                   <span className="text-green-500 shrink-0">+{f.added}</span>
-                  {'removed' in f && f.removed > 0 && <span className="text-red-400 shrink-0">-{f.removed}</span>}
+                  {'removed' in f && (f.removed ?? 0) > 0 && <span className="text-red-400 shrink-0">-{f.removed}</span>}
                 </>
               )}
             </div>

@@ -15,7 +15,7 @@ const root = resolve(__dirname, '../../..')
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, root, '')
 
-  return {
+  return ({
     main: {
       plugins: [externalizeDepsPlugin({ exclude: slayzoneDeps })],
       define: {
@@ -63,5 +63,5 @@ export default defineConfig(({ mode }) => {
         exclude: slayzoneDeps
       }
     }
-  }
+  }) as any
 })

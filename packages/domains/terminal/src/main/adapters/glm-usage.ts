@@ -54,7 +54,7 @@ async function getGlmApiKey(): Promise<string | null> {
   }
 }
 
-function mapWindow(limit: GlmApiResponse['data']['limits'][0]): UsageWindow | null {
+function mapWindow(limit: NonNullable<GlmApiResponse['data']>['limits'][0]): UsageWindow | null {
   if (!limit.nextResetTime) return null
   return {
     utilization: limit.percentage,
