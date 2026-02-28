@@ -48,10 +48,10 @@ export function TaskItem({ task, onEdit, onDelete }: TaskItemProps): React.JSX.E
 
       {/* Actions */}
       <div className="flex gap-1">
-        <Button variant="ghost" size="icon-sm" onClick={() => onEdit(task)}>
+        <Button variant="ghost" size="icon-sm" onClick={() => onEdit(task)} aria-label="Edit task">
           <Pencil className="size-4" />
         </Button>
-        <Button variant="ghost" size="icon-sm" onClick={() => onDelete(task)}>
+        <Button variant="ghost" size="icon-sm" onClick={() => onDelete(task)} aria-label="Delete task">
           <Trash2 className="size-4" />
         </Button>
       </div>

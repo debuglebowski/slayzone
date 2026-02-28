@@ -197,6 +197,7 @@ export function WebPanelView({
           variant="ghost"
           size="icon-sm"
           title="Copy URL"
+          aria-label="Copy URL"
           onClick={() => {
             const currentUrl = webviewRef.current?.getURL() ?? url
             navigator.clipboard.writeText(currentUrl)
@@ -210,6 +211,7 @@ export function WebPanelView({
         <Button
           variant="ghost"
           size="icon-sm"
+          aria-label="Reload page"
           onClick={() => {
             const wv = webviewRef.current
             if (!wv) return

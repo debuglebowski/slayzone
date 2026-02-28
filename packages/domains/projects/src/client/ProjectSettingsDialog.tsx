@@ -319,7 +319,7 @@ export function ProjectSettingsDialog({
                       placeholder="/path/to/repo"
                       className="flex-1"
                     />
-                    <Button type="button" variant="outline" size="icon" onClick={handleBrowse}>
+                    <Button type="button" variant="outline" size="icon" aria-label="Browse for directory" onClick={handleBrowse}>
                       <FolderOpen className="h-4 w-4" />
                     </Button>
                   </div>
@@ -378,6 +378,7 @@ export function ProjectSettingsDialog({
                             variant="ghost"
                             size="icon"
                             className="h-6 w-6 shrink-0"
+                            aria-label="Remove copy file entry"
                             onClick={() => saveCopyFiles(worktreeCopyFiles.filter((_, j) => j !== i))}
                           >
                             <Trash2 className="h-3.5 w-3.5" />

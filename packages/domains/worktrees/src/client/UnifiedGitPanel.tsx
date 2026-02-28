@@ -151,6 +151,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
             size="icon"
             className="h-7 w-7"
             title="Refresh"
+            aria-label="Refresh"
             onClick={() => diffRef.current?.refresh()}
           >
             <RefreshCw className="h-3.5 w-3.5" />

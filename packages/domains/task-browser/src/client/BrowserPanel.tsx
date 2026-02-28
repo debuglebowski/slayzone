@@ -739,6 +739,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
             >
               <span className="truncate text-sm">{displayUrl}</span>
               <button
+                aria-label="Close tab"
                 onClick={(e) => { e.stopPropagation(); closeTab(tab.id) }}
                 className="h-4 w-4 rounded hover:bg-muted-foreground/20 flex items-center justify-center"
               >
@@ -748,6 +749,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
           )
         })}
         <button
+          aria-label="New tab"
           onClick={() => createNewTab()}
           className="h-7 px-2 rounded-md hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50 text-neutral-500 dark:text-neutral-400 flex items-center"
         >
@@ -760,7 +762,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
-              <Button variant="ghost" size="icon-sm" disabled={!canGoBack || multiDeviceMode} onClick={() => webviewRef.current?.goBack()}>
+              <Button aria-label="Back" variant="ghost" size="icon-sm" disabled={!canGoBack || multiDeviceMode} onClick={() => webviewRef.current?.goBack()}>
                 <ArrowLeft className="size-4" />
               </Button>
             </span>
@@ -770,7 +772,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
-              <Button variant="ghost" size="icon-sm" disabled={!canGoForward || multiDeviceMode} onClick={() => webviewRef.current?.goForward()}>
+              <Button aria-label="Forward" variant="ghost" size="icon-sm" disabled={!canGoForward || multiDeviceMode} onClick={() => webviewRef.current?.goForward()}>
                 <ArrowRight className="size-4" />
               </Button>
             </span>
@@ -783,6 +785,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               <TooltipTrigger asChild>
                 <span>
                   <Button
+                    aria-label="Reload"
                     variant="ghost"
                     size="icon-sm"
                     onClick={(e) => {
@@ -837,7 +840,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               <TooltipTrigger asChild>
                 <span>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon-sm">
+                    <Button aria-label="Import URL from another task" variant="ghost" size="icon-sm">
                       <Import className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -879,6 +882,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
           <TooltipTrigger asChild>
             <span>
               <Button
+                aria-label="Responsive preview"
                 variant="ghost"
                 size="icon-sm"
                 className={cn(multiDeviceMode && 'text-blue-500 bg-blue-500/10')}
@@ -895,6 +899,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
           <TooltipTrigger asChild>
             <span>
               <Button
+                aria-label="Pick element"
                 data-testid="browser-pick-element"
                 variant="ghost"
                 size="icon-sm"
@@ -919,6 +924,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
           <TooltipTrigger asChild>
             <span>
               <Button
+                aria-label="Toggle DevTools"
                 data-testid="browser-devtools"
                 variant="ghost"
                 size="icon-sm"
@@ -944,6 +950,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               <TooltipTrigger asChild>
                 <span>
                   <Button
+                    aria-label="Cycle theme"
                     data-testid="browser-theme-mode"
                     variant="ghost"
                     size="icon-sm"

@@ -12,6 +12,7 @@ export function NotificationButton({ active, count, onClick }: NotificationButto
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          aria-label="Notifications"
           onClick={onClick}
           className={cn(
             'h-7 w-7 rounded-lg flex items-center justify-center transition-colors border-b-2',

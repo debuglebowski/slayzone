@@ -672,7 +672,7 @@ export function UserSettingsDialog({
                       <div className="flex items-center gap-3 h-11 px-4">
                         <SquareTerminal className="size-4 text-muted-foreground shrink-0" />
                         <span className="text-sm font-medium flex-1">Terminal</span>
-                        <Button variant="ghost" size="icon-sm" onClick={() => setConfiguringNativeId(configuringNativeId === 'terminal' ? null : 'terminal')}>
+                        <Button variant="ghost" size="icon-sm" aria-label="Configure terminal panel" onClick={() => setConfiguringNativeId(configuringNativeId === 'terminal' ? null : 'terminal')}>
                           <Settings2 className="size-3.5" />
                         </Button>
                         <kbd className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded border shrink-0">⌘T</kbd>
@@ -727,7 +727,7 @@ export function UserSettingsDialog({
                       <div className="flex items-center gap-3 h-11 px-4">
                         <Globe className="size-4 text-muted-foreground shrink-0" />
                         <span className="text-sm font-medium flex-1">Browser</span>
-                        <Button variant="ghost" size="icon-sm" onClick={() => setConfiguringNativeId(configuringNativeId === 'browser' ? null : 'browser')}>
+                        <Button variant="ghost" size="icon-sm" aria-label="Configure browser panel" onClick={() => setConfiguringNativeId(configuringNativeId === 'browser' ? null : 'browser')}>
                           <Settings2 className="size-3.5" />
                         </Button>
                         <kbd className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded border shrink-0">⌘B</kbd>
@@ -882,10 +882,10 @@ export function UserSettingsDialog({
                                 Handoff: {(wp.handoffProtocol ?? 'custom').toLowerCase()}
                               </span>
                             )}
-                            <Button variant="ghost" size="icon-sm" onClick={() => handleDeleteWebPanel(wp.id)}>
+                            <Button variant="ghost" size="icon-sm" aria-label="Delete web panel" onClick={() => handleDeleteWebPanel(wp.id)}>
                               <Trash2 className="size-3.5" />
                             </Button>
-                            <Button variant="ghost" size="icon-sm" onClick={() => startEditingPanel(wp)}>
+                            <Button variant="ghost" size="icon-sm" aria-label="Edit web panel" onClick={() => startEditingPanel(wp)}>
                               <Pencil className="size-3.5" />
                             </Button>
                             {wp.shortcut && (
@@ -1290,6 +1290,7 @@ export function UserSettingsDialog({
                             type="button"
                             variant="outline"
                             size="icon"
+                            aria-label="Browse for project directory"
                             onClick={async () => {
                               const result = await window.api.dialog.showOpenDialog({
                                 title: 'Select Project Directory',

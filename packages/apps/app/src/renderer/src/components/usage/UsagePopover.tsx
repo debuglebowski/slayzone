@@ -265,6 +265,7 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
               : ''}
           </span>
           <button
+            aria-label="Refresh usage data"
             onClick={(e) => {
               e.stopPropagation()
               onRefresh()

@@ -67,6 +67,7 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
             ref={inputRef}
             className="bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none flex-1 min-w-0"
             placeholder="Search files..."
+            aria-label="Search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />

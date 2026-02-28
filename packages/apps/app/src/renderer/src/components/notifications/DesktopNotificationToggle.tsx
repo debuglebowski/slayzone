@@ -11,6 +11,7 @@ export function DesktopNotificationToggle({ enabled, onToggle }: DesktopNotifica
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          aria-label="Toggle desktop notifications"
           onClick={onToggle}
           className={cn(
             'h-7 w-7 rounded-lg flex items-center justify-center transition-colors border-b-2',

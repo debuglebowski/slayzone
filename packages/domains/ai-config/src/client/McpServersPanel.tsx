@@ -169,6 +169,7 @@ function McpServerFormFields({ serverKey, setServerKey, command, setCommand, arg
             <Button
               variant="ghost"
               size="icon-sm"
+              aria-label="Remove environment variable"
               onClick={() => setEnvVars(envVars.filter((_, idx) => idx !== i))}
             >
               <Trash2 className="size-3.5" />

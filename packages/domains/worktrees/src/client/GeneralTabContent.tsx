@@ -393,7 +393,7 @@ export function GeneralTabContent({
                     className="h-7 text-xs"
                     disabled={switching}
                   />
-                  <Button type="submit" variant="ghost" size="icon" className="h-7 w-7 shrink-0" disabled={!newBranchName.trim() || switching}>
+                  <Button type="submit" variant="ghost" size="icon" className="h-7 w-7 shrink-0" disabled={!newBranchName.trim() || switching} aria-label="Create branch">
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </form>
@@ -439,6 +439,7 @@ export function GeneralTabContent({
                       onClick={handleDeleteWorktree}
                       disabled={deleting}
                       className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
+                      aria-label="Remove worktree"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -533,6 +534,7 @@ export function GeneralTabContent({
                       <button
                         className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
                         onClick={() => saveCopyFiles(copyFiles.filter((_, j) => j !== i))}
+                        aria-label="Remove copy file entry"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -564,7 +566,7 @@ export function GeneralTabContent({
                       <SelectItem value="symlink">Symlink</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Button type="submit" size="icon" variant="outline" className="h-7 w-7 shrink-0" disabled={!newCopyPath.trim()}>
+                  <Button type="submit" size="icon" variant="outline" className="h-7 w-7 shrink-0" disabled={!newCopyPath.trim()} aria-label="Add copy path">
                     <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </form>

@@ -106,8 +106,16 @@ export function NotificationPanel({
                 {tasks.map(({ task, sessionId, lastOutputTime }) => (
                   <div
                     key={task.id}
+                    role="button"
+                    tabIndex={0}
                     className="rounded-lg border bg-card p-3 shadow-sm hover:bg-accent/50 transition-colors cursor-pointer"
                     onClick={() => onNavigate(task.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onNavigate(task.id)
+                      }
+                    }}
                   >
                     <div className="flex items-start gap-2">
                       {!filterCurrentProject && (
@@ -129,6 +137,7 @@ export function NotificationPanel({
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label="Kill terminal process"
                             className="h-6 w-6 text-muted-foreground hover:text-destructive"
                             onClick={(e) => {
                               e.stopPropagation()

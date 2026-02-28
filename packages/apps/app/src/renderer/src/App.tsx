@@ -1075,6 +1075,7 @@ function App(): React.JSX.Element {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
+                              aria-label="Toggle explode mode"
                               disabled={openTaskIds.length < 2}
                               onClick={() => setExplodeMode((prev) => !prev)}
                               className={cn(
@@ -1095,6 +1096,7 @@ function App(): React.JSX.Element {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
+                              aria-label="New scratch terminal"
                               onClick={selectedProjectId ? handleCreateScratchTerminal : undefined}
                               disabled={!selectedProjectId}
                               className={cn(

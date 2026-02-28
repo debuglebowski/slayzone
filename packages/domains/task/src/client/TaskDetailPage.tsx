@@ -101,8 +101,16 @@ function SortableSubTask({ sub, onNavigate, onUpdate, onDelete }: {
             <TooltipContent side="bottom" className="text-xs">{statusStyle?.label ?? sub.status}</TooltipContent>
           </Tooltip>
           <span
-            className={cn("text-xs flex-1 truncate", sub.status === 'done' && "line-through text-muted-foreground")}
+            role="button"
+            tabIndex={0}
+            className={cn("text-xs flex-1 truncate cursor-pointer", sub.status === 'done' && "line-through text-muted-foreground")}
             onClick={() => onNavigate?.(sub.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onNavigate?.(sub.id)
+              }
+            }}
           >
             {sub.title}
           </span>
@@ -1365,6 +1373,7 @@ export function TaskDetailPage({
                 onKeyDown={handleTitleKeyDown}
                 onClick={() => setEditingTitle(true)}
                 readOnly={!editingTitle}
+                aria-label="Task title"
                 className={cn(
                   'text-2xl font-bold bg-transparent border-none outline-none flex-1',
                   !editingTitle && 'cursor-pointer'
@@ -1652,8 +1661,16 @@ export function TaskDetailPage({
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <div
+                                      role="button"
+                                      tabIndex={0}
                                       className="h-7 w-fit max-w-72 px-2 flex items-center cursor-pointer rounded hover:bg-muted/50"
                                       onClick={() => setIsEditingFlags(true)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                          e.preventDefault()
+                                          setIsEditingFlags(true)
+                                        }
+                                      }}
                                     >
                                       <div className="text-xs text-neutral-700 dark:text-neutral-200 truncate">
                                         {flagsInputValue}
@@ -1670,7 +1687,7 @@ export function TaskDetailPage({
 
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button variant="ghost" size="icon" className="size-7" onClick={() => void handleScreenshot()}>
+                              <Button variant="ghost" size="icon" className="size-7" aria-label="Screenshot to terminal" onClick={() => void handleScreenshot()}>
                                 <Camera className="size-3.5" />
                               </Button>
                             </TooltipTrigger>
@@ -1679,7 +1696,7 @@ export function TaskDetailPage({
 
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button data-testid="terminal-menu-trigger" variant="ghost" size="icon" className="size-7">
+                              <Button data-testid="terminal-menu-trigger" variant="ghost" size="icon" className="size-7" aria-label="Terminal menu">
                                 <MoreHorizontal className="size-3.5" />
                               </Button>
                             </DropdownMenuTrigger>
@@ -1889,6 +1906,7 @@ export function TaskDetailPage({
                 variant="ghost"
                 size="icon"
                 className="absolute bottom-1 right-1 size-6 text-muted-foreground hover:text-foreground"
+                aria-label="Generate description"
                 onClick={() => handleGenerateDescription()}
                 disabled={generatingDescription || !task.title}
               >

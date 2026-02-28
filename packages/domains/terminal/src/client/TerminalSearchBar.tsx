@@ -106,6 +106,7 @@ export function TerminalSearchBar({ searchAddon, onClose }: TerminalSearchBarPro
         ref={inputRef}
         className="bg-transparent text-sm text-neutral-800 placeholder:text-neutral-400 dark:text-neutral-200 dark:placeholder:text-neutral-500 outline-none w-40"
         placeholder="Find..."
+        aria-label="Search terminal"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}

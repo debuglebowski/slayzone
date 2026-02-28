@@ -315,12 +315,12 @@ export function LinearCard({ taskId, onUpdate }: LinearCardProps) {
         <div className="space-y-2">
           <div className="flex items-center gap-1">
             <span className="min-w-0 flex-1 truncate text-sm">{linearLink.external_key}</span>
-            <Button variant="ghost" size="icon" className="size-7" onClick={() => window.api.shell.openExternal(linearLink.external_url)} title="Open in Linear">
+            <Button variant="ghost" size="icon" className="size-7" onClick={() => window.api.shell.openExternal(linearLink.external_url)} title="Open in Linear" aria-label="Open in Linear">
               <ExternalLinkIcon className="size-3.5" />
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-7">
+                <Button variant="ghost" size="icon" className="size-7" aria-label="Linear link options">
                   <EllipsisIcon className="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>

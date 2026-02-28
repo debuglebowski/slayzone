@@ -107,7 +107,7 @@ export function CreateWorktreeDialog({
                 className="flex-1"
                 autoFocus
               />
-              <Button type="button" variant="outline" size="icon" onClick={handleBrowse}>
+              <Button type="button" variant="outline" size="icon" onClick={handleBrowse} aria-label="Browse for directory">
                 <FolderOpen className="h-4 w-4" />
               </Button>
             </div>

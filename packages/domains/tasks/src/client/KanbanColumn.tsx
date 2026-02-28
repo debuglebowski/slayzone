@@ -174,7 +174,7 @@ export function KanbanColumn({
           {column.id === 'done' && onArchiveAllTasks && column.tasks.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6">
+                <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Column options">
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -192,6 +192,7 @@ export function KanbanColumn({
               className="h-6 w-6"
               onClick={() => onCreateTask(column)}
               title="Add task"
+              aria-label="Add task"
             >
               <Plus className="h-4 w-4" />
             </Button>

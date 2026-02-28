@@ -186,6 +186,7 @@ export function AppSidebar({
                   variant="ghost"
                   size="icon-lg"
                   onClick={onTutorial}
+                  aria-label="Take a tour"
                   className={footerActionClassName}
                 >
                   <IoCompassSharp className="size-6" />
@@ -199,6 +200,7 @@ export function AppSidebar({
                   variant="ghost"
                   size="icon-lg"
                   onClick={onChangelog}
+                  aria-label="What's new"
                   className={footerActionClassName}
                 >
                   <Megaphone className="size-5" />
@@ -212,6 +214,7 @@ export function AppSidebar({
                   variant="ghost"
                   size="icon-lg"
                   onClick={onOnboarding}
+                  aria-label="Onboarding"
                   className={footerActionClassName}
                 >
                   <FaRegHandshake className="size-5" />
@@ -225,6 +228,7 @@ export function AppSidebar({
                   variant="ghost"
                   size="icon-lg"
                   onClick={() => setShortcutsOpen(true)}
+                  aria-label="Keyboard shortcuts"
                   className={footerActionClassName}
                 >
                   <Keyboard className="size-5" />
@@ -285,6 +289,7 @@ export function AppSidebar({
                   variant="ghost"
                   size="icon-lg"
                   onClick={onSettings}
+                  aria-label="Settings"
                   className={footerActionClassName}
                 >
                   <Settings className="size-5" />

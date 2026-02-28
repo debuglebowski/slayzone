@@ -208,6 +208,7 @@ function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboard
                       variant="outline"
                       disabled={authBusy || auth.isLoading}
                       className="h-9 w-9 rounded-full p-0 overflow-hidden"
+                      aria-label="Account menu"
                       title="Account"
                     >
                       {authBusy || auth.isLoading ? (

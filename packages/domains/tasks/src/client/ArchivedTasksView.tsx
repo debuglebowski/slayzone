@@ -46,7 +46,7 @@ export function ArchivedTasksView({
       {/* Header */}
       <header className="sticky top-10 z-10 border-b bg-background p-4">
         <div className="flex items-center gap-4 window-no-drag">
-          <Button variant="ghost" size="icon" onClick={onBack}>
+          <Button variant="ghost" size="icon" onClick={onBack} aria-label="Go back">
             <ArrowLeft className="size-5" />
           </Button>
           <h1 className="text-2xl font-bold">Archived Tasks</h1>
@@ -97,6 +97,7 @@ export function ArchivedTasksView({
                     className="opacity-0 group-hover:opacity-100 shrink-0"
                     onClick={() => handleUnarchive(task.id)}
                     title="Restore task"
+                    aria-label="Restore task"
                   >
                     <Undo2 className="size-4" />
                   </Button>

@@ -169,6 +169,7 @@ export function OnboardingDialog({
                     size="icon"
                     className="text-muted-foreground"
                     onClick={handleBack}
+                    aria-label="Go back"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>

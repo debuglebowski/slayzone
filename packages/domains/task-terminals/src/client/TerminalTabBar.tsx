@@ -155,6 +155,9 @@ export function TerminalTabBar({
           return (
             <div
               key={group.id}
+              role="tab"
+              tabIndex={0}
+              aria-selected={isActive}
               data-testid={`terminal-tab-${group.id}`}
               data-tab-id={group.id}
               data-tab-main={group.isMain ? 'true' : 'false'}
@@ -168,6 +171,12 @@ export function TerminalTabBar({
                 isDragOver && 'bg-neutral-200 dark:bg-neutral-600 shadow-[inset_0_-2px_0_0_theme(colors.neutral.400)] dark:shadow-[inset_0_-2px_0_0_theme(colors.neutral.400)]'
               )}
               onClick={() => onGroupSelect(group.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onGroupSelect(group.id)
+                }
+              }}
               onDragOver={(e) => handleGroupDragOver(e, group.id)}
               onDragLeave={handleGroupDragLeave}
               onDrop={(e) => handleGroupDrop(e, group.id)}
@@ -203,6 +212,7 @@ export function TerminalTabBar({
                             if (e.key === 'Enter') handleRenameSubmit(tab.id)
                             if (e.key === 'Escape') setEditingTabId(null)
                           }}
+                          aria-label="Rename terminal tab"
                           className="w-20 bg-transparent border-none outline-none text-xs"
                           onClick={e => e.stopPropagation()}
                         />

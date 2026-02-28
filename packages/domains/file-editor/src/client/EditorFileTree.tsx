@@ -387,6 +387,7 @@ export function EditorFileTree({ projectPath, onOpenFile, onFileRenamed, activeF
               if (e.key === 'Escape') setRenaming(null)
             }}
             onBlur={() => handleRename(entry.path, renameValue)}
+            aria-label="Rename file"
             className="h-6 text-xs font-mono py-0 px-1"
           />
         </div>

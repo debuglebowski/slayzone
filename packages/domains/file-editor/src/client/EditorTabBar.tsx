@@ -58,7 +58,9 @@ export function EditorTabBar({ files, activeFilePath, onSelect, onClose, isDirty
             {diskChanged?.(file.path) && (
               <span className="text-[10px] leading-none text-amber-500 shrink-0">changed</span>
             )}
-            <span
+            <button
+              type="button"
+              aria-label={`Close ${name}`}
               className="grid place-items-center size-4 shrink-0 rounded hover:bg-muted"
               onClick={(e) => {
                 e.stopPropagation()
@@ -69,7 +71,7 @@ export function EditorTabBar({ files, activeFilePath, onSelect, onClose, isDirty
                 <span className="col-start-1 row-start-1 size-2 rounded-full bg-foreground opacity-40 transition-opacity group-hover:opacity-0" />
               )}
               <X className="col-start-1 row-start-1 size-3 opacity-0 transition-opacity group-hover:opacity-100" />
-            </span>
+            </button>
           </button>
         )
       })}

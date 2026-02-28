@@ -85,6 +85,7 @@ function TabContent({ title, isActive, isDragging, onClose, terminalState, isSub
       <span className={cn('truncate text-sm', isTemporary && 'italic text-muted-foreground/90')}>{title}</span>
       {onClose && (
         <button
+          aria-label="Close tab"
           className="h-4 w-4 rounded text-muted-foreground/90 hover:text-foreground hover:bg-muted-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/80 flex items-center justify-center"
           onClick={(e) => {
             e.stopPropagation()

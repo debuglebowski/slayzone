@@ -157,7 +157,7 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
                 className="h-7 text-xs"
                 disabled={switching}
               />
-              <Button type="submit" variant="ghost" size="icon" className="h-7 w-7 shrink-0" disabled={!newBranchName.trim() || switching}>
+              <Button type="submit" variant="ghost" size="icon" className="h-7 w-7 shrink-0" disabled={!newBranchName.trim() || switching} aria-label="Create branch">
                 <Plus className="h-3.5 w-3.5" />
               </Button>
             </form>
