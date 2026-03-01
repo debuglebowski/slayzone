@@ -43,7 +43,7 @@ function parseTask(row: Record<string, unknown> | undefined): Task | null {
 }
 
 function parseTasks(rows: Record<string, unknown>[]): Task[] {
-  return rows.map((row) => parseTask(row)!)
+  return rows.map((row) => parseTask(row)).filter((t): t is Task => t !== null)
 }
 
 function cleanupTask(db: Database, taskId: string): void {

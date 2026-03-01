@@ -2,6 +2,10 @@ import { spawn } from 'child_process'
 import { homedir, platform } from 'os'
 
 export async function runAiCommand(mode: 'claude-code' | 'codex', prompt: string): Promise<string> {
+  if (mode !== 'claude-code' && mode !== 'codex') {
+    throw new Error(`Unsupported AI mode: ${String(mode)}`)
+  }
+
   return new Promise((resolve, reject) => {
     const claudePath = platform() === 'win32' ? 'claude' : `${homedir()}/.local/bin/claude`
     const cmd = mode === 'claude-code' ? claudePath : 'codex'
