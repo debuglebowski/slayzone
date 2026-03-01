@@ -257,7 +257,7 @@ export function ProcessesPanel({ taskId, cwd, terminalSessionId }: { taskId: str
   const labelRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    window.api.processes.listForTask(taskId).then((list) => setProcesses(list as ProcessEntry[]))
+    window.api.processes.listForTask(taskId).then((list) => setProcesses(list as ProcessEntry[])).catch(() => {})
   }, [taskId])
 
   useEffect(() => {

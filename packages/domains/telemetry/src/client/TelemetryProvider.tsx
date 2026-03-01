@@ -27,17 +27,22 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     if (initializedRef.current) return
     initializedRef.current = true
 
-    window.api.settings.get(SETTINGS_KEY).then((stored) => {
-      const t: TelemetryTier = stored === 'opted_in' ? 'opted_in' : 'anonymous'
-      setTier(t)
-      initTelemetry(t)
-      startHeartbeat()
-      setReady(true)
+    ;(async () => {
+      try {
+        const stored = await window.api.settings.get(SETTINGS_KEY)
+        const t: TelemetryTier = stored === 'opted_in' ? 'opted_in' : 'anonymous'
+        setTier(t)
+        initTelemetry(t)
+        startHeartbeat()
+        setReady(true)
 
-      window.api.app.getVersion().then((version) => {
+        const version = await window.api.app.getVersion()
         track('app_opened', { version })
-      })
-    })
+      } catch {
+        // Telemetry init failed — continue without it
+        setReady(true)
+      }
+    })()
 
     return () => stopHeartbeat()
   }, [])

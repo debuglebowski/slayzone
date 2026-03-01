@@ -49,6 +49,7 @@ function getAutoUpdater() {
 }
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000 // 4 hours
+let checkTimer: ReturnType<typeof setInterval> | null = null
 
 export function initAutoUpdater(): void {
   if (is.dev) return
@@ -57,13 +58,20 @@ export function initAutoUpdater(): void {
   } catch (err) {
     console.error('[updater] init failed:', err instanceof Error ? err.message : err)
   }
-  setInterval(() => {
+  checkTimer = setInterval(() => {
     if (downloadedVersion) return
     console.log('[updater] periodic check')
     getAutoUpdater().checkForUpdatesAndNotify().catch((err) => {
       console.error('[updater] periodic check failed:', err instanceof Error ? err.message : err)
     })
   }, CHECK_INTERVAL_MS)
+}
+
+export function stopAutoUpdater(): void {
+  if (checkTimer) {
+    clearInterval(checkTimer)
+    checkTimer = null
+  }
 }
 
 export function restartForUpdate(): void {

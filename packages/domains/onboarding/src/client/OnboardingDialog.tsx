@@ -101,7 +101,7 @@ export function OnboardingDialog({
       if (value !== 'true') {
         setAutoOpen(true)
       }
-    })
+    }).catch(() => {})
   }, [])
 
   const handleNext = (): void => {

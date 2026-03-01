@@ -64,7 +64,7 @@ export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved,
 
   // Load conflict content
   useEffect(() => {
-    window.api.git.getConflictContent(repoPath, filePath).then(setContent)
+    window.api.git.getConflictContent(repoPath, filePath).then(setContent).catch(() => {})
   }, [repoPath, filePath])
 
   // Init CodeMirror editor

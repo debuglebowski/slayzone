@@ -55,7 +55,7 @@ import { registerScreenshotHandlers } from './screenshot'
 import { setProcessManagerWindow, initProcessManager, createProcess, spawnProcess, updateProcess, killProcess, restartProcess, listForTask, listAllProcesses, killTaskProcesses, killAllProcesses } from './process-manager'
 import { registerExportImportHandlers } from './export-import'
 import { registerLeaderboardHandlers } from './leaderboard'
-import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
+import { initAutoUpdater, stopAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
 
 const DEFAULT_WINDOW_WIDTH = 1760
@@ -1695,6 +1695,7 @@ app.on('will-quit', () => {
     linearSyncPoller = null
   }
   mcpCleanup?.()
+  stopAutoUpdater()
   stopDiagnostics()
   stopIdleChecker()
   killAllPtys()

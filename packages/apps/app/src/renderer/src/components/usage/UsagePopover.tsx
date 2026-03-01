@@ -177,7 +177,7 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
           /* ignore corrupt */
         }
       }
-    })
+    }).catch(() => {})
   }, [])
 
   // Resolve effective pins: saved or default (first window per provider)

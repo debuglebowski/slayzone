@@ -197,7 +197,7 @@ function App(): React.JSX.Element {
           action: { label: 'Take the tour', onClick: startTutorial }
         })
       }
-    })
+    }).catch(() => {})
   }, [])
 
   // Usage & notification state
@@ -475,8 +475,8 @@ function App(): React.JSX.Element {
 
   // Read color tints setting on mount and whenever settings change (same trigger as AppearanceProvider)
   useEffect(() => {
-    window.api.settings.get('project_color_tints_enabled').then((v) => setColorTintsEnabled(v !== '0'))
-    window.api.settings.get('leaderboard_enabled').then((v) => setLeaderboardEnabled(v === '1'))
+    window.api.settings.get('project_color_tints_enabled').then((v) => setColorTintsEnabled(v !== '0')).catch(() => {})
+    window.api.settings.get('leaderboard_enabled').then((v) => setLeaderboardEnabled(v === '1')).catch(() => {})
   }, [settingsRevision])
 
   // Sync project name value
