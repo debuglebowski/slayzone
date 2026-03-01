@@ -27,10 +27,11 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
       properties: ['openDirectory']
     })
     if (!result.canceled && result.filePaths[0]) {
-      setPath(result.filePaths[0])
+      const selectedPath = result.filePaths[0]
+      setPath(selectedPath)
       // Auto-fill name from folder name if empty
       if (!name.trim()) {
-        const folderName = result.filePaths[0].split('/').pop() || ''
+        const folderName = selectedPath.split('/').pop() || ''
         setName(folderName)
       }
     }
@@ -42,10 +43,11 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
 
     setLoading(true)
     try {
+      const normalizedPath = path.trim()
       const project = await window.api.db.createProject({
         name: name.trim(),
         color,
-        path: path || undefined
+        path: normalizedPath || undefined
       })
       onCreated(project)
       setName('')
@@ -88,7 +90,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
               </IconButton>
             </div>
             <p className="text-xs text-muted-foreground">
-              Claude Code terminal will open in this directory
+              Optional, used as terminal working directory and repository integrations source.
             </p>
           </div>
           <div className="space-y-2">

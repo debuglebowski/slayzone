@@ -83,6 +83,7 @@ describe('db:taskTags:setForTask', () => {
     const result = h.invoke('db:taskTags:getForTask', taskId) as unknown[]
     expect(result).toHaveLength(0)
   })
+
 })
 
 h.cleanup()

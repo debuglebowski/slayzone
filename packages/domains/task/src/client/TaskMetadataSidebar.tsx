@@ -63,7 +63,7 @@ export function TaskMetadataSidebar({
       setProjects(allProjects)
     }
     loadData()
-  }, [task.id])
+  }, [task.id, task.project_id])
 
   const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
     await window.api.taskDependencies.addBlocker(task.id, blockerTaskId)
@@ -241,48 +241,50 @@ export function TaskMetadataSidebar({
       {/* Blocked By */}
       <div>
         <label className="mb-1 block text-sm text-muted-foreground">Blocked By</label>
-        {blockers.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {blockers.map((blocker) => (
-              <div
-                key={blocker.id}
-                className="flex items-center gap-2 rounded bg-muted/50 px-2 py-1 text-sm"
-              >
-                <span className="flex-1 truncate">{blocker.title}</span>
-                <button
-                  onClick={() => handleRemoveBlocker(blocker.id)}
-                  className="text-muted-foreground hover:text-foreground"
+        <>
+          {blockers.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {blockers.map((blocker) => (
+                <div
+                  key={blocker.id}
+                  className="flex items-center gap-2 rounded bg-muted/50 px-2 py-1 text-sm"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="w-full">
-              Add blocker
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-[250px] p-2" align="start">
-            {availableBlockers.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No tasks available</p>
-            ) : (
-              <div className="max-h-[200px] space-y-1 overflow-y-auto">
-                {availableBlockers.map((t) => (
+                  <span className="flex-1 truncate">{blocker.title}</span>
                   <button
-                    key={t.id}
-                    onClick={() => handleAddBlocker(t.id)}
-                    className="w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
+                    onClick={() => handleRemoveBlocker(blocker.id)}
+                    className="text-muted-foreground hover:text-foreground"
                   >
-                    <span className="line-clamp-1">{t.title}</span>
+                    <X className="h-3 w-3" />
                   </button>
-                ))}
-              </div>
-            )}
-          </PopoverContent>
-        </Popover>
+                </div>
+              ))}
+            </div>
+          )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="w-full">
+                Add blocker
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[250px] p-2" align="start">
+              {availableBlockers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No tasks available</p>
+              ) : (
+                <div className="max-h-[200px] space-y-1 overflow-y-auto">
+                  {availableBlockers.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => handleAddBlocker(t.id)}
+                      className="w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
+                    >
+                      <span className="line-clamp-1">{t.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+        </>
       </div>
 
     </div>

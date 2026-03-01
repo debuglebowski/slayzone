@@ -44,10 +44,11 @@ import logoSolid from '../../resources/logo-solid.svg?asset'
 import { getDatabase, closeDatabase, getDiagnosticsDatabase, closeDiagnosticsDatabase } from './db'
 // Domain handlers
 import { registerProjectHandlers } from '@slayzone/projects/main'
-import { configureTaskRuntimeAdapters, registerTaskHandlers, registerAiHandlers, registerFilesHandlers } from '@slayzone/task/main'
+import { configureTaskRuntimeAdapters, registerTaskHandlers, registerFilesHandlers } from '@slayzone/task/main'
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/main'
 import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, startIdleChecker, stopIdleChecker } from '@slayzone/terminal/main'
+import { getRepoFeatureSyncConfig, syncAllProjectFeatureTasks } from '@slayzone/projects/main'
 import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/main'
 import { registerWorktreeHandlers } from '@slayzone/worktrees/main'
 import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics } from '@slayzone/diagnostics/main'
@@ -63,6 +64,7 @@ import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handof
 
 const DEFAULT_WINDOW_WIDTH = 1760
 const DEFAULT_WINDOW_HEIGHT = 1280
+const FEATURE_REPO_SYNC_POLL_INTERVAL_MS = 30_000
 
 // Splash screen: self-contained HTML with inline logo SVG and typewriter animation
 const splashLogoSvg = readFileSync(logoSolid, 'utf-8')
@@ -192,6 +194,7 @@ let inlineDevToolsView: BrowserView | null = null
 let inlineDevToolsViewAttached = false
 let inlineDeviceToolbarDisableTimers: NodeJS.Timeout[] = []
 let linearSyncPoller: NodeJS.Timeout | null = null
+let featureRepoSyncPoller: NodeJS.Timeout | null = null
 let mcpCleanup: (() => void) | null = null
 let pendingOAuthCallback: { code?: string; error?: string } | null = null
 let oauthCallbackServer: HttpServer | null = null
@@ -808,7 +811,6 @@ app.whenReady().then(async () => {
   // Register domain handlers (inject ipcMain and db)
   registerProjectHandlers(ipcMain, db)
   registerTaskHandlers(ipcMain, db)
-  registerAiHandlers(ipcMain)
   registerTagHandlers(ipcMain, db)
   registerSettingsHandlers(ipcMain, db)
   registerThemeHandlers(ipcMain, db)
@@ -859,6 +861,37 @@ app.whenReady().then(async () => {
 
   linearSyncPoller = startLinearSyncPoller(db)
   logBoot('integration poller started')
+  const runFeatureRepoSync = (): void => {
+    try {
+      const sync = syncAllProjectFeatureTasks(db)
+      if (sync.created > 0 || sync.updated > 0) {
+        mainWindow?.webContents.send('tasks:changed')
+      }
+      if (sync.errors.length > 0) {
+        console.warn('[feature-sync] warnings:', sync.errors.join(' | '))
+      }
+    } catch (err) {
+      console.error('[feature-sync] poll failed:', err)
+    }
+  }
+  const getFeatureRepoSyncIntervalMs = (): number => {
+    try {
+      const config = getRepoFeatureSyncConfig(db)
+      const seconds = Number.isFinite(config.pollIntervalSeconds) ? config.pollIntervalSeconds : 30
+      return Math.max(5_000, Math.min(3_600_000, Math.round(seconds * 1_000)))
+    } catch {
+      return FEATURE_REPO_SYNC_POLL_INTERVAL_MS
+    }
+  }
+  const scheduleFeatureRepoSync = (): void => {
+    const nextIntervalMs = getFeatureRepoSyncIntervalMs()
+    featureRepoSyncPoller = setTimeout(() => {
+      runFeatureRepoSync()
+      scheduleFeatureRepoSync()
+    }, nextIntervalMs)
+  }
+  runFeatureRepoSync()
+  scheduleFeatureRepoSync()
 
   initAutoUpdater()
   logBoot('auto-updater initialized')
@@ -1140,6 +1173,9 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:is-context-manager-enabled', () => isContextManagerEnabled)
+  ipcMain.handle('app:open-project-settings', () => {
+    emitOpenProjectSettings()
+  })
   ipcMain.handle('app:restart-for-update', () => restartForUpdate())
   ipcMain.handle('app:check-for-updates', () => checkForUpdates())
   ipcMain.handle('app:cli-status', () => ({ installed: existsSync(CLI_TARGET) }))
@@ -1755,6 +1791,10 @@ app.on('will-quit', () => {
   if (linearSyncPoller) {
     clearInterval(linearSyncPoller)
     linearSyncPoller = null
+  }
+  if (featureRepoSyncPoller) {
+    clearTimeout(featureRepoSyncPoller)
+    featureRepoSyncPoller = null
   }
   mcpCleanup?.()
   stopDiagnostics()

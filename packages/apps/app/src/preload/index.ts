@@ -15,20 +15,28 @@ window.addEventListener('drop', (e) => {
 
 // Custom APIs for renderer
 const api: ElectronAPI = {
-  ai: {
-    generateDescription: (title, mode) => ipcRenderer.invoke('ai:generate-description', title, mode)
-  },
   db: {
     // Projects
     getProjects: () => ipcRenderer.invoke('db:projects:getAll'),
     createProject: (data) => ipcRenderer.invoke('db:projects:create', data),
     updateProject: (data) => ipcRenderer.invoke('db:projects:update', data),
+    syncProjectFeatures: (projectId) => ipcRenderer.invoke('db:projects:syncFeatures', projectId),
+    syncAllProjectFeatures: () => ipcRenderer.invoke('db:projects:syncAllFeatures'),
+    getProjectFeatureSyncConfig: () => ipcRenderer.invoke('db:projects:getFeatureSyncConfig'),
+    setProjectFeatureSyncConfig: (input) => ipcRenderer.invoke('db:projects:setFeatureSyncConfig', input),
     deleteProject: (id) => ipcRenderer.invoke('db:projects:delete', id),
 
     // Tasks
     getTasks: () => ipcRenderer.invoke('db:tasks:getAll'),
     getTasksByProject: (projectId) => ipcRenderer.invoke('db:tasks:getByProject', projectId),
     getTask: (id) => ipcRenderer.invoke('db:tasks:get', id),
+    getTaskFeatureContext: (taskId) => ipcRenderer.invoke('db:tasks:getFeatureContext', taskId),
+    getTaskFeatureDetails: (taskId) => ipcRenderer.invoke('db:tasks:getFeatureDetails', taskId),
+    syncTaskFeatureFromRepo: (taskId) => ipcRenderer.invoke('db:tasks:syncFeatureFromRepo', taskId),
+    syncTaskFeatureToRepo: (taskId) => ipcRenderer.invoke('db:tasks:syncFeatureToRepo', taskId),
+    createTaskFeature: (taskId, input) => ipcRenderer.invoke('db:tasks:createFeature', taskId, input),
+    deleteTaskFeature: (taskId) => ipcRenderer.invoke('db:tasks:deleteFeature', taskId),
+    updateTaskFeature: (taskId, input) => ipcRenderer.invoke('db:tasks:updateFeature', taskId, input),
     getSubTasks: (parentId) => ipcRenderer.invoke('db:tasks:getSubTasks', parentId),
     createTask: (data) => ipcRenderer.invoke('db:tasks:create', data),
     updateTask: (data) => ipcRenderer.invoke('db:tasks:update', data),
@@ -70,9 +78,9 @@ const api: ElectronAPI = {
   theme: {
     getEffective: () => ipcRenderer.invoke('theme:get-effective'),
     getSource: () => ipcRenderer.invoke('theme:get-source'),
-    set: (theme: 'light' | 'dark' | 'system') => ipcRenderer.invoke('theme:set', theme),
-    onChange: (callback: (theme: 'light' | 'dark') => void) => {
-      const handler = (_event: unknown, theme: 'light' | 'dark') => callback(theme)
+    set: (theme) => ipcRenderer.invoke('theme:set', theme),
+    onChange: (callback) => {
+      const handler = (_: unknown, effective: 'light' | 'dark') => callback(effective)
       ipcRenderer.on('theme:changed', handler)
       return () => ipcRenderer.removeListener('theme:changed', handler)
     }
@@ -165,6 +173,7 @@ const api: ElectronAPI = {
       return () => ipcRenderer.removeListener('app:update-status', handler)
     },
     dataReady: () => ipcRenderer.send('app:data-ready'),
+    openProjectSettings: () => ipcRenderer.invoke('app:open-project-settings'),
     restartForUpdate: () => ipcRenderer.invoke('app:restart-for-update'),
     checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
     cliStatus: () => ipcRenderer.invoke('app:cli-status'),

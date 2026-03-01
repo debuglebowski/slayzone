@@ -5,6 +5,51 @@ interface Migration {
   up: (db: Database.Database) => void
 }
 
+function tableExists(db: Database.Database, table: string): boolean {
+  const row = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?"
+  ).get(table) as { name: string } | undefined
+  return Boolean(row)
+}
+
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  if (!tableExists(db, table)) return false
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  return rows.some((row) => row.name === column)
+}
+
+function hasForeignKeyOnColumn(db: Database.Database, table: string, column: string): boolean {
+  if (!tableExists(db, table)) return false
+  const rows = db.prepare(`PRAGMA foreign_key_list(${table})`).all() as Array<{ from: string }>
+  return rows.some((row) => row.from === column)
+}
+
+function rebuildTerminalTabsWithoutTaskForeignKey(db: Database.Database): void {
+  if (!tableExists(db, 'terminal_tabs')) return
+  if (!hasForeignKeyOnColumn(db, 'terminal_tabs', 'task_id')) return
+  db.exec(`
+    ALTER TABLE terminal_tabs RENAME TO terminal_tabs_old;
+
+    CREATE TABLE terminal_tabs (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      label TEXT,
+      mode TEXT NOT NULL DEFAULT 'terminal',
+      is_main INTEGER NOT NULL DEFAULT 0,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      group_id TEXT
+    );
+
+    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, created_at, group_id)
+    SELECT id, task_id, label, mode, is_main, position, created_at, group_id
+    FROM terminal_tabs_old;
+
+    DROP TABLE terminal_tabs_old;
+    CREATE INDEX IF NOT EXISTS idx_terminal_tabs_task ON terminal_tabs(task_id);
+  `)
+}
+
 const migrations: Migration[] = [
   {
     version: 1,
@@ -726,6 +771,12 @@ const migrations: Migration[] = [
       if (!hasColumnsConfig) {
         db.exec(`ALTER TABLE projects ADD COLUMN columns_config TEXT DEFAULT NULL`)
       }
+      if (!hasColumn(db, 'projects', 'task_backend')) {
+        db.exec(`
+          ALTER TABLE projects
+            ADD COLUMN task_backend TEXT NOT NULL DEFAULT 'db';
+        `)
+      }
     }
   },
   {
@@ -762,6 +813,9 @@ const migrations: Migration[] = [
           updateStmt.run(JSON.stringify(filtered), row.key)
         }
       }
+      // terminal_tabs.task_id FK blocks repo-file tasks (task not persisted in tasks table)
+      // Recreate table without FK while preserving data.
+      rebuildTerminalTabsWithoutTaskForeignKey(db)
     }
   },
   {
@@ -805,6 +859,40 @@ const migrations: Migration[] = [
           updateStmt.run(JSON.stringify(filtered), row.key)
         }
       }
+
+      if (!hasColumn(db, 'projects', 'feature_repo_integration_enabled')) {
+        db.exec(`
+          ALTER TABLE projects
+            ADD COLUMN feature_repo_integration_enabled INTEGER NOT NULL DEFAULT 0;
+        `)
+      }
+      if (!hasColumn(db, 'projects', 'feature_repo_features_path')) {
+        db.exec(`
+          ALTER TABLE projects
+            ADD COLUMN feature_repo_features_path TEXT NOT NULL DEFAULT 'docs/features';
+        `)
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_feature_task_links (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          feature_id TEXT DEFAULT NULL,
+          feature_title TEXT NOT NULL DEFAULT '',
+          feature_file_path TEXT NOT NULL,
+          content_hash TEXT DEFAULT NULL,
+          last_sync_source TEXT NOT NULL DEFAULT 'repo',
+          last_sync_at TEXT NOT NULL DEFAULT (datetime('now')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(project_id, feature_file_path),
+          UNIQUE(project_id, task_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_feature_links_project
+          ON project_feature_task_links(project_id);
+        CREATE INDEX IF NOT EXISTS idx_project_feature_links_task
+          ON project_feature_task_links(task_id);
+      `)
     }
   },
   {
@@ -816,6 +904,24 @@ const migrations: Migration[] = [
       if (!hasColumnsConfig) {
         db.exec(`ALTER TABLE projects ADD COLUMN columns_config TEXT DEFAULT NULL`)
       }
+
+      if (!hasColumn(db, 'project_feature_task_links', 'last_sync_source')) {
+        db.exec(`
+          ALTER TABLE project_feature_task_links
+            ADD COLUMN last_sync_source TEXT NOT NULL DEFAULT 'repo';
+        `)
+      }
+      if (!hasColumn(db, 'project_feature_task_links', 'last_sync_at')) {
+        db.exec(`
+          ALTER TABLE project_feature_task_links
+            ADD COLUMN last_sync_at TEXT DEFAULT NULL;
+        `)
+      }
+      db.exec(`
+        UPDATE project_feature_task_links
+        SET last_sync_source = COALESCE(NULLIF(last_sync_source, ''), 'repo'),
+            last_sync_at = COALESCE(last_sync_at, updated_at, datetime('now'))
+      `)
     }
   },
   {
@@ -975,6 +1081,56 @@ const migrations: Migration[] = [
   }
 ]
 
+function ensureSchemaBackfills(db: Database.Database): void {
+  // Safety net: if user_version was bumped externally but column wasn't actually added,
+  // auto-heal on startup to prevent runtime "no such column" crashes.
+  if (!hasColumn(db, 'projects', 'task_backend')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN task_backend TEXT NOT NULL DEFAULT 'db';`)
+  }
+  if (!hasColumn(db, 'projects', 'feature_repo_integration_enabled')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN feature_repo_integration_enabled INTEGER NOT NULL DEFAULT 0;`)
+  }
+  if (!hasColumn(db, 'projects', 'feature_repo_features_path')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN feature_repo_features_path TEXT NOT NULL DEFAULT 'docs/features';`)
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_feature_task_links (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      feature_id TEXT DEFAULT NULL,
+      feature_title TEXT NOT NULL DEFAULT '',
+      feature_file_path TEXT NOT NULL,
+      content_hash TEXT DEFAULT NULL,
+      last_sync_source TEXT NOT NULL DEFAULT 'repo',
+      last_sync_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(project_id, feature_file_path),
+      UNIQUE(project_id, task_id)
+    );
+    UPDATE project_feature_task_links
+    SET last_sync_source = COALESCE(NULLIF(last_sync_source, ''), 'repo'),
+        last_sync_at = COALESCE(last_sync_at, updated_at, datetime('now'));
+    CREATE INDEX IF NOT EXISTS idx_project_feature_links_project
+      ON project_feature_task_links(project_id);
+    CREATE INDEX IF NOT EXISTS idx_project_feature_links_task
+      ON project_feature_task_links(task_id);
+  `)
+  if (!hasColumn(db, 'project_feature_task_links', 'last_sync_source')) {
+    db.exec(`ALTER TABLE project_feature_task_links ADD COLUMN last_sync_source TEXT NOT NULL DEFAULT 'repo';`)
+  }
+  if (!hasColumn(db, 'project_feature_task_links', 'last_sync_at')) {
+    db.exec(`ALTER TABLE project_feature_task_links ADD COLUMN last_sync_at TEXT DEFAULT NULL;`)
+  }
+  db.exec(`
+    UPDATE project_feature_task_links
+    SET last_sync_source = COALESCE(NULLIF(last_sync_source, ''), 'repo'),
+        last_sync_at = COALESCE(last_sync_at, updated_at, datetime('now'));
+  `)
+  rebuildTerminalTabsWithoutTaskForeignKey(db)
+}
+
 export function runMigrations(db: Database.Database): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number
 
@@ -987,4 +1143,6 @@ export function runMigrations(db: Database.Database): void {
       console.log(`Migration ${migration.version} applied`)
     }
   }
+
+  ensureSchemaBackfills(db)
 }

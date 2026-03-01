@@ -21,7 +21,7 @@ document.head.appendChild(underlineOverride)
 
 import { getTerminal, setTerminal, disposeTerminal, updateAllThemes } from './terminal-cache'
 import { usePty } from './PtyContext'
-import { useTheme, useAppearance } from '@slayzone/settings/client'
+import { useAppearance } from '@slayzone/settings/client'
 import { getTerminalTheme } from './terminal-themes'
 import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalMode, TerminalState, CodeMode } from '@slayzone/terminal/shared'
@@ -157,7 +157,6 @@ export function Terminal({
   const hasCalledFirstInputRef = useRef(false)
 
   const { subscribe, subscribeExit, subscribeSessionInvalid, subscribeAttention, subscribeState, getState, getCrashOutput, resetTaskState, cleanupTask } = usePty()
-  const { theme } = useTheme()
   const { terminalFontSize } = useAppearance()
 
   const [ptyState, setPtyState] = useState<TerminalState>(() => getState(sessionId))
@@ -227,8 +226,8 @@ export function Terminal({
         } else {
           // Reattach existing terminal (container already has dimensions)
           containerRef.current.appendChild(cached.element)
-          cached.terminal.options.theme = getTerminalTheme(theme)
-          cached.terminal.options.minimumContrastRatio = theme === 'light' ? 4.5 : 1
+          cached.terminal.options.theme = getTerminalTheme('dark')
+          cached.terminal.options.minimumContrastRatio = 1
           terminalRef.current = cached.terminal
           fitAddonRef.current = cached.fitAddon
           serializeAddonRef.current = cached.serializeAddon
@@ -288,8 +287,8 @@ export function Terminal({
         cursorBlink: true,
         fontSize: terminalFontSize,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        theme: getTerminalTheme(theme),
-        minimumContrastRatio: theme === 'light' ? 4.5 : 1
+        theme: getTerminalTheme('dark'),
+        minimumContrastRatio: 1
       })
 
       const fitAddon = new FitAddon()
@@ -333,6 +332,7 @@ export function Terminal({
 
       // Check if PTY already exists (e.g., from idle hibernation)
       const exists = await window.api.pty.exists(sessionId)
+      let shouldInjectInitialPrompt = false
       if (signal.aborted) return // Don't continue if unmounted
       if (exists) {
         // Sync state from main process (fixes stuck loading spinner)
@@ -365,6 +365,7 @@ export function Terminal({
         const isAiMode = mode === 'claude-code' || mode === 'codex'
         const effectiveConversationId = isAiMode ? newConversationId : undefined
         const effectiveExistingConversationId = isAiMode ? existingConversationId : undefined
+        shouldInjectInitialPrompt = mode !== 'codex' || !effectiveExistingConversationId
         const result = await window.api.pty.create(sessionId, cwd, effectiveConversationId, effectiveExistingConversationId, mode, null, codeMode, providerFlags)
         if (!result.success) {
           const message = result.error || 'Failed to create terminal process'
@@ -410,7 +411,7 @@ export function Terminal({
       })
 
       // Inject initial prompt if provided (after a delay for terminal to be ready)
-      if (initialPrompt) {
+      if (initialPrompt && shouldInjectInitialPrompt) {
         setTimeout(async () => {
           if (signal.aborted) return // Don't inject if unmounted
           try {
@@ -522,10 +523,10 @@ export function Terminal({
     return subscribeState(sessionId, (newState) => setPtyState(newState))
   }, [sessionId, getState, subscribeState])
 
-  // Sync terminal theme with app theme
+  // Force terminal to remain dark regardless of app theme.
   useEffect(() => {
-    const xtermTheme = getTerminalTheme(theme)
-    const contrastRatio = theme === 'light' ? 4.5 : 1
+    const xtermTheme = getTerminalTheme('dark')
+    const contrastRatio = 1
     if (terminalRef.current) {
       terminalRef.current.options.theme = xtermTheme
       terminalRef.current.options.minimumContrastRatio = contrastRatio
@@ -538,7 +539,7 @@ export function Terminal({
       background: xtermTheme.background ?? '#000000',
       cursor: xtermTheme.cursor ?? '#ffffff',
     })
-  }, [theme])
+  }, [])
 
   // Handle resize
   useEffect(() => {
@@ -728,15 +729,14 @@ export function Terminal({
       <div
         ref={containerRef}
         tabIndex={0}
-        className={`h-full w-full bg-white dark:bg-[#0a0a0a] rounded-lg outline-none overflow-hidden transition-colors ${
+        className={`h-full w-full bg-black rounded-lg outline-none overflow-hidden ${
           isDragOver ? 'ring-2 ring-blue-500/50 ring-inset' : ''
         }`}
-        style={{ padding: '8px' }}
         onClick={() => terminalRef.current?.focus()}
       >
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white dark:bg-[#0a0a0a] z-10">
-            <div className="flex items-center gap-2 text-neutral-500">
+          <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
+            <div className="flex items-center gap-2 text-neutral-300">
               <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
@@ -746,23 +746,23 @@ export function Terminal({
           </div>
         )}
         {initError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white dark:bg-[#0a0a0a] z-10 p-4">
+          <div className="absolute inset-0 flex items-center justify-center bg-black z-10 p-4">
             <div className="text-red-400 text-sm text-center">Failed to start terminal: {initError}</div>
           </div>
         )}
         {showDeadOverlay && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-[#0a0a0a] z-10 p-6 gap-4 overflow-y-auto">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black z-10 p-6 gap-4 overflow-y-auto">
             {deadCrashOutput && (
-              <pre className="text-xs text-neutral-500 dark:text-neutral-400 max-h-32 overflow-y-auto w-full max-w-lg bg-neutral-50 dark:bg-neutral-900 rounded p-3 font-mono whitespace-pre-wrap break-all">
+              <pre className="text-xs text-neutral-400 max-h-32 overflow-y-auto w-full max-w-lg bg-neutral-900 rounded p-3 font-mono whitespace-pre-wrap break-all">
                 {stripAnsi(deadCrashOutput).split('\n').slice(-20).join('\n')}
               </pre>
             )}
-            <p className="text-sm text-neutral-500">Process exited with code {deadExitCode}</p>
+            <p className="text-sm text-neutral-400">Process exited with code {deadExitCode}</p>
             <div className="flex gap-2">
               {onRetry && (
                 <button
                   onClick={handleRetry}
-                  className="px-3 py-1.5 text-sm rounded-md bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors"
+                  className="px-3 py-1.5 text-sm rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition-colors"
                 >
                   Retry
                 </button>
@@ -770,7 +770,7 @@ export function Terminal({
               <button
                 onClick={() => void handleDoctor()}
                 disabled={doctorLoading}
-                className="px-3 py-1.5 text-sm rounded-md bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                className="px-3 py-1.5 text-sm rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition-colors disabled:opacity-50 flex items-center gap-1.5"
               >
                 {doctorLoading
                   ? <><Loader2 className="size-3.5 animate-spin" />Checking…</>
@@ -783,21 +783,21 @@ export function Terminal({
                 {doctorResults.map((r) => (
                   <div
                     key={r.check}
-                    className={`rounded-lg border p-3 space-y-1.5 ${r.ok ? 'border-green-500/20 bg-green-50/40 dark:bg-green-950/20' : 'border-red-500/20 bg-red-50/40 dark:bg-red-950/20'}`}
+                    className={`rounded-lg border p-3 space-y-1.5 ${r.ok ? 'border-green-500/20 bg-green-950/20' : 'border-red-500/20 bg-red-950/20'}`}
                   >
                     <div className="flex items-start gap-2">
                       {r.ok
-                        ? <CheckCircle2 className="size-3.5 text-green-600 dark:text-green-400 shrink-0 mt-px" />
-                        : <XCircle className="size-3.5 text-red-500 dark:text-red-400 shrink-0 mt-px" />
+                        ? <CheckCircle2 className="size-3.5 text-green-400 shrink-0 mt-px" />
+                        : <XCircle className="size-3.5 text-red-400 shrink-0 mt-px" />
                       }
                       <div className="min-w-0 space-y-0.5">
                         <p className="text-xs font-medium leading-none">{r.check}</p>
-                        <p className="text-xs text-neutral-500 dark:text-neutral-400">{r.detail}</p>
+                        <p className="text-xs text-neutral-400">{r.detail}</p>
                       </div>
                     </div>
                     {!r.ok && r.fix && (
                       <div className="ml-5">
-                        <code className="text-xs bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 rounded px-2 py-1 font-mono block">
+                        <code className="text-xs bg-neutral-800 text-neutral-300 rounded px-2 py-1 font-mono block">
                           {r.fix}
                         </code>
                       </div>

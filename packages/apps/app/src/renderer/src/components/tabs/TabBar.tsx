@@ -59,10 +59,12 @@ function TabContent({ title, isActive, isDragging, onClose, terminalState, isSub
   return (
     <div
       className={cn(
-        'group relative flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0',
-        !projectColor && 'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
-        isActive ? 'border border-neutral-300 dark:border-neutral-600' : 'text-neutral-500 dark:text-neutral-400',
-        isTemporary && 'border border-dashed border-neutral-400 dark:border-neutral-500',
+        'group relative flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer select-none flex-shrink-0 border border-transparent',
+        'transition-[color,background-color,border-color,box-shadow]',
+        !projectColor && 'bg-muted/70 hover:bg-accent/90 hover:border-border/80',
+        isActive ? 'border-border bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:border-border/70',
+        projectColor && !isActive && 'text-foreground/85 hover:text-foreground',
+        isTemporary && 'border-dashed border-border/80',
         'max-w-[300px]',
         isDragging && 'shadow-lg'
       )}
@@ -80,10 +82,10 @@ function TabContent({ title, isActive, isDragging, onClose, terminalState, isSub
         </Tooltip>
       )}
       {isSubTask && <span className="text-[10px] text-muted-foreground/60 shrink-0">SUB</span>}
-      <span className={cn('truncate text-sm', isTemporary && 'italic text-muted-foreground')}>{title}</span>
+      <span className={cn('truncate text-sm', isTemporary && 'italic text-muted-foreground/90')}>{title}</span>
       {onClose && (
         <button
-          className="h-4 w-4 rounded hover:bg-muted-foreground/20 flex items-center justify-center"
+          className="h-4 w-4 rounded text-muted-foreground/90 hover:text-foreground hover:bg-muted-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/80 flex items-center justify-center"
           onClick={(e) => {
             e.stopPropagation()
             onClose()
@@ -177,10 +179,10 @@ function LeaderboardTab({ isActive, onClick }: { isActive: boolean; onClick: () 
     <div
       className={cn(
         'flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
-        'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
+        'border border-transparent bg-muted/70 hover:bg-accent/90 hover:border-border/80',
         isActive
-          ? 'bg-neutral-200 dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600'
-          : 'text-neutral-500 dark:text-neutral-400'
+          ? 'bg-card text-foreground border-border shadow-sm'
+          : 'text-muted-foreground hover:text-foreground'
       )}
       onClick={onClick}
     >
@@ -233,9 +235,10 @@ export function TabBar({
     }
   }
 
+  // window-drag-region: all interactive children MUST have window-no-drag
   return (
-    /* window-drag-region: all interactive children MUST have window-no-drag */
-    <div className="flex items-center h-11 pr-2 gap-1 bg-sidebar window-drag-region">
+  /* window-drag-region: all interactive children MUST have window-no-drag */
+  <div className="flex items-center h-11 pr-2 gap-1 bg-sidebar window-drag-region">
       {/* Scrollable tabs area */}
       <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide flex-1 min-w-0">
         {/* Leaderboard tab — self-contained, guards its own Convex hooks */}
@@ -249,11 +252,11 @@ export function TabBar({
         {/* Home tab - not draggable */}
         <div
           className={cn(
-            'flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
-            'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
+            'flex items-center justify-center h-8 w-10 rounded-xl cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
+            'border border-transparent bg-muted/70 hover:bg-accent/90 hover:border-border/80',
             activeIndex === homeIndex
-              ? 'bg-neutral-200 dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600'
-              : 'text-neutral-500 dark:text-neutral-400'
+              ? 'bg-card text-foreground border-border shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
           )}
           onClick={() => onTabClick(homeIndex)}
         >

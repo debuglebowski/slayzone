@@ -333,7 +333,7 @@ export const test = base.extend<ElectronFixtures>({
 /** Seed helpers — call window.api methods to create test data without UI interaction */
 export function seed(page: Page) {
   return {
-    createProject: (data: { name: string; color: string; path?: string }) =>
+    createProject: (data: { name: string; color: string; path?: string; taskBackend?: 'db' }) =>
       page.evaluate((d) => window.api.db.createProject(d), data),
 
     createTask: (data: {
@@ -384,6 +384,7 @@ export function seed(page: Page) {
       name?: string
       color?: string
       path?: string | null
+      taskBackend?: 'db'
       autoCreateWorktreeOnTaskCreate?: boolean | null
       columnsConfig?: Array<{
         id: string
@@ -408,9 +409,6 @@ export function seed(page: Page) {
       page.evaluate(({ k, v }) => window.api.settings.set(k, v), { k: key, v: value }),
 
     getSetting: (key: string) => page.evaluate((k) => window.api.settings.get(k), key),
-
-    setTheme: (theme: 'light' | 'dark' | 'system') =>
-      page.evaluate((t) => window.api.theme.set(t), theme),
 
     /** Re-fetch all data from DB into React state */
     refreshData: () =>

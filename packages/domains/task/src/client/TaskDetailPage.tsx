@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { MoreHorizontal, Archive, Trash2, AlertTriangle, Sparkles, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronRight, Plus, GripVertical, Camera, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu } from 'lucide-react'
+import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronRight, Plus, GripVertical, Camera, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, FileText } from 'lucide-react'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -67,6 +67,7 @@ import { WebPanelView } from './WebPanelView'
 import { ResizeHandle } from './ResizeHandle'
 import { RegionSelector } from './RegionSelector'
 import { ProcessesPanel } from './ProcessesPanel'
+import { FeaturePanel } from './FeaturePanel'
 // ErrorBoundary should be provided by the app when rendering this component
 
 function SortableSubTask({ sub, columns, statusOptions, onNavigate, onUpdate, onDelete }: {
@@ -173,6 +174,7 @@ export function TaskDetailPage({
   const [project, setProject] = useState<Project | null>(null)
   const [tags, setTags] = useState<Tag[]>([])
   const [taskTagIds, setTaskTagIds] = useState<string[]>([])
+  const [featureTerminalCwd, setFeatureTerminalCwd] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const statusOptions = useMemo(() => buildStatusOptions(project?.columns_config), [project?.columns_config])
   const completedStatus = useMemo(() => getDoneStatus(project?.columns_config), [project?.columns_config])
@@ -219,7 +221,6 @@ export function TaskDetailPage({
 
   // Description editing state
   const [descriptionValue, setDescriptionValue] = useState('')
-  const [generatingDescription, setGeneratingDescription] = useState(false)
 
   // Terminal restart key (changing this forces remount)
   const [terminalKey, setTerminalKey] = useState(0)
@@ -231,7 +232,7 @@ export function TaskDetailPage({
   const flagsInputRef = useRef<HTMLInputElement>(null)
 
   // Panel visibility state
-  const defaultPanelVisibility: PanelVisibility = { terminal: true, browser: false, diff: false, settings: true, editor: false, processes: false }
+  const defaultPanelVisibility: PanelVisibility = { terminal: true, browser: false, diff: false, settings: true, feature: false, editor: false, processes: false }
   const [panelVisibility, setPanelVisibility] = useState<PanelVisibility>(defaultPanelVisibility)
 
   // Browser tabs state
@@ -376,7 +377,7 @@ export function TaskDetailPage({
     setLoading(true)
     setDetectedSessionId(null)
     setEditingTitle(false)
-    setGeneratingDescription(false)
+    setFeatureTerminalCwd(null)
 
     const loadData = async (): Promise<void> => {
       const checkProjectPathExists = async (path: string): Promise<boolean> => {
@@ -386,8 +387,9 @@ export function TaskDetailPage({
         return true
       }
 
-      const [loadedTask, loadedTags, loadedTaskTags, projects, loadedSubTasks] = await Promise.all([
+      const [loadedTask, loadedTaskFeatureContext, loadedTags, loadedTaskTags, projects, loadedSubTasks] = await Promise.all([
         window.api.db.getTask(taskId),
+        window.api.db.getTaskFeatureContext(taskId),
         window.api.tags.getTags(),
         window.api.taskTags.getTagsForTask(taskId),
         window.api.db.getProjects(),
@@ -442,11 +444,34 @@ export function TaskDetailPage({
       }
       setTags(loadedTags)
       setTaskTagIds(loadedTaskTags.map((t) => t.id))
+      setFeatureTerminalCwd(loadedTaskFeatureContext?.featureDirAbsolutePath ?? null)
       setLoading(false)
     }
 
     loadData()
   }, [taskId])
+
+  useEffect(() => {
+    if (!task) {
+      setFeatureTerminalCwd(null)
+      return
+    }
+
+    let cancelled = false
+    void window.api.db.getTaskFeatureContext(task.id)
+      .then((context) => {
+        if (cancelled) return
+        setFeatureTerminalCwd(context?.featureDirAbsolutePath ?? null)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setFeatureTerminalCwd(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [task?.id, task?.worktree_path, project?.path, project?.feature_repo_integration_enabled, project?.updated_at])
 
   // Re-check project path on window focus
   useEffect(() => {
@@ -494,8 +519,13 @@ export function TaskDetailPage({
     }
 
     void syncProject()
+    const handleProjectsChanged = (): void => {
+      void syncProject()
+    }
+    window.addEventListener('slayzone:projects-changed', handleProjectsChanged)
     return () => {
       cancelled = true
+      window.removeEventListener('slayzone:projects-changed', handleProjectsChanged)
     }
   }, [task?.project_id, task?.id])
 
@@ -706,6 +736,20 @@ export function TaskDetailPage({
       await terminalApiRef.current.sendInput(plainText.trim())
     }
   }, [descriptionValue])
+
+  const initialTerminalPrompt = useMemo(() => {
+    if (!task) return undefined
+    const quickPrompt = getQuickRunPrompt(task.id)
+    return quickPrompt || undefined
+  }, [task, getQuickRunPrompt])
+
+  const terminalCwd = useMemo(() => {
+    const fallbackCwd = task?.worktree_path || project?.path || ''
+    if (!task || !project) return fallbackCwd
+    if (task.terminal_mode !== 'codex') return fallbackCwd
+    if (project.feature_repo_integration_enabled !== 1) return fallbackCwd
+    return featureTerminalCwd || fallbackCwd
+  }, [task, project, featureTerminalCwd])
 
   // Cmd+I (title), Cmd+Shift+I (description)
   // Note: Cmd+Shift+K (clear buffer) is handled per-terminal in Terminal.tsx via attachCustomKeyEventHandler
@@ -1066,33 +1110,6 @@ export function TaskDetailPage({
     setTask(updated)
     onTaskUpdated(updated)
   }
-
-  const handleGenerateDescription = async (): Promise<void> => {
-    if (!task || generatingDescription) return
-    setGeneratingDescription(true)
-    try {
-      const result = await window.api.ai.generateDescription(
-        task.title,
-        task.terminal_mode
-      )
-      if (result.success && result.description) {
-        setDescriptionValue(result.description)
-        const updated = await window.api.db.updateTask({
-          id: task.id,
-          description: result.description
-        })
-        setTask(updated)
-        onTaskUpdated(updated)
-      } else if (result.error) {
-        console.error('[generate] Error:', result.error)
-      }
-    } catch (err) {
-      console.error('[generate] Exception:', err)
-    } finally {
-      setGeneratingDescription(false)
-    }
-  }
-
   const handleCreateSubTask = async (): Promise<void> => {
     if (!task || !subTaskTitle.trim()) return
     const sub = await window.api.db.createTask({
@@ -1419,7 +1436,8 @@ export function TaskDetailPage({
                     { id: 'diff', icon: GitBranch, label: 'Git', shortcut: '⌘G' },
                     ...(import.meta.env.DEV ? [{ id: 'processes', icon: Cpu, label: 'Processes', shortcut: '⌘O' }] : []),
                     { id: 'settings', icon: Settings2, label: 'Settings', shortcut: '⌘S' },
-                  ].filter(p => isBuiltinEnabled(p.id) && !(task.is_temporary && p.id === 'settings'))
+                    { id: 'feature', icon: FileText, label: 'Feature' },
+                  ].filter(p => isBuiltinEnabled(p.id) && !(task.is_temporary && (p.id === 'settings' || p.id === 'feature')))
 
                   // Insert web panels after editor
                   const editorIdx = builtins.findIndex(p => p.id === 'editor')
@@ -1560,14 +1578,14 @@ export function TaskDetailPage({
               ) : project?.id === task.project_id && project.path && !projectPathMissing ? (
                 <TerminalContainer
                   ref={terminalContainerRef}
-                  key={`${terminalKey}-${task.project_id}-${project?.path || ''}-${task.worktree_path || ''}`}
+                  key={`${terminalKey}-${task.project_id}-${project?.path || ''}-${task.worktree_path || ''}-${task.terminal_mode}-${terminalCwd}`}
                   taskId={task.id}
                   isActive={isActive}
-                  cwd={task.worktree_path || project.path}
+                  cwd={terminalCwd}
                   defaultMode={task.terminal_mode}
                   conversationId={getConversationIdForMode(task) || undefined}
                   existingConversationId={getConversationIdForMode(task) || undefined}
-                  initialPrompt={getQuickRunPrompt(task.id)}
+                  initialPrompt={initialTerminalPrompt}
                   codeMode={getQuickRunCodeMode(task.id)}
                   providerFlags={getProviderFlagsForMode(task)}
                   autoFocus={isFirstMountRef.current}
@@ -1896,23 +1914,6 @@ export function TaskDetailPage({
               className="rounded-md border border-input bg-transparent p-3"
               testId="task-description-editor"
             />
-            {task.terminal_mode !== 'terminal' && (
-              <IconButton
-                data-testid="generate-description-button"
-                type="button"
-                variant="ghost"
-                aria-label="Generate description"
-                className="absolute bottom-1 right-1 size-6 text-muted-foreground hover:text-foreground"
-                onClick={() => handleGenerateDescription()}
-                disabled={generatingDescription || !task.title}
-              >
-                {generatingDescription ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <Sparkles className="size-3" />
-                )}
-              </IconButton>
-            )}
           </div>
 
           {/* Sub-tasks (only for top-level tasks) */}
@@ -2005,8 +2006,32 @@ export function TaskDetailPage({
         </div>
         )}
 
+        {/* Resize handle: ... | Feature */}
+        {!compact && panelVisibility.feature && (panelVisibility.terminal || panelVisibility.browser || panelVisibility.editor || panelVisibility.diff || panelVisibility.settings || enabledWebPanels.some(wp => panelVisibility[wp.id])) && (
+          <ResizeHandle
+            width={resolvedWidths.feature ?? 380}
+            minWidth={260}
+            onWidthChange={(w) => updatePanelSizes({ feature: w })}
+            onDragStart={() => setIsResizing(true)}
+            onDragEnd={() => setIsResizing(false)}
+            onReset={resetAllPanels}
+          />
+        )}
+
+        {/* Feature Panel */}
+        {!compact && panelVisibility.feature && (
+          <div data-panel-id="feature" data-testid="task-feature-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border p-3 overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'feature' && "shadow-[0_0_18px_rgba(249,115,22,0.25)]")} style={{ width: resolvedWidths.feature }}>
+            <FeaturePanel
+              taskId={task.id}
+              project={project}
+              onTaskUpdated={handleTaskUpdate}
+              onOpenFile={handleQuickOpenFile}
+            />
+          </div>
+        )}
+
         {/* Resize handle: ... | Processes */}
-        {import.meta.env.DEV && !compact && panelVisibility.processes && (panelVisibility.terminal || panelVisibility.browser || panelVisibility.editor || panelVisibility.diff || panelVisibility.settings || enabledWebPanels.some(wp => panelVisibility[wp.id])) && (
+        {import.meta.env.DEV && !compact && panelVisibility.processes && (panelVisibility.terminal || panelVisibility.browser || panelVisibility.editor || panelVisibility.diff || panelVisibility.settings || panelVisibility.feature || enabledWebPanels.some(wp => panelVisibility[wp.id])) && (
           <ResizeHandle
             width={resolvedWidths.processes ?? 300}
             minWidth={200}

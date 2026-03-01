@@ -3,6 +3,10 @@ import type { Database } from 'better-sqlite3'
 import type { CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
 
 export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
+  const taskExistsInDb = (taskId: string): boolean => {
+    const row = db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId) as { 1: number } | undefined
+    return Boolean(row)
+  }
 
   // Tags CRUD
   ipcMain.handle('db:tags:getAll', () => {
@@ -47,6 +51,7 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
 
   // Task-Tag associations
   ipcMain.handle('db:taskTags:getForTask', (_, taskId: string) => {
+    if (!taskExistsInDb(taskId)) return []
     return db
       .prepare(
         `SELECT tags.* FROM tags
@@ -67,6 +72,9 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
   })
 
   ipcMain.handle('db:taskTags:setForTask', (_, taskId: string, tagIds: string[]) => {
+    // Ignore invalid or deleted task ids.
+    if (!taskExistsInDb(taskId)) return
+
     const deleteStmt = db.prepare('DELETE FROM task_tags WHERE task_id = ?')
     const insertStmt = db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)')
 

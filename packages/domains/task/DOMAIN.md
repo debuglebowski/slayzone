@@ -1,6 +1,6 @@
 # Task Domain
 
-Task CRUD operations, detail view, and AI-powered description generation.
+Task CRUD operations and detail view.
 
 ## Contracts (shared/)
 
@@ -24,7 +24,6 @@ Also exports validation schemas (`createTaskSchema`, `updateTaskSchema`) and for
 ## Main Process (main/)
 
 - `registerTaskHandlers(ipcMain, db)` - Task CRUD, archive, reorder
-- `registerAiHandlers(ipcMain)` - AI description generation
 - `registerFilesHandlers(ipcMain)` - Temp image saving for AI
 
 ## Client (client/)

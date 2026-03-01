@@ -14,6 +14,9 @@ const root = resolve(__dirname, '../../..')
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, root, '')
+  const devHost = env.SLAYZONE_DEV_HOST || '127.0.0.1'
+  const parsedDevPort = Number.parseInt(env.SLAYZONE_DEV_PORT || '5173', 10)
+  const devPort = Number.isFinite(parsedDevPort) ? parsedDevPort : 5173
 
   return {
     main: {
@@ -41,6 +44,11 @@ export default defineConfig(({ mode }) => {
     },
     renderer: {
       envDir: root,
+      server: {
+        host: devHost,
+        port: devPort,
+        strictPort: false
+      },
       define: {
         __POSTHOG_API_KEY__: JSON.stringify(env.POSTHOG_API_KEY ?? ''),
         __POSTHOG_HOST__: JSON.stringify(env.POSTHOG_HOST ?? ''),

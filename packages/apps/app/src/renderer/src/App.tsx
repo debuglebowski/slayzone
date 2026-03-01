@@ -1015,12 +1015,22 @@ function App(): React.JSX.Element {
     setProjects((prev) => [...prev, project])
     setSelectedProjectId(project.id)
     setCreateProjectOpen(false)
+    void window.api.db.getTasks().then((allTasks) => {
+      setTasks(allTasks)
+    }).catch((err) => {
+      console.error('[App] Failed to refresh tasks after project create:', err)
+    })
   }
 
   const handleProjectUpdated = (project: Project): void => {
     updateProject(project)
     setEditingProject(null)
     validateProjectPath(project)
+    void window.api.db.getTasks().then((allTasks) => {
+      setTasks(allTasks)
+    }).catch((err) => {
+      console.error('[App] Failed to refresh tasks after project update:', err)
+    })
   }
 
   const handleProjectNameSave = async (): Promise<void> => {

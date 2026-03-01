@@ -33,6 +33,7 @@ describe('tabs:ensureMain', () => {
     const tab = h.invoke('tabs:ensureMain', taskId, 'codex') as { mode: string }
     expect(tab.mode).toBe('codex')
   })
+
 })
 
 describe('tabs:list', () => {

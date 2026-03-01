@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from './ThemeContext'
-import { XIcon, Pencil, Trash2, Plus, Settings2, SquareTerminal, Globe, FileCode, GitCompare, SlidersHorizontal, FolderOpen } from 'lucide-react'
+import { XIcon, Pencil, Trash2, Plus, Settings2, SquareTerminal, Globe, FileCode, GitCompare, SlidersHorizontal, FolderOpen, FileText } from 'lucide-react'
 import { SettingsLayout, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
@@ -43,6 +43,19 @@ function SettingsTabIntro({ title, description }: { title: string; description: 
   )
 }
 
+interface RepoFeatureProject {
+  id: string
+  name: string
+  path: string | null
+  feature_repo_integration_enabled: number
+  feature_repo_features_path: string
+}
+
+interface RepoFeatureSyncConfig {
+  defaultFeaturesPath: string
+  pollIntervalSeconds: number
+}
+
 interface UserSettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -57,6 +70,9 @@ export function UserSettingsDialog({
   onTabChange
 }: UserSettingsDialogProps) {
   const { preference, setPreference } = useTheme()
+  const notifyProjectsChanged = (): void => {
+    window.dispatchEvent(new Event('slayzone:projects-changed'))
+  }
   const [activeTab, setActiveTab] = useState(initialTab)
   const [tags, setTags] = useState<Tag[]>([])
   const [newTagName, setNewTagName] = useState('')
@@ -106,6 +122,14 @@ export function UserSettingsDialog({
   const [editPanelProtocolError, setEditPanelProtocolError] = useState('')
   const [editShortcutError, setEditShortcutError] = useState('')
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([])
+  const [repoFeatureProjects, setRepoFeatureProjects] = useState<RepoFeatureProject[]>([])
+  const [repoFeatureConfig, setRepoFeatureConfig] = useState<RepoFeatureSyncConfig>({
+    defaultFeaturesPath: 'docs/features',
+    pollIntervalSeconds: 30
+  })
+  const [syncingRepoFeatures, setSyncingRepoFeatures] = useState(false)
+  const [repoFeatureSavingProjectId, setRepoFeatureSavingProjectId] = useState<string | null>(null)
+  const [repoFeaturesMessage, setRepoFeaturesMessage] = useState('')
   const [exportProjectId, setExportProjectId] = useState('')
   const [importedProjects, setImportedProjects] = useState<Array<{ id: string; name: string; path: string }>>([])
   const [cliInstalled, setCliInstalled] = useState(false)
@@ -182,8 +206,10 @@ export function UserSettingsDialog({
       setCliInstalled(cliStatus.status === 'fulfilled' ? cliStatus.value.installed : false)
       setLeaderboardEnabled(leaderboardVal.status === 'fulfilled' ? leaderboardVal.value === '1' : false)
 
+      const loadedProjectsValue = loadedProjects.status === 'fulfilled' ? loadedProjects.value : []
       setTags(loadedTags.status === 'fulfilled' ? loadedTags.value : [])
-      setProjects(loadedProjects.status === 'fulfilled' ? loadedProjects.value : [])
+      setProjects(loadedProjectsValue.map((project: RepoFeatureProject) => ({ id: project.id, name: project.name })))
+      setRepoFeatureProjects(loadedProjectsValue as RepoFeatureProject[])
       setDbPath(path.status === 'fulfilled' ? (path.value ?? 'Default location (userData)') : 'Default location (userData)')
       setWorktreeBasePath(wtBasePath.status === 'fulfilled' ? (wtBasePath.value ?? '') : '')
       setAutoCreateWorktreeOnTaskCreate(
@@ -241,6 +267,16 @@ export function UserSettingsDialog({
         setIntegrationsMessage(err instanceof Error ? err.message : String(err))
       }
 
+      try {
+        const cfg = await window.api.db.getProjectFeatureSyncConfig()
+        if (isStale()) return
+        setRepoFeatureConfig(cfg)
+        setRepoFeaturesMessage('')
+      } catch (err) {
+        if (isStale()) return
+        setRepoFeaturesMessage(err instanceof Error ? err.message : String(err))
+      }
+
       // Load panel config
       try {
         const panelConfigRaw = await window.api.settings.get('panel_config')
@@ -286,6 +322,178 @@ export function UserSettingsDialog({
     } finally {
       setSyncingIntegrations(false)
     }
+  }
+
+  const refreshRepoFeatureIntegrationState = async (): Promise<void> => {
+    const [allProjects, cfg] = await Promise.all([
+      window.api.db.getProjects(),
+      window.api.db.getProjectFeatureSyncConfig()
+    ])
+    setRepoFeatureProjects(allProjects)
+    setProjects(allProjects.map((project) => ({ id: project.id, name: project.name })))
+    setRepoFeatureConfig({
+      defaultFeaturesPath: cfg.defaultFeaturesPath || 'docs/features',
+      pollIntervalSeconds:
+        Number.isFinite(cfg.pollIntervalSeconds) && cfg.pollIntervalSeconds > 0
+          ? cfg.pollIntervalSeconds
+          : 30
+    })
+  }
+
+  const handleRepoFeatureConfigChange = async (
+    partial: Partial<RepoFeatureSyncConfig>
+  ): Promise<void> => {
+    try {
+      const next = await window.api.db.setProjectFeatureSyncConfig(partial)
+      setRepoFeatureConfig(next)
+      setRepoFeaturesMessage('feature.yaml integration settings updated')
+    } catch (err) {
+      setRepoFeaturesMessage(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '')
+  const toRepoRelativePath = (repoPath: string, selectedPath: string): string | null => {
+    const repo = normalizePath(repoPath)
+    const selected = normalizePath(selectedPath)
+    if (selected === repo) return '.'
+    if (!selected.startsWith(`${repo}/`)) return null
+    return selected.slice(repo.length + 1)
+  }
+  const resolveFeatureAbsolutePath = (repoPath: string, featurePath: string): string => {
+    const repo = normalizePath(repoPath)
+    const rel = featurePath.trim().replace(/\\/g, '/').replace(/^\/+/, '')
+    return rel.length > 0 ? `${repo}/${rel}` : repo
+  }
+
+  const handleToggleProjectRepoFeatures = async (
+    project: RepoFeatureProject,
+    enabled: boolean
+  ): Promise<void> => {
+    if (enabled && !project.path) {
+      setRepoFeaturesMessage(`Set a repository path for "${project.name}" before enabling this integration`)
+      return
+    }
+
+    setRepoFeatureSavingProjectId(project.id)
+    setRepoFeaturesMessage('')
+    try {
+      const updated = await window.api.db.updateProject({
+        id: project.id,
+        featureRepoIntegrationEnabled: enabled,
+        featureRepoFeaturesPath: project.feature_repo_features_path || repoFeatureConfig.defaultFeaturesPath
+      })
+      notifyProjectsChanged()
+      if (updated.feature_repo_integration_enabled === 1) {
+        const sync = await window.api.db.syncProjectFeatures(project.id)
+        const errSuffix = sync.errors.length > 0 ? ` (${sync.errors.length} warnings)` : ''
+        setRepoFeaturesMessage(
+          `Synced ${project.name}: ${sync.created} created, ${sync.updated} updated${errSuffix}`
+        )
+      } else {
+        setRepoFeaturesMessage(`Disabled feature.yaml integration for ${project.name}`)
+      }
+      ;(window as { __slayzone_refreshData?: () => void }).__slayzone_refreshData?.()
+      await refreshRepoFeatureIntegrationState()
+    } catch (err) {
+      setRepoFeaturesMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRepoFeatureSavingProjectId(null)
+    }
+  }
+
+  const handleProjectFeaturePathSave = async (
+    project: RepoFeatureProject,
+    featurePath: string
+  ): Promise<void> => {
+    const normalizedPath = featurePath.trim() || repoFeatureConfig.defaultFeaturesPath
+    setRepoFeatureSavingProjectId(project.id)
+    setRepoFeaturesMessage('')
+    try {
+      const updated = await window.api.db.updateProject({
+        id: project.id,
+        featureRepoFeaturesPath: normalizedPath
+      })
+      notifyProjectsChanged()
+      setRepoFeatureProjects((prev) =>
+        prev.map((item) =>
+          item.id === project.id
+            ? {
+                ...item,
+                feature_repo_features_path: updated.feature_repo_features_path || normalizedPath,
+                feature_repo_integration_enabled: updated.feature_repo_integration_enabled
+              }
+            : item
+        )
+      )
+      if (updated.feature_repo_integration_enabled === 1) {
+        const sync = await window.api.db.syncProjectFeatures(project.id)
+        const errSuffix = sync.errors.length > 0 ? ` (${sync.errors.length} warnings)` : ''
+        setRepoFeaturesMessage(
+          `Updated Features folder for ${project.name}. Synced ${sync.created} created, ${sync.updated} updated${errSuffix}`
+        )
+        ;(window as { __slayzone_refreshData?: () => void }).__slayzone_refreshData?.()
+      } else {
+        setRepoFeaturesMessage(`Updated Features folder for ${project.name}`)
+      }
+    } catch (err) {
+      setRepoFeaturesMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRepoFeatureSavingProjectId(null)
+    }
+  }
+
+  const handleSyncAllRepoFeatures = async (): Promise<void> => {
+    setSyncingRepoFeatures(true)
+    setRepoFeaturesMessage('')
+    try {
+      const result = await window.api.db.syncAllProjectFeatures()
+      const errSuffix = result.errors.length > 0 ? ` (${result.errors.length} warnings)` : ''
+      setRepoFeaturesMessage(
+        `Synced ${result.projects} projects: ${result.created} created, ${result.updated} updated${errSuffix}`
+      )
+      if (result.created > 0 || result.updated > 0) {
+        ;(window as { __slayzone_refreshData?: () => void }).__slayzone_refreshData?.()
+      }
+    } catch (err) {
+      setRepoFeaturesMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSyncingRepoFeatures(false)
+    }
+  }
+
+  const handleBrowseProjectFeaturePath = async (
+    project: RepoFeatureProject
+  ): Promise<void> => {
+    if (!project.path) {
+      setRepoFeaturesMessage(`Set a repository path for "${project.name}" before selecting a folder`)
+      return
+    }
+
+    const defaultPath = resolveFeatureAbsolutePath(
+      project.path,
+      project.feature_repo_features_path || repoFeatureConfig.defaultFeaturesPath
+    )
+
+    const result = await window.api.dialog.showOpenDialog({
+      title: `Select Features folder for ${project.name}`,
+      defaultPath,
+      properties: ['openDirectory']
+    })
+    if (result.canceled || !result.filePaths[0]) return
+
+    const relative = toRepoRelativePath(project.path, result.filePaths[0])
+    if (!relative) {
+      setRepoFeaturesMessage('Selected folder must be inside the repository path')
+      return
+    }
+
+    setRepoFeatureProjects((prev) =>
+      prev.map((item) =>
+        item.id === project.id ? { ...item, feature_repo_features_path: relative } : item
+      )
+    )
+    await handleProjectFeaturePathSave(project, relative)
   }
 
   const updateDiagnosticsConfig = async (partial: Partial<DiagnosticsConfig>) => {
@@ -488,7 +696,8 @@ export function UserSettingsDialog({
     browser: 'Browser',
     editor: 'Editor',
     diff: 'Diff',
-    settings: 'Settings'
+    settings: 'Settings',
+    feature: 'Feature'
   }
 
   const navItems: Array<{ key: string; label: string }> = [
@@ -803,12 +1012,17 @@ export function UserSettingsDialog({
                     {([
                       { id: 'editor', icon: FileCode, shortcut: 'E' },
                       { id: 'diff', icon: GitCompare, shortcut: 'G' },
-                      { id: 'settings', icon: SlidersHorizontal, shortcut: 'S' }
+                      { id: 'settings', icon: SlidersHorizontal, shortcut: 'S' },
+                      { id: 'feature', icon: FileText, shortcut: '' }
                     ] as const).map(({ id, icon: Icon, shortcut }) => (
                       <div key={id} className="flex items-center gap-3 h-11 rounded-lg border px-4">
                         <Icon className="size-4 text-muted-foreground shrink-0" />
                         <span className="text-sm font-medium flex-1">{BUILTIN_PANEL_LABELS[id]}</span>
-                        <kbd className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded border shrink-0">⌘{shortcut}</kbd>
+                        {shortcut ? (
+                          <kbd className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded border shrink-0">⌘{shortcut}</kbd>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground shrink-0">No shortcut</span>
+                        )}
                         <Switch
                           checked={panelConfig.builtinEnabled[id] !== false}
                           onCheckedChange={(checked) => toggleBuiltinPanel(id, checked)}
@@ -1066,6 +1280,143 @@ export function UserSettingsDialog({
                   )}
                   {integrationsMessage ? (
                     <p className="text-xs text-muted-foreground">{integrationsMessage}</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-3 border-t pt-6">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-semibold">feature.yaml</Label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSyncAllRepoFeatures}
+                      disabled={syncingRepoFeatures}
+                    >
+                      {syncingRepoFeatures ? 'Syncing…' : 'Sync All Now'}
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+                    <span className="text-sm">Default feature.yaml folder</span>
+                    <Input
+                      value={repoFeatureConfig.defaultFeaturesPath}
+                      onChange={(e) =>
+                        setRepoFeatureConfig((prev) => ({ ...prev, defaultFeaturesPath: e.target.value }))
+                      }
+                      onBlur={() => {
+                        void handleRepoFeatureConfigChange({
+                          defaultFeaturesPath: repoFeatureConfig.defaultFeaturesPath
+                        })
+                      }}
+                      placeholder="docs/features"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+                    <span className="text-sm">Polling interval (seconds)</span>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={3600}
+                      value={String(repoFeatureConfig.pollIntervalSeconds)}
+                      onChange={(e) =>
+                        setRepoFeatureConfig((prev) => ({
+                          ...prev,
+                          pollIntervalSeconds: Number.parseInt(e.target.value || '30', 10) || 30
+                        }))
+                      }
+                      onBlur={() => {
+                        void handleRepoFeatureConfigChange({
+                          pollIntervalSeconds: repoFeatureConfig.pollIntervalSeconds
+                        })
+                      }}
+                      placeholder="30"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    {repoFeatureProjects.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No projects found.</p>
+                    ) : (
+                      repoFeatureProjects.map((project) => {
+                        const enabled = project.feature_repo_integration_enabled === 1
+                        const isSaving = repoFeatureSavingProjectId === project.id
+                        return (
+                          <div key={project.id} className="rounded border bg-muted/20 p-3">
+                            <div className="mb-2 flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">{project.name}</p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {project.path || 'Repository path not set'}
+                                </p>
+                              </div>
+                              <Switch
+                                checked={enabled}
+                                disabled={!project.path || isSaving}
+                                onCheckedChange={(checked) =>
+                                  void handleToggleProjectRepoFeatures(project, checked === true)
+                                }
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                value={project.feature_repo_features_path || repoFeatureConfig.defaultFeaturesPath}
+                                onChange={(e) => {
+                                  const value = e.target.value
+                                  setRepoFeatureProjects((prev) =>
+                                    prev.map((item) =>
+                                      item.id === project.id
+                                        ? { ...item, feature_repo_features_path: value }
+                                        : item
+                                    )
+                                  )
+                                }}
+                                onBlur={(e) => void handleProjectFeaturePathSave(project, e.target.value)}
+                                disabled={!enabled || isSaving}
+                                placeholder={repoFeatureConfig.defaultFeaturesPath}
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={!enabled || !project.path || syncingRepoFeatures || isSaving}
+                                onClick={() => void handleBrowseProjectFeaturePath(project)}
+                              >
+                                <FolderOpen className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={!enabled || !project.path || syncingRepoFeatures || isSaving}
+                                onClick={async () => {
+                                  setRepoFeatureSavingProjectId(project.id)
+                                  setRepoFeaturesMessage('')
+                                  try {
+                                    const sync = await window.api.db.syncProjectFeatures(project.id)
+                                    const errSuffix = sync.errors.length > 0 ? ` (${sync.errors.length} warnings)` : ''
+                                    setRepoFeaturesMessage(
+                                      `Synced ${project.name}: ${sync.created} created, ${sync.updated} updated${errSuffix}`
+                                    )
+                                    if (sync.created > 0 || sync.updated > 0) {
+                                      ;(window as { __slayzone_refreshData?: () => void }).__slayzone_refreshData?.()
+                                    }
+                                  } catch (err) {
+                                    setRepoFeaturesMessage(err instanceof Error ? err.message : String(err))
+                                  } finally {
+                                    setRepoFeatureSavingProjectId(null)
+                                  }
+                                }}
+                              >
+                                Sync
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+
+                  {repoFeaturesMessage ? (
+                    <p className="text-xs text-muted-foreground">{repoFeaturesMessage}</p>
                   ) : null}
                 </div>
               </div>

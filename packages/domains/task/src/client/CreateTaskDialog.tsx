@@ -322,7 +322,10 @@ export function CreateTaskDialog({
                   <Popover>
                     <PopoverTrigger asChild>
                       <FormControl>
-                        <Button variant="outline" className="w-full justify-start">
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start"
+                        >
                           {selectedTags.length === 0 ? (
                             <span className="text-muted-foreground">Select tags...</span>
                           ) : (

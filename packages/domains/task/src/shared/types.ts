@@ -61,6 +61,7 @@ export interface PanelVisibility extends Record<string, boolean> {
   browser: boolean
   diff: boolean
   settings: boolean
+  feature: boolean
   editor: boolean
   processes: boolean
 }
@@ -98,7 +99,7 @@ export interface PanelConfig {
 // Per-task URL state (panelId → current URL)
 export type WebPanelUrls = Record<string, string>
 
-export const BUILTIN_PANEL_IDS = ['terminal', 'browser', 'editor', 'diff', 'settings', 'processes'] as const
+export const BUILTIN_PANEL_IDS = ['terminal', 'browser', 'editor', 'diff', 'settings', 'feature', 'processes'] as const
 
 export const PREDEFINED_WEB_PANELS: WebPanelDefinition[] = [
   {
@@ -246,11 +247,4 @@ export interface UpdateTaskInput {
   isTemporary?: boolean
   // Legacy
   claudeSessionId?: string | null
-}
-
-// AI description generation result
-export interface GenerateDescriptionResult {
-  success: boolean
-  description?: string
-  error?: string
 }

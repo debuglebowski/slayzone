@@ -4,9 +4,13 @@
  */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerTaskHandlers, updateTask } from './handlers.js'
+import { registerProjectHandlers } from '../../../projects/src/main/handlers.js'
 import type { Task, ProviderConfig } from '../shared/types.js'
+import fs from 'node:fs'
+import path from 'node:path'
 
 const h = await createTestHarness()
+registerProjectHandlers(h.ipcMain as never, h.db)
 registerTaskHandlers(h.ipcMain as never, h.db)
 
 // Seed a project
@@ -16,6 +20,12 @@ h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
 // Helper
 function createTask(title: string, extra?: Record<string, unknown>): Task {
   return h.invoke('db:tasks:create', { projectId, title, ...extra }) as Task
+}
+
+function writeFeatureYaml(repoPath: string, relDir: string, content: string): void {
+  const dir = path.join(repoPath, relDir)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'feature.yaml'), content, 'utf8')
 }
 
 // --- CRUD ---
@@ -303,7 +313,7 @@ describe('db:tasks:update', () => {
 
   test('updates JSON columns', () => {
     const t = createTask('JSONTest')
-    const visibility = { terminal: true, browser: false, diff: false, settings: false, editor: true }
+    const visibility = { terminal: true, browser: false, diff: false, settings: false, feature: false, editor: true, processes: false }
     const updated = h.invoke('db:tasks:update', {
       id: t.id,
       panelVisibility: visibility
@@ -321,6 +331,339 @@ describe('db:tasks:update', () => {
     }) as Task
     expect(updated.worktree_path).toBe('/tmp/wt')
     expect(updated.worktree_parent_branch).toBe('main')
+  })
+})
+
+describe('linked feature file sync', () => {
+  test('updates linked feature.yaml when task title/description change', () => {
+    const repoPath = h.tmpDir()
+    writeFeatureYaml(
+      repoPath,
+      'docs/features/feature-101',
+      `id: FEAT-101
+title: Initial title
+description: |
+  Initial description
+stories:
+  - id: US-1
+    title: Existing story
+`
+    )
+
+    const project = h.invoke('db:projects:create', {
+      name: 'Linked Project',
+      color: '#0ea5e9',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = (h.invoke('db:tasks:getByProject', project.id) as Task[])[0]
+    expect(task.title).toBe('FEAT-101 Initial title')
+
+    h.invoke('db:tasks:update', {
+      id: task.id,
+      title: 'FEAT-101 Updated title',
+      description: 'Updated description from task'
+    })
+
+    const featureFile = fs.readFileSync(
+      path.join(repoPath, 'docs/features/feature-101/feature.yaml'),
+      'utf8'
+    )
+    expect(featureFile.includes('title: "Updated title"')).toBe(true)
+    expect(featureFile.includes('Updated description from task')).toBe(true)
+    expect(featureFile.includes('stories:')).toBe(true)
+  })
+
+  test('pulls latest PRD/spec title and description on task read', () => {
+    const repoPath = h.tmpDir()
+    writeFeatureYaml(
+      repoPath,
+      'docs/features/feature-102',
+      `id: FEAT-102
+title: Initial sync title
+description: |
+  Initial sync description
+`
+    )
+
+    const project = h.invoke('db:projects:create', {
+      name: 'Read Sync Project',
+      color: '#22c55e',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    writeFeatureYaml(
+      repoPath,
+      'docs/features/feature-102',
+      `id: FEAT-102
+title: Updated from repo
+description: |
+  Updated description from repo
+`
+    )
+
+    const tasks = h.invoke('db:tasks:getByProject', project.id) as Task[]
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].title).toBe('FEAT-102 Updated from repo')
+    expect(Boolean(tasks[0].description?.includes('Updated description from repo'))).toBe(true)
+  })
+
+  test('returns linked feature context for codex prompt bootstrap', () => {
+    const repoPath = h.tmpDir()
+    writeFeatureYaml(
+      repoPath,
+      'docs/features/feature-103',
+      `id: FEAT-103
+title: Context source
+description: |
+  Source for context bootstrap
+`
+    )
+
+    const project = h.invoke('db:projects:create', {
+      name: 'Context Project',
+      color: '#14b8a6',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = (h.invoke('db:tasks:getByProject', project.id) as Task[])[0]
+    const context = h.invoke('db:tasks:getFeatureContext', task.id) as {
+      featureFilePath: string
+      featureDirPath: string
+      featureDirAbsolutePath: string | null
+    }
+
+    expect(context.featureFilePath).toBe('docs/features/feature-103/feature.yaml')
+    expect(context.featureDirPath).toBe('docs/features/feature-103')
+    expect(Boolean(context.featureDirAbsolutePath?.endsWith('docs/features/feature-103'))).toBe(true)
+  })
+
+  test('returns linked feature details with acceptance metadata', () => {
+    const repoPath = h.tmpDir()
+    writeFeatureYaml(
+      repoPath,
+      'docs/features/feature-104',
+      `id: FEAT-104
+title: Feature panel test
+description: |
+  Feature panel metadata source
+acceptance:
+  - id: SC-US1-1
+    scenario: Happy path
+    file: acceptance/features/feature-104.feature
+  - id: SC-US1-2
+    scenario: Relative path
+    file: ./acceptance/local.feature
+`
+    )
+
+    const project = h.invoke('db:projects:create', {
+      name: 'Feature Details Project',
+      color: '#8b5cf6',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = (h.invoke('db:tasks:getByProject', project.id) as Task[])[0]
+    const details = h.invoke('db:tasks:getFeatureDetails', task.id) as {
+      featureId: string | null
+      title: string
+      featureFilePath: string
+      featureDirPath: string
+      acceptance: Array<{ id: string; scenario: string; file: string | null; resolvedFilePath: string | null }>
+      lastSyncSource: 'repo' | 'task'
+    }
+
+    expect(details.featureId).toBe('FEAT-104')
+    expect(details.title).toBe('Feature panel test')
+    expect(details.featureFilePath).toBe('docs/features/feature-104/feature.yaml')
+    expect(details.featureDirPath).toBe('docs/features/feature-104')
+    expect(details.acceptance).toHaveLength(2)
+    expect(details.acceptance[0].id).toBe('SC-US1-1')
+    expect(details.acceptance[0].scenario).toBe('Happy path')
+    expect(details.acceptance[0].resolvedFilePath).toBe('acceptance/features/feature-104.feature')
+    expect(details.acceptance[1].resolvedFilePath).toBe('docs/features/feature-104/acceptance/local.feature')
+    expect(details.lastSyncSource).toBe('repo')
+  })
+
+  test('tracks last sync source for repo pull and task push', () => {
+    const repoPath = h.tmpDir()
+    writeFeatureYaml(
+      repoPath,
+      'docs/features/feature-105',
+      `id: FEAT-105
+title: Sync source test
+description: Initial
+`
+    )
+
+    const project = h.invoke('db:projects:create', {
+      name: 'Sync Source Project',
+      color: '#f97316',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = (h.invoke('db:tasks:getByProject', project.id) as Task[])[0]
+
+    h.invoke('db:tasks:update', {
+      id: task.id,
+      title: 'FEAT-105 Updated by task'
+    })
+
+    const afterPush = h.invoke('db:tasks:getFeatureDetails', task.id) as { lastSyncSource: 'repo' | 'task' }
+    expect(afterPush.lastSyncSource).toBe('task')
+
+    writeFeatureYaml(
+      repoPath,
+      'docs/features/feature-105',
+      `id: FEAT-105
+title: Updated by repo
+description: Updated by repo
+`
+    )
+    h.invoke('db:tasks:syncFeatureFromRepo', task.id)
+
+    const afterPull = h.invoke('db:tasks:getFeatureDetails', task.id) as { lastSyncSource: 'repo' | 'task' }
+    expect(afterPull.lastSyncSource).toBe('repo')
+  })
+
+  test('creates and links a new feature file for an unlinked task', () => {
+    const repoPath = h.tmpDir()
+    const project = h.invoke('db:projects:create', {
+      name: 'Create Feature Project',
+      color: '#0ea5e9',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = h.invoke('db:tasks:create', {
+      projectId: project.id,
+      title: 'Build feature tab',
+      description: 'Create feature from task panel'
+    }) as Task
+
+    const created = h.invoke('db:tasks:createFeature', task.id, {
+      featureId: 'FEAT-200',
+      folderName: 'feature-200',
+      title: 'Feature Tab V2',
+      description: 'Canonical feature description'
+    }) as { created: boolean; featureFilePath: string; task: Task | null; details: { featureId: string | null } | null }
+
+    expect(created.created).toBe(true)
+    expect(created.featureFilePath).toBe('docs/features/feature-200/feature.yaml')
+    expect(created.details?.featureId).toBe('FEAT-200')
+    expect(created.task?.title).toBe('FEAT-200 Feature Tab V2')
+    expect(created.task?.description).toBe('Canonical feature description')
+
+    const featureFile = fs.readFileSync(
+      path.join(repoPath, 'docs/features/feature-200/feature.yaml'),
+      'utf8'
+    )
+    expect(featureFile.includes('id: "FEAT-200"')).toBe(true)
+    expect(featureFile.includes('title: "Feature Tab V2"')).toBe(true)
+    expect(featureFile.includes('Canonical feature description')).toBe(true)
+  })
+
+  test('deletes linked feature directory and unlinks the task', () => {
+    const repoPath = h.tmpDir()
+    const project = h.invoke('db:projects:create', {
+      name: 'Delete Feature Project',
+      color: '#0891b2',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = h.invoke('db:tasks:create', {
+      projectId: project.id,
+      title: 'Delete linked feature'
+    }) as Task
+
+    h.invoke('db:tasks:createFeature', task.id, {
+      featureId: 'FEAT-301',
+      folderName: 'feature-301',
+      title: 'Delete me'
+    })
+
+    fs.writeFileSync(
+      path.join(repoPath, 'docs/features/feature-301', 'notes.md'),
+      '# extra file',
+      'utf8'
+    )
+
+    const deleted = h.invoke('db:tasks:deleteFeature', task.id) as {
+      deleted: boolean
+      details: unknown | null
+    }
+
+    expect(deleted.deleted).toBe(true)
+    expect(deleted.details).toBeNull()
+    expect(fs.existsSync(path.join(repoPath, 'docs/features/feature-301'))).toBe(false)
+    expect(h.invoke('db:tasks:getFeatureDetails', task.id)).toBeNull()
+  })
+
+  test('updates linked feature.yaml from editable feature payload', () => {
+    const repoPath = h.tmpDir()
+    writeFeatureYaml(
+      repoPath,
+      'docs/features/feature-201',
+      `id: "FEAT-201"
+title: "Original title"
+description: |
+  Original description
+acceptance:
+  - id: SC-US1-1
+    scenario: Original scenario
+    file: acceptance/features/original.feature
+`
+    )
+
+    const project = h.invoke('db:projects:create', {
+      name: 'Editable Feature Project',
+      color: '#7c3aed',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = (h.invoke('db:tasks:getByProject', project.id) as Task[])[0]
+    const updated = h.invoke('db:tasks:updateFeature', task.id, {
+      featureId: 'FEAT-201',
+      title: 'Edited title',
+      description: 'Edited description',
+      acceptance: [
+        {
+          id: 'SC-US1-1',
+          scenario: 'Edited scenario',
+          file: 'acceptance/features/edited.feature'
+        },
+        {
+          id: 'SC-US1-2',
+          scenario: 'Second scenario',
+          file: 'acceptance/features/second.feature'
+        }
+      ]
+    }) as { updated: boolean; task: Task; details: { title: string; description: string | null; acceptance: Array<{ id: string }> } }
+
+    expect(updated.updated).toBe(true)
+    expect(updated.task.title).toBe('FEAT-201 Edited title')
+    expect(updated.details.title).toBe('Edited title')
+    expect(updated.details.description).toBe('Edited description')
+    expect(updated.details.acceptance).toHaveLength(2)
+    expect(updated.details.acceptance[1].id).toBe('SC-US1-2')
+
+    const featureFile = fs.readFileSync(
+      path.join(repoPath, 'docs/features/feature-201/feature.yaml'),
+      'utf8'
+    )
+    expect(featureFile.includes('id: "FEAT-201"')).toBe(true)
+    expect(featureFile.includes('title: "Edited title"')).toBe(true)
+    expect(featureFile.includes('description: |')).toBe(true)
+    expect(featureFile.includes('Edited description')).toBe(true)
+    expect(featureFile.includes('acceptance:')).toBe(true)
+    expect(featureFile.includes('scenario: "Second scenario"')).toBe(true)
   })
 })
 
@@ -462,6 +805,7 @@ describe('db:taskDependencies', () => {
     const blockers = h.invoke('db:taskDependencies:getBlockers', t1.id) as Task[]
     expect(blockers).toHaveLength(1)
   })
+
 })
 
 h.cleanup()
