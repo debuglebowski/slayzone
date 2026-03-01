@@ -39,6 +39,16 @@ import {
 import { runAiCommand } from './merge-ai'
 import type { MergeWithAIResult, ConflictAnalysis, WorktreeCopyEntry } from '../shared/types'
 
+function sanitizeGitError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err)
+  // Strip "Command failed: git ..." prefix, keep git's actual error output
+  const newlineIdx = msg.indexOf('\n')
+  if (msg.startsWith('Command failed:') && newlineIdx !== -1) {
+    return msg.slice(newlineIdx + 1).trim() || msg
+  }
+  return msg
+}
+
 export function registerWorktreeHandlers(ipcMain: IpcMain): void {
   // Git operations
   ipcMain.handle('git:isGitRepo', (_, path: string) => {
@@ -59,12 +69,20 @@ export function registerWorktreeHandlers(ipcMain: IpcMain): void {
       copyEntries?: WorktreeCopyEntry[],
       sourceBranch?: string
     ) => {
-      createWorktree(repoPath, targetPath, branch, copyEntries, sourceBranch)
+      try {
+        createWorktree(repoPath, targetPath, branch, copyEntries, sourceBranch)
+      } catch (err) {
+        throw new Error(sanitizeGitError(err))
+      }
     }
   )
 
   ipcMain.handle('git:removeWorktree', (_, repoPath: string, worktreePath: string) => {
-    removeWorktree(repoPath, worktreePath)
+    try {
+      removeWorktree(repoPath, worktreePath)
+    } catch (err) {
+      throw new Error(sanitizeGitError(err))
+    }
   })
 
   ipcMain.handle('git:init', (_, path: string) => {
@@ -80,11 +98,19 @@ export function registerWorktreeHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('git:checkoutBranch', (_, path: string, branch: string) => {
-    checkoutBranch(path, branch)
+    try {
+      checkoutBranch(path, branch)
+    } catch (err) {
+      throw new Error(sanitizeGitError(err))
+    }
   })
 
   ipcMain.handle('git:createBranch', (_, path: string, branch: string) => {
-    createBranch(path, branch)
+    try {
+      createBranch(path, branch)
+    } catch (err) {
+      throw new Error(sanitizeGitError(err))
+    }
   })
 
   ipcMain.handle('git:hasUncommittedChanges', (_, path: string) => {
@@ -92,7 +118,11 @@ export function registerWorktreeHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('git:mergeIntoParent', (_, projectPath: string, parentBranch: string, sourceBranch: string) => {
-    return mergeIntoParent(projectPath, parentBranch, sourceBranch)
+    try {
+      return mergeIntoParent(projectPath, parentBranch, sourceBranch)
+    } catch (err) {
+      throw new Error(sanitizeGitError(err))
+    }
   })
 
   ipcMain.handle('git:abortMerge', (_, path: string) => {
@@ -214,13 +244,18 @@ ${steps.join('\n\n')}`
   })
 
   ipcMain.handle('git:commitFiles', (_, repoPath: string, message: string) => {
-    commitFiles(repoPath, message)
+    try {
+      commitFiles(repoPath, message)
+    } catch (err) {
+      throw new Error(sanitizeGitError(err))
+    }
   })
 
   ipcMain.handle(
     'git:analyzeConflict',
     async (_, mode: string, filePath: string, base: string | null, ours: string | null, theirs: string | null): Promise<ConflictAnalysis> => {
-      const prompt = `Analyze this merge conflict for file "${filePath}".
+      try {
+        const prompt = `Analyze this merge conflict for file "${filePath}".
 
 BASE (common ancestor):
 \`\`\`
@@ -242,16 +277,22 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
 ---RESOLUTION---
 <the complete resolved file content, picking the best combination of both sides>`
 
-      const result = await runAiCommand(mode as 'claude-code' | 'codex', prompt)
+        const result = await runAiCommand(mode as 'claude-code' | 'codex', prompt)
 
-      // Parse the structured response
-      const sepIdx = result.indexOf('---RESOLUTION---')
-      if (sepIdx === -1) {
-        return { summary: result, suggestion: '' }
+        // Parse the structured response
+        const sepIdx = result.indexOf('---RESOLUTION---')
+        if (sepIdx === -1) {
+          return { summary: result, suggestion: '' }
+        }
+        const summary = result.slice(0, sepIdx).replace(/^SUMMARY:\s*/i, '').trim()
+        const suggestion = result.slice(sepIdx + '---RESOLUTION---'.length).trim()
+        return { summary, suggestion }
+      } catch (err) {
+        return {
+          summary: `Analysis failed: ${sanitizeGitError(err)}`,
+          suggestion: ''
+        }
       }
-      const summary = result.slice(0, sepIdx).replace(/^SUMMARY:\s*/i, '').trim()
-      const suggestion = result.slice(sepIdx + '---RESOLUTION---'.length).trim()
-      return { summary, suggestion }
     }
   )
 
@@ -269,11 +310,19 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
   })
 
   ipcMain.handle('git:continueRebase', (_, path: string) => {
-    return continueRebase(path)
+    try {
+      return continueRebase(path)
+    } catch (err) {
+      throw new Error(sanitizeGitError(err))
+    }
   })
 
   ipcMain.handle('git:skipRebaseCommit', (_, path: string) => {
-    return skipRebaseCommit(path)
+    try {
+      return skipRebaseCommit(path)
+    } catch (err) {
+      throw new Error(sanitizeGitError(err))
+    }
   })
 
   ipcMain.handle('git:getMergeContext', (_, repoPath: string) => {
