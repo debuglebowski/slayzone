@@ -11,6 +11,7 @@ import {
   KanbanListView,
   FilterBar,
   useTasksData,
+  useUndoableTaskActions,
   useFilterState,
   applyFilters,
   getViewConfig,
@@ -43,7 +44,7 @@ import {
   toast,
   UpdateToast
 } from '@slayzone/ui'
-import { SidebarProvider, cn, PanelToggle, projectColorBg } from '@slayzone/ui'
+import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { ChangelogDialog } from '@/components/changelog/ChangelogDialog'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
@@ -80,13 +81,25 @@ function App(): React.JSX.Element {
     updateTask,
     moveTask,
     reorderTasks,
-    archiveTask,
-    archiveTasks,
-    deleteTask,
-    contextMenuUpdate,
+    archiveTask: rawArchiveTask,
+    archiveTasks: rawArchiveTasks,
+    deleteTask: rawDeleteTask,
+    contextMenuUpdate: rawContextMenuUpdate,
     updateProject,
     deleteProject
   } = useTasksData()
+
+  // Undo/redo stack for destructive operations
+  const { push: pushUndo, undo, redo } = useUndo()
+  const {
+    contextMenuUpdate,
+    archiveTask,
+    archiveTasks,
+    deleteTask
+  } = useUndoableTaskActions(
+    { tasks, updateTask, setTasks, archiveTask: rawArchiveTask, archiveTasks: rawArchiveTasks, deleteTask: rawDeleteTask, contextMenuUpdate: rawContextMenuUpdate },
+    { push: pushUndo, undo }
+  )
 
   // View state (tabs + selected project, persisted)
   const [tabs, activeTabIndex, selectedProjectId, setTabs, setActiveTabIndex, setSelectedProjectId] =
@@ -615,6 +628,25 @@ function App(): React.JSX.Element {
     setSearchOpen(true)
   }, { enableOnFormTags: true })
 
+  // Undo / Redo
+  useHotkeys('mod+z', async (e) => {
+    const el = e.target as HTMLElement
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+    if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+    e.preventDefault()
+    const label = await undo()
+    if (label) toast(`Undid: ${label}`)
+  }, { enableOnFormTags: true })
+
+  useHotkeys('mod+shift+z', async (e) => {
+    const el = e.target as HTMLElement
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+    if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
+    e.preventDefault()
+    const label = await redo()
+    if (label) toast(`Redid: ${label}`)
+  }, { enableOnFormTags: true })
+
   // Stable refs so IPC listeners don't need to re-subscribe on every render
   const closeActiveTaskRef = useRef<() => void>(() => {})
   closeActiveTaskRef.current = () => {
@@ -833,10 +865,28 @@ function App(): React.JSX.Element {
     if (!task) return
     const project = projects.find((item) => item.id === task.project_id)
     const doneStatus = getDoneStatus(project?.columns_config)
+    const prevStatus = task.status
     await window.api.db.updateTask({ id: activeTab.taskId, status: doneStatus })
     updateTask({ ...task, status: doneStatus })
     closeTab(activeTabIndex)
     setCompleteTaskDialogOpen(false)
+
+    if (prevStatus !== doneStatus) {
+      pushUndo({
+        label: `Completed "${task.title}"`,
+        undo: async () => {
+          await window.api.db.updateTask({ id: task.id, status: prevStatus })
+          updateTask({ ...task, status: prevStatus })
+        },
+        redo: async () => {
+          await window.api.db.updateTask({ id: task.id, status: doneStatus })
+          updateTask({ ...task, status: doneStatus })
+        }
+      })
+      toast(`Completed "${task.title}"`, {
+        action: { label: 'Undo', onClick: () => void undo() }
+      })
+    }
   }
 
   // Scratch terminal (creates unnamed task with terminal mode)

@@ -77,6 +77,8 @@ export function GeneralTabContent({
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deleteWorktreeConfirmOpen, setDeleteWorktreeConfirmOpen] = useState(false)
+  const [deleteWorktreeHasChanges, setDeleteWorktreeHasChanges] = useState(false)
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false)
   const [merging, setMerging] = useState(false)
   const [mergeResult, setMergeResult] = useState<MergeResult | null>(null)
@@ -203,14 +205,27 @@ export function GeneralTabContent({
     }
   }
 
-  const handleDeleteWorktree = async () => {
+  const handleDeleteWorktreeClick = async () => {
     if (!task.worktree_path || !projectPath) return
+    try {
+      const hasChanges = await window.api.git.hasUncommittedChanges(task.worktree_path)
+      setDeleteWorktreeHasChanges(hasChanges)
+    } catch {
+      setDeleteWorktreeHasChanges(false)
+    }
+    setDeleteWorktreeConfirmOpen(true)
+  }
+
+  const handleDeleteWorktreeConfirm = async () => {
+    if (!task.worktree_path || !projectPath) return
+    setDeleteWorktreeConfirmOpen(false)
     setDeleting(true)
     try {
       await window.api.git.removeWorktree(projectPath, task.worktree_path)
       await onUpdateTask({ id: task.id, worktreePath: null })
-    } catch { /* ignore */ }
-    finally { setDeleting(false) }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to remove worktree')
+    } finally { setDeleting(false) }
   }
 
   const handleCopyHash = useCallback((hash: string) => {
@@ -372,7 +387,7 @@ export function GeneralTabContent({
                     <IconButton
                       aria-label="Delete worktree"
                       variant="ghost"
-                      onClick={handleDeleteWorktree}
+                      onClick={handleDeleteWorktreeClick}
                       disabled={deleting}
                       className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
                     >
@@ -496,6 +511,26 @@ export function GeneralTabContent({
           </Section>
         )}
       </div>
+
+      {/* Delete worktree confirmation dialog */}
+      <AlertDialog open={deleteWorktreeConfirmOpen} onOpenChange={setDeleteWorktreeConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Worktree</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteWorktreeHasChanges
+                ? `This worktree has uncommitted changes (${totalChanges} file${totalChanges !== 1 ? 's' : ''}) that will be permanently lost.`
+                : 'This will remove the worktree directory from disk.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteWorktreeConfirm}>
+              {deleteWorktreeHasChanges ? 'Remove Anyway' : 'Remove'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Merge confirmation dialog */}
       <AlertDialog open={mergeConfirmOpen} onOpenChange={setMergeConfirmOpen}>

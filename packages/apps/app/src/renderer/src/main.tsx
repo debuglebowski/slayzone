@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { ThemeProvider } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
+import { UndoProvider } from '@slayzone/ui'
 import App from './App'
 import { getDiagnosticsContext } from './lib/diagnosticsClient'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
@@ -37,7 +38,9 @@ createRoot(document.getElementById('root')!).render(
     <PtyProvider>
       <ThemeProvider>
         <TelemetryProvider>
-          <App />
+          <UndoProvider>
+            <App />
+          </UndoProvider>
         </TelemetryProvider>
       </ThemeProvider>
     </PtyProvider>

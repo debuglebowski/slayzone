@@ -82,35 +82,38 @@ function getProjectColumns(db: Database, projectId: string): ColumnConfig[] | nu
   return parseColumnsConfig(row?.columns_config)
 }
 
-function cleanupTask(db: Database, taskId: string): void {
-  const task = db.prepare(
-    'SELECT worktree_path, project_id, terminal_mode FROM tasks WHERE id = ?'
-  ).get(taskId) as { worktree_path: string | null; project_id: string; terminal_mode: string | null } | undefined
-
-  if (!task) return
-
+/** Kill PTY only — used for soft-delete (preserves worktree for undo) */
+function cleanupTaskImmediate(taskId: string): void {
   runtimeAdapters.killPtysByTaskId(taskId)
+}
 
-  // Remove worktree if exists
-  if (task.worktree_path) {
-    const project = db.prepare(
-      'SELECT path FROM projects WHERE id = ?'
-    ).get(task.project_id) as { path: string } | undefined
+/** Kill PTY + remove worktree — used for archive and hard purge */
+function cleanupTaskFull(db: Database, taskId: string): void {
+  cleanupTaskImmediate(taskId)
 
-    if (project?.path) {
-      try {
-        removeWorktree(project.path, task.worktree_path)
-      } catch (err) {
-        console.error('Failed to remove worktree:', err)
-        runtimeAdapters.recordDiagnosticEvent({
-          level: 'error',
-          source: 'task',
-          event: 'task.cleanup_worktree_failed',
-          taskId,
-          projectId: task.project_id,
-          message: err instanceof Error ? err.message : String(err)
-        })
-      }
+  const task = db.prepare(
+    'SELECT worktree_path, project_id FROM tasks WHERE id = ?'
+  ).get(taskId) as { worktree_path: string | null; project_id: string } | undefined
+
+  if (!task?.worktree_path) return
+
+  const project = db.prepare(
+    'SELECT path FROM projects WHERE id = ?'
+  ).get(task.project_id) as { path: string } | undefined
+
+  if (project?.path) {
+    try {
+      removeWorktree(project.path, task.worktree_path)
+    } catch (err) {
+      console.error('Failed to remove worktree:', err)
+      runtimeAdapters.recordDiagnosticEvent({
+        level: 'error',
+        source: 'task',
+        event: 'task.cleanup_worktree_failed',
+        taskId,
+        projectId: task.project_id,
+        message: err instanceof Error ? err.message : String(err)
+      })
     }
   }
 }
@@ -352,12 +355,26 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
 
 export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
 
+  // Purge stale soft-deleted tasks from previous sessions
+  const stale = db.prepare(
+    `SELECT id FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', '-5 minutes')`
+  ).all() as { id: string }[]
+  for (const { id } of stale) {
+    cleanupTaskFull(db, id)
+  }
+  if (stale.length > 0) {
+    const placeholders = stale.map(() => '?').join(',')
+    db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...stale.map((r) => r.id))
+    console.log(`Purged ${stale.length} soft-deleted task(s)`)
+  }
+
   // Task CRUD
   ipcMain.handle('db:tasks:getAll', () => {
     const rows = db
       .prepare(`SELECT t.*, el.external_url AS linear_url
         FROM tasks t
         LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
+        WHERE t.deleted_at IS NULL
         ORDER BY t."order" ASC, t.created_at DESC`)
       .all() as Record<string, unknown>[]
     return parseTasks(rows)
@@ -369,7 +386,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
         `SELECT t.*, el.external_url AS linear_url
         FROM tasks t
         LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
-        WHERE t.project_id = ? AND t.archived_at IS NULL
+        WHERE t.project_id = ? AND t.archived_at IS NULL AND t.deleted_at IS NULL
         ORDER BY t."order" ASC, t.created_at DESC`
       )
       .all(projectId) as Record<string, unknown>[]
@@ -441,7 +458,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
         `SELECT t.*, el.external_url AS linear_url
         FROM tasks t
         LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
-        WHERE t.parent_id = ? AND t.archived_at IS NULL
+        WHERE t.parent_id = ? AND t.archived_at IS NULL AND t.deleted_at IS NULL
         ORDER BY t."order" ASC, t.created_at DESC`
       )
       .all(parentId) as Record<string, unknown>[]
@@ -450,18 +467,30 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('db:tasks:update', (_, data: UpdateTaskInput) => updateTask(db, data))
 
+  // Soft-delete: kill PTY but preserve worktree for undo
   ipcMain.handle('db:tasks:delete', (_, id: string) => {
-    cleanupTask(db, id)
-    const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+    cleanupTaskImmediate(id)
+    const result = db.prepare(`
+      UPDATE tasks SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
+    `).run(id)
     return result.changes > 0
+  })
+
+  // Restore a soft-deleted task
+  ipcMain.handle('db:tasks:restore', (_, id: string) => {
+    db.prepare(`
+      UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?
+    `).run(id)
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    return parseTask(row)
   })
 
   // Archive operations
   ipcMain.handle('db:tasks:archive', (_, id: string) => {
-    cleanupTask(db, id)
+    cleanupTaskFull(db, id)
     // Also archive sub-tasks
     const childIds = (db.prepare('SELECT id FROM tasks WHERE parent_id = ? AND archived_at IS NULL').all(id) as { id: string }[]).map(r => r.id)
-    for (const childId of childIds) { cleanupTask(db, childId) }
+    for (const childId of childIds) { cleanupTaskFull(db, childId) }
     db.prepare(`
       UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, updated_at = datetime('now')
       WHERE id = ? OR parent_id = ?
@@ -473,12 +502,12 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
   ipcMain.handle('db:tasks:archiveMany', (_, ids: string[]) => {
     if (ids.length === 0) return
     for (const id of ids) {
-      cleanupTask(db, id)
+      cleanupTaskFull(db, id)
     }
     // Also archive sub-tasks of all given parents
     const parentPlaceholders = ids.map(() => '?').join(',')
     const childIds = (db.prepare(`SELECT id FROM tasks WHERE parent_id IN (${parentPlaceholders}) AND archived_at IS NULL`).all(...ids) as { id: string }[]).map(r => r.id)
-    for (const childId of childIds) { cleanupTask(db, childId) }
+    for (const childId of childIds) { cleanupTaskFull(db, childId) }
     const allIds = [...ids, ...childIds]
     const placeholders = allIds.map(() => '?').join(',')
     db.prepare(`
@@ -498,7 +527,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('db:tasks:getArchived', () => {
     const rows = db
-      .prepare('SELECT * FROM tasks WHERE archived_at IS NOT NULL ORDER BY archived_at DESC')
+      .prepare('SELECT * FROM tasks WHERE archived_at IS NOT NULL AND deleted_at IS NULL ORDER BY archived_at DESC')
       .all() as Record<string, unknown>[]
     return parseTasks(rows)
   })

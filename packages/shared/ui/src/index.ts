@@ -12,6 +12,7 @@ export {
   type TaskStatusStyle,
   type ColumnStatusConfig
 } from './task-status'
+export { UndoProvider, useUndo, type UndoableAction } from './use-undo'
 
 // Components
 export * from './alert-dialog'
