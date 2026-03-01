@@ -183,8 +183,11 @@ export function useTasksData(): UseTasksDataReturn {
 
   // Context menu update (status, priority, project)
   const contextMenuUpdate = useCallback(async (taskId: string, updates: Partial<Task>) => {
-    const previousTasks = tasks
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t)))
+    let previousTasks: Task[]
+    setTasks((prev) => {
+      previousTasks = prev
+      return prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
+    })
 
     try {
       await window.api.db.updateTask({
@@ -194,9 +197,9 @@ export function useTasksData(): UseTasksDataReturn {
         projectId: updates.project_id
       })
     } catch {
-      setTasks(previousTasks)
+      setTasks(previousTasks!)
     }
-  }, [tasks])
+  }, [])
 
   // Update project in state
   const updateProject = useCallback((project: Project) => {
