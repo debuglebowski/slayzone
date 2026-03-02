@@ -80,10 +80,14 @@ function parseTasks(rows: Record<string, unknown>[]): Task[] {
 }
 
 function getProjectColumns(db: Database, projectId: string): ColumnConfig[] | null {
-  const row = db.prepare('SELECT columns_config FROM projects WHERE id = ?').get(projectId) as
-    | { columns_config: string | null }
-    | undefined
-  return parseColumnsConfig(row?.columns_config)
+  try {
+    const row = db.prepare('SELECT columns_config FROM projects WHERE id = ?').get(projectId) as
+      | { columns_config: string | null }
+      | undefined
+    return parseColumnsConfig(row?.columns_config)
+  } catch {
+    return null
+  }
 }
 
 /** Kill PTY only — used for soft-delete (preserves worktree for undo) */

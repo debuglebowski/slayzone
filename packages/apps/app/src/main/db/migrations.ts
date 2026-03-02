@@ -1084,6 +1084,9 @@ const migrations: Migration[] = [
 function ensureSchemaBackfills(db: Database.Database): void {
   // Safety net: if user_version was bumped externally but column wasn't actually added,
   // auto-heal on startup to prevent runtime "no such column" crashes.
+  if (!hasColumn(db, 'projects', 'columns_config')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN columns_config TEXT DEFAULT NULL;`)
+  }
   if (!hasColumn(db, 'projects', 'task_backend')) {
     db.exec(`ALTER TABLE projects ADD COLUMN task_backend TEXT NOT NULL DEFAULT 'db';`)
   }

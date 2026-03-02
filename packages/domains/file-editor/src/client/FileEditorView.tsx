@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect, useMemo, useImperativeHandle, forwardRef } from 'react'
-import { Code, Columns2, Eye, FileCode, Files, Search } from 'lucide-react'
+import { useState, useCallback, useRef, useEffect, useImperativeHandle, forwardRef } from 'react'
+import { FileCode, Files, Search } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +16,6 @@ import { useFileEditor } from './useFileEditor'
 import { EditorFileTree } from './EditorFileTree'
 import { EditorTabBar } from './EditorTabBar'
 import { CodeEditor } from './CodeEditor'
-import { MarkdownPreview } from './MarkdownPreview'
 import { SearchPanel } from './SearchPanel'
 
 export interface FileEditorViewHandle {
@@ -62,7 +61,6 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
   )
   const isDragging = useRef(false)
   const [confirmClose, setConfirmClose] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<'editor' | 'split' | 'preview'>('split')
   const [sidebarMode, setSidebarMode] = useState<'tree' | 'search'>('tree')
   const [isFileDragOver, setIsFileDragOver] = useState(false)
   const dragCounter = useRef(0)
