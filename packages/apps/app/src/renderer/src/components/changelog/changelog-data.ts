@@ -16,6 +16,25 @@ export interface ChangelogEntry {
 // Newest first. Only user-facing versions with meaningful changes.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.2.3',
+    date: '2026-03-03',
+    tagline: 'Run anywhere',
+    items: [
+      {
+        category: 'feature',
+        title: 'Claude Code Switch integration',
+        description:
+          'Claude Code Switch integrated into the profile dropdown for quick access.',
+      },
+      {
+        category: 'feature',
+        title: 'Execution contexts',
+        description:
+          'Run tasks on your host, in Docker containers, or over SSH — configurable per project.',
+      },
+    ],
+  },
+  {
     version: '0.2.2',
     date: '2026-03-02',
     tagline: 'Stability fixes',

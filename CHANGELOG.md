@@ -1,6 +1,19 @@
 # Changelog
 
 
+## v0.2.3
+
+[compare changes](https://github.com/debuglebowski/SlayZone/compare/v0.2.2...v0.2.3)
+
+### 🚀 Enhancements
+
+- **ccs:** CCS integration with profile dropdown ([7f03312](https://github.com/debuglebowski/SlayZone/commit/7f03312))
+- **projects:** Execution context (host/docker/ssh) ([8910a0e](https://github.com/debuglebowski/SlayZone/commit/8910a0e))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.2.2
 
 [compare changes](https://github.com/debuglebowski/SlayZone/compare/v0.2.1...v0.2.2)
