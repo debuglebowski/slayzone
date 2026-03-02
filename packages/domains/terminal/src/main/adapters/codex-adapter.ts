@@ -1,7 +1,7 @@
 import { open, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { TerminalAdapter, SpawnConfig, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
+import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
 import { buildExecCommand, getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
 
 /**
@@ -16,7 +16,7 @@ export class CodexAdapter implements TerminalAdapter {
   readonly idleTimeoutMs = 2500
   readonly sessionIdCommand = '/status'
 
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, _initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnConfig {
+  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, _initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnResult {
     const cmdArgs: string[] = []
     const shouldResume = !!conversationId && !!resuming
 
@@ -28,9 +28,12 @@ export class CodexAdapter implements TerminalAdapter {
 
     const shell = resolveUserShell()
     return {
-      shell,
-      args: getShellStartupArgs(shell),
-      postSpawnCommand: buildExecCommand('codex', cmdArgs)
+      config: {
+        shell,
+        args: getShellStartupArgs(shell),
+        postSpawnCommand: buildExecCommand('codex', cmdArgs),
+      },
+      binary: { name: 'codex', args: cmdArgs }
     }
   }
 

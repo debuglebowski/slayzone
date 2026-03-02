@@ -1,4 +1,4 @@
-export type { TerminalMode, TerminalAdapter, SpawnConfig, PromptInfo, ActivityState, ErrorInfo, CLIState } from './types'
+export type { TerminalMode, TerminalAdapter, SpawnConfig, SpawnResult, SpawnBinaryInfo, PromptInfo, ActivityState, ErrorInfo, CLIState, ExecutionContext } from './types'
 
 import type { TerminalMode, TerminalAdapter } from './types'
 import { ClaudeAdapter } from './claude-adapter'

@@ -1,4 +1,4 @@
-import type { Project, CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
+import type { Project, CreateProjectInput, UpdateProjectInput, ExecutionContext } from '@slayzone/projects/shared'
 import type { Task, CreateTaskInput, UpdateTaskInput, GenerateDescriptionResult, DesktopHandoffPolicy } from '@slayzone/task/shared'
 import type { Tag, CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
 import type { TerminalMode, TerminalState, CodeMode, PtyInfo, PromptInfo, BufferSinceResult, ProviderUsage, ValidationResult } from '@slayzone/terminal/shared'
@@ -46,6 +46,8 @@ import type {
   SyncNowInput,
   SyncNowResult
 } from '@slayzone/integrations/shared'
+
+export type { ExecutionContext } from '@slayzone/projects/shared'
 
 export interface LocalLeaderboardDay {
   date: string
@@ -123,6 +125,19 @@ export type UpdateStatus =
   | { type: 'downloaded'; version: string }
   | { type: 'not-available' }
   | { type: 'error'; message: string }
+
+export interface PtyCreateOptions {
+  sessionId: string
+  cwd: string
+  conversationId?: string | null
+  existingConversationId?: string | null
+  mode?: TerminalMode
+  initialPrompt?: string | null
+  codeMode?: CodeMode | null
+  providerFlags?: string | null
+  executionContext?: ExecutionContext | null
+  ccsProfile?: string | null
+}
 
 // ElectronAPI interface - the IPC contract between renderer and main
 export interface ElectronAPI {
@@ -242,16 +257,10 @@ export interface ElectronAPI {
     getDropPaths: () => string[]
   }
   pty: {
-    create: (
-      sessionId: string,
-      cwd: string,
-      conversationId?: string | null,
-      existingConversationId?: string | null,
-      mode?: TerminalMode,
-      initialPrompt?: string | null,
-      codeMode?: CodeMode | null,
-      providerFlags?: string | null
-    ) => Promise<{ success: boolean; error?: string }>
+    create: (opts: PtyCreateOptions) => Promise<{ success: boolean; error?: string }>
+    testExecutionContext: (context: ExecutionContext) => Promise<{ success: boolean; error?: string }>
+    setCcsEnabled: (enabled: boolean) => Promise<void>
+    ccsListProfiles: () => Promise<{ profiles: string[]; error?: string }>
     write: (sessionId: string, data: string) => Promise<boolean>
     resize: (sessionId: string, cols: number, rows: number) => Promise<boolean>
     kill: (sessionId: string) => Promise<boolean>

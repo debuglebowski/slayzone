@@ -89,6 +89,8 @@ interface TerminalProps {
   initialPrompt?: string | null
   codeMode?: CodeMode | null
   providerFlags?: string | null
+  executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
+  ccsProfile?: string | null
   autoFocus?: boolean
   onConversationCreated?: (conversationId: string) => void
   onSessionInvalid?: () => void
@@ -118,6 +120,8 @@ export function Terminal({
   initialPrompt,
   codeMode,
   providerFlags,
+  executionContext,
+  ccsProfile,
   autoFocus = false,
   onConversationCreated,
   onSessionInvalid,
@@ -365,7 +369,12 @@ export function Terminal({
         const isAiMode = mode === 'claude-code' || mode === 'codex'
         const effectiveConversationId = isAiMode ? newConversationId : undefined
         const effectiveExistingConversationId = isAiMode ? existingConversationId : undefined
-        const result = await window.api.pty.create(sessionId, cwd, effectiveConversationId, effectiveExistingConversationId, mode, null, codeMode, providerFlags)
+        const result = await window.api.pty.create({
+          sessionId, cwd,
+          conversationId: effectiveConversationId,
+          existingConversationId: effectiveExistingConversationId,
+          mode, codeMode, providerFlags, executionContext, ccsProfile
+        })
         if (!result.success) {
           const message = result.error || 'Failed to create terminal process'
           terminal.writeln(`\x1b[31mError: ${message}\x1b[0m`)
@@ -432,7 +441,7 @@ export function Terminal({
         setIsInitializing(false)
       }
     }
-  }, [sessionId, cwd, mode, conversationId, existingConversationId, initialPrompt, codeMode, providerFlags, autoFocus, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart])
+  }, [sessionId, cwd, mode, conversationId, existingConversationId, initialPrompt, codeMode, providerFlags, ccsProfile, autoFocus, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart])
 
   // Initialize terminal
   useEffect(() => {

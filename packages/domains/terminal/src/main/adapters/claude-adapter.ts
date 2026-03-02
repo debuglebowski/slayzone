@@ -1,4 +1,4 @@
-import type { TerminalAdapter, SpawnConfig, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
+import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
 import { buildExecCommand, getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
 
 /**
@@ -9,7 +9,7 @@ export class ClaudeAdapter implements TerminalAdapter {
   readonly mode = 'claude-code' as const
   readonly idleTimeoutMs = null // use default 60s
 
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], codeMode?: CodeMode): SpawnConfig {
+  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], codeMode?: CodeMode): SpawnResult {
     const claudeArgs: string[] = []
 
     // Pass --resume for existing sessions, --session-id for new ones
@@ -40,9 +40,12 @@ export class ClaudeAdapter implements TerminalAdapter {
 
     const shell = resolveUserShell()
     return {
-      shell,
-      args: getShellStartupArgs(shell),
-      postSpawnCommand: buildExecCommand('claude', claudeArgs)
+      config: {
+        shell,
+        args: getShellStartupArgs(shell),
+        postSpawnCommand: buildExecCommand('claude', claudeArgs),
+      },
+      binary: { name: 'claude', args: claudeArgs }
     }
   }
 

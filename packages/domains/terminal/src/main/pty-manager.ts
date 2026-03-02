@@ -1,4 +1,5 @@
 import * as pty from 'node-pty'
+import { execFile } from 'child_process'
 import { app, BrowserWindow, Notification, nativeTheme } from 'electron'
 import { homedir, userInfo } from 'os'
 import type { Database } from 'better-sqlite3'
@@ -6,14 +7,22 @@ import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, CodeMode, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { RingBuffer, type BufferChunk } from './ring-buffer'
-import { getAdapter, type TerminalMode, type TerminalAdapter, type ActivityState, type ErrorInfo } from './adapters'
+import { getAdapter, type TerminalMode, type TerminalAdapter, type ActivityState, type ErrorInfo, type ExecutionContext } from './adapters'
 import { StateMachine, activityToTerminalState } from './state-machine'
+import { quoteForShell, buildCcsExecCommand } from './shell-env'
 
 // Database reference for notifications
 let db: Database | null = null
 
 export function setDatabase(database: Database): void {
   db = database
+}
+
+// CCS (Claude Code Switch) — cached setting, updated via setCcsEnabled
+let ccsEnabled = false
+
+export function setCcsEnabled(enabled: boolean): void {
+  ccsEnabled = enabled
 }
 
 const MODE_LABELS: Record<string, string> = {
@@ -321,6 +330,95 @@ export function stopIdleChecker(): void {
   mainWindow = null
 }
 
+// ---------------------------------------------------------------------------
+// Execution context: transport wrapping for docker/ssh
+// ---------------------------------------------------------------------------
+
+interface TransportSpawn {
+  file: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+}
+
+function buildTransportSpawn(
+  ctx: ExecutionContext | null | undefined,
+  cwd: string,
+  env: Record<string, string>,
+  adapterEnv: Record<string, string>,
+  mcpEnv: Record<string, string>
+): TransportSpawn | null {
+  if (!ctx || ctx.type === 'host') return null // use default spawn path
+
+  if (ctx.type === 'docker') {
+    const workdir = ctx.workdir || cwd
+    const containerShell = ctx.shell || '/bin/bash'
+    const dockerArgs = ['exec', '-it']
+
+    // Forward adapter + MCP env vars via -e flags
+    for (const [k, v] of Object.entries({ ...adapterEnv, ...mcpEnv })) {
+      dockerArgs.push('-e', `${k}=${v}`)
+    }
+    // Rewrite MCP host so CLI can reach the host's MCP server from inside container
+    dockerArgs.push('-e', 'SLAYZONE_MCP_HOST=host.docker.internal')
+    dockerArgs.push('-w', workdir, '--', ctx.container, containerShell, '-i', '-l')
+
+    return { file: 'docker', args: dockerArgs, cwd: homedir(), env }
+  }
+
+  if (ctx.type === 'ssh') {
+    const workdir = ctx.workdir || cwd
+    const remoteShell = ctx.shell || '/bin/bash'
+    const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined
+
+    const sshArgs = ['-t']
+    // Reverse port forward so remote CLI can reach host MCP server
+    if (mcpPort) {
+      sshArgs.push('-R', `${mcpPort}:localhost:${mcpPort}`)
+    }
+    sshArgs.push('--', ctx.target)
+
+    // Build remote command: cd + export env + launch shell
+    const parts: string[] = [`cd ${quoteForShell(workdir)}`]
+    for (const [k, v] of Object.entries({ ...adapterEnv, ...mcpEnv })) {
+      parts.push(`export ${k}=${quoteForShell(v)}`)
+    }
+    if (mcpPort) {
+      parts.push(`export SLAYZONE_MCP_HOST=localhost`)
+    }
+    parts.push(`${quoteForShell(remoteShell)} -i -l`)
+    sshArgs.push(parts.join(' && '))
+
+    return { file: 'ssh', args: sshArgs, cwd: homedir(), env }
+  }
+
+  return null
+}
+
+export function testExecutionContext(
+  context: ExecutionContext
+): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    if (context.type === 'host') {
+      resolve({ success: true })
+      return
+    }
+
+    const cmd = context.type === 'docker' ? 'docker' : 'ssh'
+    const args = context.type === 'docker'
+      ? ['exec', '--', context.container, 'echo', 'ok']
+      : ['-o', 'ConnectTimeout=5', '--', context.target, 'echo', 'ok']
+
+    execFile(cmd, args, { timeout: 10_000 }, (err) => {
+      if (err) {
+        resolve({ success: false, error: (err as Error).message })
+      } else {
+        resolve({ success: true })
+      }
+    })
+  })
+}
+
 export interface CreatePtyOptions {
   win: BrowserWindow
   sessionId: string
@@ -339,7 +437,9 @@ export async function createPty(
   mode?: TerminalMode,
   initialPrompt?: string | null,
   providerArgs?: string[],
-  codeMode?: CodeMode | null
+  codeMode?: CodeMode | null,
+  executionContext?: ExecutionContext | null,
+  ccsProfile?: string | null
 ): Promise<{ success: boolean; error?: string }> {
   const taskId = taskIdFromSessionId(sessionId)
   const createStartedAt = Date.now()
@@ -378,7 +478,14 @@ export async function createPty(
     const effectiveConversationId = existingConversationId || conversationId
 
     // Get spawn config from adapter
-    const spawnConfig = adapter.buildSpawnConfig(cwd || homedir(), effectiveConversationId || undefined, resuming, initialPrompt || undefined, providerArgs ?? [], codeMode || undefined)
+    const { config: spawnConfig, binary } = adapter.buildSpawnConfig(cwd || homedir(), effectiveConversationId || undefined, resuming, initialPrompt || undefined, providerArgs ?? [], codeMode || undefined)
+
+    // Apply CCS wrapping if enabled
+    if (ccsEnabled && binary) {
+      const wrapped = buildCcsExecCommand(binary.name, binary.args, ccsProfile)
+      if (wrapped) spawnConfig.postSpawnCommand = wrapped
+    }
+
     spawnAttempt = {
       shell: spawnConfig.shell,
       shellArgs: spawnConfig.args,
@@ -404,36 +511,51 @@ export async function createPty(
     const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined
     if (mcpPort) mcpEnv.SLAYZONE_MCP_PORT = String(mcpPort)
 
+    const baseEnv = {
+      ...process.env,
+      USER: process.env.USER || process.env.USERNAME || userInfo().username,
+      HOME: process.env.HOME || homedir(),
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      COLORFGBG: nativeTheme.shouldUseDarkColors ? '15;0' : '0;15',
+      TERM_BACKGROUND: nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+    } as Record<string, string>
+
+    // Check for docker/ssh transport wrapping
+    const transport = buildTransportSpawn(
+      executionContext,
+      cwd || homedir(),
+      baseEnv,
+      spawnConfig.env ?? {},
+      mcpEnv
+    )
+
     const spawnOptions = {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: cwd || homedir(),
-      env: {
-        ...process.env,
+      cwd: transport ? transport.cwd : (cwd || homedir()),
+      env: transport ? transport.env : {
+        ...baseEnv,
         ...spawnConfig.env,
-        ...mcpEnv,
-        USER: process.env.USER || process.env.USERNAME || userInfo().username,
-        HOME: process.env.HOME || homedir(),
-        TERM: 'xterm-256color',
-        COLORTERM: 'truecolor',
-        COLORFGBG: nativeTheme.shouldUseDarkColors ? '15;0' : '0;15',
-        TERM_BACKGROUND: nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+        ...mcpEnv
       } as Record<string, string>
     }
-    const initialArgs = [...spawnConfig.args]
-    const canRetryInteractiveOnly = initialArgs.includes('-i') && initialArgs.includes('-l')
+
+    const spawnFile = transport ? transport.file : spawnConfig.shell
+    const initialArgs = transport ? [...transport.args] : [...spawnConfig.args]
+    const canRetryInteractiveOnly = !transport && initialArgs.includes('-i') && initialArgs.includes('-l')
     let usedArgs = [...initialArgs]
     let usedFallback = false
     const spawnStartTs = Date.now()
     let ptyProcess: pty.IPty
     try {
-      ptyProcess = pty.spawn(spawnConfig.shell, initialArgs, spawnOptions)
+      ptyProcess = pty.spawn(spawnFile, initialArgs, spawnOptions)
     } catch (err) {
-      // Fallback for shells that reject login flag combinations.
+      // Fallback for shells that reject login flag combinations (host only).
       if (!canRetryInteractiveOnly) throw err
       usedArgs = initialArgs.filter((arg) => arg !== '-l')
-      ptyProcess = pty.spawn(spawnConfig.shell, usedArgs, spawnOptions)
+      ptyProcess = pty.spawn(spawnFile, usedArgs, spawnOptions)
       usedFallback = true
       recordDiagnosticEvent({
         level: 'warn',

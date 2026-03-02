@@ -335,6 +335,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.mergeState !== undefined) { fields.push('merge_state = ?'); values.push(data.mergeState) }
   if (data.mergeContext !== undefined) { fields.push('merge_context = ?'); values.push(data.mergeContext ? JSON.stringify(data.mergeContext) : null) }
   if (data.isTemporary !== undefined) { fields.push('is_temporary = ?'); values.push(data.isTemporary ? 1 : 0) }
+  if (data.ccsProfile !== undefined) { fields.push('ccs_profile = ?'); values.push(data.ccsProfile) }
 
   if (fields.length === 0) {
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as Record<string, unknown> | undefined
@@ -430,13 +431,16 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       providerConfig[mode] = { flags: legacyOverrides[mode] ?? dbDefault }
     }
 
+    const ccsDefaultProfile = (db.prepare('SELECT value FROM settings WHERE key = ?')
+      .get('ccs_default_profile') as { value: string } | undefined)?.value ?? null
+
     const stmt = db.prepare(`
       INSERT INTO tasks (
         id, project_id, parent_id, title, description, assignee,
         status, priority, due_date, terminal_mode, provider_config,
         claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
-        is_temporary
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_temporary, ccs_profile
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     stmt.run(
       id, data.projectId, data.parentId ?? null,
@@ -448,7 +452,8 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       providerConfig['cursor-agent']?.flags ?? '',
       providerConfig['gemini']?.flags ?? '',
       providerConfig['opencode']?.flags ?? '',
-      data.isTemporary ? 1 : 0
+      data.isTemporary ? 1 : 0,
+      ccsDefaultProfile
     )
     maybeAutoCreateWorktree(db, id, data.projectId, data.title)
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined

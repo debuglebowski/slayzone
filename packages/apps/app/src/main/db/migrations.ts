@@ -972,6 +972,19 @@ const migrations: Migration[] = [
         db.exec(`ALTER TABLE projects ADD COLUMN worktree_source_branch TEXT DEFAULT NULL`)
       }
     }
+  },
+  {
+    version: 52,
+    up: (db) => {
+      db.exec(`ALTER TABLE projects ADD COLUMN execution_context TEXT DEFAULT NULL`)
+    }
+  },
+  {
+    version: 53,
+    up: (db) => {
+      db.exec(`ALTER TABLE tasks ADD COLUMN ccs_profile TEXT DEFAULT NULL`)
+      db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run('ccs_enabled', '0')
+    }
   }
 ]
 

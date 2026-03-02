@@ -1,4 +1,4 @@
-import type { TerminalAdapter, SpawnConfig, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
+import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
 import { buildExecCommand, getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
 
 /**
@@ -11,7 +11,7 @@ export class GeminiAdapter implements TerminalAdapter {
   readonly idleTimeoutMs = 2500
   readonly sessionIdCommand = '/stats'
 
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnConfig {
+  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnResult {
     const args: string[] = []
 
     if (resuming && conversationId) {
@@ -26,9 +26,12 @@ export class GeminiAdapter implements TerminalAdapter {
 
     const shell = resolveUserShell()
     return {
-      shell,
-      args: getShellStartupArgs(shell),
-      postSpawnCommand: buildExecCommand('gemini', args)
+      config: {
+        shell,
+        args: getShellStartupArgs(shell),
+        postSpawnCommand: buildExecCommand('gemini', args),
+      },
+      binary: { name: 'gemini', args }
     }
   }
 

@@ -1,4 +1,4 @@
-import type { TerminalAdapter, SpawnConfig, PromptInfo, CodeMode, ActivityState, ErrorInfo } from './types'
+import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo } from './types'
 import { getShellStartupArgs, resolveUserShell } from '../shell-env'
 
 /**
@@ -9,11 +9,13 @@ export class ShellAdapter implements TerminalAdapter {
   readonly mode = 'terminal' as const
   readonly idleTimeoutMs = null // use default 60s
 
-  buildSpawnConfig(_cwd: string, _conversationId?: string, _resuming?: boolean, _initialPrompt?: string, _providerArgs?: string[], _codeMode?: CodeMode): SpawnConfig {
+  buildSpawnConfig(_cwd: string, _conversationId?: string, _resuming?: boolean, _initialPrompt?: string, _providerArgs?: string[], _codeMode?: CodeMode): SpawnResult {
     const shell = resolveUserShell()
     return {
-      shell,
-      args: getShellStartupArgs(shell)
+      config: {
+        shell,
+        args: getShellStartupArgs(shell)
+      }
     }
   }
 

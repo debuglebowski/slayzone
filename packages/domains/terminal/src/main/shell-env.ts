@@ -129,6 +129,35 @@ export function validateShellEnv(): ValidationResult {
   return { check: 'Shell detected', ok: true, detail: shell }
 }
 
+/** CCS binary mapping: adapter binary name → CCS sub-command (null = no sub-command, undefined = not supported) */
+const CCS_BINARY_MAP: Record<string, string | null> = {
+  'claude': null,          // ccs [profile] <args>
+  'codex': 'codex',
+  'gemini': 'gemini',
+  'cursor-agent': 'cursor' // binary differs from CCS sub-command
+}
+
+/**
+ * Build a CCS-wrapped exec command. Returns null if the binary is not CCS-supported.
+ */
+export function buildCcsExecCommand(
+  originalBinary: string,
+  originalArgs: string[],
+  ccsProfile?: string | null
+): string | null {
+  const subCommand = CCS_BINARY_MAP[originalBinary]
+  if (subCommand === undefined) return null
+
+  const ccsArgs: string[] = []
+  if (subCommand) {
+    ccsArgs.push(subCommand)
+  } else if (ccsProfile) {
+    ccsArgs.push(ccsProfile)
+  }
+  ccsArgs.push(...originalArgs)
+  return buildExecCommand('ccs', ccsArgs)
+}
+
 /**
  * Find a binary by name using the same shell startup context as PTY sessions.
  * Returns the resolved path or null if not found.
@@ -153,5 +182,28 @@ export async function whichBinary(name: string): Promise<string | null> {
     return found || null
   } catch {
     return null
+  }
+}
+
+/**
+ * List CCS auth profiles by running `ccs auth list --json`.
+ * Returns profile names or empty array if ccs not found / command fails.
+ */
+export async function listCcsProfiles(): Promise<string[]> {
+  const ccsPath = await whichBinary('ccs')
+  if (!ccsPath) return []
+
+  try {
+    const shell = resolveUserShell()
+    const shellArgs = getShellStartupArgs(shell)
+    const cmd = `${quoteForShell(ccsPath)} auth list --json`
+    const { stdout } = await execFileAsync(shell, [...shellArgs, '-c', cmd], { timeout: 5000 })
+    const parsed = JSON.parse(stdout.trim())
+    if (Array.isArray(parsed?.profiles)) {
+      return parsed.profiles.map((p: { name: string }) => p.name).filter(Boolean)
+    }
+    return []
+  } catch {
+    return []
   }
 }

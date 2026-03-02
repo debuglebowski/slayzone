@@ -1,4 +1,4 @@
-import type { TerminalAdapter, SpawnConfig, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
+import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
 import { buildExecCommand, getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
 
 /**
@@ -12,7 +12,7 @@ export class CursorAdapter implements TerminalAdapter {
   // Full-screen TUI constantly redraws — detect working from user input, not output
   readonly transitionOnInput = true
 
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnConfig {
+  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnResult {
     const args: string[] = []
 
     if (resuming && conversationId) {
@@ -27,9 +27,12 @@ export class CursorAdapter implements TerminalAdapter {
 
     const shell = resolveUserShell()
     return {
-      shell,
-      args: getShellStartupArgs(shell),
-      postSpawnCommand: buildExecCommand('cursor-agent', args)
+      config: {
+        shell,
+        args: getShellStartupArgs(shell),
+        postSpawnCommand: buildExecCommand('cursor-agent', args),
+      },
+      binary: { name: 'cursor-agent', args }
     }
   }
 

@@ -1,7 +1,7 @@
-import type { CodeMode } from '@slayzone/terminal/shared'
+import type { CodeMode, ExecutionContext } from '@slayzone/terminal/shared'
 
 export type TerminalMode = 'claude-code' | 'codex' | 'cursor-agent' | 'gemini' | 'opencode' | 'terminal'
-export type { CodeMode }
+export type { CodeMode, ExecutionContext }
 
 // Activity states for CLI tools
 export type ActivityState = 'attention' | 'working' | 'unknown'
@@ -26,6 +26,20 @@ export interface SpawnConfig {
   env?: Record<string, string>
   /** Command to run after shell starts (e.g., "claude --session-id X") */
   postSpawnCommand?: string
+}
+
+/** Metadata returned alongside SpawnConfig for CCS wrapping */
+export interface SpawnBinaryInfo {
+  /** Raw binary name (e.g. 'claude', 'codex') */
+  name: string
+  /** Raw args passed to the binary */
+  args: string[]
+}
+
+export interface SpawnResult {
+  config: SpawnConfig
+  /** Present for AI modes; absent for plain terminal */
+  binary?: SpawnBinaryInfo
 }
 
 export interface PromptInfo {
@@ -60,7 +74,7 @@ export interface TerminalAdapter {
   /**
    * Build spawn configuration for this terminal mode.
    */
-  buildSpawnConfig(cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs?: string[], codeMode?: CodeMode): SpawnConfig
+  buildSpawnConfig(cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs?: string[], codeMode?: CodeMode): SpawnResult
 
   /**
    * Detect activity state from terminal output.

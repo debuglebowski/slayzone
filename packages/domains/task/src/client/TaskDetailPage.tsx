@@ -151,6 +151,7 @@ interface TaskDetailPageProps {
   onNavigateToTask?: (taskId: string) => void
   onConvertTask?: (task: Task) => Promise<Task | void>
   onCloseTab: () => void
+  settingsRevision?: number
 }
 
 export function TaskDetailPage({
@@ -164,6 +165,7 @@ export function TaskDetailPage({
   onNavigateToTask,
   onConvertTask,
   onCloseTab,
+  settingsRevision = 0,
 }: TaskDetailPageProps): React.JSX.Element {
   const { colorTintsEnabled } = useAppearance()
   // Main tab session ID format used by TerminalContainer/useTaskTerminals.
@@ -228,6 +230,8 @@ export function TaskDetailPage({
   const [isMainTabActive, setIsMainTabActive] = useState(true)
   const [flagsInputValue, setFlagsInputValue] = useState('')
   const [isEditingFlags, setIsEditingFlags] = useState(false)
+  const [ccsEnabled, setCcsEnabled] = useState(false)
+  const [ccsProfiles, setCcsProfiles] = useState<string[]>([])
   const flagsInputRef = useRef<HTMLInputElement>(null)
 
   // Panel visibility state
@@ -325,16 +329,22 @@ export function TaskDetailPage({
   }, [])
   useEffect(() => { browserOpenRef.current = panelVisibility.browser }, [panelVisibility.browser])
 
-  // Load dev server settings
+  // Load dev server settings + CCS enabled (re-read on settingsRevision change)
   useEffect(() => {
     Promise.all([
       window.api.settings.get('dev_server_toast_enabled'),
-      window.api.settings.get('dev_server_auto_open_browser')
-    ]).then(([toast, autoOpen]) => {
+      window.api.settings.get('dev_server_auto_open_browser'),
+      window.api.settings.get('ccs_enabled')
+    ]).then(([toast, autoOpen, ccs]) => {
       devServerToastEnabledRef.current = toast !== '0'
       devServerAutoOpenRef.current = autoOpen === '1'
+      const on = ccs === '1'
+      setCcsEnabled(on)
+      if (on) {
+        window.api.pty.ccsListProfiles().then(({ profiles }) => setCcsProfiles(profiles)).catch(() => {})
+      }
     })
-  }, [])
+  }, [settingsRevision])
 
   useEffect(() => {
     if (!task) return
@@ -1570,6 +1580,8 @@ export function TaskDetailPage({
                   initialPrompt={getQuickRunPrompt(task.id)}
                   codeMode={getQuickRunCodeMode(task.id)}
                   providerFlags={getProviderFlagsForMode(task)}
+                  executionContext={project?.execution_context}
+                  ccsProfile={task.ccs_profile}
                   autoFocus={isFirstMountRef.current}
                   onConversationCreated={handleSessionCreated}
                   onSessionInvalid={handleSessionInvalid}
@@ -1610,6 +1622,40 @@ export function TaskDetailPage({
                               AI provider for this task. Each provider tracks its own conversation history separately.
                             </TooltipContent>
                           </Tooltip>
+
+                          {ccsEnabled && task.terminal_mode !== 'terminal' && task.terminal_mode !== 'opencode' && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Select
+                                  value={task.ccs_profile ?? '__none__'}
+                                  onValueChange={async (val) => {
+                                    const profile = val === '__none__' ? null : val
+                                    const updated = await window.api.db.updateTask({ id: task.id, ccsProfile: profile })
+                                    if (updated) {
+                                      setTask(updated)
+                                      onTaskUpdated(updated)
+                                    }
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 text-xs bg-neutral-100 border-neutral-300 dark:bg-neutral-800 dark:border-neutral-700 w-28">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Default</SelectItem>
+                                    {ccsProfiles.map((p) => (
+                                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                                    ))}
+                                    {task.ccs_profile && !ccsProfiles.includes(task.ccs_profile) && (
+                                      <SelectItem value={task.ccs_profile}>{task.ccs_profile}</SelectItem>
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">
+                                CCS profile{task.terminal_mode === 'claude-code' ? '' : ' (only applies to Claude)'}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
 
                           {task.terminal_mode !== 'terminal' && (
                             isEditingFlags ? (

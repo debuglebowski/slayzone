@@ -2,6 +2,13 @@ export type TerminalMode = 'claude-code' | 'codex' | 'cursor-agent' | 'gemini' |
 export type TerminalState = 'starting' | 'running' | 'attention' | 'error' | 'dead'
 export type CodeMode = 'normal' | 'plan' | 'accept-edits' | 'bypass'
 
+// Duplicated from @slayzone/projects/shared — neither domain can depend on the
+// other, so both define the same structural type. Keep in sync.
+export type ExecutionContext =
+  | { type: 'host' }
+  | { type: 'docker'; container: string; workdir?: string; shell?: string }
+  | { type: 'ssh'; target: string; workdir?: string; shell?: string }
+
 // CLI activity states (more granular than TerminalState)
 export type ActivityState = 'attention' | 'working' | 'unknown'
 

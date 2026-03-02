@@ -183,8 +183,10 @@ const api: ElectronAPI = {
     }
   },
   pty: {
-    create: (sessionId, cwd, conversationId, existingConversationId, mode, initialPrompt, codeMode, providerFlags) =>
-      ipcRenderer.invoke('pty:create', sessionId, cwd, conversationId, existingConversationId, mode, initialPrompt, codeMode, providerFlags),
+    create: (opts) => ipcRenderer.invoke('pty:create', opts),
+    testExecutionContext: (context) => ipcRenderer.invoke('pty:testExecutionContext', context),
+    setCcsEnabled: (enabled) => ipcRenderer.invoke('pty:setCcsEnabled', enabled),
+    ccsListProfiles: () => ipcRenderer.invoke('pty:ccsListProfiles'),
     write: (sessionId, data) => ipcRenderer.invoke('pty:write', sessionId, data),
     setTheme: (theme) => ipcRenderer.invoke('pty:set-theme', theme),
     resize: (sessionId, cols, rows) => ipcRenderer.invoke('pty:resize', sessionId, cols, rows),

@@ -38,7 +38,7 @@ test.describe('Terminal error handling', () => {
 
     await mainWindow.evaluate(() => window.api.settings.set('shell', ''))
     const createResult = await mainWindow.evaluate(
-      ({ id, cwd }) => window.api.pty.create(id, cwd, null, null, 'terminal', null, null, null),
+      ({ id, cwd }) => window.api.pty.create({ sessionId: id, cwd, mode: 'terminal' }),
       { id: sessionId, cwd: TEST_PROJECT_PATH }
     )
     expect(createResult.success).toBe(true)

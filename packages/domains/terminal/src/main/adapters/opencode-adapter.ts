@@ -1,4 +1,4 @@
-import type { TerminalAdapter, SpawnConfig, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
+import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
 import { buildExecCommand, getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
 
 /**
@@ -12,7 +12,7 @@ export class OpencodeAdapter implements TerminalAdapter {
   // Full-screen TUI constantly redraws — detect working from user input, not output
   readonly transitionOnInput = true
 
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, _initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnConfig {
+  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, _initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnResult {
     const cmdArgs: string[] = []
 
     if (conversationId && resuming) {
@@ -23,9 +23,12 @@ export class OpencodeAdapter implements TerminalAdapter {
 
     const shell = resolveUserShell()
     return {
-      shell,
-      args: getShellStartupArgs(shell),
-      postSpawnCommand: buildExecCommand('opencode', cmdArgs)
+      config: {
+        shell,
+        args: getShellStartupArgs(shell),
+        postSpawnCommand: buildExecCommand('opencode', cmdArgs),
+      },
+      binary: { name: 'opencode', args: cmdArgs }
     }
   }
 

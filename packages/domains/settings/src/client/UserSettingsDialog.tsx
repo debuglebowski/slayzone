@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from './ThemeContext'
-import { XIcon, Pencil, Trash2, Plus, Settings2, SquareTerminal, Globe, FileCode, GitCompare, SlidersHorizontal, FolderOpen } from 'lucide-react'
+import { XIcon, Pencil, Trash2, Plus, Settings2, SquareTerminal, Globe, FileCode, GitCompare, SlidersHorizontal, FolderOpen, RefreshCw } from 'lucide-react'
 import { SettingsLayout, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
@@ -76,6 +76,10 @@ export function UserSettingsDialog({
   const [defaultProviderFlags, setDefaultProviderFlags] = useState<Record<string, string>>(
     Object.fromEntries(Object.entries(PROVIDER_DEFAULTS).map(([mode, def]) => [mode, def.fallback]))
   )
+  const [ccsEnabled, setCcsEnabled] = useState(false)
+  const [ccsProfiles, setCcsProfiles] = useState<string[]>([])
+  const [ccsDefaultProfile, setCcsDefaultProfile] = useState<string | null>(null)
+  const [ccsProfilesLoading, setCcsProfilesLoading] = useState(false)
   const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig | null>(null)
   const [retentionDaysInput, setRetentionDaysInput] = useState('14')
   const [exportRange, setExportRange] = useState<'15m' | '1h' | '24h' | '7d'>('1h')
@@ -166,7 +170,7 @@ export function UserSettingsDialog({
         window.api.settings.get('default_terminal_mode'),
         ...providerFlagKeys.map(k => window.api.settings.get(k)),
       ])
-      const [devToast, devAutoOpen, mcpPortSetting, cliStatus, colorTints, termFontSize, editorFontSizeVal, reduceMotionVal, leaderboardVal] = await Promise.allSettled([
+      const [devToast, devAutoOpen, mcpPortSetting, cliStatus, colorTints, termFontSize, editorFontSizeVal, reduceMotionVal, leaderboardVal, ccsVal, ccsDefProfileVal, ccsProfilesResult] = await Promise.allSettled([
         window.api.settings.get('dev_server_toast_enabled'),
         window.api.settings.get('dev_server_auto_open_browser'),
         window.api.settings.get('mcp_server_port'),
@@ -176,11 +180,17 @@ export function UserSettingsDialog({
         window.api.settings.get('editor_font_size'),
         window.api.settings.get('reduce_motion'),
         window.api.settings.get('leaderboard_enabled'),
+        window.api.settings.get('ccs_enabled'),
+        window.api.settings.get('ccs_default_profile'),
+        window.api.pty.ccsListProfiles(),
       ])
       if (isStale()) return
 
       setCliInstalled(cliStatus.status === 'fulfilled' ? cliStatus.value.installed : false)
       setLeaderboardEnabled(leaderboardVal.status === 'fulfilled' ? leaderboardVal.value === '1' : false)
+      setCcsEnabled(ccsVal.status === 'fulfilled' ? ccsVal.value === '1' : false)
+      setCcsDefaultProfile(ccsDefProfileVal.status === 'fulfilled' ? ccsDefProfileVal.value ?? null : null)
+      setCcsProfiles(ccsProfilesResult.status === 'fulfilled' ? ccsProfilesResult.value.profiles : [])
 
       setTags(loadedTags.status === 'fulfilled' ? loadedTags.value : [])
       setProjects(loadedProjects.status === 'fulfilled' ? loadedProjects.value : [])
@@ -751,6 +761,81 @@ export function UserSettingsDialog({
                             />
                           </div>
                           ))}
+                          <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-3">
+                            <div>
+                              <span className="text-xs text-muted-foreground">CCS</span>
+                              <p className="text-[10px] text-muted-foreground/60">Claude Code Switch</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={ccsEnabled}
+                                onCheckedChange={(checked) => {
+                                  setCcsEnabled(checked)
+                                  window.api.settings.set('ccs_enabled', checked ? '1' : '0')
+                                  window.api.pty.setCcsEnabled(checked)
+                                  if (checked && ccsProfiles.length === 0) {
+                                    setCcsProfilesLoading(true)
+                                    window.api.pty.ccsListProfiles()
+                                      .then(({ profiles }) => setCcsProfiles(profiles))
+                                      .catch(() => {})
+                                      .finally(() => setCcsProfilesLoading(false))
+                                  }
+                                }}
+                              />
+                              <span className="text-[10px] text-muted-foreground">Route providers through CCS</span>
+                            </div>
+                          </div>
+                          {ccsEnabled && (
+                            <>
+                              <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-3">
+                                <span className="text-xs text-muted-foreground">Default profile</span>
+                                <div className="flex items-center gap-2">
+                                  <Select
+                                    value={ccsDefaultProfile ?? '__none__'}
+                                    onValueChange={(val) => {
+                                      const profile = val === '__none__' ? null : val
+                                      setCcsDefaultProfile(profile)
+                                      window.api.settings.set('ccs_default_profile', profile ?? '')
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-8 text-xs flex-1">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__none__">None</SelectItem>
+                                      {ccsProfiles.map((p) => (
+                                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <IconButton
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label="Refresh profiles"
+                                    disabled={ccsProfilesLoading}
+                                    onClick={() => {
+                                      setCcsProfilesLoading(true)
+                                      window.api.pty.ccsListProfiles()
+                                        .then(({ profiles }) => setCcsProfiles(profiles))
+                                        .catch(() => {})
+                                        .finally(() => setCcsProfilesLoading(false))
+                                    }}
+                                  >
+                                    <RefreshCw className={`size-3.5 ${ccsProfilesLoading ? 'animate-spin' : ''}`} />
+                                  </IconButton>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-3">
+                                <span className="text-xs text-muted-foreground">Available</span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {ccsProfiles.length > 0
+                                    ? ccsProfiles.join(', ')
+                                    : <>No profiles found. Run <code className="font-mono">ccs auth create &lt;name&gt;</code></>
+                                  }
+                                </span>
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
