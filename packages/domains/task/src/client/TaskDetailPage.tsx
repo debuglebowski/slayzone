@@ -1881,7 +1881,9 @@ export function TaskDetailPage({
         {/* Settings Panel */}
         {!compact && panelVisibility.settings && (
         <div data-panel-id="settings" data-testid="task-settings-panel" className={cn("shrink-0 rounded-md bg-surface-2 border border-border p-3 flex flex-col gap-4 overflow-y-auto transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'settings' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.settings }}>
-          <h2 className="text-sm font-medium text-foreground pb-3 border-b border-border">Settings</h2>
+          <div className="shrink-0 h-10 px-2 -mx-3 -mt-3 border-b border-border bg-surface-1 flex items-center">
+            <span className="text-sm font-medium">Settings</span>
+          </div>
           {/* Description */}
           <div className="flex flex-col min-h-0 relative">
             <RichTextEditor
