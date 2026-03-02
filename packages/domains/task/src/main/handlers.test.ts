@@ -587,7 +587,7 @@ description: Updated by repo
     expect(created.featureFilePath).toBe('docs/features/feature-200/FEATURE.md')
     expect(created.details?.featureId).toBe('FEAT-200')
     expect(created.task?.title).toBe('FEAT-200 Feature Tab V2')
-    expect(created.task?.description).toBe('Canonical feature description')
+    expect(created.task?.description).toBe('Create feature from task panel')
 
     const featureFile = fs.readFileSync(
       path.join(repoPath, 'docs/features/feature-200/FEATURE.md'),

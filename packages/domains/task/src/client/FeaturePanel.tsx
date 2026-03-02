@@ -45,13 +45,15 @@ interface FeaturePanelProps {
   project: Project | null
   onTaskUpdated: (task: Task) => void
   onOpenFile: (filePath: string) => void
+  onFeatureCreated?: (details: TaskFeatureDetails | null) => void
 }
 
 export function FeaturePanel({
   taskId,
   project,
   onTaskUpdated,
-  onOpenFile
+  onOpenFile,
+  onFeatureCreated
 }: FeaturePanelProps): React.JSX.Element {
   const [details, setDetails] = useState<TaskFeatureDetails | null>(null)
   const [loading, setLoading] = useState(true)
@@ -340,6 +342,7 @@ export function FeaturePanel({
               })
               if (result.task) onTaskUpdated(result.task)
               setDetails(result.details)
+              onFeatureCreated?.(result.details)
               setNewFeatureFolder('')
               setNewFeatureTitle('')
               setNewFeatureDescription('')

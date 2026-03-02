@@ -7,7 +7,7 @@ import type { Task, PanelVisibility } from '@slayzone/task/shared'
 import { BUILTIN_PANEL_IDS, getProviderConversationId, getProviderFlags, setProviderConversationId, setProviderFlags, clearAllConversationIds, PROVIDER_DEFAULTS } from '@slayzone/task/shared'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project, TaskFeatureDetails } from '@slayzone/projects/shared'
 import { getDefaultStatus, getDoneStatus, getStatusByCategory, isTerminalStatus } from '@slayzone/projects/shared'
 import { DEV_SERVER_URL_PATTERN, SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import type { TerminalMode, ValidationResult } from '@slayzone/terminal/shared'
@@ -785,6 +785,17 @@ export function TaskDetailPage({
     const mainSessionId = `${task.id}:${task.id}`
     await window.api.pty.write(mainSessionId, text)
   }, [task])
+
+  const handleFeatureCreated = useCallback(async (details: TaskFeatureDetails | null): Promise<void> => {
+    setFeatureTerminalCwd(details?.featureDirAbsolutePath ?? null)
+    if (!task || task.terminal_mode !== 'codex') return
+    const mainSessionId = getMainSessionId(task.id)
+    resetTaskState(mainSessionId)
+    await window.api.pty.kill(mainSessionId)
+    await new Promise((r) => setTimeout(r, 100))
+    markSkipCache(mainSessionId)
+    setTerminalKey((k) => k + 1)
+  }, [task, getMainSessionId, resetTaskState])
 
   // Inject task description into terminal (no execute)
   const handleInjectDescription = useCallback(async () => {
@@ -2090,6 +2101,7 @@ export function TaskDetailPage({
               project={project}
               onTaskUpdated={handleTaskUpdate}
               onOpenFile={handleQuickOpenFile}
+              onFeatureCreated={(details) => { void handleFeatureCreated(details) }}
             />
           </div>
         )}

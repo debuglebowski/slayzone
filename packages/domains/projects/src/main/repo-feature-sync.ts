@@ -1291,15 +1291,12 @@ export function createFeatureForTask(
   }
 
   const nextTaskTitle = buildTaskTitleFromFeature(normalizedFeatureId, featureTitle)
-  if (
-    nextTaskTitle !== row.task_title
-    || (normalizedDescription ?? null) !== (row.task_description ?? null)
-  ) {
+  if (nextTaskTitle !== row.task_title) {
     db.prepare(`
       UPDATE tasks
-      SET title = ?, description = ?, updated_at = datetime('now')
+      SET title = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(nextTaskTitle, normalizedDescription, row.task_id)
+    `).run(nextTaskTitle, row.task_id)
   }
 
   const contentHash = buildContentHash(nextContent)
