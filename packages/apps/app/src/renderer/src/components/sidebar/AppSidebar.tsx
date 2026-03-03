@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Settings, Keyboard, ChevronDown, Megaphone } from 'lucide-react'
-import { IoCompassSharp } from 'react-icons/io5'
+import { Settings, Keyboard, ChevronDown, Megaphone, Check, CheckCheck } from 'lucide-react'
 import { FaRegHandshake } from 'react-icons/fa'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import {
@@ -13,7 +12,7 @@ import {
   SidebarMenuItem
 } from '@slayzone/ui'
 import { IconButton } from '@slayzone/ui'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import { Tooltip, TooltipTrigger, TooltipContent, Popover, PopoverTrigger, PopoverContent } from '@slayzone/ui'
 import {
   Dialog,
   DialogContent,
@@ -27,6 +26,22 @@ import { cn } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 
+export interface OnboardingChecklistStep {
+  id: string
+  label: string
+  completed: boolean
+  optional?: boolean
+  disabled?: boolean
+  allowWhenCompleted?: boolean
+  onClick: () => void
+}
+
+export interface OnboardingChecklistState {
+  steps: OnboardingChecklistStep[]
+  dismissed: boolean
+  onDismiss: () => void
+}
+
 interface AppSidebarProps {
   projects: Project[]
   tasks: Task[]
@@ -36,11 +51,10 @@ interface AppSidebarProps {
   onProjectSettings: (project: Project) => void
   onProjectDelete: (project: Project) => void
   onSettings: () => void
-  onOnboarding: () => void
-  onTutorial: () => void
   onChangelog: () => void
   onTaskClick?: (taskId: string) => void
   zenMode?: boolean
+  onboardingChecklist: OnboardingChecklistState
 }
 
 const isMac = navigator.platform.startsWith('Mac')
@@ -95,13 +109,18 @@ export function AppSidebar({
   onProjectSettings,
   onProjectDelete,
   onSettings,
-  onOnboarding,
-  onTutorial,
   onChangelog,
   onTaskClick,
   zenMode,
+  onboardingChecklist,
 }: AppSidebarProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [checklistOpen, setChecklistOpen] = useState(false)
+  const coreSteps = onboardingChecklist.steps.filter((step) => !step.optional)
+  const completedCore = coreSteps.filter((step) => step.completed).length
+  const hasCoreRemaining = completedCore < coreSteps.length
+  const showChecklistBadge = hasCoreRemaining && !onboardingChecklist.dismissed
+  const coreRemaining = coreSteps.length - completedCore
 
   return (
     <Sidebar collapsible="none" className={zenMode ? "!w-0 min-h-svh overflow-hidden" : "w-18 min-h-svh"}>
@@ -147,20 +166,102 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-col items-center gap-2">
             <TerminalStatusPopover tasks={tasks} onTaskClick={onTaskClick} />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconButton
-                  aria-label="Take a Tour"
-                  variant="ghost"
-                  size="icon-lg"
-                  onClick={onTutorial}
-                  className="rounded-lg text-muted-foreground"
-                >
-                  <IoCompassSharp className="size-6" />
-                </IconButton>
-              </TooltipTrigger>
-              <TooltipContent side="right">Take a Tour</TooltipContent>
-            </Tooltip>
+            <Popover open={checklistOpen} onOpenChange={setChecklistOpen}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Getting Started"
+                      className={cn(
+                        'relative inline-flex h-11 w-11 items-center justify-center rounded-lg transition-colors',
+                        'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                        onboardingChecklist.dismissed && 'opacity-80'
+                      )}
+                    >
+                      <FaRegHandshake className="size-5" />
+                      {showChecklistBadge && (
+                        <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-primary px-1 text-[10px] font-semibold leading-4 text-primary-foreground">
+                          {coreRemaining}
+                        </span>
+                      )}
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="right">Getting Started</TooltipContent>
+              </Tooltip>
+              <PopoverContent side="right" align="end" sideOffset={12} className="w-[320px] p-3">
+                <div className="mb-5 flex items-center justify-between gap-2">
+                  <p className="pt-0.5 text-base font-semibold">Getting started</p>
+                  {hasCoreRemaining && !onboardingChecklist.dismissed && (
+                    <button
+                      type="button"
+                      aria-label="Complete all items"
+                      onClick={() => {
+                        onboardingChecklist.onDismiss()
+                        setChecklistOpen(false)
+                      }}
+                      className="mr-1 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    >
+                      <CheckCheck className="size-4" />
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {onboardingChecklist.steps.map((step, index) => {
+                    const disabled = step.disabled || (step.completed && !step.allowWhenCompleted)
+
+                    return (
+                      <button
+                        key={step.id}
+                        type="button"
+                        onClick={() => {
+                          step.onClick()
+                          setChecklistOpen(false)
+                        }}
+                        disabled={disabled}
+                        className={cn(
+                          'group flex w-full items-center justify-between rounded-lg px-2.5 py-2.5 text-left text-sm transition-colors',
+                          step.completed
+                            ? disabled
+                              ? 'text-muted-foreground'
+                              : 'text-muted-foreground hover:bg-muted/35'
+                            : step.disabled
+                              ? 'cursor-not-allowed border border-border/60 bg-muted/25 text-muted-foreground/50 shadow-[0_1px_0_rgba(255,255,255,0.03)]'
+                              : 'border border-border/70 bg-muted/35 shadow-[0_1px_0_rgba(255,255,255,0.03)] hover:border-border hover:bg-muted/55'
+                        )}
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={cn(
+                              'inline-flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold',
+                              step.disabled
+                                ? 'border-border bg-muted text-muted-foreground/60'
+                                : 'border-border bg-background text-muted-foreground group-hover:bg-muted'
+                            )}
+                          >
+                            {index + 1}
+                          </span>
+                          <span
+                            className={cn(
+                              'truncate',
+                              step.completed && 'line-through decoration-muted-foreground/70'
+                            )}
+                          >
+                            {step.label}
+                          </span>
+                        </div>
+                        {step.completed ? (
+                          <Check className="size-4 text-green-500" />
+                        ) : (
+                          <span className="h-4 w-4 rounded-full border border-border" />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
             <Tooltip>
               <TooltipTrigger asChild>
                 <IconButton
@@ -174,20 +275,6 @@ export function AppSidebar({
                 </IconButton>
               </TooltipTrigger>
               <TooltipContent side="right">What's New</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconButton
-                  aria-label="Onboarding"
-                  variant="ghost"
-                  size="icon-lg"
-                  onClick={onOnboarding}
-                  className="rounded-lg text-muted-foreground"
-                >
-                  <FaRegHandshake className="size-5" />
-                </IconButton>
-              </TooltipTrigger>
-              <TooltipContent side="right">Onboarding</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
