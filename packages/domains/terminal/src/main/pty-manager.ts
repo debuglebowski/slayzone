@@ -155,6 +155,7 @@ let mainWindow: BrowserWindow | null = null
 let idleCheckerInterval: NodeJS.Timeout | null = null
 
 function taskIdFromSessionId(sessionId: string): string {
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return ''
   return sessionId.split(':')[0] || sessionId
 }
 

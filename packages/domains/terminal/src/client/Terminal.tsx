@@ -371,7 +371,16 @@ export function Terminal({
         const effectiveConversationId = isAiMode ? newConversationId : undefined
         const effectiveExistingConversationId = isAiMode ? existingConversationId : undefined
         shouldInjectInitialPrompt = mode !== 'codex' || !effectiveExistingConversationId
-        const result = await window.api.pty.create(sessionId, cwd, effectiveConversationId, effectiveExistingConversationId, mode, null, codeMode, providerFlags)
+        const result = await window.api.pty.create({
+          sessionId,
+          cwd,
+          conversationId: effectiveConversationId,
+          existingConversationId: effectiveExistingConversationId,
+          mode,
+          initialPrompt: null,
+          codeMode,
+          providerFlags
+        })
         if (!result.success) {
           const message = result.error || 'Failed to create terminal process'
           terminal.writeln(`\x1b[31mError: ${message}\x1b[0m`)

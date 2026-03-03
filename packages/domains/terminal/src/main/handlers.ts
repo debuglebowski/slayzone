@@ -37,6 +37,15 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
     (event, opts: PtyCreateOpts) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return { success: false, error: 'No window found' }
+      if (!opts || typeof opts !== 'object') {
+        return { success: false, error: 'Invalid PTY create options' }
+      }
+      if (typeof opts.sessionId !== 'string' || opts.sessionId.trim().length === 0) {
+        return { success: false, error: 'Missing PTY sessionId' }
+      }
+      if (typeof opts.cwd !== 'string' || opts.cwd.trim().length === 0) {
+        return { success: false, error: 'Missing PTY cwd' }
+      }
 
       let providerArgs: string[] = []
       try {
