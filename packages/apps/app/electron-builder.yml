@@ -10,10 +10,9 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!**/node_modules/@slayzone/**'
+  - '!**/node_modules/.pnpm/@slayzone+*/**'
 asarUnpack:
-  - resources/**
-  - '**/node_modules/better-sqlite3/**'
-  - '**/node_modules/node-pty/**'
+  []
 win:
   executableName: slayzone
 nsis:

@@ -1,7 +1,12 @@
-const { execSync } = require('child_process')
+const { spawnSync } = require("node:child_process");
 
-if (!process.env.CI_SKIP_POSTINSTALL) {
-  execSync('electron-rebuild -f -w better-sqlite3,node-pty', {
-    stdio: 'inherit',
-  })
+const pnpmCmd = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const result = spawnSync(
+  pnpmCmd,
+  ["--filter", "@slayzone/app", "exec", "electron-rebuild"],
+  { stdio: "inherit", shell: false }
+);
+
+if (result.status !== 0) {
+  process.exit(result.status ?? 1);
 }

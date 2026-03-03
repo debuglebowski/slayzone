@@ -6,6 +6,7 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
+    "postinstall": "electron-builder install-app-deps",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "build:mac": "pnpm --filter @slayzone/cli build && npm run build && electron-builder --mac",

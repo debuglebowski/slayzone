@@ -35,6 +35,9 @@ const projectA: Project = {
   name: 'A',
   color: '#111111',
   path: null,
+  task_backend: 'db',
+  feature_repo_integration_enabled: 0,
+  feature_repo_features_path: 'features',
   auto_create_worktree_on_task_create: null,
   worktree_source_branch: null,
   columns_config: [
@@ -50,6 +53,9 @@ const projectB: Project = {
   name: 'B',
   color: '#222222',
   path: null,
+  task_backend: 'db',
+  feature_repo_integration_enabled: 0,
+  feature_repo_features_path: 'features',
   auto_create_worktree_on_task_create: null,
   worktree_source_branch: null,
   columns_config: [
