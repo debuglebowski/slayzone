@@ -156,6 +156,24 @@ describe('git:removeWorktree', () => {
     h.invoke('git:removeWorktree', repoPath, wtPath)
     // Worktree dir should be gone
     expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
+    expect(git('git branch --list feature-1')).toBe('')
+  })
+
+  test('removes branch using provided branch hint', () => {
+    const wtPath = path.join(root, 'wt-hint')
+    createWorktree(repoPath, wtPath, 'feature-hint')
+    h.invoke('git:removeWorktree', repoPath, wtPath, 'feature-hint')
+    expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
+    expect(git('git branch --list feature-hint')).toBe('')
+  })
+
+  test('removes branch when worktree path is relative and branch differs from folder name', () => {
+    const relPath = '../wt-relative'
+    const absPath = path.join(root, 'wt-relative')
+    createWorktree(repoPath, relPath, 'feature-relative')
+    h.invoke('git:removeWorktree', repoPath, relPath)
+    expect(fs.existsSync(path.join(absPath, '.git'))).toBe(false)
+    expect(git('git branch --list feature-relative')).toBe('')
   })
 })
 

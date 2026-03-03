@@ -210,6 +210,48 @@ export function createWorktree(repoPath: string, targetPath: string, branch?: st
   spawnGit(args, { cwd: repoPath })
 }
 
+function getWorktreeBranchFromRepo(repoPath: string, worktreePath: string): string | null {
+  try {
+    const output = execGit('git worktree list --porcelain', {
+      cwd: repoPath,
+      encoding: 'utf-8'
+    }) as string
+
+    const targetPath = resolveWorktreePath(repoPath, worktreePath)
+    let currentPath: string | null = null
+    let currentBranch: string | null = null
+
+    for (const line of output.split('\n')) {
+      if (line.startsWith('worktree ')) {
+        currentPath = path.resolve(line.slice(9))
+        currentBranch = null
+      } else if (line.startsWith('branch refs/heads/')) {
+        currentBranch = line.slice(18)
+      } else if (line === '') {
+        if (currentPath === targetPath) {
+          return currentBranch
+        }
+        currentPath = null
+        currentBranch = null
+      }
+    }
+
+    if (currentPath === targetPath) {
+      return currentBranch
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+function resolveWorktreePath(repoPath: string, worktreePath: string): string {
+  return path.isAbsolute(worktreePath)
+    ? path.resolve(worktreePath)
+    : path.resolve(repoPath, worktreePath)
+}
+
 const SETUP_SCRIPT = '.slay/worktree-setup.sh'
 
 /** Check if setup script exists and ensure it's executable. Returns script path or null. */
@@ -352,8 +394,48 @@ export function runWorktreeSetupScriptSync(
   return { ran: true, success, output }
 }
 
-export function removeWorktree(repoPath: string, worktreePath: string): void {
-  spawnGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath })
+export function removeWorktree(repoPath: string, worktreePath: string, branchHint?: string | null): void {
+  const resolvedWorktreePath = resolveWorktreePath(repoPath, worktreePath)
+  const metadataBranch = getWorktreeBranchFromRepo(repoPath, resolvedWorktreePath)
+  const liveBranch = getCurrentBranch(resolvedWorktreePath)
+  const branchGuess = path.basename(resolvedWorktreePath)
+
+  const candidateBranches = [metadataBranch, branchHint, liveBranch]
+    .map(value => value?.replace(/^refs\/heads\//, '').trim())
+    .filter((value): value is string => Boolean(value))
+
+  const allBranches = listBranches(repoPath)
+  if (branchGuess && allBranches.includes(branchGuess)) {
+    candidateBranches.push(branchGuess)
+  }
+
+  spawnGit(['worktree', 'remove', resolvedWorktreePath, '--force'], { cwd: repoPath })
+
+  const repoBranch = getCurrentBranch(repoPath)
+  for (const branch of [...new Set(candidateBranches)]) {
+    if (repoBranch === branch) continue
+    try {
+      spawnGit(['branch', '-D', branch], { cwd: repoPath })
+      return
+    } catch (error) {
+      const details = extractExecErrorDetails(error)
+      recordDiagnosticEvent({
+        level: 'error',
+        source: 'git',
+        event: 'git.branch_delete_failed',
+        message: details.message,
+        payload: {
+          repoPath,
+          worktreePath,
+          branch,
+          candidates: candidateBranches,
+          exitCode: details.exitCode,
+          stderr: details.stderr,
+          stdout: details.stdout
+        }
+      })
+    }
+  }
 }
 
 export function initRepo(path: string): void {
@@ -380,7 +462,7 @@ export function listBranches(path: string): string[] {
     }) as string
     return output
       .split('\n')
-      .map(line => line.replace(/^\*?\s+/, '').trim())
+      .map(line => line.replace(/^(?:[*+]\s+|\s+)/, '').trim())
       .filter(Boolean)
   } catch {
     return []
