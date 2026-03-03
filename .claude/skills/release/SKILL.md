@@ -32,9 +32,9 @@ The tool will prepend a `## <old-tag>...main` section to CHANGELOG.md. After it 
 
 ### 4. Update in-app changelog
 
-Read `packages/apps/app/src/renderer/src/components/changelog/changelog-data.ts`.
+Read `packages/apps/app/src/renderer/src/components/changelog/changelog-data.json`.
 
-Add a new entry at the top of the `CHANGELOG` array for the new version:
+Add a new entry at the top of the JSON array for the new version:
 - `version`: the new version string (without `v` prefix)
 - `date`: today's date in `YYYY-MM-DD` format
 - `tagline`: a short, catchy 2-4 word tagline summarizing the release theme
@@ -48,7 +48,7 @@ Categories:
 ### 5. Commit and confirm
 
 ```
-git add CHANGELOG.md packages/apps/app/package.json packages/apps/app/src/renderer/src/components/changelog/changelog-data.ts
+git add CHANGELOG.md packages/apps/app/package.json packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
 git commit -m "release: v<new-version>"
 ```
 

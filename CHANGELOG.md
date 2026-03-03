@@ -1,6 +1,25 @@
 # Changelog
 
 
+## v0.2.4
+
+[compare changes](https://github.com/debuglebowski/SlayZone/compare/v0.2.3...v0.2.4)
+
+### 🚀 Enhancements
+
+- **ccs:** Use -c flag for shell spawn, style settings section ([d4a0ea5](https://github.com/debuglebowski/SlayZone/commit/d4a0ea5))
+- **settings:** Drill-down navigation for panel config ([0ba8aad](https://github.com/debuglebowski/SlayZone/commit/0ba8aad))
+- **telemetry:** Track onboarding funnel, page views, panel usage ([7532fd0](https://github.com/debuglebowski/SlayZone/commit/7532fd0))
+- **settings:** Panel config for editor, diff, terminal, browser ([2564119](https://github.com/debuglebowski/SlayZone/commit/2564119))
+
+### 🩹 Fixes
+
+- Text selection invisible in dark mode ([ef60f85](https://github.com/debuglebowski/SlayZone/commit/ef60f85))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.2.3
 
 [compare changes](https://github.com/debuglebowski/SlayZone/compare/v0.2.2...v0.2.3)

@@ -152,6 +152,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Set release notes from in-app changelog
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          NOTES=$(node scripts/generate-release-notes.js "$TAG")
+          if [ -n "$NOTES" ]; then
+            echo "$NOTES" | gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file -
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Remove blockmap artifacts (keep .yml for electron-updater)
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
