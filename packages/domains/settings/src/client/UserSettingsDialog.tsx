@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from './ThemeContext'
-import { XIcon, Pencil, Trash2, Plus, Settings2, SquareTerminal, Globe, FileCode, GitCompare, SlidersHorizontal, FolderOpen, FileText } from 'lucide-react'
+import { XIcon, Trash2, Plus, SquareTerminal, Globe, FileCode, GitCompare, SlidersHorizontal, FolderOpen, FileText } from 'lucide-react'
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { SettingsLayout, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'

@@ -380,7 +380,9 @@ export function Terminal({
           mode,
           initialPrompt: null,
           codeMode,
-          providerFlags
+          providerFlags,
+          executionContext,
+          ccsProfile
         })
         if (!result.success) {
           const message = result.error || 'Failed to create terminal process'
@@ -448,7 +450,7 @@ export function Terminal({
         setIsInitializing(false)
       }
     }
-  }, [sessionId, cwd, mode, conversationId, existingConversationId, initialPrompt, codeMode, providerFlags, autoFocus, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart, theme, terminalFontSize])
+  }, [sessionId, cwd, mode, conversationId, existingConversationId, initialPrompt, codeMode, providerFlags, executionContext, ccsProfile, autoFocus, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart, theme, terminalFontSize, terminalFontFamily, terminalScrollback])
 
   // Initialize terminal
   useEffect(() => {
