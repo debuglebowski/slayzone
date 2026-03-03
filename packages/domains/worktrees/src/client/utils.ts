@@ -14,13 +14,32 @@ export function slugify(text: string): string {
 
 export const DEFAULT_WORKTREE_BASE_PATH_TEMPLATE = '{project}/..'
 
+function isAbsolutePath(input: string): boolean {
+  if (!input) return false
+  // POSIX absolute (/tmp)
+  if (input.startsWith('/')) return true
+  // Windows drive absolute (C:\tmp or C:/tmp)
+  if (/^[A-Za-z]:[\\/]/.test(input)) return true
+  // UNC path (\\server\share)
+  if (input.startsWith('\\\\')) return true
+  return false
+}
+
 /**
  * Expands user template tokens in worktree base path.
  * "{project}/.." with "/repo/slayzone" -> "/repo"
  */
 export function resolveWorktreeBasePathTemplate(template: string, projectPath: string): string {
-  const resolved = template.replaceAll('{project}', projectPath.replace(/[\\/]+$/, ''))
-  return normalizePath(resolved)
+  const normalizedProjectPath = normalizePath(projectPath.replace(/[\\/]+$/, ''))
+  const replacedTemplate = template.replaceAll('{project}', normalizedProjectPath)
+  const normalizedTemplate = normalizePath(replacedTemplate)
+
+  // Treat relative templates as project-relative for deterministic absolute cwd.
+  if (isAbsolutePath(normalizedTemplate)) return normalizedTemplate
+
+  const separator = normalizedProjectPath.includes('\\') ? '\\' : '/'
+  const relativePart = normalizedTemplate.replace(/^[\\/]+/, '')
+  return normalizePath(`${normalizedProjectPath}${separator}${relativePart}`)
 }
 
 /**

@@ -2,7 +2,7 @@ import { open, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
-import { buildExecCommand, getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
+import { buildShellCommand, getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for OpenAI Codex.
@@ -31,7 +31,7 @@ export class CodexAdapter implements TerminalAdapter {
       config: {
         shell,
         args: getShellStartupArgs(shell),
-        postSpawnCommand: buildExecCommand('codex', cmdArgs),
+        postSpawnCommand: buildShellCommand('codex', cmdArgs, { useExec: false }),
       },
       binary: { name: 'codex', args: cmdArgs }
     }

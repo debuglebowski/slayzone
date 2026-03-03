@@ -71,7 +71,7 @@ const isWin = process.platform === 'win32'
 
 test('starts fresh codex session by default', () => {
   const result = adapter.buildSpawnConfig('/tmp')
-  expect(result.config.postSpawnCommand).toBe(isWin ? 'codex' : "exec 'codex'")
+  expect(result.config.postSpawnCommand).toBe(isWin ? 'codex' : "'codex'")
 })
 
 test('resumes codex session when existing conversation ID is provided', () => {
@@ -79,7 +79,7 @@ test('resumes codex session when existing conversation ID is provided', () => {
   expect(result.config.postSpawnCommand).toBe(
     isWin
       ? 'codex resume 11111111-2222-4333-8444-555555555555'
-      : "exec 'codex' 'resume' '11111111-2222-4333-8444-555555555555'"
+      : "'codex' 'resume' '11111111-2222-4333-8444-555555555555'"
   )
 })
 
@@ -88,7 +88,7 @@ test('includes provider flags while resuming', () => {
   expect(result.config.postSpawnCommand).toBe(
     isWin
       ? 'codex resume thread-123 --search'
-      : "exec 'codex' 'resume' 'thread-123' '--search'"
+      : "'codex' 'resume' 'thread-123' '--search'"
   )
 })
 

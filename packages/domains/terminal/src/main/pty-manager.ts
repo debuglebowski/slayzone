@@ -548,7 +548,7 @@ export async function createPty(
     // When a post-spawn command is present, pass it via -c flag instead of
     // writing to stdin after a delay.  This prevents shell init prompts
     // (e.g. oh-my-zsh update [Y/n]) from consuming/corrupting the command.
-    const directExec = !transport && !!spawnConfig.postSpawnCommand && platform() !== 'win32'
+    const directExec = !transport && !!spawnConfig.postSpawnCommand && platform() !== 'win32' && terminalMode !== 'codex'
     if (directExec) {
       initialArgs.push('-c', spawnConfig.postSpawnCommand!)
     }
@@ -556,6 +556,7 @@ export async function createPty(
     const canRetryInteractiveOnly = !transport && initialArgs.includes('-i') && initialArgs.includes('-l')
     let usedArgs = [...initialArgs]
     let usedFallback = false
+    let usedCodexShellFallback = false
     const spawnStartTs = Date.now()
     let ptyProcess: pty.IPty
     try {
@@ -947,6 +948,27 @@ export async function createPty(
         const session = sessions.get(sessionId)
         if (!session || session.pty !== target) return
 
+        const likelyResumeSessionNotFound = resuming && terminalMode === 'codex' && exitCode !== 0
+        if (likelyResumeSessionNotFound && !win.isDestroyed()) {
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'pty.resume_fast_exit',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            payload: {
+              exitCode,
+              mode: terminalMode,
+              reason: firstOutputTs === null ? 'resume_nonzero_exit_no_output' : 'resume_nonzero_exit_with_output'
+            }
+          })
+          try {
+            win.webContents.send('pty:session-not-found', sessionId)
+          } catch {
+            // Window destroyed, ignore
+          }
+        }
+
         const canAsyncFallback = canRetryInteractiveOnly && !usedFallback && firstOutputTs === null && (Date.now() - createStartedAt) <= FAST_EXIT_FALLBACK_WINDOW_MS
         if (canAsyncFallback) {
           const fallbackArgs = initialArgs.filter((arg) => arg !== '-l')
@@ -985,6 +1007,62 @@ export async function createPty(
               payload: {
                 shell: spawnConfig.shell,
                 attemptedArgs: fallbackArgs
+              }
+            })
+          }
+        }
+
+        const canCodexShellFallback = terminalMode === 'codex' && !usedCodexShellFallback && exitCode !== 0
+        if (canCodexShellFallback) {
+          const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
+          const previousArgs = [...usedArgs]
+          try {
+            const fallbackShellPty = pty.spawn(spawnFile, shellOnlyArgs, spawnOptions)
+            usedCodexShellFallback = true
+            ptyProcess = fallbackShellPty
+            session.pty = fallbackShellPty
+            usedArgs = shellOnlyArgs
+            usedFallback = true
+
+            const infoLine = `\r\n[SlayZone] Codex exited with code ${String(exitCode)}. Switched to interactive shell for recovery.\r\n`
+            session.buffer.append(infoLine)
+            if (!win.isDestroyed()) {
+              try {
+                win.webContents.send('pty:data', sessionId, infoLine, session.buffer.getCurrentSeq())
+              } catch {
+                // Window destroyed, ignore
+              }
+            }
+
+            recordDiagnosticEvent({
+              level: 'warn',
+              source: 'pty',
+              event: 'pty.codex_shell_fallback',
+              sessionId,
+              taskId: taskIdFromSessionId(sessionId),
+              message: `Codex exited with code ${String(exitCode)}; falling back to interactive shell`,
+              payload: {
+                shell: spawnFile,
+                shellArgs: shellOnlyArgs,
+                originalShell: spawnConfig.shell,
+                originalArgs: previousArgs
+              }
+            })
+
+            armStartupTimeout(fallbackShellPty)
+            attachPtyHandlers(fallbackShellPty)
+            return
+          } catch (fallbackShellErr) {
+            recordDiagnosticEvent({
+              level: 'error',
+              source: 'pty',
+              event: 'pty.codex_shell_fallback_failed',
+              sessionId,
+              taskId: taskIdFromSessionId(sessionId),
+              message: (fallbackShellErr as Error).message,
+              payload: {
+                shell: spawnFile,
+                shellArgs: shellOnlyArgs
               }
             })
           }

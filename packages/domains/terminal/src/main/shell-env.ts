@@ -96,10 +96,15 @@ export function quoteForShell(arg: string): string {
   return `'${arg.replace(/'/g, `'"'"'`)}'`
 }
 
-export function buildExecCommand(binary: string, args: string[] = []): string {
+export function buildShellCommand(binary: string, args: string[] = [], opts?: { useExec?: boolean }): string {
   const escaped = [binary, ...args].map(quoteForShell).join(' ')
   if (platform() === 'win32') return escaped
+  if (opts?.useExec === false) return escaped
   return `exec ${escaped}`
+}
+
+export function buildExecCommand(binary: string, args: string[] = []): string {
+  return buildShellCommand(binary, args, { useExec: true })
 }
 
 /**
