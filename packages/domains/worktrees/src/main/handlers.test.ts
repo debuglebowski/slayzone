@@ -4,7 +4,7 @@
  */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerWorktreeHandlers } from './handlers.js'
-import { createWorktree, runWorktreeSetupScriptSync } from './git-worktree.js'
+import { createWorktree, runWorktreeSetupScriptSync, copyFilesFromMainToWorktree } from './git-worktree.js'
 import { execSync } from 'child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -108,77 +108,99 @@ describe('git:createWorktree', () => {
     // Clean up
     h.invoke('git:removeWorktree', repoPath, wtPath)
   })
+})
 
-  test('includes tracked + untracked files with optional path filter', () => {
-    fs.mkdirSync(path.join(repoPath, 'docs'), { recursive: true })
-    fs.writeFileSync(path.join(repoPath, 'docs', 'tracked.md'), 'v1')
-    git('git add docs/tracked.md')
-    git('git commit -m "add tracked docs file"')
+describe('copy include combinations', () => {
+  test('copies files according to every combination of environment/path/tracked/untracked', () => {
+    const comboRepo = path.join(root, 'combo-repo')
+    fs.mkdirSync(comboRepo)
 
-    fs.writeFileSync(path.join(repoPath, 'docs', 'tracked.md'), 'v2-local')
-    fs.writeFileSync(path.join(repoPath, 'docs', 'untracked.md'), 'untracked-local')
-    fs.writeFileSync(path.join(repoPath, 'outside.txt'), 'outside-file')
+    const comboGit = (cmd: string) =>
+      execSync(cmd, {
+        cwd: comboRepo,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'Test',
+          GIT_AUTHOR_EMAIL: 'test@test.com',
+          GIT_COMMITTER_NAME: 'Test',
+          GIT_COMMITTER_EMAIL: 'test@test.com'
+        }
+      }).trim()
 
-    const wtPath = path.join(root, 'wt-include-files')
-    const result = h.invoke(
-      'git:createWorktree',
-      repoPath,
-      wtPath,
-      'feature-include-files',
-      undefined,
-      {
-        includeTracked: true,
-        includeUntracked: true,
-        includeIgnored: false,
-        pathGlobs: ['docs/**']
-      }
-    ) as {
-      includeResult: { copiedCount: number; skippedLargeCount: number; skippedBlockedCount: number }
+    comboGit('git init')
+    comboGit('git branch -m main')
+
+    fs.mkdirSync(path.join(comboRepo, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(comboRepo, '.gitignore'), '.env\ndocs/ignored-doc.bin\nignored-root.txt\n')
+    fs.writeFileSync(path.join(comboRepo, 'tracked-root.txt'), 'tracked root baseline')
+    fs.writeFileSync(path.join(comboRepo, 'docs', 'tracked-doc.txt'), 'tracked doc baseline')
+    comboGit('git add -A')
+    comboGit('git commit -m "combo baseline"')
+
+    fs.writeFileSync(path.join(comboRepo, 'tracked-root.txt'), 'tracked root modified')
+    fs.writeFileSync(path.join(comboRepo, 'docs', 'tracked-doc.txt'), 'tracked doc modified')
+    fs.writeFileSync(path.join(comboRepo, 'untracked-root.txt'), 'untracked root')
+    fs.writeFileSync(path.join(comboRepo, 'docs', 'untracked-doc.txt'), 'untracked doc')
+    fs.writeFileSync(path.join(comboRepo, '.env'), 'API_KEY=test')
+    fs.writeFileSync(path.join(comboRepo, 'docs', 'ignored-doc.bin'), 'ignored doc')
+    fs.writeFileSync(path.join(comboRepo, 'ignored-root.txt'), 'ignored root')
+
+    const assertCopied = (targetPath: string, expected: string[]) => {
+      const actual = [
+        '.env',
+        'tracked-root.txt',
+        'untracked-root.txt',
+        'ignored-root.txt',
+        'docs/tracked-doc.txt',
+        'docs/untracked-doc.txt',
+        'docs/ignored-doc.bin'
+      ].filter((relPath) => fs.existsSync(path.join(targetPath, relPath))).sort()
+
+      expect(actual).toEqual([...expected].sort())
     }
 
-    expect(fs.readFileSync(path.join(wtPath, 'docs', 'tracked.md'), 'utf-8')).toBe('v2-local')
-    expect(fs.readFileSync(path.join(wtPath, 'docs', 'untracked.md'), 'utf-8')).toBe('untracked-local')
-    expect(fs.existsSync(path.join(wtPath, 'outside.txt'))).toBe(false)
-    expect(result.includeResult.copiedCount).toBe(2)
+    for (const includeEnvironmentFiles of [false, true]) {
+      for (const includeAllInPath of [false, true]) {
+        for (const includeTracked of [false, true]) {
+          for (const includeUntracked of [false, true]) {
+            const comboName = `e${Number(includeEnvironmentFiles)}-a${Number(includeAllInPath)}-t${Number(includeTracked)}-u${Number(includeUntracked)}`
+            const targetPath = path.join(root, `combo-copy-${comboName}`)
+            fs.mkdirSync(targetPath, { recursive: true })
 
-    h.invoke('git:removeWorktree', repoPath, wtPath)
-    git('git checkout -- docs/tracked.md')
-    fs.unlinkSync(path.join(repoPath, 'docs', 'untracked.md'))
-    fs.unlinkSync(path.join(repoPath, 'outside.txt'))
-  })
+            copyFilesFromMainToWorktree(comboRepo, targetPath, {
+              includeIgnored: includeEnvironmentFiles,
+              includeAllStatusesInPaths: includeAllInPath,
+              includeTracked,
+              includeUntracked,
+              pathGlobs: includeAllInPath ? ['docs/**'] : undefined
+            })
 
-  test('can include ignored files but excludes blocked directories', () => {
-    fs.writeFileSync(path.join(repoPath, '.gitignore'), '.env\nnode_modules/\n')
-    git('git add .gitignore')
-    git('git commit -m "add ignore rules"')
-
-    fs.writeFileSync(path.join(repoPath, '.env'), 'TOKEN=secret')
-    fs.mkdirSync(path.join(repoPath, 'node_modules', 'pkg'), { recursive: true })
-    fs.writeFileSync(path.join(repoPath, 'node_modules', 'pkg', 'leak.txt'), 'should-not-copy')
-
-    const wtPath = path.join(root, 'wt-include-ignored')
-    const result = h.invoke(
-      'git:createWorktree',
-      repoPath,
-      wtPath,
-      'feature-include-ignored',
-      undefined,
-      {
-        includeTracked: false,
-        includeUntracked: false,
-        includeIgnored: true
+            if (includeAllInPath) {
+              const expected = [
+                'docs/tracked-doc.txt',
+                'docs/untracked-doc.txt',
+                'docs/ignored-doc.bin'
+              ]
+              if (includeEnvironmentFiles) expected.push('.env')
+              assertCopied(targetPath, expected)
+            } else {
+              const expected: string[] = []
+              if (includeTracked) {
+                expected.push('tracked-root.txt', 'docs/tracked-doc.txt')
+              }
+              if (includeUntracked) {
+                expected.push('untracked-root.txt', 'docs/untracked-doc.txt')
+              }
+              if (includeEnvironmentFiles) {
+                expected.push('.env')
+              }
+              assertCopied(targetPath, expected)
+            }
+          }
+        }
       }
-    ) as {
-      includeResult: { copiedCount: number; skippedLargeCount: number; skippedBlockedCount: number }
     }
-
-    expect(fs.existsSync(path.join(wtPath, '.env'))).toBe(true)
-    expect(fs.existsSync(path.join(wtPath, 'node_modules', 'pkg', 'leak.txt'))).toBe(false)
-    expect(result.includeResult.skippedBlockedCount).toBeGreaterThan(0)
-
-    h.invoke('git:removeWorktree', repoPath, wtPath)
-    fs.unlinkSync(path.join(repoPath, '.env'))
-    fs.rmSync(path.join(repoPath, 'node_modules'), { recursive: true, force: true })
   })
 })
 

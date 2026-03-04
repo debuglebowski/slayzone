@@ -351,9 +351,14 @@ export function copyFilesFromMainToWorktree(
   let copiedCount = 0
   let skippedLargeCount = 0
   let skippedBlockedCount = 0
+  const includeEnvironmentFiles = Boolean(input?.includeIgnored)
 
   for (const relPath of files) {
-    if (!matchesPathGlob(relPath, globs)) continue
+    const matchesPaths = matchesPathGlob(relPath, globs)
+    const shouldIncludeBySelection = includeAllStatusesInPaths
+      ? (matchesPaths || (includeEnvironmentFiles && isEnvLikeFile(relPath)))
+      : matchesPaths
+    if (!shouldIncludeBySelection) continue
     if (isBlockedPath(relPath)) {
       skippedBlockedCount += 1
       continue
