@@ -13,7 +13,7 @@ interface TaskMutations {
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>
   archiveTask: (taskId: string) => Promise<void>
   archiveTasks: (taskIds: string[]) => Promise<void>
-  deleteTask: (taskId: string) => Promise<void>
+  deleteTask: (taskId: string, options?: { deleteFeatureDir?: boolean }) => Promise<void>
   contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>
 }
 
@@ -102,9 +102,9 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
   )
 
   const deleteTask = useCallback(
-    async (taskId: string) => {
+    async (taskId: string, options?: { deleteFeatureDir?: boolean }) => {
       const task = tasksRef.current.find((t) => t.id === taskId)
-      await rawDelete(taskId)
+      await rawDelete(taskId, options)
       if (!task) return
 
       undo.push({
@@ -113,7 +113,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
           const restored = await window.api.db.restoreTask(taskId)
           if (restored) setTasks((prev) => [restored, ...prev])
         },
-        redo: () => rawDelete(taskId)
+        redo: () => rawDelete(taskId, options)
       })
       toast(`Deleted "${task.title}"`, {
         action: { label: 'Undo', onClick: () => void undo.undo() }

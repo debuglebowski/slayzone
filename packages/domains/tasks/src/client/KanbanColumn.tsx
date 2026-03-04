@@ -38,7 +38,7 @@ interface SortableKanbanCardProps {
   allProjects?: Project[]
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
   onArchiveTask?: (taskId: string) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string, options?: { deleteFeatureDir?: boolean }) => void
 }
 
 function SortableKanbanCard({
@@ -141,7 +141,7 @@ interface KanbanColumnProps {
   allProjects?: Project[]
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
   onArchiveTask?: (taskId: string) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string, options?: { deleteFeatureDir?: boolean }) => void
   onArchiveAllTasks?: (taskIds: string[]) => void
 }
 

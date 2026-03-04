@@ -597,7 +597,23 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
   })
 
   // Soft-delete: kill PTY but preserve worktree for undo
-  ipcMain.handle('db:tasks:delete', (_, id: string) => {
+  ipcMain.handle('db:tasks:delete', (_, id: string, options?: { deleteFeatureDir?: boolean }) => {
+    if (options?.deleteFeatureDir === true) {
+      try {
+        deleteFeatureForTask(db, id)
+      } catch (err) {
+        console.error('Failed to delete linked feature during task delete:', err)
+        const projectRow = db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(id) as { project_id: string } | undefined
+        runtimeAdapters.recordDiagnosticEvent({
+          level: 'error',
+          source: 'task',
+          event: 'task.delete_feature_cleanup_failed',
+          taskId: id,
+          projectId: projectRow?.project_id,
+          message: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }
     cleanupTaskImmediate(id)
     const result = db.prepare(`
       UPDATE tasks SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?

@@ -777,6 +777,70 @@ describe('db:tasks:delete', () => {
     expect(h.invoke('db:tasks:get', t.id)).toBeNull()
   })
 
+  test('deletes linked feature directory when task has attached feature', () => {
+    const repoPath = h.tmpDir()
+    const project = h.invoke('db:projects:create', {
+      name: 'Delete Task With Feature Project',
+      color: '#10b981',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = h.invoke('db:tasks:create', {
+      projectId: project.id,
+      title: 'Task with attached feature'
+    }) as Task
+
+    h.invoke('db:tasks:createFeature', task.id, {
+      featureId: 'FEAT-401',
+      folderName: 'feature-401',
+      title: 'Delete on task delete'
+    })
+
+    fs.writeFileSync(
+      path.join(repoPath, 'docs/features/feature-401', 'notes.md'),
+      '# feature notes',
+      'utf8'
+    )
+
+    expect(h.invoke('db:tasks:delete', task.id, { deleteFeatureDir: true })).toBe(true)
+    expect(fs.existsSync(path.join(repoPath, 'docs/features/feature-401'))).toBe(false)
+
+    const remainingLinks = h.db
+      .prepare('SELECT COUNT(*) as count FROM project_feature_task_links WHERE task_id = ?')
+      .get(task.id) as { count: number }
+    expect(remainingLinks.count).toBe(0)
+  })
+
+  test('keeps linked feature directory when deleteFeatureDir option is not set', () => {
+    const repoPath = h.tmpDir()
+    const project = h.invoke('db:projects:create', {
+      name: 'Delete Task Keep Feature Project',
+      color: '#10b981',
+      path: repoPath,
+      featureRepoIntegrationEnabled: true
+    }) as { id: string }
+
+    const task = h.invoke('db:tasks:create', {
+      projectId: project.id,
+      title: 'Task with attached feature kept'
+    }) as Task
+
+    h.invoke('db:tasks:createFeature', task.id, {
+      featureId: 'FEAT-402',
+      folderName: 'feature-402',
+      title: 'Keep on task delete'
+    })
+
+    expect(h.invoke('db:tasks:delete', task.id)).toBe(true)
+    expect(fs.existsSync(path.join(repoPath, 'docs/features/feature-402'))).toBe(true)
+
+    const remainingLinks = h.db
+      .prepare('SELECT COUNT(*) as count FROM project_feature_task_links WHERE task_id = ?')
+      .get(task.id) as { count: number }
+    expect(remainingLinks.count).toBe(1)
+  })
+
   test('returns false for nonexistent', () => {
     expect(h.invoke('db:tasks:delete', 'nope')).toBe(false)
   })

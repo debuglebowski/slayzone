@@ -43,7 +43,7 @@ interface KanbanListViewProps {
   allProjects?: Project[]
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
   onArchiveTask?: (taskId: string) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string, options?: { deleteFeatureDir?: boolean }) => void
 }
 
 // ── Priority bar (same as KanbanCard) ──
@@ -119,7 +119,7 @@ interface ListRowProps {
   allProjects?: Project[]
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
   onArchiveTask?: (taskId: string) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string, options?: { deleteFeatureDir?: boolean }) => void
 }
 
 function SortableListRow(props: ListRowProps): React.JSX.Element {
@@ -276,7 +276,7 @@ interface GroupSectionProps {
   allProjects?: Project[]
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
   onArchiveTask?: (taskId: string) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string, options?: { deleteFeatureDir?: boolean }) => void
 }
 
 function GroupSection({

@@ -1016,10 +1016,7 @@ function App(): React.JSX.Element {
   }
 
   const handleTaskDeleted = (): void => {
-    if (deletingTask) {
-      deleteTask(deletingTask.id)
-      setDeletingTask(null)
-    }
+    setDeletingTask(null)
   }
 
   const handleTaskClick = (task: Task, e: { metaKey: boolean }): void => {
@@ -1461,6 +1458,7 @@ function App(): React.JSX.Element {
           open={!!deletingTask}
           onOpenChange={(open) => !open && setDeletingTask(null)}
           onDeleted={handleTaskDeleted}
+          onDeleteTask={deleteTask}
         />
         <CreateProjectDialog
           open={createProjectOpen}

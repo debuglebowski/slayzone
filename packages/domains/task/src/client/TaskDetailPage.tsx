@@ -149,7 +149,7 @@ interface TaskDetailPageProps {
   onBack: () => void
   onTaskUpdated: (task: Task) => void
   onArchiveTask?: (taskId: string) => Promise<void>
-  onDeleteTask?: (taskId: string) => Promise<void>
+  onDeleteTask?: (taskId: string, options?: { deleteFeatureDir?: boolean }) => Promise<void>
   onNavigateToTask?: (taskId: string) => void
   onConvertTask?: (task: Task) => Promise<Task | void>
   onCloseTab: () => void

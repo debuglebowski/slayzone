@@ -212,7 +212,7 @@ export interface ElectronAPI {
     getSubTasks: (parentId: string) => Promise<Task[]>
     createTask: (data: CreateTaskInput) => Promise<Task>
     updateTask: (data: UpdateTaskInput) => Promise<Task>
-    deleteTask: (id: string) => Promise<boolean>
+    deleteTask: (id: string, options?: { deleteFeatureDir?: boolean }) => Promise<boolean>
     restoreTask: (id: string) => Promise<Task>
     archiveTask: (id: string) => Promise<Task>
     archiveTasks: (ids: string[]) => Promise<void>

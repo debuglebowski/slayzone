@@ -27,7 +27,7 @@ interface UseTasksDataReturn {
   reorderTasks: (taskIds: string[]) => void
   archiveTask: (taskId: string) => Promise<void>
   archiveTasks: (taskIds: string[]) => Promise<void>
-  deleteTask: (taskId: string) => Promise<void>
+  deleteTask: (taskId: string, options?: { deleteFeatureDir?: boolean }) => Promise<void>
   contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>
 
   // Project handlers
@@ -178,9 +178,9 @@ export function useTasksData(): UseTasksDataReturn {
   }, [])
 
   // Delete task
-  const deleteTask = useCallback(async (taskId: string) => {
+  const deleteTask = useCallback(async (taskId: string, options?: { deleteFeatureDir?: boolean }) => {
     setTasks((prev) => prev.filter((t) => t.id !== taskId))
-    await window.api.db.deleteTask(taskId)
+    await window.api.db.deleteTask(taskId, options)
   }, [])
 
   // Context menu update (status, priority, project)
