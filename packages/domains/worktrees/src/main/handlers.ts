@@ -36,7 +36,8 @@ import {
   getMergeContext,
   getRecentCommits,
   getAheadBehind,
-  getStatusSummary
+  getStatusSummary,
+  listIgnoredEnvLikeFiles
 } from './git-worktree'
 import { runAiCommand } from './merge-ai'
 import type { MergeWithAIResult, ConflictAnalysis, WorktreeIncludeFilesOptions, WorktreeIncludeFilesResult } from '../shared/types'
@@ -294,5 +295,9 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
 
   ipcMain.handle('git:getStatusSummary', (_, repoPath: string) => {
     return getStatusSummary(repoPath)
+  })
+
+  ipcMain.handle('git:listIgnoredEnvLikeFiles', (_, repoPath: string, limit?: number) => {
+    return listIgnoredEnvLikeFiles(repoPath, limit)
   })
 }

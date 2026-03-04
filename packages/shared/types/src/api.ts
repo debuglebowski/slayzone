@@ -331,6 +331,7 @@ export interface ElectronAPI {
     getRecentCommits: (repoPath: string, count?: number) => Promise<CommitInfo[]>
     getAheadBehind: (repoPath: string, branch: string, upstream: string) => Promise<AheadBehind>
     getStatusSummary: (repoPath: string) => Promise<StatusSummary>
+    listIgnoredEnvLikeFiles: (repoPath: string, limit?: number) => Promise<string[]>
   }
   tabs: {
     list: (taskId: string) => Promise<TerminalTab[]>

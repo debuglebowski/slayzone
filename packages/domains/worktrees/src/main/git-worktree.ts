@@ -282,6 +282,7 @@ function listGitFilesByMode(repoPath: string, options: {
   includeTracked: boolean
   includeUntracked: boolean
   includeIgnored: boolean
+  includeAllIgnoredFiles?: boolean
 }): Set<string> {
   const files = new Set<string>()
   const addFromOutput = (output: string) => {
@@ -299,11 +300,21 @@ function listGitFilesByMode(repoPath: string, options: {
     addFromOutput(runGitListCommand(repoPath, ['ls-files', '--others', '--exclude-standard']))
   }
   if (options.includeIgnored) {
-    addFromOutput(runGitListCommand(
+    const ignoredOutput = runGitListCommand(
       repoPath,
       ['ls-files', '--others', '-i', '--exclude-standard'],
       { allowPartialOnBufferOverflow: true }
-    ))
+    )
+    if (options.includeAllIgnoredFiles) {
+      addFromOutput(ignoredOutput)
+    } else {
+      addFromOutput(
+        ignoredOutput
+          .split('\n')
+          .filter(isEnvLikeFile)
+          .join('\n')
+      )
+    }
   }
 
   return files
@@ -319,10 +330,12 @@ export function copyFilesFromMainToWorktree(
   worktreePath: string,
   input?: WorktreeIncludeFilesOptions
 ): WorktreeIncludeFilesResult {
-  const includeTracked = Boolean(input?.includeTracked)
-  const includeUntracked = Boolean(input?.includeUntracked)
-  const includeIgnored = Boolean(input?.includeIgnored)
   const globs = normalizeGlobs(input?.pathGlobs)
+  const includeAllStatusesInPaths = Boolean(input?.includeAllStatusesInPaths && globs.length > 0)
+
+  const includeTracked = includeAllStatusesInPaths ? true : Boolean(input?.includeTracked)
+  const includeUntracked = includeAllStatusesInPaths ? true : Boolean(input?.includeUntracked)
+  const includeIgnored = includeAllStatusesInPaths ? true : Boolean(input?.includeIgnored)
 
   if (!includeTracked && !includeUntracked && !includeIgnored) {
     return { copiedCount: 0, skippedLargeCount: 0, skippedBlockedCount: 0 }
@@ -331,7 +344,8 @@ export function copyFilesFromMainToWorktree(
   const files = listGitFilesByMode(repoPath, {
     includeTracked,
     includeUntracked,
-    includeIgnored
+    includeIgnored,
+    includeAllIgnoredFiles: includeAllStatusesInPaths
   })
 
   let copiedCount = 0
@@ -376,6 +390,7 @@ export function copyFilesFromMainToWorktree(
       includeTracked,
       includeUntracked,
       includeIgnored,
+      includeAllStatusesInPaths,
       pathGlobs: globs,
       copiedCount,
       skippedLargeCount,
@@ -888,6 +903,39 @@ export function commitFiles(repoPath: string, message: string): void {
 }
 
 // --- General tab operations ---
+
+function isEnvLikeFile(relPath: string): boolean {
+  const normalized = relPath.replace(/\\/g, '/').trim().toLowerCase()
+  if (!normalized) return false
+  const base = path.basename(normalized)
+  return (
+    base === '.env' ||
+    base === '.envrc' ||
+    base === '.npmrc' ||
+    base.startsWith('.env.')
+  )
+}
+
+export function listIgnoredEnvLikeFiles(repoPath: string, limit = 20): string[] {
+  try {
+    const output = runGitListCommand(
+      repoPath,
+      ['ls-files', '--others', '-i', '--exclude-standard'],
+      { allowPartialOnBufferOverflow: true }
+    )
+
+    return output
+      .trim()
+      .split('\n')
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .filter(isEnvLikeFile)
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, Math.max(0, limit))
+  } catch {
+    return []
+  }
+}
 
 export function getRecentCommits(repoPath: string, count = 5): CommitInfo[] {
   try {

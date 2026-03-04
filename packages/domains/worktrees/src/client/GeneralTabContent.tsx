@@ -79,12 +79,13 @@ export function GeneralTabContent({
   const [createWorktreeConfirmOpen, setCreateWorktreeConfirmOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [includeTracked, setIncludeTracked] = useState(true)
+  const [includeTracked, setIncludeTracked] = useState(false)
   const [includeUntracked, setIncludeUntracked] = useState(false)
-  const [includeIgnored, setIncludeIgnored] = useState(false)
-  const [limitPaths, setLimitPaths] = useState(false)
+  const [includeIgnored, setIncludeIgnored] = useState(true)
+  const [ignoredEnvFilesPreview, setIgnoredEnvFilesPreview] = useState<string[]>([])
+  const [loadingIgnoredEnvFilesPreview, setLoadingIgnoredEnvFilesPreview] = useState(false)
+  const [limitPaths, setLimitPaths] = useState(true)
   const [pathFilters, setPathFilters] = useState('docs/**')
-  const [copyPreset, setCopyPreset] = useState<'custom' | 'docs-only' | 'everything-no-ignored' | 'include-ignored'>('custom')
   const [deleteWorktreeConfirmOpen, setDeleteWorktreeConfirmOpen] = useState(false)
   const [deleteWorktreeHasChanges, setDeleteWorktreeHasChanges] = useState(false)
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false)
@@ -137,6 +138,32 @@ export function GeneralTabContent({
     if (!task.worktree_path) { setWorktreeBranch(null); return }
     window.api.git.getCurrentBranch(task.worktree_path).then(setWorktreeBranch).catch(() => setWorktreeBranch(null))
   }, [task.worktree_path])
+
+  useEffect(() => {
+    if (!createWorktreeConfirmOpen || !projectPath || !includeIgnored) {
+      setIgnoredEnvFilesPreview([])
+      setLoadingIgnoredEnvFilesPreview(false)
+      return
+    }
+
+    let cancelled = false
+    setLoadingIgnoredEnvFilesPreview(true)
+    window.api.git
+      .listIgnoredEnvLikeFiles(projectPath, 20)
+      .then((files) => {
+        if (!cancelled) setIgnoredEnvFilesPreview(files)
+      })
+      .catch(() => {
+        if (!cancelled) setIgnoredEnvFilesPreview([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingIgnoredEnvFilesPreview(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [createWorktreeConfirmOpen, projectPath, includeIgnored])
 
   // Branch popover handlers
   const handleBranchPopoverChange = (open: boolean) => {
@@ -194,31 +221,6 @@ export function GeneralTabContent({
     finally { setInitializing(false) }
   }
 
-  // Worktree handlers
-  const handlePresetChange = (value: 'custom' | 'docs-only' | 'everything-no-ignored' | 'include-ignored') => {
-    setCopyPreset(value)
-    if (value === 'custom') return
-    if (value === 'docs-only') {
-      setIncludeTracked(true)
-      setIncludeUntracked(true)
-      setIncludeIgnored(false)
-      setLimitPaths(true)
-      setPathFilters('docs/**')
-      return
-    }
-    if (value === 'everything-no-ignored') {
-      setIncludeTracked(true)
-      setIncludeUntracked(true)
-      setIncludeIgnored(false)
-      setLimitPaths(false)
-      return
-    }
-    setIncludeTracked(true)
-    setIncludeUntracked(true)
-    setIncludeIgnored(true)
-    setLimitPaths(false)
-  }
-
   const handleCreateWorktreeConfirm = async () => {
     if (!projectPath) return
     setCreateWorktreeConfirmOpen(false)
@@ -235,12 +237,13 @@ export function GeneralTabContent({
         branch,
         undefined,
         {
-          includeTracked,
-          includeUntracked,
-          includeIgnored,
+          includeTracked: limitPaths ? true : includeTracked,
+          includeUntracked: limitPaths ? true : includeUntracked,
+          includeIgnored: limitPaths ? true : includeIgnored,
           pathGlobs: limitPaths
             ? pathFilters.split(',').map(value => value.trim()).filter(Boolean)
-            : undefined
+            : undefined,
+          includeAllStatusesInPaths: limitPaths
         }
       )
       await onUpdateTask({ id: task.id, worktreePath, worktreeParentBranch: currentBranch })
@@ -571,53 +574,54 @@ export function GeneralTabContent({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-3 text-sm">
-            <div className="space-y-1">
-              <div className="text-xs font-medium text-muted-foreground">Preset</div>
-              <select
-                value={copyPreset}
-                onChange={(e) => handlePresetChange(e.target.value as 'custom' | 'docs-only' | 'everything-no-ignored' | 'include-ignored')}
-                className="w-full h-8 rounded-md border bg-background px-2 text-xs"
-              >
-                <option value="custom">Custom</option>
-                <option value="docs-only">Docs only</option>
-                <option value="everything-no-ignored">Everything except ignored</option>
-                <option value="include-ignored">Include ignored too (advanced)</option>
-              </select>
-            </div>
-
-            <div className="space-y-2 rounded-md border p-3 bg-muted/20">
-              <div className="text-xs font-medium text-muted-foreground">Include local files from main workspace</div>
+            <div className="space-y-2">
               <label className="flex items-center gap-2 text-xs">
-                <Checkbox checked={includeTracked} onCheckedChange={(v) => { setCopyPreset('custom'); setIncludeTracked(!!v) }} />
-                Tracked changes (modified tracked files)
+                <Checkbox checked={includeIgnored} onCheckedChange={(v) => setIncludeIgnored(!!v)} />
+                Environment files (.env, .env.local, .envrc)
               </label>
-              <label className="flex items-center gap-2 text-xs">
-                <Checkbox checked={includeUntracked} onCheckedChange={(v) => { setCopyPreset('custom'); setIncludeUntracked(!!v) }} />
-                Untracked files
-              </label>
-              <label className="flex items-center gap-2 text-xs">
-                <Checkbox checked={includeIgnored} onCheckedChange={(v) => { setCopyPreset('custom'); setIncludeIgnored(!!v) }} />
-                Gitignored files (advanced / risky)
-              </label>
+              {includeIgnored && (
+                <div className="space-y-2 rounded-md border p-2.5">
+                  <p className="text-xs text-muted-foreground">Detected environment-like ignored files to copy</p>
+                  {loadingIgnoredEnvFilesPreview ? (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Scanning ignored files...
+                    </div>
+                  ) : ignoredEnvFilesPreview.length > 0 ? (
+                    <div className="text-xs space-y-1 max-h-24 overflow-auto">
+                      {ignoredEnvFilesPreview.map((file) => (
+                        <div key={file} className="font-mono text-[11px] text-muted-foreground">{file}</div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No ignored env-like files found.</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <label className="flex items-center gap-2 text-xs">
-              <Checkbox checked={limitPaths} onCheckedChange={(v) => { setCopyPreset('custom'); setLimitPaths(!!v) }} />
-              Only include under these paths
+              <Checkbox checked={limitPaths} onCheckedChange={(v) => setLimitPaths(!!v)} />
+              Include ALL the files included in this path
             </label>
             {limitPaths && (
               <Input
                 value={pathFilters}
-                onChange={(e) => { setCopyPreset('custom'); setPathFilters(e.target.value) }}
+                onChange={(e) => setPathFilters(e.target.value)}
                 placeholder="docs/**, FEATURES/**"
                 className="h-8 text-xs"
               />
             )}
-            {includeIgnored && (
-              <p className="text-xs text-amber-500">
-                May include secrets and large folders (.env, build artifacts). Prefer selecting paths.
-              </p>
-            )}
+
+            <label className="flex items-center gap-2 text-xs">
+              <Checkbox checked={includeTracked} onCheckedChange={(v) => setIncludeTracked(!!v)} />
+              Tracked changes (modified tracked files)
+            </label>
+
+            <label className="flex items-center gap-2 text-xs">
+              <Checkbox checked={includeUntracked} onCheckedChange={(v) => setIncludeUntracked(!!v)} />
+              Untracked files
+            </label>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={creating}>Cancel</AlertDialogCancel>

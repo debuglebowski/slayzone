@@ -86,6 +86,7 @@ export interface WorktreeIncludeFilesOptions {
   includeUntracked?: boolean
   includeIgnored?: boolean
   pathGlobs?: string[]
+  includeAllStatusesInPaths?: boolean
 }
 
 export interface WorktreeIncludeFilesResult {

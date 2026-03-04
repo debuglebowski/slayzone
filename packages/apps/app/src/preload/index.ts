@@ -291,7 +291,8 @@ const api: ElectronAPI = {
     getMergeContext: (repoPath) => ipcRenderer.invoke('git:getMergeContext', repoPath),
     getRecentCommits: (repoPath, count) => ipcRenderer.invoke('git:getRecentCommits', repoPath, count),
     getAheadBehind: (repoPath, branch, upstream) => ipcRenderer.invoke('git:getAheadBehind', repoPath, branch, upstream),
-    getStatusSummary: (repoPath) => ipcRenderer.invoke('git:getStatusSummary', repoPath)
+    getStatusSummary: (repoPath) => ipcRenderer.invoke('git:getStatusSummary', repoPath),
+    listIgnoredEnvLikeFiles: (repoPath, limit) => ipcRenderer.invoke('git:listIgnoredEnvLikeFiles', repoPath, limit)
   },
   tabs: {
     list: (taskId) => ipcRenderer.invoke('tabs:list', taskId),
