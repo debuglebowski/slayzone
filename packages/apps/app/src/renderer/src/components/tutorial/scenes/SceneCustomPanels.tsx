@@ -21,7 +21,7 @@ function Kbd({ children }: { children: string }): React.JSX.Element {
   return <span className="text-[11px] text-muted-foreground/40 bg-muted px-1.5 py-0.5 rounded font-mono">{children}</span>
 }
 
-const SIDEBAR_TABS = ['General', 'Appearance', 'Panels', 'Integrations', 'Tags', 'Telemetry', 'Labs', 'About']
+const SIDEBAR_TABS = ['General', 'Appearance', 'Panels', 'Tags', 'Import & Export', 'Telemetry', 'Labs', 'About']
 
 const NATIVE_PANELS = [
   { icon: Terminal, label: 'Terminal', shortcut: '⌘T' },
