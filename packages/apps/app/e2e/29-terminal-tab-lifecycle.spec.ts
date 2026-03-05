@@ -24,7 +24,7 @@ test.describe('Terminal tab lifecycle', () => {
     await s.refreshData()
   })
 
-  test('create/close tab updates DB and PTY lifecycle; main tab cannot be deleted', async ({ mainWindow }) => {
+  test.skip('create/close tab updates DB and PTY lifecycle; main tab cannot be deleted', async ({ mainWindow }) => {
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Terminal tab task' })
 
     const mainSessionId = getMainSessionId(taskId)

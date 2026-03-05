@@ -17,6 +17,8 @@ test.describe('Session ID banners', () => {
   let claudeTaskId: string
 
   const detectedId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const sessionBanner = (page: import('@playwright/test').Page) =>
+    page.getByText('Session not saved').last()
 
   test.beforeAll(async ({ electronApp, mainWindow }) => {
     // Mock PTY handlers so we don't need real CLIs
@@ -98,12 +100,12 @@ test.describe('Session ID banners', () => {
   test('codex: shows detect banner with /status button', async ({ mainWindow }) => {
     await mainWindow.getByText('BT codex task').first().click()
 
-    await expect(mainWindow.getByText('Session not saved')).toBeVisible()
-    await expect(mainWindow.getByRole('button', { name: /Run \/status/ })).toBeVisible()
+    await expect(sessionBanner(mainWindow)).toBeVisible()
+    await expect(mainWindow.getByRole('button', { name: /Run \/status/ }).last()).toBeVisible()
   })
 
   test('codex: clicking detect button saves session id and hides banner', async ({ mainWindow }) => {
-    await mainWindow.getByRole('button', { name: /Run \/status/ }).click()
+    await mainWindow.getByRole('button', { name: /Run \/status/ }).last().click()
 
     await expect
       .poll(async () => {
@@ -112,7 +114,7 @@ test.describe('Session ID banners', () => {
       })
       .toBe(detectedId)
 
-    await expect(mainWindow.getByText('Session not saved')).not.toBeVisible()
+    await expect(sessionBanner(mainWindow)).not.toBeVisible()
   })
 
   // --- Gemini: detect banner with /stats ---
@@ -123,12 +125,12 @@ test.describe('Session ID banners', () => {
     await expect(mainWindow.getByText('BT gemini task').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('BT gemini task').first().click()
 
-    await expect(mainWindow.getByText('Session not saved')).toBeVisible()
-    await expect(mainWindow.getByRole('button', { name: /Run \/stats/ })).toBeVisible()
+    await expect(sessionBanner(mainWindow)).toBeVisible()
+    await expect(mainWindow.getByRole('button', { name: /Run \/stats/ }).last()).toBeVisible()
   })
 
   test('gemini: clicking detect button saves session id', async ({ mainWindow }) => {
-    await mainWindow.getByRole('button', { name: /Run \/stats/ }).click()
+    await mainWindow.getByRole('button', { name: /Run \/stats/ }).last().click()
 
     await expect
       .poll(async () => {
@@ -137,7 +139,7 @@ test.describe('Session ID banners', () => {
       })
       .toBe(detectedId)
 
-    await expect(mainWindow.getByText('Session not saved')).not.toBeVisible()
+    await expect(sessionBanner(mainWindow)).not.toBeVisible()
   })
 
   // --- Cursor Agent: unavailable banner ---
@@ -190,7 +192,7 @@ test.describe('Session ID banners', () => {
     await expect(mainWindow.getByText('BT claude task').first()).toBeVisible({ timeout: 5_000 })
     await mainWindow.getByText('BT claude task').first().click()
 
-    await expect(mainWindow.getByText('Session not saved')).not.toBeVisible()
+    await expect(sessionBanner(mainWindow)).not.toBeVisible()
     await expect(mainWindow.getByText(/Session ID detection not available/)).not.toBeVisible()
   })
 })

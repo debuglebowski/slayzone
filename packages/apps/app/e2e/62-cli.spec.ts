@@ -296,9 +296,9 @@ test.describe('CLI: slay', () => {
       // Spawn a short-lived process via test global exposed in Playwright mode
       processId = await electronApp.evaluate(() => {
         const spawn = (globalThis as Record<string, unknown>).__spawnProcess as (
-          taskId: string | null, label: string, command: string, cwd: string, autoRestart: boolean
+          projectId: string | null, taskId: string | null, label: string, command: string, cwd: string, autoRestart: boolean
         ) => string
-        return spawn(null, 'CLI test process', 'echo hello-from-slay-cli', '/tmp', false)
+        return spawn(null, null, 'CLI test process', 'echo hello-from-slay-cli', '/tmp', false)
       })
       // Give it a moment to produce output
       await new Promise((r) => setTimeout(r, 300))
@@ -379,9 +379,9 @@ test.describe('CLI: slay', () => {
       // Spawn a process that finishes quickly
       const followId = await electronApp.evaluate(() => {
         const spawn = (globalThis as Record<string, unknown>).__spawnProcess as (
-          taskId: string | null, label: string, command: string, cwd: string, autoRestart: boolean
+          projectId: string | null, taskId: string | null, label: string, command: string, cwd: string, autoRestart: boolean
         ) => string
-        return spawn(null, 'CLI follow test', 'echo follow-output-marker', '/tmp', false)
+        return spawn(null, null, 'CLI follow test', 'echo follow-output-marker', '/tmp', false)
       })
       // Wait for it to complete
       await new Promise((r) => setTimeout(r, 400))
