@@ -17,7 +17,7 @@ interface TerminalTabBarProps {
   rightContent?: React.ReactNode
 }
 
-const MODE_ICONS: Record<TerminalMode, typeof TerminalIcon> = {
+const MODE_ICONS: Partial<Record<TerminalMode, typeof TerminalIcon>> = {
   'claude-code': Bot,
   'codex': Command,
   'cursor-agent': MousePointerClick,
@@ -173,7 +173,7 @@ export function TerminalTabBar({
               onDrop={(e) => handleGroupDrop(e, group.id)}
             >
               {group.tabs.map((tab, i) => {
-                const Icon = MODE_ICONS[tab.mode]
+                const Icon = MODE_ICONS[tab.mode] ?? TerminalIcon
                 const isEditing = editingTabId === tab.id
                 const isDragging = draggingTabId === tab.id
 
