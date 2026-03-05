@@ -1,6 +1,6 @@
 import type { CodeMode, ExecutionContext } from '@slayzone/terminal/shared'
 
-export type TerminalMode = 'claude-code' | 'ccs' | 'codex' | 'cursor-agent' | 'gemini' | 'opencode' | 'terminal'
+export type TerminalMode = string
 export type { CodeMode, ExecutionContext }
 
 // Activity states for CLI tools

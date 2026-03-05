@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 
 interface Migration {
   version: number
@@ -995,6 +996,91 @@ const migrations: Migration[] = [
         UPDATE tasks
         SET provider_config = json_set(COALESCE(provider_config, '{}'), '$.ccs', json_object('flags', ccs_profile))
         WHERE ccs_profile IS NOT NULL AND ccs_profile != ''
+      `)
+    }
+  },
+  {
+    version: 55,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS terminal_modes (
+          id TEXT PRIMARY KEY,
+          label TEXT NOT NULL,
+          type TEXT NOT NULL,
+          command TEXT,
+          args TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          is_builtin INTEGER NOT NULL DEFAULT 0,
+          "order" INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `)
+
+      const insertStmt = db.prepare(`
+        INSERT INTO terminal_modes (id, label, type, command, args, enabled, is_builtin, "order")
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      for (const mode of DEFAULT_TERMINAL_MODES) {
+        insertStmt.run(
+          mode.id,
+          mode.label,
+          mode.type,
+          mode.command ?? null,
+          mode.args ?? null,
+          mode.enabled ? 1 : 0,
+          mode.isBuiltin ? 1 : 0,
+          mode.order
+        )
+      }
+    }
+  },
+  {
+    version: 56,
+    up: (db) => {
+      // Simplify integration connections: keep only provider + credential reference metadata.
+      db.exec(`PRAGMA foreign_keys = OFF;`)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS integration_connections_next (
+          id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL,
+          credential_ref TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          last_synced_at TEXT DEFAULT NULL
+        );
+
+        INSERT INTO integration_connections_next (
+          id, provider, credential_ref, enabled, created_at, updated_at, last_synced_at
+        )
+        SELECT
+          id,
+          provider,
+          credential_ref,
+          enabled,
+          COALESCE(created_at, datetime('now')),
+          COALESCE(updated_at, datetime('now')),
+          last_synced_at
+        FROM integration_connections;
+
+        DROP TABLE integration_connections;
+        ALTER TABLE integration_connections_next RENAME TO integration_connections;
+
+        CREATE INDEX IF NOT EXISTS idx_integration_connections_provider
+          ON integration_connections(provider, updated_at);
+      `)
+      db.exec(`PRAGMA foreign_keys = ON;`)
+    }
+  },
+  {
+    version: 57,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE terminal_modes ADD COLUMN pattern_attention TEXT;
+        ALTER TABLE terminal_modes ADD COLUMN pattern_working TEXT;
+        ALTER TABLE terminal_modes ADD COLUMN pattern_error TEXT;
       `)
     }
   }

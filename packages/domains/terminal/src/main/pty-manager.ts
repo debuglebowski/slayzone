@@ -18,16 +18,6 @@ export function setDatabase(database: Database): void {
   db = database
 }
 
-const MODE_LABELS: Record<string, string> = {
-  'claude-code': 'Claude',
-  'ccs': 'CCS',
-  'codex': 'Codex',
-  'cursor-agent': 'Cursor',
-  'gemini': 'Gemini',
-  'opencode': 'OpenCode',
-  'terminal': 'Terminal'
-}
-
 // Hold references to active notifications keyed by sessionId so we can dismiss them
 const activeNotifications = new Map<string, Notification>()
 
@@ -68,7 +58,12 @@ function showTaskAttentionNotification(sessionId: string): void {
   const taskId = session?.taskId ?? taskIdFromSessionId(sessionId)
   const taskRow = db.prepare('SELECT title FROM tasks WHERE id = ?').get(taskId) as { title: string } | undefined
   if (taskRow?.title) {
-    const label = MODE_LABELS[session?.mode ?? ''] ?? 'Terminal'
+    let label = 'Terminal'
+    const modeInfo = db.prepare('SELECT label FROM terminal_modes WHERE id = ?').get(session?.mode ?? '') as { label: string } | undefined
+    if (modeInfo) {
+      label = modeInfo.label
+    }
+    
     const notification = new Notification({
       title: taskRow.title,
       body: `${label} needs attention`
@@ -432,7 +427,13 @@ export async function createPty(
   initialPrompt?: string | null,
   providerArgs?: string[],
   codeMode?: CodeMode | null,
-  executionContext?: ExecutionContext | null
+  executionContext?: ExecutionContext | null,
+  type?: string,
+  command?: string | null,
+  args?: string | null,
+  patternAttention?: string | null,
+  patternWorking?: string | null,
+  patternError?: string | null
 ): Promise<{ success: boolean; error?: string }> {
   const taskId = taskIdFromSessionId(sessionId)
   const createStartedAt = Date.now()
@@ -445,6 +446,12 @@ export async function createPty(
     taskId,
     payload: {
       mode: mode ?? null,
+      type: type ?? null,
+      command: command ?? null,
+      args: args ?? null,
+      patternAttention: patternAttention ?? null,
+      patternWorking: patternWorking ?? null,
+      patternError: patternError ?? null,
       providerArgs: providerArgs ?? [],
       codeMode: codeMode ?? null,
       hasConversationId: Boolean(conversationId),
@@ -466,7 +473,11 @@ export async function createPty(
 
   try {
     const terminalMode = mode || 'claude-code'
-    const adapter = getAdapter(terminalMode)
+    const adapter = getAdapter(terminalMode, type, command, args, {
+      attention: patternAttention,
+      working: patternWorking,
+      error: patternError
+    })
     const resuming = !!existingConversationId
     const effectiveConversationId = existingConversationId || conversationId
 

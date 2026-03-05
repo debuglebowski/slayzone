@@ -1,7 +1,19 @@
 import type { Project, CreateProjectInput, UpdateProjectInput, ExecutionContext } from '@slayzone/projects/shared'
 import type { Task, CreateTaskInput, UpdateTaskInput, GenerateDescriptionResult, DesktopHandoffPolicy } from '@slayzone/task/shared'
 import type { Tag, CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
-import type { TerminalMode, TerminalState, CodeMode, PtyInfo, PromptInfo, BufferSinceResult, ProviderUsage, ValidationResult } from '@slayzone/terminal/shared'
+import type {
+  TerminalMode,
+  TerminalState,
+  CodeMode,
+  PtyInfo,
+  PromptInfo,
+  BufferSinceResult,
+  ProviderUsage,
+  ValidationResult,
+  TerminalModeInfo,
+  CreateTerminalModeInput,
+  UpdateTerminalModeInput
+} from '@slayzone/terminal/shared'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '@slayzone/task-terminals/shared'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary } from '@slayzone/worktrees/shared'
@@ -33,6 +45,9 @@ import type { DirEntry, ReadFileResult, FileSearchResult, SearchFilesOptions } f
 import type {
   ConnectGithubInput,
   ConnectLinearInput,
+  UpdateIntegrationConnectionInput,
+  ClearProjectProviderInput,
+  ClearProjectConnectionInput,
   ExternalLink,
   GithubIssueSummary,
   GithubProjectSummary,
@@ -44,6 +59,7 @@ import type {
   ImportLinearIssuesInput,
   ImportLinearIssuesResult,
   IntegrationConnectionPublic,
+  IntegrationConnectionUsage,
   IntegrationProjectMapping,
   IntegrationProvider,
   ListGithubRepositoryIssuesInput,
@@ -57,6 +73,7 @@ import type {
   PushTaskInput,
   PushTaskResult,
   SetProjectMappingInput,
+  SetProjectConnectionInput,
   SyncNowInput,
   SyncNowResult,
   TaskSyncStatus
@@ -303,6 +320,16 @@ export interface ElectronAPI {
     validate: (mode: TerminalMode) => Promise<ValidationResult[]>
     setTheme: (theme: { foreground: string; background: string; cursor: string }) => Promise<void>
   }
+  terminalModes: {
+    list: () => Promise<TerminalModeInfo[]>
+    get: (id: string) => Promise<TerminalModeInfo | null>
+    create: (input: CreateTerminalModeInput) => Promise<TerminalModeInfo>
+    update: (id: string, updates: UpdateTerminalModeInput) => Promise<TerminalModeInfo | null>
+    delete: (id: string) => Promise<boolean>
+    test: (command: string) => Promise<{ ok: boolean; error?: string; detail?: string }>
+    restoreDefaults: () => Promise<void>
+    resetToDefaultState: () => Promise<void>
+  }
   git: {
     isGitRepo: (path: string) => Promise<boolean>
     detectWorktrees: (repoPath: string) => Promise<DetectedWorktree[]>
@@ -468,8 +495,14 @@ export interface ElectronAPI {
   integrations: {
     connectGithub: (input: ConnectGithubInput) => Promise<IntegrationConnectionPublic>
     connectLinear: (input: ConnectLinearInput) => Promise<IntegrationConnectionPublic>
+    updateConnection: (input: UpdateIntegrationConnectionInput) => Promise<IntegrationConnectionPublic>
     listConnections: (provider?: IntegrationProvider) => Promise<IntegrationConnectionPublic[]>
+    getConnectionUsage: (connectionId: string) => Promise<IntegrationConnectionUsage>
     disconnect: (connectionId: string) => Promise<boolean>
+    clearProjectProvider: (input: ClearProjectProviderInput) => Promise<boolean>
+    getProjectConnection: (projectId: string, provider: IntegrationProvider) => Promise<string | null>
+    setProjectConnection: (input: SetProjectConnectionInput) => Promise<boolean>
+    clearProjectConnection: (input: ClearProjectConnectionInput) => Promise<boolean>
     listGithubRepositories: (connectionId: string) => Promise<GithubRepositorySummary[]>
     listGithubProjects: (connectionId: string) => Promise<GithubProjectSummary[]>
     listGithubIssues: (

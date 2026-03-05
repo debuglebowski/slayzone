@@ -23,6 +23,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue
 } from '@slayzone/ui'
@@ -54,7 +55,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
 import { RichTextEditor } from '@slayzone/editor'
-import { markSkipCache, usePty } from '@slayzone/terminal'
+import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { TerminalContainer, type TerminalContainerHandle } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
 import { buildStatusOptions, cn, getColumnStatusStyle, projectColorBg, useAppearance } from '@slayzone/ui'
@@ -172,6 +173,8 @@ export function TaskDetailPage({
   terminalFocusRequestId = 0,
   onTerminalFocusRequestHandled,
 }: TaskDetailPageProps): React.JSX.Element {
+  const { modes } = useTerminalModes()
+
   const { colorTintsEnabled } = useAppearance()
   // Main tab session ID format used by TerminalContainer/useTaskTerminals.
   const getMainSessionId = useCallback((id: string) => `${id}:${id}`, [])
@@ -1599,17 +1602,31 @@ export function TaskDetailPage({
                             <SelectTrigger
                               data-testid="terminal-mode-trigger"
                               size="sm"
-                              className="w-36 h-7 text-xs bg-neutral-100 border-neutral-300 dark:bg-neutral-800 dark:border-neutral-700"
+                              className="min-w-32 h-7 text-xs bg-neutral-100 border-neutral-300 dark:bg-neutral-800 dark:border-neutral-700"
                             >
                               <SelectValue />
                             </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="claude-code">Claude Code</SelectItem>
-                              <SelectItem value="codex">Codex</SelectItem>
-                              <SelectItem value="cursor-agent">Cursor Agent</SelectItem>
-                              <SelectItem value="gemini">Gemini</SelectItem>
-                              <SelectItem value="opencode">OpenCode</SelectItem>
-                              <SelectItem value="ccs">CCS - Claude Code</SelectItem>
+                            <SelectContent position="popper" className="min-w-[var(--radix-select-trigger-width)] max-h-none">
+                              {(() => {
+                                const visibleModes = getVisibleModes(modes, task.terminal_mode)
+                                const { builtin, custom } = groupTerminalModes(visibleModes)
+                                return (
+                                  <>
+                                    {builtin.map(mode => (
+                                      <SelectItem key={mode.id} value={mode.id}>
+                                        {getModeLabel(mode)}
+                                      </SelectItem>
+                                    ))}
+                                    {custom.length > 0 && builtin.length > 0 && <SelectSeparator />}
+                                    {custom.map(mode => (
+                                      <SelectItem key={mode.id} value={mode.id}>
+                                        {getModeLabel(mode)}
+                                      </SelectItem>
+                                    ))}
+                                  </>
+                                )
+                              })()}
+                              <SelectSeparator />
                               <SelectItem value="terminal">Terminal</SelectItem>
                             </SelectContent>
                           </Select>
@@ -1932,6 +1949,10 @@ export function TaskDetailPage({
           <div className="shrink-0 h-10 px-2 -mx-3 -mt-3 border-b border-border bg-surface-1 flex items-center">
             <span className="text-sm font-medium">Settings</span>
           </div>
+
+          {/* External sync links */}
+          <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
+
           {/* Description */}
           <div className="flex flex-col min-h-0 relative">
             <RichTextEditor
@@ -2022,9 +2043,6 @@ export function TaskDetailPage({
 
           {/* Spacer — pushes remaining groups to bottom */}
           <div className="flex-1" />
-
-          {/* External sync group — only shown when linked */}
-          <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
 
           {/* Details */}
           <TaskMetadataSidebar

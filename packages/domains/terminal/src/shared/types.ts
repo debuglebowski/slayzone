@@ -1,6 +1,62 @@
-export type TerminalMode = 'claude-code' | 'ccs' | 'codex' | 'cursor-agent' | 'gemini' | 'opencode' | 'terminal'
+export type TerminalMode = string
 export type TerminalState = 'starting' | 'running' | 'attention' | 'error' | 'dead'
 export type CodeMode = 'normal' | 'plan' | 'accept-edits' | 'bypass'
+
+export const BuiltinTerminalMode = {
+  ClaudeCode: 'claude-code',
+  Codex: 'codex',
+  Gemini: 'gemini',
+  CursorAgent: 'cursor-agent',
+  OpenCode: 'opencode',
+  Terminal: 'terminal',
+} as const
+
+export interface TerminalModeInfo {
+  id: string
+  label: string
+  type: string
+  command?: string | null
+  args?: string | null
+  enabled: boolean
+  isBuiltin: boolean
+  order: number
+  patternAttention?: string | null
+  patternWorking?: string | null
+  patternError?: string | null
+}
+
+export interface CreateTerminalModeInput {
+  id: string
+  label: string
+  type: string
+  command?: string | null
+  args?: string | null
+  enabled?: boolean
+  order?: number
+  patternAttention?: string | null
+  patternWorking?: string | null
+  patternError?: string | null
+}
+
+export interface UpdateTerminalModeInput {
+  label?: string
+  type?: string
+  command?: string | null
+  args?: string | null
+  enabled?: boolean
+  order?: number
+  patternAttention?: string | null
+  patternWorking?: string | null
+  patternError?: string | null
+}
+
+export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
+  { id: BuiltinTerminalMode.ClaudeCode, label: 'Claude', type: 'claude-code', command: 'claude', args: '--allow-dangerously-skip-permissions', enabled: true, isBuiltin: true, order: 0 },
+  { id: BuiltinTerminalMode.Codex, label: 'Codex', type: 'codex', command: 'codex', args: '--full-auto --search', enabled: true, isBuiltin: true, order: 1 },
+  { id: BuiltinTerminalMode.Gemini, label: 'Gemini', type: 'gemini', command: 'gemini', args: '--yolo', enabled: true, isBuiltin: true, order: 2 },
+  { id: BuiltinTerminalMode.CursorAgent, label: 'Cursor', type: 'cursor-agent', command: 'cursor-agent', args: '--force', enabled: true, isBuiltin: true, order: 3 },
+  { id: BuiltinTerminalMode.OpenCode, label: 'OpenCode', type: 'opencode', command: 'opencode', args: '', enabled: true, isBuiltin: true, order: 4 },
+]
 
 // Duplicated from @slayzone/projects/shared — neither domain can depend on the
 // other, so both define the same structural type. Keep in sync.

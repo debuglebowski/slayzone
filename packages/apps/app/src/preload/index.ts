@@ -244,6 +244,16 @@ const api: ElectronAPI = {
     getState: (sessionId: string) => ipcRenderer.invoke('pty:getState', sessionId),
     validate: (mode: string) => ipcRenderer.invoke('pty:validate', mode)
   },
+  terminalModes: {
+    list: () => ipcRenderer.invoke('terminalModes:list'),
+    get: (id) => ipcRenderer.invoke('terminalModes:get', id),
+    create: (input) => ipcRenderer.invoke('terminalModes:create', input),
+    update: (id, updates) => ipcRenderer.invoke('terminalModes:update', id, updates),
+    delete: (id) => ipcRenderer.invoke('terminalModes:delete', id),
+    test: (command) => ipcRenderer.invoke('terminalModes:test', command),
+    restoreDefaults: () => ipcRenderer.invoke('terminalModes:restoreDefaults'),
+    resetToDefaultState: () => ipcRenderer.invoke('terminalModes:resetToDefaultState')
+  },
   git: {
     isGitRepo: (path) => ipcRenderer.invoke('git:isGitRepo', path),
     detectWorktrees: (repoPath) => ipcRenderer.invoke('git:detectWorktrees', repoPath),
@@ -470,8 +480,15 @@ const api: ElectronAPI = {
   integrations: {
     connectGithub: (input) => ipcRenderer.invoke('integrations:connect-github', input),
     connectLinear: (input) => ipcRenderer.invoke('integrations:connect-linear', input),
+    updateConnection: (input) => ipcRenderer.invoke('integrations:update-connection', input),
     listConnections: (provider) => ipcRenderer.invoke('integrations:list-connections', provider),
+    getConnectionUsage: (connectionId) => ipcRenderer.invoke('integrations:get-connection-usage', connectionId),
     disconnect: (connectionId) => ipcRenderer.invoke('integrations:disconnect', connectionId),
+    clearProjectProvider: (input) => ipcRenderer.invoke('integrations:clear-project-provider', input),
+    getProjectConnection: (projectId, provider) =>
+      ipcRenderer.invoke('integrations:get-project-connection', projectId, provider),
+    setProjectConnection: (input) => ipcRenderer.invoke('integrations:set-project-connection', input),
+    clearProjectConnection: (input) => ipcRenderer.invoke('integrations:clear-project-connection', input),
     listGithubRepositories: (connectionId) =>
       ipcRenderer.invoke('integrations:list-github-repositories', connectionId),
     listGithubProjects: (connectionId) =>

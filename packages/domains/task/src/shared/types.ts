@@ -22,13 +22,16 @@ export interface ProviderConfig {
 }
 
 /** Maps TerminalMode → settings key + fallback flags for new tasks */
+/**
+ * @deprecated Most provider settings are now database-driven via terminalModes.
+ * Remaining entries are kept for legacy compatibility during refactor.
+ */
 export const PROVIDER_DEFAULTS: Record<string, { settingsKey: string; fallback: string; label: string }> = {
   'claude-code':  { settingsKey: 'default_claude_flags',   fallback: '--allow-dangerously-skip-permissions', label: 'Claude' },
   'codex':        { settingsKey: 'default_codex_flags',    fallback: '--full-auto --search',                 label: 'Codex' },
   'cursor-agent': { settingsKey: 'default_cursor_flags',   fallback: '--force',                              label: 'Cursor' },
   'gemini':       { settingsKey: 'default_gemini_flags',   fallback: '--yolo',                               label: 'Gemini' },
   'opencode':     { settingsKey: 'default_opencode_flags', fallback: '',                                     label: 'OpenCode' },
-  'ccs':          { settingsKey: 'ccs_default_profile',   fallback: '',                                     label: 'CCS - Claude Code' },
 }
 
 export function getProviderConversationId(cfg: ProviderConfig | undefined | null, mode: string): string | null {
