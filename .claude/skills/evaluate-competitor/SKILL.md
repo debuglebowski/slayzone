@@ -1,6 +1,6 @@
 ---
 name: evaluate-competitor
-description: "You are evaluating a competitor for the SlayZone comparison table. The competitor is: $ARGUMENTS"
+description: "Evaluate a competitor for the SlayZone comparison table"
 ---
 
 You are evaluating a competitor for the SlayZone comparison table. The competitor is: $ARGUMENTS

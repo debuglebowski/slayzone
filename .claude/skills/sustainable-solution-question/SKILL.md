@@ -1,6 +1,6 @@
 ---
 name: sustainable-solution-question
-description: "Is this a sustainable solution?"
+description: "Asks if the current solution is a sustainable one"
 ---
 
 Is this a sustainable solution?

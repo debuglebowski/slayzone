@@ -1,6 +1,6 @@
 ---
 name: release
-description: "Create a new release. Argument: patch, minor, major, or an explicit version (e.g. 0.3.0). Usage: /release patch"
+description: "Create a new release for SlayZone. The version argument is: $ARGUMENTS"
 ---
 
 Create a new release for SlayZone. The version argument is: $ARGUMENTS
