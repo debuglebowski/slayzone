@@ -77,6 +77,7 @@ export function RegionSelector({ onSelect, onCancel }: RegionSelectorProps) {
     <div
       ref={overlayRef}
       tabIndex={-1}
+      data-testid="region-selector-overlay"
       className="fixed inset-0 z-[9999] cursor-crosshair select-none outline-none"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
