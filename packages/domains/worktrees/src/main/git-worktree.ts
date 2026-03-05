@@ -353,7 +353,15 @@ export function runWorktreeSetupScriptSync(
 }
 
 export function removeWorktree(repoPath: string, worktreePath: string): void {
-  spawnGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath })
+  try {
+    spawnGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath })
+  } catch (err) {
+    if (!existsSync(worktreePath)) {
+      spawnGit(['worktree', 'prune'], { cwd: repoPath })
+      return
+    }
+    throw err
+  }
 }
 
 export function initRepo(path: string): void {
