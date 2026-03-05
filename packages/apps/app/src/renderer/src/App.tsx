@@ -392,6 +392,7 @@ function App(): React.JSX.Element {
         })
       })
       unsubscribes.push(unsub)
+
     }
 
     // Cleanup closed tabs from state

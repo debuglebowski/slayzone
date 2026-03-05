@@ -3,7 +3,7 @@ import { execFile } from 'child_process'
 import { app, BrowserWindow, Notification, nativeTheme } from 'electron'
 import { homedir, platform, userInfo } from 'os'
 import type { Database } from 'better-sqlite3'
-import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
+import { DEV_SERVER_URL_PATTERN, extractOscTitle } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, CodeMode, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { RingBuffer, type BufferChunk } from './ring-buffer'
@@ -115,6 +115,8 @@ interface PtySession {
   detectedDevUrls: Set<string>
   // Pending partial escape sequence from previous onData chunk
   syncQueryPending: string
+  // Last emitted process title (to deduplicate pty:title-change events)
+  lastEmittedTitle: string
 }
 
 export type { PtyInfo }
@@ -599,7 +601,8 @@ export async function createPty(
       statusOutputBuffer: '',
       // Dev server URL dedup
       detectedDevUrls: new Set(),
-      syncQueryPending: ''
+      syncQueryPending: '',
+      lastEmittedTitle: ''
     })
     stateMachine.register(sessionId, 'starting')
     let firstOutputTs: number | null = null
@@ -852,6 +855,18 @@ export async function createPty(
       if (prompt && !win.isDestroyed()) {
         try {
           win.webContents.send('pty:prompt', sessionId, prompt)
+        } catch {
+          // Window destroyed, ignore
+        }
+      }
+
+      // Emit terminal title changes: prefer OSC 0/1/2 title, fall back to PTY process name
+      const oscTitle = extractOscTitle(data)
+      const processTitle = oscTitle ?? session.pty.process
+      if (processTitle && processTitle !== session.lastEmittedTitle && !win.isDestroyed()) {
+        session.lastEmittedTitle = processTitle
+        try {
+          win.webContents.send('pty:title-change', sessionId, processTitle)
         } catch {
           // Window destroyed, ignore
         }

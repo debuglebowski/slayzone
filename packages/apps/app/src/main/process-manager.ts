@@ -1,8 +1,9 @@
-import { spawn } from 'child_process'
+import { spawn, execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
+import { extractOscTitle } from '@slayzone/terminal/shared'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
 
@@ -19,10 +20,13 @@ export interface ProcessInfo {
   exitCode: number | null
   logBuffer: string[]
   startedAt: string
+  processTitle: string | null
 }
 
 interface ManagedProcess extends ProcessInfo {
   child: ChildProcess | null
+  titlePollTimer: ReturnType<typeof setInterval> | null
+  oscTitleSet: boolean  // true once an OSC title has been received; blocks ps polling
 }
 
 const LOG_BUFFER_MAX = 500
@@ -62,6 +66,8 @@ export function initProcessManager(database: Database): void {
       logBuffer: [],
       child: null,
       startedAt: new Date().toISOString(),
+      processTitle: null, oscTitleSet: false,
+      titlePollTimer: null,
     })
   }
 }
@@ -82,6 +88,55 @@ function setStatus(proc: ManagedProcess, status: ProcessStatus): void {
   }
 }
 
+function pollProcessTitle(proc: ManagedProcess): void {
+  const pid = proc.pid
+  if (!pid || proc.oscTitleSet) return
+  execFile('ps', ['-o', 'comm=', '-p', String(pid)], { timeout: 2000 }, (err, stdout) => {
+    if (err || !stdout.trim() || proc.oscTitleSet) return
+    const title = stdout.trim().split('/').pop()!
+    if (!title) return
+    emitTitle(proc, title, false)
+  })
+}
+
+function startTitlePolling(proc: ManagedProcess): void {
+  if (process.platform === 'win32') return
+  stopTitlePolling(proc)
+  pollProcessTitle(proc)
+  proc.titlePollTimer = setInterval(() => pollProcessTitle(proc), 2000)
+}
+
+function stopTitlePolling(proc: ManagedProcess): void {
+  if (proc.titlePollTimer) {
+    clearInterval(proc.titlePollTimer)
+    proc.titlePollTimer = null
+  }
+}
+
+function emitTitle(proc: ManagedProcess, title: string, fromOsc: boolean): void {
+  if (title === proc.processTitle) return
+  proc.processTitle = title
+  // OSC title is explicit from the process — stop polling so ps doesn't overwrite it
+  if (fromOsc) {
+    proc.oscTitleSet = true
+    stopTitlePolling(proc)
+  }
+  if (!win?.webContents.isDestroyed()) {
+    win?.webContents.send('processes:title', proc.id, title)
+  }
+}
+
+function handleProcessData(proc: ManagedProcess, data: Buffer): void {
+  const str = data.toString()
+  const oscTitle = extractOscTitle(str)
+  if (oscTitle) emitTitle(proc, oscTitle, true)
+  // Strip OSC sequences from log output
+  const clean = str.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+  for (const line of clean.split('\n')) {
+    if (line.trim()) pushLog(proc, line)
+  }
+}
+
 function doSpawn(proc: ManagedProcess): void {
   const child = spawn(proc.command, [], {
     cwd: proc.cwd,
@@ -92,24 +147,21 @@ function doSpawn(proc: ManagedProcess): void {
   proc.child = child
   proc.pid = child.pid ?? null
   proc.exitCode = null
+  proc.processTitle = null
+  proc.oscTitleSet = false
+  startTitlePolling(proc)
 
-  child.stdout?.on('data', (data: Buffer) => {
-    for (const line of data.toString().split('\n')) {
-      if (line.trim()) pushLog(proc, line)
-    }
-  })
-
-  child.stderr?.on('data', (data: Buffer) => {
-    for (const line of data.toString().split('\n')) {
-      if (line.trim()) pushLog(proc, line)
-    }
-  })
+  child.stdout?.on('data', (data: Buffer) => handleProcessData(proc, data))
+  child.stderr?.on('data', (data: Buffer) => handleProcessData(proc, data))
 
   child.on('exit', (code) => {
     if (proc.child !== child) return // stale exit from restarted process
+    stopTitlePolling(proc)
     proc.pid = null
     proc.child = null
     proc.exitCode = code
+    proc.processTitle = null
+    proc.oscTitleSet = false
     if (proc.autoRestart && processes.has(proc.id)) {
       pushLog(proc, `[exited with code ${code ?? '?'}, restarting in 1s...]`)
       setStatus(proc, 'running')
@@ -135,7 +187,8 @@ export function createProcess(
     id, taskId, projectId, label, command, cwd, autoRestart,
     status: 'stopped', pid: null, exitCode: null,
     logBuffer: [], child: null,
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    processTitle: null, titlePollTimer: null, oscTitleSet: false,
   }
   processes.set(id, proc)
   db?.prepare('INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -156,7 +209,8 @@ export function spawnProcess(
     id, taskId, projectId, label, command, cwd, autoRestart,
     status: 'running', pid: null, exitCode: null,
     logBuffer: [], child: null,
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    processTitle: null, titlePollTimer: null, oscTitleSet: false,
   }
   processes.set(id, proc)
   db?.prepare('INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -183,6 +237,7 @@ export function updateProcess(
 export function killProcess(id: string): boolean {
   const proc = processes.get(id)
   if (!proc) return false
+  stopTitlePolling(proc)
   proc.autoRestart = false
   proc.child?.kill()
   proc.child = null
@@ -213,15 +268,16 @@ export function killTaskProcesses(taskId: string): void {
 export function listForTask(taskId: string | null, projectId: string | null): ProcessInfo[] {
   return Array.from(processes.values())
     .filter(p => p.taskId === taskId || (p.taskId === null && p.projectId != null && p.projectId === projectId))
-    .map(({ child: _, ...info }) => info)
+    .map(({ child: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info)
 }
 
 export function listAllProcesses(): ProcessInfo[] {
-  return Array.from(processes.values()).map(({ child: _, ...info }) => info)
+  return Array.from(processes.values()).map(({ child: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info)
 }
 
 export function killAllProcesses(): void {
   for (const proc of processes.values()) {
+    stopTitlePolling(proc)
     proc.autoRestart = false
     proc.child?.kill()
     proc.child = null

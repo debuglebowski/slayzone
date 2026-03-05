@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import { usePty } from '@slayzone/terminal'
 import type { TerminalMode, CodeMode } from '@slayzone/terminal/shared'
 import { useTaskTerminals } from './useTaskTerminals'
@@ -71,7 +71,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     getSessionId
   } = useTaskTerminals(taskId, defaultMode)
 
-  const { subscribePrompt } = usePty()
+  const { subscribePrompt, subscribeTitleChange, getTitle } = usePty()
   const terminalApiRef = useRef<{
     sendInput: (text: string) => Promise<void>
     write: (data: string) => Promise<boolean>
@@ -100,6 +100,34 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       // Main tab prompt events could trigger task-level UI updates
     })
   }, [taskId, tabs, getSessionId, subscribePrompt])
+
+  // Track terminal process titles for tab labels
+  const [terminalTitles, setTerminalTitles] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    const unsubs: Array<() => void> = []
+    for (const tab of tabs) {
+      const sessionId = getSessionId(tab.id)
+      // Seed with current title
+      const current = getTitle(sessionId)
+      if (current) {
+        setTerminalTitles(prev => {
+          if (prev.get(tab.id) === current) return prev
+          const next = new Map(prev)
+          next.set(tab.id, current)
+          return next
+        })
+      }
+      const unsub = subscribeTitleChange(sessionId, (title) => {
+        setTerminalTitles(prev => {
+          const next = new Map(prev)
+          next.set(tab.id, title)
+          return next
+        })
+      })
+      unsubs.push(unsub)
+    }
+    return () => unsubs.forEach(u => u())
+  }, [tabs, getSessionId, subscribeTitleChange, getTitle])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -286,6 +314,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       <TerminalTabBar
         groups={groups}
         activeGroupId={activeGroupId}
+        terminalTitles={terminalTitles}
         onGroupSelect={setActiveGroupId}
         onGroupCreate={() => createTab().then(tab => focusGroupTerminal(`${taskId}:${tab.id}`))}
         onGroupClose={closeGroup}

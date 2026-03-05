@@ -7,6 +7,7 @@ import type { TerminalMode } from '@slayzone/terminal/shared'
 interface TerminalTabBarProps {
   groups: TerminalGroup[]
   activeGroupId: string
+  terminalTitles?: Map<string, string>
   onGroupSelect: (groupId: string) => void
   onGroupCreate: () => void
   onGroupClose: (groupId: string) => void
@@ -27,7 +28,8 @@ const MODE_ICONS: Record<TerminalMode, typeof TerminalIcon> = {
   'terminal': TerminalIcon
 }
 
-function getTabLabel(tab: TerminalTab): string {
+function getTabLabel(tab: TerminalTab, processTitle?: string): string {
+  if (processTitle && !tab.isMain) return processTitle
   if (tab.label) return tab.label
   if (tab.isMain) {
     switch (tab.mode) {
@@ -48,6 +50,7 @@ const DRAG_TYPE = 'application/x-slayzone-pane'
 export function TerminalTabBar({
   groups,
   activeGroupId,
+  terminalTitles,
   onGroupSelect,
   onGroupCreate,
   onGroupClose,
@@ -207,7 +210,7 @@ export function TerminalTabBar({
                           onClick={e => e.stopPropagation()}
                         />
                       ) : (
-                        <span className="truncate text-sm">{getTabLabel(tab)}</span>
+                        <span className="truncate text-sm">{getTabLabel(tab, terminalTitles?.get(tab.id))}</span>
                       )}
                       {tab.isMain && (
                         <span className="text-[10px] text-orange-300/80 bg-orange-400/10 px-1.5 rounded-full">main</span>

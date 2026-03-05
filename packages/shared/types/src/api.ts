@@ -89,6 +89,7 @@ export interface ProcessInfo {
   exitCode: number | null
   logBuffer: string[]
   startedAt: string
+  processTitle: string | null
 }
 
 export interface DiagnosticsConfig {
@@ -299,6 +300,7 @@ export interface ElectronAPI {
     onPrompt: (callback: (sessionId: string, prompt: PromptInfo) => void) => () => void
     onSessionDetected: (callback: (sessionId: string, conversationId: string) => void) => () => void
     onDevServerDetected: (callback: (sessionId: string, url: string) => void) => () => void
+    onTitleChange: (callback: (sessionId: string, title: string) => void) => () => void
     getState: (sessionId: string) => Promise<TerminalState | null>
     validate: (mode: TerminalMode) => Promise<ValidationResult[]>
     setTheme: (theme: { foreground: string; background: string; cursor: string }) => Promise<void>
@@ -513,5 +515,6 @@ export interface ElectronAPI {
     killTask: (taskId: string) => Promise<void>
     onLog: (cb: (processId: string, line: string) => void) => () => void
     onStatus: (cb: (processId: string, status: ProcessStatus) => void) => () => void
+    onTitle: (cb: (processId: string, title: string) => void) => () => void
   }
 }
