@@ -3,6 +3,7 @@ import type { ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
+import { extractOscTitle } from '@slayzone/terminal/shared'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
 
@@ -99,6 +100,7 @@ function pollProcessTitle(proc: ManagedProcess): void {
 }
 
 function startTitlePolling(proc: ManagedProcess): void {
+  if (process.platform === 'win32') return
   stopTitlePolling(proc)
   pollProcessTitle(proc)
   proc.titlePollTimer = setInterval(() => pollProcessTitle(proc), 2000)
@@ -109,17 +111,6 @@ function stopTitlePolling(proc: ManagedProcess): void {
     clearInterval(proc.titlePollTimer)
     proc.titlePollTimer = null
   }
-}
-
-// Extract terminal title from OSC 0/1/2 sequences (e.g. \x1b]0;title\x07)
-function extractOscTitle(data: string): string | undefined {
-  let title: string | undefined
-  const re = /\x1b\]([012]);([^\x07\x1b]*)(?:\x07|\x1b\\)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(data)) !== null) {
-    title = m[2]
-  }
-  return title
 }
 
 function emitTitle(proc: ManagedProcess, title: string, fromOsc: boolean): void {
@@ -170,7 +161,7 @@ function doSpawn(proc: ManagedProcess): void {
     proc.child = null
     proc.exitCode = code
     proc.processTitle = null
-  proc.oscTitleSet = false
+    proc.oscTitleSet = false
     if (proc.autoRestart && processes.has(proc.id)) {
       pushLog(proc, `[exited with code ${code ?? '?'}, restarting in 1s...]`)
       setStatus(proc, 'running')

@@ -3,7 +3,7 @@ import { execFile } from 'child_process'
 import { app, BrowserWindow, Notification, nativeTheme } from 'electron'
 import { homedir, platform, userInfo } from 'os'
 import type { Database } from 'better-sqlite3'
-import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
+import { DEV_SERVER_URL_PATTERN, extractOscTitle } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, CodeMode, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { RingBuffer, type BufferChunk } from './ring-buffer'
@@ -176,16 +176,7 @@ function hexToOscRgb(hex: string): string {
   return `rgb:${r}${r}/${g}${g}/${b}${b}`
 }
 
-// Extract terminal title from OSC 0/1/2 sequences (returns last title found, or undefined)
-function extractOscTitle(data: string): string | undefined {
-  let title: string | undefined
-  const re = /\x1b\]([012]);([^\x07\x1b]*)(?:\x07|\x1b\\)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(data)) !== null) {
-    title = m[2]
-  }
-  return title
-}
+
 
 // Filter out terminal escape sequences that cause issues
 function filterBufferData(data: string): string {
