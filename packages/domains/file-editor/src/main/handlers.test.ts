@@ -54,6 +54,11 @@ describe('fs:readDir', () => {
     expect(names).toContain('main.ts')
     expect(names).toContain('utils.ts')
   })
+
+  test('returns empty list for missing subdirectory', () => {
+    const entries = h.invoke('fs:readDir', root, 'missing-dir') as { name: string }[]
+    expect(entries).toEqual([])
+  })
 })
 
 describe('fs:readFile', () => {

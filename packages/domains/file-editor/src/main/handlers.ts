@@ -71,7 +71,15 @@ function addWinToWatcher(root: string, win: BrowserWindow, wins: Set<BrowserWind
 export function registerFileEditorHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('fs:readDir', (_event, rootPath: string, dirPath: string): DirEntry[] => {
     const abs = dirPath ? assertWithinRoot(rootPath, dirPath) : path.resolve(rootPath)
-    const entries = fs.readdirSync(abs, { withFileTypes: true })
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(abs, { withFileTypes: true })
+    } catch (error) {
+      // File trees can request folders that were just moved/deleted. Treat as empty
+      // so the renderer can recover without surfacing noisy IPC errors.
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return []
+      throw error
+    }
     return entries
       .filter((e) => !ALWAYS_IGNORED.has(e.name))
       .map((e) => {
