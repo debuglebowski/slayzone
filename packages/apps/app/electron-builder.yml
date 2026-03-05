@@ -23,6 +23,7 @@ nsis:
   createDesktopShortcut: always
 afterPack: build/afterPack.cjs
 mac:
+  artifactName: ${productName}-${arch}.${ext}
   hardenedRuntime: true
   gatekeeperAssess: false
   icon: build/icon.icns

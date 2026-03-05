@@ -1,0 +1,30 @@
+name: Release PR Dry Run
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/release-pr-dry-run.yml
+      - .github/workflows/release-foundation.yml
+      - packages/apps/app/electron-builder.yml
+      - packages/apps/app/package.json
+      - packages/apps/cli/package.json
+      - packages/apps/cli/src/**
+      - scripts/generate-release-notes.js
+      - scripts/release/**
+      - package.json
+      - pnpm-lock.yaml
+
+concurrency:
+  group: release-pr-dry-run-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dry-run:
+    uses: ./.github/workflows/release-foundation.yml
+    with:
+      mode: dry-run
+      release_tag: ${{ format('v0.0.0-pr.{0}', github.event.pull_request.number) }}
+      channels_json: '["stable"]'
+    secrets: inherit

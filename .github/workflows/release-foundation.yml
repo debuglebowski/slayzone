@@ -1,0 +1,467 @@
+name: Release Foundation
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: Release mode (dry-run or publish)
+        required: true
+        type: string
+      release_tag:
+        description: Release tag in vX.Y.Z format
+        required: true
+        type: string
+      channels_json:
+        description: JSON array of channels to publish
+        required: false
+        default: '["stable"]'
+        type: string
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.validate.outputs.mode }}
+      release_tag: ${{ steps.validate.outputs.release_tag }}
+      version: ${{ steps.validate.outputs.version }}
+      channels_json: ${{ steps.validate.outputs.channels_json }}
+      source_ref: ${{ steps.validate.outputs.source_ref }}
+      build_commit: ${{ steps.build_commit.outputs.build_commit }}
+    steps:
+      - name: Validate inputs
+        id: validate
+        shell: bash
+        env:
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+          INPUT_CHANNELS_JSON: ${{ inputs.channels_json }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$INPUT_MODE" != "dry-run" ] && [ "$INPUT_MODE" != "publish" ]; then
+            echo "mode must be 'dry-run' or 'publish', got: $INPUT_MODE" >&2
+            exit 1
+          fi
+
+          if ! [[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release_tag must match vX.Y.Z (optionally with suffix), got: $INPUT_TAG" >&2
+            exit 1
+          fi
+
+          CHANNELS_JSON=$(node -e "const raw=process.env.INPUT_CHANNELS_JSON;let parsed;try{parsed=JSON.parse(raw);}catch{console.error('channels_json must be valid JSON');process.exit(1);}if(!Array.isArray(parsed)||parsed.length===0){console.error('channels_json must be a non-empty array');process.exit(1);}const normalized=[...new Set(parsed.map((c)=>String(c).trim().toLowerCase()).filter(Boolean))];if(normalized.length===0){console.error('channels_json must contain at least one non-empty channel');process.exit(1);}process.stdout.write(JSON.stringify(normalized));")
+
+          if [ "$INPUT_MODE" = "publish" ]; then
+            SOURCE_REF="refs/tags/$INPUT_TAG"
+          else
+            SOURCE_REF="$FALLBACK_REF"
+          fi
+
+          echo "mode=$INPUT_MODE" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${INPUT_TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "channels_json=$CHANNELS_JSON" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Validate required publish secrets
+        if: steps.validate.outputs.mode == 'publish'
+        shell: bash
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          VITE_CONVEX_URL: ${{ secrets.VITE_CONVEX_URL }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in \
+            CONVEX_DEPLOY_KEY \
+            MACOS_CERTIFICATE \
+            MACOS_CERTIFICATE_PWD \
+            APPLE_ID \
+            APPLE_APP_SPECIFIC_PASSWORD \
+            APPLE_TEAM_ID \
+            POSTHOG_API_KEY \
+            POSTHOG_HOST \
+            VITE_CONVEX_URL; do
+            if [ -z "${!name}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required publish secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.validate.outputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Resolve build commit
+        id: build_commit
+        shell: bash
+        run: echo "build_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  preflight:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+  deploy-convex:
+    needs: [resolve, preflight]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
+      - name: Deploy Convex to production
+        if: needs.resolve.outputs.mode == 'publish'
+        run: npx convex deploy --cmd 'echo skip'
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+
+      - name: Skip Convex deploy in dry-run mode
+        if: needs.resolve.outputs.mode == 'dry-run'
+        run: echo "Skipping Convex deploy for dry-run mode."
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: [resolve, preflight, deploy-convex]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+            build_args: --mac --arm64
+          - name: linux-x64
+            os: ubuntu-latest
+            build_args: --linux --x64
+          - name: windows
+            os: windows-latest
+            build_args: --win --x64 --arm64
+
+    runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Python setuptools (needed by node-gyp on macOS)
+        if: runner.os == 'macOS'
+        run: pip3 install --break-system-packages setuptools
+
+      - name: Install Python setuptools (needed by node-gyp on Windows)
+        if: runner.os == 'Windows'
+        run: pip install setuptools
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
+      - name: Import macOS certificate
+        if: runner.os == 'macOS' && needs.resolve.outputs.mode == 'publish'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN_PATH" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Build CLI
+        run: pnpm --filter @slayzone/cli build
+
+      - name: Build
+        run: pnpm build
+        env:
+          POSTHOG_API_KEY: ${{ needs.resolve.outputs.mode == 'publish' && secrets.POSTHOG_API_KEY || 'dry-run' }}
+          POSTHOG_HOST: ${{ needs.resolve.outputs.mode == 'publish' && secrets.POSTHOG_HOST || 'https://app.posthog.com' }}
+          VITE_CONVEX_URL: ${{ needs.resolve.outputs.mode == 'publish' && secrets.VITE_CONVEX_URL || 'https://example.invalid' }}
+          VITE_COMMUNITY_DISCORD_URL: ${{ vars.VITE_COMMUNITY_DISCORD_URL || 'https://discord.gg/g7xPHXaU98' }}
+          VITE_UPDATES_X_URL: ${{ vars.VITE_UPDATES_X_URL || 'https://x.com/debuglebowski' }}
+
+      - name: Get electron version
+        shell: bash
+        run: echo "ELECTRON_VERSION=$(cd packages/apps/app && node -p "require('electron/package.json').version")" >> $GITHUB_ENV
+
+      - name: Strip workspace deps (bundled by electron-vite)
+        run: node -e "const fs=require('fs'),p='packages/apps/app/package.json',pkg=JSON.parse(fs.readFileSync(p));Object.keys(pkg.dependencies).filter(k=>k.startsWith('@slayzone/')).forEach(k=>delete pkg.dependencies[k]);fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\n')"
+
+      - name: Package
+        shell: bash
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+
+          EXTRA_ARGS=""
+          if [ "${{ needs.resolve.outputs.mode }}" = "dry-run" ] && [ "${{ runner.os }}" = "macOS" ]; then
+            EXTRA_ARGS="-c.mac.notarize=false"
+          fi
+
+          pnpm --filter @slayzone/app exec electron-builder ${{ matrix.build_args }} $EXTRA_ARGS -c.electronVersion=${{ env.ELECTRON_VERSION }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ needs.resolve.outputs.mode == 'dry-run' && 'false' || '' }}
+          WIN_CSC_LINK: ${{ needs.resolve.outputs.mode == 'publish' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ needs.resolve.outputs.mode == 'publish' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ needs.resolve.outputs.mode == 'publish' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ needs.resolve.outputs.mode == 'publish' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ needs.resolve.outputs.mode == 'publish' && secrets.APPLE_TEAM_ID || '' }}
+
+      - name: Collect release assets
+        run: |
+          node scripts/release/collect-release-assets.mjs \
+            --input packages/apps/app/dist \
+            --output "${{ runner.temp }}/release-assets/${{ matrix.name }}"
+
+      - name: Upload build assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-${{ matrix.name }}
+          path: ${{ runner.temp }}/release-assets/${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 90
+
+  bundle:
+    runs-on: ubuntu-latest
+    needs: [resolve, build]
+    steps:
+      - name: Download platform build assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-build-*
+          path: ${{ runner.temp }}/release-builds
+
+      - name: Assemble release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ASSETS_DIR="$RUNNER_TEMP/release-bundle/assets"
+          mkdir -p "$ASSETS_DIR"
+
+          while IFS= read -r -d '' file; do
+            name=$(basename "$file")
+            if [ -f "$ASSETS_DIR/$name" ]; then
+              echo "Duplicate asset filename detected: $name" >&2
+              exit 1
+            fi
+            cp "$file" "$ASSETS_DIR/$name"
+          done < <(find "$RUNNER_TEMP/release-builds" -type f -print0)
+
+          node scripts/release/generate-release-manifest.mjs \
+            --assets-dir "$ASSETS_DIR" \
+            --output "$RUNNER_TEMP/release-bundle/release-manifest.json" \
+            --checksums "$RUNNER_TEMP/release-bundle/SHA256SUMS.txt" \
+            --tag "${{ needs.resolve.outputs.release_tag }}" \
+            --commit "${{ needs.resolve.outputs.build_commit }}" \
+            --mode "${{ needs.resolve.outputs.mode }}" \
+            --channels-json '${{ needs.resolve.outputs.channels_json }}'
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/release-bundle
+          if-no-files-found: error
+          retention-days: 90
+
+  publish-channel:
+    name: Publish (${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    needs: [resolve, bundle]
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(needs.resolve.outputs.channels_json) }}
+
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: release-bundle
+
+      - uses: actions/checkout@v4
+        if: needs.resolve.outputs.mode == 'publish'
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - name: Resolve channel target
+        id: channel
+        shell: bash
+        env:
+          BASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          CHANNEL: ${{ matrix.channel }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [ "$CHANNEL" = "stable" ]; then
+            channel_tag="$BASE_TAG"
+            release_title="SlayZone $VERSION"
+            prerelease="false"
+          else
+            channel_tag="$BASE_TAG-$CHANNEL"
+            release_title="SlayZone $VERSION ($CHANNEL)"
+            prerelease="true"
+          fi
+
+          echo "channel_tag=$channel_tag" >> "$GITHUB_OUTPUT"
+          echo "release_title=$release_title" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        if: needs.resolve.outputs.mode == 'publish'
+        shell: bash
+        env:
+          BASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          CHANNEL: ${{ matrix.channel }}
+        run: |
+          set -euo pipefail
+
+          NOTES=$(node scripts/generate-release-notes.js "$BASE_TAG" || true)
+          if [ -z "$NOTES" ]; then
+            NOTES="Release $BASE_TAG"
+          fi
+
+          if [ "$CHANNEL" = "stable" ]; then
+            printf '%s\n' "$NOTES" > /tmp/release-notes.md
+          else
+            {
+              printf 'Channel: %s\n\n' "$CHANNEL"
+              printf '%s\n' "$NOTES"
+            } > /tmp/release-notes.md
+          fi
+
+      - name: Publish channel assets
+        if: needs.resolve.outputs.mode == 'publish'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL_TAG: ${{ steps.channel.outputs.channel_tag }}
+          RELEASE_TITLE: ${{ steps.channel.outputs.release_title }}
+          PRERELEASE: ${{ steps.channel.outputs.prerelease }}
+          SOURCE_REF: ${{ needs.resolve.outputs.build_commit }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Using existing release: $CHANNEL_TAG"
+          else
+            if [ "$PRERELEASE" = "true" ]; then
+              gh release create "$CHANNEL_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$SOURCE_REF" \
+                --title "$RELEASE_TITLE" \
+                --notes-file /tmp/release-notes.md \
+                --draft \
+                --prerelease
+            else
+              gh release create "$CHANNEL_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$SOURCE_REF" \
+                --title "$RELEASE_TITLE" \
+                --notes-file /tmp/release-notes.md \
+                --draft
+            fi
+          fi
+
+          for file in release-bundle/assets/* release-bundle/SHA256SUMS.txt release-bundle/release-manifest.json; do
+            gh release upload "$CHANNEL_TAG" "$file" --repo "$GITHUB_REPOSITORY" --clobber
+          done
+
+          if [ "$PRERELEASE" = "true" ]; then
+            gh release edit "$CHANNEL_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --notes-file /tmp/release-notes.md \
+              --draft=false \
+              --prerelease
+          else
+            gh release edit "$CHANNEL_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --notes-file /tmp/release-notes.md \
+              --draft=false
+          fi
+
+      - name: Dry-run summary
+        if: needs.resolve.outputs.mode == 'dry-run'
+        shell: bash
+        env:
+          CHANNEL_TAG: ${{ steps.channel.outputs.channel_tag }}
+          CHANNEL: ${{ matrix.channel }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "Channel: $CHANNEL"
+            echo "Would publish as tag: $CHANNEL_TAG"
+            echo
+            echo "Assets:"
+            ls -1 release-bundle/assets
+            echo
+            echo "Checksum file: SHA256SUMS.txt"
+            echo "Manifest file: release-manifest.json"
+          } >> "$GITHUB_STEP_SUMMARY"

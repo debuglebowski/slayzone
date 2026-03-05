@@ -11,6 +11,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  workflow-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint GitHub workflows
+        uses: rhysd/actionlint@v1
+
+      - name: Enforce release workflow policy
+        run: bash scripts/ci/check-release-workflow-policy.sh
+
   check:
     runs-on: ubuntu-latest
 
@@ -41,3 +53,5 @@ jobs:
           POSTHOG_API_KEY: ci
           POSTHOG_HOST: https://app.posthog.com
           VITE_CONVEX_URL: https://example.invalid
+          VITE_COMMUNITY_DISCORD_URL: ${{ vars.VITE_COMMUNITY_DISCORD_URL || 'https://discord.gg/g7xPHXaU98' }}
+          VITE_UPDATES_X_URL: ${{ vars.VITE_UPDATES_X_URL || 'https://x.com/debuglebowski' }}
