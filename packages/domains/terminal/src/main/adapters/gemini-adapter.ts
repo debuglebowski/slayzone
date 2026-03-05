@@ -1,5 +1,5 @@
-import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
-import { getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
+import type { TerminalAdapter, PromptInfo, ActivityState, ErrorInfo, ValidationResult } from './types'
+import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for Google Gemini.
@@ -10,20 +10,6 @@ export class GeminiAdapter implements TerminalAdapter {
   // Ink TUI redraws in bursts; short idle timeout to detect when response is done
   readonly idleTimeoutMs = 2500
   readonly sessionIdCommand = '/stats'
-
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnResult {
-    const args: string[] = []
-
-    if (resuming && conversationId) {
-      args.push('--resume', 'latest')
-    }
-
-    const shell = resolveUserShell()
-    return {
-      config: { shell, args: getShellStartupArgs(shell) },
-      binary: { name: 'gemini', args, providerArgs, initialPrompt }
-    }
-  }
 
   private static stripAnsi(data: string): string {
     return data

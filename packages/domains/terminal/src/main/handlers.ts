@@ -7,7 +7,7 @@ import { createPty, writePty, resizePty, killPty, hasPty, getBuffer, clearBuffer
 
 const execFileAsync = promisify(execFile)
 import { getAdapter, type ExecutionContext } from './adapters'
-import type { TerminalMode, CodeMode, TerminalModeInfo, CreateTerminalModeInput, UpdateTerminalModeInput } from '@slayzone/terminal/shared'
+import type { TerminalMode, TerminalModeInfo, CreateTerminalModeInput, UpdateTerminalModeInput } from '@slayzone/terminal/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import { parseShellArgs } from './adapters/flag-parser'
 import { setShellOverrideProvider, listCcsProfiles } from './shell-env'
@@ -20,7 +20,6 @@ interface PtyCreateOpts {
   existingConversationId?: string | null
   mode?: TerminalMode
   initialPrompt?: string | null
-  codeMode?: CodeMode | null
   providerFlags?: string | null
   executionContext?: ExecutionContext | null
 }
@@ -30,14 +29,15 @@ function mapModeRow(row: any): TerminalModeInfo {
     id: row.id,
     label: row.label,
     type: row.type,
-    command: row.command,
-    args: row.args,
+    initialCommand: row.initial_command,
+    resumeCommand: row.resume_command,
+    defaultFlags: row.default_flags,
     enabled: Boolean(row.enabled),
     isBuiltin: Boolean(row.is_builtin),
     order: row.order,
     patternAttention: row.pattern_attention,
     patternWorking: row.pattern_working,
-    patternError: row.pattern_error
+    patternError: row.pattern_error,
   }
 }
 
@@ -82,14 +82,15 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
   ipcMain.handle('terminalModes:create', async (_, input: CreateTerminalModeInput) => {
     const id = input.id
     db.prepare(`
-      INSERT INTO terminal_modes (id, label, type, command, args, enabled, is_builtin, "order", pattern_attention, pattern_working, pattern_error)
+      INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, default_flags, enabled, is_builtin, "order", pattern_attention, pattern_working, pattern_error)
       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
     `).run(
       id,
       input.label,
       input.type,
-      input.command ?? null,
-      input.args ?? null,
+      input.initialCommand ?? null,
+      input.resumeCommand ?? null,
+      input.defaultFlags ?? null,
       input.enabled !== false ? 1 : 0,
       input.order ?? 0,
       input.patternAttention ?? null,
@@ -115,13 +116,17 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
       sets.push('type = ?')
       params.push(updates.type)
     }
-    if (updates.command !== undefined && !isBuiltin) {
-      sets.push('command = ?')
-      params.push(updates.command)
+    if (updates.initialCommand !== undefined && !isBuiltin) {
+      sets.push('initial_command = ?')
+      params.push(updates.initialCommand)
     }
-    if (updates.args !== undefined) {
-      sets.push('args = ?')
-      params.push(updates.args)
+    if (updates.resumeCommand !== undefined && !isBuiltin) {
+      sets.push('resume_command = ?')
+      params.push(updates.resumeCommand ?? null)
+    }
+    if (updates.defaultFlags !== undefined) {
+      sets.push('default_flags = ?')
+      params.push(updates.defaultFlags)
     }
     if (updates.enabled !== undefined) {
       sets.push('enabled = ?')
@@ -166,16 +171,17 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
   ipcMain.handle('terminalModes:restoreDefaults', async () => {
     db.transaction(() => {
       const insertStmt = db.prepare(`
-        INSERT OR IGNORE INTO terminal_modes (id, label, type, command, args, enabled, is_builtin, "order")
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        INSERT OR IGNORE INTO terminal_modes (id, label, type, initial_command, resume_command, default_flags, enabled, is_builtin, "order")
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
       `)
       for (const mode of DEFAULT_TERMINAL_MODES) {
         insertStmt.run(
           mode.id,
           mode.label,
           mode.type,
-          mode.command ?? null,
-          mode.args ?? null,
+          mode.initialCommand ?? null,
+          mode.resumeCommand ?? null,
+          mode.defaultFlags ?? null,
           mode.enabled ? 1 : 0,
           mode.order
         )
@@ -187,16 +193,17 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
     db.transaction(() => {
       db.prepare('DELETE FROM terminal_modes').run()
       const insertStmt = db.prepare(`
-        INSERT INTO terminal_modes (id, label, type, command, args, enabled, is_builtin, "order")
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, default_flags, enabled, is_builtin, "order")
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
       `)
       for (const mode of DEFAULT_TERMINAL_MODES) {
         insertStmt.run(
           mode.id,
           mode.label,
           mode.type,
-          mode.command ?? null,
-          mode.args ?? null,
+          mode.initialCommand ?? null,
+          mode.resumeCommand ?? null,
+          mode.defaultFlags ?? null,
           mode.enabled ? 1 : 0,
           mode.order
         )
@@ -217,23 +224,34 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
         console.warn('[pty:create] Invalid provider flags, ignoring:', (err as Error).message)
       }
 
-      // Look up mode info to get type, command, and default args
+      // Look up mode info to get type, templates, and default flags
       const modeId = opts.mode || 'claude-code'
 
       if (modeId === 'terminal') {
-        return createPty(win, opts.sessionId, opts.cwd, opts.conversationId, opts.existingConversationId, 'terminal', opts.initialPrompt, providerArgs, opts.codeMode, opts.executionContext, 'terminal', null, null, null, null, null)
+        return createPty({ win, sessionId: opts.sessionId, cwd: opts.cwd, conversationId: opts.conversationId, existingConversationId: opts.existingConversationId, mode: 'terminal', initialPrompt: opts.initialPrompt, providerArgs, executionContext: opts.executionContext, type: 'terminal' })
       }
 
-      const modeRow = db.prepare('SELECT type, command, args, pattern_attention, pattern_working, pattern_error FROM terminal_modes WHERE id = ?').get(modeId) as { type: string; command: string | null; args: string | null; pattern_attention: string | null; pattern_working: string | null; pattern_error: string | null } | undefined
+      const modeRow = db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(modeId)
+      const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
 
-      const type = modeRow?.type
-      const command = modeRow?.command
-      const args = modeRow?.args
-      const patternAttention = modeRow?.pattern_attention
-      const patternWorking = modeRow?.pattern_working
-      const patternError = modeRow?.pattern_error
-
-      return createPty(win, opts.sessionId, opts.cwd, opts.conversationId, opts.existingConversationId, opts.mode as TerminalMode, opts.initialPrompt, providerArgs, opts.codeMode, opts.executionContext, type, command, args, patternAttention, patternWorking, patternError)
+      return createPty({
+        win,
+        sessionId: opts.sessionId,
+        cwd: opts.cwd,
+        conversationId: opts.conversationId,
+        existingConversationId: opts.existingConversationId,
+        mode: opts.mode as TerminalMode,
+        initialPrompt: opts.initialPrompt,
+        providerArgs,
+        executionContext: opts.executionContext,
+        type: modeInfo?.type,
+        initialCommand: modeInfo?.initialCommand,
+        resumeCommand: modeInfo?.resumeCommand,
+        defaultFlags: modeInfo?.defaultFlags,
+        patternAttention: modeInfo?.patternAttention,
+        patternWorking: modeInfo?.patternWorking,
+        patternError: modeInfo?.patternError,
+      })
     }
   )
 
@@ -295,7 +313,7 @@ ipcMain.handle('pty:resize', (_, sessionId: string, cols: number, rows: number) 
   })
 
   ipcMain.handle('pty:validate', async (_, mode: TerminalMode) => {
-    const adapter = getAdapter(mode)
+    const adapter = getAdapter({ mode })
     return adapter.validate ? adapter.validate() : []
   })
 }

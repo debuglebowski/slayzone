@@ -4,12 +4,13 @@ import { app, BrowserWindow, Notification, nativeTheme } from 'electron'
 import { homedir, platform, userInfo } from 'os'
 import type { Database } from 'better-sqlite3'
 import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
-import type { TerminalState, PtyInfo, CodeMode, BufferSinceResult } from '@slayzone/terminal/shared'
+import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { RingBuffer, type BufferChunk } from './ring-buffer'
 import { getAdapter, type TerminalMode, type TerminalAdapter, type SpawnConfig, type ActivityState, type ErrorInfo, type ExecutionContext } from './adapters'
+import { interpolateTemplate } from './adapters/template-interpolation'
 import { StateMachine, activityToTerminalState } from './state-machine'
-import { quoteForShell, buildExecCommand } from './shell-env'
+import { quoteForShell, buildExecCommand, resolveUserShell, getShellStartupArgs } from './shell-env'
 
 // Database reference for notifications
 let db: Database | null = null
@@ -412,29 +413,23 @@ export interface CreatePtyOptions {
   win: BrowserWindow
   sessionId: string
   cwd: string
-  mode?: TerminalMode
   conversationId?: string | null
-  resuming?: boolean
+  existingConversationId?: string | null
+  mode?: TerminalMode
+  initialPrompt?: string | null
+  providerArgs?: string[]
+  executionContext?: ExecutionContext | null
+  type?: string
+  initialCommand?: string | null
+  resumeCommand?: string | null
+  defaultFlags?: string | null
+  patternAttention?: string | null
+  patternWorking?: string | null
+  patternError?: string | null
 }
 
-export async function createPty(
-  win: BrowserWindow,
-  sessionId: string,
-  cwd: string,
-  conversationId?: string | null,
-  existingConversationId?: string | null,
-  mode?: TerminalMode,
-  initialPrompt?: string | null,
-  providerArgs?: string[],
-  codeMode?: CodeMode | null,
-  executionContext?: ExecutionContext | null,
-  type?: string,
-  command?: string | null,
-  args?: string | null,
-  patternAttention?: string | null,
-  patternWorking?: string | null,
-  patternError?: string | null
-): Promise<{ success: boolean; error?: string }> {
+export async function createPty(opts: CreatePtyOptions): Promise<{ success: boolean; error?: string }> {
+  const { win, sessionId, cwd, conversationId, existingConversationId, mode, initialPrompt, providerArgs, executionContext, type, initialCommand, resumeCommand, defaultFlags, patternAttention, patternWorking, patternError } = opts
   const taskId = taskIdFromSessionId(sessionId)
   const createStartedAt = Date.now()
   let spawnAttempt: { shell: string; shellArgs: string[]; hasPostSpawnCommand: boolean } | null = null
@@ -447,13 +442,13 @@ export async function createPty(
     payload: {
       mode: mode ?? null,
       type: type ?? null,
-      command: command ?? null,
-      args: args ?? null,
+      initialCommand: initialCommand ?? null,
+      resumeCommand: resumeCommand ?? null,
+      defaultFlags: defaultFlags ?? null,
       patternAttention: patternAttention ?? null,
       patternWorking: patternWorking ?? null,
       patternError: patternError ?? null,
       providerArgs: providerArgs ?? [],
-      codeMode: codeMode ?? null,
       hasConversationId: Boolean(conversationId),
       hasExistingConversationId: Boolean(existingConversationId)
     }
@@ -473,21 +468,29 @@ export async function createPty(
 
   try {
     const terminalMode = mode || 'claude-code'
-    const adapter = getAdapter(terminalMode, type, command, args, {
-      attention: patternAttention,
-      working: patternWorking,
-      error: patternError
+    const adapter = getAdapter({
+      mode: terminalMode,
+      type,
+      patterns: { attention: patternAttention, working: patternWorking, error: patternError }
     })
     const resuming = !!existingConversationId
     const effectiveConversationId = existingConversationId || conversationId
 
-    // Get shell + binary info from adapter
-    const { config: shellConfig, binary } = adapter.buildSpawnConfig(cwd || homedir(), effectiveConversationId || undefined, resuming, initialPrompt || undefined, providerArgs ?? [], codeMode || undefined)
+    // Pick template: resume if resuming and resume_command exists, otherwise initial
+    const template = (resuming && resumeCommand) ? resumeCommand : (initialCommand || undefined)
 
-    // Build full spawn config — pty-manager owns postSpawnCommand construction
+    // Build spawn config via template interpolation
+    const shell = resolveUserShell()
+    const shellConfig = { shell, args: getShellStartupArgs(shell) }
     let postSpawnCommand: string | undefined
-    if (binary) {
-      const allArgs = [...binary.args, ...binary.providerArgs]
+    if (template) {
+      const binary = interpolateTemplate({
+        template,
+        conversationId: effectiveConversationId || undefined,
+        flags: providerArgs ?? [],
+        initialPrompt: initialPrompt || undefined
+      })
+      const allArgs = [...binary.args]
       if (binary.initialPrompt) allArgs.push(binary.initialPrompt)
       postSpawnCommand = buildExecCommand(binary.name, allArgs)
     }

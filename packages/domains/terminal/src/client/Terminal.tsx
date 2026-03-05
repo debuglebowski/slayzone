@@ -24,7 +24,7 @@ import { usePty } from './PtyContext'
 import { useTheme, useAppearance } from '@slayzone/settings/client'
 import { getTerminalTheme } from './terminal-themes'
 import { TerminalSearchBar } from './TerminalSearchBar'
-import type { TerminalMode, TerminalState, CodeMode } from '@slayzone/terminal/shared'
+import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
 
 // Wait for container to have non-zero dimensions before opening terminal
 function waitForDimensions(
@@ -82,7 +82,6 @@ interface TerminalProps {
   conversationId?: string | null
   existingConversationId?: string | null
   initialPrompt?: string | null
-  codeMode?: CodeMode | null
   providerFlags?: string | null
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   isActive?: boolean
@@ -117,7 +116,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   conversationId,
   existingConversationId,
   initialPrompt,
-  codeMode,
   providerFlags,
   executionContext,
   isActive = true,
@@ -361,23 +359,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         }
       } else {
 
-        // Generate conversation ID only for claude-code mode
+        // Generate conversation ID for AI modes (used as {id} in templates)
         let newConversationId = conversationId
-        if (mode === 'claude-code' && !newConversationId && !existingConversationId) {
+        if (mode !== 'terminal' && !newConversationId && !existingConversationId) {
           newConversationId = crypto.randomUUID()
           onConversationCreatedRef.current?.(newConversationId)
         }
 
-        // Create PTY with selected mode (conversation IDs apply to AI modes only)
+        // Create PTY — plain terminal mode doesn't use conversation IDs
         // Note: Don't pass initialPrompt - we'll inject it after terminal is ready
-        const isAiMode = mode === 'claude-code' || mode === 'codex'
+        const isAiMode = mode !== 'terminal'
         const effectiveConversationId = isAiMode ? newConversationId : undefined
         const effectiveExistingConversationId = isAiMode ? existingConversationId : undefined
         const result = await window.api.pty.create({
           sessionId, cwd,
           conversationId: effectiveConversationId,
           existingConversationId: effectiveExistingConversationId,
-          mode, codeMode, providerFlags, executionContext
+          mode, providerFlags, executionContext
         })
         if (!result.success) {
           const message = result.error || 'Failed to create terminal process'
@@ -427,7 +425,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           if (signal.aborted) return // Don't inject if unmounted
           try {
             // For plan mode, prefix with /plan
-            const textToInject = codeMode === 'plan' ? `/plan ${initialPrompt}` : initialPrompt
+            const textToInject = initialPrompt
             await injectText(textToInject)
           } catch {
             // Terminal may have been disposed, ignore
@@ -444,7 +442,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         setIsInitializing(false)
       }
     }
-  }, [sessionId, cwd, mode, conversationId, existingConversationId, initialPrompt, codeMode, providerFlags, executionContext, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart])
+  }, [sessionId, cwd, mode, conversationId, existingConversationId, initialPrompt, providerFlags, executionContext, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart])
 
   // Initialize terminal
   useEffect(() => {

@@ -19,21 +19,21 @@ const BUILTIN_ADAPTERS: Record<string, new () => TerminalAdapter> = {
   'terminal': ShellAdapter
 }
 
-/**
- * Get the adapter for a terminal mode.
- */
-export function getAdapter(
-  mode: string,
-  type?: string,
-  command?: string | null,
-  args?: string | null,
+export interface GetAdapterOptions {
+  mode: string
+  type?: string
   patterns?: {
     attention?: string | null
     working?: string | null
     error?: string | null
   }
-): TerminalAdapter {
-  const adapterType = type || mode
+}
+
+/**
+ * Get the adapter for a terminal mode.
+ */
+export function getAdapter(opts: GetAdapterOptions): TerminalAdapter {
+  const adapterType = opts.type || opts.mode
   const AdapterClass = BUILTIN_ADAPTERS[adapterType]
 
   // If it's a specialized AI adapter type (and not the generic 'terminal' type), use it
@@ -41,8 +41,8 @@ export function getAdapter(
     return new AdapterClass()
   }
 
-  // Use ShellAdapter for raw 'terminal' mode OR custom modes (which have type='terminal' + a custom command)
-  return new ShellAdapter(command, args, patterns)
+  // Use ShellAdapter for raw 'terminal' mode OR custom modes (which have type='terminal' + a custom template)
+  return new ShellAdapter(opts.patterns)
 }
 
 /**

@@ -11,8 +11,6 @@ import {
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
 import { disposeTerminal } from './terminal-cache'
 
-export type CodeMode = 'normal' | 'plan' | 'accept-edits' | 'bypass'
-
 // Per-task state - no buffer (backend is source of truth)
 interface PtyState {
   lastSeq: number // Last sequence number received for ordering
@@ -22,7 +20,6 @@ interface PtyState {
   state: TerminalState
   pendingPrompt?: PromptInfo
   quickRunPrompt?: string
-  quickRunCodeMode?: CodeMode
 }
 
 type DataCallback = (data: string, seq: number) => void
@@ -90,9 +87,8 @@ interface PtyContextValue {
   // Global prompt tracking for badge
   getPendingPromptTaskIds: () => string[]
   // Quick run prompt
-  setQuickRunPrompt: (sessionId: string, prompt: string, codeMode?: CodeMode) => void
+  setQuickRunPrompt: (sessionId: string, prompt: string) => void
   getQuickRunPrompt: (sessionId: string) => string | undefined
-  getQuickRunCodeMode: (sessionId: string) => CodeMode | undefined
   clearQuickRunPrompt: (sessionId: string) => void
 }
 
@@ -510,25 +506,19 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // Quick run prompt - for auto-sending prompt when task opens
-  const setQuickRunPrompt = useCallback((sessionId: string, prompt: string, codeMode?: CodeMode): void => {
+  const setQuickRunPrompt = useCallback((sessionId: string, prompt: string): void => {
     const state = getOrCreateState(sessionId)
     state.quickRunPrompt = prompt
-    state.quickRunCodeMode = codeMode
   }, [getOrCreateState])
 
   const getQuickRunPrompt = useCallback((sessionId: string): string | undefined => {
     return statesRef.current.get(sessionId)?.quickRunPrompt
   }, [])
 
-  const getQuickRunCodeMode = useCallback((sessionId: string): CodeMode | undefined => {
-    return statesRef.current.get(sessionId)?.quickRunCodeMode
-  }, [])
-
   const clearQuickRunPrompt = useCallback((sessionId: string): void => {
     const state = statesRef.current.get(sessionId)
     if (state) {
       state.quickRunPrompt = undefined
-      state.quickRunCodeMode = undefined
     }
   }, [])
 
@@ -553,7 +543,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     getPendingPromptTaskIds,
     setQuickRunPrompt,
     getQuickRunPrompt,
-    getQuickRunCodeMode,
     clearQuickRunPrompt
   }), [
     subscribe,
@@ -576,7 +565,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     getPendingPromptTaskIds,
     setQuickRunPrompt,
     getQuickRunPrompt,
-    getQuickRunCodeMode,
     clearQuickRunPrompt
   ])
 

@@ -1,5 +1,5 @@
-import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
-import { getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
+import type { TerminalAdapter, PromptInfo, ActivityState, ErrorInfo, ValidationResult } from './types'
+import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for Cursor Agent CLI.
@@ -11,20 +11,6 @@ export class CursorAdapter implements TerminalAdapter {
   readonly idleTimeoutMs = 2500
   // Full-screen TUI constantly redraws — detect working from user input, not output
   readonly transitionOnInput = true
-
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnResult {
-    const args: string[] = []
-
-    if (resuming && conversationId) {
-      args.push('--resume', conversationId)
-    }
-
-    const shell = resolveUserShell()
-    return {
-      config: { shell, args: getShellStartupArgs(shell) },
-      binary: { name: 'cursor-agent', args, providerArgs, initialPrompt }
-    }
-  }
 
   detectActivity(_data: string, _current: ActivityState): ActivityState | null {
     // Activity detected via transitionOnInput + idle timeout.

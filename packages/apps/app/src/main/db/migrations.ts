@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3'
-import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 
 interface Migration {
   version: number
@@ -1016,24 +1015,7 @@ const migrations: Migration[] = [
           updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
       `)
-
-      const insertStmt = db.prepare(`
-        INSERT INTO terminal_modes (id, label, type, command, args, enabled, is_builtin, "order")
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-
-      for (const mode of DEFAULT_TERMINAL_MODES) {
-        insertStmt.run(
-          mode.id,
-          mode.label,
-          mode.type,
-          mode.command ?? null,
-          mode.args ?? null,
-          mode.enabled ? 1 : 0,
-          mode.isBuiltin ? 1 : 0,
-          mode.order
-        )
-      }
+      // Data seeding handled by syncTerminalModes() on startup
     }
   },
   {
@@ -1081,6 +1063,51 @@ const migrations: Migration[] = [
         ALTER TABLE terminal_modes ADD COLUMN pattern_attention TEXT;
         ALTER TABLE terminal_modes ADD COLUMN pattern_working TEXT;
         ALTER TABLE terminal_modes ADD COLUMN pattern_error TEXT;
+      `)
+    }
+  },
+  {
+    version: 58,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE terminal_modes ADD COLUMN resume_command TEXT;
+      `)
+    }
+  },
+  {
+    version: 59,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE terminal_modes_new (
+          id TEXT PRIMARY KEY,
+          label TEXT NOT NULL,
+          type TEXT NOT NULL,
+          initial_command TEXT,
+          resume_command TEXT,
+          default_flags TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          is_builtin INTEGER NOT NULL DEFAULT 0,
+          "order" INTEGER NOT NULL DEFAULT 0,
+          pattern_attention TEXT,
+          pattern_working TEXT,
+          pattern_error TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO terminal_modes_new (id, label, type, initial_command, resume_command, default_flags, enabled, is_builtin, "order", pattern_attention, pattern_working, pattern_error, created_at, updated_at)
+        SELECT id, label, type,
+          CASE
+            WHEN is_builtin = 0 AND command IS NOT NULL THEN command || ' {flags}'
+            ELSE NULL
+          END,
+          resume_command,
+          args,
+          enabled, is_builtin, "order", pattern_attention, pattern_working, pattern_error, created_at, updated_at
+        FROM terminal_modes;
+
+        DROP TABLE terminal_modes;
+        ALTER TABLE terminal_modes_new RENAME TO terminal_modes;
       `)
     }
   }

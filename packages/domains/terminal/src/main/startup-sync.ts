@@ -9,13 +9,13 @@ import { DEFAULT_TERMINAL_MODES } from '../shared/types'
 export function syncTerminalModes(db: Database): void {
   db.transaction(() => {
     const insertStmt = db.prepare(`
-      INSERT INTO terminal_modes (id, label, type, command, args, enabled, is_builtin, "order")
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+      INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, default_flags, enabled, is_builtin, "order")
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
     `)
 
     const updateStmt = db.prepare(`
-      UPDATE terminal_modes 
-      SET label = ?, type = ?, command = ?, is_builtin = 1, updated_at = datetime('now')
+      UPDATE terminal_modes
+      SET label = ?, type = ?, initial_command = ?, resume_command = ?, is_builtin = 1, updated_at = datetime('now')
       WHERE id = ?
     `)
 
@@ -25,7 +25,7 @@ export function syncTerminalModes(db: Database): void {
     const builtinIds = DEFAULT_TERMINAL_MODES.map(m => m.id)
     const placeholders = builtinIds.map(() => '?').join(',')
     db.prepare(`
-      DELETE FROM terminal_modes 
+      DELETE FROM terminal_modes
       WHERE is_builtin = 1 AND id NOT IN (${placeholders})
     `).run(...builtinIds)
 
@@ -37,12 +37,13 @@ export function syncTerminalModes(db: Database): void {
 
       const existing = existsStmt.get(mode.id)
       if (existing) {
-        // Update built-in mode to ensure command/label match current code
-        // (Args/Enabled are left to user preference)
+        // Update built-in mode to ensure templates/label match current code
+        // (defaultFlags/enabled are left to user preference)
         updateStmt.run(
           mode.label,
           mode.type,
-          mode.command ?? null,
+          mode.initialCommand ?? null,
+          mode.resumeCommand ?? null,
           mode.id
         )
       } else {
@@ -51,8 +52,9 @@ export function syncTerminalModes(db: Database): void {
           mode.id,
           mode.label,
           mode.type,
-          mode.command ?? null,
-          mode.args ?? null,
+          mode.initialCommand ?? null,
+          mode.resumeCommand ?? null,
+          mode.defaultFlags ?? null,
           mode.enabled ? 1 : 0,
           mode.order
         )

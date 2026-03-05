@@ -1,7 +1,7 @@
-import type { CodeMode, ExecutionContext } from '@slayzone/terminal/shared'
+import type { ExecutionContext } from '@slayzone/terminal/shared'
 
 export type TerminalMode = string
-export type { CodeMode, ExecutionContext }
+export type { ExecutionContext }
 
 // Activity states for CLI tools
 export type ActivityState = 'attention' | 'working' | 'unknown'
@@ -78,11 +78,6 @@ export interface TerminalAdapter {
 
   /** Command to run in terminal to discover session ID. Undefined = supports --session-id at creation. */
   readonly sessionIdCommand?: string
-
-  /**
-   * Build spawn configuration for this terminal mode.
-   */
-  buildSpawnConfig(cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs?: string[], codeMode?: CodeMode): SpawnResult
 
   /**
    * Detect activity state from terminal output.

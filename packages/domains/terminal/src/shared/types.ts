@@ -1,6 +1,5 @@
 export type TerminalMode = string
 export type TerminalState = 'starting' | 'running' | 'attention' | 'error' | 'dead'
-export type CodeMode = 'normal' | 'plan' | 'accept-edits' | 'bypass'
 
 export const BuiltinTerminalMode = {
   ClaudeCode: 'claude-code',
@@ -15,8 +14,9 @@ export interface TerminalModeInfo {
   id: string
   label: string
   type: string
-  command?: string | null
-  args?: string | null
+  initialCommand?: string | null
+  resumeCommand?: string | null
+  defaultFlags?: string | null
   enabled: boolean
   isBuiltin: boolean
   order: number
@@ -29,8 +29,9 @@ export interface CreateTerminalModeInput {
   id: string
   label: string
   type: string
-  command?: string | null
-  args?: string | null
+  initialCommand?: string | null
+  resumeCommand?: string | null
+  defaultFlags?: string | null
   enabled?: boolean
   order?: number
   patternAttention?: string | null
@@ -41,8 +42,9 @@ export interface CreateTerminalModeInput {
 export interface UpdateTerminalModeInput {
   label?: string
   type?: string
-  command?: string | null
-  args?: string | null
+  initialCommand?: string | null
+  resumeCommand?: string | null
+  defaultFlags?: string | null
   enabled?: boolean
   order?: number
   patternAttention?: string | null
@@ -50,12 +52,26 @@ export interface UpdateTerminalModeInput {
   patternError?: string | null
 }
 
+export interface DetectionEngine {
+  type: string
+  label: string
+}
+
+export const DETECTION_ENGINES: DetectionEngine[] = [
+  { type: 'terminal', label: 'Custom regex' },
+  { type: 'claude-code', label: 'Claude Code' },
+  { type: 'codex', label: 'Codex' },
+  { type: 'gemini', label: 'Gemini' },
+  { type: 'cursor-agent', label: 'Cursor' },
+  { type: 'opencode', label: 'OpenCode' },
+]
+
 export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
-  { id: BuiltinTerminalMode.ClaudeCode, label: 'Claude', type: 'claude-code', command: 'claude', args: '--allow-dangerously-skip-permissions', enabled: true, isBuiltin: true, order: 0 },
-  { id: BuiltinTerminalMode.Codex, label: 'Codex', type: 'codex', command: 'codex', args: '--full-auto --search', enabled: true, isBuiltin: true, order: 1 },
-  { id: BuiltinTerminalMode.Gemini, label: 'Gemini', type: 'gemini', command: 'gemini', args: '--yolo', enabled: true, isBuiltin: true, order: 2 },
-  { id: BuiltinTerminalMode.CursorAgent, label: 'Cursor', type: 'cursor-agent', command: 'cursor-agent', args: '--force', enabled: true, isBuiltin: true, order: 3 },
-  { id: BuiltinTerminalMode.OpenCode, label: 'OpenCode', type: 'opencode', command: 'opencode', args: '', enabled: true, isBuiltin: true, order: 4 },
+  { id: BuiltinTerminalMode.ClaudeCode, label: 'Claude', type: 'claude-code', initialCommand: 'claude --session-id {id} {flags}', resumeCommand: 'claude --resume {id} {flags}', defaultFlags: '--allow-dangerously-skip-permissions', enabled: true, isBuiltin: true, order: 0 },
+  { id: BuiltinTerminalMode.Codex, label: 'Codex', type: 'codex', initialCommand: 'codex {flags}', resumeCommand: 'codex {flags} resume {id}', defaultFlags: '--full-auto --search', enabled: true, isBuiltin: true, order: 1 },
+  { id: BuiltinTerminalMode.Gemini, label: 'Gemini', type: 'gemini', initialCommand: 'gemini {flags}', resumeCommand: 'gemini --resume latest {flags}', defaultFlags: '--yolo', enabled: true, isBuiltin: true, order: 2 },
+  { id: BuiltinTerminalMode.CursorAgent, label: 'Cursor', type: 'cursor-agent', initialCommand: 'cursor-agent {flags}', resumeCommand: 'cursor-agent --resume {id} {flags}', defaultFlags: '--force', enabled: true, isBuiltin: true, order: 3 },
+  { id: BuiltinTerminalMode.OpenCode, label: 'OpenCode', type: 'opencode', initialCommand: 'opencode {flags}', resumeCommand: 'opencode --session {id} {flags}', defaultFlags: '', enabled: true, isBuiltin: true, order: 4 },
 ]
 
 // Duplicated from @slayzone/projects/shared — neither domain can depend on the

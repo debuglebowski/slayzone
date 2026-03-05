@@ -1,10 +1,39 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, type ComponentProps } from 'react'
 import { ChevronRight, Plus, RefreshCw, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
-import { Button, IconButton, Input, Label, Switch, toast } from '@slayzone/ui'
+import { Button, IconButton, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, toast } from '@slayzone/ui'
 import { groupTerminalModes } from '@slayzone/terminal'
 import type { TerminalModeInfo, CreateTerminalModeInput, UpdateTerminalModeInput } from '@slayzone/terminal/shared'
+import { DETECTION_ENGINES } from '@slayzone/terminal/shared'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { PanelBreadcrumb } from './PanelBreadcrumb'
+
+/** Input that holds local state while typing and commits on blur. */
+function DebouncedInput({ value: propValue, onValueCommit, ...props }: Omit<ComponentProps<typeof Input>, 'value' | 'onChange'> & { value: string; onValueCommit: (value: string) => void }) {
+  const [localValue, setLocalValue] = useState(propValue)
+  const committedRef = useRef(propValue)
+
+  useEffect(() => {
+    // Sync from props only when external value changes (not from our own commit)
+    if (propValue !== committedRef.current) {
+      committedRef.current = propValue
+      setLocalValue(propValue)
+    }
+  }, [propValue])
+
+  return (
+    <Input
+      {...props}
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={() => {
+        if (localValue !== committedRef.current) {
+          committedRef.current = localValue
+          onValueCommit(localValue)
+        }
+      }}
+    />
+  )
+}
 
 interface AiProvidersSettingsTabProps {
   activeTab: string
@@ -29,8 +58,10 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
 
   // New mode state encapsulated inside the tab
   const [newModeLabel, setNewModeLabel] = useState('')
-  const [newModeCommand, setNewModeCommand] = useState('')
-  const [newModeArgs, setNewModeArgs] = useState('')
+  const [newInitialCommand, setNewInitialCommand] = useState('')
+  const [newResumeCommand, setNewResumeCommand] = useState('')
+  const [newDefaultFlags, setNewDefaultFlags] = useState('')
+  const [newDetectionEngine, setNewDetectionEngine] = useState('terminal')
   const [newPatternAttention, setNewPatternAttention] = useState('')
   const [newPatternWorking, setNewPatternWorking] = useState('')
   const [newPatternError, setNewPatternError] = useState('')
@@ -106,7 +137,7 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
                                <div className="size-2 rounded-full bg-blue-500" />
                             </div>
                             <span className="text-sm font-medium flex-1">{mode.label}</span>
-                            <span className="text-xs text-muted-foreground truncate max-w-[200px]">{mode.command}</span>
+                            <span className="text-xs text-muted-foreground truncate max-w-[200px] font-mono">{mode.initialCommand}</span>
                             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                               <Label htmlFor={`list-enable-${mode.id}`} className="text-[10px] uppercase text-muted-foreground font-semibold cursor-pointer">Enabled</Label>
                               <Switch
@@ -137,7 +168,7 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
                                <div className="size-2 rounded-full bg-blue-500" />
                             </div>
                             <span className="text-sm font-medium flex-1">{mode.label}</span>
-                            <span className="text-xs text-muted-foreground truncate max-w-[200px]">{mode.command}</span>
+                            <span className="text-xs text-muted-foreground truncate max-w-[200px] font-mono">{mode.initialCommand}</span>
                             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                               <Label htmlFor={`list-enable-${mode.id}`} className="text-[10px] uppercase text-muted-foreground font-semibold cursor-pointer">Enabled</Label>
                               <Switch
@@ -181,14 +212,14 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs uppercase text-muted-foreground">Command</Label>
+                <Label className="text-xs uppercase text-muted-foreground">Initial Command</Label>
                 <div className="flex items-center gap-2">
                   <Input
-                    placeholder="npx my-ai-cli"
-                    className="flex-1"
-                    value={newModeCommand}
+                    className="font-mono text-xs flex-1"
+                    placeholder="e.g. my-cli {flags}"
+                    value={newInitialCommand}
                     onChange={(e) => {
-                      setNewModeCommand(e.target.value)
+                      setNewInitialCommand(e.target.value)
                       if (testResults['__new__']) setTestResults(prev => { const n = { ...prev }; delete n['__new__']; return n })
                     }}
                   />
@@ -197,7 +228,7 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
                     size="sm"
                     className="h-9"
                     disabled={testingId === '__new__'}
-                    onClick={() => handleTest('__new__', newModeCommand)}
+                    onClick={() => handleTest('__new__', newInitialCommand.split(/\s+/)[0] || '')}
                   >
                     {testingId === '__new__' ? (
                       <RefreshCw className="size-3.5 mr-1.5 animate-spin" />
@@ -211,70 +242,108 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
                     Test
                   </Button>
                 </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Use <code className="px-1 bg-muted rounded">{'{flags}'}</code> for task flags and <code className="px-1 bg-muted rounded">{'{id}'}</code> for session ID.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs uppercase text-muted-foreground">Resume Command</Label>
+                <Input
+                  className="font-mono text-xs"
+                  placeholder="e.g. my-cli {flags} --resume {id}"
+                  value={newResumeCommand}
+                  onChange={(e) => setNewResumeCommand(e.target.value)}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Optional. Template for resuming sessions. Same variables as above.
+                </p>
               </div>
 
               <div className="space-y-2">
                 <Label className="text-xs uppercase text-muted-foreground">Default Flags</Label>
                 <Input
-                  placeholder="--json"
-                  value={newModeArgs}
-                  onChange={(e) => setNewModeArgs(e.target.value)}
+                  className="font-mono text-xs"
+                  placeholder="--json --verbose"
+                  value={newDefaultFlags}
+                  onChange={(e) => setNewDefaultFlags(e.target.value)}
                 />
+                <p className="text-[10px] text-muted-foreground">
+                  Default value for <code className="px-1 bg-muted rounded">{'{flags}'}</code>. Editable per task.
+                </p>
               </div>
 
               <div className="pt-2 border-t border-dashed border-neutral-200 dark:border-neutral-800 space-y-3">
-                <h5 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Recognition Patterns (Optional)</h5>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-[10px] uppercase text-muted-foreground">Attention</Label>
-                    <Input
-                      className="h-8 text-xs font-mono"
-                      placeholder="e.g. \? $"
-                      value={newPatternAttention}
-                      onChange={(e) => setNewPatternAttention(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] uppercase text-muted-foreground">Working</Label>
-                    <Input
-                      className="h-8 text-xs font-mono"
-                      placeholder="e.g. \.\.\."
-                      value={newPatternWorking}
-                      onChange={(e) => setNewPatternWorking(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] uppercase text-muted-foreground">Error</Label>
-                    <Input
-                      className="h-8 text-xs font-mono"
-                      placeholder="e.g. fail"
-                      value={newPatternError}
-                      onChange={(e) => setNewPatternError(e.target.value)}
-                    />
-                  </div>
+                <h5 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Status Detection</h5>
+                <div className="space-y-2">
+                  <Label className="text-[10px] uppercase text-muted-foreground">Detection Engine</Label>
+                  <Select value={newDetectionEngine} onValueChange={setNewDetectionEngine}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DETECTION_ENGINES.map(e => (
+                        <SelectItem key={e.type} value={e.type}>{e.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+                {newDetectionEngine === 'terminal' && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] uppercase text-muted-foreground">Attention</Label>
+                      <Input
+                        className="h-8 text-xs font-mono"
+                        placeholder="e.g. \? $"
+                        value={newPatternAttention}
+                        onChange={(e) => setNewPatternAttention(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] uppercase text-muted-foreground">Working</Label>
+                      <Input
+                        className="h-8 text-xs font-mono"
+                        placeholder="e.g. \.\.\."
+                        value={newPatternWorking}
+                        onChange={(e) => setNewPatternWorking(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] uppercase text-muted-foreground">Error</Label>
+                      <Input
+                        className="h-8 text-xs font-mono"
+                        placeholder="e.g. fail"
+                        value={newPatternError}
+                        onChange={(e) => setNewPatternError(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Button
                 size="sm"
                 className="w-full"
-                disabled={!newModeLabel || !newModeCommand}
+                disabled={!newModeLabel || !newInitialCommand}
                 onClick={() => {
                   const generatedId = `${slugify(newModeLabel)}-${Math.random().toString(36).substring(2, 7)}`
                   createMode({
                     id: generatedId,
                     label: newModeLabel,
-                    type: 'terminal',
-                    command: newModeCommand,
-                    args: newModeArgs,
+                    type: newDetectionEngine,
+                    initialCommand: newInitialCommand,
+                    resumeCommand: newResumeCommand || null,
+                    defaultFlags: newDefaultFlags || null,
                     enabled: true,
                     patternAttention: newPatternAttention || null,
                     patternWorking: newPatternWorking || null,
-                    patternError: newPatternError || null
+                    patternError: newPatternError || null,
                   }).then(() => {
                     setNewModeLabel('')
-                    setNewModeCommand('')
-                    setNewModeArgs('')
+                    setNewInitialCommand('')
+                    setNewResumeCommand('')
+                    setNewDefaultFlags('')
+                    setNewDetectionEngine('terminal')
                     setNewPatternAttention('')
                     setNewPatternWorking('')
                     setNewPatternError('')
@@ -339,140 +408,201 @@ export function AiProvidersSettingsTab(props: AiProvidersSettingsTabProps) {
               <div className="space-y-4">
                 <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
                   <Label className={`text-sm ${mode.isBuiltin ? 'text-muted-foreground' : ''}`}>Label</Label>
-                  <Input
-                    value={mode.label}
-                    readOnly={mode.isBuiltin}
-                    disabled={mode.isBuiltin}
-                    onChange={(e) => updateMode(mode.id, { label: e.target.value })}
-                    className={mode.isBuiltin ? 'bg-muted/50 cursor-not-allowed opacity-70' : ''}
-                  />
-                </div>
-                <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
-                  <Label className={`text-sm ${mode.isBuiltin ? 'text-muted-foreground' : ''}`}>Command</Label>
-                  <div className="flex items-center gap-2">
+                  {mode.isBuiltin ? (
                     <Input
-                      className={`font-mono flex-1 ${mode.isBuiltin ? 'bg-muted/50 cursor-not-allowed opacity-70' : ''}`}
-                      value={mode.command ?? ''}
-                      readOnly={mode.isBuiltin}
-                      disabled={mode.isBuiltin}
-                      onChange={(e) => {
-                        updateMode(mode.id, { command: e.target.value })
-                        if (testResults[mode.id]) setTestResults(prev => { const n = { ...prev }; delete n[mode.id]; return n })
-                      }}
+                      value={mode.label}
+                      readOnly
+                      disabled
+                      className="bg-muted/50 cursor-not-allowed opacity-70"
                     />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9"
-                      aria-label="Test command"
-                      disabled={testingId === mode.id || !mode.command}
-                      onClick={() => handleTest(mode.id, mode.command!)}
-                    >
-                      {testingId === mode.id ? (
-                        <RefreshCw className="size-3.5 mr-1.5 animate-spin" />
-                      ) : testResults[mode.id]?.ok ? (
-                        <CheckCircle2 className="size-3.5 mr-1.5 text-green-500" />
-                      ) : testResults[mode.id]?.error ? (
-                        <AlertCircle className="size-3.5 mr-1.5 text-destructive" />
+                  ) : (
+                    <DebouncedInput
+                      value={mode.label}
+                      onValueCommit={(v) => updateMode(mode.id, { label: v })}
+                    />
+                  )}
+                </div>
+                <div className="grid grid-cols-[140px_minmax(0,1fr)] items-start gap-4">
+                  <div className="space-y-0.5 pt-2">
+                    <Label className={`text-sm ${mode.isBuiltin ? 'text-muted-foreground' : ''}`}>Initial Command</Label>
+                    {!mode.isBuiltin && <p className="text-[10px] text-muted-foreground">Run on first launch</p>}
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      {mode.isBuiltin ? (
+                        <Input
+                          className="font-mono text-xs flex-1 bg-muted/50 cursor-not-allowed opacity-70"
+                          value={mode.initialCommand ?? ''}
+                          readOnly
+                          disabled
+                        />
                       ) : (
-                        <RefreshCw className="size-3.5 mr-1.5" />
+                        <DebouncedInput
+                          className="font-mono text-xs flex-1"
+                          value={mode.initialCommand ?? ''}
+                          onValueCommit={(v) => {
+                            updateMode(mode.id, { initialCommand: v })
+                            if (testResults[mode.id]) setTestResults(prev => { const n = { ...prev }; delete n[mode.id]; return n })
+                          }}
+                        />
                       )}
-                      Test
-                    </Button>
-
+                      {!mode.isBuiltin && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9"
+                          aria-label="Test command"
+                          disabled={testingId === mode.id || !mode.initialCommand}
+                          onClick={() => handleTest(mode.id, (mode.initialCommand ?? '').split(/\s+/)[0] || '')}
+                        >
+                          {testingId === mode.id ? (
+                            <RefreshCw className="size-3.5 mr-1.5 animate-spin" />
+                          ) : testResults[mode.id]?.ok ? (
+                            <CheckCircle2 className="size-3.5 mr-1.5 text-green-500" />
+                          ) : testResults[mode.id]?.error ? (
+                            <AlertCircle className="size-3.5 mr-1.5 text-destructive" />
+                          ) : (
+                            <RefreshCw className="size-3.5 mr-1.5" />
+                          )}
+                          Test
+                        </Button>
+                      )}
+                    </div>
+                    {!mode.isBuiltin && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Use <code className="px-1 bg-muted rounded">{'{flags}'}</code> for task flags and <code className="px-1 bg-muted rounded">{'{id}'}</code> for session ID.
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-[140px_minmax(0,1fr)] items-start gap-4">
+                  <div className="space-y-0.5 pt-2">
+                    <Label className={`text-sm ${mode.isBuiltin ? 'text-muted-foreground' : ''}`}>Resume Command</Label>
+                    {!mode.isBuiltin && <p className="text-[10px] text-muted-foreground">Run when session exists</p>}
+                  </div>
+                  <div className="space-y-1">
+                    {mode.isBuiltin ? (
+                      <Input
+                        className="font-mono text-xs bg-muted/50 cursor-not-allowed opacity-70"
+                        value={mode.resumeCommand ?? ''}
+                        readOnly
+                        disabled
+                      />
+                    ) : (
+                      <DebouncedInput
+                        className="font-mono text-xs"
+                        placeholder="e.g. my-cli {flags} --resume {id}"
+                        value={mode.resumeCommand ?? ''}
+                        onValueCommit={(v) => updateMode(mode.id, { resumeCommand: v || null })}
+                      />
+                    )}
+                    {!mode.isBuiltin && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Optional. Same variables as initial command.
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
                   <Label className="text-sm">Default Flags</Label>
-                  <Input
-                    className="font-mono"
-                    value={mode.args ?? ''}
-                    onChange={(e) => updateMode(mode.id, { args: e.target.value })}
-                  />
+                  <div className="space-y-1">
+                    <DebouncedInput
+                      className="font-mono text-xs"
+                      value={mode.defaultFlags ?? ''}
+                      onValueCommit={(v) => updateMode(mode.id, { defaultFlags: v })}
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Default value for <code className="px-1 bg-muted rounded">{'{flags}'}</code>. Editable per task.
+                    </p>
+                  </div>
                 </div>
 
-                <div className="pt-4 border-t border-neutral-200 dark:border-neutral-800">
-                  <div className="rounded-xl border bg-neutral-50/50 dark:bg-neutral-900/30 p-5 space-y-4">
-                    <div className="space-y-1">
-                      <h4 className="text-sm font-semibold">Status Recognition (Advanced)</h4>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Define regular expression patterns to automatically detect the terminal state from its output. 
-                        This enables the "thinking" spinner, "needs attention" badges, and error reporting for custom tools.
-                      </p>
-                    </div>
-
-                    <div className="space-y-4 pt-2">
-                      <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
-                        <div className="space-y-0.5">
-                          <Label className="text-xs font-medium">Attention Pattern</Label>
-                          <p className="text-[10px] text-muted-foreground">User input required</p>
-                        </div>
-                        <div className="space-y-1">
-                          <Input
-                            className="font-mono text-xs"
-                            placeholder="e.g. (?:\?|❯)\s*$"
-                            value={mode.patternAttention ?? ''}
-                            readOnly={mode.isBuiltin}
-                            disabled={mode.isBuiltin}
-                            onChange={(e) => {
-                              const val = e.target.value
-                              updateMode(mode.id, { patternAttention: val || null })
-                            }}
-                          />
-                          {mode.patternAttention && !isValidRegex(mode.patternAttention) && (
-                            <p className="text-[10px] text-destructive">Invalid regular expression</p>
-                          )}
-                        </div>
+                {!mode.isBuiltin && (
+                  <div className="pt-4 border-t border-neutral-200 dark:border-neutral-800">
+                    <div className="rounded-xl border bg-neutral-50/50 dark:bg-neutral-900/30 p-5 space-y-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-semibold">Status Detection</h4>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Controls how the terminal state (thinking, needs attention, error) is detected from output.
+                        </p>
                       </div>
 
-                      <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
-                        <div className="space-y-0.5">
-                          <Label className="text-xs font-medium">Working Pattern</Label>
-                          <p className="text-[10px] text-muted-foreground">Thinking/Processing</p>
+                      <div className="space-y-4 pt-2">
+                        <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
+                          <Label className="text-xs font-medium">Detection Engine</Label>
+                          <Select value={mode.type} onValueChange={(v) => updateMode(mode.id, { type: v })}>
+                            <SelectTrigger size="sm" className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {DETECTION_ENGINES.map(e => (
+                                <SelectItem key={e.type} value={e.type}>{e.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <div className="space-y-1">
-                          <Input
-                            className="font-mono text-xs"
-                            placeholder="e.g. ⠋|⠙|⠹"
-                            value={mode.patternWorking ?? ''}
-                            readOnly={mode.isBuiltin}
-                            disabled={mode.isBuiltin}
-                            onChange={(e) => {
-                              const val = e.target.value
-                              updateMode(mode.id, { patternWorking: val || null })
-                            }}
-                          />
-                          {mode.patternWorking && !isValidRegex(mode.patternWorking) && (
-                            <p className="text-[10px] text-destructive">Invalid regular expression</p>
-                          )}
-                        </div>
-                      </div>
 
-                      <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
-                        <div className="space-y-0.5">
-                          <Label className="text-xs font-medium">Error Pattern</Label>
-                          <p className="text-[10px] text-muted-foreground">Fatal/CLI errors</p>
-                        </div>
-                        <div className="space-y-1">
-                          <Input
-                            className="font-mono text-xs"
-                            placeholder="e.g. ^Error:.*"
-                            value={mode.patternError ?? ''}
-                            readOnly={mode.isBuiltin}
-                            disabled={mode.isBuiltin}
-                            onChange={(e) => {
-                              const val = e.target.value
-                              updateMode(mode.id, { patternError: val || null })
-                            }}
-                          />
-                          {mode.patternError && !isValidRegex(mode.patternError) && (
-                            <p className="text-[10px] text-destructive">Invalid regular expression</p>
-                          )}
-                        </div>
+                        {mode.type === 'terminal' && (
+                          <>
+                            <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
+                              <div className="space-y-0.5">
+                                <Label className="text-xs font-medium">Attention Pattern</Label>
+                                <p className="text-[10px] text-muted-foreground">User input required</p>
+                              </div>
+                              <div className="space-y-1">
+                                <DebouncedInput
+                                  className="font-mono text-xs"
+                                  placeholder="e.g. (?:\?|❯)\s*$"
+                                  value={mode.patternAttention ?? ''}
+                                  onValueCommit={(v) => updateMode(mode.id, { patternAttention: v || null })}
+                                />
+                                {mode.patternAttention && !isValidRegex(mode.patternAttention) && (
+                                  <p className="text-[10px] text-destructive">Invalid regular expression</p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
+                              <div className="space-y-0.5">
+                                <Label className="text-xs font-medium">Working Pattern</Label>
+                                <p className="text-[10px] text-muted-foreground">Thinking/Processing</p>
+                              </div>
+                              <div className="space-y-1">
+                                <DebouncedInput
+                                  className="font-mono text-xs"
+                                  placeholder="e.g. ⠋|⠙|⠹"
+                                  value={mode.patternWorking ?? ''}
+                                  onValueCommit={(v) => updateMode(mode.id, { patternWorking: v || null })}
+                                />
+                                {mode.patternWorking && !isValidRegex(mode.patternWorking) && (
+                                  <p className="text-[10px] text-destructive">Invalid regular expression</p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
+                              <div className="space-y-0.5">
+                                <Label className="text-xs font-medium">Error Pattern</Label>
+                                <p className="text-[10px] text-muted-foreground">Fatal/CLI errors</p>
+                              </div>
+                              <div className="space-y-1">
+                                <DebouncedInput
+                                  className="font-mono text-xs"
+                                  placeholder="e.g. ^Error:.*"
+                                  value={mode.patternError ?? ''}
+                                  onValueCommit={(v) => updateMode(mode.id, { patternError: v || null })}
+                                />
+                                {mode.patternError && !isValidRegex(mode.patternError) && (
+                                  <p className="text-[10px] text-destructive">Invalid regular expression</p>
+                                )}
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>

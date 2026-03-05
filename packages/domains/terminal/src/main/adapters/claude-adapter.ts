@@ -1,5 +1,5 @@
-import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
-import { getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
+import type { TerminalAdapter, PromptInfo, ActivityState, ErrorInfo, ValidationResult } from './types'
+import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for Claude Code CLI.
@@ -8,33 +8,6 @@ import { getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } 
 export class ClaudeAdapter implements TerminalAdapter {
   readonly mode = 'claude-code' as const
   readonly idleTimeoutMs = null // use default 60s
-
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, initialPrompt?: string, providerArgs: string[] = [], codeMode?: CodeMode): SpawnResult {
-    const args: string[] = []
-    const flags: string[] = []
-
-    if (resuming && conversationId) {
-      args.push('--resume', conversationId)
-    } else if (conversationId) {
-      args.push('--session-id', conversationId)
-    }
-
-    if (codeMode === 'bypass') {
-      flags.push('--allow-dangerously-skip-permissions')
-    }
-
-    flags.push(...providerArgs)
-
-    if (codeMode === 'accept-edits') {
-      flags.push('--allowedTools', 'Edit,Write,MultiEdit,NotebookEdit')
-    }
-
-    const shell = resolveUserShell()
-    return {
-      config: { shell, args: getShellStartupArgs(shell) },
-      binary: { name: 'claude', args, providerArgs: flags, initialPrompt }
-    }
-  }
 
   detectActivity(data: string, _current: ActivityState): ActivityState | null {
     // Strip ANSI escape codes for pattern matching

@@ -4,7 +4,6 @@ import type { Tag, CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
 import type {
   TerminalMode,
   TerminalState,
-  CodeMode,
   PtyInfo,
   PromptInfo,
   BufferSinceResult,
@@ -76,7 +75,11 @@ import type {
   SetProjectConnectionInput,
   SyncNowInput,
   SyncNowResult,
-  TaskSyncStatus
+  TaskSyncStatus,
+  FetchProviderStatusesInput,
+  ApplyStatusSyncInput,
+  ProviderStatus,
+  StatusResyncPreview
 } from '@slayzone/integrations/shared'
 
 export type { ExecutionContext } from '@slayzone/projects/shared'
@@ -165,7 +168,6 @@ export interface PtyCreateOptions {
   existingConversationId?: string | null
   mode?: TerminalMode
   initialPrompt?: string | null
-  codeMode?: CodeMode | null
   providerFlags?: string | null
   executionContext?: ExecutionContext | null
 }
@@ -529,6 +531,9 @@ export interface ElectronAPI {
     pullTask: (input: PullTaskInput) => Promise<PullTaskResult>
     getLink: (taskId: string, provider: IntegrationProvider) => Promise<ExternalLink | null>
     unlinkTask: (taskId: string, provider: IntegrationProvider) => Promise<boolean>
+    fetchProviderStatuses: (input: FetchProviderStatusesInput) => Promise<ProviderStatus[]>
+    applyStatusSync: (input: ApplyStatusSyncInput) => Promise<Project>
+    resyncProviderStatuses: (input: { projectId: string; provider: IntegrationProvider }) => Promise<StatusResyncPreview>
   }
   exportImport: {
     exportAll: () => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>

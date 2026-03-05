@@ -206,7 +206,7 @@ export function TaskDetailPage({
   const [projectPathMissing, setProjectPathMissing] = useState(false)
 
   // PTY context for buffer management
-  const { resetTaskState, subscribeSessionDetected, subscribeDevServer, getQuickRunPrompt, getQuickRunCodeMode, clearQuickRunPrompt } = usePty()
+  const { resetTaskState, subscribeSessionDetected, subscribeDevServer, getQuickRunPrompt, clearQuickRunPrompt } = usePty()
 
   // Detected session ID from /status command
   const [detectedSessionId, setDetectedSessionId] = useState<string | null>(null)
@@ -1576,7 +1576,6 @@ export function TaskDetailPage({
                   conversationId={getConversationIdForMode(task) || undefined}
                   existingConversationId={getConversationIdForMode(task) || undefined}
                   initialPrompt={getQuickRunPrompt(task.id)}
-                  codeMode={getQuickRunCodeMode(task.id)}
                   providerFlags={getProviderFlagsForMode(task)}
                   executionContext={project?.execution_context}
                   focusRequestId={terminalFocusRequestId}

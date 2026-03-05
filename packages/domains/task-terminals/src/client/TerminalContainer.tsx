@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import { usePty } from '@slayzone/terminal'
-import type { TerminalMode, CodeMode } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal/shared'
 import { useTaskTerminals } from './useTaskTerminals'
 import { TerminalTabBar } from './TerminalTabBar'
 import { TerminalSplitGroup, type TerminalSplitGroupHandle } from './TerminalSplitGroup'
@@ -16,7 +16,6 @@ interface TerminalContainerProps {
   conversationId?: string | null
   existingConversationId?: string | null
   initialPrompt?: string | null
-  codeMode?: CodeMode | null
   providerFlags?: string
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   isActive?: boolean
@@ -43,7 +42,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   conversationId,
   existingConversationId,
   initialPrompt,
-  codeMode,
   providerFlags,
   executionContext,
   isActive = true,
@@ -260,7 +258,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       conversationId: tab.isMain ? conversationId : undefined,
       existingConversationId: tab.isMain ? existingConversationId : undefined,
       initialPrompt: tab.isMain ? initialPrompt : undefined,
-      codeMode: tab.isMain ? codeMode : undefined,
       providerFlags: tab.isMain ? providerFlags : undefined,
       executionContext,
       onConversationCreated: tab.isMain ? handleConversationCreated : undefined,
@@ -269,7 +266,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       onFirstInput: tab.isMain ? onFirstInput : undefined,
       onRetry: tab.isMain ? onRetry : undefined
     }))
-  }, [activeGroup, getSessionId, cwd, conversationId, existingConversationId, initialPrompt, codeMode, providerFlags, executionContext, handleConversationCreated, onSessionInvalid, handleTerminalReady, onFirstInput, onRetry])
+  }, [activeGroup, getSessionId, cwd, conversationId, existingConversationId, initialPrompt, providerFlags, executionContext, handleConversationCreated, onSessionInvalid, handleTerminalReady, onFirstInput, onRetry])
 
   if (isLoading || !activeGroup) {
     return (

@@ -1,5 +1,5 @@
-import type { TerminalAdapter, SpawnResult, PromptInfo, ActivityState, ErrorInfo, ValidationResult } from './types'
-import { getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
+import type { TerminalAdapter, PromptInfo, ActivityState, ErrorInfo, ValidationResult } from './types'
+import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for CCS (Claude Code Switch).
@@ -9,16 +9,6 @@ import { getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } 
 export class CcsAdapter implements TerminalAdapter {
   readonly mode = 'ccs' as const
   readonly idleTimeoutMs = null // same as Claude (CCS runs Claude underneath)
-
-  buildSpawnConfig(_cwd: string, _conversationId?: string, _resuming?: boolean, initialPrompt?: string, providerArgs: string[] = []): SpawnResult {
-    // providerArgs[0] = profile name (from provider_config['ccs'].flags)
-    // CCS manages sessions internally — no --resume, --session-id
-    const shell = resolveUserShell()
-    return {
-      config: { shell, args: getShellStartupArgs(shell) },
-      binary: { name: 'ccs', args: [], providerArgs, initialPrompt }
-    }
-  }
 
   // CCS runs Claude Code underneath — reuse Claude's activity patterns
   detectActivity(data: string, _current: ActivityState): ActivityState | null {

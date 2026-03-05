@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import { Terminal, type TerminalHandle } from '@slayzone/terminal'
-import type { CodeMode } from '@slayzone/terminal/shared'
 import type { TerminalTab } from '../shared/types'
 
 interface PaneProps {
@@ -10,7 +9,6 @@ interface PaneProps {
   conversationId?: string | null
   existingConversationId?: string | null
   initialPrompt?: string | null
-  codeMode?: CodeMode | null
   providerFlags?: string
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   onConversationCreated?: (conversationId: string) => void
@@ -125,7 +123,6 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           conversationId={pane.conversationId}
           existingConversationId={pane.existingConversationId}
           initialPrompt={pane.initialPrompt}
-          codeMode={pane.codeMode}
           providerFlags={pane.providerFlags}
           executionContext={pane.executionContext}
           isActive={isActive}
@@ -154,8 +151,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
               conversationId={pane.conversationId}
               existingConversationId={pane.existingConversationId}
               initialPrompt={pane.initialPrompt}
-              codeMode={pane.codeMode}
-              providerFlags={pane.providerFlags}
+                  providerFlags={pane.providerFlags}
               executionContext={pane.executionContext}
               isActive={isActive}
               onAttached={onAttached}

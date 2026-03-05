@@ -65,32 +65,6 @@ test('detects alternative working indicator phrases', () => {
   expect(adapter.detectActivity('Ctrl+C to stop', 'unknown')).toBe('working')
 })
 
-console.log('\nCodexAdapter.buildSpawnConfig\n')
-
-function expectDeepEqual(actual: unknown, expected: unknown) {
-  const a = JSON.stringify(actual), b = JSON.stringify(expected)
-  if (a !== b) throw new Error(`Expected ${b}, got ${a}`)
-}
-
-test('starts fresh codex session by default', () => {
-  const result = adapter.buildSpawnConfig('/tmp')
-  expect(result.binary?.name).toBe('codex')
-  expectDeepEqual(result.binary?.args, [])
-  expectDeepEqual(result.binary?.providerArgs, [])
-})
-
-test('resumes codex session when existing conversation ID is provided', () => {
-  const result = adapter.buildSpawnConfig('/tmp', '11111111-2222-4333-8444-555555555555', true)
-  expectDeepEqual(result.binary?.args, ['resume', '11111111-2222-4333-8444-555555555555'])
-  expectDeepEqual(result.binary?.providerArgs, [])
-})
-
-test('separates structural args from provider flags', () => {
-  const result = adapter.buildSpawnConfig('/tmp', 'thread-123', true, undefined, ['--search'])
-  expectDeepEqual(result.binary?.args, ['resume', 'thread-123'])
-  expectDeepEqual(result.binary?.providerArgs, ['--search'])
-})
-
 console.log('\nCodexAdapter.detectError\n')
 
 test('detects stale codex resume session as SESSION_NOT_FOUND', () => {

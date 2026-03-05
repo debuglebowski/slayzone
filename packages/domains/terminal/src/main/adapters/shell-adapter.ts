@@ -1,57 +1,20 @@
-import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo } from './types'
-import { getShellStartupArgs, resolveUserShell } from '../shell-env'
-import { parseShellArgs } from './flag-parser'
+import type { TerminalAdapter, PromptInfo, ActivityState, ErrorInfo } from './types'
 
 /**
- * Adapter for raw terminal/shell.
- * Passthrough with no special parsing or prompt detection.
+ * Adapter for raw terminal/shell and custom providers.
+ * Detection-only — command construction handled by template interpolation in pty-manager.
  */
 export class ShellAdapter implements TerminalAdapter {
   readonly mode = 'terminal' as const
   readonly idleTimeoutMs = null // use default 60s
 
   constructor(
-    private readonly command?: string | null,
-    private readonly args?: string | null,
     private readonly patterns?: {
       attention?: string | null
       working?: string | null
       error?: string | null
     }
   ) {}
-
-  buildSpawnConfig(_cwd: string, _conversationId?: string, _resuming?: boolean, _initialPrompt?: string, _providerArgs?: string[], _codeMode?: CodeMode): SpawnResult {
-    if (this.command) {
-      const commandParts = parseShellArgs(this.command)
-      const name = commandParts[0] || ''
-      const commandArgs = commandParts.slice(1)
-
-      const allArgs: string[] = [...commandArgs]
-      if (this.args) {
-        allArgs.push(...parseShellArgs(this.args))
-      }
-
-      return {
-        config: {
-          shell: resolveUserShell(),
-          args: getShellStartupArgs(resolveUserShell())
-        },
-        binary: {
-          name,
-          args: allArgs,
-          providerArgs: _providerArgs ?? []
-        }
-      }
-    }
-
-    const shell = resolveUserShell()
-    return {
-      config: {
-        shell,
-        args: getShellStartupArgs(shell)
-      }
-    }
-  }
 
   private static stripAnsi(data: string): string {
     return data

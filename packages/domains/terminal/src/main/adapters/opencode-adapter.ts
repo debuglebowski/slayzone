@@ -1,5 +1,5 @@
-import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
-import { getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
+import type { TerminalAdapter, PromptInfo, ActivityState, ErrorInfo, ValidationResult } from './types'
+import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for OpenCode CLI.
@@ -11,20 +11,6 @@ export class OpencodeAdapter implements TerminalAdapter {
   readonly idleTimeoutMs = 2500
   // Full-screen TUI constantly redraws — detect working from user input, not output
   readonly transitionOnInput = true
-
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, _initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnResult {
-    const args: string[] = []
-
-    if (conversationId && resuming) {
-      args.push('--session', conversationId)
-    }
-
-    const shell = resolveUserShell()
-    return {
-      config: { shell, args: getShellStartupArgs(shell) },
-      binary: { name: 'opencode', args, providerArgs }
-    }
-  }
 
   private static stripAnsi(data: string): string {
     return data

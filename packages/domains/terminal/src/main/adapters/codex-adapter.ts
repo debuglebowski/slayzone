@@ -1,8 +1,8 @@
 import { open, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { TerminalAdapter, SpawnResult, PromptInfo, CodeMode, ActivityState, ErrorInfo, ValidationResult } from './types'
-import { getShellStartupArgs, resolveUserShell, whichBinary, validateShellEnv } from '../shell-env'
+import type { TerminalAdapter, PromptInfo, ActivityState, ErrorInfo, ValidationResult } from './types'
+import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for OpenAI Codex.
@@ -15,20 +15,6 @@ export class CodexAdapter implements TerminalAdapter {
   // let a short idle timeout decide when activity has stopped.
   readonly idleTimeoutMs = 2500
   readonly sessionIdCommand = '/status'
-
-  buildSpawnConfig(_cwd: string, conversationId?: string, resuming?: boolean, _initialPrompt?: string, providerArgs: string[] = [], _codeMode?: CodeMode): SpawnResult {
-    const args: string[] = []
-
-    if (conversationId && resuming) {
-      args.push('resume', conversationId)
-    }
-
-    const shell = resolveUserShell()
-    return {
-      config: { shell, args: getShellStartupArgs(shell) },
-      binary: { name: 'codex', args, providerArgs }
-    }
-  }
 
   private static stripAnsi(data: string): string {
     return data
