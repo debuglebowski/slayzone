@@ -4,10 +4,7 @@ import { clickSettings, goHome, openProjectSettings } from './electron'
 type ProjectSection = 'providers' | 'instructions' | 'skills' | 'mcp'
 
 function globalSettingsDialog(mainWindow: Page): Locator {
-  return mainWindow
-    .getByRole('dialog')
-    .filter({ has: mainWindow.getByRole('heading', { name: /^Settings$/ }) })
-    .last()
+  return mainWindow.locator('[role="dialog"][aria-label="Settings"]').last()
 }
 
 function projectSettingsDialog(mainWindow: Page): Locator {
@@ -114,18 +111,34 @@ async function isProjectSectionVisible(dialog: Locator, section: ProjectSection)
 }
 
 export async function openGlobalContextManager(mainWindow: Page): Promise<Locator> {
-  await closeTopDialog(mainWindow)
-  await goHome(mainWindow)
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    await clickSettings(mainWindow)
-    const dialog = globalSettingsDialog(mainWindow)
-    if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
-    await mainWindow.keyboard.press('Meta+,').catch(() => {})
-    if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
-    await mainWindow.waitForTimeout(120)
+  const dialog = globalSettingsDialog(mainWindow)
+
+  for (let reopenAttempt = 0; reopenAttempt < 2; reopenAttempt += 1) {
+    await closeTopDialog(mainWindow)
+    await goHome(mainWindow)
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await mainWindow.bringToFront().catch(() => {})
+      if (await dialog.isVisible({ timeout: 500 }).catch(() => false)) break
+
+      await clickSettings(mainWindow)
+      if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
+
+      await mainWindow.keyboard.press('Meta+,').catch(() => {})
+      if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
+
+      const sidebarSettingsButton = mainWindow.getByRole('button', { name: 'Settings', exact: true }).first()
+      if (await sidebarSettingsButton.isVisible({ timeout: 600 }).catch(() => false)) {
+        await sidebarSettingsButton.click({ force: true }).catch(() => {})
+        if (await dialog.isVisible({ timeout: 1_500 }).catch(() => false)) break
+      }
+
+      await mainWindow.waitForTimeout(150)
+    }
+
+    if (await dialog.isVisible({ timeout: 800 }).catch(() => false)) break
   }
 
-  const dialog = globalSettingsDialog(mainWindow)
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await openSettingsTabWithRetry(
     mainWindow,

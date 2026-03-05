@@ -13,6 +13,7 @@ import { TEST_PROJECT_PATH, goHome, clickProject } from './fixtures/electron'
 import {
   openTaskTerminal,
   binaryOnPath,
+  switchTerminalMode,
 } from './fixtures/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 
@@ -123,15 +124,15 @@ test.describe('Doctor from terminal menu', () => {
     mainWindow.locator('[data-testid="terminal-menu-trigger"]:visible').first()
   const doctorMenuItem = (mainWindow: import('@playwright/test').Page) =>
     mainWindow.getByRole('menuitem', { name: 'Doctor' })
-  const terminalModeTrigger = (mainWindow: import('@playwright/test').Page) =>
-    mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()
   const openTerminalMenu = async (mainWindow: import('@playwright/test').Page) => {
     await mainWindow.keyboard.press('Escape').catch(() => {})
     await terminalMenuButton(mainWindow).click()
   }
-  const setTerminalMode = async (mainWindow: import('@playwright/test').Page, modeLabel: 'Claude Code' | 'Terminal') => {
-    await terminalModeTrigger(mainWindow).click()
-    await mainWindow.getByRole('option', { name: modeLabel }).click()
+  const setTerminalMode = async (
+    mainWindow: import('@playwright/test').Page,
+    mode: 'claude-code' | 'terminal'
+  ) => {
+    await switchTerminalMode(mainWindow, mode)
   }
 
   test.beforeAll(async ({ mainWindow }) => {
@@ -168,7 +169,7 @@ test.describe('Doctor from terminal menu', () => {
   })
 
   test('Doctor dialog shows validation results for claude', async ({ mainWindow }) => {
-    await setTerminalMode(mainWindow, 'Claude Code')
+    await setTerminalMode(mainWindow, 'claude-code')
     await openTerminalMenu(mainWindow)
     await expect(doctorMenuItem(mainWindow)).toBeVisible({ timeout: 3_000 })
 
@@ -196,7 +197,7 @@ test.describe('Doctor from terminal menu', () => {
 
   test('Doctor not shown for terminal mode', async ({ mainWindow }) => {
     // Switch to terminal mode via UI to ensure rendered state is up to date.
-    await setTerminalMode(mainWindow, 'Terminal')
+    await setTerminalMode(mainWindow, 'terminal')
 
     await openTerminalMenu(mainWindow)
 
@@ -207,6 +208,6 @@ test.describe('Doctor from terminal menu', () => {
     await mainWindow.keyboard.press('Escape')
 
     // Restore to claude-code
-    await setTerminalMode(mainWindow, 'Claude Code')
+    await setTerminalMode(mainWindow, 'claude-code')
   })
 })

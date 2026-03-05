@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject } from './fixtures/electron'
 import { TEST_PROJECT_PATH } from './fixtures/electron'
+import { switchTerminalMode } from './fixtures/terminal'
 
 test.describe('AI description generation', () => {
   let projectAbbrev: string
@@ -98,18 +99,13 @@ test.describe('AI description generation', () => {
   })
 
   test('button hidden in terminal mode', async ({ mainWindow }) => {
-    // Switch to terminal mode
-    const modeTrigger = mainWindow.getByRole('combobox').filter({ hasText: /Claude Code|Codex|Terminal/ })
-    await modeTrigger.click()
-    await mainWindow.getByRole('option', { name: 'Terminal' }).click()
+    await switchTerminalMode(mainWindow, 'terminal')
 
     await expect(generateBtn(mainWindow)).not.toBeVisible()
   })
 
   test('button visible again in codex mode', async ({ mainWindow }) => {
-    const modeTrigger = mainWindow.getByRole('combobox').filter({ hasText: /Claude Code|Codex|Terminal/ })
-    await modeTrigger.click()
-    await mainWindow.getByRole('option', { name: 'Codex' }).click()
+    await switchTerminalMode(mainWindow, 'codex')
 
     await expect(generateBtn(mainWindow)).toBeVisible()
   })
@@ -138,9 +134,7 @@ test.describe('AI description generation', () => {
       .toContain('Mock description for: Implement login flow')
 
     // Switch back to claude-code for clean state
-    const modeTrigger = mainWindow.getByRole('combobox').filter({ hasText: /Claude Code|Codex|Terminal/ })
-    await modeTrigger.click()
-    await mainWindow.getByRole('option', { name: 'Claude Code' }).click()
+    await switchTerminalMode(mainWindow, 'claude-code')
     await expect(generateBtn(mainWindow)).toBeVisible()
   })
 })

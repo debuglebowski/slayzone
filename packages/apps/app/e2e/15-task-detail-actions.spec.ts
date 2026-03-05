@@ -3,6 +3,13 @@ import { TEST_PROJECT_PATH } from './fixtures/electron'
 
 test.describe('Task detail actions', () => {
   let projectAbbrev: string
+  const openTaskFromBoard = async (mainWindow: import('@playwright/test').Page, title: string) => {
+    await goHome(mainWindow)
+    await clickProject(mainWindow, projectAbbrev)
+    const card = mainWindow.locator('p').filter({ hasText: title }).first()
+    await expect(card).toBeVisible({ timeout: 10_000 })
+    await card.click()
+  }
 
   test.beforeAll(async ({ mainWindow }) => {
     const s = seed(mainWindow)
@@ -31,7 +38,7 @@ test.describe('Task detail actions', () => {
   })
 
   test('archive task from settings danger zone', async ({ mainWindow }) => {
-    await mainWindow.getByText('Archive me from detail').first().click()
+    await openTaskFromBoard(mainWindow, 'Archive me from detail')
 
     // Archive button is in the settings panel's danger zone — opens confirmation dialog
     const archiveBtn = mainWindow.getByRole('button', { name: /^Archive$/ }).first()
@@ -54,7 +61,7 @@ test.describe('Task detail actions', () => {
   })
 
   test('delete task from settings danger zone', async ({ mainWindow }) => {
-    await mainWindow.getByText('Delete me from detail').first().click()
+    await openTaskFromBoard(mainWindow, 'Delete me from detail')
 
     // Delete button is in the settings panel's danger zone
     const deleteBtn = mainWindow.getByRole('button', { name: /^Delete$/ }).first()
@@ -76,7 +83,7 @@ test.describe('Task detail actions', () => {
   })
 
   test('Cmd+Shift+D opens complete task confirmation', async ({ mainWindow }) => {
-    await mainWindow.getByText('Complete me task').first().click()
+    await openTaskFromBoard(mainWindow, 'Complete me task')
     await expect(mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible()
 
     await mainWindow.keyboard.press('Meta+Shift+d')

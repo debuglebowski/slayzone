@@ -487,18 +487,30 @@ export async function clickAddProject(page: Page) {
 /** Click the settings button in the sidebar footer */
 export async function clickSettings(page: Page) {
   const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
-  await page.keyboard.press('Meta+,').catch(() => {})
-  if (await dialog.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    return
-  }
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await page.bringToFront().catch(() => {})
+    if (await dialog.isVisible({ timeout: 400 }).catch(() => false)) return
 
-  const footer = sidebar(page).locator('[data-sidebar="footer"]').first()
-  const settingsButton = footer
-    .locator('button')
-    .filter({ has: page.locator('.lucide-settings') })
-    .first()
-  if (await settingsButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await settingsButton.click({ force: true })
+    await page.keyboard.press('Meta+,').catch(() => {})
+    if (await dialog.isVisible({ timeout: 800 }).catch(() => false)) return
+
+    const sidebarSettingsButton = page.getByRole('button', { name: 'Settings', exact: true }).first()
+    if (await sidebarSettingsButton.isVisible({ timeout: 500 }).catch(() => false)) {
+      await sidebarSettingsButton.click({ force: true }).catch(() => {})
+      if (await dialog.isVisible({ timeout: 800 }).catch(() => false)) return
+    }
+
+    const footer = sidebar(page).locator('[data-sidebar="footer"]').first()
+    const footerIconButton = footer
+      .locator('button')
+      .filter({ has: page.locator('.lucide-settings') })
+      .first()
+    if (await footerIconButton.isVisible({ timeout: 500 }).catch(() => false)) {
+      await footerIconButton.click({ force: true }).catch(() => {})
+      if (await dialog.isVisible({ timeout: 800 }).catch(() => false)) return
+    }
+
+    await page.waitForTimeout(120)
   }
 }
 

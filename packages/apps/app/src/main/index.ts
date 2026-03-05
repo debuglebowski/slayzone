@@ -899,9 +899,29 @@ app.whenReady().then(async () => {
     ;(globalThis as Record<string, unknown>).__spawnProcess = spawnProcess
     ;(globalThis as Record<string, unknown>).__restorePtyHandlers = () => {
       for (const ch of [
-        'pty:create', 'pty:write', 'pty:resize', 'pty:kill', 'pty:exists',
-        'pty:getBuffer', 'pty:clearBuffer', 'pty:getBufferSince', 'pty:list', 'pty:getState',
+        'terminalModes:list',
+        'terminalModes:test',
+        'terminalModes:get',
+        'terminalModes:create',
+        'terminalModes:update',
+        'terminalModes:delete',
+        'terminalModes:restoreDefaults',
+        'terminalModes:resetToDefaultState',
+        'pty:create',
+        'pty:testExecutionContext',
+        'pty:ccsListProfiles',
+        'pty:write',
+        'pty:resize',
+        'pty:kill',
+        'pty:exists',
+        'pty:getBuffer',
+        'pty:clearBuffer',
+        'pty:getBufferSince',
+        'pty:list',
+        'pty:getState',
         'pty:dismissAllNotifications',
+        'pty:set-theme',
+        'pty:validate',
       ]) {
         ipcMain.removeHandler(ch)
       }

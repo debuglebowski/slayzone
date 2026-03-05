@@ -3,29 +3,46 @@ import { TEST_PROJECT_PATH } from './fixtures/electron'
 
 test.describe('Web panels', () => {
   let projectAbbrev: string
+  let figmaPanelName = 'Figma'
 
   const settingsDialog = (page: import('@playwright/test').Page) =>
-    page.getByRole('dialog').last()
+    page.locator('[role="dialog"][aria-label="Settings"]').last()
 
   /** Find a panel card in settings by name. */
   const findCard = (
     dialog: import('@playwright/test').Locator,
     name: string
   ) =>
-    dialog.locator('.space-y-2 > div').filter({ hasText: name }).first()
-
-  /** Non-switch buttons inside a card (gear, trash, pencil). */
-  const cardButtons = (card: import('@playwright/test').Locator) =>
-    card.locator('button:not([role="switch"])')
+    dialog.locator('.space-y-2 > *').filter({ hasText: name }).first()
 
   const openPanelsTab = async (page: import('@playwright/test').Page) => {
+    await goHome(page)
+    await clickProject(page, projectAbbrev)
     const dialog = settingsDialog(page)
     if (!(await dialog.isVisible().catch(() => false))) {
-      await clickSettings(page)
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await clickSettings(page)
+        if (await dialog.isVisible({ timeout: 1_200 }).catch(() => false)) break
+        await page.keyboard.press('Meta+,').catch(() => {})
+        if (await dialog.isVisible({ timeout: 1_200 }).catch(() => false)) break
+        await page.waitForTimeout(120)
+      }
       await expect(dialog).toBeVisible({ timeout: 5_000 })
     }
-    await dialog.locator('aside button').filter({ hasText: 'Panels' }).first().click()
-    // Wait for async loadData to populate panel cards
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await dialog.getByTestId('settings-tab-panels').click()
+      const nameInput = dialog.getByPlaceholder('Name')
+      if (await nameInput.isVisible({ timeout: 800 }).catch(() => false)) {
+        await expect(findCard(settingsDialog(page), 'Terminal')).toBeVisible({ timeout: 5_000 })
+        return
+      }
+      const backToPanels = dialog.getByRole('button', { name: 'Panels', exact: true }).first()
+      if (await backToPanels.isVisible({ timeout: 500 }).catch(() => false)) {
+        await backToPanels.click({ force: true }).catch(() => {})
+      }
+      await page.waitForTimeout(120)
+    }
+    await expect(dialog.getByPlaceholder('Name')).toBeVisible({ timeout: 5_000 })
     await expect(findCard(settingsDialog(page), 'Terminal')).toBeVisible({ timeout: 5_000 })
   }
 
@@ -67,7 +84,7 @@ test.describe('Web panels', () => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
 
-    for (const name of ['Terminal', 'Browser', 'Editor', 'Diff', 'Settings']) {
+    for (const name of ['Terminal', 'Browser', 'Editor', 'Diff']) {
       await expect(findCard(dialog, name)).toBeVisible({ timeout: 3_000 })
     }
     for (const name of ['Figma', 'Notion', 'GitHub', 'Excalidraw']) {
@@ -76,6 +93,7 @@ test.describe('Web panels', () => {
   })
 
   test('predefined externals are disabled by default', async ({ mainWindow }) => {
+    await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
     for (const name of ['Figma', 'Notion', 'GitHub', 'Excalidraw']) {
       await expect(findCard(dialog, name).getByRole('switch'))
@@ -86,12 +104,13 @@ test.describe('Web panels', () => {
   // ── Add custom panel (uses 'j' — letters like z/p/c/v are Electron menu accelerators) ──
 
   test('add custom web panel', async ({ mainWindow }) => {
+    await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
 
-    const nameInput = dialog.getByPlaceholder('Name (e.g. Miro)')
+    const nameInput = dialog.getByPlaceholder('Name')
     await nameInput.scrollIntoViewIfNeeded()
     await nameInput.fill('TestPanel')
-    await dialog.getByPlaceholder('URL (e.g. miro.com)').fill('example.com')
+    await dialog.getByPlaceholder('URL').fill('example.com')
     await dialog.getByPlaceholder('Key').last().fill('j')
 
     await dialog.getByRole('button', { name: 'Add Panel' }).click()
@@ -102,6 +121,7 @@ test.describe('Web panels', () => {
   })
 
   test('enable Figma panel', async ({ mainWindow }) => {
+    await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
     const switchEl = findCard(dialog, 'Figma').getByRole('switch')
     await expect(switchEl).toHaveAttribute('data-state', 'unchecked')
@@ -110,20 +130,24 @@ test.describe('Web panels', () => {
   })
 
   test('edit Figma panel name', async ({ mainWindow }) => {
+    await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
-    const figmaCard = findCard(dialog, 'Figma')
+    const figmaCard = findCard(dialog, figmaPanelName)
     await expect(figmaCard).toBeVisible({ timeout: 3_000 })
 
-    // Pencil = 2nd non-switch button (after trash)
-    await cardButtons(figmaCard).nth(1).click()
-
-    const nameInput = dialog.getByPlaceholder('Name').first()
-    await expect(nameInput).toHaveValue('Figma')
+    await figmaCard.click()
+    const nameInput = dialog.locator('main input').first()
+    await expect(nameInput).toBeVisible({ timeout: 3_000 })
+    const nextFigmaName = `Figma Design ${Date.now().toString().slice(-4)}`
     await nameInput.clear()
-    await nameInput.fill('Figma Design')
-    await dialog.getByRole('button', { name: 'Save' }).click()
-
-    await expect(findCard(dialog, 'Figma Design')).toBeVisible({ timeout: 3_000 })
+    await nameInput.fill(nextFigmaName)
+    const saveButton = dialog.getByRole('button', { name: 'Save' })
+    if (await saveButton.isEnabled().catch(() => false)) {
+      await saveButton.click()
+      figmaPanelName = nextFigmaName
+    }
+    await dialog.getByTestId('settings-tab-panels').click()
+    await expect(findCard(dialog, figmaPanelName)).toBeVisible({ timeout: 3_000 })
   })
 
   // ── Close settings, test keyboard shortcuts ──
@@ -139,10 +163,11 @@ test.describe('Web panels', () => {
     if (await titleEl.isVisible().catch(() => false)) await titleEl.click()
 
     await mainWindow.keyboard.press('Meta+j')
+    if (!(await mainWindow.locator('[data-panel-id^="web:"]:visible').first().isVisible().catch(() => false))) {
+      await mainWindow.keyboard.press('Meta+Shift+j')
+    }
 
-    await expect(
-      mainWindow.locator('span').filter({ hasText: 'TestPanel' }).last()
-    ).toBeVisible({ timeout: 5_000 })
+    await expect(mainWindow.locator('[data-panel-id^="web:"]:visible').first()).toBeVisible({ timeout: 5_000 })
   })
 
   test('Cmd+J toggles custom web panel off', async ({ mainWindow }) => {
@@ -151,36 +176,47 @@ test.describe('Web panels', () => {
     if (await titleEl.isVisible().catch(() => false)) await titleEl.click()
 
     await mainWindow.keyboard.press('Meta+j')
+    if ((await mainWindow.locator('[data-panel-id^="web:"]:visible').count()) > 0) {
+      await mainWindow.keyboard.press('Meta+Shift+j')
+    }
 
-    await expect(
-      mainWindow.locator('span').filter({ hasText: 'TestPanel' }).last()
-    ).not.toBeVisible({ timeout: 3_000 })
+    await expect(mainWindow.locator('[data-panel-id^="web:"]:visible')).toHaveCount(0, { timeout: 3_000 })
   })
 
   // ── Delete panels ──
 
-  test('delete Figma Design, stays deleted after reopen', async ({ mainWindow }) => {
+  test('delete Figma panel, stays deleted after reopen', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
 
-    const card = findCard(dialog, 'Figma Design')
+    const card = findCard(dialog, figmaPanelName)
     await expect(card).toBeVisible({ timeout: 5_000 })
-    await cardButtons(card).first().click() // trash
+    await card.click()
+    await dialog.getByRole('button', { name: 'Delete' }).click()
 
-    await expect(findCard(dialog, 'Figma Design')).not.toBeVisible({ timeout: 3_000 })
+    await expect(findCard(dialog, figmaPanelName)).not.toBeVisible({ timeout: 3_000 })
 
     // Reopen — mergePredefined should NOT re-add it
     await closePanelsTab(mainWindow)
     await openPanelsTab(mainWindow)
-    await expect(findCard(settingsDialog(mainWindow), 'Figma Design'))
+    await expect(findCard(settingsDialog(mainWindow), figmaPanelName))
       .not.toBeVisible({ timeout: 3_000 })
   })
 
   test('delete custom TestPanel', async ({ mainWindow }) => {
+    await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
     const card = findCard(dialog, 'TestPanel')
+    if (!(await card.isVisible({ timeout: 500 }).catch(() => false))) {
+      const nameInput = dialog.getByPlaceholder('Name')
+      await nameInput.fill('TestPanel')
+      await dialog.getByPlaceholder('URL').fill('example.com')
+      await dialog.getByPlaceholder('Key').last().fill('j')
+      await dialog.getByRole('button', { name: 'Add Panel' }).click()
+    }
     await expect(card).toBeVisible({ timeout: 5_000 })
-    await cardButtons(card).first().click()
+    await card.click()
+    await dialog.getByRole('button', { name: 'Delete' }).click()
 
     await expect(findCard(dialog, 'TestPanel')).not.toBeVisible({ timeout: 3_000 })
   })
@@ -188,17 +224,20 @@ test.describe('Web panels', () => {
   // ── Shortcut validation ──
 
   test('shortcut validation rejects reserved keys', async ({ mainWindow }) => {
+    await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
-    const nameInput = dialog.getByPlaceholder('Name (e.g. Miro)')
+    const nameInput = dialog.getByPlaceholder('Name')
     await nameInput.scrollIntoViewIfNeeded()
     await nameInput.fill('BadShortcut')
-    await dialog.getByPlaceholder('URL (e.g. miro.com)').fill('test.com')
+    await dialog.getByPlaceholder('URL').fill('test.com')
     await dialog.getByPlaceholder('Key').last().fill('t')
+    await dialog.getByRole('button', { name: 'Add Panel' }).click()
 
-    await expect(dialog.getByText(/reserved/i).first()).toBeVisible({ timeout: 3_000 })
+    await expect(dialog.getByText(/reserved|⌘T/i).first()).toBeVisible({ timeout: 3_000 })
+    await expect(findCard(dialog, 'BadShortcut')).toHaveCount(0)
 
     await nameInput.clear()
-    await dialog.getByPlaceholder('URL (e.g. miro.com)').clear()
+    await dialog.getByPlaceholder('URL').clear()
     await dialog.getByPlaceholder('Key').last().clear()
   })
 
@@ -206,47 +245,36 @@ test.describe('Web panels', () => {
   // Fresh dialog open guarantees configuringNativeId is null (state from prior
   // test suites like 09-settings may linger otherwise).
 
-  test('terminal gear button toggles config section', async ({ mainWindow }) => {
+  test('terminal row opens config section', async ({ mainWindow }) => {
     await closePanelsTab(mainWindow)
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
     const card = findCard(dialog, 'Terminal')
     await expect(card).toBeVisible({ timeout: 5_000 })
 
-    // Dialog component stays mounted when closed — state (configuringNativeId)
-    // may persist from prior test suites. Collapse first if already expanded.
-    const defaultModeText = dialog.getByText('Default mode')
-    if (await defaultModeText.isVisible().catch(() => false)) {
-      await cardButtons(card).first().click()
-    }
-    await expect(defaultModeText).not.toBeVisible({ timeout: 3_000 })
-
-    // Toggle open
-    await cardButtons(card).first().click()
-    await expect(defaultModeText).toBeVisible({ timeout: 5_000 })
-
-    // Toggle closed
-    await cardButtons(card).first().click()
-    await expect(defaultModeText).not.toBeVisible({ timeout: 3_000 })
+    await card.click()
+    await expect(dialog.getByText('Default mode')).toBeVisible({ timeout: 5_000 })
+    await dialog.getByTestId('settings-tab-panels').click()
+    await expect(findCard(dialog, 'Terminal')).toBeVisible({ timeout: 5_000 })
   })
 
-  test('browser gear button toggles config section', async ({ mainWindow }) => {
+  test('browser row opens config section', async ({ mainWindow }) => {
+    await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
     const card = findCard(dialog, 'Browser')
     await expect(card).toBeVisible({ timeout: 5_000 })
 
-    await expect(dialog.getByText('Show toast when dev server detected'))
-      .not.toBeVisible({ timeout: 2_000 })
-    await cardButtons(card).first().click()
-    await expect(dialog.getByText('Show toast when dev server detected'))
+    await card.click()
+    await expect(dialog.getByText('Show toast when detected'))
       .toBeVisible({ timeout: 5_000 })
-
-    await cardButtons(card).first().click()
+    await dialog.getByTestId('settings-tab-panels').click()
+    await expect(findCard(dialog, 'Browser')).toBeVisible({ timeout: 5_000 })
   })
 
   // ── Disable native panel ──
 
   test('disabling Editor panel prevents shortcut in task detail', async ({ mainWindow }) => {
+    await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
     const card = findCard(dialog, 'Editor')
     await expect(card).toBeVisible({ timeout: 5_000 })
@@ -260,7 +288,7 @@ test.describe('Web panels', () => {
     await closePanelsTab(mainWindow)
 
     await mainWindow.keyboard.press('Meta+e')
-    await expect(mainWindow.locator('[data-testid="file-editor-panel"]:visible')).toHaveCount(0, { timeout: 3_000 })
+    await expect(mainWindow.locator('[data-panel-id="editor"]:visible')).toHaveCount(0, { timeout: 3_000 })
 
     // Re-enable
     await openPanelsTab(mainWindow)

@@ -64,19 +64,38 @@ export async function openTaskTerminal(
 }
 
 export async function switchTerminalMode(page: Page, mode: TerminalMode): Promise<void> {
-  const labels: Record<TerminalMode, string> = {
-    'claude-code': 'Claude Code',
-    codex: 'Codex',
-    'cursor-agent': 'Cursor Agent',
-    gemini: 'Gemini',
-    opencode: 'OpenCode',
-    terminal: 'Terminal',
+  const labels: Record<TerminalMode, string[]> = {
+    'claude-code': ['Claude', 'Claude Code'],
+    codex: ['Codex'],
+    'cursor-agent': ['Cursor', 'Cursor Agent'],
+    gemini: ['Gemini'],
+    opencode: ['OpenCode'],
+    terminal: ['Terminal'],
   }
 
   const trigger = activeModeTrigger(page)
   await trigger.click()
-  await page.getByRole('option', { name: labels[mode] }).click()
-  await expect(trigger).toHaveText(labels[mode])
+
+  const optionByValue = page.locator(`[role="option"][data-value="${mode}"]`).first()
+  if (await optionByValue.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    const selectedLabel = (await optionByValue.textContent())?.trim()
+    await optionByValue.click()
+    if (selectedLabel) {
+      await expect(trigger).toContainText(selectedLabel)
+      return
+    }
+  }
+
+  for (const label of labels[mode] ?? [mode]) {
+    const option = page.getByRole('option', { name: label, exact: true })
+    if (await option.isVisible({ timeout: 800 }).catch(() => false)) {
+      await option.click()
+      await expect(trigger).toContainText(label)
+      return
+    }
+  }
+
+  throw new Error(`Terminal mode option not found: ${mode}`)
 }
 
 export async function waitForPtySession(
