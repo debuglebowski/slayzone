@@ -75,8 +75,8 @@ function seedConnection(db: import('better-sqlite3').Database): string {
   storeCredential(db, ref, 'lin_test_key')
   db.prepare(`
     INSERT OR REPLACE INTO integration_connections
-      (id, provider, workspace_id, workspace_name, account_label, credential_ref, enabled)
-    VALUES (?, 'linear', 'ws-1', 'Test Workspace', 'test@test.com', ?, 1)
+      (id, provider, credential_ref, enabled)
+    VALUES (?, 'linear', ?, 1)
   `).run(id, ref)
   return id
 }
@@ -106,24 +106,22 @@ try {
   _mock.getViewer = async () => ({
     workspaceId: 'ws-new', workspaceName: 'New WS', accountLabel: 'new@test.com'
   })
-  const result = await h.invoke('integrations:connect-linear', { apiKey: 'lin_new_key' }) as any
+  const result = await h.invoke('integrations:connect-linear', { apiKey: 'lin_new_key', projectId }) as any
   expect(result.provider).toBe('linear')
-  expect(result.workspace_id).toBe('ws-new')
   expect(result.enabled).toBe(true)
   expect('credential_ref' in result).toBe(false)
-  h.db.prepare('DELETE FROM integration_connections WHERE workspace_id = ?').run('ws-new')
+  h.db.prepare('DELETE FROM integration_connections WHERE id = ?').run(result.id)
   ok('creates new connection')
 } catch (e) { no('creates new connection', e) }
 
 try {
+  await h.invoke('integrations:set-project-connection', { projectId, provider: 'linear', connectionId: connId })
   _mock.getViewer = async () => ({
     workspaceId: 'ws-1', workspaceName: 'Updated WS', accountLabel: 'updated@test.com'
   })
   const result = await h.invoke('integrations:connect-linear', {
-    apiKey: 'lin_updated_key', accountLabel: 'Custom Label'
+    apiKey: 'lin_updated_key', projectId
   }) as any
-  expect(result.workspace_name).toBe('Updated WS')
-  expect(result.account_label).toBe('Custom Label')
   expect(result.id).toBe(connId)
   // Restore credential
   const conn = h.db.prepare('SELECT credential_ref FROM integration_connections WHERE id = ?').get(connId) as any
