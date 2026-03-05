@@ -26,6 +26,7 @@ interface ProcessEntry {
   exitCode: number | null
   logBuffer: string[]
   startedAt: string
+  processTitle: string | null
 }
 
 interface AddFormState {
@@ -147,6 +148,11 @@ function ProcessRow({
           )}
           {proc.status === 'running' && proc.pid && (
             <span className="text-[10px] text-muted-foreground/30 font-mono">pid {proc.pid}</span>
+          )}
+          {proc.processTitle && (
+            <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-muted-foreground bg-muted/60 border-border">
+              {proc.processTitle}
+            </span>
           )}
           <StatusBadge status={proc.status} />
         </div>
@@ -305,6 +311,13 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId }: { 
   useEffect(() => {
     const unsub = window.api.processes.onStatus((processId, status) => {
       setProcesses(prev => prev.map(p => p.id === processId ? { ...p, status } : p))
+    })
+    return unsub
+  }, [])
+
+  useEffect(() => {
+    const unsub = window.api.processes.onTitle?.((processId, title) => {
+      setProcesses(prev => prev.map(p => p.id === processId ? { ...p, processTitle: title } : p))
     })
     return unsub
   }, [])

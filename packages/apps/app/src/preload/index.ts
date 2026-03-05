@@ -476,6 +476,11 @@ const api: ElectronAPI = {
       const handler = (_event: unknown, processId: string, status: import('@slayzone/types').ProcessStatus) => cb(processId, status)
       ipcRenderer.on('processes:status', handler)
       return () => ipcRenderer.removeListener('processes:status', handler)
+    },
+    onTitle: (cb) => {
+      const handler = (_event: unknown, processId: string, title: string) => cb(processId, title)
+      ipcRenderer.on('processes:title', handler)
+      return () => ipcRenderer.removeListener('processes:title', handler)
     }
   },
   integrations: {

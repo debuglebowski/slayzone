@@ -74,6 +74,7 @@ export interface ProcessInfo {
   exitCode: number | null
   logBuffer: string[]
   startedAt: string
+  processTitle: string | null
 }
 
 export interface DiagnosticsConfig {
@@ -479,5 +480,6 @@ export interface ElectronAPI {
     killTask: (taskId: string) => Promise<void>
     onLog: (cb: (processId: string, line: string) => void) => () => void
     onStatus: (cb: (processId: string, status: ProcessStatus) => void) => () => void
+    onTitle: (cb: (processId: string, title: string) => void) => () => void
   }
 }
