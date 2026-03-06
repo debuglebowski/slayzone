@@ -195,6 +195,7 @@ export function ProjectSettingsDialog({
   onOpenGlobalAiConfig,
   onUpdated
 }: ProjectSettingsDialogProps) {
+  const integrationsEnabled = import.meta.env.DEV
   const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'columns' | 'integrations' | 'ai-config'>('general')
   const [name, setName] = useState('')
   const [color, setColor] = useState('')
@@ -315,27 +316,33 @@ export function ProjectSettingsDialog({
 
   useEffect(() => {
     if (open) {
-      setActiveTab(initialTab)
+      const resolvedInitialTab = !integrationsEnabled && initialTab === 'integrations'
+        ? 'general'
+        : initialTab
+      setActiveTab(resolvedInitialTab)
       setContextManagerTab('config')
       setSelectedIntegrationEntry(
-        integrationOnboardingProvider === 'github'
-          ? 'github_projects'
-          : integrationOnboardingProvider === 'linear'
-            ? 'linear'
-            : null
+        integrationsEnabled
+          ? integrationOnboardingProvider === 'github'
+            ? 'github_projects'
+            : integrationOnboardingProvider === 'linear'
+              ? 'linear'
+              : null
+          : null
       )
-      setSelectedIntegrationMode(integrationOnboardingProvider ? 'continuous' : null)
+      setSelectedIntegrationMode(integrationsEnabled && integrationOnboardingProvider ? 'continuous' : null)
     }
-  }, [open, project?.id, initialTab])
+  }, [open, project?.id, initialTab, integrationOnboardingProvider, integrationsEnabled])
 
   useEffect(() => {
+    if (!integrationsEnabled) return
     if (!open) return
     if (!integrationOnboardingProvider) return
     setActiveTab('integrations')
     setSelectedIntegrationEntry(integrationOnboardingProvider === 'github' ? 'github_projects' : 'linear')
     setSelectedIntegrationMode('continuous')
     onIntegrationOnboardingHandled?.()
-  }, [open, integrationOnboardingProvider, onIntegrationOnboardingHandled])
+  }, [open, integrationOnboardingProvider, onIntegrationOnboardingHandled, integrationsEnabled])
 
   useEffect(() => {
     let cancelled = false
@@ -352,6 +359,7 @@ export function ProjectSettingsDialog({
   }, [])
 
   const reloadIntegrationState = useCallback(async () => {
+    if (!integrationsEnabled) return
     if (!open || !project) return
     const [
       loadedConnections,
@@ -415,11 +423,12 @@ export function ProjectSettingsDialog({
     setGithubSyncRows([])
     setGithubSyncSummary(null)
     setGithubSyncMessage('')
-  }, [open, project])
+  }, [open, project, integrationsEnabled])
 
   useEffect(() => {
+    if (!integrationsEnabled) return
     void reloadIntegrationState()
-  }, [reloadIntegrationState])
+  }, [reloadIntegrationState, integrationsEnabled])
 
   useEffect(() => {
     const loadGithubRepositories = async () => {
@@ -1389,7 +1398,7 @@ export function ProjectSettingsDialog({
     { key: 'general', label: 'General' },
     { key: 'environment', label: 'Environment' },
     { key: 'columns', label: 'Task statuses' },
-    ...(import.meta.env.DEV ? [{ key: 'integrations' as const, label: 'Integrations' }] : []),
+    ...(integrationsEnabled ? [{ key: 'integrations' as const, label: 'Integrations' }] : []),
   ]
   if (contextManagerEnabled) {
     navItems.push({ key: 'ai-config', label: 'Context Manager' })
@@ -1738,7 +1747,7 @@ export function ProjectSettingsDialog({
             </div>
           )}
 
-          {import.meta.env.DEV && activeTab === 'integrations' && (
+          {integrationsEnabled && activeTab === 'integrations' && (
             <div className="w-full space-y-6">
               <SettingsTabIntro
                 title="Integrations"

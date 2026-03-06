@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3'
 import type { CreateTaskInput, UpdateTaskInput, Task, ProviderConfig } from '@slayzone/task/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { getDefaultStatus, isKnownStatus, isTerminalStatus, parseColumnsConfig } from '@slayzone/projects/shared'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import path from 'path'
 import { removeWorktree, createWorktree, runWorktreeSetupScript, getCurrentBranch, isGitRepo } from '@slayzone/worktrees/main'
 
@@ -81,6 +82,36 @@ function getProjectColumns(db: Database, projectId: string): ColumnConfig[] | nu
     | { columns_config: string | null }
     | undefined
   return parseColumnsConfig(row?.columns_config)
+}
+
+type TerminalModeFlagsRow = { id: string; default_flags: string | null }
+
+function getEnabledModeDefaults(db: Database): TerminalModeFlagsRow[] {
+  let rows: TerminalModeFlagsRow[] = []
+  try {
+    rows = db.prepare('SELECT id, default_flags FROM terminal_modes WHERE enabled = 1').all() as TerminalModeFlagsRow[]
+  } catch {
+    rows = []
+  }
+
+  if (rows.length > 0) return rows
+
+  return DEFAULT_TERMINAL_MODES
+    .filter((mode) => mode.enabled)
+    .map((mode) => ({ id: mode.id, default_flags: mode.defaultFlags ?? '' }))
+}
+
+function getModeDefaultFlags(db: Database, modeId: string): string | undefined {
+  try {
+    const row = db.prepare('SELECT default_flags FROM terminal_modes WHERE id = ?')
+      .get(modeId) as { default_flags: string | null } | undefined
+    if (row) return row.default_flags ?? ''
+  } catch {
+    // Fall back to built-in defaults when terminal_modes is unavailable or unseeded.
+  }
+
+  const fallback = DEFAULT_TERMINAL_MODES.find((mode) => mode.id === modeId)
+  return fallback ? (fallback.defaultFlags ?? '') : undefined
 }
 
 /** Kill PTY only — used for soft-delete (preserves worktree for undo) */
@@ -311,10 +342,9 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
 
       // Seed default flags when switching terminal mode
       if (data.terminalMode !== undefined) {
-        const modeRow = db.prepare('SELECT default_flags FROM terminal_modes WHERE id = ?')
-          .get(data.terminalMode) as { default_flags: string | null } | undefined
-        if (modeRow) {
-          merged[data.terminalMode] = { ...merged[data.terminalMode], flags: modeRow.default_flags ?? '' }
+        const defaultFlags = getModeDefaultFlags(db, data.terminalMode)
+        if (defaultFlags !== undefined) {
+          merged[data.terminalMode] = { ...merged[data.terminalMode], flags: defaultFlags }
         }
       }
 
@@ -432,7 +462,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       'claude-code': data.claudeFlags, 'codex': data.codexFlags,
       'cursor-agent': data.cursorFlags, 'gemini': data.geminiFlags, 'opencode': data.opencodeFlags,
     }
-    const allModes = db.prepare('SELECT id, default_flags FROM terminal_modes WHERE enabled = 1').all() as Array<{ id: string; default_flags: string | null }>
+    const allModes = getEnabledModeDefaults(db)
     for (const row of allModes) {
       providerConfig[row.id] = { flags: legacyOverrides[row.id] ?? row.default_flags ?? '' }
     }

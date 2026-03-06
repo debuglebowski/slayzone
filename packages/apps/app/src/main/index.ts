@@ -33,6 +33,7 @@ app.name = 'slayzone'
 const isPlaywright = process.env.PLAYWRIGHT === '1'
 const isContextManagerEnabled =
   is.dev || isPlaywright || process.env.SLAYZONE_ENABLE_CONTEXT_MANAGER === '1'
+const isIntegrationsEnabled = is.dev
 
 // Enable remote debugging in dev (port 0 = OS-assigned, avoids conflicts with other dev instances)
 if (is.dev && !isPlaywright) {
@@ -935,7 +936,9 @@ app.whenReady().then(async () => {
   if (isContextManagerEnabled) {
     registerAiConfigHandlers(ipcMain, db)
   }
-  registerIntegrationHandlers(ipcMain, db, { enableTestChannels: isPlaywright })
+  if (isIntegrationsEnabled) {
+    registerIntegrationHandlers(ipcMain, db, { enableTestChannels: isPlaywright })
+  }
   registerFileEditorHandlers(ipcMain)
   registerScreenshotHandlers()
   registerExportImportHandlers(ipcMain, db, isPlaywright)
@@ -955,8 +958,12 @@ app.whenReady().then(async () => {
     console.error('[MCP] Failed to start server:', err)
   })
 
-  linearSyncPoller = startLinearSyncPoller(db)
-  logBoot('integration poller started')
+  if (isIntegrationsEnabled) {
+    linearSyncPoller = startLinearSyncPoller(db)
+    logBoot('integration poller started')
+  } else {
+    logBoot('integrations disabled')
+  }
 
   initAutoUpdater()
   logBoot('auto-updater initialized')

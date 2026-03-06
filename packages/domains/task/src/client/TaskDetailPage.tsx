@@ -1945,7 +1945,7 @@ export function TaskDetailPage({
           </div>
 
           {/* External sync links */}
-          <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
+          {import.meta.env.DEV && <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />}
 
           {/* Description */}
           <div className="flex flex-col min-h-0 relative">

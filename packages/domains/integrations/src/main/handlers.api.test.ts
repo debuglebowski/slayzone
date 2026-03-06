@@ -196,6 +196,10 @@ try {
   ok('upserts on same project+provider')
 } catch (e) { no('upserts on same project+provider', e) }
 
+// This suite targets import/sync behavior after setup is completed.
+h.db.prepare(`UPDATE integration_project_mappings SET status_setup_complete = 1 WHERE project_id = ? AND provider = 'linear'`)
+  .run(projectId)
+
 // ── list-linear-issues ────────────────────────────────────────────────────
 console.log('\nintegrations:list-linear-issues')
 try {
@@ -247,13 +251,13 @@ try {
   // Priority mapping: Linear → Local
   const canceled = tasks.find((t: any) => t.title === 'Canceled task')
   expect(canceled.priority).toBe(2)   // Linear 4 → local 2
-  expect(canceled.status).toBe('done') // canceled → done
+  expect(canceled.status).toBe('canceled') // canceled → canceled
   expect(canceled.assignee).toBe('Bob')
   expect(canceled.description).toBeTruthy()
 
   const urgent = tasks.find((t: any) => t.title === 'Urgent bug')
   expect(urgent.priority).toBe(5)     // Linear 1 → local 5
-  expect(urgent.status).toBe('todo')  // triage → todo
+  expect(urgent.status).toBe('inbox')  // triage → inbox
   expect(urgent.assignee).toBeNull()
   expect(urgent.description).toBeNull()
 

@@ -49,6 +49,10 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const [path, setPath] = useState('')
   const [startMode, setStartMode] = useState<ProjectStartMode>('scratch')
   const [loading, setLoading] = useState(false)
+  const integrationsEnabled = import.meta.env.DEV
+  const visibleStartOptions = integrationsEnabled
+    ? START_OPTIONS
+    : START_OPTIONS.filter((option) => option.mode === 'scratch')
 
   const handleBrowse = async () => {
     const result = await window.api.dialog.showOpenDialog({
@@ -76,7 +80,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
         color,
         path: path || undefined
       })
-      onCreated(project, { startMode })
+      onCreated(project, { startMode: integrationsEnabled ? startMode : 'scratch' })
       setName('')
       setPath('')
       setStartMode('scratch')
@@ -128,7 +132,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
           <div className="space-y-2">
             <Label>How do you want to start this project?</Label>
             <div className="space-y-2">
-              {START_OPTIONS.map((option) => (
+              {visibleStartOptions.map((option) => (
                 <button
                   key={option.mode}
                   type="button"
@@ -151,7 +155,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
               Cancel
             </Button>
             <Button type="submit" disabled={!name.trim() || loading}>
-              {startMode === 'scratch' ? 'Create' : 'Create and continue'}
+              {(!integrationsEnabled || startMode === 'scratch') ? 'Create' : 'Create and continue'}
             </Button>
           </div>
         </form>

@@ -402,7 +402,11 @@ describe('db:tasks:delete', () => {
   test('deletes task', () => {
     const t = createTask('ToDelete')
     expect(h.invoke('db:tasks:delete', t.id)).toBe(true)
-    expect(h.invoke('db:tasks:get', t.id)).toBeNull()
+    const deleted = h.invoke('db:tasks:get', t.id) as Task
+    expect(deleted).toBeTruthy()
+    expect((deleted as { deleted_at?: string | null }).deleted_at).toBeTruthy()
+    const visible = h.invoke('db:tasks:getAll') as Task[]
+    expect(visible.some((task) => task.id === t.id)).toBe(false)
   })
 
   test('returns false for nonexistent', () => {
