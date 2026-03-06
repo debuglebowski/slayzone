@@ -338,8 +338,6 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes }: PanelsSettin
                     </>
                   )
                 })()}
-                <SelectSeparator />
-                <SelectItem value="terminal">Terminal</SelectItem>
               </SelectContent>
             </Select>
           </div>

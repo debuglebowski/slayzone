@@ -29,9 +29,6 @@ export function syncTerminalModes(db: Database): void {
       WHERE is_builtin = 1 AND id NOT IN (${placeholders})
     `).run(...builtinIds)
 
-    // Manual cleanup for "terminal" since it's now entirely code-side
-    db.prepare('DELETE FROM terminal_modes WHERE id = ?').run('terminal')
-
     for (const mode of DEFAULT_TERMINAL_MODES) {
       if (!mode.isBuiltin) continue
 

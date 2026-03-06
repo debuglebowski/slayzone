@@ -227,10 +227,6 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
       // Look up mode info to get type, templates, and default flags
       const modeId = opts.mode || 'claude-code'
 
-      if (modeId === 'terminal') {
-        return createPty({ win, sessionId: opts.sessionId, cwd: opts.cwd, conversationId: opts.conversationId, existingConversationId: opts.existingConversationId, mode: 'terminal', initialPrompt: opts.initialPrompt, providerArgs, executionContext: opts.executionContext, type: 'terminal' })
-      }
-
       const modeRow = db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(modeId)
       const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
 
@@ -240,7 +236,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
         cwd: opts.cwd,
         conversationId: opts.conversationId,
         existingConversationId: opts.existingConversationId,
-        mode: opts.mode as TerminalMode,
+        mode: modeId as TerminalMode,
         initialPrompt: opts.initialPrompt,
         providerArgs,
         executionContext: opts.executionContext,

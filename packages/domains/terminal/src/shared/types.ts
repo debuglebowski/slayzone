@@ -7,7 +7,6 @@ export const BuiltinTerminalMode = {
   Gemini: 'gemini',
   CursorAgent: 'cursor-agent',
   OpenCode: 'opencode',
-  Terminal: 'terminal',
 } as const
 
 export interface TerminalModeInfo {
