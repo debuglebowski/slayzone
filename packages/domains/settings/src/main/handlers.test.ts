@@ -28,9 +28,9 @@ describe('db:settings:set', () => {
 
 describe('db:settings:delete', () => {
   test('removes an existing setting', () => {
-    h.invoke('db:settings:set', 'theme', 'dark')
-    h.invoke('db:settings:delete', 'theme')
-    expect(h.invoke('db:settings:get', 'theme')).toBeNull()
+    h.invoke('db:settings:set', 'test_delete_key', 'dark')
+    h.invoke('db:settings:delete', 'test_delete_key')
+    expect(h.invoke('db:settings:get', 'test_delete_key')).toBeNull()
   })
 })
 
