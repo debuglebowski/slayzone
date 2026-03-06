@@ -83,7 +83,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
     const id = input.id
     db.prepare(`
       INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, default_flags, enabled, is_builtin, "order", pattern_attention, pattern_working, pattern_error)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
     `).run(
       id,
       input.label,
