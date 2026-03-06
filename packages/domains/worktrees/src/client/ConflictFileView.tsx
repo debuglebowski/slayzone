@@ -133,7 +133,7 @@ export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved,
   }, [repoPath, filePath, onResolved])
 
   const handleAnalyze = useCallback(async () => {
-    if (!content || terminalMode === 'terminal') return
+    if (!content) return
     setAnalyzing(true)
     setError(null)
     try {
@@ -237,7 +237,7 @@ export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved,
           size="sm"
           className="gap-1 h-7 text-xs"
           onClick={handleAnalyze}
-          disabled={analyzing || terminalMode === 'terminal'}
+          disabled={analyzing}
         >
           <Sparkles className="h-3 w-3" />
           {analyzing ? 'Analyzing...' : 'Analyze with AI'}

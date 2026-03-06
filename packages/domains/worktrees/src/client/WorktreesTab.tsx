@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forward
 import {
   FolderGit2,
   GitBranch,
-  LayoutGrid,
   TerminalSquare,
   Trash2,
   FolderSearch,
@@ -477,11 +476,7 @@ function TaskItem({
               />
             ))}
           </div>
-          {task.terminal_mode === 'terminal' ? (
-            <LayoutGrid className="h-4 w-4 shrink-0 opacity-70 group-hover/task:opacity-100" />
-          ) : (
-            <TerminalSquare className="h-4 w-4 shrink-0 text-primary/70 group-hover/task:text-primary" />
-          )}
+          <TerminalSquare className="h-4 w-4 shrink-0 text-primary/70 group-hover/task:text-primary" />
           <span className="truncate flex-1 text-left font-medium">{task.title}</span>
         </button>
       </TooltipTrigger>
