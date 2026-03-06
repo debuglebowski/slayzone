@@ -249,7 +249,8 @@ export async function runSyncNow(db: Database, input: SyncNowInput): Promise<Syn
     FROM external_links l
     JOIN integration_connections c ON c.id = l.connection_id
     JOIN tasks t ON t.id = l.task_id
-    WHERE ${where.join(' AND ')}
+    JOIN integration_project_mappings pm ON pm.project_id = t.project_id AND pm.provider = l.provider
+    WHERE ${where.join(' AND ')} AND pm.status_setup_complete = 1
   `).all(...values) as LinkRow[]
 
   for (const link of links) {

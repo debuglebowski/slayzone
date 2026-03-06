@@ -46,6 +46,7 @@ export interface IntegrationProjectMapping {
   external_team_key: string
   external_project_id: string | null
   sync_mode: IntegrationSyncMode
+  status_setup_complete: number
   created_at: string
   updated_at: string
 }
@@ -328,4 +329,49 @@ export interface ImportGithubRepositoryIssuesResult {
   updated: number
   skippedAlreadyLinked: number
   nextCursor: string | null
+}
+
+// --- Status Sync ---
+
+export function slugifyStatusName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+}
+
+export interface ProviderStatus {
+  id: string
+  name: string
+  color: string
+  type?: string
+  position?: number
+}
+
+export interface FetchProviderStatusesInput {
+  connectionId: string
+  provider: IntegrationProvider
+  externalTeamId: string
+  externalProjectId?: string
+}
+
+export interface ApplyStatusSyncInput {
+  projectId: string
+  provider: IntegrationProvider
+  statuses: ProviderStatus[]
+  categoryOverrides?: Record<string, string>
+  taskRemapping?: Record<string, string>
+}
+
+export interface StatusDiff {
+  added: ProviderStatus[]
+  removed: import('@slayzone/workflow').ColumnConfig[]
+  renamed: Array<{ old: import('@slayzone/workflow').ColumnConfig; new: ProviderStatus }>
+}
+
+export interface StatusResyncPreview {
+  current: import('@slayzone/workflow').ColumnConfig[]
+  incoming: import('@slayzone/workflow').ColumnConfig[]
+  diff: StatusDiff
+  providerStatuses: ProviderStatus[]
 }

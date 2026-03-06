@@ -6,13 +6,16 @@ import { Input } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
 import { resolveColumns, type Project } from '@slayzone/projects/shared'
-import type {
-  GithubProjectSummary,
-  IntegrationConnectionPublic,
-  IntegrationProjectMapping,
-  IntegrationSyncMode,
-  LinearProject,
-  LinearTeam
+import { WORKFLOW_CATEGORIES, type WorkflowCategory } from '@slayzone/workflow'
+import {
+  slugifyStatusName,
+  type GithubProjectSummary,
+  type IntegrationConnectionPublic,
+  type IntegrationProjectMapping,
+  type IntegrationSyncMode,
+  type LinearProject,
+  type LinearTeam,
+  type ProviderStatus
 } from '@slayzone/integrations/shared'
 
 export type ProjectIntegrationProvider = 'linear' | 'github'
@@ -34,7 +37,7 @@ interface ProjectIntegrationSetupWizardProps {
   }) => void
 }
 
-const STEPS = ['Connect account', 'Choose source', 'Choose mode', 'Review mapping', 'Preview and confirm']
+const STEPS = ['Connect account', 'Choose source', 'Choose mode', 'Set up statuses', 'Review mapping', 'Preview and confirm']
 
 const SYNC_MODE_OPTIONS: Array<{
   value: WizardSyncMode
@@ -129,6 +132,13 @@ export function ProjectIntegrationSetupWizard({
   const [previewCount, setPreviewCount] = useState(0)
   const [previewImportableCount, setPreviewImportableCount] = useState(0)
 
+  const [providerStatuses, setProviderStatuses] = useState<ProviderStatus[]>([])
+  const [loadingStatuses, setLoadingStatuses] = useState(false)
+  const [categoryOverrides, setCategoryOverrides] = useState<Record<string, WorkflowCategory>>({})
+  const [taskRemapping, setTaskRemapping] = useState<Record<string, string>>({})
+  const [statusSetupComplete, setStatusSetupComplete] = useState(false)
+  const [applyingStatuses, setApplyingStatuses] = useState(false)
+
   const syncModeOptions = useMemo(
     () => SYNC_MODE_OPTIONS.map((option) => ({ ...option, disabled: !option.enabled(provider) })),
     [provider]
@@ -206,6 +216,10 @@ export function ProjectIntegrationSetupWizard({
     setPreviewImportableCount(0)
     setShowConnectForm(false)
     setConnectionCredential('')
+    setProviderStatuses([])
+    setCategoryOverrides({})
+    setTaskRemapping({})
+    setStatusSetupComplete(false)
   }, [provider, initialConnectionId, initialTeamId, initialLinearProjectId, initialSyncMode, project.id])
 
   useEffect(() => {
@@ -273,8 +287,66 @@ export function ProjectIntegrationSetupWizard({
       })
   }, [provider, connectionId])
 
+  // Clear status setup when source changes
+  const sourceKey = provider === 'linear'
+    ? `${connectionId}:${teamId}:${linearProjectId}`
+    : `${connectionId}:${selectedGitHubProject?.id ?? ''}`
   useEffect(() => {
-    if (step !== 5) return
+    setProviderStatuses([])
+    setCategoryOverrides({})
+    setTaskRemapping({})
+    setStatusSetupComplete(false)
+  }, [sourceKey])
+
+  useEffect(() => {
+    if (step !== 4) return
+    if (!connectionId) return
+    if (providerStatuses.length > 0) return
+
+    const externalTeamId = provider === 'linear' ? teamId : selectedGitHubProject?.owner.login
+    const externalProjectId = provider === 'github' ? selectedGitHubProject?.id : (linearProjectId || undefined)
+    if (!externalTeamId) return
+
+    setLoadingStatuses(true)
+    void window.api.integrations.fetchProviderStatuses({
+      connectionId,
+      provider,
+      externalTeamId,
+      externalProjectId
+    })
+      .then((statuses) => {
+        setProviderStatuses(statuses)
+      })
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => {
+        setLoadingStatuses(false)
+      })
+  }, [step, connectionId, provider, teamId, selectedGitHubProject, linearProjectId, providerStatuses.length])
+
+  const handleApplyStatuses = async () => {
+    setApplyingStatuses(true)
+    setMessage('')
+    try {
+      await window.api.integrations.applyStatusSync({
+        projectId: project.id,
+        provider,
+        statuses: providerStatuses,
+        categoryOverrides: Object.keys(categoryOverrides).length > 0 ? categoryOverrides : undefined,
+        taskRemapping: Object.keys(taskRemapping).length > 0 ? taskRemapping : undefined
+      })
+      setStatusSetupComplete(true)
+      setMessage('Statuses synced successfully')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setApplyingStatuses(false)
+    }
+  }
+
+  useEffect(() => {
+    if (step !== 6) return
     if (!connectionId) return
 
     if (provider === 'linear' && !teamId) return
@@ -319,9 +391,10 @@ export function ProjectIntegrationSetupWizard({
       return Boolean(connectionId && selectedGitHubProject)
     }
     if (step === 3) return Boolean(syncMode)
-    if (step === 4) return true
+    if (step === 4) return statusSetupComplete
+    if (step === 5) return true
     return false
-  }, [provider, step, connectionId, teamId, selectedGitHubProject, syncMode])
+  }, [provider, step, connectionId, teamId, selectedGitHubProject, syncMode, statusSetupComplete])
 
   const persistMapping = async (): Promise<IntegrationProjectMapping> => {
     if (!connectionId) throw new Error('Connection is required')
@@ -418,10 +491,10 @@ export function ProjectIntegrationSetupWizard({
         <div className="space-y-1">
           <CardTitle className="text-base">{provider === 'github' ? 'GitHub Project Setup Wizard' : 'Linear Setup Wizard'}</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Configure sync for this project in five quick steps.
+            Configure sync for this project in six quick steps.
           </p>
         </div>
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-6 gap-2">
           {STEPS.map((label, index) => {
             const current = index + 1
             const done = current < step
@@ -573,6 +646,9 @@ export function ProjectIntegrationSetupWizard({
                   <SelectValue placeholder={loadingGithubProjects ? 'Loading projects...' : 'Choose a GitHub Project'} />
                 </SelectTrigger>
                 <SelectContent>
+                  {githubProjects.length === 0 ? (
+                    <SelectItem value="__none__" disabled>No projects found — use a classic PAT with repo scope</SelectItem>
+                  ) : null}
                   {githubProjects.map((githubProject) => (
                     <SelectItem key={githubProject.id} value={githubProject.id}>
                       {githubProject.owner.login}#{githubProject.number} - {githubProject.title}
@@ -637,6 +713,104 @@ export function ProjectIntegrationSetupWizard({
         {step === 4 ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
+              Import statuses from {providerLabel(provider)} to replace this project's statuses.
+            </p>
+            {loadingStatuses ? (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" />
+                Loading statuses from {providerLabel(provider)}...
+              </p>
+            ) : providerStatuses.length > 0 ? (
+              <>
+                <div className="rounded-md border p-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {providerLabel(provider)} statuses
+                  </p>
+                  <div className="space-y-2">
+                    {providerStatuses.map((status) => (
+                      <div key={status.id} className="flex items-center justify-between gap-2">
+                        <span className="text-sm">{status.name}</span>
+                        <Select
+                          value={categoryOverrides[status.id] ?? status.type ?? 'unstarted'}
+                          onValueChange={(value) =>
+                            setCategoryOverrides((prev) => ({ ...prev, [status.id]: value as WorkflowCategory }))
+                          }
+                        >
+                          <SelectTrigger className="w-36">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {WORKFLOW_CATEGORIES.map((cat) => (
+                              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {!statusSetupComplete ? (
+                  <div className="rounded-md border p-3">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Remap existing tasks
+                    </p>
+                    <p className="mb-2 text-xs text-muted-foreground">
+                      Choose where existing tasks should go. Unmapped tasks will move to the default status.
+                    </p>
+                    <div className="space-y-2">
+                      {resolveColumns(project.columns_config).map((col) => (
+                        <div key={col.id} className="flex items-center justify-between gap-2">
+                          <span className="text-sm">{col.label}</span>
+                          <span className="text-xs text-muted-foreground">-&gt;</span>
+                          <Select
+                            value={taskRemapping[col.id] ?? ''}
+                            onValueChange={(value) =>
+                              setTaskRemapping((prev) => ({ ...prev, [col.id]: value }))
+                            }
+                          >
+                            <SelectTrigger className="w-40">
+                              <SelectValue placeholder="Auto (default)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {providerStatuses.map((ps) => (
+                                <SelectItem key={ps.id} value={slugifyStatusName(ps.name)}>
+                                  {ps.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="flex justify-end">
+                  {statusSetupComplete ? (
+                    <p className="flex items-center gap-2 text-xs text-green-600">
+                      <CheckCircle2 className="size-3" /> Statuses applied
+                    </p>
+                  ) : (
+                    <Button
+                      size="sm"
+                      onClick={() => void handleApplyStatuses()}
+                      disabled={applyingStatuses}
+                    >
+                      {applyingStatuses ? 'Applying...' : 'Apply statuses'}
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">No statuses found.</p>
+            )}
+          </div>
+        ) : null}
+
+        {step === 5 ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
               Mapping defaults are pre-filled for this scaffold. Required fields are enforced.
             </p>
             <div className="rounded-md border p-3">
@@ -669,7 +843,7 @@ export function ProjectIntegrationSetupWizard({
           </div>
         ) : null}
 
-        {step === 5 ? (
+        {step === 6 ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               Review projected first sync impact before confirming.

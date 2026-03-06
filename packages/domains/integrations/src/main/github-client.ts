@@ -494,6 +494,61 @@ export async function updateIssue(
   return mapIssue(input.owner, input.repo, issue)
 }
 
+interface GitHubGraphQLProjectStatusFieldData {
+  node: {
+    __typename: string
+    field: {
+      __typename: string
+      id: string
+      options: Array<{
+        id: string
+        name: string
+        color: string
+      }>
+    } | null
+  } | null
+}
+
+export async function listProjectStatusOptions(
+  token: string,
+  projectId: string
+): Promise<Array<{ id: string; name: string; color: string }>> {
+  const data = await requestGitHubGraphQL<GitHubGraphQLProjectStatusFieldData>(
+    token,
+    `
+      query ProjectStatusField($projectId: ID!) {
+        node(id: $projectId) {
+          __typename
+          ... on ProjectV2 {
+            field(name: "Status") {
+              __typename
+              ... on ProjectV2SingleSelectField {
+                id
+                options {
+                  id
+                  name
+                  color
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+    { projectId }
+  )
+
+  if (!data.node || data.node.__typename !== 'ProjectV2') {
+    throw new Error('GitHub project not found or inaccessible')
+  }
+
+  if (!data.node.field || data.node.field.__typename !== 'ProjectV2SingleSelectField') {
+    return []
+  }
+
+  return data.node.field.options
+}
+
 export async function listProjectIssues(
   token: string,
   input: {

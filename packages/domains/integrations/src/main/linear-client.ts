@@ -37,7 +37,10 @@ interface WorkflowStatesQuery {
   workflowStates: {
     nodes: Array<{
       id: string
+      name: string
       type: string
+      color: string
+      position: number
       team: { id: string } | null
     }>
   }
@@ -186,12 +189,12 @@ export async function listProjects(apiKey: string, teamId: string): Promise<Line
 export async function listWorkflowStates(
   apiKey: string,
   teamId: string
-): Promise<Array<{ id: string; type: string }>> {
+): Promise<Array<{ id: string; name: string; type: string; color: string; position: number }>> {
   const data = await requestLinear<WorkflowStatesQuery>(
     apiKey,
     `query WorkflowStates($teamId: ID!) {
       workflowStates(filter: { team: { id: { eq: $teamId } } }) {
-        nodes { id type team { id } }
+        nodes { id name type color position team { id } }
       }
     }`,
     { teamId }
@@ -199,7 +202,7 @@ export async function listWorkflowStates(
 
   return data.workflowStates.nodes
     .filter((state) => state.team?.id === teamId)
-    .map((state) => ({ id: state.id, type: state.type }))
+    .map((state) => ({ id: state.id, name: state.name, type: state.type, color: state.color, position: state.position }))
 }
 
 export async function listIssues(

@@ -251,6 +251,7 @@ export function ProjectSettingsDialog({
   const [syncSettingsMessage, setSyncSettingsMessage] = useState('')
   const [savingSyncProvider, setSavingSyncProvider] = useState<IntegrationProvider | null>(null)
   const [pullingLinearSyncNow, setPullingLinearSyncNow] = useState(false)
+  const [resyncingStatuses, setResyncingStatuses] = useState<IntegrationProvider | null>(null)
   const [linearImportTeamId, setLinearImportTeamId] = useState('')
   const [linearImportProjectId, setLinearImportProjectId] = useState('')
   const [linearImportTeams, setLinearImportTeams] = useState<LinearTeam[]>([])
@@ -775,6 +776,50 @@ export function ProjectSettingsDialog({
       toast.error(error instanceof Error ? error.message : String(error))
     } finally {
       setPullingLinearSyncNow(false)
+    }
+  }
+
+  const handleResyncStatuses = async (provider: IntegrationProvider) => {
+    if (!project) return
+    setResyncingStatuses(provider)
+    try {
+      const preview = await window.api.integrations.resyncProviderStatuses({
+        projectId: project.id,
+        provider
+      })
+
+      const { diff } = preview
+      const lines: string[] = []
+      for (const s of diff.added) lines.push(`+ ${s.name} (new)`)
+      for (const s of diff.removed) lines.push(`- ${s.label} (removed)`)
+      for (const s of diff.renamed) lines.push(`~ ${s.old.label} → ${s.new.name} (renamed)`)
+
+      if (lines.length === 0) {
+        toast.success('Statuses are already up to date')
+        return
+      }
+
+      const confirmed = window.confirm(
+        `Status changes from ${provider === 'github' ? 'GitHub' : 'Linear'}:\n\n${lines.join('\n')}\n\n` +
+        (diff.removed.length > 0
+          ? 'Tasks on removed statuses will move to the default status.\n\n'
+          : '') +
+        'Apply these changes?'
+      )
+      if (!confirmed) return
+
+      await window.api.integrations.applyStatusSync({
+        projectId: project.id,
+        provider,
+        statuses: preview.providerStatuses
+      })
+
+      toast.success(`Statuses resynced: ${lines.length} change${lines.length === 1 ? '' : 's'}`)
+      ;(window as any).__slayzone_refreshData?.()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    } finally {
+      setResyncingStatuses(null)
     }
   }
 
@@ -1344,7 +1389,7 @@ export function ProjectSettingsDialog({
     { key: 'general', label: 'General' },
     { key: 'environment', label: 'Environment' },
     { key: 'columns', label: 'Task statuses' },
-    { key: 'integrations', label: 'Integrations' },
+    ...(import.meta.env.DEV ? [{ key: 'integrations' as const, label: 'Integrations' }] : []),
   ]
   if (contextManagerEnabled) {
     navItems.push({ key: 'ai-config', label: 'Context Manager' })
@@ -1693,7 +1738,7 @@ export function ProjectSettingsDialog({
             </div>
           )}
 
-          {activeTab === 'integrations' && (
+          {import.meta.env.DEV && activeTab === 'integrations' && (
             <div className="w-full space-y-6">
               <SettingsTabIntro
                 title="Integrations"
@@ -1881,7 +1926,7 @@ export function ProjectSettingsDialog({
                                   </SelectTrigger>
                                   <SelectContent>
                                     {githubSyncProjects.length === 0 ? (
-                                      <SelectItem value="__none__" disabled>No GitHub Projects found</SelectItem>
+                                      <SelectItem value="__none__" disabled>No GitHub Projects found — use a classic PAT with repo scope</SelectItem>
                                     ) : null}
                                     {githubSyncProjects.map((projectOption) => (
                                       <SelectItem key={projectOption.id} value={projectOption.id}>
@@ -1911,6 +1956,14 @@ export function ProjectSettingsDialog({
                               </div>
 
                               <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => void handleResyncStatuses('github')}
+                                  disabled={resyncingStatuses === 'github'}
+                                >
+                                  {resyncingStatuses === 'github' ? 'Resyncing…' : 'Resync statuses'}
+                                </Button>
                                 <Button
                                   size="sm"
                                   disabled={
@@ -2041,6 +2094,14 @@ export function ProjectSettingsDialog({
                               </div>
 
                               <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={resyncingStatuses === 'linear'}
+                                  onClick={() => void handleResyncStatuses('linear')}
+                                >
+                                  {resyncingStatuses === 'linear' ? 'Resyncing…' : 'Resync statuses'}
+                                </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"

@@ -14,6 +14,7 @@ import {
   listRepositories as listGitHubRepositories,
   listProjects as listGitHubProjects,
   listProjectIssues as listGitHubProjectIssues,
+  listProjectStatusOptions as listGitHubProjectStatusOptions,
   getIssue as getGitHubIssue,
   updateIssue as updateGitHubIssue
 } from './github-client'
@@ -51,9 +52,14 @@ import type {
   TaskSyncFieldDiff,
   TaskSyncFieldState,
   TaskSyncStatus,
-  SyncNowInput
+  SyncNowInput,
+  FetchProviderStatusesInput,
+  ApplyStatusSyncInput,
+  ProviderStatus,
+  StatusResyncPreview
 } from '../shared'
 import { runSyncNow } from './sync'
+import { providerStatusesToColumns, computeStatusDiff } from './status-sync'
 import { htmlToMarkdown, markdownToHtml } from './markdown'
 import {
   getColumnById,
@@ -119,6 +125,10 @@ function ensureIntegrationSchema(db: Database): void {
 
   if (!columnExists(db, 'integration_project_mappings', 'sync_mode')) {
     db.exec(`ALTER TABLE integration_project_mappings ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'one_way';`)
+  }
+
+  if (!columnExists(db, 'integration_project_mappings', 'status_setup_complete')) {
+    db.exec(`ALTER TABLE integration_project_mappings ADD COLUMN status_setup_complete INTEGER NOT NULL DEFAULT 0;`)
   }
 
   db.exec(`
@@ -1480,6 +1490,10 @@ export function registerIntegrationHandlers(
       WHERE project_id = ? AND provider = 'github'
     `).get(input.projectId) as IntegrationProjectMapping | undefined
 
+    if (mapping && !mapping.status_setup_complete) {
+      throw new Error('Status setup must be completed before importing issues')
+    }
+
     const token = readCredential(db, connection.credential_ref)
     const githubProjectId = input.githubProjectId ?? mapping?.external_project_id ?? undefined
     if (!githubProjectId) {
@@ -1531,6 +1545,15 @@ export function registerIntegrationHandlers(
   ipcMain.handle('integrations:import-github-repository-issues', async (_event, input: ImportGithubRepositoryIssuesInput) => {
     const connection = getConnection(db, input.connectionId)
     assertConnectionProvider(connection, 'github')
+
+    const ghMapping = db.prepare(`
+      SELECT * FROM integration_project_mappings
+      WHERE project_id = ? AND provider = 'github'
+    `).get(input.projectId) as IntegrationProjectMapping | undefined
+    if (ghMapping && !ghMapping.status_setup_complete) {
+      throw new Error('Status setup must be completed before importing issues')
+    }
+
     const repository = parseGitHubRepositoryFullName(input.repositoryFullName)
     if (!repository) {
       throw new Error('Repository must be in owner/repo format')
@@ -1592,6 +1615,10 @@ export function registerIntegrationHandlers(
       SELECT * FROM integration_project_mappings
       WHERE project_id = ? AND provider = 'linear'
     `).get(input.projectId) as IntegrationProjectMapping | undefined
+
+    if (mapping && !mapping.status_setup_complete) {
+      throw new Error('Status setup must be completed before importing issues')
+    }
 
     const teamId = input.teamId ?? mapping?.external_team_id
     if (!teamId) {
@@ -1714,6 +1741,15 @@ export function registerIntegrationHandlers(
       throw new Error('Task is not linked to GitHub')
     }
 
+    const pushTaskRow = getTaskById(db, input.taskId)
+    const pushMapping = db.prepare(`
+      SELECT * FROM integration_project_mappings
+      WHERE project_id = ? AND provider = ?
+    `).get(pushTaskRow.project_id, input.provider) as IntegrationProjectMapping | undefined
+    if (pushMapping && !pushMapping.status_setup_complete) {
+      throw new Error('Status setup must be completed before pushing')
+    }
+
     const key = parseGitHubExternalKey(link.external_key)
     if (!key) {
       throw new Error('Linked GitHub issue key is invalid')
@@ -1792,6 +1828,15 @@ export function registerIntegrationHandlers(
     `).get(input.taskId) as ExternalLink | undefined
     if (!link) {
       throw new Error('Task is not linked to GitHub')
+    }
+
+    const pullTask = getTaskById(db, input.taskId)
+    const pullMapping = db.prepare(`
+      SELECT * FROM integration_project_mappings
+      WHERE project_id = ? AND provider = ?
+    `).get(pullTask.project_id, input.provider) as IntegrationProjectMapping | undefined
+    if (pullMapping && !pullMapping.status_setup_complete) {
+      throw new Error('Status setup must be completed before pulling')
     }
 
     const key = parseGitHubExternalKey(link.external_key)
@@ -1885,5 +1930,129 @@ export function registerIntegrationHandlers(
 
     const res = db.prepare('DELETE FROM external_links WHERE task_id = ? AND provider = ?').run(taskId, provider)
     return res.changes > 0
+  })
+
+  // --- Status Sync Handlers ---
+
+  ipcMain.handle('integrations:fetch-provider-statuses', async (_event, input: FetchProviderStatusesInput): Promise<ProviderStatus[]> => {
+    const connection = getConnection(db, input.connectionId)
+    assertConnectionProvider(connection, input.provider)
+    const credential = readCredential(db, connection.credential_ref)
+
+    if (input.provider === 'linear') {
+      const states = await listWorkflowStates(credential, input.externalTeamId)
+      return states
+        .sort((a, b) => a.position - b.position)
+        .map((s) => ({ id: s.id, name: s.name, color: s.color, type: s.type, position: s.position }))
+    }
+
+    if (input.provider === 'github') {
+      if (!input.externalProjectId) throw new Error('externalProjectId required for GitHub')
+      const options = await listGitHubProjectStatusOptions(credential, input.externalProjectId)
+      return options.map((o, i) => ({ id: o.id, name: o.name, color: o.color, position: i }))
+    }
+
+    throw new Error(`Unsupported provider: ${input.provider}`)
+  })
+
+  ipcMain.handle('integrations:apply-status-sync', async (_event, input: ApplyStatusSyncInput) => {
+    const mapping = db.prepare(`
+      SELECT * FROM integration_project_mappings
+      WHERE project_id = ? AND provider = ?
+    `).get(input.projectId, input.provider) as IntegrationProjectMapping | undefined
+    if (!mapping) throw new Error('No integration mapping found for this project')
+
+    const { columns: newColumns, providerIdToColumnId } = providerStatusesToColumns(
+      input.provider,
+      input.statuses,
+      input.categoryOverrides as Record<string, WorkflowCategory> | undefined
+    )
+
+    // Remap existing tasks
+    if (input.taskRemapping && Object.keys(input.taskRemapping).length > 0) {
+      for (const [oldStatus, newStatus] of Object.entries(input.taskRemapping)) {
+        if (!newColumns.some((c) => c.id === newStatus)) continue
+        db.prepare('UPDATE tasks SET status = ?, updated_at = datetime(\'now\') WHERE project_id = ? AND status = ?')
+          .run(newStatus, input.projectId, oldStatus)
+      }
+    }
+
+    // Update project columns_config
+    db.prepare('UPDATE projects SET columns_config = ?, updated_at = datetime(\'now\') WHERE id = ?')
+      .run(JSON.stringify(newColumns), input.projectId)
+
+    // Normalize any tasks with statuses not in the new column set
+    const defaultStatus = getDefaultStatus(newColumns)
+    const newStatusIds = newColumns.map((c) => c.id)
+    const placeholders = newStatusIds.map(() => '?').join(',')
+    db.prepare(
+      `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE project_id = ? AND status NOT IN (${placeholders})`
+    ).run(defaultStatus, input.projectId, ...newStatusIds)
+
+    // Rebuild integration_state_mappings using the mapping from providerStatusesToColumns
+    db.prepare("DELETE FROM integration_state_mappings WHERE project_mapping_id = ?")
+      .run(mapping.id)
+
+    for (const status of input.statuses) {
+      const colId = providerIdToColumnId.get(status.id)
+      if (!colId) continue
+      db.prepare(`
+        INSERT INTO integration_state_mappings (
+          id, provider, project_mapping_id, local_status, state_id, state_type, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).run(
+        crypto.randomUUID(),
+        input.provider,
+        mapping.id,
+        colId,
+        status.id,
+        status.type ?? 'unknown'
+      )
+    }
+
+    // Mark status setup complete
+    db.prepare('UPDATE integration_project_mappings SET status_setup_complete = 1, updated_at = datetime(\'now\') WHERE id = ?')
+      .run(mapping.id)
+
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(input.projectId)
+    return project
+  })
+
+  ipcMain.handle('integrations:resync-provider-statuses', async (_event, input: { projectId: string; provider: IntegrationProvider }): Promise<StatusResyncPreview> => {
+    const mapping = db.prepare(`
+      SELECT * FROM integration_project_mappings
+      WHERE project_id = ? AND provider = ?
+    `).get(input.projectId, input.provider) as IntegrationProjectMapping | undefined
+    if (!mapping) throw new Error('No integration mapping found for this project')
+
+    const connection = getConnection(db, mapping.connection_id)
+    const credential = readCredential(db, connection.credential_ref)
+
+    let providerStatuses: ProviderStatus[]
+    if (input.provider === 'linear') {
+      const states = await listWorkflowStates(credential, mapping.external_team_id)
+      providerStatuses = states
+        .sort((a, b) => a.position - b.position)
+        .map((s) => ({ id: s.id, name: s.name, color: s.color, type: s.type, position: s.position }))
+    } else if (input.provider === 'github') {
+      if (!mapping.external_project_id) throw new Error('No GitHub project ID in mapping')
+      const options = await listGitHubProjectStatusOptions(credential, mapping.external_project_id)
+      providerStatuses = options.map((o, i) => ({ id: o.id, name: o.name, color: o.color, position: i }))
+    } else {
+      throw new Error(`Unsupported provider: ${input.provider}`)
+    }
+
+    // Build local_status -> provider_status_id map from integration_state_mappings
+    const stateMappingRows = db.prepare(`
+      SELECT local_status, state_id FROM integration_state_mappings
+      WHERE project_mapping_id = ?
+    `).all(mapping.id) as Array<{ local_status: string; state_id: string }>
+    const currentIdMap = new Map(stateMappingRows.map((r) => [r.local_status, r.state_id]))
+
+    const current = resolveColumns(getProjectColumns(db, input.projectId))
+    const { columns: incoming } = providerStatusesToColumns(input.provider, providerStatuses)
+    const diff = computeStatusDiff(current, providerStatuses, currentIdMap)
+
+    return { current, incoming, diff, providerStatuses }
   })
 }
