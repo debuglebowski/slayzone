@@ -107,7 +107,14 @@ function main() {
     const destination = path.join(outputDir, baseName)
 
     if (existsSync(destination)) {
-      throw new Error(`Duplicate output filename detected: ${baseName}`)
+      // Windows builds with --x64 --arm64 produce arch-specific installers
+      // but identical update manifests (app-update.yml). Skip exact duplicates.
+      const existingSize = statSync(destination).size
+      const newSize = statSync(filePath).size
+      if (existingSize === newSize) {
+        continue
+      }
+      throw new Error(`Duplicate output filename detected with different content: ${baseName}`)
     }
 
     cpSync(filePath, destination)
