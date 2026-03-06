@@ -289,6 +289,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [resolve, build]
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
       - name: Download platform build assets
         uses: actions/download-artifact@v4
         with:
