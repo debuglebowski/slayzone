@@ -26,6 +26,8 @@ export interface AppearanceSettings {
   browserDefaultZoom: number
   browserDefaultUrl: string
   browserDeviceDefaults: BrowserDeviceDefaults | null
+  // Sidebar
+  sidebarBadgeMode: 'none' | 'blob' | 'count'
 }
 
 export const appearanceDefaults: AppearanceSettings = {
@@ -44,6 +46,7 @@ export const appearanceDefaults: AppearanceSettings = {
   browserDefaultZoom: 100,
   browserDefaultUrl: '',
   browserDeviceDefaults: null,
+  sidebarBadgeMode: 'blob',
 }
 
 export const AppearanceContext = createContext<AppearanceSettings>(appearanceDefaults)

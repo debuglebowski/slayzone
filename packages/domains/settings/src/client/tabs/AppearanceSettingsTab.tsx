@@ -15,12 +15,14 @@ export function AppearanceSettingsTab({
   const [terminalFontSize, setTerminalFontSize] = useState('13')
   const [editorFontSize, setEditorFontSize] = useState('13')
   const [reduceMotion, setReduceMotion] = useState(false)
+  const [sidebarBadgeMode, setSidebarBadgeMode] = useState<'none' | 'blob' | 'count'>('blob')
 
   useEffect(() => {
     window.api.settings.get('project_color_tints_enabled').then(val => setProjectColorTints(val !== '0'))
     window.api.settings.get('terminal_font_size').then(val => setTerminalFontSize(val ?? '13'))
     window.api.settings.get('editor_font_size').then(val => setEditorFontSize(val ?? '13'))
     window.api.settings.get('reduce_motion').then(val => setReduceMotion(val === '1'))
+    window.api.settings.get('sidebar_badge_mode').then(val => setSidebarBadgeMode((val === 'none' || val === 'count') ? val : 'blob'))
   }, [])
 
   return (
@@ -80,6 +82,23 @@ export function AppearanceSettingsTab({
             </Select>
           </div>
         ))}
+      </div>
+
+      <div className="space-y-3">
+        <Label className="text-base font-semibold">Sidebar</Label>
+        <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+          <span className="text-sm">Task attention badges</span>
+          <Select value={sidebarBadgeMode} onValueChange={(v) => { setSidebarBadgeMode(v as 'none' | 'blob' | 'count'); window.api.settings.set('sidebar_badge_mode', v) }}>
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None</SelectItem>
+              <SelectItem value="blob">Blob</SelectItem>
+              <SelectItem value="count">Count</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="space-y-3">

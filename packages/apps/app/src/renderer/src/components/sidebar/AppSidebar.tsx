@@ -22,7 +22,7 @@ import {
 } from '@slayzone/ui'
 import { ProjectItem } from './ProjectItem'
 import { TerminalStatusPopover } from '@slayzone/terminal'
-import { cn } from '@slayzone/ui'
+import { cn, useAppearance } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
@@ -40,6 +40,7 @@ interface AppSidebarProps {
   onTaskClick?: (taskId: string) => void
   zenMode?: boolean
   onboardingChecklist: OnboardingChecklistState
+  attentionByProject: Map<string, number>
 }
 
 const isMac = navigator.platform.startsWith('Mac')
@@ -98,9 +99,11 @@ export function AppSidebar({
   onTaskClick,
   zenMode,
   onboardingChecklist,
+  attentionByProject,
 }: AppSidebarProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [checklistOpen, setChecklistOpen] = useState(false)
+  const { sidebarBadgeMode } = useAppearance()
 
   return (
     <Sidebar collapsible="none" className={zenMode ? "!w-0 min-h-svh overflow-hidden" : "w-18 min-h-svh"}>
@@ -119,6 +122,8 @@ export function AppSidebar({
                     onClick={() => onSelectProject(project.id)}
                     onSettings={() => onProjectSettings(project)}
                     onDelete={() => onProjectDelete(project)}
+                    attentionCount={attentionByProject.get(project.id) ?? 0}
+                    badgeMode={sidebarBadgeMode}
                   />
                 </SidebarMenuItem>
               ))}

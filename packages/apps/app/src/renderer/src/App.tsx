@@ -282,10 +282,23 @@ function App(): React.JSX.Element {
   // Usage & notification state
   const { data: usageData, refresh: refreshUsage } = useUsage()
   const [notificationState, setNotificationState] = useNotificationState()
-  const { attentionTasks, refresh: refreshAttentionTasks } = useAttentionTasks(
+  const { attentionTasks: allAttentionTasks, refresh: refreshAttentionTasks } = useAttentionTasks(
     tasks,
-    notificationState.filterCurrentProject ? selectedProjectId : null
+    null
   )
+  const attentionTasks = useMemo(
+    () => notificationState.filterCurrentProject
+      ? allAttentionTasks.filter((at) => at.task.project_id === selectedProjectId)
+      : allAttentionTasks,
+    [allAttentionTasks, notificationState.filterCurrentProject, selectedProjectId]
+  )
+  const attentionByProject = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const at of allAttentionTasks) {
+      map.set(at.task.project_id, (map.get(at.task.project_id) ?? 0) + 1)
+    }
+    return map
+  }, [allAttentionTasks])
 
   const previousProjectRef = useRef<string>(selectedProjectId)
   const previousActiveTabRef = useRef<string>('home')
@@ -1145,7 +1158,7 @@ function App(): React.JSX.Element {
     setProjects((prev) => [...prev, project])
     setSelectedProjectId(project.id)
     setCreateProjectOpen(false)
-    if (context.startMode === 'github' || context.startMode === 'linear') {
+    if (import.meta.env.DEV && (context.startMode === 'github' || context.startMode === 'linear')) {
       openProjectSettings(project, {
         initialTab: 'integrations',
         integrationOnboardingProvider: context.startMode
@@ -1246,6 +1259,7 @@ function App(): React.JSX.Element {
           onTaskClick={openTask}
           zenMode={zenMode}
           onboardingChecklist={onboardingChecklist}
+          attentionByProject={attentionByProject}
         />
 
         <div id="right-column" className={`flex-1 flex flex-col min-w-0 bg-surface-1 pb-2 pr-2 ${zenMode ? 'pl-2' : ''}`}>

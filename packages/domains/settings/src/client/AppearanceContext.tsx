@@ -38,12 +38,14 @@ export function AppearanceProvider({
       window.api.settings.get('browser_default_zoom'),
       window.api.settings.get('browser_default_url'),
       window.api.settings.get('browser_default_devices'),
+      window.api.settings.get('sidebar_badge_mode'),
     ]).then(([
       termSize, editorSize, reduceMotion, colorTints,
       wordWrap, tabSize, indentTabs, renderWs,
       termFamily, termScrollback,
       diffContext, diffWs,
       browserZoom, browserUrl, browserDevices,
+      sidebarBadge,
     ]) => {
       const d = appearanceDefaults
       setSettings({
@@ -62,6 +64,7 @@ export function AppearanceProvider({
         browserDefaultZoom: browserZoom ? parseInt(browserZoom, 10) : d.browserDefaultZoom,
         browserDefaultUrl: browserUrl || '',
         browserDeviceDefaults: tryParseJson<BrowserDeviceDefaults | null>(browserDevices, null),
+        sidebarBadgeMode: (sidebarBadge === 'none' || sidebarBadge === 'count') ? sidebarBadge : 'blob',
       })
     })
   }, [settingsRevision])
