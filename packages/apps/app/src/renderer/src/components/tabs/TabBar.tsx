@@ -61,7 +61,8 @@ function TabContent({ title, isActive, isDragging, onClose, terminalState, isSub
       className={cn(
         'group relative flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0',
         !projectColor && 'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
-        isActive ? 'border border-neutral-300 dark:border-neutral-600' : 'text-neutral-500 dark:text-neutral-400',
+        'border',
+        isActive ? 'border-neutral-300 dark:border-neutral-600' : 'border-transparent text-neutral-500 dark:text-neutral-400',
         isTemporary && 'border border-dashed border-neutral-400 dark:border-neutral-500',
         'max-w-[300px]',
         isDragging && 'shadow-lg'
@@ -178,9 +179,10 @@ function LeaderboardTab({ isActive, onClick }: { isActive: boolean; onClick: () 
       className={cn(
         'flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
         'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
+        'border',
         isActive
-          ? 'bg-neutral-200 dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600'
-          : 'text-neutral-500 dark:text-neutral-400'
+          ? 'bg-neutral-200 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600'
+          : 'border-transparent text-neutral-500 dark:text-neutral-400'
       )}
       onClick={onClick}
     >
@@ -251,9 +253,10 @@ export function TabBar({
           className={cn(
             'flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
             'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
+            'border',
             activeIndex === homeIndex
-              ? 'bg-neutral-200 dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600'
-              : 'text-neutral-500 dark:text-neutral-400'
+              ? 'bg-neutral-200 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600'
+              : 'border-transparent text-neutral-500 dark:text-neutral-400'
           )}
           onClick={() => onTabClick(homeIndex)}
         >
