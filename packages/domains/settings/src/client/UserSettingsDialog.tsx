@@ -213,7 +213,7 @@ export function UserSettingsDialog({
       ])
       const [devToast, devAutoOpen, mcpPortSetting, cliStatus, colorTints, termFontSize, editorFontSizeVal, reduceMotionVal, leaderboardVal, ccsDefProfileVal, ccsProfilesResult,
         edWordWrap, edTabSize, edIndentTabs, edRenderWs,
-        termFamily, termScrollback, termThemeOverride, termForceDarkLegacy,
+        termFamily, termScrollback, termThemeOverride,
         dfContextLines, dfIgnoreWs,
         brDefaultUrl, brDefaultZoom, brDevices,
       ] = await Promise.allSettled([
@@ -235,7 +235,6 @@ export function UserSettingsDialog({
         window.api.settings.get('terminal_font_family'),
         window.api.settings.get('terminal_scrollback'),
         window.api.settings.get('terminal_theme_override'),
-        window.api.settings.get('terminal_force_dark'),
         window.api.settings.get('diff_context_lines'),
         window.api.settings.get('diff_ignore_whitespace'),
         window.api.settings.get('browser_default_url'),
@@ -297,8 +296,7 @@ export function UserSettingsDialog({
       setTerminalFontFamily(termFamily.status === 'fulfilled' && termFamily.value ? termFamily.value : 'Menlo, Monaco, "Courier New", monospace')
       setTerminalScrollback(termScrollback.status === 'fulfilled' && termScrollback.value ? termScrollback.value : '5000')
       const tto = termThemeOverride.status === 'fulfilled' ? termThemeOverride.value : null
-      const legacyDark = termForceDarkLegacy.status === 'fulfilled' ? termForceDarkLegacy.value : null
-      setTerminalThemeOverride(tto === 'dark' || tto === 'light' ? tto : legacyDark === '1' ? 'dark' : 'follow')
+      setTerminalThemeOverride(tto === 'dark' || tto === 'light' ? tto : 'follow')
       // Diff settings
       const dc = dfContextLines.status === 'fulfilled' ? dfContextLines.value : null
       setDiffContextLines(dc === '0' || dc === '5' || dc === 'all' ? dc : '3')

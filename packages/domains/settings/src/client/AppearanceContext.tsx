@@ -39,14 +39,13 @@ export function AppearanceProvider({
       window.api.settings.get('browser_default_url'),
       window.api.settings.get('browser_default_devices'),
       window.api.settings.get('terminal_theme_override'),
-      window.api.settings.get('terminal_force_dark'),
     ]).then(([
       termSize, editorSize, reduceMotion, colorTints,
       wordWrap, tabSize, indentTabs, renderWs,
       termFamily, termScrollback,
       diffContext, diffWs,
       browserZoom, browserUrl, browserDevices,
-      termThemeOverride, termForceDarkLegacy,
+      termThemeOverride,
     ]) => {
       const d = appearanceDefaults
       setSettings({
@@ -60,7 +59,7 @@ export function AppearanceProvider({
         editorRenderWhitespace: renderWs === 'all' ? 'all' : 'none',
         terminalFontFamily: termFamily || d.terminalFontFamily,
         terminalScrollback: termScrollback ? parseInt(termScrollback, 10) : d.terminalScrollback,
-        terminalThemeOverride: termThemeOverride === 'dark' || termThemeOverride === 'light' ? termThemeOverride : termForceDarkLegacy === '1' ? 'dark' : 'follow',
+        terminalThemeOverride: termThemeOverride === 'dark' || termThemeOverride === 'light' ? termThemeOverride : 'follow',
         diffContextLines: (diffContext === '0' || diffContext === '5' || diffContext === 'all') ? diffContext : '3',
         diffIgnoreWhitespace: diffWs === '1',
         browserDefaultZoom: browserZoom ? parseInt(browserZoom, 10) : d.browserDefaultZoom,
