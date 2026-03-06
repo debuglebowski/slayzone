@@ -26,6 +26,14 @@ describe('db:settings:set', () => {
   })
 })
 
+describe('db:settings:delete', () => {
+  test('removes an existing setting', () => {
+    h.invoke('db:settings:set', 'theme', 'dark')
+    h.invoke('db:settings:delete', 'theme')
+    expect(h.invoke('db:settings:get', 'theme')).toBeNull()
+  })
+})
+
 describe('db:settings:getAll', () => {
   test('returns all settings as object', () => {
     h.invoke('db:settings:set', 'foo', 'bar')

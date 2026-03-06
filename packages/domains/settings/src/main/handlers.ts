@@ -2,7 +2,6 @@ import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 
 export function registerSettingsHandlers(ipcMain: IpcMain, db: Database): void {
-
   ipcMain.handle('db:settings:get', (_, key: string) => {
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
       | { value: string }
@@ -12,6 +11,10 @@ export function registerSettingsHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('db:settings:set', (_, key: string, value: string) => {
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
+  })
+
+  ipcMain.handle('db:settings:delete', (_, key: string) => {
+    db.prepare('DELETE FROM settings WHERE key = ?').run(key)
   })
 
   ipcMain.handle('db:settings:getAll', () => {

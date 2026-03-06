@@ -675,7 +675,11 @@ export function UserSettingsDialog({
                     <Select value={terminalThemeOverride} onValueChange={(v) => {
                       const val = v as 'follow' | 'dark' | 'light'
                       setTerminalThemeOverride(val)
-                      window.api.settings.set('terminal_theme_override', val)
+                      if (val === 'follow') {
+                        void window.api.settings.delete('terminal_theme_override')
+                        return
+                      }
+                      void window.api.settings.set('terminal_theme_override', val)
                     }}>
                       <SelectTrigger className="w-48">
                         <SelectValue />

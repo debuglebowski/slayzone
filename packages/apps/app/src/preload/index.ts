@@ -65,6 +65,7 @@ const api: ElectronAPI = {
   settings: {
     get: (key) => ipcRenderer.invoke('db:settings:get', key),
     set: (key, value) => ipcRenderer.invoke('db:settings:set', key, value),
+    delete: (key) => ipcRenderer.invoke('db:settings:delete', key),
     getAll: () => ipcRenderer.invoke('db:settings:getAll')
   },
   theme: {
