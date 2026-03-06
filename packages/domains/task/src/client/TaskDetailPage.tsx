@@ -502,18 +502,20 @@ export function TaskDetailPage({
     }
   }, [task?.project_id, task?.id])
 
-  // Handle session ID creation from terminal
+  // Handle session ID creation from terminal — persist to DB only.
+  // Don't setTask/onTaskUpdated: the conversation ID is internal terminal state.
+  // Updating task state here would change the conversationId prop flowing back into
+  // Terminal, causing initTerminal to re-run (detach + reattach), which loses focus.
+  // The DB write is sufficient — the value is read back on future task loads.
   const handleSessionCreated = useCallback(
-    async (sessionId: string) => {
+    (sessionId: string) => {
       if (!task) return
-      const updated = await window.api.db.updateTask({
+      void window.api.db.updateTask({
         id: task.id,
         providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, sessionId)
       })
-      setTask(updated)
-      onTaskUpdated(updated)
     },
-    [task, onTaskUpdated]
+    [task]
   )
 
   // Handle terminal ready - memoized to prevent effect cascade
