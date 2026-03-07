@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -13,35 +13,72 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
 } from '@slayzone/ui'
 import { Plus, Trash2, Save } from 'lucide-react'
-import type { TestCategory, TestProfile, CreateTestCategoryInput } from '../shared/types'
+import type { TestCategory, TestProfile, CreateTestCategoryInput, TestLabel } from '../shared/types'
 
 interface CategoryManagerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
   categories: TestCategory[]
+  labels: TestLabel[]
   onCategoriesChanged: () => void
   onPatternsChanged: () => void
+  onLabelsChanged: () => void
 }
 
 const CUSTOM_VALUE = '__custom__'
+const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280']
 
-export function CategoryManager({ open, onOpenChange, projectId, categories, onCategoriesChanged, onPatternsChanged }: CategoryManagerProps): React.JSX.Element {
+const DEFAULT_STARTER_LABELS = [
+  { name: 'Core', color: '#3b82f6' },
+  { name: 'Advanced', color: '#8b5cf6' },
+  { name: 'Experimental', color: '#f97316' },
+]
+
+function matchProfile(categories: TestCategory[], profiles: TestProfile[]): string {
+  for (const p of profiles) {
+    if (p.categories.length !== categories.length) continue
+    const match = p.categories.every((pc, i) =>
+      categories[i] && pc.name === categories[i].name && pc.pattern === categories[i].pattern && pc.color === categories[i].color
+    )
+    if (match) return p.id
+  }
+  return CUSTOM_VALUE
+}
+
+export function CategoryManager({ open, onOpenChange, projectId, categories, labels, onCategoriesChanged, onPatternsChanged, onLabelsChanged }: CategoryManagerProps): React.JSX.Element {
   const [profiles, setProfiles] = useState<TestProfile[]>([])
-  const [selectedProfile, setSelectedProfile] = useState<string>(CUSTOM_VALUE)
   const [profileName, setProfileName] = useState('')
+  const [labelsInitialized, setLabelsInitialized] = useState(false)
 
   useEffect(() => {
     if (open) {
       window.api.testPanel.getProfiles().then(setProfiles)
-      setSelectedProfile(CUSTOM_VALUE)
     }
+    if (!open) setLabelsInitialized(false)
   }, [open])
 
+  const selectedProfile = matchProfile(categories, profiles)
+
+  useEffect(() => {
+    if (open && labels.length === 0 && !labelsInitialized) {
+      setLabelsInitialized(true)
+      ;(async () => {
+        for (const starter of DEFAULT_STARTER_LABELS) {
+          await window.api.testPanel.createLabel({ project_id: projectId, name: starter.name, color: starter.color })
+        }
+        onLabelsChanged()
+      })()
+    }
+  }, [open, labels.length, labelsInitialized, projectId, onLabelsChanged])
+
   const handleProfileChange = async (value: string) => {
-    setSelectedProfile(value)
     if (value !== CUSTOM_VALUE && value !== '') {
       await window.api.testPanel.applyProfile(projectId, value)
       onPatternsChanged()
@@ -55,20 +92,24 @@ export function CategoryManager({ open, onOpenChange, projectId, categories, onC
       pattern: '**/*.test.ts'
     }
     await window.api.testPanel.createCategory(input)
-    setSelectedProfile(CUSTOM_VALUE)
     onPatternsChanged()
   }
 
+  const categoryIdsRef = useRef(new Set<string>())
+  useEffect(() => {
+    categoryIdsRef.current = new Set(categories.map((c) => c.id))
+  }, [categories])
+
   const updateCategory = async (id: string, field: string, value: string | number) => {
+    // Guard against stale onBlur from unmounted inputs (e.g. after profile switch)
+    if (!categoryIdsRef.current.has(id)) return
     await window.api.testPanel.updateCategory({ id, [field]: value })
-    setSelectedProfile(CUSTOM_VALUE)
     if (field === 'pattern') onPatternsChanged()
     else onCategoriesChanged()
   }
 
   const deleteCategory = async (id: string) => {
     await window.api.testPanel.deleteCategory(id)
-    setSelectedProfile(CUSTOM_VALUE)
     onPatternsChanged()
   }
 
@@ -87,7 +128,22 @@ export function CategoryManager({ open, onOpenChange, projectId, categories, onC
   const deleteProfile = async (id: string) => {
     await window.api.testPanel.deleteProfile(id)
     setProfiles(await window.api.testPanel.getProfiles())
-    if (selectedProfile === id) setSelectedProfile(CUSTOM_VALUE)
+    // profile match is derived, no state to reset
+  }
+
+  const addLabel = async () => {
+    await window.api.testPanel.createLabel({ project_id: projectId, name: 'New Label' })
+    onLabelsChanged()
+  }
+
+  const updateLabel = async (id: string, field: string, value: string | number) => {
+    await window.api.testPanel.updateLabel({ id, [field]: value })
+    onLabelsChanged()
+  }
+
+  const deleteLabel = async (id: string) => {
+    await window.api.testPanel.deleteLabel(id)
+    onLabelsChanged()
   }
 
   const builtinProfiles = profiles.filter((p) => p.id.startsWith('builtin:'))
@@ -97,40 +153,43 @@ export function CategoryManager({ open, onOpenChange, projectId, categories, onC
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Test Categories</DialogTitle>
-          <DialogDescription>Choose a profile or customize glob patterns to categorize test files.</DialogDescription>
+          <DialogTitle>Test Settings</DialogTitle>
+          <DialogDescription>Configure categories and labels for organizing test files.</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 mt-2">
-          <div className="flex items-center gap-2">
-            <Select value={selectedProfile} onValueChange={handleProfileChange}>
-              <SelectTrigger className="h-8 text-sm flex-1">
-                <SelectValue placeholder="Select a profile..." />
-              </SelectTrigger>
-              <SelectContent>
-                {builtinProfiles.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name} — {p.categories.map((c) => c.name).join(', ')}
-                  </SelectItem>
-                ))}
-                {userProfiles.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name} — {p.categories.map((c) => c.name).join(', ')}
-                  </SelectItem>
-                ))}
-                <SelectItem value={CUSTOM_VALUE}>Custom</SelectItem>
-              </SelectContent>
-            </Select>
-            {userProfiles.some((p) => p.id === selectedProfile) && (
-              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => deleteProfile(selectedProfile)}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            )}
-          </div>
+        <Tabs defaultValue="categories" className="gap-6">
+          <TabsList className="w-full">
+            <TabsTrigger value="categories">Categories</TabsTrigger>
+            <TabsTrigger value="labels">Labels</TabsTrigger>
+          </TabsList>
 
-          {selectedProfile === CUSTOM_VALUE && (
-            <>
-              <Separator />
+          <TabsContent value="categories">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Select value={selectedProfile} onValueChange={handleProfileChange}>
+                  <SelectTrigger className="h-8 text-sm flex-1">
+                    <SelectValue placeholder="Select a profile..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {builtinProfiles.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name} — {p.categories.map((c) => c.name).join(', ')}
+                      </SelectItem>
+                    ))}
+                    {userProfiles.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name} — {p.categories.map((c) => c.name).join(', ')}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={CUSTOM_VALUE}>Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+                {userProfiles.some((p) => p.id === selectedProfile) && (
+                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => deleteProfile(selectedProfile)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
 
               <div className="space-y-3">
                 {categories.map((cat) => (
@@ -139,9 +198,8 @@ export function CategoryManager({ open, onOpenChange, projectId, categories, onC
                       className="h-6 w-6 rounded-full border border-border shrink-0"
                       style={{ backgroundColor: cat.color }}
                       onClick={() => {
-                        const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280']
-                        const idx = colors.indexOf(cat.color)
-                        updateCategory(cat.id, 'color', colors[(idx + 1) % colors.length])
+                        const idx = COLORS.indexOf(cat.color)
+                        updateCategory(cat.id, 'color', COLORS[(idx + 1) % COLORS.length])
                       }}
                     />
                     <Input
@@ -188,9 +246,41 @@ export function CategoryManager({ open, onOpenChange, projectId, categories, onC
                   </div>
                 </>
               )}
-            </>
-          )}
-        </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="labels">
+            <div className="space-y-3">
+              {labels.map((label) => (
+                <div key={label.id} className="flex items-center gap-2">
+                  <button
+                    className="h-6 w-6 rounded-full border border-border shrink-0"
+                    style={{ backgroundColor: label.color }}
+                    onClick={() => {
+                      const idx = COLORS.indexOf(label.color)
+                      updateLabel(label.id, 'color', COLORS[(idx + 1) % COLORS.length])
+                    }}
+                  />
+                  <Input
+                    className="h-8 text-sm flex-1"
+                    defaultValue={label.name}
+                    placeholder="Label name"
+                    onBlur={(e) => {
+                      if (e.target.value !== label.name) updateLabel(label.id, 'name', e.target.value)
+                    }}
+                  />
+                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => deleteLabel(label.id)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+
+              <Button variant="outline" size="sm" className="w-full" onClick={addLabel}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> Add Label
+              </Button>
+            </div>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )

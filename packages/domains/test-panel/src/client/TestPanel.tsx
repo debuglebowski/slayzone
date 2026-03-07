@@ -4,7 +4,6 @@ import { Button, Card, Collapsible, CollapsibleTrigger, CollapsibleContent } fro
 import type { TestCategory, ScanResult, TestLabel, TestFileLabel } from '../shared/types'
 import { TestFileRow } from './TestFileRow'
 import { CategoryManager } from './CategoryManager'
-import { LabelManager } from './LabelManager'
 
 interface TestPanelProps {
   projectId: string | null
@@ -55,7 +54,6 @@ export function TestPanel({ projectId, projectPath }: TestPanelProps): React.JSX
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [managerOpen, setManagerOpen] = useState(false)
-  const [labelManagerOpen, setLabelManagerOpen] = useState(false)
   const [groupBy, setGroupBy] = useState<'none' | 'path' | 'label'>('none')
   const [labels, setLabels] = useState<TestLabel[]>([])
   const [fileLabels, setFileLabels] = useState<TestFileLabel[]>([])
@@ -150,7 +148,7 @@ export function TestPanel({ projectId, projectPath }: TestPanelProps): React.JSX
       fileLabels={getFileLabelsForPath(path)}
       labels={labels}
       onToggleLabel={(id) => handleToggleLabel(path, id)}
-      onManageLabels={() => setLabelManagerOpen(true)}
+      onManageLabels={() => setManagerOpen(true)}
     />
   )
 
@@ -360,15 +358,9 @@ export function TestPanel({ projectId, projectPath }: TestPanelProps): React.JSX
         onOpenChange={setManagerOpen}
         projectId={projectId}
         categories={categories}
+        labels={labels}
         onCategoriesChanged={reloadCategories}
         onPatternsChanged={rescanFiles}
-      />
-
-      <LabelManager
-        open={labelManagerOpen}
-        onOpenChange={setLabelManagerOpen}
-        projectId={projectId}
-        labels={labels}
         onLabelsChanged={reloadLabels}
       />
     </div>
