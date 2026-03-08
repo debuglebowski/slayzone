@@ -196,6 +196,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       void clearBufferWithoutRestart()
       return false
     }
+    // Ctrl+Shift+C/V handled via DOM keydown listener (useEffect below)
+    // to work reliably regardless of xterm.js internal event handling.
+    if (e.ctrlKey && e.shiftKey && (e.code === 'KeyC' || e.code === 'KeyV') && e.type === 'keydown') {
+      return false
+    }
     return true
   }, [clearBufferWithoutRestart])
 
@@ -632,6 +637,36 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     if (!t) return
     t.options.scrollback = terminalScrollback
   }, [terminalScrollback])
+
+  // Handle Ctrl+Shift+C/V at the DOM level for reliable copy/paste on Linux/Windows.
+  // Uses a capture-phase listener on the container so it fires before xterm.js
+  // processes the key event. macOS uses Cmd+C/V natively via xterm.js.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleCopyPaste = (e: KeyboardEvent): void => {
+      if (!e.ctrlKey || !e.shiftKey) return
+
+      if (e.code === 'KeyC') {
+        e.preventDefault()
+        e.stopPropagation()
+        const sel = terminalRef.current?.getSelection()
+        if (sel) void navigator.clipboard.writeText(sel)
+      }
+
+      if (e.code === 'KeyV') {
+        e.preventDefault()
+        e.stopPropagation()
+        void navigator.clipboard.readText().then((text) => {
+          if (text) window.api.pty.write(sessionId, text)
+        })
+      }
+    }
+
+    container.addEventListener('keydown', handleCopyPaste, true)
+    return () => container.removeEventListener('keydown', handleCopyPaste, true)
+  }, [sessionId])
 
   // Handle paste and drag-drop for files/images
   useEffect(() => {
