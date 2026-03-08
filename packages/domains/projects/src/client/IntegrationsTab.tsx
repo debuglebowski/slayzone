@@ -167,6 +167,7 @@ export function IntegrationsTab({
   const [githubSyncProjects, setGithubSyncProjects] = useState<GithubProjectSummary[]>([])
   const [loadingGithubSyncProjects, setLoadingGithubSyncProjects] = useState(false)
   const [githubSyncProjectId, setGithubSyncProjectId] = useState('')
+  const [githubSyncRepoFullName, setGithubSyncRepoFullName] = useState('')
   const [githubSyncMode, setGithubSyncMode] = useState<IntegrationSyncMode>('one_way')
   const [linearSyncTeamId, setLinearSyncTeamId] = useState('')
   const [linearSyncProjectId, setLinearSyncProjectId] = useState('')
@@ -259,6 +260,11 @@ export function IntegrationsTab({
     setGithubProjectConnectionId(resolvedGithubConnectionId)
     setLinearProjectConnectionId(resolvedLinearConnectionId)
     setGithubSyncProjectId(loadedGithubMapping?.external_project_id ?? '')
+    setGithubSyncRepoFullName(
+      loadedGithubMapping?.external_repo_owner && loadedGithubMapping?.external_repo_name
+        ? `${loadedGithubMapping.external_repo_owner}/${loadedGithubMapping.external_repo_name}`
+        : ''
+    )
     setGithubSyncMode(loadedGithubMapping?.sync_mode ?? 'one_way')
     setLinearSyncTeamId(loadedMapping?.external_team_id ?? '')
     setLinearSyncProjectId(loadedMapping?.external_project_id ?? '')
@@ -303,8 +309,14 @@ export function IntegrationsTab({
           if (current && repos.some((repo) => repo.fullName === current)) return current
           return repos[0]?.fullName ?? ''
         })
+        setGithubSyncRepoFullName((current) => {
+          if (current && repos.some((repo) => repo.fullName === current)) return current
+          return ''
+        })
       } catch (error) {
-        setGithubRepoImportMessage(error instanceof Error ? error.message : String(error))
+        const msg = error instanceof Error ? error.message : String(error)
+        setGithubRepoImportMessage(msg)
+        console.error('[integrations] Failed to load GitHub repositories:', msg)
         setGithubRepositories([])
         setGithubRepositoryFullName('')
       } finally {
@@ -554,6 +566,8 @@ export function IntegrationsTab({
       return
     }
 
+    const [repoOwner, repoName] = githubSyncRepoFullName.split('/')
+
     setSavingSyncProvider('github')
     setSyncSettingsMessage('')
     try {
@@ -564,7 +578,9 @@ export function IntegrationsTab({
         externalTeamId: selectedProject.owner.login,
         externalTeamKey: `${selectedProject.owner.login}#${selectedProject.number}`,
         externalProjectId: selectedProject.id,
-        syncMode: githubSyncMode
+        syncMode: githubSyncMode,
+        externalRepoOwner: repoOwner || null,
+        externalRepoName: repoName || null
       })
       setGithubMapping(saved)
       setGithubProjectConnectionId(saved.connection_id)
@@ -1482,6 +1498,28 @@ export function IntegrationsTab({
                                     {githubSyncProjects.map((projectOption) => (
                                       <SelectItem key={projectOption.id} value={projectOption.id}>
                                         {projectOption.owner.login}#{projectOption.number} - {projectOption.title}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+                                <Label htmlFor="github-sync-repo" className="text-sm">Repository</Label>
+                                <Select
+                                  value={githubSyncRepoFullName || '__none__'}
+                                  onValueChange={(value) => setGithubSyncRepoFullName(value === '__none__' ? '' : value)}
+                                  disabled={!githubProjectConnectionId || loadingGithubRepositories}
+                                >
+                                  <SelectTrigger id="github-sync-repo" className="w-full">
+                                    <SelectValue placeholder={loadingGithubRepositories ? 'Loading repositories\u2026' : 'Choose repository'} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {githubRepositories.length === 0 ? (
+                                      <SelectItem value="__none__" disabled>No repositories found</SelectItem>
+                                    ) : null}
+                                    {githubRepositories.map((repo) => (
+                                      <SelectItem key={repo.fullName} value={repo.fullName}>
+                                        {repo.fullName}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>

@@ -763,6 +763,8 @@ export async function runDiscovery(db: Database): Promise<void> {
     WHERE pm.status_setup_complete = 1
   `).all() as Array<IntegrationProjectMapping & { credential_ref: string }>
 
+  console.log(`[discovery] found ${mappings.length} active mappings`)
+
   for (const mapping of mappings) {
     try {
       const credential = readCredential(db, mapping.credential_ref)
@@ -833,7 +835,10 @@ async function discoverGithubIssues(
   mapping: IntegrationProjectMapping & { credential_ref: string },
   token: string
 ): Promise<void> {
-  if (!mapping.external_repo_owner || !mapping.external_repo_name) return
+  if (!mapping.external_repo_owner || !mapping.external_repo_name) {
+    console.log(`[discovery] GitHub: skipping mapping ${mapping.id} — no repo configured (owner=${mapping.external_repo_owner}, name=${mapping.external_repo_name})`)
+    return
+  }
 
   let cursor: string | null = null
   let discovered = 0
@@ -881,6 +886,10 @@ async function discoverGithubIssues(
 let discoveryRunning = false
 
 export function startDiscoveryPoller(db: Database): NodeJS.Timeout {
+  // Run immediately on startup, then every 60s
+  void runDiscovery(db).catch((err) => {
+    console.error('Initial discovery failed:', err)
+  })
   return setInterval(() => {
     if (discoveryRunning) return
     discoveryRunning = true

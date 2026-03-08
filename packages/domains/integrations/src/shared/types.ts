@@ -119,6 +119,9 @@ export interface SetProjectMappingInput {
   // Linear: optional project scope id. GitHub: ProjectV2 node id.
   externalProjectId?: string | null
   syncMode?: IntegrationSyncMode
+  // GitHub only: repo for issue discovery
+  externalRepoOwner?: string | null
+  externalRepoName?: string | null
 }
 
 export interface ImportLinearIssuesInput {
