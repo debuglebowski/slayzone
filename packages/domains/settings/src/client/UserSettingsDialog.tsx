@@ -75,7 +75,7 @@ export function UserSettingsDialog({
   const navItems = [
     { key: 'general', label: 'General' },
     { key: 'appearance', label: 'Appearance' },
-    { key: 'ai-providers', label: 'AI Providers' },
+    { key: 'ai-providers', label: 'Providers' },
     {
       key: 'panels',
       label: 'Panels',
