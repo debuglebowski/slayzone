@@ -84,7 +84,7 @@ test.describe('Web panels', () => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
 
-    for (const name of ['Terminal', 'Browser', 'Editor', 'Diff']) {
+    for (const name of ['Terminal', 'Browser', 'Editor', 'Git']) {
       await expect(findCard(dialog, name)).toBeVisible({ timeout: 3_000 })
     }
     for (const name of ['Figma', 'Notion', 'GitHub', 'Excalidraw']) {
@@ -278,7 +278,8 @@ test.describe('Web panels', () => {
     const dialog = settingsDialog(mainWindow)
     const card = findCard(dialog, 'Editor')
     await expect(card).toBeVisible({ timeout: 5_000 })
-    const switchEl = card.getByRole('switch')
+    // Editor has 2 switches (home + task) — use last for task view
+    const switchEl = card.getByRole('switch').last()
 
     if ((await switchEl.getAttribute('data-state')) === 'checked') {
       await switchEl.click()
@@ -292,7 +293,7 @@ test.describe('Web panels', () => {
 
     // Re-enable
     await openPanelsTab(mainWindow)
-    await findCard(settingsDialog(mainWindow), 'Editor').getByRole('switch').click()
+    await findCard(settingsDialog(mainWindow), 'Editor').getByRole('switch').last().click()
     await closePanelsTab(mainWindow)
   })
 
