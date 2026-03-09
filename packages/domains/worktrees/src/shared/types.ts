@@ -101,7 +101,19 @@ export interface GhPrComment {
   type: 'comment' | 'review'
   /** Only for review type */
   reviewState?: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED'
+  /** Files commented on in this review */
+  reviewFiles?: string[]
 }
+
+export interface GhPrCommit {
+  type: 'commit'
+  oid: string
+  messageHeadline: string
+  author: string
+  createdAt: string
+}
+
+export type GhPrTimelineEvent = GhPrComment | GhPrCommit
 
 export interface CreatePrInput {
   repoPath: string
@@ -134,6 +146,32 @@ export interface EditPrCommentInput {
   repoPath: string
   commentId: string
   body: string
+}
+
+// --- Branch tab data ---
+
+export interface BranchDetail {
+  name: string
+  lastCommit: CommitInfo
+  upstream: string | null
+  aheadBehindUpstream: AheadBehind | null
+  aheadBehindDefault: AheadBehind | null
+  isDefault: boolean
+  isCurrent: boolean
+}
+
+export interface BranchListResult {
+  branches: BranchDetail[]
+  defaultBranch: string
+}
+
+export interface DeleteBranchResult {
+  success: boolean
+  error?: string
+}
+
+export interface PruneResult {
+  pruned: string[]
 }
 
 export interface GitDiffSnapshot {

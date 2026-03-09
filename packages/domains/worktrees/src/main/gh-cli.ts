@@ -152,19 +152,28 @@ export async function createPr(input: CreatePrInput): Promise<CreatePrResult> {
 }
 
 export async function getPrComments(repoPath: string, prNumber: number): Promise<GhPrTimelineEvent[]> {
-  const [result, reviewFilesResult] = await Promise.all([
-    spawnGh([
-      'pr', 'view', String(prNumber),
-      '--json', 'comments,reviews,commits'
-    ], { cwd: repoPath }),
-    // Fetch review file comments to know which files each review touched
-    getRepoOwnerAndName(repoPath)
-      .then(({ owner, repo }) => spawnGh([
-        'api', `repos/${owner}/${repo}/pulls/${prNumber}/comments`,
-        '--jq', '[.[] | {path, review_id: .pull_request_review_id}]'
-      ], { cwd: repoPath }))
-      .catch(() => ({ status: 1, stdout: '', stderr: '' }))
-  ])
+  // Resolve repo slug once, shared by all API calls
+  let slug: { owner: string; repo: string } | null = null
+  try { slug = await getRepoOwnerAndName(repoPath) } catch { /* ignore */ }
+
+  const apiCalls: [
+    Promise<{ status: number | null; stdout: string; stderr: string }>,
+    Promise<{ status: number | null; stdout: string; stderr: string }>,
+    Promise<{ status: number | null; stdout: string; stderr: string }>
+  ] = [
+    spawnGh(['pr', 'view', String(prNumber), '--json', 'comments,reviews,commits'], { cwd: repoPath }),
+    // Review file comments + review numeric IDs (for matching)
+    slug
+      ? spawnGh(['api', `repos/${slug.owner}/${slug.repo}/pulls/${prNumber}/comments`,
+          '--jq', '[.[] | {path, review_id: .pull_request_review_id}]'], { cwd: repoPath })
+      : Promise.resolve({ status: 1, stdout: '', stderr: '' }),
+    slug
+      ? spawnGh(['api', `repos/${slug.owner}/${slug.repo}/pulls/${prNumber}/reviews`,
+          '--jq', '[.[] | {id, submitted_at}]'], { cwd: repoPath })
+      : Promise.resolve({ status: 1, stdout: '', stderr: '' })
+  ]
+
+  const [result, reviewFilesResult, restReviewsResult] = await Promise.all(apiCalls)
 
   if (result.status !== 0) return []
 
@@ -203,19 +212,14 @@ export async function getPrComments(repoPath: string, prNumber: number): Promise
     } catch { /* ignore parse errors */ }
   }
 
-  // Fetch REST reviews to get numeric IDs for matching with file comments
+  // Map review submittedAt → numeric REST ID for matching with file comments
   let reviewIdBySubmittedAt = new Map<string, number>()
-  try {
-    const { owner, repo } = await getRepoOwnerAndName(repoPath)
-    const restReviews = await spawnGh([
-      'api', `repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
-      '--jq', '[.[] | {id, submitted_at}]'
-    ], { cwd: repoPath })
-    if (restReviews.status === 0) {
-      const parsed = JSON.parse(restReviews.stdout) as Array<{ id: number; submitted_at: string }>
+  if (restReviewsResult.status === 0 && restReviewsResult.stdout) {
+    try {
+      const parsed = JSON.parse(restReviewsResult.stdout) as Array<{ id: number; submitted_at: string }>
       reviewIdBySubmittedAt = new Map(parsed.map(r => [r.submitted_at, r.id]))
-    }
-  } catch { /* ignore */ }
+    } catch { /* ignore */ }
+  }
 
   const events: GhPrTimelineEvent[] = []
 

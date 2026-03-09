@@ -17,7 +17,7 @@ import type {
 } from '@slayzone/terminal/shared'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '@slayzone/task-terminals/shared'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
-import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, GhPullRequest, GhPrComment, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput } from '@slayzone/worktrees/shared'
+import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, BranchListResult, DeleteBranchResult, PruneResult, GhPullRequest, GhPrTimelineEvent, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput } from '@slayzone/worktrees/shared'
 import type { MergeContext } from '@slayzone/task/shared'
 import type {
   AiConfigItem,
@@ -396,13 +396,22 @@ export interface ElectronAPI {
     fetch: (path: string) => Promise<void>
     push: (path: string, branch?: string, force?: boolean) => Promise<GitSyncResult>
     pull: (path: string) => Promise<GitSyncResult>
+    // Branch tab
+    getDefaultBranch: (path: string) => Promise<string>
+    listBranchesDetailed: (path: string) => Promise<BranchListResult>
+    listRemoteBranches: (path: string) => Promise<string[]>
+    getMergeBase: (path: string, branch1: string, branch2: string) => Promise<string | null>
+    getCommitsSince: (path: string, sinceRef: string, branch: string) => Promise<CommitInfo[]>
+    getCommitsBeforeRef: (path: string, ref: string, count?: number) => Promise<CommitInfo[]>
+    deleteBranch: (path: string, branch: string, force?: boolean) => Promise<DeleteBranchResult>
+    pruneRemote: (path: string) => Promise<PruneResult>
     // GitHub CLI (gh)
     checkGhInstalled: () => Promise<boolean>
     hasGithubRemote: (repoPath: string) => Promise<boolean>
     listOpenPrs: (repoPath: string) => Promise<GhPullRequest[]>
     getPrByUrl: (repoPath: string, url: string) => Promise<GhPullRequest | null>
     createPr: (input: CreatePrInput) => Promise<CreatePrResult>
-    getPrComments: (repoPath: string, prNumber: number) => Promise<GhPrComment[]>
+    getPrComments: (repoPath: string, prNumber: number) => Promise<GhPrTimelineEvent[]>
     addPrComment: (repoPath: string, prNumber: number, body: string) => Promise<void>
     mergePr: (input: MergePrInput) => Promise<void>
     getPrDiff: (repoPath: string, prNumber: number) => Promise<string>

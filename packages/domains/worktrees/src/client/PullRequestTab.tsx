@@ -22,13 +22,13 @@ import {
   ShieldAlert,
   ShieldQuestion,
   RefreshCw,
-  Eye,
   Reply,
   Pencil,
   ChevronsUpDown,
   FilePlus2,
   FileX2,
-  File
+  File,
+  GitCommitHorizontal
 } from 'lucide-react'
 import {
   Button,
@@ -49,7 +49,7 @@ import {
   AlertDialogTitle,
 } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import type { GhPullRequest, GhPrComment, MergeStrategy } from '../shared/types'
+import type { GhPullRequest, GhPrComment, GhPrCommit, GhPrTimelineEvent, MergeStrategy } from '../shared/types'
 import { DiffView } from './DiffView'
 import { parseUnifiedDiff } from './parse-diff'
 import type { FileDiff } from './parse-diff'
@@ -241,7 +241,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
   onUnlink: () => void
   onPrUpdated: (pr: GhPullRequest) => void
 }) {
-  const [comments, setComments] = useState<GhPrComment[]>([])
+  const [comments, setComments] = useState<GhPrTimelineEvent[]>([])
   const [loadingComments, setLoadingComments] = useState(true)
   const [commentBody, setCommentBody] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -370,17 +370,28 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
     })
   }, [])
 
+  const collapsableComments = comments.filter((c): c is GhPrComment => c.type !== 'commit' && !!c.body)
+
   const collapseAll = useCallback(() => {
-    const ids = comments.filter(c => c.body).map(c => c.id)
+    const ids = collapsableComments.map(c => c.id)
     if (pr.body) ids.push('__pr_body__')
     setCollapsedIds(new Set(ids))
-  }, [comments, pr.body])
+  }, [collapsableComments, pr.body])
 
   const expandAll = useCallback(() => {
     setCollapsedIds(new Set())
   }, [])
 
-  const allCollapsed = comments.filter(c => c.body).every(c => collapsedIds.has(c.id)) && (!pr.body || collapsedIds.has('__pr_body__'))
+  const allCollapsed = collapsableComments.every(c => collapsedIds.has(c.id)) && (!pr.body || collapsedIds.has('__pr_body__'))
+
+  const groupedTimeline = useMemo(() => groupTimelineEvents(comments), [comments])
+  const TIMELINE_PAGE_SIZE = 25
+  const [timelineLimit, setTimelineLimit] = useState(TIMELINE_PAGE_SIZE)
+  const visibleTimeline = useMemo(() => {
+    if (groupedTimeline.length <= timelineLimit) return groupedTimeline
+    return groupedTimeline.slice(groupedTimeline.length - timelineLimit)
+  }, [groupedTimeline, timelineLimit])
+  const hasOlderEntries = groupedTimeline.length > timelineLimit
 
   // Merge
   const handleMerge = async () => {
@@ -543,7 +554,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
           </button>
 
           {/* Expand/collapse for activity tab */}
-          {activeTab === 'activity' && comments.filter(c => c.body).length > 0 && (
+          {activeTab === 'activity' && collapsableComments.length > 0 && (
             <button
               onClick={allCollapsed ? expandAll : collapseAll}
               className="flex items-center gap-1 ml-auto px-2 py-2 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
@@ -656,17 +667,19 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
                       <div className="flex-1 w-px bg-border mt-1" />
                     )}
                   </div>
-                  <div className="flex-1 min-w-0 rounded-lg border bg-surface-2 overflow-hidden mb-2">
+                  <div className="flex-1 min-w-0 rounded-lg border bg-surface-2 overflow-hidden mb-4">
                     <div
                       className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 border-b cursor-pointer"
                       onClick={() => toggleCollapse('__pr_body__')}
                     >
-                      {collapsedIds.has('__pr_body__')
-                        ? <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                        : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
-                      }
                       <span className="text-[11px] font-semibold">{pr.author}</span>
                       <span className="text-[10px] text-muted-foreground/60">{formatRelativeTime(pr.createdAt)}</span>
+                      <span className="ml-auto shrink-0">
+                        {collapsedIds.has('__pr_body__')
+                          ? <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                          : <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                        }
+                      </span>
                     </div>
                     {!collapsedIds.has('__pr_body__') && (
                       <div className="px-3 py-2 text-xs">
@@ -687,24 +700,45 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
                   <p className="text-xs text-muted-foreground/60">No activity yet</p>
                 </div>
               ) : (
-                comments.map((comment, i) => (
-                  <TimelineItem
-                    key={comment.id}
-                    comment={comment}
-                    collapsed={collapsedIds.has(comment.id)}
-                    onToggleCollapse={() => toggleCollapse(comment.id)}
-                    onReply={() => handleReply(comment)}
-                    isOwnComment={ghUser !== null && comment.author === ghUser}
-                    isEditing={editingId === comment.id}
-                    editBody={editingId === comment.id ? editBody : ''}
-                    editSubmitting={editSubmitting}
-                    onStartEdit={() => handleStartEdit(comment)}
-                    onEditChange={setEditBody}
-                    onSaveEdit={handleSaveEdit}
-                    onCancelEdit={handleCancelEdit}
-                    isLast={i === comments.length - 1}
-                  />
-                ))
+                <>
+                  {hasOlderEntries && (
+                    <div className="flex justify-center pb-3">
+                      <button
+                        onClick={() => setTimelineLimit(prev => prev + TIMELINE_PAGE_SIZE)}
+                        className="text-[11px] text-muted-foreground hover:text-foreground transition-colors px-3 py-1 rounded-md border border-border hover:bg-accent/30"
+                      >
+                        Show {Math.min(TIMELINE_PAGE_SIZE, groupedTimeline.length - timelineLimit)} older entries
+                      </button>
+                    </div>
+                  )}
+                  {visibleTimeline.map((entry, i) => (
+                    entry.kind === 'commits' ? (
+                      <CommitGroupItem
+                        key={`commits-${entry.commits[0].oid}`}
+                        commits={entry.commits}
+                        author={entry.author}
+                        isLast={i === visibleTimeline.length - 1}
+                      />
+                    ) : (
+                      <TimelineItem
+                        key={entry.event.id}
+                        comment={entry.event}
+                        collapsed={collapsedIds.has(entry.event.id)}
+                        onToggleCollapse={() => toggleCollapse(entry.event.id)}
+                        onReply={() => handleReply(entry.event)}
+                        isOwnComment={ghUser !== null && entry.event.author === ghUser}
+                        isEditing={editingId === entry.event.id}
+                        editBody={editingId === entry.event.id ? editBody : ''}
+                        editSubmitting={editSubmitting}
+                        onStartEdit={() => handleStartEdit(entry.event)}
+                        onEditChange={setEditBody}
+                        onSaveEdit={handleSaveEdit}
+                        onCancelEdit={handleCancelEdit}
+                        isLast={i === visibleTimeline.length - 1}
+                      />
+                    )
+                  ))}
+                </>
               )}
             </div>
           </div>
@@ -798,6 +832,77 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
   )
 }
 
+// --- Grouped timeline entries ---
+
+type GroupedTimelineEntry =
+  | { kind: 'event'; event: GhPrComment }
+  | { kind: 'commits'; commits: GhPrCommit[]; author: string }
+
+function groupTimelineEvents(events: GhPrTimelineEvent[]): GroupedTimelineEntry[] {
+  const groups: GroupedTimelineEntry[] = []
+  let pendingCommits: GhPrCommit[] = []
+
+  const flushCommits = () => {
+    if (pendingCommits.length === 0) return
+    // Group by author
+    const byAuthor = new Map<string, GhPrCommit[]>()
+    for (const c of pendingCommits) {
+      const list = byAuthor.get(c.author) ?? []
+      list.push(c)
+      byAuthor.set(c.author, list)
+    }
+    for (const [author, commits] of byAuthor) {
+      groups.push({ kind: 'commits', commits, author })
+    }
+    pendingCommits = []
+  }
+
+  for (const event of events) {
+    if (event.type === 'commit') {
+      pendingCommits.push(event)
+    } else {
+      flushCommits()
+      groups.push({ kind: 'event', event })
+    }
+  }
+  flushCommits()
+  return groups
+}
+
+// --- Commit group timeline item ---
+
+function CommitGroupItem({ commits, author, isLast }: {
+  commits: GhPrCommit[]
+  author: string
+  isLast: boolean
+}) {
+  return (
+    <div className="relative flex gap-3 pb-0">
+      <div className="relative shrink-0 flex flex-col items-center">
+        <div className="relative z-10">
+          <AuthorAvatar name={author} />
+        </div>
+        {!isLast && <div className="flex-1 w-px bg-border mt-1" />}
+      </div>
+      <div className="flex-1 min-w-0 mb-4">
+        <div className="text-[11px] text-muted-foreground">
+          <span className="font-medium text-foreground/80">{author}</span>
+          {' '}added {commits.length} commit{commits.length !== 1 && 's'}
+        </div>
+        <div className="mt-1.5 space-y-0.5 pl-1">
+          {commits.map(c => (
+            <div key={c.oid} className="flex items-center gap-2 text-[11px] text-muted-foreground truncate">
+              <GitCommitHorizontal className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+              <span className="text-foreground/70 truncate">{c.messageHeadline}</span>
+              <code className="shrink-0 text-[10px] font-mono text-muted-foreground/60">{c.oid.slice(0, 7)}</code>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Timeline item ---
 
 function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComment, isEditing, editBody, editSubmitting, onStartEdit, onEditChange, onSaveEdit, onCancelEdit, isLast }: {
@@ -820,18 +925,31 @@ function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComm
 
   if (isReviewAction) {
     return (
-      <div className="relative flex items-center gap-3 pb-0">
+      <div className="relative flex gap-3 pb-0">
         <div className="relative shrink-0 flex flex-col items-center">
           <div className="relative z-10">
-            <ReviewEventDot state={comment.reviewState} />
+            <AuthorAvatar name={comment.author} />
           </div>
           {!isLast && <div className="flex-1 w-px bg-border mt-1" />}
         </div>
-        <span className="text-[11px] text-muted-foreground mb-2">
-          <span className="font-medium text-foreground/80">{comment.author}</span>
-          {' '}{reviewActionLabel(comment.reviewState)}
-          <span className="ml-1.5 text-muted-foreground/60">{timeAgo}</span>
-        </span>
+        <div className="flex-1 min-w-0 mb-4">
+          <span className="text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground/80">{comment.author}</span>
+            {' '}{reviewActionLabel(comment.reviewState)}
+            <span className="ml-1.5 text-muted-foreground/60">{timeAgo}</span>
+          </span>
+          {comment.reviewFiles && comment.reviewFiles.length > 0 && (
+            <div className="mt-1 space-y-0.5">
+              {comment.reviewFiles.map(file => (
+                <div key={file} className="flex items-center gap-1.5 text-[11px] text-muted-foreground truncate">
+                  <File className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+                  <span className="font-mono truncate">{file.split('/').pop()}</span>
+                  <span className="text-[10px] text-muted-foreground/40 truncate hidden sm:inline">{file}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     )
   }
@@ -847,16 +965,12 @@ function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComm
       </div>
 
       {/* Comment card */}
-      <div className="flex-1 min-w-0 rounded-lg border bg-surface-2 overflow-hidden mb-2">
+      <div className="flex-1 min-w-0 rounded-lg border bg-surface-2 overflow-hidden mb-4">
         {/* Comment header */}
         <div
           className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 border-b cursor-pointer"
           onClick={onToggleCollapse}
         >
-          {collapsed
-            ? <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
-            : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
-          }
           <span className="text-[11px] font-semibold">{comment.author}</span>
           {comment.type === 'review' && comment.reviewState && (
             <ReviewInlineBadge state={comment.reviewState} />
@@ -885,6 +999,12 @@ function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComm
               )}
             </div>
           )}
+          <span className={cn('shrink-0', collapsed && 'ml-auto')}>
+            {collapsed
+              ? <ChevronRight className="h-3 w-3 text-muted-foreground" />
+              : <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            }
+          </span>
         </div>
 
         {/* Comment body */}
@@ -913,6 +1033,16 @@ function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComm
               <GhMarkdown>{comment.body}</GhMarkdown>
             </div>
           )
+        )}
+        {comment.reviewFiles && comment.reviewFiles.length > 0 && (
+          <div className="border-t px-3 py-1.5 space-y-0.5">
+            {comment.reviewFiles.map(file => (
+              <div key={file} className="flex items-center gap-1.5 text-[11px] text-muted-foreground truncate">
+                <File className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+                <span className="font-mono truncate">{file}</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -946,12 +1076,29 @@ function avatarColor(name: string): string {
   return avatarColors[Math.abs(hash) % avatarColors.length]
 }
 
+const failedAvatars = new Set<string>()
+
 function AuthorAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+  const [imgError, setImgError] = useState(() => failedAvatars.has(name))
   const initials = name.slice(0, 2).toUpperCase()
+  const sizeClass = size === 'sm' ? 'h-4 w-4' : 'h-6 w-6'
+
+  if (!imgError) {
+    return (
+      <img
+        src={`https://github.com/${name}.png?size=48`}
+        alt={name}
+        className={cn(sizeClass, 'rounded-full')}
+        onError={() => { failedAvatars.add(name); setImgError(true) }}
+      />
+    )
+  }
+
   return (
     <div className={cn(
       'rounded-full flex items-center justify-center font-bold select-none',
-      size === 'sm' ? 'h-4 w-4 text-[7px]' : 'h-6 w-6 text-[9px]',
+      sizeClass,
+      size === 'sm' ? 'text-[7px]' : 'text-[9px]',
       avatarColor(name)
     )}>
       {initials}
@@ -959,21 +1106,6 @@ function AuthorAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' 
   )
 }
 
-// --- Review event dot ---
-
-function ReviewEventDot({ state }: { state?: string }) {
-  const base = 'h-6 w-6 rounded-full flex items-center justify-center'
-  switch (state) {
-    case 'APPROVED':
-      return <div className={cn(base, 'bg-green-500/15')}><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /></div>
-    case 'CHANGES_REQUESTED':
-      return <div className={cn(base, 'bg-red-500/15')}><XCircle className="h-3.5 w-3.5 text-red-500" /></div>
-    case 'COMMENTED':
-      return <div className={cn(base, 'bg-muted')}><Eye className="h-3.5 w-3.5 text-muted-foreground" /></div>
-    default:
-      return <div className={cn(base, 'bg-muted')}><MessageSquare className="h-3.5 w-3.5 text-muted-foreground" /></div>
-  }
-}
 
 function reviewActionLabel(state?: string): string {
   switch (state) {
