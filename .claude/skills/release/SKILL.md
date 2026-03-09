@@ -17,13 +17,29 @@ Interpret `$ARGUMENTS`:
 - `major` — bump the major number (e.g. 0.3.0 -> 1.0.0)
 - Anything else — treat as an explicit version string (e.g. `0.5.0`)
 
-### 2. Bump version
+### 2. Bump version + sync with remote
 
 Update `"version"` in `packages/apps/app/package.json` to the new version.
 
+Commit the version bump alone:
+```
+git add packages/apps/app/package.json
+git commit -m "release: bump version to <new-version>"
+```
+
+Then sync with remote to stabilize commit hashes before generating changelogs:
+```
+git pull --rebase
+git push
+```
+
+If the rebase has conflicts, resolve them, `git rebase --continue`, then push.
+
 ### 3. Generate changelog
 
-Run `npx changelogen --from <previous-tag> --to main --output CHANGELOG.md --hideAuthorEmail` (use `pnpx` if available).
+**This must happen AFTER push** so commit hashes match what's on GitHub.
+
+Run `pnpx changelogen --from <previous-tag> --to main --output CHANGELOG.md --hideAuthorEmail`.
 
 The tool will prepend a `## <old-tag>...main` section to CHANGELOG.md. After it runs:
 - Rename the new section header from `## <old-tag>...main` to `## v<new-version>`
@@ -48,7 +64,7 @@ Categories:
 ### 5. Commit and confirm
 
 ```
-git add CHANGELOG.md packages/apps/app/package.json packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
+git add CHANGELOG.md packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
 git commit -m "release: v<new-version>"
 ```
 
@@ -75,3 +91,4 @@ Print a summary:
 - The release CI triggers on `v*` tag push — builds macOS/Linux/Windows + deploys Convex
 - Do NOT modify `package.json` in the monorepo root — only `packages/apps/app/package.json` matters for electron-builder
 - Always confirm with the user before running `git push`
+- Changelog generation MUST happen after `git push` — a rebase changes all commit hashes, making pre-rebase hashes dead links on GitHub
