@@ -1,6 +1,52 @@
 # Changelog
 
 
+## v0.3.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.2.6...v0.3.0)
+
+### 🚀 Enhancements
+
+- **worktrees:** Double git panel commit count from 20 to 40 ([4d34afd](https://github.com/debuglebowski/slayzone/commit/4d34afd))
+- **worktrees:** Add git push/pull controls + remote URL to git panel ([558ff49](https://github.com/debuglebowski/slayzone/commit/558ff49))
+- **usage:** Configurable rate-limit bars with custom provider support ([ef7c4fe](https://github.com/debuglebowski/slayzone/commit/ef7c4fe))
+- **worktrees:** Commit list fills remaining space with min-height + internal scroll ([6a1b9a5](https://github.com/debuglebowski/slayzone/commit/6a1b9a5))
+- **settings:** Per-view panel toggle config (home vs task) ([0cad4cb](https://github.com/debuglebowski/slayzone/commit/0cad4cb))
+- **worktrees:** PR tab with create/link, comments timeline, markdown rendering ([9ea73f9](https://github.com/debuglebowski/slayzone/commit/9ea73f9))
+- **worktrees:** Show PR number in pull request tab label ([2118ec3](https://github.com/debuglebowski/slayzone/commit/2118ec3))
+- **worktrees:** PR tab overhaul — merge, diff, mermaid, comments, filters ([8272407](https://github.com/debuglebowski/slayzone/commit/8272407))
+- **worktrees:** Enrich PR activity with commits, avatars, review files + pagination ([43ef2b9](https://github.com/debuglebowski/slayzone/commit/43ef2b9))
+- **tabs:** Group task tabs by worktree with colored borders ([93edbdb](https://github.com/debuglebowski/slayzone/commit/93edbdb))
+- **worktrees:** Add branch/worktree tabs with graph, actions, PR status ([11cf43a](https://github.com/debuglebowski/slayzone/commit/11cf43a))
+
+### 🩹 Fixes
+
+- **e2e:** Stabilize test suite — renumber, isolate, fix race conditions ([ca2ecee](https://github.com/debuglebowski/slayzone/commit/ca2ecee))
+- **worktrees:** Use opaque bg on sticky Staged/Unstaged headers ([5dfcdde](https://github.com/debuglebowski/slayzone/commit/5dfcdde))
+- **projects:** Use app API for integrations flag instead of import.meta.env ([fd55be5](https://github.com/debuglebowski/slayzone/commit/fd55be5))
+- **e2e:** Retry dialog dismiss in project settings test ([4f94f08](https://github.com/debuglebowski/slayzone/commit/4f94f08))
+- **e2e:** Re-create integration tables after resetApp ([bb2d0cb](https://github.com/debuglebowski/slayzone/commit/bb2d0cb))
+- **e2e:** Update test 46 for renamed Git panel and Editor dual-switch ([3440b72](https://github.com/debuglebowski/slayzone/commit/3440b72))
+- **e2e:** Use dispatchEvent instead of click in Radix dialogs ([d462a2e](https://github.com/debuglebowski/slayzone/commit/d462a2e))
+- **ui:** Prevent Radix Dialog outside-click dismiss in Playwright ([b91ad05](https://github.com/debuglebowski/slayzone/commit/b91ad05))
+- **e2e:** Tighten timeouts, skip flaky MCP test, fix 51+55 ([32a76d8](https://github.com/debuglebowski/slayzone/commit/32a76d8))
+- **e2e:** Optimize test speed — reduce retry loops and unnecessary waits (~100s saved) ([6d0d65d](https://github.com/debuglebowski/slayzone/commit/6d0d65d))
+- **terminal:** Eliminate main-thread freezes from sync git operations ([e9075b5](https://github.com/debuglebowski/slayzone/commit/e9075b5))
+- **e2e:** Bump timeouts for slow CLI tests after global timeout reduction ([6ca45e5](https://github.com/debuglebowski/slayzone/commit/6ca45e5))
+- **ui:** Layout shift + xterm scrollbar leak on tab switch ([864cab6](https://github.com/debuglebowski/slayzone/commit/864cab6))
+- **worktrees:** Collapse/expand all includes PR description in activity ([06cd31e](https://github.com/debuglebowski/slayzone/commit/06cd31e))
+- **e2e:** Call resetApp in every test suite's beforeAll ([40814f3](https://github.com/debuglebowski/slayzone/commit/40814f3))
+- **e2e:** Resolve 22 failing tests across tab isolation, toast overlay, and CLI connectivity ([d3864e3](https://github.com/debuglebowski/slayzone/commit/d3864e3))
+- **worktrees:** Async gh-cli to stop blocking main thread ([bb4ecbe](https://github.com/debuglebowski/slayzone/commit/bb4ecbe))
+
+### 💅 Refactors
+
+- **settings:** Shorten AI Providers label to Providers ([16d1840](https://github.com/debuglebowski/slayzone/commit/16d1840))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.2.6
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.2.5...v0.2.6)

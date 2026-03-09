@@ -1,5 +1,52 @@
 [
   {
+    "version": "0.3.0",
+    "date": "2026-03-10",
+    "tagline": "Git hub command center",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Pull request dashboard",
+        "description": "Full PR tab with create/link, merge controls, diff view, comments timeline, and mermaid diagrams."
+      },
+      {
+        "category": "feature",
+        "title": "Branch & worktree graph",
+        "description": "Visual branch/worktree tabs with graph view, actions, and PR status at a glance."
+      },
+      {
+        "category": "feature",
+        "title": "Worktree tab grouping",
+        "description": "Task tabs grouped by worktree with colored borders for quick identification."
+      },
+      {
+        "category": "feature",
+        "title": "Git push/pull controls",
+        "description": "Push and pull directly from the git panel with remote URL display."
+      },
+      {
+        "category": "feature",
+        "title": "Configurable rate-limit bars",
+        "description": "Customize usage bars with support for custom providers."
+      },
+      {
+        "category": "feature",
+        "title": "Per-view panel toggles",
+        "description": "Configure which panels show on home vs task views independently."
+      },
+      {
+        "category": "fix",
+        "title": "Main-thread freezes eliminated",
+        "description": "Git and GitHub CLI operations no longer block the UI."
+      },
+      {
+        "category": "fix",
+        "title": "Layout shift on tab switch",
+        "description": "Fixed xterm scrollbar leak and layout jump when switching tabs."
+      }
+    ]
+  },
+  {
     "version": "0.2.6",
     "date": "2026-03-08",
     "tagline": "Themes & reliability",
