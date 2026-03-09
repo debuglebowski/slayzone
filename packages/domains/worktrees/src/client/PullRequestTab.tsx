@@ -253,8 +253,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBody, setEditBody] = useState('')
   const [editSubmitting, setEditSubmitting] = useState(false)
-  const [descriptionOpen, setDescriptionOpen] = useState(true)
-  const [activityOpen, setActivityOpen] = useState(true)
+  const [activeTab, setActiveTab] = useState<'description' | 'activity' | 'files'>('description')
 
   // Merge state
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -265,7 +264,6 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
   const [mergeError, setMergeError] = useState<string | null>(null)
 
   // Diff state
-  const [diffOpen, setDiffOpen] = useState(false)
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffFiles, setDiffFiles] = useState<FileDiff[]>([])
   const [diffError, setDiffError] = useState<string | null>(null)
@@ -405,10 +403,8 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
   }
 
   // Diff - lazy load
-  const handleToggleDiff = async () => {
-    if (diffOpen) { setDiffOpen(false); return }
-    setDiffOpen(true)
-    if (diffFiles.length > 0) return // already loaded
+  const loadDiff = useCallback(async () => {
+    if (diffFiles.length > 0 || diffLoading) return
     setDiffLoading(true)
     setDiffError(null)
     try {
@@ -418,7 +414,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
       setDiffError(err instanceof Error ? err.message : 'Failed to load diff')
     }
     setDiffLoading(false)
-  }
+  }, [diffFiles.length, diffLoading, projectPath, pr.number])
 
   const toggleFileExpand = useCallback((path: string) => {
     setExpandedFiles(prev => {
@@ -438,65 +434,122 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
   const [unlinkOpen, setUnlinkOpen] = useState(false)
 
   return (
-    <div className="h-full flex flex-col bg-surface-1">
-      {/* Header */}
-      <div className="shrink-0 px-4 py-6 border-b space-y-2.5">
-        {/* Title row: icon | title #number | pills | action icons */}
-        <div className="flex items-start gap-2.5">
-          <PrStateIcon state={pr.state} isDraft={pr.isDraft} />
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium leading-snug">
+    <div className="h-full flex flex-col bg-surface-1 overflow-hidden">
+      {/* Header + tabs */}
+      <div className="shrink-0 border-b">
+        <div className="px-4 pt-4 pb-3 space-y-1.5">
+          {/* Title row: icon | title | badges */}
+          <div className="flex items-center gap-2.5">
+            <PrStateIcon state={pr.state} isDraft={pr.isDraft} />
+            <div className="flex-1 min-w-0 text-sm font-medium leading-snug truncate">
               {pr.title} <span className="text-xs text-muted-foreground font-normal">#{pr.number}</span>
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-muted-foreground">
-              <AuthorAvatar name={pr.author} size="sm" />
-              <span className="font-medium">{pr.author}</span>
-              <span className="mx-0.5">·</span>
-              <span className="font-mono">{pr.headRefName}</span>
-              <span>→</span>
-              <span className="font-mono">{pr.baseRefName}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <PrStateBadge state={pr.state} isDraft={pr.isDraft} />
-            {pr.statusCheckRollup && <ChecksBadge status={pr.statusCheckRollup} />}
-            {pr.reviewDecision && <ReviewBadge decision={pr.reviewDecision} />}
-            <div className="w-5" />
-            {pr.state === 'OPEN' && (
+            <div className="flex items-center gap-1 shrink-0">
+              <PrStateBadge state={pr.state} isDraft={pr.isDraft} />
+              {pr.statusCheckRollup && <ChecksBadge status={pr.statusCheckRollup} />}
+              {pr.reviewDecision && <ReviewBadge decision={pr.reviewDecision} />}
+              <div className="w-2" />
+              {pr.state === 'OPEN' && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconButton aria-label="Merge" variant="ghost" className="h-6 w-6" onClick={() => setMergeOpen(true)}>
+                      <GitMerge className="h-3 w-3" />
+                    </IconButton>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Merge PR</TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <IconButton aria-label="Merge" variant="ghost" className="h-6 w-6" onClick={() => setMergeOpen(true)}>
-                    <GitMerge className="h-3 w-3" />
+                  <IconButton aria-label="Refresh" variant="ghost" className="h-6 w-6" onClick={fetchComments}>
+                    <RefreshCw className="h-3 w-3" />
                   </IconButton>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">Merge PR</TooltipContent>
+                <TooltipContent side="bottom">Refresh</TooltipContent>
               </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconButton aria-label="Refresh" variant="ghost" className="h-6 w-6" onClick={fetchComments}>
-                  <RefreshCw className="h-3 w-3" />
-                </IconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Refresh</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconButton aria-label="Open in browser" variant="ghost" className="h-6 w-6" onClick={() => window.api.shell.openExternal(pr.url)}>
-                  <ExternalLink className="h-3 w-3" />
-                </IconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Open in browser</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconButton aria-label="Unlink PR" variant="ghost" className="h-6 w-6" onClick={() => setUnlinkOpen(true)}>
-                  <Unlink className="h-3 w-3" />
-                </IconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Unlink PR</TooltipContent>
-            </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <IconButton aria-label="Open in browser" variant="ghost" className="h-6 w-6" onClick={() => window.api.shell.openExternal(pr.url)}>
+                    <ExternalLink className="h-3 w-3" />
+                  </IconButton>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Open in browser</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <IconButton aria-label="Unlink PR" variant="ghost" className="h-6 w-6" onClick={() => setUnlinkOpen(true)}>
+                    <Unlink className="h-3 w-3" />
+                  </IconButton>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Unlink PR</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
+          {/* Meta row: author · branches */}
+          <div className="flex items-center gap-1.5 pl-[26px] text-[11px] text-muted-foreground">
+            <AuthorAvatar name={pr.author} size="sm" />
+            <span className="font-medium">{pr.author}</span>
+            <span className="mx-0.5">·</span>
+            <span className="font-mono">{pr.headRefName}</span>
+            <span>→</span>
+            <span className="font-mono">{pr.baseRefName}</span>
+          </div>
+        </div>
+
+        {/* Tab row with action buttons right-aligned */}
+        <div className="flex items-center px-4">
+          <button
+            onClick={() => setActiveTab('description')}
+            className={cn(
+              'px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px',
+              activeTab === 'description'
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Description
+          </button>
+          <button
+            onClick={() => setActiveTab('activity')}
+            className={cn(
+              'px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px',
+              activeTab === 'activity'
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Activity
+            {comments.length > 0 && (
+              <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">({comments.length})</span>
+            )}
+          </button>
+          <button
+            onClick={() => { setActiveTab('files'); loadDiff() }}
+            className={cn(
+              'px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px',
+              activeTab === 'files'
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Files
+            {diffFiles.length > 0 && (
+              <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                ({diffStats.files})
+              </span>
+            )}
+          </button>
+
+          {/* Expand/collapse for activity tab */}
+          {activeTab === 'activity' && comments.filter(c => c.body).length > 0 && (
+            <button
+              onClick={allCollapsed ? expandAll : collapseAll}
+              className="flex items-center gap-1 ml-auto px-2 py-2 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ChevronsUpDown className="h-3 w-3" />
+              {allCollapsed ? 'Expand' : 'Collapse'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -570,44 +623,93 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Scrollable content */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
-        {/* PR Description */}
-        {pr.body && (
-          <div className="border-b">
-            <button
-              onClick={() => setDescriptionOpen(!descriptionOpen)}
-              className="flex items-center gap-2 w-full px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-accent/30 transition-colors"
-            >
-              {descriptionOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              Description
-            </button>
-            {descriptionOpen && (
-              <div className="px-4 pb-3">
-                <GhMarkdown>{pr.body}</GhMarkdown>
+      {/* Tab content — all panels stay mounted, hidden via display:none to avoid reflow on switch */}
+      <div className="flex-1 min-h-0 relative">
+        <div ref={activeTab === 'description' ? scrollRef : undefined} className={cn('absolute inset-0 overflow-y-auto', activeTab !== 'description' && 'hidden')}>
+            <div className="px-4 py-3">
+              <div className="rounded-lg border bg-surface-2 overflow-hidden">
+                {pr.body ? (
+                  <div className="px-3 py-2.5 text-xs">
+                    <GhMarkdown>{pr.body}</GhMarkdown>
+                  </div>
+                ) : (
+                  <p className="px-3 py-4 text-xs text-muted-foreground/60 italic">No description provided.</p>
+                )}
               </div>
-            )}
+            </div>
           </div>
-        )}
 
-        {/* Diff viewer */}
-        <div className="border-b">
-          <button
-            onClick={handleToggleDiff}
-            className="flex items-center gap-2 w-full px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-accent/30 transition-colors"
-          >
-            {diffOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Files changed
-            {diffFiles.length > 0 && (
-              <span className="text-[10px] font-normal">
-                {diffStats.files} files
-                <span className="text-green-500 ml-1">+{diffStats.additions}</span>
-                <span className="text-red-500 ml-1">-{diffStats.deletions}</span>
-              </span>
-            )}
-          </button>
-          {diffOpen && (
-            <div className="pb-2">
+        <div ref={activeTab === 'activity' ? scrollRef : undefined} className={cn('absolute inset-0 overflow-y-auto', activeTab !== 'activity' && 'hidden')}>
+          <div className="px-4 py-3">
+            <div className="space-y-0">
+              {/* PR description as first timeline entry */}
+              {pr.body && (
+                <div className="relative flex gap-3 pb-0">
+                  {/* Avatar + connector */}
+                  <div className="relative shrink-0 flex flex-col items-center">
+                    <div className="relative z-10">
+                      <AuthorAvatar name={pr.author} />
+                    </div>
+                    {(comments.length > 0 || loadingComments) && (
+                      <div className="flex-1 w-px bg-border mt-1" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0 rounded-lg border bg-surface-2 overflow-hidden mb-2">
+                    <div
+                      className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 border-b cursor-pointer"
+                      onClick={() => toggleCollapse('__pr_body__')}
+                    >
+                      {collapsedIds.has('__pr_body__')
+                        ? <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                        : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                      }
+                      <span className="text-[11px] font-semibold">{pr.author}</span>
+                      <span className="text-[10px] text-muted-foreground/60">{formatRelativeTime(pr.createdAt)}</span>
+                    </div>
+                    {!collapsedIds.has('__pr_body__') && (
+                      <div className="px-3 py-2 text-xs">
+                        <GhMarkdown>{pr.body}</GhMarkdown>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {loadingComments ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : comments.length === 0 && !pr.body ? (
+                <div className="py-6 text-center">
+                  <MessageSquare className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground/30" />
+                  <p className="text-xs text-muted-foreground/60">No activity yet</p>
+                </div>
+              ) : (
+                comments.map((comment, i) => (
+                  <TimelineItem
+                    key={comment.id}
+                    comment={comment}
+                    collapsed={collapsedIds.has(comment.id)}
+                    onToggleCollapse={() => toggleCollapse(comment.id)}
+                    onReply={() => handleReply(comment)}
+                    isOwnComment={ghUser !== null && comment.author === ghUser}
+                    isEditing={editingId === comment.id}
+                    editBody={editingId === comment.id ? editBody : ''}
+                    editSubmitting={editSubmitting}
+                    onStartEdit={() => handleStartEdit(comment)}
+                    onEditChange={setEditBody}
+                    onSaveEdit={handleSaveEdit}
+                    onCancelEdit={handleCancelEdit}
+                    isLast={i === comments.length - 1}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div ref={activeTab === 'files' ? scrollRef : undefined} className={cn('absolute inset-0 overflow-y-auto', activeTab !== 'files' && 'hidden')}>
+            <div className="py-2">
               {diffLoading ? (
                 <div className="flex items-center justify-center py-6">
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -617,95 +719,39 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
               ) : diffFiles.length === 0 ? (
                 <div className="px-4 py-4 text-center text-xs text-muted-foreground">No file changes</div>
               ) : (
-                <div className="space-y-0">
-                  {diffFiles.map(file => (
-                    <div key={file.path}>
-                      <button
-                        onClick={() => toggleFileExpand(file.path)}
-                        className="flex items-center gap-2 w-full px-4 py-1.5 text-[11px] hover:bg-accent/30 transition-colors"
-                      >
-                        {expandedFiles.has(file.path) ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
-                        <DiffFileIcon file={file} />
-                        <span className="font-mono truncate text-left">{file.path}</span>
-                        <span className="ml-auto shrink-0 text-[10px]">
-                          {file.additions > 0 && <span className="text-green-500">+{file.additions}</span>}
-                          {file.deletions > 0 && <span className="text-red-500 ml-1">-{file.deletions}</span>}
-                        </span>
-                      </button>
-                      {expandedFiles.has(file.path) && (
-                        <div className="border-t border-b border-border/30 ml-4 mr-2 mb-1">
-                          <DiffView diff={file} />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <>
+                  <div className="px-4 pb-2 text-[10px] text-muted-foreground">
+                    {diffStats.files} files
+                    <span className="text-green-500 ml-1">+{diffStats.additions}</span>
+                    <span className="text-red-500 ml-1">-{diffStats.deletions}</span>
+                  </div>
+                  <div className="space-y-0">
+                    {diffFiles.map(file => (
+                      <div key={file.path}>
+                        <button
+                          onClick={() => toggleFileExpand(file.path)}
+                          className="flex items-center gap-2 w-full px-4 py-1.5 text-[11px] hover:bg-accent/30 transition-colors"
+                        >
+                          {expandedFiles.has(file.path) ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+                          <DiffFileIcon file={file} />
+                          <span className="font-mono truncate text-left">{file.path}</span>
+                          <span className="ml-auto shrink-0 text-[10px]">
+                            {file.additions > 0 && <span className="text-green-500">+{file.additions}</span>}
+                            {file.deletions > 0 && <span className="text-red-500 ml-1">-{file.deletions}</span>}
+                          </span>
+                        </button>
+                        {expandedFiles.has(file.path) && (
+                          <div className="border-t border-b border-border/30 ml-4 mr-2 mb-1">
+                            <DiffView diff={file} />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
-          )}
-        </div>
-
-        {/* Activity */}
-        <div className="border-b">
-          <div className="flex items-center">
-            <button
-              onClick={() => setActivityOpen(!activityOpen)}
-              className="flex items-center gap-2 flex-1 px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-accent/30 transition-colors"
-            >
-              {activityOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              Activity
-              {comments.length > 0 && (
-                <span className="text-[10px] font-normal">{comments.length}</span>
-              )}
-            </button>
-            {activityOpen && comments.filter(c => c.body).length > 0 && (
-              <button
-                onClick={allCollapsed ? expandAll : collapseAll}
-                className="flex items-center gap-1 px-4 py-2 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <ChevronsUpDown className="h-3 w-3" />
-                {allCollapsed ? 'Expand all' : 'Collapse all'}
-              </button>
-            )}
           </div>
-          {activityOpen && (
-            loadingComments ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              </div>
-            ) : comments.length === 0 ? (
-              <div className="py-6 text-center">
-                <MessageSquare className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground/30" />
-                <p className="text-xs text-muted-foreground/60">No activity yet</p>
-              </div>
-            ) : (
-              <div className="relative px-4 py-3">
-                {/* Timeline connector line */}
-                <div className="absolute left-[27px] top-3 bottom-3 w-px bg-border" />
-
-                <div className="space-y-0.5">
-                  {comments.map((comment) => (
-                    <TimelineItem
-                      key={comment.id}
-                      comment={comment}
-                      collapsed={collapsedIds.has(comment.id)}
-                      onToggleCollapse={() => toggleCollapse(comment.id)}
-                      onReply={() => handleReply(comment)}
-                      isOwnComment={ghUser !== null && comment.author === ghUser}
-                      isEditing={editingId === comment.id}
-                      editBody={editingId === comment.id ? editBody : ''}
-                      editSubmitting={editSubmitting}
-                      onStartEdit={() => handleStartEdit(comment)}
-                      onEditChange={setEditBody}
-                      onSaveEdit={handleSaveEdit}
-                      onCancelEdit={handleCancelEdit}
-                    />
-                  ))}
-                </div>
-              </div>
-            )
-          )}
-        </div>
       </div>
 
       {/* Comment input */}
@@ -752,7 +798,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
 
 // --- Timeline item ---
 
-function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComment, isEditing, editBody, editSubmitting, onStartEdit, onEditChange, onSaveEdit, onCancelEdit }: {
+function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComment, isEditing, editBody, editSubmitting, onStartEdit, onEditChange, onSaveEdit, onCancelEdit, isLast }: {
   comment: GhPrComment
   collapsed: boolean
   onToggleCollapse: () => void
@@ -765,17 +811,21 @@ function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComm
   onEditChange: (body: string) => void
   onSaveEdit: () => void
   onCancelEdit: () => void
+  isLast: boolean
 }) {
   const isReviewAction = comment.type === 'review' && !comment.body
   const timeAgo = formatRelativeTime(comment.createdAt)
 
   if (isReviewAction) {
     return (
-      <div className="relative flex items-center gap-3 py-2">
-        <div className="relative z-10 shrink-0">
-          <ReviewEventDot state={comment.reviewState} />
+      <div className="relative flex items-center gap-3 pb-0">
+        <div className="relative shrink-0 flex flex-col items-center">
+          <div className="relative z-10">
+            <ReviewEventDot state={comment.reviewState} />
+          </div>
+          {!isLast && <div className="flex-1 w-px bg-border mt-1" />}
         </div>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-[11px] text-muted-foreground mb-2">
           <span className="font-medium text-foreground/80">{comment.author}</span>
           {' '}{reviewActionLabel(comment.reviewState)}
           <span className="ml-1.5 text-muted-foreground/60">{timeAgo}</span>
@@ -785,14 +835,17 @@ function TimelineItem({ comment, collapsed, onToggleCollapse, onReply, isOwnComm
   }
 
   return (
-    <div className="relative flex gap-3 py-1.5">
-      {/* Avatar */}
-      <div className="relative z-10 shrink-0">
-        <AuthorAvatar name={comment.author} />
+    <div className="relative flex gap-3 pb-0">
+      {/* Avatar + connector */}
+      <div className="relative shrink-0 flex flex-col items-center">
+        <div className="relative z-10">
+          <AuthorAvatar name={comment.author} />
+        </div>
+        {!isLast && <div className="flex-1 w-px bg-border mt-1" />}
       </div>
 
       {/* Comment card */}
-      <div className="flex-1 min-w-0 rounded-lg border bg-surface-2 overflow-hidden">
+      <div className="flex-1 min-w-0 rounded-lg border bg-surface-2 overflow-hidden mb-2">
         {/* Comment header */}
         <div
           className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 border-b cursor-pointer"

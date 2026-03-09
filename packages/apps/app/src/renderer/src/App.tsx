@@ -1380,8 +1380,9 @@ function App(): React.JSX.Element {
                       className={
                         explodeMode
                           ? "rounded overflow-hidden border border-border min-h-0 relative"
-                          : `absolute inset-0 ${i !== activeTabIndex ? 'invisible pointer-events-none' : 'z-10'}`
+                          : `absolute inset-0 ${i !== activeTabIndex ? 'opacity-0' : 'z-10'}`
                       }
+                      inert={!explodeMode && i !== activeTabIndex ? true : undefined}
                     >
                         {tab.type === 'home' ? (
                         <div className="flex flex-col flex-1 p-6 pt-4 h-full" style={{ backgroundColor: colorTintsEnabled ? projectColorBg(selectedProject?.color) : undefined }}>

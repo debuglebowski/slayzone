@@ -262,13 +262,19 @@ export function TaskDetailPage({
   // Measure split-view container width for auto panel sizing
   const [containerWidth, setContainerWidth] = useState(0)
   const roRef = useRef<ResizeObserver | null>(null)
+  const lastWidthRef = useRef(0)
   const splitContainerRef = useCallback((el: HTMLDivElement | null) => {
     if (roRef.current) {
       roRef.current.disconnect()
       roRef.current = null
     }
     if (el) {
-      roRef.current = new ResizeObserver(([entry]) => setContainerWidth(entry.contentRect.width))
+      roRef.current = new ResizeObserver(([entry]) => {
+        const w = Math.floor(entry.contentRect.width)
+        if (Math.abs(w - lastWidthRef.current) < 2) return
+        lastWidthRef.current = w
+        setContainerWidth(w)
+      })
       roRef.current.observe(el)
     }
   }, [])
