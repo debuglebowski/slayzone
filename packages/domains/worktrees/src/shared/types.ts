@@ -116,6 +116,26 @@ export interface CreatePrResult {
   number: number
 }
 
+// --- Merge PR ---
+
+export type MergeStrategy = 'merge' | 'squash' | 'rebase'
+
+export interface MergePrInput {
+  repoPath: string
+  prNumber: number
+  strategy: MergeStrategy
+  deleteBranch?: boolean
+  auto?: boolean
+}
+
+// --- Edit comment ---
+
+export interface EditPrCommentInput {
+  repoPath: string
+  commentId: string
+  body: string
+}
+
 export interface GitDiffSnapshot {
   targetPath: string
   files: string[]

@@ -311,7 +311,11 @@ const api: ElectronAPI = {
     getPrByUrl: (repoPath, url) => ipcRenderer.invoke('git:getPrByUrl', repoPath, url),
     createPr: (input) => ipcRenderer.invoke('git:createPr', input),
     getPrComments: (repoPath, prNumber) => ipcRenderer.invoke('git:getPrComments', repoPath, prNumber),
-    addPrComment: (repoPath, prNumber, body) => ipcRenderer.invoke('git:addPrComment', repoPath, prNumber, body)
+    addPrComment: (repoPath, prNumber, body) => ipcRenderer.invoke('git:addPrComment', repoPath, prNumber, body),
+    mergePr: (input) => ipcRenderer.invoke('git:mergePr', input),
+    getPrDiff: (repoPath, prNumber) => ipcRenderer.invoke('git:getPrDiff', repoPath, prNumber),
+    getGhUser: (repoPath) => ipcRenderer.invoke('git:getGhUser', repoPath),
+    editPrComment: (input) => ipcRenderer.invoke('git:editPrComment', input)
   },
   tabs: {
     list: (taskId) => ipcRenderer.invoke('tabs:list', taskId),

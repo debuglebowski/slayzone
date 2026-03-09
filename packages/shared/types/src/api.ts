@@ -17,7 +17,7 @@ import type {
 } from '@slayzone/terminal/shared'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '@slayzone/task-terminals/shared'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
-import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, GhPullRequest, GhPrComment, CreatePrInput, CreatePrResult } from '@slayzone/worktrees/shared'
+import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, GhPullRequest, GhPrComment, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput } from '@slayzone/worktrees/shared'
 import type { MergeContext } from '@slayzone/task/shared'
 import type {
   AiConfigItem,
@@ -404,6 +404,10 @@ export interface ElectronAPI {
     createPr: (input: CreatePrInput) => Promise<CreatePrResult>
     getPrComments: (repoPath: string, prNumber: number) => Promise<GhPrComment[]>
     addPrComment: (repoPath: string, prNumber: number, body: string) => Promise<void>
+    mergePr: (input: MergePrInput) => Promise<void>
+    getPrDiff: (repoPath: string, prNumber: number) => Promise<string>
+    getGhUser: (repoPath: string) => Promise<string>
+    editPrComment: (input: EditPrCommentInput) => Promise<void>
   }
   tabs: {
     list: (taskId: string) => Promise<TerminalTab[]>

@@ -1,6 +1,6 @@
 import { spawnSync, execSync } from 'child_process'
 import { whichBinary, resolveUserShell, getShellStartupArgs } from '@slayzone/terminal/main'
-import type { GhPullRequest, GhPrComment, CreatePrInput, CreatePrResult } from '../shared/types'
+import type { GhPullRequest, GhPrComment, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput } from '../shared/types'
 
 const GH_PR_JSON_FIELDS = 'number,title,body,url,state,headRefName,baseRefName,isDraft,author,createdAt,reviewDecision,statusCheckRollup'
 
@@ -236,5 +236,66 @@ export function addPrComment(repoPath: string, prNumber: number, body: string): 
   if (result.status !== 0) {
     const stderr = result.stderr?.toString().trim() || 'Unknown error'
     throw new Error(`gh pr comment failed: ${stderr}`)
+  }
+}
+
+export function mergePr(input: MergePrInput): void {
+  const args = ['pr', 'merge', String(input.prNumber), `--${input.strategy}`]
+  if (input.deleteBranch) args.push('--delete-branch')
+  if (input.auto) args.push('--auto')
+
+  const result = spawnGh(args, { cwd: input.repoPath, timeout: 30000 })
+
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim() || 'Unknown error'
+    throw new Error(`gh pr merge failed: ${stderr}`)
+  }
+}
+
+export function getPrDiff(repoPath: string, prNumber: number): string {
+  const result = spawnGh(['pr', 'diff', String(prNumber)], { cwd: repoPath, timeout: 30000 })
+
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim() || 'Unknown error'
+    throw new Error(`gh pr diff failed: ${stderr}`)
+  }
+  return result.stdout
+}
+
+// Cache gh user per session
+let cachedGhUser: string | null = null
+
+export function getGhUser(repoPath: string): string {
+  if (cachedGhUser) return cachedGhUser
+  const result = spawnGh(['api', 'user', '--jq', '.login'], { cwd: repoPath })
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim() || 'Unknown error'
+    throw new Error(`gh api user failed: ${stderr}`)
+  }
+  cachedGhUser = result.stdout.trim()
+  return cachedGhUser
+}
+
+function getRepoOwnerAndName(repoPath: string): { owner: string; repo: string } {
+  const result = spawnGh(['repo', 'view', '--json', 'owner,name'], { cwd: repoPath })
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim() || 'Unknown error'
+    throw new Error(`gh repo view failed: ${stderr}`)
+  }
+  const data = JSON.parse(result.stdout) as { owner: { login: string }; name: string }
+  return { owner: data.owner.login, repo: data.name }
+}
+
+export function editPrComment(input: EditPrCommentInput): void {
+  const { owner, repo } = getRepoOwnerAndName(input.repoPath)
+  const result = spawnGh([
+    'api', `repos/${owner}/${repo}/issues/comments/${input.commentId}`,
+    '-X', 'PATCH',
+    '-f', `body=${input.body}`
+  ], { cwd: input.repoPath, timeout: 15000 })
+
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim() || 'Unknown error'
+    throw new Error(`Edit comment failed: ${stderr}`)
   }
 }

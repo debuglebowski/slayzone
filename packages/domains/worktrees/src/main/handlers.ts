@@ -50,9 +50,13 @@ import {
   getPrByUrl,
   createPr,
   getPrComments,
-  addPrComment
+  addPrComment,
+  mergePr,
+  getPrDiff,
+  getGhUser,
+  editPrComment
 } from './gh-cli'
-import type { MergeWithAIResult, ConflictAnalysis, CreatePrInput } from '../shared/types'
+import type { MergeWithAIResult, ConflictAnalysis, CreatePrInput, MergePrInput, EditPrCommentInput } from '../shared/types'
 
 export function registerWorktreeHandlers(ipcMain: IpcMain): void {
   // Git operations
@@ -356,5 +360,21 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
 
   ipcMain.handle('git:addPrComment', (_, repoPath: string, prNumber: number, body: string) => {
     return addPrComment(repoPath, prNumber, body)
+  })
+
+  ipcMain.handle('git:mergePr', (_, input: MergePrInput) => {
+    return mergePr(input)
+  })
+
+  ipcMain.handle('git:getPrDiff', (_, repoPath: string, prNumber: number) => {
+    return getPrDiff(repoPath, prNumber)
+  })
+
+  ipcMain.handle('git:getGhUser', (_, repoPath: string) => {
+    return getGhUser(repoPath)
+  })
+
+  ipcMain.handle('git:editPrComment', (_, input: EditPrCommentInput) => {
+    return editPrComment(input)
   })
 }
