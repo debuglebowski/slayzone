@@ -13,8 +13,10 @@ import { ProjectGeneralTab } from './ProjectGeneralTab'
 import { WorktreesTab, type WorktreesTabHandle } from './WorktreesTab'
 import { PullRequestTab } from './PullRequestTab'
 import { ProjectPrTab } from './ProjectPrTab'
+import { BranchesTab } from './BranchesTab'
+import { BranchTab } from './BranchTab'
 
-export type GitTabId = 'general' | 'changes' | 'conflicts' | 'worktrees' | 'pr'
+export type GitTabId = 'general' | 'changes' | 'branches' | 'conflicts' | 'worktrees' | 'pr'
 const isMac = navigator.platform.startsWith('Mac')
 const gitGeneralShortcut = isMac ? '⌘G' : 'Ctrl+G'
 const gitDiffShortcut = isMac ? '⌘⇧G' : 'Ctrl+Shift+G'
@@ -97,6 +99,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
   const [conflictToolbar, setConflictToolbar] = useState<ConflictToolbarData | null>(null)
 
   const showWorktrees = !task
+  const showBranchTab = task ? !!task.worktree_path : true
   const [hasGithubRemote, setHasGithubRemote] = useState(false)
 
   // Check if repo has a GitHub remote
@@ -123,7 +126,10 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
     if (!hasGithubRemote && activeTab === 'pr') {
       setActiveTab('general')
     }
-  }, [showWorktrees, hasGithubRemote, activeTab])
+    if (!showBranchTab && activeTab === 'branches') {
+      setActiveTab('general')
+    }
+  }, [showWorktrees, showBranchTab, hasGithubRemote, activeTab])
 
   // Merge-mode: commit and continue merge
   const handleCommitAndContinueMerge = useCallback(async () => {
@@ -198,6 +204,14 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
         >
           Diff
         </TabButton>
+        {showBranchTab && (
+          <TabButton
+            active={activeTab === 'branches'}
+            onClick={() => setActiveTab('branches')}
+          >
+            {task ? 'Worktree' : 'Branches'}
+          </TabButton>
+        )}
         {showWorktrees && (
           <TabButton
             active={activeTab === 'worktrees'}
@@ -298,6 +312,21 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
             onCommitAndContinueMerge={task ? handleCommitAndContinueMerge : undefined}
             onAbortMerge={task ? handleAbortMerge : undefined}
           />
+        </div>
+        <div className={cn('absolute inset-0', activeTab !== 'branches' && 'hidden')}>
+          {task ? (
+            <BranchTab
+              task={task}
+              projectPath={projectPath}
+              visible={visible && activeTab === 'branches'}
+              pollIntervalMs={pollIntervalMs}
+            />
+          ) : (
+            <BranchesTab
+              projectPath={projectPath}
+              visible={visible && activeTab === 'branches'}
+            />
+          )}
         </div>
         <div className={cn('absolute inset-0', activeTab !== 'worktrees' && 'hidden')}>
           <WorktreesTab

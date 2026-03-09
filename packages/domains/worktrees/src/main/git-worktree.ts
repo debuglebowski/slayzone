@@ -3,9 +3,9 @@ import { platform } from 'os'
 import { existsSync, readFileSync, writeFileSync, chmodSync, constants as fsConstants, accessSync } from 'fs'
 import path from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
-import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, DeleteBranchResult, PruneResult } from '../shared/types'
+import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
-import { execGit, trimOutput } from './exec-async'
+import { execAsync, execGit, trimOutput } from './exec-async'
 
 export async function isGitRepo(repoPath: string): Promise<boolean> {
   try {
@@ -722,29 +722,26 @@ export async function gitPull(repoPath: string): Promise<GitSyncResult> {
 
 // --- Branch tab operations ---
 
-export async function getDefaultBranch(repoPath: string): Promise<string> {
+export async function getDefaultBranch(repoPath: string, knownBranches?: string[]): Promise<string> {
   try {
     const output = await execGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd: repoPath })
     return output.trim().replace('refs/remotes/origin/', '')
   } catch {
-    // Fallback: check for main/master
-    const branches = await listBranches(repoPath)
+    // Fallback: check for main/master using provided list (avoids extra spawn)
+    const branches = knownBranches ?? await listBranches(repoPath)
     if (branches.includes('main')) return 'main'
     if (branches.includes('master')) return 'master'
     return branches[0] ?? 'main'
   }
 }
 
-export async function listBranchesDetailed(repoPath: string): Promise<BranchDetail[]> {
+export async function listBranchesDetailed(repoPath: string): Promise<BranchListResult> {
   try {
     const format = '%(refname:short)%00%(objectname:short)%00%(objectname)%00%(subject)%00%(authorname)%00%(committerdate:relative)%00%(upstream:short)'
-    const output = await execGit(
-      ['for-each-ref', '--sort=-committerdate', `--format=${format}`, 'refs/heads/'],
-      { cwd: repoPath }
-    )
-
-    const currentBranch = await getCurrentBranch(repoPath)
-    const defaultBranch = await getDefaultBranch(repoPath)
+    const [output, currentBranch] = await Promise.all([
+      execGit(['for-each-ref', '--sort=-committerdate', `--format=${format}`, 'refs/heads/'], { cwd: repoPath }),
+      getCurrentBranch(repoPath)
+    ])
 
     const lines = output.trim().split('\n').filter(Boolean)
     const branches: BranchDetail[] = []
@@ -755,8 +752,11 @@ export async function listBranchesDetailed(repoPath: string): Promise<BranchDeta
       return { name, shortHash, hash, message, author, relativeDate, upstream: upstream || null }
     })
 
-    // Batch ahead/behind computations (cap at 30)
-    const toCompute = parsed.slice(0, 30)
+    // Resolve default branch using already-parsed names (avoids redundant spawn in fallback)
+    const defaultBranch = await getDefaultBranch(repoPath, parsed.map(b => b.name))
+
+    // Batch ahead/behind computations (cap at 10 to limit spawned processes)
+    const toCompute = parsed.slice(0, 10)
     const results = await Promise.all(
       toCompute.map(async (b) => {
         const [abUpstream, abDefault] = await Promise.all([
@@ -787,9 +787,9 @@ export async function listBranchesDetailed(repoPath: string): Promise<BranchDeta
       })
     }
 
-    return branches
+    return { branches, defaultBranch }
   } catch {
-    return []
+    return { branches: [], defaultBranch: 'main' }
   }
 }
 
@@ -823,6 +823,16 @@ export async function getCommitsSince(repoPath: string, sinceRef: string, branch
   }
 }
 
+export async function getCommitsBeforeRef(repoPath: string, ref: string, count = 3): Promise<CommitInfo[]> {
+  try {
+    // Use -n + --skip instead of ref~count range — works even when history is shorter than count
+    const output = await execGit(['log', ref, '--skip=1', `-${count}`, '--format=%H%n%h%n%s%n%an%n%ar'], { cwd: repoPath })
+    return parseCommitOutput(output)
+  } catch {
+    return []
+  }
+}
+
 export async function deleteBranch(repoPath: string, branch: string, force?: boolean): Promise<DeleteBranchResult> {
   try {
     await execGit(['branch', force ? '-D' : '-d', branch], { cwd: repoPath })
@@ -843,4 +853,63 @@ export async function pruneRemote(repoPath: string): Promise<PruneResult> {
   } catch {
     return { pruned: [] }
   }
+}
+
+// --- Worktree tab operations ---
+
+export async function rebaseOnto(worktreePath: string, ontoBranch: string): Promise<RebaseOntoResult> {
+  try {
+    await execGit(['rebase', ontoBranch], { cwd: worktreePath })
+    return { success: true }
+  } catch (err) {
+    const inProgress = await isRebaseInProgress(worktreePath)
+    if (inProgress) {
+      return { success: false, conflicted: true, error: 'Rebase has conflicts — resolve in terminal' }
+    }
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export async function mergeFrom(worktreePath: string, branch: string): Promise<MergeResult> {
+  try {
+    await execGit(['merge', branch, '--no-edit'], { cwd: worktreePath })
+    return { success: true, merged: true, conflicted: false }
+  } catch (err) {
+    const conflicted = await isMergeInProgress(worktreePath)
+    if (conflicted) {
+      const files = await getConflictedFiles(worktreePath)
+      return { success: false, merged: false, conflicted: true, error: `Conflicts in ${files.length} file(s)` }
+    }
+    return { success: false, merged: false, conflicted: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export async function getDiffStats(repoPath: string, ref: string): Promise<DiffStatsSummary> {
+  try {
+    const output = await execGit(['diff', '--numstat', `${ref}...HEAD`], { cwd: repoPath })
+    const lines = output.trim().split('\n').filter(Boolean)
+    let filesChanged = 0, insertions = 0, deletions = 0
+    for (const line of lines) {
+      const [ins, del] = line.split('\t')
+      filesChanged++
+      if (ins !== '-') insertions += parseInt(ins, 10) || 0
+      if (del !== '-') deletions += parseInt(del, 10) || 0
+    }
+    return { filesChanged, insertions, deletions }
+  } catch {
+    return { filesChanged: 0, insertions: 0, deletions: 0 }
+  }
+}
+
+export async function getWorktreeMetadata(worktreePath: string): Promise<WorktreeMetadata> {
+  const [diskResult, createdAt] = await Promise.all([
+    execAsync('du', ['-sh', worktreePath])
+      .then(r => r.stdout.trim().split(/\s+/)[0] || '?')
+      .catch(() => '?'),
+    // Use first commit date on this branch as proxy for worktree creation
+    execGit(['log', '--reverse', '--format=%aI', '-1'], { cwd: worktreePath })
+      .then(out => out.trim() || null)
+      .catch(() => null)
+  ])
+  return { path: worktreePath, diskSize: diskResult, createdAt }
 }

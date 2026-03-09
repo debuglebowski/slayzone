@@ -4,3 +4,6 @@ export { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from './Un
 export { GeneralTabContent } from './GeneralTabContent'
 export { CommitTimeline } from './CommitTimeline'
 export { WorktreesTab } from './WorktreesTab'
+export { BranchesTab } from './BranchesTab'
+export { BranchTab } from './BranchTab'
+export { BranchGraph } from './BranchGraph'

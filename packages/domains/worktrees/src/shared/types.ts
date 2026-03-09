@@ -174,6 +174,24 @@ export interface PruneResult {
   pruned: string[]
 }
 
+export interface DiffStatsSummary {
+  filesChanged: number
+  insertions: number
+  deletions: number
+}
+
+export interface WorktreeMetadata {
+  path: string
+  diskSize: string
+  createdAt: string | null
+}
+
+export interface RebaseOntoResult {
+  success: boolean
+  conflicted?: boolean
+  error?: string
+}
+
 export interface GitDiffSnapshot {
   targetPath: string
   files: string[]

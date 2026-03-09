@@ -40,7 +40,19 @@ import {
   getRemoteUrl,
   gitFetch,
   gitPush,
-  gitPull
+  gitPull,
+  getDefaultBranch,
+  listBranchesDetailed,
+  listRemoteBranches,
+  getMergeBase,
+  getCommitsSince,
+  getCommitsBeforeRef,
+  deleteBranch,
+  pruneRemote,
+  rebaseOnto,
+  mergeFrom,
+  getDiffStats,
+  getWorktreeMetadata
 } from './git-worktree'
 import { runAiCommand } from './merge-ai'
 import {
@@ -331,6 +343,56 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
 
   ipcMain.handle('git:pull', (_, path: string) => {
     return gitPull(path)
+  })
+
+  // Branch tab operations
+  ipcMain.handle('git:getDefaultBranch', (_, path: string) => {
+    return getDefaultBranch(path)
+  })
+
+  ipcMain.handle('git:listBranchesDetailed', (_, path: string) => {
+    return listBranchesDetailed(path)
+  })
+
+  ipcMain.handle('git:listRemoteBranches', (_, path: string) => {
+    return listRemoteBranches(path)
+  })
+
+  ipcMain.handle('git:getMergeBase', (_, path: string, branch1: string, branch2: string) => {
+    return getMergeBase(path, branch1, branch2)
+  })
+
+  ipcMain.handle('git:getCommitsSince', (_, path: string, sinceRef: string, branch: string) => {
+    return getCommitsSince(path, sinceRef, branch)
+  })
+
+  ipcMain.handle('git:getCommitsBeforeRef', (_, path: string, ref: string, count?: number) => {
+    return getCommitsBeforeRef(path, ref, count)
+  })
+
+  ipcMain.handle('git:deleteBranch', (_, path: string, branch: string, force?: boolean) => {
+    return deleteBranch(path, branch, force)
+  })
+
+  ipcMain.handle('git:pruneRemote', (_, path: string) => {
+    return pruneRemote(path)
+  })
+
+  // Worktree tab operations
+  ipcMain.handle('git:rebaseOnto', (_, path: string, ontoBranch: string) => {
+    return rebaseOnto(path, ontoBranch)
+  })
+
+  ipcMain.handle('git:mergeFrom', (_, path: string, branch: string) => {
+    return mergeFrom(path, branch)
+  })
+
+  ipcMain.handle('git:getDiffStats', (_, path: string, ref: string) => {
+    return getDiffStats(path, ref)
+  })
+
+  ipcMain.handle('git:getWorktreeMetadata', (_, path: string) => {
+    return getWorktreeMetadata(path)
   })
 
   // GitHub CLI (gh) operations

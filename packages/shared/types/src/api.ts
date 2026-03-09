@@ -17,7 +17,7 @@ import type {
 } from '@slayzone/terminal/shared'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '@slayzone/task-terminals/shared'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
-import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, BranchListResult, DeleteBranchResult, PruneResult, GhPullRequest, GhPrTimelineEvent, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput } from '@slayzone/worktrees/shared'
+import type { DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, GhPullRequest, GhPrTimelineEvent, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput } from '@slayzone/worktrees/shared'
 import type { MergeContext } from '@slayzone/task/shared'
 import type {
   AiConfigItem,
@@ -405,6 +405,11 @@ export interface ElectronAPI {
     getCommitsBeforeRef: (path: string, ref: string, count?: number) => Promise<CommitInfo[]>
     deleteBranch: (path: string, branch: string, force?: boolean) => Promise<DeleteBranchResult>
     pruneRemote: (path: string) => Promise<PruneResult>
+    // Worktree tab
+    rebaseOnto: (path: string, ontoBranch: string) => Promise<RebaseOntoResult>
+    mergeFrom: (path: string, branch: string) => Promise<MergeResult>
+    getDiffStats: (path: string, ref: string) => Promise<DiffStatsSummary>
+    getWorktreeMetadata: (path: string) => Promise<WorktreeMetadata>
     // GitHub CLI (gh)
     checkGhInstalled: () => Promise<boolean>
     hasGithubRemote: (repoPath: string) => Promise<boolean>
