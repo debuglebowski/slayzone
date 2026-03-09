@@ -371,14 +371,16 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
   }, [])
 
   const collapseAll = useCallback(() => {
-    setCollapsedIds(new Set(comments.filter(c => c.body).map(c => c.id)))
-  }, [comments])
+    const ids = comments.filter(c => c.body).map(c => c.id)
+    if (pr.body) ids.push('__pr_body__')
+    setCollapsedIds(new Set(ids))
+  }, [comments, pr.body])
 
   const expandAll = useCallback(() => {
     setCollapsedIds(new Set())
   }, [])
 
-  const allCollapsed = comments.filter(c => c.body).every(c => collapsedIds.has(c.id))
+  const allCollapsed = comments.filter(c => c.body).every(c => collapsedIds.has(c.id)) && (!pr.body || collapsedIds.has('__pr_body__'))
 
   // Merge
   const handleMerge = async () => {
