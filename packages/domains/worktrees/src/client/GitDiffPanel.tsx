@@ -648,7 +648,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
             {stagedEntries.length > 0 && (
               <div>
                 <div
-                  className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide bg-muted/30 border-b sticky top-0 z-10 flex items-center justify-between cursor-pointer select-none"
+                  className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide bg-muted border-b sticky top-0 z-10 flex items-center justify-between cursor-pointer select-none"
                   onClick={() => setStagedCollapsed((v) => !v)}
                 >
                   <span className="flex items-center gap-1">
@@ -686,7 +686,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
             {unstagedEntries.length > 0 && (
               <div>
                 <div
-                  className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide bg-muted/30 border-b sticky top-0 z-10 flex items-center justify-between cursor-pointer select-none"
+                  className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide bg-muted border-b sticky top-0 z-10 flex items-center justify-between cursor-pointer select-none"
                   onClick={() => setUnstagedCollapsed((v) => !v)}
                 >
                   <span className="flex items-center gap-1">
