@@ -1,4 +1,4 @@
-import { test, expect, seed, goHome, clickProject, resetApp} from './fixtures/electron'
+import { test, expect, seed, goHome, clickProject, resetApp, ensureGitRepo} from './fixtures/electron'
 import { TEST_PROJECT_PATH } from './fixtures/electron'
 import { execSync } from 'child_process'
 import { existsSync } from 'fs'
@@ -36,16 +36,7 @@ test.describe('Git worktree operations', () => {
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
-    // Ensure test project dir has a git repo with an initial commit
-    try { execSync('git rev-parse --is-inside-work-tree', { cwd: TEST_PROJECT_PATH }) }
-    catch {
-      execSync('git init', { cwd: TEST_PROJECT_PATH })
-      execSync('git config user.name "Test"', { cwd: TEST_PROJECT_PATH })
-      execSync('git config user.email "test@test.com"', { cwd: TEST_PROJECT_PATH })
-      execSync('touch README.md', { cwd: TEST_PROJECT_PATH })
-      execSync('git add README.md', { cwd: TEST_PROJECT_PATH })
-      execSync('git commit -m "Initial commit"', { cwd: TEST_PROJECT_PATH })
-    }
+    ensureGitRepo(TEST_PROJECT_PATH)
 
     // Clean up any leftover worktrees from previous runs.
     try {

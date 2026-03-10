@@ -1,5 +1,4 @@
-import { test, expect, seed, TEST_PROJECT_PATH, resetApp} from './fixtures/electron'
-import { execSync } from 'child_process'
+import { test, expect, seed, TEST_PROJECT_PATH, resetApp, ensureGitRepo} from './fixtures/electron'
 import path from 'path'
 
 function slugify(text: string): string {
@@ -10,19 +9,6 @@ function slugify(text: string): string {
     .replace(/[\s_]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
-}
-
-function ensureGitRepo(projectPath: string): void {
-  try {
-    execSync('git rev-parse --is-inside-work-tree', { cwd: projectPath, stdio: 'pipe' })
-  } catch {
-    execSync('git init', { cwd: projectPath, stdio: 'pipe' })
-    execSync('git config user.name "Test"', { cwd: projectPath, stdio: 'pipe' })
-    execSync('git config user.email "test@test.com"', { cwd: projectPath, stdio: 'pipe' })
-    execSync('touch README.md', { cwd: projectPath, stdio: 'pipe' })
-    execSync('git add README.md', { cwd: projectPath, stdio: 'pipe' })
-    execSync('git commit -m "Initial commit"', { cwd: projectPath, stdio: 'pipe' })
-  }
 }
 
 test.describe('Auto worktree on task create', () => {

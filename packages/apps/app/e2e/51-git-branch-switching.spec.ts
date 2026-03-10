@@ -1,4 +1,4 @@
-import { test, expect, seed, goHome, clickProject, resetApp} from './fixtures/electron'
+import { test, expect, seed, goHome, clickProject, resetApp, ensureGitRepo} from './fixtures/electron'
 import { TEST_PROJECT_PATH } from './fixtures/electron'
 import { execSync } from 'child_process'
 import fs from 'fs'
@@ -40,28 +40,7 @@ test.describe('Git branch switching & creation', () => {
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
-    // Always init own git repo — TEST_PROJECT_PATH is inside slayzone repo
-    // so `git rev-parse --is-inside-work-tree` would misleadingly succeed.
-    const hasOwnGit = fs.existsSync(path.join(TEST_PROJECT_PATH, '.git'))
-    if (!hasOwnGit) {
-      git('git init')
-      git('git config user.name "Test"')
-      git('git config user.email "test@test.com"')
-      fs.writeFileSync(path.join(TEST_PROJECT_PATH, 'README.md'), '# test\n')
-      git('git add -A')
-      git('git -c commit.gpgsign=false commit --allow-empty -m "Initial commit"')
-    }
-
-    // Ensure this repo has at least one commit, even if .git already existed.
-    try {
-      git('git rev-parse --verify HEAD')
-    } catch {
-      git('git config user.name "Test"')
-      git('git config user.email "test@test.com"')
-      fs.writeFileSync(path.join(TEST_PROJECT_PATH, 'README.md'), '# test\n')
-      git('git add -A')
-      git('git -c commit.gpgsign=false commit --allow-empty -m "Initial commit"')
-    }
+    ensureGitRepo(TEST_PROJECT_PATH)
 
     // Ensure we're on main/master
     const currentBranch = git('git branch --show-current')

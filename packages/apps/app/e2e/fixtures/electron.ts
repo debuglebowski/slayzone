@@ -2,6 +2,7 @@ import { test as base, expect, type Page, type Locator } from '@playwright/test'
 import { _electron as electron, type ElectronApplication } from 'playwright'
 import path from 'path'
 import fs from 'fs'
+import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 
@@ -45,6 +46,27 @@ interface LaunchAttemptRecord {
 
 function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true })
+}
+
+/**
+ * Ensure `dirPath` has its OWN git repo, not inheriting from a parent repo.
+ * TEST_PROJECT_PATH lives inside the slayzone repo, so `--is-inside-work-tree`
+ * would misleadingly succeed against the parent. We check `--show-toplevel` instead.
+ */
+export function ensureGitRepo(dirPath: string): void {
+  try {
+    const toplevel = execSync('git rev-parse --show-toplevel', {
+      cwd: dirPath, stdio: 'pipe',
+    }).toString().trim()
+    if (toplevel !== dirPath) throw new Error('not own repo')
+  } catch {
+    execSync('git init', { cwd: dirPath, stdio: 'pipe' })
+    execSync('git config user.name "Test"', { cwd: dirPath, stdio: 'pipe' })
+    execSync('git config user.email "test@test.com"', { cwd: dirPath, stdio: 'pipe' })
+    fs.writeFileSync(path.join(dirPath, 'README.md'), '# test\n')
+    execSync('git add -A', { cwd: dirPath, stdio: 'pipe' })
+    execSync('git -c commit.gpgsign=false commit -m "Initial commit"', { cwd: dirPath, stdio: 'pipe' })
+  }
 }
 
 function wait(ms: number): Promise<void> {
@@ -259,6 +281,7 @@ export const test = base.extend<ElectronFixtures>({
         TEST_PROJECT_PATH = path.join(workerRoot, 'test-project')
         ensureDir(userDataDir)
         ensureDir(TEST_PROJECT_PATH)
+        ensureGitRepo(TEST_PROJECT_PATH)
         ensureDir(workerArtifactsDir)
 
         const executablePath = require('electron') as unknown as string
