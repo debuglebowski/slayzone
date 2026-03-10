@@ -61,15 +61,19 @@ function TabContent({ title, isActive, isDragging, onClose, terminalState, isSub
     <div
       className={cn(
         'group relative flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0',
-        !projectColor && 'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
-        'border',
-        isActive ? 'border-neutral-300 dark:border-neutral-600' : 'border-transparent text-neutral-500 dark:text-neutral-400',
+        !projectColor && !isActive && 'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
+        !isActive && 'text-neutral-500 dark:text-neutral-400',
         isTemporary && 'border border-dashed border-neutral-400 dark:border-neutral-500',
         'max-w-[300px]',
         isDragging && 'shadow-lg'
       )}
       style={{
-        backgroundColor: projectColorBg(projectColor, isActive ? 'tabActive' : 'tab')
+        backgroundColor: isActive
+          ? (projectColor ? projectColor + '80' : 'var(--sidebar-accent)')
+          : projectColorBg(projectColor, 'tab'),
+        ...(isActive && {
+          boxShadow: '0 0 0 1px var(--sidebar-border), 0 1px 4px rgba(0,0,0,0.2)',
+        })
       }}
     >
       {projectColor && <div className="pointer-events-none absolute inset-0 rounded-md opacity-0 transition-opacity group-hover:opacity-100 bg-black/10 dark:bg-white/10" />}
