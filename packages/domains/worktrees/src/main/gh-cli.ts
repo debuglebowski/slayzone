@@ -15,6 +15,7 @@ async function resolveGhPath(): Promise<string | null> {
 
 /** Run gh with the user's shell environment so PATH is correct. */
 async function spawnGh(args: string[], opts: { cwd?: string; timeout?: number } = {}) {
+  if (!ghPath) await resolveGhPath()
   if (!ghPath) throw new Error('gh CLI not found')
 
   const shell = resolveUserShell()
