@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
-import { GitBranch, GitMerge, GitPullRequest, Plus, Link2, Loader2, AlertTriangle, ChevronDown, Trash2 } from 'lucide-react'
+import { GitBranch, GitMerge, GitPullRequest, FolderTree, Link2, Loader2, AlertTriangle, ChevronDown, Trash2 } from 'lucide-react'
 import {
   Button, Tooltip, TooltipContent, TooltipTrigger,
   Popover, PopoverContent, PopoverTrigger,
@@ -85,7 +85,7 @@ export function WorktreeButton({ data }: { data: ConsolidatedGeneralData }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="outline" size="sm" onClick={data.handleAddWorktree} disabled={data.creating} className="gap-2 rounded-r-none border-r-0">
-            <Plus className="h-3.5 w-3.5 shrink-0" />
+            <FolderTree className="h-3.5 w-3.5 shrink-0" />
             {data.creating ? 'Creating...' : 'Branch to worktree'}
           </Button>
         </TooltipTrigger>
