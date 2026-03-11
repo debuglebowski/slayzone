@@ -2,6 +2,9 @@ import { useState, useCallback } from 'react'
 import { ChevronDown, Loader2, Download, Upload } from 'lucide-react'
 import {
   Button,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -73,27 +76,37 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
   return (
     <>
       <div className="flex items-center gap-1.5 shrink-0">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handlePull}
-          disabled={pulling || pushing}
-          className="gap-1 h-7 px-2"
-        >
-          {pulling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-          Pull{behind > 0 && ` ↓${behind}`}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePull}
+              disabled={pulling || pushing}
+              className="gap-1 h-7 px-2"
+            >
+              {pulling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              Pull{behind > 0 && ` ↓${behind}`}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{behind > 0 ? `Pull ${behind} commit${behind !== 1 ? 's' : ''} from remote` : 'Pull from remote'}</TooltipContent>
+        </Tooltip>
         <div className="flex">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handlePush(false)}
-            disabled={pushing || pulling}
-            className="gap-1 h-7 px-2 rounded-r-none border-r-0"
-          >
-            {pushing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-            Push{ahead > 0 && ` ↑${ahead}`}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePush(false)}
+                disabled={pushing || pulling}
+                className="gap-1 h-7 px-2 rounded-r-none border-r-0"
+              >
+                {pushing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                Push{ahead > 0 && ` ↑${ahead}`}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{ahead > 0 ? `Push ${ahead} commit${ahead !== 1 ? 's' : ''} to remote` : 'Push to remote'}</TooltipContent>
+          </Tooltip>
           <Popover open={pushMenuOpen} onOpenChange={setPushMenuOpen}>
             <PopoverTrigger asChild>
               <Button

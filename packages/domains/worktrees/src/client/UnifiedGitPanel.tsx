@@ -14,7 +14,6 @@ import { WorktreesTab, type WorktreesTabHandle } from './WorktreesTab'
 import { PullRequestTab } from './PullRequestTab'
 import { ProjectPrTab } from './ProjectPrTab'
 import { BranchesTab } from './BranchesTab'
-import { BranchTab } from './BranchTab'
 
 export type GitTabId = 'general' | 'changes' | 'branches' | 'conflicts' | 'worktrees' | 'pr'
 const isMac = navigator.platform.startsWith('Mac')
@@ -105,7 +104,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
   }, [])
 
   const showWorktrees = !task
-  const showBranchTab = task ? !!task.worktree_path : true
+  const showBranchTab = !task // project-level only (task branch graph is now in General)
   const [hasGithubRemote, setHasGithubRemote] = useState(false)
 
   // Check if repo has a GitHub remote
@@ -215,7 +214,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
             active={activeTab === 'branches'}
             onClick={() => setActiveTab('branches')}
           >
-            {task ? 'Worktree' : 'Branches'}
+            Branches
           </TabButton>
         )}
         {showWorktrees && (
@@ -319,19 +318,10 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
           />
         </div>
         <div className={cn('absolute inset-0', activeTab !== 'branches' && 'hidden')}>
-          {task ? (
-            <BranchTab
-              task={task}
-              projectPath={projectPath}
-              visible={visible && activeTab === 'branches'}
-              pollIntervalMs={pollIntervalMs}
-            />
-          ) : (
-            <BranchesTab
-              projectPath={projectPath}
-              visible={visible && activeTab === 'branches'}
-            />
-          )}
+          <BranchesTab
+            projectPath={projectPath}
+            visible={visible && activeTab === 'branches'}
+          />
         </div>
         <div className={cn('absolute inset-0', activeTab !== 'worktrees' && 'hidden')}>
           <WorktreesTab
