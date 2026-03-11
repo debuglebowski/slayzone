@@ -10,7 +10,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 const h = await createTestHarness()
-registerWorktreeHandlers(h.ipcMain as never)
+registerWorktreeHandlers(h.ipcMain as never, h.db as never)
 
 const root = h.tmpDir()
 const repoPath = path.join(root, 'repo')
@@ -20,6 +20,8 @@ fs.mkdirSync(repoPath)
 function git(cmd: string, cwd = repoPath) {
   return execSync(cmd, { cwd, encoding: 'utf-8', env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@test.com' } }).trim()
 }
+
+// --- git:init ---
 
 // --- git:init ---
 

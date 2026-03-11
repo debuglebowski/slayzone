@@ -7,7 +7,7 @@ import { registerWorktreeHandlers } from '../../../worktrees/src/main/handlers'
 import { _mock } from '../../../../shared/test-utils/mock-merge-ai.js'
 
 const h = await createTestHarness()
-registerWorktreeHandlers(h.ipcMain as any)
+registerWorktreeHandlers(h.ipcMain as any, h.db as any)
 
 describe('git:analyzeConflict', () => {
   test('parses SUMMARY + ---RESOLUTION--- correctly', async () => {
