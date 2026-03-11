@@ -123,11 +123,11 @@ export function GeneralTabContent({
         <Section label="Branch">
           <div className="flex items-center gap-2 flex-wrap px-3 py-2.5 rounded-lg border bg-muted/30">
             <StatusChips data={data} onSwitchTab={onSwitchTab} />
-            <Button variant="ghost" size="sm" onClick={() => onSwitchTab('changes')} className="h-7 px-2 text-xs text-muted-foreground">
-              View diff
-            </Button>
             <div className="ml-auto flex items-center gap-1.5">
               {data.hasWorktree && data.parentBranch && <RebaseMergeButtons data={data} />}
+              <Button variant="outline" size="sm" onClick={() => onSwitchTab('changes')} className="gap-1 h-7 px-2">
+                View diff
+              </Button>
               {data.targetPath && (
                 <RemoteSection
                   remoteUrl={data.remoteUrl ?? undefined}
