@@ -7,6 +7,7 @@ build() {
 
   # Copy static assets into dist
   cp -r assets/* dist/ 2>/dev/null || true
+  cp src/sitemap.xml src/robots.txt dist/ 2>/dev/null || true
 
   for src in src/pages/*.html; do
     out="dist/$(basename "$src")"
