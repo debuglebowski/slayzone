@@ -57,7 +57,11 @@ import {
   getCommitDag,
   resolveChildBranches,
   copyIgnoredFiles,
-  getIgnoredFileTree
+  getIgnoredFileTree,
+  getResolvedCommitDag,
+  getResolvedForkGraph,
+  getResolvedUpstreamGraph,
+  getResolvedRecentCommits
 } from './git-worktree'
 import { runAiCommand } from './merge-ai'
 import {
@@ -456,6 +460,22 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
 
   ipcMain.handle('git:copyIgnoredFiles', (_, repoPath: string, worktreePath: string, paths: string[]) => {
     return copyIgnoredFiles(repoPath, worktreePath, 'custom', paths)
+  })
+
+  ipcMain.handle('git:getResolvedCommitDag', (_, path: string, limit: number, branches: string[] | undefined, baseBranch: string) => {
+    return getResolvedCommitDag(path, limit, branches, baseBranch)
+  })
+
+  ipcMain.handle('git:getResolvedForkGraph', (_, targetPath: string, repoPath: string, activeBranch: string, compareBranch: string, activeBranchLabel: string, compareBranchLabel: string) => {
+    return getResolvedForkGraph(targetPath, repoPath, activeBranch, compareBranch, activeBranchLabel, compareBranchLabel)
+  })
+
+  ipcMain.handle('git:getResolvedUpstreamGraph', (_, repoPath: string, branch: string) => {
+    return getResolvedUpstreamGraph(repoPath, branch)
+  })
+
+  ipcMain.handle('git:getResolvedRecentCommits', (_, path: string, count: number, branchName: string) => {
+    return getResolvedRecentCommits(path, count, branchName)
   })
 
   // GitHub CLI (gh) operations

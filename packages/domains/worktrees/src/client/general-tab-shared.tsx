@@ -222,11 +222,11 @@ export function PrButtons({ onCreatePr, onLinkPr }: { onCreatePr: () => void; on
 // --- Stale nudge ---
 
 export function StaleNudge({ data }: { data: ConsolidatedGeneralData }) {
-  if (data.incomingCommits.length < 5) return null
+  if (data.baseCount < 5) return null
   return (
     <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-yellow-500/30 bg-yellow-500/10 text-[11px] text-yellow-600 dark:text-yellow-400">
       <AlertTriangle className="h-3 w-3 shrink-0" />
-      <span>{data.incomingCommits.length} behind {data.parentBranch}</span>
+      <span>{data.baseCount} behind {data.parentBranch}</span>
     </div>
   )
 }
@@ -234,8 +234,8 @@ export function StaleNudge({ data }: { data: ConsolidatedGeneralData }) {
 // --- Rebase/Merge buttons (shown inline in status section for worktree tasks) ---
 
 export function RebaseMergeButtons({ data }: { data: ConsolidatedGeneralData }) {
-  const { actionLoading, handleConfirmedAction, parentBranch, incomingCommits } = data
-  const hasBehind = incomingCommits.length > 0
+  const { actionLoading, handleConfirmedAction, parentBranch, baseCount } = data
+  const hasBehind = baseCount > 0
 
   return (
     <>

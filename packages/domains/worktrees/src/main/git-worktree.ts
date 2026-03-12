@@ -3,7 +3,7 @@ import { platform } from 'os'
 import { existsSync, readFileSync, writeFileSync, chmodSync, constants as fsConstants, accessSync, cpSync, statSync, mkdirSync } from 'fs'
 import path from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
-import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, IgnoredFileNode } from '../shared/types'
+import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, IgnoredFileNode, ResolvedCommit, ResolvedGraph, ForkGraphResult } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
 import { execAsync, execGit, trimOutput } from './exec-async'
 
@@ -1052,7 +1052,7 @@ export async function getDiffStats(repoPath: string, ref: string): Promise<DiffS
 
 export async function getCommitDag(repoPath: string, limit: number, branches?: string[]): Promise<DagCommit[]> {
   try {
-    const args = ['log', '--topo-order', `-${limit}`, '--format=%H%n%h%n%P%n%s%n%an%n%ar%n%D']
+    const args = ['log', '--topo-order', `-${limit}`, '--format=%H%n%h%n%P%n%s%n%an%n%ar%n%D%x00']
     if (branches && branches.length > 0) {
       args.push(...branches)
     } else {
@@ -1062,17 +1062,18 @@ export async function getCommitDag(repoPath: string, limit: number, branches?: s
       args,
       { cwd: repoPath }
     )
-    const lines = output.trim().split('\n')
     const commits: DagCommit[] = []
-    for (let i = 0; i + 6 < lines.length; i += 7) {
+    for (const record of output.split('\x00')) {
+      const lines = record.trim().split('\n')
+      if (lines.length < 6 || !lines[0]) continue
       commits.push({
-        hash: lines[i],
-        shortHash: lines[i + 1],
-        parents: lines[i + 2] ? lines[i + 2].split(' ').filter(Boolean) : [],
-        message: lines[i + 3],
-        author: lines[i + 4],
-        relativeDate: lines[i + 5],
-        refs: lines[i + 6] ? lines[i + 6].split(', ').map(r => r.trim()).filter(Boolean) : []
+        hash: lines[0],
+        shortHash: lines[1],
+        parents: lines[2] ? lines[2].split(' ').filter(Boolean) : [],
+        message: lines[3],
+        author: lines[4],
+        relativeDate: lines[5],
+        refs: lines[6] ? lines[6].split(', ').map(r => r.trim()).filter(Boolean) : []
       })
     }
     return commits
@@ -1151,4 +1152,288 @@ export async function getWorktreeMetadata(worktreePath: string): Promise<Worktre
       .catch(() => null)
   ])
   return { path: worktreePath, diskSize: diskResult, createdAt }
+}
+
+// ─── Commit graph normalization ─────────────────────────────────
+
+function parseRef(raw: string): { type: 'branch' | 'remote' | 'tag' | 'head'; name: string; isHead: boolean } {
+  const trimmed = raw.trim()
+  if (trimmed === 'HEAD') return { type: 'head', name: 'HEAD', isHead: true }
+  if (trimmed.startsWith('HEAD -> ')) {
+    return { type: 'branch', name: trimmed.slice(8), isHead: true }
+  }
+  if (trimmed.startsWith('tag: ')) {
+    return { type: 'tag', name: trimmed.slice(5), isHead: false }
+  }
+  if (trimmed.includes('/')) {
+    return { type: 'remote', name: trimmed, isHead: false }
+  }
+  return { type: 'branch', name: trimmed, isHead: false }
+}
+
+/**
+ * Resolve raw DagCommit[] into a ResolvedGraph with all git-ref semantics pre-processed.
+ * Pure function — no git calls.
+ */
+export function resolveCommitGraph(commits: DagCommit[], baseBranch: string): ResolvedGraph {
+  if (commits.length === 0) return { commits: [], baseBranch, branches: [] }
+
+  // Collect all known local branch names (from refs)
+  const localBranchNames = new Set<string>()
+  for (const c of commits) {
+    for (const raw of c.refs) {
+      const parsed = parseRef(raw)
+      if (parsed.type === 'branch') localBranchNames.add(parsed.name)
+    }
+  }
+
+  // Parse refs for each commit
+  const commitParsedRefs = new Map<string, { branchRefs: string[]; tags: string[]; isHead: boolean }>()
+  for (const c of commits) {
+    const branchRefs: string[] = []
+    const tags: string[] = []
+    let isHead = false
+    for (const raw of c.refs) {
+      const parsed = parseRef(raw)
+      if (parsed.isHead) isHead = true
+      if (parsed.type === 'branch') {
+        branchRefs.push(parsed.name)
+      } else if (parsed.type === 'remote') {
+        // Collapse origin/X → X if local X exists, otherwise show collapsed name
+        const parts = parsed.name.split('/')
+        const localName = parts.slice(1).join('/')
+        if (localName === 'HEAD') {
+          // Skip origin/HEAD — it's not a real branch
+        } else if (!localBranchNames.has(localName)) {
+          branchRefs.push(localName)
+        }
+        // If local exists, skip — the local ref already covers it
+      } else if (parsed.type === 'tag') {
+        tags.push(parsed.name)
+      }
+    }
+    commitParsedRefs.set(c.hash, { branchRefs, tags, isHead })
+  }
+
+  // --- 3-pass branch ownership ---
+  const commitBranchName = new Map<string, string>()
+
+  // Pass 1: map branch-tip commits to their branch name
+  for (const c of commits) {
+    const parsed = commitParsedRefs.get(c.hash)!
+    if (parsed.branchRefs.length > 0) {
+      commitBranchName.set(c.hash, parsed.branchRefs[0])
+    }
+  }
+
+  // Pass 2: for merge commits, assign synthetic branch names to second+ parents
+  const hashToCommit = new Map<string, DagCommit>()
+  for (const c of commits) hashToCommit.set(c.hash, c)
+  for (const c of commits) {
+    if (c.parents.length < 2) continue
+    for (let p = 1; p < c.parents.length; p++) {
+      const parentHash = c.parents[p]
+      if (commitBranchName.has(parentHash)) continue
+      const mergeMatch = c.message.match(/from\s+\S+\/(.+)$/) ?? c.message.match(/Merge branch '([^']+)'/)
+      const syntheticName = mergeMatch ? mergeMatch[1] : `merged-${c.hash.slice(0, 7)}-p${p}`
+      commitBranchName.set(parentHash, syntheticName)
+    }
+  }
+
+  // Pass 3: propagate branch name down through first-parent chain
+  for (const c of commits) {
+    if (!commitBranchName.has(c.hash)) continue
+    const name = commitBranchName.get(c.hash)!
+    let current = c
+    while (current.parents.length > 0) {
+      const parent = hashToCommit.get(current.parents[0])
+      if (!parent) break
+      if (commitBranchName.has(parent.hash) && commitBranchName.get(parent.hash) !== name) break
+      commitBranchName.set(parent.hash, name)
+      current = parent
+    }
+  }
+
+  // Collect all unique branch names in priority order (base first)
+  const branchOrder: string[] = []
+  const branchSeen = new Set<string>()
+  if (baseBranch) { branchOrder.push(baseBranch); branchSeen.add(baseBranch) }
+  for (const c of commits) {
+    const name = commitBranchName.get(c.hash)
+    if (name && !branchSeen.has(name)) {
+      branchOrder.push(name)
+      branchSeen.add(name)
+    }
+  }
+
+  // Build resolved commits
+  const resolved: ResolvedCommit[] = commits.map(c => {
+    const parsed = commitParsedRefs.get(c.hash)!
+    return {
+      hash: c.hash,
+      shortHash: c.shortHash,
+      message: c.message,
+      author: c.author,
+      relativeDate: c.relativeDate,
+      parents: c.parents,
+      branch: commitBranchName.get(c.hash) ?? baseBranch,
+      branchRefs: parsed.branchRefs,
+      tags: parsed.tags,
+      isBranchTip: parsed.branchRefs.length > 0,
+      isHead: parsed.isHead
+    }
+  })
+
+  return { commits: resolved, baseBranch, branches: branchOrder }
+}
+
+/**
+ * Build a ResolvedGraph from pre-separated fork data.
+ * Fork graphs use simple sequential layout — no parent hashes needed.
+ */
+export function resolveForkGraph(opts: {
+  baseBranchCommits: CommitInfo[]
+  baseBranchName: string
+  featureBranchCommits: CommitInfo[]
+  featureBranchName: string
+  forkPoint: string
+  preForkCommits: CommitInfo[]
+}): ResolvedGraph {
+  const resolved: ResolvedCommit[] = []
+  const baseBranch = opts.baseBranchName
+  const featureBranch = opts.featureBranchName
+
+  // Base branch commits
+  for (let i = 0; i < opts.baseBranchCommits.length; i++) {
+    const c = opts.baseBranchCommits[i]
+    resolved.push({
+      ...c,
+      parents: [],
+      branch: baseBranch,
+      branchRefs: i === 0 ? [baseBranch] : [],
+      tags: [],
+      isBranchTip: i === 0,
+      isHead: false
+    })
+  }
+
+  // Feature branch commits
+  for (let i = 0; i < opts.featureBranchCommits.length; i++) {
+    const c = opts.featureBranchCommits[i]
+    resolved.push({
+      ...c,
+      parents: [],
+      branch: featureBranch,
+      branchRefs: i === 0 ? [featureBranch] : [],
+      tags: [],
+      isBranchTip: i === 0,
+      isHead: false
+    })
+  }
+
+  // Fork point
+  resolved.push({
+    hash: opts.forkPoint,
+    shortHash: opts.forkPoint.slice(0, 7),
+    message: 'fork point',
+    author: '',
+    relativeDate: '',
+    parents: [],
+    branch: baseBranch,
+    branchRefs: [],
+    tags: [],
+    isBranchTip: false,
+    isHead: false
+  })
+
+  // Pre-fork context commits
+  for (const c of opts.preForkCommits) {
+    resolved.push({
+      ...c,
+      parents: [],
+      branch: baseBranch,
+      branchRefs: [],
+      tags: [],
+      isBranchTip: false,
+      isHead: false
+    })
+  }
+
+  const branches = opts.featureBranchCommits.length > 0
+    ? [baseBranch, featureBranch]
+    : [baseBranch]
+
+  return { commits: resolved, baseBranch, branches }
+}
+
+/** IPC-ready: fetch DAG + resolve in one call */
+export async function getResolvedCommitDag(
+  repoPath: string, limit: number, branches: string[] | undefined, baseBranch: string
+): Promise<ResolvedGraph> {
+  const raw = await getCommitDag(repoPath, limit, branches)
+  return resolveCommitGraph(raw, baseBranch)
+}
+
+/** IPC-ready: fetch fork comparison data + resolve in one call */
+export async function getResolvedForkGraph(
+  targetPath: string,
+  repoPath: string,
+  activeBranch: string,
+  compareBranch: string,
+  activeBranchLabel: string,
+  compareBranchLabel: string
+): Promise<ForkGraphResult | null> {
+  const mergeBase = await getMergeBase(repoPath, activeBranch, compareBranch)
+  if (!mergeBase) return null
+
+  const [baseCommits, featureCommits, preFork] = await Promise.all([
+    getCommitsSince(repoPath, mergeBase, compareBranch),
+    getCommitsSince(targetPath, mergeBase, activeBranch),
+    getCommitsBeforeRef(repoPath, mergeBase, 3)
+  ])
+
+  const graph = resolveForkGraph({
+    baseBranchCommits: baseCommits,
+    baseBranchName: compareBranchLabel,
+    featureBranchCommits: featureCommits,
+    featureBranchName: activeBranchLabel,
+    forkPoint: mergeBase,
+    preForkCommits: preFork
+  })
+
+  return {
+    graph,
+    forkPoint: mergeBase,
+    featureCount: featureCommits.length,
+    baseCount: baseCommits.length
+  }
+}
+
+/** IPC-ready: fetch upstream fork graph — resolves @{upstream} server-side */
+export async function getResolvedUpstreamGraph(
+  repoPath: string,
+  branch: string
+): Promise<ForkGraphResult | null> {
+  const upstreamRef = `${branch}@{upstream}`
+  return getResolvedForkGraph(
+    repoPath, repoPath, branch, upstreamRef,
+    branch, `origin/${branch}`
+  )
+}
+
+/** IPC-ready: build a simple single-branch ResolvedGraph from recent commits */
+export async function getResolvedRecentCommits(
+  repoPath: string, count: number, branchName: string
+): Promise<ResolvedGraph> {
+  const commits = await getRecentCommits(repoPath, count)
+  const resolved: ResolvedCommit[] = commits.map((c, i) => ({
+    ...c,
+    parents: [],
+    branch: branchName,
+    branchRefs: i === 0 ? [branchName] : [],
+    tags: [],
+    isBranchTip: i === 0,
+    isHead: i === 0
+  }))
+  return { commits: resolved, baseBranch: branchName, branches: [branchName] }
 }

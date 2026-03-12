@@ -1,63 +1,17 @@
 import { cn, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Copy, Check } from 'lucide-react'
 import { useState, useRef, useCallback, useMemo } from 'react'
-import type { CommitInfo, DagCommit } from '../shared/types'
+import type { ResolvedCommit, ResolvedGraph } from '../shared/types'
 
-// --- Public interfaces ---
+// --- Public interface ---
 
-export interface GraphNode {
-  commit: CommitInfo
-  column: number
-  type: 'commit' | 'branch-tip' | 'fork-point'
-  branchName?: string
-  branchLabel?: string
-}
-
-type CommitGraphProps =
-  | { mode: 'fork'; nodes: GraphNode[]; maxColumns: number; className?: string }
-  | { mode: 'dag'; commits: DagCommit[]; filterQuery?: string; tipsOnly?: boolean; className?: string }
-
-// --- Fork graph builder ---
-
-export function buildForkGraphNodes(opts: {
-  column0Commits: CommitInfo[]
-  column0Label: string
-  column1Commits: CommitInfo[]
-  column1Label: string
-  forkPoint: string
-  preForkCommits: CommitInfo[]
-}): { nodes: GraphNode[]; columns: number } {
-  const nodes: GraphNode[] = []
-  const fp = opts.forkPoint
-
-  // Column 0
-  for (let i = 0; i < opts.column0Commits.length; i++) {
-    nodes.push({
-      commit: opts.column0Commits[i], column: 0,
-      type: i === 0 ? 'branch-tip' : 'commit',
-      branchName: opts.column0Label, branchLabel: i === 0 ? opts.column0Label : undefined
-    })
-  }
-
-  // Column 1
-  for (let i = 0; i < opts.column1Commits.length; i++) {
-    nodes.push({
-      commit: opts.column1Commits[i], column: 1,
-      type: i === 0 ? 'branch-tip' : 'commit',
-      branchName: opts.column1Label, branchLabel: i === 0 ? opts.column1Label : undefined
-    })
-  }
-
-  // Fork point + pre-fork context
-  nodes.push({
-    commit: { hash: fp, shortHash: fp.slice(0, 7), message: 'fork point', author: '', relativeDate: '' },
-    column: 0, type: 'fork-point'
-  })
-  for (const c of opts.preForkCommits) {
-    nodes.push({ commit: c, column: 0, type: 'commit' })
-  }
-
-  return { nodes, columns: opts.column1Commits.length > 0 ? 2 : 1 }
+interface CommitGraphProps {
+  graph: ResolvedGraph
+  filterQuery?: string
+  tipsOnly?: boolean
+  /** Max rows to render (layout uses all commits for accurate topology) */
+  renderLimit?: number
+  className?: string
 }
 
 // --- Constants ---
@@ -110,10 +64,80 @@ function rowY(row: number): number {
   return row * ROW_HEIGHT + ROW_HEIGHT / 2
 }
 
+// --- Simple fork layout (≤2 branches) ---
+
+function computeTipsLayout(commits: ResolvedCommit[], baseBranch: string): DagLayout {
+  if (commits.length === 0) return { nodes: [], edges: [], maxColumn: 0 }
+
+  // Feature branch → column 0 (left), base branch → column 1 (right)
+  const branchToCol = new Map<string, number>()
+  let nextCol = 0
+
+  const nodes: LayoutNode[] = []
+  const edges: LayoutEdge[] = []
+  const lastRowInCol = new Map<number, number>()
+
+  for (let row = 0; row < commits.length; row++) {
+    const commit = commits[row]
+    let col = branchToCol.get(commit.branch)
+    if (col === undefined) {
+      if (commit.branch === baseBranch) {
+        // Base always gets the highest column (rightmost)
+        col = branchToCol.size > 0 ? Math.max(...branchToCol.values()) + 1 : 1
+      } else {
+        col = nextCol++
+        // If we assigned col 0, bump nextCol past any future base col
+      }
+      branchToCol.set(commit.branch, col)
+    }
+
+    const colorIndex = commit.branch === baseBranch ? BASE_BRANCH_COLOR_INDEX : hashBranchColor(commit.branch)
+
+    nodes.push({
+      commit, column: col, row,
+      isMerge: false,
+      isBranchTip: commit.isBranchTip,
+      colorIndex
+    })
+
+    // Straight edge from previous commit in same column (may not be the previous row)
+    const prevRow = lastRowInCol.get(col)
+    if (prevRow !== undefined) {
+      edges.push({
+        fromRow: prevRow, fromCol: col, toRow: row, toCol: col,
+        color: getColor(colorIndex), type: 'straight'
+      })
+    }
+    lastRowInCol.set(col, row)
+  }
+
+  // Cross-column edge at fork point (where base and feature meet)
+  const cols = new Set(nodes.map(n => n.column))
+  if (cols.size === 2) {
+    const lastByCol = new Map<number, LayoutNode>()
+    for (const n of nodes) lastByCol.set(n.column, n)
+    const entries = [...lastByCol.entries()]
+    if (entries.length === 2) {
+      const [, a] = entries[0]
+      const [, b] = entries[1]
+      const bottom = a.row > b.row ? a : b
+      const other = a.row > b.row ? b : a
+      edges.push({
+        fromRow: other.row, fromCol: other.column,
+        toRow: bottom.row, toCol: bottom.column,
+        color: getColor(other.colorIndex), type: 'curve'
+      })
+    }
+  }
+
+  const maxColumn = Math.max(0, ...nodes.map(n => n.column))
+  return { nodes, edges, maxColumn }
+}
+
 // --- Full DAG topology algorithm ---
 
 interface LayoutNode {
-  commit: DagCommit
+  commit: ResolvedCommit
   column: number
   row: number
   isMerge: boolean
@@ -137,7 +161,7 @@ interface DagLayout {
   maxColumn: number
 }
 
-function computeDagLayout(commits: DagCommit[]): DagLayout {
+function computeDagLayout(commits: ResolvedCommit[], baseBranch: string): DagLayout {
   if (commits.length === 0) return { nodes: [], edges: [], maxColumn: 0 }
 
   const hashToRow = new Map<string, number>()
@@ -146,63 +170,14 @@ function computeDagLayout(commits: DagCommit[]): DagLayout {
   const edges: LayoutEdge[] = []
 
   const activeColumns: (string | null)[] = []
-  const columnColorIndex: number[] = []  // current colorIndex per column
+  const columnColorIndex: number[] = []
+  const columnBranch: (string | null)[] = []  // track branch per column
   let nextFallbackColor = 0
 
-  // Pre-compute: map each commit hash → branch name by finding the nearest branch tip
-  // In topo order, tips come first, so we can walk forward to find which branch owns each commit
-  const commitBranchName = new Map<string, string>()
-  {
-    // First pass: map branch tip commits to their branch name
-    for (const c of commits) {
-      const branchRef = c.refs.find(r => !r.startsWith('tag:') && r !== 'HEAD')
-      if (branchRef) {
-        commitBranchName.set(c.hash, branchRef.replace(/^HEAD -> /, ''))
-      }
-    }
-    // Second pass: for merge commits, assign synthetic branch names to second+ parents
-    // These represent branches that were merged and had their refs deleted
-    const hashToCommit = new Map<string, DagCommit>()
-    for (const c of commits) hashToCommit.set(c.hash, c)
-    for (const c of commits) {
-      if (c.parents.length < 2) continue
-      for (let p = 1; p < c.parents.length; p++) {
-        const parentHash = c.parents[p]
-        if (commitBranchName.has(parentHash)) continue
-        // Extract branch name from merge message (e.g. "Merge pull request #2 from user/branch-name")
-        const mergeMatch = c.message.match(/from\s+\S+\/(.+)$/) ?? c.message.match(/Merge branch '([^']+)'/)
-        const syntheticName = mergeMatch ? mergeMatch[1] : `merged-${c.hash.slice(0, 7)}-p${p}`
-        commitBranchName.set(parentHash, syntheticName)
-      }
-    }
-    // Third pass: propagate branch name down through first-parent chain
-    for (const c of commits) {
-      if (!commitBranchName.has(c.hash)) continue
-      const name = commitBranchName.get(c.hash)!
-      let current = c
-      while (current.parents.length > 0) {
-        const parent = hashToCommit.get(current.parents[0])
-        if (!parent) break
-        // Stop at commits owned by a different branch, but walk through unowned commits (tag-only)
-        if (commitBranchName.has(parent.hash) && commitBranchName.get(parent.hash) !== name) break
-        commitBranchName.set(parent.hash, name)
-        current = parent
-      }
-    }
-  }
-
-  // The first branch tip in topo order is the base branch — give it white
-  const baseBranchName = commits.find(c => {
-    const ref = c.refs.find(r => !r.startsWith('tag:') && r !== 'HEAD')
-    return ref !== undefined
-  })?.refs.find(r => !r.startsWith('tag:') && r !== 'HEAD')?.replace(/^HEAD -> /, '')
-
-  function getCommitColorIndex(hash: string): number {
-    const name = commitBranchName.get(hash)
-    if (name) {
-      if (name === baseBranchName) return BASE_BRANCH_COLOR_INDEX
-      return hashBranchColor(name)
-    }
+  // Branch ownership is already resolved — just read commit.branch
+  function getCommitColorIndex(commit: ResolvedCommit): number {
+    if (commit.branch === baseBranch) return BASE_BRANCH_COLOR_INDEX
+    if (commit.branch) return hashBranchColor(commit.branch)
     return nextFallbackColor++
   }
 
@@ -212,6 +187,7 @@ function computeDagLayout(commits: DagCommit[]): DagLayout {
     }
     activeColumns.push(null)
     columnColorIndex.push(0)
+    columnBranch.push(null)
     return activeColumns.length - 1
   }
 
@@ -224,10 +200,6 @@ function computeDagLayout(commits: DagCommit[]): DagLayout {
 
   const hashToColorIndex = new Map<string, number>()
 
-  function isBaseBranch(hash: string): boolean {
-    return baseBranchName !== undefined && commitBranchName.get(hash) === baseBranchName
-  }
-
   for (let row = 0; row < commits.length; row++) {
     const commit = commits[row]
     hashToRow.set(commit.hash, row)
@@ -236,9 +208,8 @@ function computeDagLayout(commits: DagCommit[]): DagLayout {
 
     if (col !== null) {
       // Base branch commits should always stay in column 0
-      const isBase = isBaseBranch(commit.hash)
+      const isBase = commit.branch === baseBranch
       if (isBase && col !== 0) {
-        // Swap: move whatever is in col 0 to the column we found, take col 0
         if (activeColumns[0] === commit.hash) {
           // Column 0 also reserved for this commit — just pick column 0
         } else if (activeColumns[0] !== null) {
@@ -260,14 +231,32 @@ function computeDagLayout(commits: DagCommit[]): DagLayout {
       col = findFreeColumn()
     }
 
-    const ci = getCommitColorIndex(commit.hash)
+    // Branch-aware split: if this column was serving a different branch, move to a new column
+    const prevBranch = columnBranch[col]
+    if (prevBranch && commit.branch !== prevBranch && commit.branch !== baseBranch) {
+      const prevRow = nodes.findLast(n => n.column === col)?.row
+      const newCol = findFreeColumn()   // find before releasing — otherwise gets same column
+      activeColumns[col] = null
+      activeColumns[newCol] = commit.hash
+      if (prevRow !== undefined) {
+        const ci = getCommitColorIndex(commit)
+        edges.push({
+          fromRow: prevRow, fromCol: col, toRow: row, toCol: newCol,
+          color: getColor(ci), type: 'curve'
+        })
+      }
+      col = newCol
+    }
+
+    const ci = getCommitColorIndex(commit)
     columnColorIndex[col] = ci
+    columnBranch[col] = commit.branch
 
     hashToCol.set(commit.hash, col)
     hashToColorIndex.set(commit.hash, ci)
 
     const isMerge = commit.parents.length >= 2
-    const isBranchTip = commit.refs.length > 0
+    const isBranchTip = commit.isBranchTip
 
     nodes.push({ commit, column: col, row, isMerge, isBranchTip, colorIndex: ci })
 
@@ -291,7 +280,9 @@ function computeDagLayout(commits: DagCommit[]): DagLayout {
         const pExisting = findColumnReservedFor(parentHash)
         if (pExisting === null) {
           const pCol = findFreeColumn()
-          const pci = getCommitColorIndex(parentHash)
+          // Look up the parent's color if it exists in the list
+          const parentCommit = commits.find(c => c.hash === parentHash)
+          const pci = parentCommit ? getCommitColorIndex(parentCommit) : (nextFallbackColor++)
           columnColorIndex[pCol] = pci
           activeColumns[pCol] = parentHash
           edges.push({
@@ -360,7 +351,7 @@ interface CollapsedLayout {
   maxColumn: number
 }
 
-function computeCollapsedLayout(commits: DagCommit[], fullLayout: DagLayout): CollapsedLayout {
+function computeCollapsedLayout(commits: ResolvedCommit[], fullLayout: DagLayout): CollapsedLayout {
   if (commits.length === 0) return { nodes: [], edges: [], maxColumn: 0 }
 
   // Build children map: parent hash → child hashes
@@ -399,7 +390,6 @@ function computeCollapsedLayout(commits: DagCommit[], fullLayout: DagLayout): Co
   let nextRow = 0
 
   const emittedForks = new Set<string>()
-  // Map EVERY commit hash → collapsed row (not just interesting ones)
   const hashToCollapsedRow = new Map<string, number>()
 
   function mapHashes(hashes: string[], row: number) {
@@ -416,19 +406,19 @@ function computeCollapsedLayout(commits: DagCommit[], fullLayout: DagLayout): Co
     while (segmentStart < nodes.length) {
       const node = nodes[segmentStart]
       const color = getColor(node.colorIndex)
-      const hasRefs = node.commit.refs.length > 0
+      const hasRefs = node.commit.branchRefs.length > 0
       const isFork = isForkPoint(node.commit.hash)
 
       if (hasRefs) {
         const branchRow = nextRow++
         collapsedNodes.push({
           kind: 'branch',
-          label: node.commit.refs.join(', '),
+          label: node.commit.branchRefs.join(', '),
           column: col,
           row: branchRow,
           color,
           id: `branch-${node.commit.hash}`,
-          refs: node.commit.refs
+          refs: node.commit.branchRefs
         })
         hashToCollapsedRow.set(node.commit.hash, branchRow)
         segmentStart++
@@ -436,7 +426,7 @@ function computeCollapsedLayout(commits: DagCommit[], fullLayout: DagLayout): Co
         const groupHashes: string[] = []
         while (segmentStart < nodes.length) {
           const n = nodes[segmentStart]
-          if (n.commit.refs.length > 0) break
+          if (n.commit.branchRefs.length > 0) break
           if (isForkPoint(n.commit.hash)) {
             groupHashes.push(n.commit.hash)
             emittedForks.add(n.commit.hash)
@@ -471,7 +461,7 @@ function computeCollapsedLayout(commits: DagCommit[], fullLayout: DagLayout): Co
 
         while (segmentStart < nodes.length) {
           const n = nodes[segmentStart]
-          if (n.commit.refs.length > 0 || isForkPoint(n.commit.hash)) break
+          if (n.commit.branchRefs.length > 0 || isForkPoint(n.commit.hash)) break
           groupHashes.push(n.commit.hash)
           segmentStart++
         }
@@ -493,7 +483,7 @@ function computeCollapsedLayout(commits: DagCommit[], fullLayout: DagLayout): Co
 
         while (segmentStart < nodes.length) {
           const n = nodes[segmentStart]
-          if (n.commit.refs.length > 0 || isForkPoint(n.commit.hash)) break
+          if (n.commit.branchRefs.length > 0 || isForkPoint(n.commit.hash)) break
           groupHashes.push(n.commit.hash)
           segmentStart++
         }
@@ -531,9 +521,7 @@ function computeCollapsedLayout(commits: DagCommit[], fullLayout: DagLayout): Co
     }
   }
 
-  // Cross-column fork edges: a commit whose FIRST parent is in a different column
-  // marks a fork point (where a branch diverged). Second+ parents are merges, not forks.
-  // Deduplicate since multiple commits in the same collapsed group may share the same edge.
+  // Cross-column fork edges
   const addedForkEdges = new Set<string>()
   for (const node of fullLayout.nodes) {
     if (node.commit.parents.length === 0) continue
@@ -556,52 +544,6 @@ function computeCollapsedLayout(commits: DagCommit[], fullLayout: DagLayout): Co
   }
 
   return { nodes: collapsedNodes, edges: collapsedEdges, maxColumn: fullLayout.maxColumn }
-}
-
-// --- Fork mode layout ---
-
-interface TipsLayout {
-  nodes: Array<{ node: GraphNode; row: number }>
-  edges: LayoutEdge[]
-  maxColumn: number
-}
-
-function computeTipsLayout(nodes: GraphNode[], maxColumns: number): TipsLayout {
-  const layoutNodes = nodes.map((node, i) => ({ node, row: i }))
-
-  const columnRanges: Record<number, { first: number; last: number }> = {}
-  for (let i = 0; i < nodes.length; i++) {
-    const col = nodes[i].column
-    if (!(col in columnRanges)) {
-      columnRanges[col] = { first: i, last: i }
-    } else {
-      columnRanges[col].last = i
-    }
-  }
-
-  const edges: LayoutEdge[] = []
-  for (let col = 0; col < maxColumns; col++) {
-    const range = columnRanges[col]
-    if (!range) continue
-    edges.push({
-      fromRow: range.first, fromCol: col, toRow: range.last, toCol: col,
-      color: getColor(col), type: 'straight'
-    })
-  }
-
-  for (const { node, row } of layoutNodes) {
-    if (node.type === 'fork-point' && maxColumns > 1) {
-      // Connect fork point to the last node in the branch column (col 1)
-      const branchRange = columnRanges[maxColumns - 1]
-      const targetRow = branchRange ? branchRange.last : row
-      edges.push({
-        fromRow: row, fromCol: node.column, toRow: targetRow, toCol: maxColumns - 1,
-        color: getColor(1), type: 'curve'
-      })
-    }
-  }
-
-  return { nodes: layoutNodes, edges, maxColumn: maxColumns - 1 }
 }
 
 // --- Copy hash hook ---
@@ -769,75 +711,72 @@ function CommitGroupRow({ count, color, gutterWidth }: {
 
 // --- Main component ---
 
-export function CommitGraph(props: CommitGraphProps) {
+export function CommitGraph({ graph, filterQuery, tipsOnly, renderLimit, className }: CommitGraphProps) {
   const { copiedHash, handleCopy } = useCopyHash()
 
-  if (props.mode === 'dag') {
-    return <DagGraph commits={props.commits} filterQuery={props.filterQuery} tipsOnly={props.tipsOnly}
-      className={props.className} copiedHash={copiedHash} onCopy={handleCopy} />
-  }
-  return <TipsGraph nodes={props.nodes} maxColumns={props.maxColumns}
-    className={props.className} copiedHash={copiedHash} onCopy={handleCopy} />
-}
-
-// --- DAG mode ---
-
-function DagGraph({ commits, filterQuery, tipsOnly, className, copiedHash, onCopy }: {
-  commits: DagCommit[]; filterQuery?: string; tipsOnly?: boolean
-  className?: string; copiedHash: string | null; onCopy: (hash: string) => void
-}) {
-  const fullLayout = useMemo(() => computeDagLayout(commits), [commits])
+  const hasTopology = useMemo(() => graph.commits.some(c => c.parents.length > 0), [graph])
+  const fullLayout = useMemo(
+    () => hasTopology
+      ? computeDagLayout(graph.commits, graph.baseBranch)
+      : computeTipsLayout(graph.commits, graph.baseBranch),
+    [graph, hasTopology]
+  )
   const collapsed = useMemo(
-    () => tipsOnly ? computeCollapsedLayout(commits, fullLayout) : null,
-    [commits, fullLayout, tipsOnly]
+    () => tipsOnly ? computeCollapsedLayout(graph.commits, fullLayout) : null,
+    [graph, fullLayout, tipsOnly]
   )
 
-  // Map colorIndex → branch name from branch refs (skip tags, HEAD pointer)
+  // Map colorIndex → branch name for tooltip overlays
   const colorBranch = useMemo(() => {
     const map = new Map<number, string>()
     for (const node of fullLayout.nodes) {
       if (map.has(node.colorIndex)) continue
-      const branches = node.commit.refs
-        .filter(r => !r.startsWith('tag:') && r !== 'HEAD')
-        .map(r => r.replace(/^HEAD -> /, ''))
-      if (branches.length > 0) {
-        map.set(node.colorIndex, branches.join(', '))
+      if (node.commit.branch) {
+        map.set(node.colorIndex, node.commit.branch)
       }
     }
     return map
   }, [fullLayout])
 
-  // Filter dimming — must be before any early return (hooks rule)
+  // Filter dimming
   const matchSet = useMemo(() => {
     if (!filterQuery) return null
     const q = filterQuery.toLowerCase()
     const set = new Set<string>()
-    for (const c of commits) {
+    for (const c of graph.commits) {
       if (c.message.toLowerCase().includes(q) || c.author.toLowerCase().includes(q) ||
-        c.refs.some(r => r.toLowerCase().includes(q))) {
+        c.branchRefs.some(r => r.toLowerCase().includes(q)) ||
+        c.tags.some(t => t.toLowerCase().includes(q))) {
         set.add(c.hash)
       }
     }
     return set
-  }, [commits, filterQuery])
+  }, [graph.commits, filterQuery])
 
   if (collapsed) {
     return <CollapsedGraph layout={collapsed} className={className} />
   }
 
+  // Layout uses all commits for accurate topology; rendering is capped
+  const maxRow = renderLimit != null ? renderLimit : fullLayout.nodes.length
+  const visibleNodes = fullLayout.nodes.filter(n => n.row < maxRow)
+  const visibleEdges = fullLayout.edges.filter(e => e.toRow !== -1 && e.fromRow < maxRow)
+
   const gutterWidth = (fullLayout.maxColumn + 1) * COLUMN_WIDTH + GUTTER_PAD
-  const totalHeight = fullLayout.nodes.length * ROW_HEIGHT
+  const totalHeight = visibleNodes.length * ROW_HEIGHT
 
   return (
     <div className={cn('relative', className)}>
       <svg className="absolute top-0 left-0 pointer-events-none" width={gutterWidth} height={totalHeight} style={{ zIndex: 0 }}>
-        {fullLayout.edges.map((edge, i) => {
-          if (edge.toRow === -1) return null
-          return edge.type === 'straight'
-            ? <SvgStraightEdge key={`e-${i}`} edge={edge} />
-            : <SvgCurveEdge key={`e-${i}`} edge={edge} />
+        {visibleEdges.map((edge, i) => {
+          const clampedEdge = edge.toRow >= maxRow
+            ? { ...edge, toRow: maxRow - 1 }
+            : edge
+          return clampedEdge.type === 'straight'
+            ? <SvgStraightEdge key={`e-${i}`} edge={clampedEdge} />
+            : <SvgCurveEdge key={`e-${i}`} edge={clampedEdge} />
         })}
-        {fullLayout.nodes.map((node) => {
+        {visibleNodes.map((node) => {
           const cx = colX(node.column), cy = rowY(node.row)
           const color = getColor(node.colorIndex)
           const dotType = node.isBranchTip ? 'tip' : node.isMerge ? 'merge' : 'regular'
@@ -845,19 +784,20 @@ function DagGraph({ commits, filterQuery, tipsOnly, className, copiedHash, onCop
           return <SvgDot key={node.commit.hash} cx={cx} cy={cy} color={color} type={dotType} dimmed={dimmed} />
         })}
       </svg>
-      <DotOverlays items={fullLayout.nodes.map(node => ({
+      <DotOverlays items={visibleNodes.map(node => ({
         key: node.commit.hash, row: node.row, column: node.column,
         color: getColor(node.colorIndex), branchName: colorBranch.get(node.colorIndex)
       }))} />
-      {fullLayout.nodes.map((node) => {
+      {visibleNodes.map((node) => {
         const dimmed = matchSet !== null && !matchSet.has(node.commit.hash)
+        const refs = [...node.commit.branchRefs, ...node.commit.tags.map(t => `🏷 ${t}`)]
         return (
           <CommitRow key={node.commit.hash}
             shortHash={node.commit.shortHash} message={node.commit.message}
             author={node.commit.author} relativeDate={node.commit.relativeDate}
-            refs={node.commit.refs.length > 0 ? node.commit.refs : undefined}
+            refs={refs.length > 0 ? refs : undefined}
             color={getColor(node.colorIndex)} gutterWidth={gutterWidth}
-            copiedHash={copiedHash} onCopy={onCopy} dimmed={dimmed} />
+            copiedHash={copiedHash} onCopy={handleCopy} dimmed={dimmed} />
         )
       })}
       {/* Fade-out at bottom */}
@@ -896,47 +836,6 @@ function CollapsedGraph({ layout, className }: { layout: CollapsedLayout; classN
         }
         return <CommitGroupRow key={node.id} count={node.commitCount!} color={node.color} gutterWidth={gutterWidth} />
       })}
-    </div>
-  )
-}
-
-// --- Fork mode ---
-
-function TipsGraph({ nodes, maxColumns, className, copiedHash, onCopy }: {
-  nodes: GraphNode[]; maxColumns: number; className?: string
-  copiedHash: string | null; onCopy: (hash: string) => void
-}) {
-  const layout = useMemo(() => computeTipsLayout(nodes, maxColumns), [nodes, maxColumns])
-  const gutterWidth = (layout.maxColumn + 1) * COLUMN_WIDTH + GUTTER_PAD
-  const totalHeight = nodes.length * ROW_HEIGHT
-
-  return (
-    <div className={cn('relative', className)}>
-      <svg className="absolute top-0 left-0 pointer-events-none" width={gutterWidth} height={totalHeight} style={{ zIndex: 0 }}>
-        {layout.edges.map((edge, i) => (
-          edge.type === 'straight'
-            ? <SvgStraightEdge key={`e-${i}`} edge={edge} />
-            : <SvgCurveEdge key={`e-${i}`} edge={edge} />
-        ))}
-        {layout.nodes.map(({ node, row }) => {
-          const cx = colX(node.column), cy = rowY(row)
-          const color = getColor(node.column)
-          const dotType = node.type === 'branch-tip' ? 'tip' : node.type === 'fork-point' ? 'merge' : 'regular'
-          return <SvgDot key={`${node.commit.hash}-${row}`} cx={cx} cy={cy} color={color} type={dotType} />
-        })}
-      </svg>
-      <DotOverlays items={layout.nodes.map(({ node, row }) => ({
-        key: `${node.commit.hash}-${row}`, row, column: node.column,
-        color: getColor(node.column), branchName: node.branchName
-      }))} />
-      {layout.nodes.map(({ node, row }) => (
-        <CommitRow key={`${node.commit.hash}-${row}`}
-          shortHash={node.commit.shortHash} message={node.commit.message}
-          author={node.commit.author} relativeDate={node.commit.relativeDate}
-          refs={node.branchLabel ? [node.branchLabel] : undefined}
-          color={getColor(node.column)} gutterWidth={gutterWidth}
-          copiedHash={copiedHash} onCopy={onCopy} />
-      ))}
     </div>
   )
 }

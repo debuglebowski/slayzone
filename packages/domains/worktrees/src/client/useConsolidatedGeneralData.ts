@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import type { CommitInfo, AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest } from '../shared/types'
-import { type GraphNode, buildForkGraphNodes } from './CommitGraph'
+import type { CommitInfo, AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest, ResolvedGraph } from '../shared/types'
 import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
   joinWorktreePath,
@@ -36,21 +35,18 @@ export interface ConsolidatedGeneralData {
   upstreamAB: AheadBehind | null
 
   // Branch/worktree data
-  branchCommits: CommitInfo[]
-  incomingCommits: CommitInfo[]
-  preForkCommits: CommitInfo[]
   forkPoint: string | null
+  featureCount: number
+  baseCount: number
   taskBranch: string | null
   diffStats: DiffStatsSummary | null
   pr: GhPullRequest | null
   metadata: WorktreeMetadata | null
-  graphNodes: GraphNode[]
-  graphColumns: number
   branchLoading: boolean
 
-  // Upstream (local vs remote) graph — used when no worktree
-  upstreamGraphNodes: GraphNode[]
-  upstreamGraphColumns: number
+  // Resolved graphs
+  worktreeGraph: ResolvedGraph | null
+  upstreamGraph: ResolvedGraph | null
 
   // Computed
   hasWorktree: boolean
@@ -113,10 +109,9 @@ export function useConsolidatedGeneralData(
   copyFilesDialogRef.current = copyFilesDialog
 
   // Branch state
-  const [branchCommits, setBranchCommits] = useState<CommitInfo[]>([])
-  const [incomingCommits, setIncomingCommits] = useState<CommitInfo[]>([])
-  const [preForkCommits, setPreForkCommits] = useState<CommitInfo[]>([])
   const [forkPoint, setForkPoint] = useState<string | null>(null)
+  const [featureCount, setFeatureCount] = useState(0)
+  const [baseCount, setBaseCount] = useState(0)
   const [taskBranch, setTaskBranch] = useState<string | null>(null)
   const [diffStats, setDiffStats] = useState<DiffStatsSummary | null>(null)
   const [pr, setPr] = useState<GhPullRequest | null>(null)
@@ -124,11 +119,9 @@ export function useConsolidatedGeneralData(
   const [branchLoading, setBranchLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
-  // Upstream (local vs remote) state — for non-worktree tasks
-  const [upstreamLocalCommits, setUpstreamLocalCommits] = useState<CommitInfo[]>([])
-  const [upstreamRemoteCommits, setUpstreamRemoteCommits] = useState<CommitInfo[]>([])
-  const [upstreamPreForkCommits, setUpstreamPreForkCommits] = useState<CommitInfo[]>([])
-  const [upstreamForkPoint, setUpstreamForkPoint] = useState<string | null>(null)
+  // Resolved graphs
+  const [worktreeGraph, setWorktreeGraph] = useState<ResolvedGraph | null>(null)
+  const [upstreamGraph, setUpstreamGraph] = useState<ResolvedGraph | null>(null)
 
   const initialLoad = useRef(false)
 
@@ -159,33 +152,24 @@ export function useConsolidatedGeneralData(
         setRecentCommits(commits)
         setUpstreamAB(uab)
 
-        // Fetch upstream divergence commits (for non-worktree graph)
+        // Fetch upstream graph (for non-worktree tasks)
         if (!hasWorktree && activeBranch && uab && (uab.ahead > 0 || uab.behind > 0)) {
           try {
-            const upstreamRef = `${activeBranch}@{upstream}`
-            const base = await window.api.git.getMergeBase(targetPath, activeBranch, upstreamRef)
-            setUpstreamForkPoint(base)
-            if (base) {
-              const [local, remote, preFork] = await Promise.all([
-                window.api.git.getCommitsSince(targetPath, base, activeBranch),
-                window.api.git.getCommitsSince(targetPath, base, upstreamRef),
-                window.api.git.getCommitsBeforeRef(targetPath, base, 3)
-              ])
-              setUpstreamLocalCommits(local)
-              setUpstreamRemoteCommits(remote)
-              setUpstreamPreForkCommits(preFork)
-            }
+            const result = await window.api.git.getResolvedUpstreamGraph(targetPath, activeBranch)
+            setUpstreamGraph(result?.graph ?? null)
           } catch {
-            setUpstreamForkPoint(null)
-            setUpstreamLocalCommits([])
-            setUpstreamRemoteCommits([])
-            setUpstreamPreForkCommits([])
+            setUpstreamGraph(null)
+          }
+        } else if (!hasWorktree && activeBranch) {
+          // No divergence — single-branch graph of recent commits
+          try {
+            const graph = await window.api.git.getResolvedRecentCommits(targetPath, 40, activeBranch)
+            setUpstreamGraph(graph)
+          } catch {
+            setUpstreamGraph(null)
           }
         } else {
-          setUpstreamForkPoint(null)
-          setUpstreamLocalCommits([])
-          setUpstreamRemoteCommits([])
-          setUpstreamPreForkCommits([])
+          setUpstreamGraph(null)
         }
       }
     } catch { /* polling error */ }
@@ -199,29 +183,22 @@ export function useConsolidatedGeneralData(
       setTaskBranch(branch)
       if (!branch) return
 
-      const mergeBase = await window.api.git.getMergeBase(
-        projectPath || targetPath,
-        branch,
-        parentBranch
-      )
-      setForkPoint(mergeBase)
+      const repoPath = projectPath || targetPath
 
-      if (mergeBase) {
-        const repoPath = projectPath || targetPath
-        const [yours, incoming, preFork, stats] = await Promise.all([
-          window.api.git.getCommitsSince(targetPath, mergeBase, branch),
-          window.api.git.getCommitsSince(repoPath, mergeBase, parentBranch),
-          window.api.git.getCommitsBeforeRef(repoPath, mergeBase, 3),
-          window.api.git.getDiffStats(targetPath, parentBranch)
-        ])
-        setBranchCommits(yours)
-        setIncomingCommits(incoming)
-        setPreForkCommits(preFork)
+      // Single call gets graph + fork point + counts
+      const result = await window.api.git.getResolvedForkGraph(
+        targetPath, repoPath, branch, parentBranch,
+        branch, parentBranch
+      )
+      setWorktreeGraph(result?.graph ?? null)
+      setForkPoint(result?.forkPoint ?? null)
+      setFeatureCount(result?.featureCount ?? 0)
+      setBaseCount(result?.baseCount ?? 0)
+
+      if (result?.forkPoint) {
+        const stats = await window.api.git.getDiffStats(targetPath, parentBranch)
         setDiffStats(stats)
       } else {
-        setBranchCommits([])
-        setIncomingCommits([])
-        setPreForkCommits([])
         setDiffStats(null)
       }
     } catch { /* polling error */ }
@@ -455,48 +432,13 @@ export function useConsolidatedGeneralData(
     })
   }, [handleAction])
 
-  // Build worktree fork graph nodes
-  let graphNodes: GraphNode[] = []
-  let graphColumns = 1
-
-  if (hasWorktree && parentBranch && forkPoint) {
-    const result = buildForkGraphNodes({
-      column0Commits: incomingCommits, column0Label: parentBranch,
-      column1Commits: branchCommits, column1Label: taskBranch ?? 'HEAD',
-      forkPoint, preForkCommits
-    })
-    graphNodes = result.nodes
-    graphColumns = result.columns
-  }
-
-  // Build upstream (local vs remote) graph nodes — for non-worktree tasks
-  let upstreamGraphNodes: GraphNode[] = []
-  let upstreamGraphColumns = 1
-  const activeBranchName = hasWorktree ? worktreeBranch : currentBranch
-  const upstreamLabel = activeBranchName ? `origin/${activeBranchName}` : 'origin'
-
-  if (!hasWorktree && upstreamForkPoint && (upstreamLocalCommits.length > 0 || upstreamRemoteCommits.length > 0)) {
-    const result = buildForkGraphNodes({
-      column0Commits: upstreamRemoteCommits, column0Label: upstreamLabel,
-      column1Commits: upstreamLocalCommits, column1Label: activeBranchName ?? 'HEAD',
-      forkPoint: upstreamForkPoint, preForkCommits: upstreamPreForkCommits
-    })
-    upstreamGraphNodes = result.nodes
-    upstreamGraphColumns = result.columns
-  } else if (!hasWorktree && recentCommits.length > 0) {
-    // No divergence — single column of recent commits
-    for (const c of recentCommits) {
-      upstreamGraphNodes.push({ commit: c, column: 0, type: 'commit' })
-    }
-  }
-
   const totalChanges = statusSummary ? statusSummary.staged + statusSummary.unstaged + statusSummary.untracked : 0
 
   return {
     isGitRepo, currentBranch, worktreeBranch, statusSummary, recentCommits,
-    remoteUrl, upstreamAB, branchCommits, incomingCommits, preForkCommits,
-    forkPoint, taskBranch, diffStats, pr, metadata, graphNodes, graphColumns,
-    branchLoading, upstreamGraphNodes, upstreamGraphColumns,
+    remoteUrl, upstreamAB,
+    forkPoint, featureCount, baseCount, taskBranch, diffStats, pr, metadata,
+    branchLoading, worktreeGraph, upstreamGraph,
     hasWorktree, targetPath, totalChanges, parentBranch,
     sluggedBranch: slugify(task.title) || `task-${task.id.slice(0, 8)}`,
     handleAddWorktree, handleLinkWorktree, handleRemoveWorktree, handleInitGit,

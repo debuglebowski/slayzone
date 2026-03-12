@@ -171,8 +171,8 @@ export function GeneralTabContent({
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Worktree</div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               vs {data.parentBranch}
-              {data.branchCommits.length > 0 && <span className="text-green-500">↑{data.branchCommits.length}</span>}
-              {data.incomingCommits.length > 0 && <span className="text-yellow-500">↓{data.incomingCommits.length}</span>}
+              {data.featureCount > 0 && <span className="text-green-500">↑{data.featureCount}</span>}
+              {data.baseCount > 0 && <span className="text-yellow-500">↓{data.baseCount}</span>}
             </div>
             {data.diffStats && data.diffStats.filesChanged > 0 && (
               <div className="text-[11px] text-muted-foreground ml-auto">
@@ -190,9 +190,9 @@ export function GeneralTabContent({
             <div className="flex items-center justify-center h-32">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : data.graphNodes.length > 0 ? (
+          ) : data.worktreeGraph ? (
             <div className="rounded-lg border bg-muted/30 p-2">
-              <CommitGraph mode="fork" nodes={data.graphNodes} maxColumns={data.graphColumns} />
+              <CommitGraph graph={data.worktreeGraph} />
             </div>
           ) : (
             <div className="flex items-center justify-center h-20 text-xs text-muted-foreground">
@@ -204,11 +204,11 @@ export function GeneralTabContent({
       ) : (
         /* No worktree — commit graph (local vs remote when diverged, or single-column recent) */
         <div className="flex-1 min-h-0 flex flex-col">
-          {data.upstreamGraphNodes.length > 0 && (
+          {data.upstreamGraph && data.upstreamGraph.commits.length > 0 && (
             <div className="flex-1 min-h-[200px] flex flex-col p-4 pt-4">
               <div className="shrink-0 text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Recent Commits</div>
               <div className="min-h-0 overflow-y-auto rounded-lg border bg-muted/30 p-2">
-                <CommitGraph mode="fork" nodes={data.upstreamGraphNodes} maxColumns={data.upstreamGraphColumns} />
+                <CommitGraph graph={data.upstreamGraph} />
               </div>
             </div>
           )}

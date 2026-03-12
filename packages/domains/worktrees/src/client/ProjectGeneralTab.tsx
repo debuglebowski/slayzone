@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { GitBranch, ChevronDown, Check, Loader2, Plus, Copy, FolderGit2 } from 'lucide-react'
 import { Button, IconButton, Input, Popover, PopoverContent, PopoverTrigger, cn, toast } from '@slayzone/ui'
-import type { CommitInfo, StatusSummary, AheadBehind } from '../shared/types'
+import type { StatusSummary, AheadBehind, ResolvedGraph } from '../shared/types'
 import { RemoteSection } from './RemoteSection'
-import { CommitGraph, type GraphNode, buildForkGraphNodes } from './CommitGraph'
+import { CommitGraph } from './CommitGraph'
 
 interface ProjectGeneralTabProps {
   projectPath: string | null
@@ -15,16 +15,12 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
   const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null)
-  const [recentCommits, setRecentCommits] = useState<CommitInfo[]>([])
 
   const [initializing, setInitializing] = useState(false)
 
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [upstreamAB, setUpstreamAB] = useState<AheadBehind | null>(null)
-  const [upstreamLocalCommits, setUpstreamLocalCommits] = useState<CommitInfo[]>([])
-  const [upstreamRemoteCommits, setUpstreamRemoteCommits] = useState<CommitInfo[]>([])
-  const [upstreamPreForkCommits, setUpstreamPreForkCommits] = useState<CommitInfo[]>([])
-  const [upstreamForkPoint, setUpstreamForkPoint] = useState<string | null>(null)
+  const [upstreamGraph, setUpstreamGraph] = useState<ResolvedGraph | null>(null)
 
   const [branchPopoverOpen, setBranchPopoverOpen] = useState(false)
   const [branches, setBranches] = useState<string[]>([])
@@ -39,15 +35,13 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
       const isRepo = await window.api.git.isGitRepo(projectPath)
       setIsGitRepo(isRepo)
       if (!isRepo) return
-      const [branch, status, commits, remote] = await Promise.all([
+      const [branch, status, remote] = await Promise.all([
         window.api.git.getCurrentBranch(projectPath),
         window.api.git.getStatusSummary(projectPath),
-        window.api.git.getRecentCommits(projectPath, 40),
         window.api.git.getRemoteUrl(projectPath)
       ])
       setCurrentBranch(branch)
       setStatusSummary(status)
-      setRecentCommits(commits)
       setRemoteUrl(remote)
       if (branch) {
         const uab = await window.api.git.getAheadBehindUpstream(projectPath, branch)
@@ -55,33 +49,23 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
 
         if (uab && (uab.ahead > 0 || uab.behind > 0)) {
           try {
-            const upstreamRef = `${branch}@{upstream}`
-            const base = await window.api.git.getMergeBase(projectPath, branch, upstreamRef)
-            setUpstreamForkPoint(base)
-            if (base) {
-              const [local, remote, preFork] = await Promise.all([
-                window.api.git.getCommitsSince(projectPath, base, branch),
-                window.api.git.getCommitsSince(projectPath, base, upstreamRef),
-                window.api.git.getCommitsBeforeRef(projectPath, base, 3)
-              ])
-              setUpstreamLocalCommits(local)
-              setUpstreamRemoteCommits(remote)
-              setUpstreamPreForkCommits(preFork)
-            }
+            const result = await window.api.git.getResolvedUpstreamGraph(projectPath, branch)
+            setUpstreamGraph(result?.graph ?? null)
           } catch {
-            setUpstreamForkPoint(null)
-            setUpstreamLocalCommits([])
-            setUpstreamRemoteCommits([])
-            setUpstreamPreForkCommits([])
+            setUpstreamGraph(null)
           }
         } else {
-          setUpstreamForkPoint(null)
-          setUpstreamLocalCommits([])
-          setUpstreamRemoteCommits([])
-          setUpstreamPreForkCommits([])
+          // No divergence — single-branch graph of recent commits
+          try {
+            const graph = await window.api.git.getResolvedRecentCommits(projectPath, 40, branch)
+            setUpstreamGraph(graph)
+          } catch {
+            setUpstreamGraph(null)
+          }
         }
       } else {
         setUpstreamAB(null)
+        setUpstreamGraph(null)
       }
     } catch { /* polling error */ }
   }, [projectPath])
@@ -171,25 +155,6 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
   }
 
   const totalChanges = statusSummary ? statusSummary.staged + statusSummary.unstaged + statusSummary.untracked : 0
-
-  // Build upstream graph nodes
-  const upstreamLabel = currentBranch ? `origin/${currentBranch}` : 'origin'
-  let graphNodes: GraphNode[] = []
-  let graphColumns = 1
-
-  if (upstreamForkPoint && (upstreamLocalCommits.length > 0 || upstreamRemoteCommits.length > 0)) {
-    const result = buildForkGraphNodes({
-      column0Commits: upstreamRemoteCommits, column0Label: upstreamLabel,
-      column1Commits: upstreamLocalCommits, column1Label: currentBranch ?? 'HEAD',
-      forkPoint: upstreamForkPoint, preForkCommits: upstreamPreForkCommits
-    })
-    graphNodes = result.nodes
-    graphColumns = result.columns
-  } else {
-    for (const c of recentCommits) {
-      graphNodes.push({ commit: c, column: 0, type: 'commit' })
-    }
-  }
 
   return (
     <div className="h-full flex flex-col">
@@ -286,11 +251,11 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
       </div>
 
       {/* Recent commits */}
-      {graphNodes.length > 0 && (
+      {upstreamGraph && upstreamGraph.commits.length > 0 && (
         <div className="flex-1 min-h-[200px] flex flex-col p-4 pt-6">
           <div className="shrink-0 text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Recent Commits</div>
           <div className="min-h-0 overflow-y-auto rounded-lg border bg-muted/30 p-2">
-            <CommitGraph mode="fork" nodes={graphNodes} maxColumns={graphColumns} />
+            <CommitGraph graph={upstreamGraph} />
           </div>
         </div>
       )}

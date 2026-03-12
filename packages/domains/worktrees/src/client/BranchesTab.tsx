@@ -6,10 +6,11 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   Label
 } from '@slayzone/ui'
-import type { DagCommit, CommitGraphConfig } from '../shared/types'
+import type { CommitGraphConfig, ResolvedGraph } from '../shared/types'
 import { CommitGraph } from './CommitGraph'
 
-const COMMIT_LIMIT = 500
+const FETCH_LIMIT = 2000   // fetch more for accurate branch topology
+const RENDER_LIMIT = 500   // cap DOM nodes for performance
 
 const DEFAULT_CONFIG: CommitGraphConfig = {
   baseBranch: '',  // resolved at runtime to current branch
@@ -25,7 +26,7 @@ interface BranchesTabProps {
 }
 
 export function BranchesTab({ projectPath, visible }: BranchesTabProps) {
-  const [dagCommits, setDagCommits] = useState<DagCommit[]>([])
+  const [dagGraph, setDagGraph] = useState<ResolvedGraph | null>(null)
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(false)
@@ -77,11 +78,11 @@ export function BranchesTab({ projectPath, visible }: BranchesTabProps) {
         }
       }
 
-      // Fetch DAG for only the resolved branches
-      const commits = await window.api.git.getCommitDag(
-        projectPath, COMMIT_LIMIT, [...branchSet]
+      // Fetch resolved DAG for only the resolved branches
+      const graph = await window.api.git.getResolvedCommitDag(
+        projectPath, FETCH_LIMIT, [...branchSet], baseBranch
       )
-      setDagCommits(commits)
+      setDagGraph(graph)
     } catch { /* polling error */ }
   }, [projectPath, config])
 
@@ -175,14 +176,14 @@ export function BranchesTab({ projectPath, visible }: BranchesTabProps) {
       </div>
 
       {/* Graph */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-3">
-        {dagCommits.length > 0 ? (
-          <div className="rounded-lg border bg-muted/30 p-2">
+      <div className="flex-1 min-h-0 p-3">
+        {dagGraph && dagGraph.commits.length > 0 ? (
+          <div className="rounded-lg border bg-muted/30 p-2 h-full overflow-y-auto">
             <CommitGraph
-              mode="dag"
-              commits={dagCommits}
+              graph={dagGraph}
               filterQuery={filter || undefined}
               tipsOnly={config.collapsed}
+              renderLimit={RENDER_LIMIT}
             />
           </div>
         ) : (

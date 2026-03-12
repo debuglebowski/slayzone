@@ -232,6 +232,41 @@ export interface DagCommit {
   refs: string[]
 }
 
+// --- Resolved graph data (git-ref semantics pre-resolved) ---
+
+export interface ResolvedCommit {
+  hash: string
+  shortHash: string
+  message: string
+  author: string
+  relativeDate: string
+  parents: string[]
+  /** Owning branch name, already resolved (no "origin/", "HEAD ->") */
+  branch: string
+  /** Display labels pointing at this commit (e.g. ["main"]) */
+  branchRefs: string[]
+  tags: string[]
+  isBranchTip: boolean
+  isHead: boolean
+}
+
+export interface ResolvedGraph {
+  commits: ResolvedCommit[]
+  /** Branch that gets base color */
+  baseBranch: string
+  /** All branch names present, ordered by priority */
+  branches: string[]
+}
+
+export interface ForkGraphResult {
+  graph: ResolvedGraph
+  forkPoint: string
+  /** Number of commits on the active (feature) branch since fork */
+  featureCount: number
+  /** Number of commits on the compare (base) branch since fork */
+  baseCount: number
+}
+
 export interface RebaseOntoResult {
   success: boolean
   conflicted?: boolean
