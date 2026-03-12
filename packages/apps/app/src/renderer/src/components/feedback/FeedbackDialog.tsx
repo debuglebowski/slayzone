@@ -112,21 +112,22 @@ export function FeedbackDialog(): React.JSX.Element {
     setContent('')
   }, [])
 
-  const handleDelete = useCallback(async () => {
-    if (!selectedThread) return
+  const handleDeleteThread = useCallback(async (thread: FeedbackThread) => {
     try {
-      if (selectedThread.discord_thread_id) {
-        await markDeleted({ threadId: selectedThread.discord_thread_id }).catch(() => {})
+      if (thread.discord_thread_id) {
+        await markDeleted({ threadId: thread.discord_thread_id }).catch(() => {})
       }
-      await window.api.feedback.deleteThread(selectedThread.id)
-      setSelectedId(null)
-      setMessages([])
+      await window.api.feedback.deleteThread(thread.id)
+      if (selectedId === thread.id) {
+        setSelectedId(null)
+        setMessages([])
+      }
       await loadThreads()
       toast.success('Feedback deleted')
     } catch {
       toast.error('Failed to delete feedback')
     }
-  }, [selectedThread, markDeleted, loadThreads])
+  }, [selectedId, markDeleted, loadThreads])
 
   const handleSend = useCallback(async () => {
     const text = content.trim()
@@ -246,14 +247,32 @@ export function FeedbackDialog(): React.JSX.Element {
                     type="button"
                     onClick={() => setSelectedId(thread.id)}
                     className={cn(
-                      'group w-full px-4 py-3 text-left transition-colors hover:bg-muted/50',
+                      'group relative w-full px-4 py-3 text-left transition-colors hover:bg-muted/50',
                       selectedId === thread.id
                         ? 'bg-muted border-l-2 border-l-primary'
                         : 'border-l-2 border-l-transparent'
                     )}
                   >
-                    <p className="truncate text-[13px] font-medium leading-snug">{thread.title}</p>
+                    <p className="truncate pr-6 text-[13px] font-medium leading-snug">{thread.title}</p>
                     <p className="mt-1 text-[11px] text-muted-foreground/60">{timeAgo(thread.created_at)}</p>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Delete thread"
+                      className="absolute right-3 top-3 hidden rounded p-0.5 text-muted-foreground/50 hover:text-destructive group-hover:inline-flex"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDeleteThread(thread)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.stopPropagation()
+                          handleDeleteThread(thread)
+                        }
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </span>
                   </button>
                 ))}
               </div>
@@ -287,22 +306,6 @@ export function FeedbackDialog(): React.JSX.Element {
                         <p className="text-[11px] text-muted-foreground/60">{formatDate(selectedThread.created_at)}</p>
                       )}
                     </div>
-                    {selectedThread && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <IconButton
-                            aria-label="Delete thread"
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={handleDelete}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </IconButton>
-                        </TooltipTrigger>
-                        <TooltipContent>Delete</TooltipContent>
-                      </Tooltip>
-                    )}
                   </div>
 
                   {/* Messages */}
@@ -338,7 +341,8 @@ export function FeedbackDialog(): React.JSX.Element {
                   )}
 
                   {/* Compose */}
-                  <div className="border-t bg-muted/5 px-5 py-4">
+                  <div className="bg-muted/5 px-5 py-4">
+                    <p className="mb-2 text-[10px] font-medium text-amber-500">Do not share any sensitive or personal information.</p>
                     <div className="rounded-lg border bg-background shadow-[0_1px_3px_rgba(0,0,0,0.04)] focus-within:ring-2 focus-within:ring-ring/50">
                       <textarea
                         value={content}
