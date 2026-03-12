@@ -9,6 +9,7 @@ interface PersistedChecklistStateV1 {
   completed: {
     setupGuide: boolean
     takeTour: boolean
+    checkLeaderboard: boolean
     joinCommunity: boolean
     followOnX: boolean
   }
@@ -20,6 +21,7 @@ const DEFAULT_PERSISTED_STATE: PersistedChecklistStateV1 = {
   completed: {
     setupGuide: false,
     takeTour: false,
+    checkLeaderboard: false,
     joinCommunity: false,
     followOnX: false
   }
@@ -49,6 +51,7 @@ interface UseOnboardingChecklistOptions {
   onStartTour: () => void
   onCreateFirstProject: () => void
   onCreateFirstTask: () => void
+  onCheckLeaderboard: () => void
   onJoinCommunity: () => void
   onFollowOnX: () => void
 }
@@ -74,7 +77,8 @@ function isPersistedChecklistStateV1(value: unknown): value is PersistedChecklis
     typeof completed.setupGuide === 'boolean' &&
     typeof completed.takeTour === 'boolean' &&
     typeof completed.joinCommunity === 'boolean' &&
-    typeof completed.followOnX === 'boolean'
+    typeof completed.followOnX === 'boolean' &&
+    (completed.checkLeaderboard === undefined || typeof completed.checkLeaderboard === 'boolean')
   )
 }
 
@@ -82,7 +86,12 @@ function parsePersistedChecklistState(raw: string | null): PersistedChecklistSta
   if (!raw) return null
   try {
     const parsed: unknown = JSON.parse(raw)
-    return isPersistedChecklistStateV1(parsed) ? parsed : null
+    if (!isPersistedChecklistStateV1(parsed)) return null
+    // Default checkLeaderboard for existing persisted state without it
+    if (parsed.completed.checkLeaderboard === undefined) {
+      parsed.completed.checkLeaderboard = false
+    }
+    return parsed
   } catch {
     return null
   }
@@ -93,6 +102,7 @@ function areStatesEqual(left: PersistedChecklistStateV1, right: PersistedCheckli
     left.dismissed === right.dismissed &&
     left.completed.setupGuide === right.completed.setupGuide &&
     left.completed.takeTour === right.completed.takeTour &&
+    left.completed.checkLeaderboard === right.completed.checkLeaderboard &&
     left.completed.joinCommunity === right.completed.joinCommunity &&
     left.completed.followOnX === right.completed.followOnX
   )
@@ -105,6 +115,7 @@ export function useOnboardingChecklist({
   onStartTour,
   onCreateFirstProject,
   onCreateFirstTask,
+  onCheckLeaderboard,
   onJoinCommunity,
   onFollowOnX
 }: UseOnboardingChecklistOptions): UseOnboardingChecklistResult {
@@ -131,6 +142,7 @@ export function useOnboardingChecklist({
         completed: {
           setupGuide: true,
           takeTour: true,
+          checkLeaderboard: true,
           joinCommunity: true,
           followOnX: true
         }
@@ -143,6 +155,7 @@ export function useOnboardingChecklist({
       completed: {
         setupGuide: isTruthy(setupGuideRaw),
         takeTour: isTruthy(takeTourRaw),
+        checkLeaderboard: false,
         joinCommunity: isTruthy(joinCommunityRaw),
         followOnX: isTruthy(followOnXRaw)
       }
@@ -202,6 +215,17 @@ export function useOnboardingChecklist({
     }))
   }, [onStartTour, updatePersistedState])
 
+  const checkLeaderboard = useCallback((): void => {
+    onCheckLeaderboard()
+    updatePersistedState((previous) => ({
+      ...previous,
+      completed: {
+        ...previous.completed,
+        checkLeaderboard: true
+      }
+    }))
+  }, [onCheckLeaderboard, updatePersistedState])
+
   const joinCommunity = useCallback((): void => {
     onJoinCommunity()
     updatePersistedState((previous) => ({
@@ -231,6 +255,7 @@ export function useOnboardingChecklist({
       completed: {
         setupGuide: true,
         takeTour: true,
+        checkLeaderboard: true,
         joinCommunity: true,
         followOnX: true
       }
@@ -268,6 +293,12 @@ export function useOnboardingChecklist({
         onClick: onCreateFirstTask
       },
       {
+        id: 'check-leaderboard',
+        label: 'Checkout the leaderboard',
+        completed: forceComplete || persistedState.completed.checkLeaderboard,
+        onClick: checkLeaderboard
+      },
+      {
         id: 'join-community',
         label: 'Join the community',
         completed: forceComplete || persistedState.completed.joinCommunity,
@@ -284,6 +315,7 @@ export function useOnboardingChecklist({
     persistedState.dismissed,
     persistedState.completed.setupGuide,
     persistedState.completed.takeTour,
+    persistedState.completed.checkLeaderboard,
     persistedState.completed.joinCommunity,
     persistedState.completed.followOnX,
     projectCount,
@@ -292,6 +324,7 @@ export function useOnboardingChecklist({
     startTour,
     onCreateFirstProject,
     onCreateFirstTask,
+    checkLeaderboard,
     joinCommunity,
     followOnX
   ])

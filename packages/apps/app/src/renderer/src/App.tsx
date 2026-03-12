@@ -256,6 +256,12 @@ function App(): React.JSX.Element {
     setCreateOpen(true)
   }, [projects.length])
 
+  const handleChecklistCheckLeaderboard = useCallback((): void => {
+    const { tabs, setActiveTabIndex } = useTabStore.getState()
+    const idx = tabs.findIndex((t) => t.type === 'leaderboard')
+    if (idx >= 0) setActiveTabIndex(idx)
+  }, [])
+
   const handleChecklistJoinCommunity = useCallback((): void => {
     void window.api.shell.openExternal(COMMUNITY_DISCORD_URL)
   }, [])
@@ -276,6 +282,7 @@ function App(): React.JSX.Element {
     onStartTour: openTutorialModal,
     onCreateFirstProject: handleChecklistCreateFirstProject,
     onCreateFirstTask: handleChecklistCreateFirstTask,
+    onCheckLeaderboard: handleChecklistCheckLeaderboard,
     onJoinCommunity: handleChecklistJoinCommunity,
     onFollowOnX: handleChecklistFollowOnX
   })
