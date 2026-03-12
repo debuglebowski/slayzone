@@ -24,7 +24,7 @@ if (!entry) process.exit(0)
 const icons = { feature: '🚀', improvement: '✨', fix: '🐛' }
 let body = `## ${entry.tagline}\n\n`
 body += entry.items
-  .map((i) => `${icons[i.category] || '•'} **${i.title}** — ${i.description}`)
+  .map((i) => `${icons[i.category] || '•'}  **${i.title}** — ${i.description}`)
   .join('\n')
 
 process.stdout.write(body)

@@ -556,6 +556,34 @@ jobs:
             -X PATCH \
             -f sha="$COMMIT_SHA"
 
+  notify-discord:
+    runs-on: ubuntu-latest
+    needs: [resolve, publish-channel]
+    if: needs.resolve.outputs.mode == 'publish'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - name: Send Discord notification
+        shell: bash
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          VERSION: ${{ needs.resolve.outputs.release_tag }}
+          REPO: ${{ github.repository }}
+          CHANNEL_TAG: ${{ needs.resolve.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK_URL secret not set, skipping"
+            exit 0
+          fi
+          RELEASE_URL="https://github.com/$REPO/releases/tag/$CHANNEL_TAG"
+          node scripts/release/notify-discord.mjs \
+            --version "$VERSION" \
+            --webhook-url "$DISCORD_WEBHOOK_URL" \
+            --release-url "$RELEASE_URL"
+
   update-nix:
     runs-on: ubuntu-latest
     needs: [resolve, publish-channel]
