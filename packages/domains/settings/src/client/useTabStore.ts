@@ -84,7 +84,7 @@ function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup
 
 export const useTabStore = create<TabState>()(
   subscribeWithSelector((set, get) => ({
-    tabs: [{ type: 'home' }],
+    tabs: [{ type: 'home' }, { type: 'leaderboard', title: 'Leaderboard' }],
     activeTabIndex: 0,
     selectedProjectId: '',
     closedTabs: [],
@@ -194,6 +194,10 @@ export const useTabStore = create<TabState>()(
       const validTabs = Array.isArray(state.tabs) && state.tabs.length > 0 ? state.tabs : [{ type: 'home' as const }]
       if (validTabs[0]?.type !== 'home') {
         validTabs.unshift({ type: 'home' })
+      }
+      if (!validTabs.some((t) => t.type === 'leaderboard')) {
+        const homeIdx = validTabs.findIndex((t) => t.type === 'home')
+        validTabs.splice(homeIdx + 1, 0, { type: 'leaderboard', title: 'Leaderboard' })
       }
       const clampedIndex = Math.max(0, Math.min(state.activeTabIndex ?? 0, validTabs.length - 1))
       set({
