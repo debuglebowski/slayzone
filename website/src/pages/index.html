@@ -17,7 +17,7 @@
 {{head-common}}
 <style>
 {{css-vars}}
-  body { background: #ffffff; color: var(--text); font-family: 'Outfit', sans-serif; font-weight: 300; line-height: 1.6; overflow-x: hidden; }
+  body { background: #ffffff; color: var(--text); font-family: 'Outfit', sans-serif; font-weight: 300; line-height: 1.6; margin: 0; overflow-x: hidden; }
   .hero-bow::before { content: ''; position: absolute; inset: 0; opacity: 0.025; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); pointer-events: none; z-index: 1; }
   .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
   nav { padding: 28px 0; display: flex; align-items: center; justify-content: space-between; position: relative; }
@@ -69,9 +69,8 @@
   .hero-bow {
     position: absolute;
     top: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 100vw;
+    left: 0;
+    right: 0;
     bottom: 15%;
     background: linear-gradient(180deg, #27286B 0%, #215274 46%, #1C757B 100%);
     z-index: 0;
@@ -350,7 +349,6 @@
 </style>
 </head>
 <body>
-<div class="container">
   <div class="hero-wrap">
     <div class="hero-bow">
       <div class="hero-wave">
@@ -359,6 +357,7 @@
       </div>
     </div>
 
+  <div class="container">
   <nav>
     <a href="index.html" class="logo">Slay<span class="slash">/</span>Zone</a>
     <div class="nav-right">
@@ -551,8 +550,8 @@
     <div class="demo-step-label" id="step-label"><span>1/4</span> &nbsp;Kanban board — scan all tasks at a glance</div>
   </section>
 
+  </div><!-- end container -->
   </div><!-- end hero-wrap -->
-</div><!-- end container -->
 
 <div class="bottom-section">
 <div class="container">
