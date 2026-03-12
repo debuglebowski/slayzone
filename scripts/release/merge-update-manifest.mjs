@@ -74,11 +74,7 @@ function parseManifest(text) {
 }
 
 function serializeManifest(top, files) {
-  let out = ''
-  for (const [k, v] of Object.entries(top)) {
-    if (k === 'path' || k === 'sha512') continue
-    out += `${k}: ${v}\n`
-  }
+  let out = `version: ${top.version}\n`
   out += 'files:\n'
   for (const f of files) {
     const entries = Object.entries(f)
