@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
@@ -49,7 +49,12 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const [path, setPath] = useState('')
   const [startMode, setStartMode] = useState<ProjectStartMode>('scratch')
   const [loading, setLoading] = useState(false)
-  const integrationsEnabled = window.api.app.isIntegrationsEnabled
+  const [integrationsEnabled, setIntegrationsEnabled] = useState(window.api.app.isIntegrationsEnabledSync)
+
+  useEffect(() => {
+    if (!open) return
+    window.api.app.isIntegrationsEnabled().then(setIntegrationsEnabled)
+  }, [open])
   const visibleStartOptions = integrationsEnabled
     ? START_OPTIONS
     : START_OPTIONS.filter((option) => option.mode === 'scratch')

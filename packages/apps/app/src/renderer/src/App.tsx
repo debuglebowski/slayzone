@@ -146,6 +146,7 @@ function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsRevision, setSettingsRevision] = useState(0)
   const [colorTintsEnabled, setColorTintsEnabled] = useState(true)
+  const [testsPanelEnabled, setTestsPanelEnabled] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<string>('general')
   const [settingsInitialAiConfigSection, setSettingsInitialAiConfigSection] = useState<GlobalAiConfigSection | null>(null)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
@@ -613,6 +614,7 @@ function App(): React.JSX.Element {
   // Read color tints setting on mount and whenever settings change (same trigger as AppearanceProvider)
   useEffect(() => {
     window.api.settings.get('project_color_tints_enabled').then((v) => setColorTintsEnabled(v !== '0'))
+    window.api.app.isTestsPanelEnabled().then(setTestsPanelEnabled)
   }, [settingsRevision])
 
   // Sync project name value
@@ -945,7 +947,7 @@ function App(): React.JSX.Element {
       } else if (e.key === 'o' && import.meta.env.DEV && isHomePanelEnabled('processes', 'home')) {
         e.preventDefault()
         setHomePanelVisibility(prev => ({ ...prev, processes: !prev.processes }))
-      } else if (e.key === 'u' && import.meta.env.DEV && isHomePanelEnabled('tests', 'home')) {
+      } else if (e.key === 'u' && testsPanelEnabled && isHomePanelEnabled('tests', 'home')) {
         e.preventDefault()
         setHomePanelVisibility(prev => ({ ...prev, tests: !prev.tests }))
       }
@@ -1418,7 +1420,7 @@ function App(): React.JSX.Element {
                                     { id: 'git', icon: GitBranch, label: 'Git', shortcut: '⌘G', active: homePanelVisibility.git, disabled: !selectedProjectId },
                                     { id: 'editor', icon: FileCode, label: 'Editor', shortcut: '⌘E', active: homePanelVisibility.editor, disabled: !selectedProjectId },
                                     ...(import.meta.env.DEV ? [{ id: 'processes', icon: Cpu, label: 'Processes', shortcut: '⌘O', active: homePanelVisibility.processes, disabled: !selectedProjectId }] : [{ id: 'processes', icon: Cpu, label: 'Processes', active: homePanelVisibility.processes, disabled: !selectedProjectId }]),
-                                    ...(import.meta.env.DEV ? [{ id: 'tests', icon: FlaskConical, label: 'Tests', shortcut: '⌘U', active: homePanelVisibility.tests, disabled: !selectedProjectId }] : []),
+                                    ...(testsPanelEnabled ? [{ id: 'tests', icon: FlaskConical, label: 'Tests', shortcut: '⌘U', active: homePanelVisibility.tests, disabled: !selectedProjectId }] : []),
                                   ].filter(p => p.id === 'kanban' || isHomePanelEnabled(p.id, 'home'))}
                                   onChange={(id, active) => setHomePanelVisibility(prev => ({ ...prev, [id]: active }))}
                                 />

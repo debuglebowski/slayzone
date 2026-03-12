@@ -31,9 +31,6 @@ protocol.registerSchemesAsPrivileged([
 // Use consistent app name for userData path (paired with legacy DB migration)
 app.name = 'slayzone'
 const isPlaywright = process.env.PLAYWRIGHT === '1'
-const isContextManagerEnabled =
-  is.dev || isPlaywright || process.env.SLAYZONE_ENABLE_CONTEXT_MANAGER === '1'
-const isIntegrationsEnabled = is.dev
 
 // Enable remote debugging in dev (port 0 = OS-assigned, avoids conflicts with other dev instances)
 if (is.dev && !isPlaywright) {
@@ -56,7 +53,6 @@ import { registerWorktreeHandlers } from '@slayzone/worktrees/main'
 import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics } from '@slayzone/diagnostics/main'
 import { registerAiConfigHandlers } from '@slayzone/ai-config/main'
 import { registerIntegrationHandlers, ensureIntegrationSchema, startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags } from '@slayzone/integrations/main'
-import type { IntegrationHandles } from '@slayzone/integrations/main'
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/main'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/main'
 import { registerScreenshotHandlers } from './screenshot'
@@ -760,6 +756,11 @@ app.whenReady().then(async () => {
   logBoot('database init start')
   const db = getDatabase()
   const diagDb = getDiagnosticsDatabase()
+  const isLabEnabled = (key: string): boolean => {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
+    if (!row) return is.dev || isPlaywright
+    return row.value === '1'
+  }
   logBoot('database init complete')
 
   // Skip onboarding in Playwright — tested explicitly in 02-onboarding.spec.ts
@@ -945,13 +946,8 @@ app.whenReady().then(async () => {
   registerTerminalTabsHandlers(ipcMain, db)
   registerFilesHandlers(ipcMain)
   registerWorktreeHandlers(ipcMain, db)
-  if (isContextManagerEnabled) {
-    registerAiConfigHandlers(ipcMain, db)
-  }
-  let integrationHandles: IntegrationHandles | null = null
-  if (isIntegrationsEnabled) {
-    integrationHandles = registerIntegrationHandlers(ipcMain, db, { enableTestChannels: isPlaywright })
-  }
+  registerAiConfigHandlers(ipcMain, db)
+  const integrationHandles = registerIntegrationHandlers(ipcMain, db, { enableTestChannels: isPlaywright })
   registerFileEditorHandlers(ipcMain)
   registerScreenshotHandlers()
   registerExportImportHandlers(ipcMain, db, isPlaywright)
@@ -974,36 +970,32 @@ app.whenReady().then(async () => {
     console.error('[MCP] Failed to start server:', err)
   })
 
-  if (isIntegrationsEnabled) {
-    linearSyncPoller = startSyncPoller(db)
-    discoveryPoller = startDiscoveryPoller(db)
-    logBoot('integration pollers started (sync 10s, discovery 60s)')
+  linearSyncPoller = startSyncPoller(db)
+  discoveryPoller = startDiscoveryPoller(db)
+  logBoot('integration pollers started (sync 10s, discovery 60s)')
 
-    // Push to providers immediately after local task edits (skip in E2E — tests exercise push explicitly)
-    if (!isPlaywright) {
-      ipcMain.on('db:tasks:update:done', (_event, taskId: string) => {
-        void pushTaskAfterEdit(db, taskId, {
-          pushGithubTask: integrationHandles?.pushGithubTask
-        })
+  // Push to providers immediately after local task edits (skip in E2E — tests exercise push explicitly)
+  if (!isPlaywright) {
+    ipcMain.on('db:tasks:update:done', (_event, taskId: string) => {
+      void pushTaskAfterEdit(db, taskId, {
+        pushGithubTask: integrationHandles.pushGithubTask
       })
-    }
+    })
+  }
 
-    if (!isPlaywright) {
-      // Push new tasks to providers (two_way sync)
-      ipcMain.on('db:tasks:create:done', (_event, taskId: string, projectId: string) => {
-        void pushNewTaskToProviders(db, taskId, projectId)
-      })
+  if (!isPlaywright) {
+    // Push new tasks to providers (two_way sync)
+    ipcMain.on('db:tasks:create:done', (_event, taskId: string, projectId: string) => {
+      void pushNewTaskToProviders(db, taskId, projectId)
+    })
 
-      // Archive/unarchive sync to providers
-      ipcMain.on('db:tasks:archive:done', (_event, taskId: string) => {
-        void pushArchiveToProviders(db, taskId)
-      })
-      ipcMain.on('db:tasks:unarchive:done', (_event, taskId: string) => {
-        void pushUnarchiveToProviders(db, taskId)
-      })
-    }
-  } else {
-    logBoot('integrations disabled')
+    // Archive/unarchive sync to providers
+    ipcMain.on('db:tasks:archive:done', (_event, taskId: string) => {
+      void pushArchiveToProviders(db, taskId)
+    })
+    ipcMain.on('db:tasks:unarchive:done', (_event, taskId: string) => {
+      void pushUnarchiveToProviders(db, taskId)
+    })
   }
 
   initAutoUpdater()
@@ -1228,10 +1220,12 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
-  ipcMain.handle('app:is-context-manager-enabled', () => isContextManagerEnabled)
-  ipcMain.on('app:is-context-manager-enabled-sync', (event) => { event.returnValue = isContextManagerEnabled })
-  ipcMain.handle('app:is-integrations-enabled', () => isIntegrationsEnabled)
-  ipcMain.on('app:is-integrations-enabled-sync', (event) => { event.returnValue = isIntegrationsEnabled })
+  ipcMain.handle('app:is-context-manager-enabled', () => isLabEnabled('labs_context_manager'))
+  ipcMain.on('app:is-context-manager-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_context_manager') })
+  ipcMain.handle('app:is-integrations-enabled', () => isLabEnabled('labs_integrations'))
+  ipcMain.on('app:is-integrations-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_integrations') })
+  ipcMain.handle('app:is-tests-panel-enabled', () => isLabEnabled('labs_tests_panel'))
+  ipcMain.on('app:is-tests-panel-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_tests_panel') })
   ipcMain.handle('app:get-protocol-client-status', () => protocolClientStatus)
   ipcMain.handle('app:restart-for-update', () => restartForUpdate())
   ipcMain.handle('app:check-for-updates', () => checkForUpdates())
@@ -1712,7 +1706,7 @@ app.whenReady().then(async () => {
       db.exec('PRAGMA foreign_keys = ON')
       db.pragma('user_version = 0')
       runMigrations(db)
-      if (isIntegrationsEnabled) ensureIntegrationSchema(db)
+      ensureIntegrationSchema(db)
       normalizeProjectStatusData(db)
       syncTerminalModes(db)
 

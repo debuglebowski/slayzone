@@ -37,10 +37,16 @@ export function ProjectSettingsDialog({
   onOpenGlobalAiConfig,
   onUpdated
 }: ProjectSettingsDialogProps) {
-  const integrationsEnabled = window.api.app.isIntegrationsEnabled
+  const [integrationsEnabled, setIntegrationsEnabled] = useState(window.api.app.isIntegrationsEnabledSync)
   const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'columns' | 'worktrees' | 'integrations' | 'ai-config' | 'tests'>('general')
-  const contextManagerEnabled = window.api.app.isContextManagerEnabledSync
+  const [contextManagerEnabled, setContextManagerEnabled] = useState(window.api.app.isContextManagerEnabledSync)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    window.api.app.isContextManagerEnabled().then(setContextManagerEnabled)
+    window.api.app.isIntegrationsEnabled().then(setIntegrationsEnabled)
+  }, [open])
 
   const checkIntegrationLock = useCallback(async () => {
     if (!project || !integrationsEnabled || window.api.app.isPlaywright) {

@@ -99,8 +99,10 @@ const api: ElectronAPI = {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     isContextManagerEnabled: () => ipcRenderer.invoke('app:is-context-manager-enabled'),
     isContextManagerEnabledSync: ipcRenderer.sendSync('app:is-context-manager-enabled-sync') as boolean,
-    isIntegrationsEnabled: ipcRenderer.sendSync('app:is-integrations-enabled-sync') as boolean,
-    isTestsPanelEnabled: ipcRenderer.sendSync('app:is-tests-panel-enabled-sync') as boolean,
+    isIntegrationsEnabled: () => ipcRenderer.invoke('app:is-integrations-enabled'),
+    isIntegrationsEnabledSync: ipcRenderer.sendSync('app:is-integrations-enabled-sync') as boolean,
+    isTestsPanelEnabled: () => ipcRenderer.invoke('app:is-tests-panel-enabled'),
+    isTestsPanelEnabledSync: ipcRenderer.sendSync('app:is-tests-panel-enabled-sync') as boolean,
     isPlaywright: process.env.PLAYWRIGHT === '1',
     onGoHome: (callback: () => void) => {
       const handler = () => callback()

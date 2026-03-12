@@ -16,11 +16,11 @@ import { PanelsSettingsTab } from './tabs/PanelsSettingsTab'
 import { AiProvidersSettingsTab } from './tabs/AiProvidersSettingsTab'
 import { TagsSettingsTab } from './tabs/TagsSettingsTab'
 import { DataSettingsTab } from './tabs/DataSettingsTab'
-import { LabsSettingsTab } from './tabs/LabsSettingsTab'
 import { DiagnosticsSettingsTab } from './tabs/DiagnosticsSettingsTab'
 import { AboutSettingsTab } from './tabs/AboutSettingsTab'
 import { WorktreesSettingsTab } from './tabs/WorktreesSettingsTab'
 import { BackupSettingsTab } from './tabs/BackupSettingsTab'
+import { LabsSettingsTab } from './tabs/LabsSettingsTab'
 import { SettingsTabIntro } from './tabs/SettingsTabIntro'
 
 function TelemetrySettingsTab() {
