@@ -57,7 +57,7 @@ interface TabState {
   reopenClosedTab: () => void
 
   // Internal
-  _loadState: (state: { tabs: Tab[]; activeTabIndex: number; selectedProjectId: string }) => void
+  _loadState: (state: { tabs: Tab[]; activeTabIndex: number; selectedProjectId: string }, opts?: { leaderboardEnabled?: boolean }) => void
 }
 
 function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup): number {
@@ -84,7 +84,7 @@ function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup
 
 export const useTabStore = create<TabState>()(
   subscribeWithSelector((set, get) => ({
-    tabs: [{ type: 'home' }, { type: 'leaderboard', title: 'Leaderboard' }],
+    tabs: [{ type: 'home' }],
     activeTabIndex: 0,
     selectedProjectId: '',
     closedTabs: [],
@@ -190,14 +190,19 @@ export const useTabStore = create<TabState>()(
       set({ closedTabs: newClosed })
     },
 
-    _loadState: (state) => {
+    _loadState: (state, opts?: { leaderboardEnabled?: boolean }) => {
+      const leaderboardEnabled = opts?.leaderboardEnabled ?? true
       const validTabs = Array.isArray(state.tabs) && state.tabs.length > 0 ? state.tabs : [{ type: 'home' as const }]
       if (validTabs[0]?.type !== 'home') {
         validTabs.unshift({ type: 'home' })
       }
-      if (!validTabs.some((t) => t.type === 'leaderboard')) {
+      if (leaderboardEnabled && !validTabs.some((t) => t.type === 'leaderboard')) {
         const homeIdx = validTabs.findIndex((t) => t.type === 'home')
         validTabs.splice(homeIdx + 1, 0, { type: 'leaderboard', title: 'Leaderboard' })
+      }
+      if (!leaderboardEnabled) {
+        const lbIdx = validTabs.findIndex((t) => t.type === 'leaderboard')
+        if (lbIdx >= 0) validTabs.splice(lbIdx, 1)
       }
       const clampedIndex = Math.max(0, Math.min(state.activeTabIndex ?? 0, validTabs.length - 1))
       set({
@@ -213,15 +218,22 @@ export const useTabStore = create<TabState>()(
 // Eagerly load persisted state at module scope — runs before any component mounts,
 // eliminating race conditions between store hydration and React effects.
 export const tabStoreReady: Promise<void> = (typeof window !== 'undefined' && window.api?.settings
-  ? window.api.settings.get('viewState').then((value) => {
+  ? Promise.all([
+    window.api.settings.get('viewState'),
+    window.api.settings.get('leaderboard_enabled')
+  ]).then(([value, lbVal]) => {
+    const leaderboardEnabled = lbVal !== '0'
     if (value) {
       try {
-        useTabStore.getState()._loadState(JSON.parse(value))
+        useTabStore.getState()._loadState(JSON.parse(value), { leaderboardEnabled })
       } catch {
         useTabStore.setState({ isLoaded: true })
       }
     } else {
-      useTabStore.setState({ isLoaded: true })
+      useTabStore.getState()._loadState(
+        { tabs: [], activeTabIndex: 0, selectedProjectId: '' },
+        { leaderboardEnabled }
+      )
     }
   }).catch(() => {
     // IPC failure — render with default state rather than permanent white screen
