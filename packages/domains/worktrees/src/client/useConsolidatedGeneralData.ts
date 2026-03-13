@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import type { CommitInfo, AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest, ResolvedGraph } from '../shared/types'
+import type { CommitInfo, AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest } from '../shared/types'
 import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
   joinWorktreePath,
@@ -43,10 +43,6 @@ export interface ConsolidatedGeneralData {
   pr: GhPullRequest | null
   metadata: WorktreeMetadata | null
   branchLoading: boolean
-
-  // Resolved graphs
-  worktreeGraph: ResolvedGraph | null
-  upstreamGraph: ResolvedGraph | null
 
   // Computed
   hasWorktree: boolean
@@ -119,10 +115,6 @@ export function useConsolidatedGeneralData(
   const [branchLoading, setBranchLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
-  // Resolved graphs
-  const [worktreeGraph, setWorktreeGraph] = useState<ResolvedGraph | null>(null)
-  const [upstreamGraph, setUpstreamGraph] = useState<ResolvedGraph | null>(null)
-
   const initialLoad = useRef(false)
 
 
@@ -151,26 +143,6 @@ export function useConsolidatedGeneralData(
         setStatusSummary(status)
         setRecentCommits(commits)
         setUpstreamAB(uab)
-
-        // Fetch upstream graph (for non-worktree tasks)
-        if (!hasWorktree && activeBranch && uab && (uab.ahead > 0 || uab.behind > 0)) {
-          try {
-            const result = await window.api.git.getResolvedUpstreamGraph(targetPath, activeBranch)
-            setUpstreamGraph(result?.graph ?? null)
-          } catch {
-            setUpstreamGraph(null)
-          }
-        } else if (!hasWorktree && activeBranch) {
-          // No divergence — single-branch graph of recent commits
-          try {
-            const graph = await window.api.git.getResolvedRecentCommits(targetPath, 40, activeBranch)
-            setUpstreamGraph(graph)
-          } catch {
-            setUpstreamGraph(null)
-          }
-        } else {
-          setUpstreamGraph(null)
-        }
       }
     } catch { /* polling error */ }
   }, [projectPath, targetPath, hasWorktree, worktreeBranch])
@@ -185,12 +157,11 @@ export function useConsolidatedGeneralData(
 
       const repoPath = projectPath || targetPath
 
-      // Single call gets graph + fork point + counts
+      // Get fork point + counts for status display
       const result = await window.api.git.getResolvedForkGraph(
         targetPath, repoPath, branch, parentBranch,
         branch, parentBranch
       )
-      setWorktreeGraph(result?.graph ?? null)
       setForkPoint(result?.forkPoint ?? null)
       setFeatureCount(result?.featureCount ?? 0)
       setBaseCount(result?.baseCount ?? 0)
@@ -438,7 +409,7 @@ export function useConsolidatedGeneralData(
     isGitRepo, currentBranch, worktreeBranch, statusSummary, recentCommits,
     remoteUrl, upstreamAB,
     forkPoint, featureCount, baseCount, taskBranch, diffStats, pr, metadata,
-    branchLoading, worktreeGraph, upstreamGraph,
+    branchLoading,
     hasWorktree, targetPath, totalChanges, parentBranch,
     sluggedBranch: slugify(task.title) || `task-${task.id.slice(0, 8)}`,
     handleAddWorktree, handleLinkWorktree, handleRemoveWorktree, handleInitGit,
