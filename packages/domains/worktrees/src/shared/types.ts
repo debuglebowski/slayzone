@@ -208,16 +208,16 @@ export interface WorktreeMetadata {
 // --- Commit graph config ---
 
 export interface CommitGraphConfig {
-  /** Branch shown as the left/base column */
+  /** Branch shown as the left/base column (resolved at runtime, not user-editable) */
   baseBranch: string
-  /** Branches always shown (additional columns) */
-  forcedBranches: string[]
-  /** Branches whose children are auto-included */
-  includeChildrenOf: string[]
-  /** Include already-merged branches */
-  showMergedBranches: boolean
   /** Show individual commits vs collapsed summaries */
   collapsed: boolean
+  /** Show child branches of base branch */
+  includeChildBranches: boolean
+  /** Show merged/deleted PR branches */
+  includeDeletedBranches: boolean
+  /** Collapsed only: break collapse chain at tagged commits */
+  includeTags: boolean
 }
 
 // --- DAG graph data ---

@@ -9,6 +9,8 @@ interface CommitGraphProps {
   graph: ResolvedGraph
   filterQuery?: string
   tipsOnly?: boolean
+  /** When tipsOnly, also break collapse chain at tagged commits */
+  includeTags?: boolean
   /** Max rows to render (layout uses all commits for accurate topology) */
   renderLimit?: number
   className?: string
@@ -394,14 +396,14 @@ interface CollapsedDag {
   rowOffsets: Map<number, number>
 }
 
-function computeCollapsedDag(fullLayout: DagLayout): CollapsedDag {
+function computeCollapsedDag(fullLayout: DagLayout, includeTags = true): CollapsedDag {
   const { nodes, edges, maxColumn } = fullLayout
   if (nodes.length === 0) return { nodes: [], edges: [], groups: [], maxColumn: 0, totalRows: 0, rowOffsets: new Map() }
 
   // Identify head rows (nodes with branchRefs or synthetic branches)
   const headRows = new Set<number>()
   for (const n of nodes) {
-    if (n.commit.branchRefs.length > 0 || n.syntheticBranch || n.commit.tags.length > 0) headRows.add(n.row)
+    if (n.commit.branchRefs.length > 0 || n.syntheticBranch || (includeTags && n.commit.tags.length > 0)) headRows.add(n.row)
   }
 
   // Build segments: consecutive head or non-head rows
@@ -647,7 +649,7 @@ function CommitGroupRow({ count, color, gutterWidth }: {
 
 // --- Main component ---
 
-export function CommitGraph({ graph, filterQuery, tipsOnly, renderLimit, className }: CommitGraphProps) {
+export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, renderLimit, className }: CommitGraphProps) {
   const { copiedHash, handleCopy } = useCopyHash()
 
   const hasTopology = useMemo(() => graph.commits.some(c => c.parents.length > 0), [graph])
@@ -658,8 +660,8 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, renderLimit, classNa
     [graph, hasTopology]
   )
   const collapsed = useMemo(
-    () => tipsOnly ? computeCollapsedDag(fullLayout) : null,
-    [fullLayout, tipsOnly]
+    () => tipsOnly ? computeCollapsedDag(fullLayout, includeTags) : null,
+    [fullLayout, tipsOnly, includeTags]
   )
 
   // Map colorIndex → branch name for tooltip overlays
