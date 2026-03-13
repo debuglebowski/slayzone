@@ -8,7 +8,6 @@ interface WebviewElement extends HTMLElement {
   loadURL(url: string): void
   getURL(): string
   getWebContentsId(): number
-  executeJavaScript(code: string): Promise<string>
 }
 
 export interface DeviceLayout {
