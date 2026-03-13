@@ -39,7 +39,7 @@ function main() {
   const { artifacts } = manifest
   const baseUrl = `https://github.com/debuglebowski/slayzone/releases/download/${tag}`
 
-  const linuxAppImage = findArtifact(artifacts, 'SlayZone-x64.AppImage')
+  const linuxAppImage = findArtifact(artifacts, 'SlayZone-x86_64.AppImage')
   const macArm64Zip = findArtifact(artifacts, 'SlayZone-arm64.zip')
   const macX64Zip = findArtifact(artifacts, 'SlayZone-x64.zip')
 
