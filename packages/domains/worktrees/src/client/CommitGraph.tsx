@@ -802,10 +802,6 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, renderL
         const primaryColor = group.columns[0] ? getColor(group.columns[0].colorIndex) : getColor(0)
         return <CommitGroupRow key={`grp-${group.row}`} count={group.count} color={primaryColor} gutterWidth={gutterWidth} />
       })}
-      {/* Fade-out at bottom */}
-      <div className="h-8 pointer-events-none" style={{
-        background: 'linear-gradient(to bottom, var(--color-card), transparent)'
-      }} />
     </div>
   )
 }

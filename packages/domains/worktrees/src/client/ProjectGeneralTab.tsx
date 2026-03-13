@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { GitBranch, ChevronDown, Check, Loader2, Plus, Copy, FolderGit2 } from 'lucide-react'
 import { Button, IconButton, Input, Popover, PopoverContent, PopoverTrigger, cn, toast } from '@slayzone/ui'
-import type { StatusSummary, AheadBehind, ResolvedGraph } from '../shared/types'
+import type { StatusSummary, AheadBehind } from '../shared/types'
 import { RemoteSection } from './RemoteSection'
-import { CommitGraph } from './CommitGraph'
+import { useBranchGraph, BranchGraphToolbar, BranchGraphCard } from './BranchesTab'
 
 interface ProjectGeneralTabProps {
   projectPath: string | null
@@ -20,7 +20,6 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
 
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [upstreamAB, setUpstreamAB] = useState<AheadBehind | null>(null)
-  const [upstreamGraph, setUpstreamGraph] = useState<ResolvedGraph | null>(null)
 
   const [branchPopoverOpen, setBranchPopoverOpen] = useState(false)
   const [branches, setBranches] = useState<string[]>([])
@@ -28,6 +27,8 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
   const [newBranchName, setNewBranchName] = useState('')
   const [switching, setSwitching] = useState(false)
   const [branchError, setBranchError] = useState<string | null>(null)
+
+  const branchGraph = useBranchGraph(projectPath, visible && isGitRepo === true)
 
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return
@@ -46,26 +47,8 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
       if (branch) {
         const uab = await window.api.git.getAheadBehindUpstream(projectPath, branch)
         setUpstreamAB(uab)
-
-        if (uab && (uab.ahead > 0 || uab.behind > 0)) {
-          try {
-            const result = await window.api.git.getResolvedUpstreamGraph(projectPath, branch)
-            setUpstreamGraph(result?.graph ?? null)
-          } catch {
-            setUpstreamGraph(null)
-          }
-        } else {
-          // No divergence — single-branch graph of recent commits
-          try {
-            const graph = await window.api.git.getResolvedRecentCommits(projectPath, 40, branch)
-            setUpstreamGraph(graph)
-          } catch {
-            setUpstreamGraph(null)
-          }
-        }
       } else {
         setUpstreamAB(null)
-        setUpstreamGraph(null)
       }
     } catch { /* polling error */ }
   }, [projectPath])
@@ -250,15 +233,17 @@ export function ProjectGeneralTab({ projectPath, visible, onSwitchToDiff }: Proj
 
       </div>
 
-      {/* Recent commits */}
-      {upstreamGraph && upstreamGraph.commits.length > 0 && (
-        <div className="flex-1 min-h-[200px] flex flex-col p-4 pt-6">
-          <div className="shrink-0 text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Recent Commits</div>
-          <div className="min-h-0 overflow-y-auto rounded-lg border bg-muted/30 p-2">
-            <CommitGraph graph={upstreamGraph} />
-          </div>
+      {/* Branch graph */}
+      <div className="flex-1 min-h-[200px] flex flex-col p-4 pt-6">
+        <div className="shrink-0 flex items-end gap-2 mb-2">
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Commits & Branches</div>
+          <div className="flex-1" />
+          <BranchGraphToolbar state={branchGraph} />
         </div>
-      )}
+        <div className="flex-1 min-h-0">
+          <BranchGraphCard state={branchGraph} />
+        </div>
+      </div>
     </div>
   )
 }

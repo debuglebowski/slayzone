@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import type { CommitInfo, AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest } from '../shared/types'
+import type { AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest } from '../shared/types'
 import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
   joinWorktreePath,
@@ -30,7 +30,6 @@ export interface ConsolidatedGeneralData {
   currentBranch: string | null
   worktreeBranch: string | null
   statusSummary: StatusSummary | null
-  recentCommits: CommitInfo[]
   remoteUrl: string | null
   upstreamAB: AheadBehind | null
 
@@ -92,7 +91,6 @@ export function useConsolidatedGeneralData(
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null)
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null)
-  const [recentCommits, setRecentCommits] = useState<CommitInfo[]>([])
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [upstreamAB, setUpstreamAB] = useState<AheadBehind | null>(null)
   const [initializing, setInitializing] = useState(false)
@@ -135,13 +133,11 @@ export function useConsolidatedGeneralData(
 
       if (targetPath) {
         const activeBranch = hasWorktree ? worktreeBranch : branch
-        const [status, commits, uab] = await Promise.all([
+        const [status, uab] = await Promise.all([
           window.api.git.getStatusSummary(targetPath),
-          window.api.git.getRecentCommits(targetPath, 40),
           activeBranch ? window.api.git.getAheadBehindUpstream(targetPath, activeBranch) : Promise.resolve(null)
         ])
         setStatusSummary(status)
-        setRecentCommits(commits)
         setUpstreamAB(uab)
       }
     } catch { /* polling error */ }
@@ -406,7 +402,7 @@ export function useConsolidatedGeneralData(
   const totalChanges = statusSummary ? statusSummary.staged + statusSummary.unstaged + statusSummary.untracked : 0
 
   return {
-    isGitRepo, currentBranch, worktreeBranch, statusSummary, recentCommits,
+    isGitRepo, currentBranch, worktreeBranch, statusSummary,
     remoteUrl, upstreamAB,
     forkPoint, featureCount, baseCount, taskBranch, diffStats, pr, metadata,
     branchLoading,

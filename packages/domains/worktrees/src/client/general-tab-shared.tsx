@@ -49,7 +49,7 @@ export function MergeBanner({ mergeState, onSwitchTab }: { mergeState: string; o
 
 // --- Status chips ---
 
-export function StatusChips({ data, onSwitchTab }: { data: ConsolidatedGeneralData; onSwitchTab: (tab: 'changes' | 'conflicts' | 'branches') => void }) {
+export function StatusChips({ data, onSwitchTab }: { data: ConsolidatedGeneralData; onSwitchTab: (tab: 'changes' | 'conflicts') => void }) {
   const { statusSummary, totalChanges } = data
   if (!statusSummary || totalChanges === 0) {
     return <span className="text-xs text-muted-foreground">No changes</span>

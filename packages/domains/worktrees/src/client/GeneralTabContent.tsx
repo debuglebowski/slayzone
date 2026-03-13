@@ -32,7 +32,7 @@ interface GeneralTabContentProps {
   hasGithubRemote?: boolean
   onUpdateTask: (data: UpdateTaskInput) => Promise<Task>
   onTaskUpdated: (task: Task) => void
-  onSwitchTab: (tab: 'changes' | 'conflicts' | 'branches' | 'pr') => void
+  onSwitchTab: (tab: 'changes' | 'conflicts' | 'pr') => void
 }
 
 export function GeneralTabContent({
@@ -160,14 +160,14 @@ export function GeneralTabContent({
 
       {/* Commit graph */}
       <div className="flex-1 min-h-0 flex flex-col">
-        <div className="shrink-0 px-4 pt-4 flex items-center">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Commits</div>
+        <div className="shrink-0 px-4 pt-4 mb-0.5 flex items-end">
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Commits & Branches</div>
           <div className="flex-1" />
           <div className="flex items-center gap-0.5">
             <BranchGraphToolbar state={branchGraph} />
           </div>
         </div>
-        <div className="flex-1 min-h-0 p-3">
+        <div className="flex-1 min-h-0 px-3 pb-3">
           <BranchGraphCard state={branchGraph} />
         </div>
       </div>
