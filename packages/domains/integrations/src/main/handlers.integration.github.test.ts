@@ -56,6 +56,86 @@ try {
   ok('getViewer returns user info')
 } catch (e) { no('getViewer returns user info', e) }
 
+// ── Connect (handler-level) ───────────────────────────────────────────────
+console.log('\nGitHub: Connect handler')
+let handlerConnectionId = ''
+try {
+  const result = await h.invoke('integrations:connect-github', { token: GITHUB_TOKEN }) as any
+  expect(result.provider).toBe('github')
+  expect(result.enabled).toBe(true)
+  expect('credential_ref' in result).toBe(false)
+  handlerConnectionId = result.id
+  ok('connect-github creates connection')
+} catch (e) { no('connect-github creates connection', e) }
+
+try {
+  let threw = false
+  try { await h.invoke('integrations:connect-github', { token: '  ' }) } catch { threw = true }
+  expect(threw).toBe(true)
+  ok('connect-github rejects empty token')
+} catch (e) { no('connect-github rejects empty token', e) }
+
+// ── Connection management (handler-level) ────────────────────────────────
+console.log('\nGitHub: Connection management')
+if (handlerConnectionId) {
+  try {
+    const connections = await h.invoke('integrations:list-connections', 'github') as any[]
+    expect(connections.length).toBeGreaterThan(0)
+    const found = connections.find((c: any) => c.id === handlerConnectionId)
+    expect(found).toBeTruthy()
+    ok('list-connections returns github connections')
+  } catch (e) { no('list-connections returns github connections', e) }
+
+  try {
+    const usage = await h.invoke('integrations:get-connection-usage', handlerConnectionId) as any
+    expect(typeof usage.mapped_project_count).toBe('number')
+    ok('get-connection-usage returns usage')
+  } catch (e) { no('get-connection-usage returns usage', e) }
+
+  try {
+    await h.invoke('integrations:update-connection', {
+      connectionId: handlerConnectionId, credential: GITHUB_TOKEN
+    })
+    ok('update-connection updates credential')
+  } catch (e) { no('update-connection updates credential', e) }
+
+  // set/get/clear project connection
+  const connTestProjectId = `proj-conn-test-${Date.now()}`
+  h.db.prepare(`INSERT INTO projects (id, name, color, path, created_at, updated_at)
+    VALUES (?, 'Conn Test', '#888888', '/tmp/conn-test', datetime('now'), datetime('now'))`)
+    .run(connTestProjectId)
+
+  try {
+    await h.invoke('integrations:set-project-connection', {
+      projectId: connTestProjectId, provider: 'github', connectionId: handlerConnectionId
+    })
+    const connId = await h.invoke('integrations:get-project-connection', connTestProjectId, 'github') as any
+    expect(connId).toBeTruthy()
+    expect(connId).toBe(handlerConnectionId)
+    ok('set/get-project-connection works')
+  } catch (e) { no('set/get-project-connection works', e) }
+
+  // Use a disposable connection for clear test so handlerConnectionId survives
+  const clearConnResult = await h.invoke('integrations:connect-github', { token: GITHUB_TOKEN }) as any
+  const clearConnId = clearConnResult.id
+  const clearProjectId = `proj-clear-conn-${Date.now()}`
+  h.db.prepare(`INSERT INTO projects (id, name, color, path, created_at, updated_at)
+    VALUES (?, 'Clear Conn', '#888888', '/tmp/clear-conn', datetime('now'), datetime('now'))`)
+    .run(clearProjectId)
+  await h.invoke('integrations:set-project-connection', {
+    projectId: clearProjectId, provider: 'github', connectionId: clearConnId
+  })
+
+  try {
+    await h.invoke('integrations:clear-project-connection', {
+      projectId: clearProjectId, provider: 'github'
+    })
+    const connId = await h.invoke('integrations:get-project-connection', clearProjectId, 'github') as any
+    expect(connId).toBeNull()
+    ok('clear-project-connection removes connection')
+  } catch (e) { no('clear-project-connection removes connection', e) }
+}
+
 // ── Discovery ─────────────────────────────────────────────────────────────
 console.log('\nGitHub: Discovery')
 try {
@@ -65,6 +145,38 @@ try {
   expect(testRepo).toBeTruthy()
   ok('listRepositories includes test repo')
 } catch (e) { no('listRepositories includes test repo', e) }
+
+if (handlerConnectionId) {
+  try {
+    const repos = await h.invoke('integrations:list-github-repositories', handlerConnectionId) as any[]
+    expect(repos.length).toBeGreaterThan(0)
+    ok('list-github-repositories handler returns repos')
+  } catch (e) { no('list-github-repositories handler returns repos', e) }
+
+  try {
+    const projects = await h.invoke('integrations:list-github-projects', handlerConnectionId) as any[]
+    expect(Array.isArray(projects)).toBe(true)
+    ok('list-github-projects handler returns array')
+  } catch (e) { no('list-github-projects handler returns array', e) }
+
+  if (GITHUB_TEST_PROJECT_ID) {
+    try {
+      const result = await h.invoke('integrations:list-github-issues', {
+        connectionId: handlerConnectionId, githubProjectId: GITHUB_TEST_PROJECT_ID, limit: 5
+      }) as any
+      expect(Array.isArray(result.issues)).toBe(true)
+      ok('list-github-issues handler returns project issues')
+    } catch (e) { no('list-github-issues handler returns project issues', e) }
+  }
+
+  try {
+    const result = await h.invoke('integrations:list-github-repository-issues', {
+      connectionId: handlerConnectionId, repositoryFullName: GITHUB_TEST_REPO, limit: 5
+    }) as any
+    expect(Array.isArray(result.issues)).toBe(true)
+    ok('list-github-repository-issues handler returns repo issues')
+  } catch (e) { no('list-github-repository-issues handler returns repo issues', e) }
+}
 
 // ── Issue CRUD ────────────────────────────────────────────────────────────
 console.log('\nGitHub: Issue CRUD')
@@ -700,6 +812,46 @@ if (GITHUB_TEST_PROJECT_ID) {
   } catch (e) { no('fetch-provider-statuses returns project statuses', e) }
 } else {
   console.log('\nGitHub: Projects V2 status sync (skipped: no GITHUB_TEST_PROJECT_ID)')
+}
+
+// ── Destructive: clear-project-provider + disconnect (run last) ──────────
+console.log('\nGitHub: Clear/disconnect')
+{
+  // Use a fresh mapping to test clear-project-provider without affecting other tests
+  const clearTest = seedFullMapping(h.db, 'github', GITHUB_TOKEN, {
+    teamId: REPO_OWNER, teamKey: REPO_OWNER,
+    syncMode: 'two_way', repoOwner: REPO_OWNER, repoName: REPO_NAME
+  })
+  // Create a task + link in this mapping
+  const clearTaskId = crypto.randomUUID()
+  h.db.prepare(`INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+    VALUES (?, ?, 'clear test', 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), datetime('now'))`)
+    .run(clearTaskId, clearTest.projectId)
+  h.db.prepare(`INSERT INTO external_links (id, provider, connection_id, external_type, external_id, external_key, external_url, task_id, sync_state, created_at, updated_at)
+    VALUES (?, 'github', ?, 'issue', 'ext-clear', 'owner/repo#999', '', ?, 'active', datetime('now'), datetime('now'))`)
+    .run(crypto.randomUUID(), clearTest.connectionId, clearTaskId)
+
+  try {
+    await h.invoke('integrations:clear-project-provider', { projectId: clearTest.projectId, provider: 'github' })
+    const links = h.db.prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'github'").all(clearTaskId) as any[]
+    expect(links.length).toBe(0)
+    const mapping = h.db.prepare("SELECT * FROM integration_project_mappings WHERE id = ?").get(clearTest.mappingId) as any
+    expect(mapping).toBeUndefined()
+    // Task should still exist (only link removed)
+    const task = h.db.prepare("SELECT * FROM tasks WHERE id = ?").get(clearTaskId) as any
+    expect(task).toBeTruthy()
+    ok('clear-project-provider removes links/mappings, keeps tasks')
+  } catch (e) { no('clear-project-provider removes links/mappings, keeps tasks', e) }
+
+  // Disconnect handler connection (if we created one via connect-github handler)
+  if (handlerConnectionId) {
+    try {
+      await h.invoke('integrations:disconnect', handlerConnectionId)
+      const conn = h.db.prepare("SELECT * FROM integration_connections WHERE id = ?").get(handlerConnectionId) as any
+      expect(conn).toBeUndefined()
+      ok('disconnect removes connection')
+    } catch (e) { no('disconnect removes connection', e) }
+  }
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────

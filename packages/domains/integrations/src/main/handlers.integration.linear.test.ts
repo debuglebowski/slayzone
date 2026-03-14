@@ -49,6 +49,85 @@ try {
   ok('getViewer returns workspace info')
 } catch (e) { no('getViewer returns workspace info', e) }
 
+// ── Connect (handler-level) ───────────────────────────────────────────────
+console.log('\nLinear: Connect handler')
+let handlerConnectionId = ''
+try {
+  const result = await h.invoke('integrations:connect-linear', { apiKey: LINEAR_API_KEY }) as any
+  expect(result.provider).toBe('linear')
+  expect(result.enabled).toBe(true)
+  expect('credential_ref' in result).toBe(false)
+  handlerConnectionId = result.id
+  ok('connect-linear creates connection via handler')
+} catch (e) { no('connect-linear creates connection via handler', e) }
+
+try {
+  let threw = false
+  try { await h.invoke('integrations:connect-linear', { apiKey: '  ' }) } catch { threw = true }
+  expect(threw).toBe(true)
+  ok('connect-linear rejects empty API key')
+} catch (e) { no('connect-linear rejects empty API key', e) }
+
+// ── Connection management ────────────────────────────────────────────────
+console.log('\nLinear: Connection management')
+if (handlerConnectionId) {
+  try {
+    const connections = await h.invoke('integrations:list-connections', 'linear') as any[]
+    expect(connections.length).toBeGreaterThan(0)
+    ok('list-connections returns linear connections')
+  } catch (e) { no('list-connections returns linear connections', e) }
+
+  try {
+    const usage = await h.invoke('integrations:get-connection-usage', handlerConnectionId) as any
+    expect(typeof usage.mapped_project_count).toBe('number')
+    ok('get-connection-usage returns usage')
+  } catch (e) { no('get-connection-usage returns usage', e) }
+
+  try {
+    await h.invoke('integrations:update-connection', {
+      connectionId: handlerConnectionId, credential: LINEAR_API_KEY
+    })
+    ok('update-connection updates credential')
+  } catch (e) { no('update-connection updates credential', e) }
+
+  // set/get/clear project connection — use a separate connection for clear test
+  // because clear-project-connection deletes unused connections
+  const connTestProjectId = `proj-conn-test-${Date.now()}`
+  h.db.prepare(`INSERT INTO projects (id, name, color, path, created_at, updated_at)
+    VALUES (?, 'Conn Test', '#888888', '/tmp/conn-test', datetime('now'), datetime('now'))`)
+    .run(connTestProjectId)
+
+  try {
+    await h.invoke('integrations:set-project-connection', {
+      projectId: connTestProjectId, provider: 'linear', connectionId: handlerConnectionId
+    })
+    const connId = await h.invoke('integrations:get-project-connection', connTestProjectId, 'linear') as any
+    expect(connId).toBeTruthy()
+    expect(connId).toBe(handlerConnectionId)
+    ok('set/get-project-connection works')
+  } catch (e) { no('set/get-project-connection works', e) }
+
+  // Use a disposable connection for clear test so handlerConnectionId survives
+  const clearConnResult = await h.invoke('integrations:connect-linear', { apiKey: LINEAR_API_KEY }) as any
+  const clearConnId = clearConnResult.id
+  const clearProjectId = `proj-clear-conn-${Date.now()}`
+  h.db.prepare(`INSERT INTO projects (id, name, color, path, created_at, updated_at)
+    VALUES (?, 'Clear Conn', '#888888', '/tmp/clear-conn', datetime('now'), datetime('now'))`)
+    .run(clearProjectId)
+  await h.invoke('integrations:set-project-connection', {
+    projectId: clearProjectId, provider: 'linear', connectionId: clearConnId
+  })
+
+  try {
+    await h.invoke('integrations:clear-project-connection', {
+      projectId: clearProjectId, provider: 'linear'
+    })
+    const connId = await h.invoke('integrations:get-project-connection', clearProjectId, 'linear') as any
+    expect(connId).toBeNull()
+    ok('clear-project-connection removes connection')
+  } catch (e) { no('clear-project-connection removes connection', e) }
+}
+
 // ── Discovery ─────────────────────────────────────────────────────────────
 console.log('\nLinear: Discovery')
 let teamKey = 'TST'
@@ -69,6 +148,29 @@ try {
   expect(types.has('started') || types.has('unstarted')).toBe(true)
   ok('listWorkflowStates returns states')
 } catch (e) { no('listWorkflowStates returns states', e) }
+
+// Handler-level discovery
+if (handlerConnectionId) {
+  try {
+    const result = await h.invoke('integrations:list-linear-teams', handlerConnectionId) as any
+    expect(result.teams.length).toBeGreaterThan(0)
+    ok('list-linear-teams handler returns teams')
+  } catch (e) { no('list-linear-teams handler returns teams', e) }
+
+  try {
+    const projects = await h.invoke('integrations:list-linear-projects', handlerConnectionId, LINEAR_TEST_TEAM_ID) as any[]
+    expect(Array.isArray(projects)).toBe(true)
+    ok('list-linear-projects handler returns array')
+  } catch (e) { no('list-linear-projects handler returns array', e) }
+
+  try {
+    const result = await h.invoke('integrations:list-linear-issues', {
+      connectionId: handlerConnectionId, teamId: LINEAR_TEST_TEAM_ID, limit: 5
+    }) as any
+    expect(Array.isArray(result.issues)).toBe(true)
+    ok('list-linear-issues handler returns issues')
+  } catch (e) { no('list-linear-issues handler returns issues', e) }
+}
 
 // ── Issue CRUD ────────────────────────────────────────────────────────────
 console.log('\nLinear: Issue CRUD')
@@ -656,6 +758,43 @@ if (createdIssueId) {
     expect(emptyResult.size).toBe(0)
     ok('getIssuesBatch with empty array returns empty map')
   } catch (e) { no('getIssuesBatch with empty array returns empty map', e) }
+}
+
+// ── Destructive: clear-project-provider + disconnect (run last) ──────────
+console.log('\nLinear: Clear/disconnect')
+{
+  const clearTest = seedFullMapping(h.db, 'linear', LINEAR_API_KEY, {
+    teamId: LINEAR_TEST_TEAM_ID, teamKey,
+    syncMode: 'two_way',
+    workflowStates: workflowStates.map(s => ({ id: s.id, type: s.type }))
+  })
+  const clearTaskId = crypto.randomUUID()
+  h.db.prepare(`INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, claude_flags, codex_flags, created_at, updated_at)
+    VALUES (?, ?, 'clear test', 'todo', 3, 'claude-code', '{}', '', '', datetime('now'), datetime('now'))`)
+    .run(clearTaskId, clearTest.projectId)
+  h.db.prepare(`INSERT INTO external_links (id, provider, connection_id, external_type, external_id, external_key, external_url, task_id, sync_state, created_at, updated_at)
+    VALUES (?, 'linear', ?, 'issue', 'ext-clear', 'ENG-999', '', ?, 'active', datetime('now'), datetime('now'))`)
+    .run(crypto.randomUUID(), clearTest.connectionId, clearTaskId)
+
+  try {
+    await h.invoke('integrations:clear-project-provider', { projectId: clearTest.projectId, provider: 'linear' })
+    const links = h.db.prepare("SELECT * FROM external_links WHERE task_id = ? AND provider = 'linear'").all(clearTaskId) as any[]
+    expect(links.length).toBe(0)
+    const mapping = h.db.prepare("SELECT * FROM integration_project_mappings WHERE id = ?").get(clearTest.mappingId) as any
+    expect(mapping).toBeUndefined()
+    const task = h.db.prepare("SELECT * FROM tasks WHERE id = ?").get(clearTaskId) as any
+    expect(task).toBeTruthy()
+    ok('clear-project-provider removes links/mappings, keeps tasks')
+  } catch (e) { no('clear-project-provider removes links/mappings, keeps tasks', e) }
+
+  if (handlerConnectionId) {
+    try {
+      await h.invoke('integrations:disconnect', handlerConnectionId)
+      const conn = h.db.prepare("SELECT * FROM integration_connections WHERE id = ?").get(handlerConnectionId) as any
+      expect(conn).toBeUndefined()
+      ok('disconnect removes connection')
+    } catch (e) { no('disconnect removes connection', e) }
+  }
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────
