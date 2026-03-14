@@ -1,4 +1,3 @@
-export { Terminal, type TerminalHandle } from './Terminal'
 export { TerminalStatusPopover } from './TerminalStatusPopover'
 export { PtyProvider, usePty, usePendingPrompts, useActiveTaskIds } from './PtyContext'
 export { usePtyStatus } from './usePtyStatus'

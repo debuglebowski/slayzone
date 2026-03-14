@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { AlertTriangle, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
@@ -17,9 +17,10 @@ import {
   getViewConfig,
   type Column
 } from '@slayzone/tasks'
-import { CreateTaskDialog, EditTaskDialog, DeleteTaskDialog, TaskDetailPage, ProcessesPanel, ResizeHandle, usePanelSizes, usePanelConfig } from '@slayzone/task'
+import { CreateTaskDialog, EditTaskDialog, DeleteTaskDialog, ProcessesPanel, ResizeHandle, usePanelSizes, usePanelConfig } from '@slayzone/task'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
-import { FileEditorView, QuickOpenDialog, type FileEditorViewHandle } from '@slayzone/file-editor/client'
+import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
+import { QuickOpenDialog } from '@slayzone/file-editor/client/QuickOpenDialog'
 import {
   CreateProjectDialog,
   ProjectSettingsDialog,
@@ -27,7 +28,7 @@ import {
   type ProjectCreationContext,
   type ProjectStartMode
 } from '@slayzone/projects'
-import { UserSettingsDialog, useTabStore, AppearanceProvider, type Tab } from '@slayzone/settings'
+import { useTabStore, AppearanceProvider, type Tab } from '@slayzone/settings'
 import { OnboardingDialog } from '@slayzone/onboarding'
 import { TestPanel } from '@slayzone/test-panel'
 import { track } from '@slayzone/telemetry/client'
@@ -68,9 +69,14 @@ import {
 } from '@/components/notifications'
 import { UsagePopover } from '@/components/usage/UsagePopover'
 import { useUsage } from '@/components/usage/useUsage'
-import { TutorialAnimationModal } from '@/components/tutorial/TutorialAnimationModal'
 import { useOnboardingChecklist } from '@/hooks/useOnboardingChecklist'
 import { useHomePanelState } from '@/hooks/useHomePanelVisibility'
+
+// Lazy-loaded: heavy components not needed for first paint (sub-path exports to avoid barrel pull-in)
+const TaskDetailPage = lazy(() => import('@slayzone/task/client/TaskDetailPage').then(m => ({ default: m.TaskDetailPage })))
+const FileEditorView = lazy(() => import('@slayzone/file-editor/client/FileEditorView').then(m => ({ default: m.FileEditorView })))
+const UserSettingsDialog = lazy(() => import('@slayzone/settings/client/UserSettingsDialog').then(m => ({ default: m.UserSettingsDialog })))
+const TutorialAnimationModal = lazy(() => import('@/components/tutorial/TutorialAnimationModal').then(m => ({ default: m.TutorialAnimationModal })))
 
 type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests'
 type ProjectSettingsTab = 'general' | 'environment' | 'columns' | 'integrations' | 'ai-config' | 'tests'
@@ -1520,7 +1526,7 @@ function App(): React.JSX.Element {
                                           }}
                                         />
                                       )}
-                                      {id === 'editor' && <FileEditorView ref={homeEditorRefCallback} projectPath={projectPath ?? ''} />}
+                                      {id === 'editor' && <Suspense><FileEditorView ref={homeEditorRefCallback} projectPath={projectPath ?? ''} /></Suspense>}
                                       {id === 'processes' && <ProcessesPanel taskId={null} projectId={selectedProjectId} cwd={projectPath} />}
                                       {id === 'tests' && <TestPanel projectId={selectedProjectId} projectPath={projectPath} groupBy={testGroupBy} onOpenSettings={() => { if (selectedProject) openProjectSettings(selectedProject, { initialTab: 'tests' }) }} />}
                                     </div>
@@ -1533,6 +1539,7 @@ function App(): React.JSX.Element {
                         ) : tab.type === 'leaderboard' ? (
                         <LeaderboardPage />
                         ) : (
+                        <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground text-sm">Loading...</div>}>
                         <div className={explodeMode ? "absolute inset-0" : "h-full"}>
                           <TaskDetailPage
                             taskId={tab.taskId}
@@ -1549,7 +1556,7 @@ function App(): React.JSX.Element {
                             terminalFocusRequestId={terminalFocusRequests[tab.taskId] ?? 0}
                             onTerminalFocusRequestHandled={handleTerminalFocusRequestHandled}
                           />
-                        </div>
+                        </div></Suspense>
                         )}
                     </div>
                     )
@@ -1642,6 +1649,7 @@ function App(): React.JSX.Element {
           onOpenChange={(open) => !open && setDeletingProject(null)}
           onDeleted={handleProjectDeleted}
         />
+        <Suspense>
         <UserSettingsDialog
           open={settingsOpen}
           onOpenChange={(open) => {
@@ -1655,6 +1663,7 @@ function App(): React.JSX.Element {
           initialAiConfigSection={settingsInitialAiConfigSection}
           onTabChange={setSettingsInitialTab}
         />
+        </Suspense>
         <SearchDialog
           open={searchOpen}
           onOpenChange={setSearchOpen}
@@ -1683,7 +1692,9 @@ function App(): React.JSX.Element {
             }
           }}
         />
+        <Suspense>
         <TutorialAnimationModal open={showAnimatedTour} onClose={() => setShowAnimatedTour(false)} />
+        </Suspense>
         <ChangelogDialog
           open={changelogOpen || autoChangelogOpen}
           onOpenChange={(open) => {

@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./main": "./src/main/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./client/UserSettingsDialog": "./src/client/UserSettingsDialog.tsx"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

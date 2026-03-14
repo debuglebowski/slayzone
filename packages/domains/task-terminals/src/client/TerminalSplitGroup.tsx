@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
-import { Terminal, type TerminalHandle } from '@slayzone/terminal'
+import { Terminal, type TerminalHandle } from '@slayzone/terminal/client/Terminal'
 import type { TerminalTab } from '../shared/types'
 
 interface PaneProps {

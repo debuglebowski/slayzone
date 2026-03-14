@@ -1,7 +1,6 @@
 export { CreateTaskDialog } from './CreateTaskDialog'
 export { EditTaskDialog } from './EditTaskDialog'
 export { DeleteTaskDialog } from './DeleteTaskDialog'
-export { TaskDetailPage } from './TaskDetailPage'
 export { TaskMetadataSidebar } from './TaskMetadataSidebar'
 export { ProcessesPanel } from './ProcessesPanel'
 export { ResizeHandle } from './ResizeHandle'

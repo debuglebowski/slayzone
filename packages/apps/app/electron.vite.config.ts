@@ -3,6 +3,7 @@ import { readFileSync } from 'fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { visualizer } from 'rollup-plugin-visualizer'
 import { loadEnv } from 'vite'
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'))
@@ -55,7 +56,11 @@ export default defineConfig(({ mode }) => {
           'posthog-js': 'posthog-js/dist/module.no-external.js'
         }
       },
-      plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } }), tailwindcss()],
+      plugins: [
+        react({ babel: { plugins: ['babel-plugin-react-compiler'] } }),
+        tailwindcss(),
+        visualizer({ filename: 'bundle-report.html', gzipSize: true, template: 'treemap' })
+      ],
       optimizeDeps: {
         exclude: slayzoneDeps
       }

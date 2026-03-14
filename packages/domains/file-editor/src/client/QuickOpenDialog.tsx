@@ -9,7 +9,7 @@ import {
   Dialog,
   DialogContent
 } from '@slayzone/ui'
-import { FileIcon } from './FileIcon'
+import { FileIcon } from '@slayzone/icons'
 
 const MAX_RENDERED = 100
 

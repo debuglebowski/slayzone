@@ -1,4 +1,3 @@
-import posthog from 'posthog-js'
 import type { TelemetryTier, TelemetryEventName, TelemetryEventProps } from '../shared/types'
 
 declare const __POSTHOG_API_KEY__: string
@@ -14,6 +13,12 @@ const ENABLED = POSTHOG_KEY && POSTHOG_HOST && (!IS_DEV || DEV_ENABLED)
 
 const HEARTBEAT_INTERVAL = 10 * 60 * 1000 // 10 minutes
 const ACTIVITY_THROTTLE = 1000 // 1 second
+
+// Lazy-loaded posthog instance (deferred to avoid blocking first paint)
+let ph: typeof import('posthog-js').default | null = null
+const phReady: Promise<typeof import('posthog-js').default | null> | null = ENABLED
+  ? import('posthog-js').then(m => { ph = m.default; return m.default }).catch(() => null)
+  : null
 
 let currentTier: TelemetryTier = 'anonymous'
 let initialized = false
@@ -156,8 +161,11 @@ export function stopHeartbeat(): void {
   accumulatedActiveMs = 0
 }
 
-export function initTelemetry(tier: TelemetryTier): void {
-  if (!ENABLED) return
+export async function initTelemetry(tier: TelemetryTier): Promise<void> {
+  if (!ENABLED || !phReady) return
+
+  const posthog = await phReady
+  if (!posthog) return
 
   if (initialized) {
     posthog.reset()
@@ -197,19 +205,19 @@ export function track<E extends TelemetryEventName>(
   event: E,
   ...args: TelemetryEventProps[E] extends Record<string, never> ? [] : [TelemetryEventProps[E]]
 ): void {
-  if (!initialized) return
-  posthog.capture(event, args[0] as Record<string, unknown> | undefined)
+  if (!initialized || !ph) return
+  ph.capture(event, args[0] as Record<string, unknown> | undefined)
 }
 
 export function setTelemetryTier(tier: TelemetryTier): void {
   if (tier === currentTier) return
 
-  if (tier === 'anonymous') {
-    posthog.reset()
+  if (tier === 'anonymous' && ph) {
+    ph.reset()
     localStorage.removeItem('slayzone_telemetry_id')
   }
 
-  initTelemetry(tier)
+  void initTelemetry(tier)
 }
 
 export function getTelemetryTier(): TelemetryTier {
@@ -218,8 +226,14 @@ export function getTelemetryTier(): TelemetryTier {
 
 export function shutdownTelemetry(): void {
   stopHeartbeat()
-  if (initialized) {
-    posthog.reset()
+  if (initialized && ph) {
+    ph.reset()
     initialized = false
   }
+}
+
+/** Returns the posthog instance once loaded, for PostHogProvider */
+export async function getPosthogInstance(): Promise<typeof import('posthog-js').default | null> {
+  if (!phReady) return null
+  return phReady
 }
