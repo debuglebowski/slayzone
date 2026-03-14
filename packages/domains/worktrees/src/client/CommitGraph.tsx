@@ -514,7 +514,7 @@ interface CollapsedDag {
   rowOffsets: Map<number, number>
 }
 
-function computeCollapsedDag(fullLayout: DagLayout, includeTags = true, breakOnMerges = true): CollapsedDag {
+function computeCollapsedDag(fullLayout: DagLayout, baseBranch: string, includeTags = true, breakOnMerges = true): CollapsedDag {
   const { nodes, edges, maxColumn } = fullLayout
   if (nodes.length === 0) return { nodes: [], edges: [], groups: [], maxColumn: 0, totalRows: 0, rowOffsets: new Map() }
 
@@ -523,6 +523,17 @@ function computeCollapsedDag(fullLayout: DagLayout, includeTags = true, breakOnM
   for (const n of nodes) {
     if (n.commit.branchRefs.length > 0 || (breakOnMerges && n.syntheticBranch) || (includeTags && n.commit.tags.length > 0)) headRows.add(n.row)
   }
+
+  // Always show first and last commit of the base branch
+  let baseFirst = Infinity, baseLast = -1
+  for (const n of nodes) {
+    if (n.commit.branch === baseBranch) {
+      if (n.row < baseFirst) baseFirst = n.row
+      if (n.row > baseLast) baseLast = n.row
+    }
+  }
+  if (baseFirst !== Infinity) headRows.add(baseFirst)
+  if (baseLast !== -1) headRows.add(baseLast)
 
   // Build segments: consecutive head or non-head rows
   type Segment = { type: 'head'; row: number } | { type: 'group'; rows: number[] }
@@ -781,8 +792,8 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOn
     [graph, hasTopology]
   )
   const collapsed = useMemo(
-    () => tipsOnly ? computeCollapsedDag(fullLayout, includeTags, breakOnMerges) : null,
-    [fullLayout, tipsOnly, includeTags, breakOnMerges]
+    () => tipsOnly ? computeCollapsedDag(fullLayout, graph.baseBranch, includeTags, breakOnMerges) : null,
+    [fullLayout, graph.baseBranch, tipsOnly, includeTags, breakOnMerges]
   )
 
   // Map colorIndex → branch name for tooltip overlays

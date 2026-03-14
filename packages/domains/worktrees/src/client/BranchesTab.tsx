@@ -228,7 +228,7 @@ export function BranchGraphCard({ state, className }: { state: BranchGraphState;
   )
 
   return (
-    <div className={cn('rounded-lg border bg-muted/30 p-2 h-full', className)}>
+    <div className={cn('rounded-lg border bg-muted/30 pt-4 pr-4 pb-4 pl-2 h-full', className)}>
       {graphContent}
     </div>
   )
