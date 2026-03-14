@@ -104,7 +104,7 @@ describe('resolveCommitGraph — single branch, linear history', () => {
   const c1Hash = makeHash()
   const c2Hash = makeHash()
   const commits: DagCommit[] = [
-    dag({ hash: c1Hash, message: 'latest', refs: ['HEAD -> main'], parents: [c2Hash] }),
+    dag({ hash: c1Hash, message: 'latest', refs: ['HEAD -> refs/heads/main'], parents: [c2Hash] }),
     dag({ hash: c2Hash, message: 'older', refs: [], parents: [] }),
   ]
 
@@ -140,8 +140,8 @@ describe('resolveCommitGraph — origin/main shown as display ref when local mai
   const c1Hash = makeHash()
   const c2Hash = makeHash()
   const commits: DagCommit[] = [
-    dag({ hash: c1Hash, message: 'local tip', refs: ['HEAD -> main'], parents: [c2Hash] }),
-    dag({ hash: c2Hash, message: 'shared', refs: ['origin/main'], parents: [] }),
+    dag({ hash: c1Hash, message: 'local tip', refs: ['HEAD -> refs/heads/main'], parents: [c2Hash] }),
+    dag({ hash: c2Hash, message: 'shared', refs: ['refs/remotes/origin/main'], parents: [] }),
   ]
 
   const g = resolveCommitGraph(commits, 'main')
@@ -160,8 +160,8 @@ describe('resolveCommitGraph — origin/feat shown when no local feat exists', (
   const c1Hash = makeHash()
   const c2Hash = makeHash()
   const commits: DagCommit[] = [
-    dag({ hash: c1Hash, message: 'main tip', refs: ['HEAD -> main'], parents: [c2Hash] }),
-    dag({ hash: c2Hash, message: 'feat tip', refs: ['origin/feat'], parents: [] }),
+    dag({ hash: c1Hash, message: 'main tip', refs: ['HEAD -> refs/heads/main'], parents: [c2Hash] }),
+    dag({ hash: c2Hash, message: 'feat tip', refs: ['refs/remotes/origin/feat'], parents: [] }),
   ]
 
   const g = resolveCommitGraph(commits, 'main')
@@ -178,7 +178,7 @@ describe('resolveCommitGraph — origin/feat shown when no local feat exists', (
 describe('resolveCommitGraph — tags parsed', () => {
   const c1Hash = makeHash()
   const commits: DagCommit[] = [
-    dag({ hash: c1Hash, message: 'release', refs: ['HEAD -> main', 'tag: v1.0.0'], parents: [] }),
+    dag({ hash: c1Hash, message: 'release', refs: ['HEAD -> refs/heads/main', 'tag: refs/tags/v1.0.0'], parents: [] }),
   ]
 
   const g = resolveCommitGraph(commits, 'main')
@@ -197,8 +197,8 @@ describe('resolveCommitGraph — two branches diverged', () => {
   const featTip = makeHash()
   const mergeBase = makeHash()
   const commits: DagCommit[] = [
-    dag({ hash: mainTip, message: 'main work', refs: ['HEAD -> main'], parents: [mergeBase] }),
-    dag({ hash: featTip, message: 'feat work', refs: ['feature-x'], parents: [mergeBase] }),
+    dag({ hash: mainTip, message: 'main work', refs: ['HEAD -> refs/heads/main'], parents: [mergeBase] }),
+    dag({ hash: featTip, message: 'feat work', refs: ['refs/heads/feature-x'], parents: [mergeBase] }),
     dag({ hash: mergeBase, message: 'shared base', refs: [], parents: [] }),
   ]
 
@@ -219,12 +219,114 @@ describe('resolveCommitGraph — two branches diverged', () => {
   })
 })
 
+describe('resolveCommitGraph — branch names with slashes (feature/x)', () => {
+  const mainTip = makeHash()
+  const featTip = makeHash()
+  const featChild = makeHash()
+  const mergeBase = makeHash()
+  const commits: DagCommit[] = [
+    dag({ hash: featTip, message: 'feat tip', refs: ['refs/heads/feature/api-v2'], parents: [featChild] }),
+    dag({ hash: featChild, message: 'feat child', refs: [], parents: [mergeBase] }),
+    dag({ hash: mainTip, message: 'main work', refs: ['HEAD -> refs/heads/main'], parents: [mergeBase] }),
+    dag({ hash: mergeBase, message: 'shared base', refs: [], parents: [] }),
+  ]
+
+  const requested = ['main', 'feature/api-v2']
+  const g = resolveCommitGraph(commits, 'main', requested)
+
+  test('slash branch recognized as local — not treated as remote', () => {
+    expect(g.commits[0].branchRefs).toContain('feature/api-v2')
+    expect(g.commits[0].isBranchTip).toBe(true)
+  })
+
+  test('both commits on feature branch owned correctly', () => {
+    expect(g.commits[0].branch).toBe('feature/api-v2')
+    expect(g.commits[1].branch).toBe('feature/api-v2')
+  })
+
+  test('main commits unaffected', () => {
+    expect(g.commits[2].branch).toBe('main')
+    expect(g.commits[3].branch).toBe('main')
+  })
+
+  test('branches list has both', () => {
+    expect(g.branches).toContain('main')
+    expect(g.branches).toContain('feature/api-v2')
+  })
+})
+
+describe('resolveCommitGraph — slash branch with remote tracking ref', () => {
+  const mainTip = makeHash()
+  const featTip = makeHash()
+  const remotePos = makeHash()
+  const mergeBase = makeHash()
+  const commits: DagCommit[] = [
+    dag({ hash: featTip, message: 'local ahead', refs: ['refs/heads/feature/api'], parents: [remotePos] }),
+    dag({ hash: remotePos, message: 'pushed', refs: ['refs/remotes/origin/feature/api'], parents: [mergeBase] }),
+    dag({ hash: mainTip, message: 'main work', refs: ['HEAD -> refs/heads/main'], parents: [mergeBase] }),
+    dag({ hash: mergeBase, message: 'shared', refs: [], parents: [] }),
+  ]
+
+  const requested = ['main', 'feature/api']
+  const g = resolveCommitGraph(commits, 'main', requested)
+
+  test('local slash branch is a tip, remote shows as origin/ display ref', () => {
+    expect(g.commits[0].branchRefs).toContain('feature/api')
+    expect(g.commits[0].isBranchTip).toBe(true)
+    expect(g.commits[1].branchRefs).toContain('origin/feature/api')
+  })
+
+  test('both feature commits owned by feature/api', () => {
+    expect(g.commits[0].branch).toBe('feature/api')
+    expect(g.commits[1].branch).toBe('feature/api')
+  })
+})
+
+describe('resolveCommitGraph — deeply nested slash branch (user/name/feature)', () => {
+  const mainTip = makeHash()
+  const featTip = makeHash()
+  const mergeBase = makeHash()
+  const commits: DagCommit[] = [
+    dag({ hash: featTip, message: 'deep branch', refs: ['refs/heads/user/kalle/my-feature'], parents: [mergeBase] }),
+    dag({ hash: mainTip, message: 'main', refs: ['HEAD -> refs/heads/main'], parents: [mergeBase] }),
+    dag({ hash: mergeBase, message: 'base', refs: [], parents: [] }),
+  ]
+
+  const requested = ['main', 'user/kalle/my-feature']
+  const g = resolveCommitGraph(commits, 'main', requested)
+
+  test('deeply nested slash branch recognized as local', () => {
+    expect(g.commits[0].branchRefs).toContain('user/kalle/my-feature')
+    expect(g.commits[0].isBranchTip).toBe(true)
+    expect(g.commits[0].branch).toBe('user/kalle/my-feature')
+  })
+})
+
+describe('resolveCommitGraph — slash branch without requestedBranches', () => {
+  const mainTip = makeHash()
+  const featTip = makeHash()
+  const mergeBase = makeHash()
+  const commits: DagCommit[] = [
+    dag({ hash: featTip, message: 'feat', refs: ['refs/heads/feature/api'], parents: [mergeBase] }),
+    dag({ hash: mainTip, message: 'main', refs: ['HEAD -> refs/heads/main'], parents: [mergeBase] }),
+    dag({ hash: mergeBase, message: 'base', refs: [], parents: [] }),
+  ]
+
+  // With --decorate=full, refs are unambiguous even without requestedBranches
+  const g = resolveCommitGraph(commits, 'main')
+
+  test('slash branch recognized correctly without requestedBranches', () => {
+    expect(g.commits[0].isBranchTip).toBe(true)
+    expect(g.commits[0].branch).toBe('feature/api')
+  })
+})
+
 describe('resolveCommitGraph — merge commit with synthetic branch name', () => {
   const mergeHash = makeHash()
   const parentMain = makeHash()
   const parentFeat = makeHash()
   const commits: DagCommit[] = [
-    dag({ hash: mergeHash, message: "Merge branch 'hotfix'", refs: ['HEAD -> main'], parents: [parentMain, parentFeat] }),
+    dag({ hash: mergeHash, message: "Merge branch 'hotfix'", refs: ['HEAD -> refs/heads/main'], parents: [parentMain, parentFeat] }),
     dag({ hash: parentMain, message: 'main parent', refs: [], parents: [] }),
     dag({ hash: parentFeat, message: 'hotfix work', refs: [], parents: [] }),
   ]
@@ -268,7 +370,7 @@ describe('resolveCommitGraph — multiple remote refs collapsed correctly', () =
     dag({
       hash: c1Hash,
       message: 'tip',
-      refs: ['HEAD -> main', 'origin/main', 'origin/HEAD'],
+      refs: ['HEAD -> refs/heads/main', 'refs/remotes/origin/main', 'refs/remotes/origin/HEAD'],
       parents: [],
     }),
   ]
@@ -445,11 +547,11 @@ describe('resolveCommitGraph — behind branch requested: visible in graph', () 
   const mainHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> main'], parents: [aHash] }),
+    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> refs/heads/main'], parents: [aHash] }),
     dag({ hash: aHash, message: 'A', refs: [], parents: [bHash] }),
     dag({ hash: bHash, message: 'B', refs: [], parents: [cHash] }),
     dag({ hash: cHash, message: 'C', refs: [], parents: [wtHash] }),
-    dag({ hash: wtHash, message: 'worktree work', refs: ['worktree-test'], parents: [dHash] }),
+    dag({ hash: wtHash, message: 'worktree work', refs: ['refs/heads/worktree-test'], parents: [dHash] }),
     dag({ hash: dHash, message: 'D', refs: [], parents: [eHash] }),
     dag({ hash: eHash, message: 'E', refs: [], parents: [] }),
   ]
@@ -493,11 +595,11 @@ describe('resolveCommitGraph — behind branch NOT requested: invisible in graph
   const mainHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> main'], parents: [aHash] }),
+    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> refs/heads/main'], parents: [aHash] }),
     dag({ hash: aHash, message: 'A', refs: [], parents: [bHash] }),
     dag({ hash: bHash, message: 'B', refs: [], parents: [cHash] }),
     dag({ hash: cHash, message: 'C', refs: [], parents: [wtHash] }),
-    dag({ hash: wtHash, message: 'worktree work', refs: ['worktree-test'], parents: [dHash] }),
+    dag({ hash: wtHash, message: 'worktree work', refs: ['refs/heads/worktree-test'], parents: [dHash] }),
     dag({ hash: dHash, message: 'D', refs: [], parents: [eHash] }),
     dag({ hash: eHash, message: 'E', refs: [], parents: [] }),
   ]
@@ -530,11 +632,11 @@ describe('resolveCommitGraph — merge + behind branch requested', () => {
   const mainHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> main'], parents: [mergeHash] }),
+    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> refs/heads/main'], parents: [mergeHash] }),
     dag({ hash: mergeHash, message: "Merge branch 'hotfix'", refs: [], parents: [parent1, parent2] }),
     dag({ hash: parent1, message: 'pre-merge', refs: [], parents: [wtHash] }),
     dag({ hash: parent2, message: 'hotfix work', refs: [], parents: [wtHash] }),
-    dag({ hash: wtHash, message: 'worktree base', refs: ['worktree-test'], parents: [dHash] }),
+    dag({ hash: wtHash, message: 'worktree base', refs: ['refs/heads/worktree-test'], parents: [dHash] }),
     dag({ hash: dHash, message: 'old', refs: [], parents: [] }),
   ]
 
@@ -565,11 +667,11 @@ describe('resolveCommitGraph — merge + behind branch NOT requested', () => {
   const mainHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> main'], parents: [mergeHash] }),
+    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> refs/heads/main'], parents: [mergeHash] }),
     dag({ hash: mergeHash, message: "Merge branch 'hotfix'", refs: [], parents: [parent1, parent2] }),
     dag({ hash: parent1, message: 'pre-merge', refs: [], parents: [wtHash] }),
     dag({ hash: parent2, message: 'hotfix work', refs: [], parents: [wtHash] }),
-    dag({ hash: wtHash, message: 'worktree base', refs: ['worktree-test'], parents: [dHash] }),
+    dag({ hash: wtHash, message: 'worktree base', refs: ['refs/heads/worktree-test'], parents: [dHash] }),
     dag({ hash: dHash, message: 'old', refs: [], parents: [] }),
   ]
 
@@ -595,7 +697,7 @@ describe('resolveCommitGraph — merge synthetic name included when requested', 
   const mainHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> main'], parents: [mergeHash] }),
+    dag({ hash: mainHash, message: 'main latest', refs: ['HEAD -> refs/heads/main'], parents: [mergeHash] }),
     dag({ hash: mergeHash, message: "Merge branch 'hotfix'", refs: [], parents: [parent1, parent2] }),
     dag({ hash: parent1, message: 'pre-merge', refs: [], parents: [dHash] }),
     dag({ hash: parent2, message: 'hotfix work', refs: [], parents: [dHash] }),
@@ -622,7 +724,7 @@ describe('resolveCommitGraph — PR merge synthetic name preserved', () => {
   const mainHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'latest', refs: ['HEAD -> main'], parents: [mergeHash] }),
+    dag({ hash: mainHash, message: 'latest', refs: ['HEAD -> refs/heads/main'], parents: [mergeHash] }),
     dag({ hash: mergeHash, message: 'Merge pull request #30 from jimmystridh/fix/worktree-remove-missing-path', refs: [], parents: [parent1, parent2] }),
     dag({ hash: parent1, message: 'pre-merge', refs: [], parents: [baseHash] }),
     dag({ hash: parent2, message: 'fix worktree path', refs: [], parents: [baseHash] }),
@@ -661,8 +763,8 @@ describe('resolveCommitGraph — diverged feature with shared ancestry below for
   const featHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> main'], parents: [m1Hash] }),
-    dag({ hash: featHash, message: 'feat tip', refs: ['feature'], parents: [f1Hash] }),
+    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> refs/heads/main'], parents: [m1Hash] }),
+    dag({ hash: featHash, message: 'feat tip', refs: ['refs/heads/feature'], parents: [f1Hash] }),
     dag({ hash: m1Hash, message: 'main work', refs: [], parents: [forkHash] }),
     dag({ hash: f1Hash, message: 'feat work', refs: [], parents: [forkHash] }),
     dag({ hash: forkHash, message: 'fork point', refs: [], parents: [old1Hash] }),
@@ -699,11 +801,11 @@ describe('resolveCommitGraph — two feature branches behind main (stacked tips)
   const mainHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> main'], parents: [aHash] }),
+    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> refs/heads/main'], parents: [aHash] }),
     dag({ hash: aHash, message: 'A', refs: [], parents: [featAHash] }),
-    dag({ hash: featAHash, message: 'feat-a work', refs: ['feat-a'], parents: [bHash] }),
+    dag({ hash: featAHash, message: 'feat-a work', refs: ['refs/heads/feat-a'], parents: [bHash] }),
     dag({ hash: bHash, message: 'B', refs: [], parents: [featBHash] }),
-    dag({ hash: featBHash, message: 'feat-b work', refs: ['feat-b'], parents: [cHash] }),
+    dag({ hash: featBHash, message: 'feat-b work', refs: ['refs/heads/feat-b'], parents: [cHash] }),
     dag({ hash: cHash, message: 'C initial', refs: [], parents: [] }),
   ]
 
@@ -745,9 +847,9 @@ describe('resolveCommitGraph — feature ahead of main (main is behind)', () => 
   const featHash = makeHash()
 
   const commits: DagCommit[] = [
-    dag({ hash: featHash, message: 'feat tip', refs: ['feature'], parents: [f1Hash] }),
+    dag({ hash: featHash, message: 'feat tip', refs: ['refs/heads/feature'], parents: [f1Hash] }),
     dag({ hash: f1Hash, message: 'feat work', refs: [], parents: [mainHash] }),
-    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> main'], parents: [oldHash] }),
+    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> refs/heads/main'], parents: [oldHash] }),
     dag({ hash: oldHash, message: 'old', refs: [], parents: [] }),
   ]
 
@@ -805,6 +907,197 @@ function assertNoOrphans(layout: DagLayout, commits: ResolvedCommit[]) {
   }
 }
 
+/** Assert no edge connects two commits without a parent relationship */
+function assertNoSpuriousEdges(layout: DagLayout, commits: ResolvedCommit[]) {
+  const hashToRow = new Map<string, number>()
+  for (const n of layout.nodes) hashToRow.set(n.commit.hash, n.row)
+  const parentPairs = new Set<string>()
+  for (const c of commits) {
+    const row = hashToRow.get(c.hash)
+    if (row === undefined) continue
+    for (const parentHash of c.parents) {
+      const parentRow = hashToRow.get(parentHash)
+      if (parentRow === undefined) continue
+      parentPairs.add(`${row}→${parentRow}`)
+    }
+  }
+  for (const e of layout.edges) {
+    if (e.toRow === -1) continue // unresolved deferred edge
+    const key = `${e.fromRow}→${e.toRow}`
+    if (!parentPairs.has(key)) {
+      const from = layout.nodes.find(n => n.row === e.fromRow)
+      const to = layout.nodes.find(n => n.row === e.toRow)
+      throw new Error(`Spurious edge: row ${e.fromRow} (${from?.commit.hash.slice(0, 7)}) → row ${e.toRow} (${to?.commit.hash.slice(0, 7)}) — no parent link`)
+    }
+  }
+}
+
+describe('computeDagLayout — base branch always in column 0', () => {
+  // Feature branch commits appear before main in topo order
+  // Base branch should still occupy column 0
+  const mainHash = makeHash()
+  const featHash = makeHash()
+  const baseHash = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: featHash, message: 'feat work', branch: 'feature', parents: [baseHash], branchRefs: ['feature'], isBranchTip: true }),
+    resolved({ hash: mainHash, message: 'main tip', branch: 'main', parents: [baseHash], branchRefs: ['main'], isBranchTip: true, isHead: true }),
+    resolved({ hash: baseHash, message: 'shared', branch: 'main', parents: [] }),
+  ]
+
+  const layout = computeDagLayout(commits, 'main')
+
+  test('main commits are in column 0', () => {
+    for (const node of layout.nodes) {
+      if (node.commit.branch === 'main') {
+        expect(node.column).toBe(0)
+      }
+    }
+  })
+
+  test('feature commits are NOT in column 0', () => {
+    for (const node of layout.nodes) {
+      if (node.commit.branch === 'feature') {
+        if (node.column === 0) throw new Error(`feature commit "${node.commit.message}" is in column 0`)
+      }
+    }
+  })
+})
+
+describe('computeDagLayout — child branch always right of parent branch', () => {
+  // Topology: api-v2 → api → dashboard, charts → dashboard, auth-2fa → auth
+  // Each child branch should be in a higher column than its fork point
+  const mainTip = makeHash()
+  const dashTip = makeHash()
+  const dashChild = makeHash()
+  const chartsTip = makeHash()
+  const chartsChild = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: chartsTip, message: 'chart tip', branch: 'charts', parents: [chartsChild], branchRefs: ['charts'], isBranchTip: true }),
+    resolved({ hash: chartsChild, message: 'chart work', branch: 'charts', parents: [dashTip] }),
+    resolved({ hash: dashTip, message: 'dash tip', branch: 'dashboard', parents: [dashChild], branchRefs: ['dashboard'], isBranchTip: true }),
+    resolved({ hash: dashChild, message: 'dash work', branch: 'dashboard', parents: [mainTip] }),
+    resolved({ hash: mainTip, message: 'main', branch: 'main', parents: [], branchRefs: ['main'], isBranchTip: true, isHead: true }),
+  ]
+
+  const layout = computeDagLayout(commits, 'main')
+
+  test('main in col 0, dashboard right of main, charts right of dashboard', () => {
+    const colOf = (branch: string) => {
+      const node = layout.nodes.find(n => n.commit.branch === branch && n.isBranchTip)
+      if (!node) throw new Error(`branch ${branch} not found`)
+      return node.column
+    }
+    const mainCol = colOf('main')
+    const dashCol = colOf('dashboard')
+    const chartsCol = colOf('charts')
+    expect(mainCol).toBe(0)
+    if (dashCol <= mainCol) throw new Error(`dashboard col ${dashCol} should be > main col ${mainCol}`)
+    if (chartsCol <= dashCol) throw new Error(`charts col ${chartsCol} should be > dashboard col ${dashCol}`)
+  })
+})
+
+describe('computeDagLayout — each branch gets a unique column', () => {
+  // Two branch hierarchies competing for columns:
+  //   main → dashboard → api, main → auth → auth-oauth
+  // Even with column pressure from dashboard/api, auth must get its own
+  // column and auth-oauth must be strictly to its right.
+  const mainHash = makeHash()
+  const dashTip = makeHash()
+  const dashChild = makeHash()
+  const apiTip = makeHash()
+  const apiChild = makeHash()
+  const authTip = makeHash()
+  const authChild = makeHash()
+  const oauthTip = makeHash()
+  const oauthChild = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: apiTip, message: 'api tip', branch: 'api', parents: [apiChild], branchRefs: ['api'], isBranchTip: true }),
+    resolved({ hash: apiChild, message: 'api work', branch: 'api', parents: [dashTip] }),
+    resolved({ hash: dashTip, message: 'dash tip', branch: 'dashboard', parents: [dashChild], branchRefs: ['dashboard'], isBranchTip: true }),
+    resolved({ hash: dashChild, message: 'dash work', branch: 'dashboard', parents: [mainHash] }),
+    resolved({ hash: oauthTip, message: 'oauth tip', branch: 'auth-oauth', parents: [oauthChild], branchRefs: ['auth-oauth'], isBranchTip: true }),
+    resolved({ hash: oauthChild, message: 'oauth work', branch: 'auth-oauth', parents: [authTip] }),
+    resolved({ hash: authTip, message: 'auth tip', branch: 'auth', parents: [authChild], branchRefs: ['auth'], isBranchTip: true }),
+    resolved({ hash: authChild, message: 'auth work', branch: 'auth', parents: [mainHash] }),
+    resolved({ hash: mainHash, message: 'main', branch: 'main', parents: [], branchRefs: ['main'], isBranchTip: true, isHead: true }),
+  ]
+
+  const layout = computeDagLayout(commits, 'main')
+
+  test('no overlapping branches share a column', () => {
+    // Branches CAN share a column if they don't overlap in rows
+    const branchRanges = new Map<string, { col: number; minRow: number; maxRow: number }>()
+    for (const node of layout.nodes) {
+      const range = branchRanges.get(node.commit.branch)
+      if (!range) {
+        branchRanges.set(node.commit.branch, { col: node.column, minRow: node.row, maxRow: node.row })
+      } else {
+        range.maxRow = Math.max(range.maxRow, node.row)
+        range.minRow = Math.min(range.minRow, node.row)
+      }
+    }
+    // Check no two branches in same column overlap
+    for (const [a, ra] of branchRanges) {
+      for (const [b, rb] of branchRanges) {
+        if (a >= b) continue
+        if (ra.col === rb.col && ra.minRow <= rb.maxRow && ra.maxRow >= rb.minRow) {
+          throw new Error(`branches ${a} and ${b} overlap in column ${ra.col}`)
+        }
+      }
+    }
+  })
+
+  test('parent branches are left of child branches', () => {
+    const colOf = (branch: string) => layout.nodes.find(n => n.commit.branch === branch)!.column
+    const mainCol = colOf('main')
+    const dashCol = colOf('dashboard')
+    const apiCol = colOf('api')
+    const authCol = colOf('auth')
+    const oauthCol = colOf('auth-oauth')
+    if (dashCol <= mainCol) throw new Error(`dashboard col ${dashCol} should be > main col ${mainCol}`)
+    if (apiCol <= dashCol) throw new Error(`api col ${apiCol} should be > dashboard col ${dashCol}`)
+    if (authCol <= mainCol) throw new Error(`auth col ${authCol} should be > main col ${mainCol}`)
+    if (oauthCol <= authCol) throw new Error(`auth-oauth col ${oauthCol} should be > auth col ${authCol}`)
+  })
+})
+
+describe('computeDagLayout — no spurious edges on column reuse', () => {
+  // Topology: api-v2 → api → dashboard → main, charts → dashboard → main
+  // When api-v2 finishes and frees its column, charts may reuse it.
+  // No edge should connect api-v2's last commit to charts.
+  const mainHash = makeHash()
+  const dashHash = makeHash()
+  const dashChild = makeHash()
+  const apiHash = makeHash()
+  const apiChild = makeHash()
+  const v2Hash = makeHash()
+  const v2Child = makeHash()
+  const chartsHash = makeHash()
+  const chartsChild = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: v2Hash, message: 'v2 tip', branch: 'api-v2', parents: [v2Child], branchRefs: ['api-v2'], isBranchTip: true }),
+    resolved({ hash: v2Child, message: 'v2 work', branch: 'api-v2', parents: [apiHash] }),
+    resolved({ hash: apiHash, message: 'api tip', branch: 'api', parents: [apiChild], branchRefs: ['api'], isBranchTip: true }),
+    resolved({ hash: apiChild, message: 'api work', branch: 'api', parents: [dashHash] }),
+    resolved({ hash: chartsHash, message: 'charts tip', branch: 'charts', parents: [chartsChild], branchRefs: ['charts'], isBranchTip: true }),
+    resolved({ hash: chartsChild, message: 'charts work', branch: 'charts', parents: [dashHash] }),
+    resolved({ hash: dashHash, message: 'dash tip', branch: 'dashboard', parents: [dashChild], branchRefs: ['dashboard'], isBranchTip: true }),
+    resolved({ hash: dashChild, message: 'dash work', branch: 'dashboard', parents: [mainHash] }),
+    resolved({ hash: mainHash, message: 'main', branch: 'main', parents: [], branchRefs: ['main'], isBranchTip: true, isHead: true }),
+  ]
+
+  const layout = computeDagLayout(commits, 'main')
+
+  test('no orphans and no spurious edges', () => {
+    assertNoOrphans(layout, commits)
+    assertNoSpuriousEdges(layout, commits)
+  })
+})
+
 describe('computeDagLayout — no orphaned nodes (every parent link has an edge)', () => {
   // linear: main tip → A → worktree-test tip → B → C
   const cHash = makeHash()
@@ -829,6 +1122,7 @@ describe('computeDagLayout — no orphaned nodes (every parent link has an edge)
 
   test('no orphans — every parent link has an edge', () => {
     assertNoOrphans(layout, commits)
+    assertNoSpuriousEdges(layout, commits)
   })
 })
 
@@ -856,6 +1150,7 @@ describe('computeDagLayout — behind-branch tip stays in base column', () => {
 
   test('no orphans', () => {
     assertNoOrphans(layout, commits)
+    assertNoSpuriousEdges(layout, commits)
   })
 })
 
@@ -887,6 +1182,7 @@ describe('computeDagLayout — merge second parent gets own column', () => {
 
   test('no orphans', () => {
     assertNoOrphans(layout, commits)
+    assertNoSpuriousEdges(layout, commits)
   })
 })
 
@@ -919,6 +1215,7 @@ describe('computeDagLayout — merge parent column not stolen by releasing base 
 
   test('no orphans', () => {
     assertNoOrphans(layout, commits)
+    assertNoSpuriousEdges(layout, commits)
   })
 })
 
@@ -951,6 +1248,7 @@ describe('computeDagLayout — two stacked behind-branch tips stay in base colum
 
   test('no orphans', () => {
     assertNoOrphans(layout, commits)
+    assertNoSpuriousEdges(layout, commits)
   })
 })
 
@@ -966,10 +1264,10 @@ describe('end-to-end: unrequested branch refs are filtered out', () => {
   const mainHash = makeHash()
 
   const rawCommits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> main'], parents: [aHash] }),
+    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> refs/heads/main'], parents: [aHash] }),
     dag({ hash: aHash, message: 'A', refs: [], parents: [bHash] }),
     dag({ hash: bHash, message: 'B', refs: [], parents: [wtHash] }),
-    dag({ hash: wtHash, message: 'wt', refs: ['origin/main', 'origin/HEAD', 'worktree-test'], parents: [cHash] }),
+    dag({ hash: wtHash, message: 'wt', refs: ['refs/remotes/origin/main', 'refs/remotes/origin/HEAD', 'refs/heads/worktree-test'], parents: [cHash] }),
     dag({ hash: cHash, message: 'C', refs: [], parents: [dHash] }),
     dag({ hash: dHash, message: 'D', refs: [], parents: [] }),
   ]
@@ -1003,10 +1301,10 @@ describe('end-to-end: requested branch refs are preserved', () => {
   const mainHash = makeHash()
 
   const rawCommits: DagCommit[] = [
-    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> main'], parents: [aHash] }),
+    dag({ hash: mainHash, message: 'main tip', refs: ['HEAD -> refs/heads/main'], parents: [aHash] }),
     dag({ hash: aHash, message: 'A', refs: [], parents: [bHash] }),
     dag({ hash: bHash, message: 'B', refs: [], parents: [wtHash] }),
-    dag({ hash: wtHash, message: 'wt', refs: ['origin/main', 'origin/HEAD', 'worktree-test'], parents: [cHash] }),
+    dag({ hash: wtHash, message: 'wt', refs: ['refs/remotes/origin/main', 'refs/remotes/origin/HEAD', 'refs/heads/worktree-test'], parents: [cHash] }),
     dag({ hash: cHash, message: 'C', refs: [], parents: [dHash] }),
     dag({ hash: dHash, message: 'D', refs: [], parents: [] }),
   ]
@@ -1032,10 +1330,10 @@ describe('real-world: PR merge second parents get synthetic branch names', () =>
   // includes second-parent commits (935968d, 81eefa1, 7d1ff27).
   // These get synthetic branch names from merge commit messages.
   const commits: DagCommit[] = [
-    dag({ hash: '512265a', message: 'feat: double git panel commit count', refs: ['HEAD -> main'], parents: ['a4be17b'] }),
+    dag({ hash: '512265a', message: 'feat: double git panel commit count', refs: ['HEAD -> refs/heads/main'], parents: ['a4be17b'] }),
     dag({ hash: 'a4be17b', message: 'Merge pull request #30 from jimmystridh/fix/worktree-remove-missing-path', refs: [], parents: ['caa4377', '935968d'] }),
     dag({ hash: '935968d', message: 'fix(worktrees): handle already-deleted worktree path', refs: [], parents: ['fd05813'] }),
-    dag({ hash: 'caa4377', message: 'release: v0.2.6', refs: ['tag: v0.2.6'], parents: ['28ac5b8'] }),
+    dag({ hash: 'caa4377', message: 'release: v0.2.6', refs: ['tag: refs/tags/v0.2.6'], parents: ['28ac5b8'] }),
     dag({ hash: '28ac5b8', message: 'chore(settings): rename theme labels', refs: [], parents: ['1eefed1'] }),
     dag({ hash: '1eefed1', message: 'fix(usage): add caching', refs: [], parents: ['b448b61'] }),
     dag({ hash: 'b448b61', message: 'feat(integrations): add repo selector', refs: [], parents: ['d7eab12'] }),
@@ -1101,7 +1399,7 @@ describe('real git history: resolveCommitGraph + computeDagLayout', () => {
     dag({ hash: '512265a', message: 'feat: double git panel commit count', refs: [], parents: ['a4be17b'] }),
     dag({ hash: 'a4be17b', message: 'Merge pull request #30 from jimmystridh/fix/worktree-remove-missing-path', refs: [], parents: ['caa4377', '935968d'] }),
     dag({ hash: '935968d', message: 'fix(worktrees): handle already-deleted worktree path', refs: [], parents: ['fd05813'] }),
-    dag({ hash: 'caa4377', message: 'release: v0.2.6', refs: ['tag: v0.2.6'], parents: ['28ac5b8'] }),
+    dag({ hash: 'caa4377', message: 'release: v0.2.6', refs: ['tag: refs/tags/v0.2.6'], parents: ['28ac5b8'] }),
     dag({ hash: '28ac5b8', message: 'chore(settings): rename theme labels', refs: [], parents: ['1eefed1'] }),
     dag({ hash: '1eefed1', message: 'fix(usage): add caching', refs: [], parents: ['b448b61'] }),
     dag({ hash: 'b448b61', message: 'feat(integrations): add repo selector', refs: [], parents: ['d7eab12'] }),
@@ -1128,7 +1426,7 @@ describe('real git history: resolveCommitGraph + computeDagLayout', () => {
 
   // Add HEAD -> main to first commit in the full set (512265a is not the actual HEAD,
   // but for this slice it's the topmost commit visible)
-  commits[0].refs = ['HEAD -> main']
+  commits[0].refs = ['HEAD -> refs/heads/main']
 
   const g = resolveCommitGraph(commits, 'main', ['main'])
   const layout = computeDagLayout(g.commits, g.baseBranch)

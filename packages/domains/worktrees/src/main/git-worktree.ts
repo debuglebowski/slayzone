@@ -1075,7 +1075,7 @@ export async function getDiffStats(repoPath: string, ref: string): Promise<DiffS
 
 export async function getCommitDag(repoPath: string, limit: number, branches?: string[]): Promise<DagCommit[]> {
   try {
-    const args = ['log', '--topo-order', `-${limit}`, '--format=%H%n%h%n%P%n%s%n%an%n%ar%n%D%x00']
+    const args = ['log', '--topo-order', `-${limit}`, '--decorate=full', '--format=%H%n%h%n%P%n%s%n%an%n%ar%n%D%x00']
     if (branches && branches.length > 0) {
       args.push(...branches)
     } else {
@@ -1179,18 +1179,32 @@ export async function getWorktreeMetadata(worktreePath: string): Promise<Worktre
 
 // ─── Commit graph normalization ─────────────────────────────────
 
+/**
+ * Parse a single ref from git's `%D` output with `--decorate=full`.
+ * Full paths are unambiguous: refs/heads/ = local, refs/remotes/ = remote, refs/tags/ = tag.
+ */
 function parseRef(raw: string): { type: 'branch' | 'remote' | 'tag' | 'head'; name: string; isHead: boolean } {
   const trimmed = raw.trim()
   if (trimmed === 'HEAD') return { type: 'head', name: 'HEAD', isHead: true }
   if (trimmed.startsWith('HEAD -> ')) {
-    return { type: 'branch', name: trimmed.slice(8), isHead: true }
+    const refPath = trimmed.slice(8) // e.g. 'refs/heads/main'
+    const name = refPath.replace(/^refs\/heads\//, '')
+    return { type: 'branch', name, isHead: true }
   }
   if (trimmed.startsWith('tag: ')) {
-    return { type: 'tag', name: trimmed.slice(5), isHead: false }
+    const refPath = trimmed.slice(5) // e.g. 'refs/tags/v1.0'
+    const name = refPath.replace(/^refs\/tags\//, '')
+    return { type: 'tag', name, isHead: false }
   }
-  if (trimmed.includes('/')) {
-    return { type: 'remote', name: trimmed, isHead: false }
+  if (trimmed.startsWith('refs/remotes/')) {
+    const name = trimmed.slice(13) // e.g. 'origin/main'
+    return { type: 'remote', name, isHead: false }
   }
+  if (trimmed.startsWith('refs/heads/')) {
+    const name = trimmed.slice(11) // e.g. 'feature/api-v2'
+    return { type: 'branch', name, isHead: false }
+  }
+  // Fallback for bare names (shouldn't happen with --decorate=full)
   return { type: 'branch', name: trimmed, isHead: false }
 }
 

@@ -169,14 +169,111 @@ export interface DagLayout {
 export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string): DagLayout {
   if (commits.length === 0) return { nodes: [], edges: [], maxColumn: 0 }
 
+  // --- Pre-compute fixed column per branch ---
+  // Each branch gets its own unique column. Children are always right of parents.
+  const hashToBranch = new Map<string, string>()
+  for (const c of commits) hashToBranch.set(c.hash, c.branch)
+
+  // Find parent branch for each branch: the branch of the first-parent at the fork point
+  const branchParent = new Map<string, string>()
+  for (const c of commits) {
+    if (c.parents.length === 0) continue
+    const parentBranch = hashToBranch.get(c.parents[0])
+    if (parentBranch && parentBranch !== c.branch) {
+      branchParent.set(c.branch, parentBranch) // last write wins = deepest fork point
+    }
+  }
+
+  // Order children by first appearance in commits (topo order)
+  const branchFirstRow = new Map<string, number>()
+  for (let i = 0; i < commits.length; i++) {
+    if (!branchFirstRow.has(commits[i].branch)) {
+      branchFirstRow.set(commits[i].branch, i)
+    }
+  }
+
+  // Compute row range per branch (for overlap detection)
+  const branchRowRange = new Map<string, { min: number; max: number }>()
+  for (let i = 0; i < commits.length; i++) {
+    const range = branchRowRange.get(commits[i].branch)
+    if (!range) {
+      branchRowRange.set(commits[i].branch, { min: i, max: i })
+    } else {
+      range.max = i
+    }
+  }
+
+  // Detect "behind" branches: their tip sits on the base branch's first-parent chain
+  const baseFirstParentChain = new Set<string>()
+  const hashToCommit = new Map<string, ResolvedCommit>()
+  for (const c of commits) hashToCommit.set(c.hash, c)
+  {
+    let current = commits.find(c => c.branch === baseBranch && c.isBranchTip)
+    while (current) {
+      baseFirstParentChain.add(current.hash)
+      current = current.parents.length > 0 ? hashToCommit.get(current.parents[0]) : undefined
+    }
+  }
+  const branchTipHash = new Map<string, string>()
+  for (const c of commits) {
+    if (c.isBranchTip && !branchTipHash.has(c.branch)) {
+      branchTipHash.set(c.branch, c.hash)
+    }
+  }
+
+  // Track occupied row ranges per column for overlap detection
+  const columnOccupied: Array<Array<{ min: number; max: number }>> = [[]]
+  function isColumnFree(col: number, range: { min: number; max: number }): boolean {
+    const ranges = columnOccupied[col]
+    if (!ranges) return true
+    return !ranges.some(r => r.min <= range.max + 1 && r.max >= range.min - 1)
+  }
+  function occupyColumn(col: number, range: { min: number; max: number }) {
+    while (columnOccupied.length <= col) columnOccupied.push([])
+    columnOccupied[col].push(range)
+  }
+
+  // BFS from base branch to assign columns (lowest free column > parent)
+  const branchCol = new Map<string, number>()
+  branchCol.set(baseBranch, 0)
+  const baseRange = branchRowRange.get(baseBranch)
+  if (baseRange) occupyColumn(0, baseRange)
+  const queue = [baseBranch]
+  while (queue.length > 0) {
+    const parent = queue.shift()!
+    const parentCol = branchCol.get(parent)!
+    const children: string[] = []
+    for (const [child, p] of branchParent) {
+      if (p === parent && !branchCol.has(child)) children.push(child)
+    }
+    children.sort((a, b) => (branchFirstRow.get(a) ?? 0) - (branchFirstRow.get(b) ?? 0))
+    for (const child of children) {
+      // Behind branches (tip is on base branch's first-parent chain) share base column
+      const childTip = branchTipHash.get(child)
+      if (childTip && baseFirstParentChain.has(childTip)) {
+        branchCol.set(child, 0)
+      } else {
+        const range = branchRowRange.get(child)!
+        let col = parentCol + 1
+        while (!isColumnFree(col, range)) col++
+        branchCol.set(child, col)
+        occupyColumn(col, range)
+      }
+      queue.push(child)
+    }
+  }
+
   const hashToRow = new Map<string, number>()
   const hashToCol = new Map<string, number>()
   const nodes: LayoutNode[] = []
   const edges: LayoutEdge[] = []
 
-  const activeColumns: (string | null)[] = []
-  const columnColorIndex: number[] = []
-  const columnBranch: (string | null)[] = []  // track branch per column
+  // Pre-reserve column 0 for the base branch so feature branches never claim it.
+  // '__base_reserved__' is a sentinel — treated as free only by base branch lookups.
+  const BASE_RESERVED = '__base_reserved__'
+  const activeColumns: (string | null | typeof BASE_RESERVED)[] = [BASE_RESERVED]
+  const columnColorIndex: number[] = [BASE_BRANCH_COLOR_INDEX]
+  const columnBranch: (string | null)[] = [baseBranch]
   let nextFallbackColor = 0
 
   // Branch ownership is already resolved — just read commit.branch
@@ -186,10 +283,18 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
     return nextFallbackColor++
   }
 
-  function findFreeColumn(): number {
-    for (let i = 0; i < activeColumns.length; i++) {
-      if (activeColumns[i] === null) return i
+  function findFreeColumn(forBase = false, minCol = 0): number {
+    const start = Math.max(forBase ? 0 : 1, minCol) // non-base branches skip column 0
+    for (let i = start; i < activeColumns.length; i++) {
+      if (activeColumns[i] === null || (forBase && activeColumns[i] === BASE_RESERVED)) return i
     }
+    // Expand to at least `start` columns, then add one free column
+    while (activeColumns.length <= start) {
+      activeColumns.push(null)
+      columnColorIndex.push(0)
+      columnBranch.push(null)
+    }
+    if (activeColumns[start] === null || (forBase && activeColumns[start] === BASE_RESERVED)) return start
     activeColumns.push(null)
     columnColorIndex.push(0)
     columnBranch.push(null)
@@ -209,52 +314,42 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
     const commit = commits[row]
     hashToRow.set(commit.hash, row)
 
-    let col = findColumnReservedFor(commit.hash)
-    // Track if this commit was reserved on the base branch column (first-parent chain).
-    // Behind-branch tips on main's trunk should not be ejected to a new column.
-    const reservedOnBaseLine = col !== null && columnBranch[col] === baseBranch
+    // Force commit into its branch's pre-assigned column
+    const targetCol = branchCol.get(commit.branch) ?? findFreeColumn(false, 1)
+    // Ensure columns exist up to targetCol
+    while (activeColumns.length <= targetCol) {
+      activeColumns.push(null)
+      columnColorIndex.push(0)
+      columnBranch.push(null)
+    }
 
-    if (col !== null) {
-      // Base branch commits should always stay in column 0
-      const isBase = commit.branch === baseBranch
-      if (isBase && col !== 0) {
-        if (activeColumns[0] === commit.hash) {
-          // Column 0 also reserved for this commit — just pick column 0
-        } else if (activeColumns[0] !== null) {
-          activeColumns[col] = activeColumns[0]
-        } else {
-          activeColumns[col] = null
+    // Clear any reservations for this commit in other columns
+    for (let i = 0; i < activeColumns.length; i++) {
+      if (activeColumns[i] === commit.hash && i !== targetCol) {
+        activeColumns[i] = null
+      }
+    }
+
+    // If targetCol is occupied by a different commit's reservation, relocate it
+    if (activeColumns[targetCol] !== null && activeColumns[targetCol] !== commit.hash && activeColumns[targetCol] !== BASE_RESERVED) {
+      const displaced = activeColumns[targetCol]!
+      // Find a free column for the displaced reservation
+      const displacedBranch = hashToBranch.get(displaced)
+      const displacedTarget = displacedBranch ? branchCol.get(displacedBranch) : null
+      if (displacedTarget !== null && displacedTarget !== undefined && displacedTarget !== targetCol) {
+        while (activeColumns.length <= displacedTarget) {
+          activeColumns.push(null)
+          columnColorIndex.push(0)
+          columnBranch.push(null)
         }
-        col = 0
-      }
-
-      for (let i = 0; i < activeColumns.length; i++) {
-        if (i !== col && activeColumns[i] === commit.hash) {
-          activeColumns[i] = null
-        }
+        activeColumns[displacedTarget] = displaced
+      } else {
+        const freeCol = findFreeColumn(false, 1)
+        activeColumns[freeCol] = displaced
       }
     }
 
-    if (col === null) {
-      col = findFreeColumn()
-    }
-
-    // Branch-aware split: if this column was serving a different branch, move to a new column
-    const prevBranch = columnBranch[col]
-    if (prevBranch && commit.branch !== prevBranch && commit.branch !== baseBranch && !reservedOnBaseLine) {
-      const prevRow = nodes.findLast(n => n.column === col)?.row
-      const newCol = findFreeColumn()   // find before releasing — otherwise gets same column
-      activeColumns[col] = null
-      activeColumns[newCol] = commit.hash
-      if (prevRow !== undefined) {
-        const ci = getCommitColorIndex(commit)
-        edges.push({
-          fromRow: prevRow, fromCol: col, toRow: row, toCol: newCol,
-          color: getColor(ci), type: 'curve'
-        })
-      }
-      col = newCol
-    }
+    const col = targetCol
 
     const ci = getCommitColorIndex(commit)
     columnColorIndex[col] = ci
@@ -272,43 +367,55 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
       activeColumns[col] = null
     } else {
       const firstParent = commit.parents[0]
+      // Reserve first parent in its branch's assigned column
+      const parentBranch = hashToBranch.get(firstParent)
+      const parentTargetCol = parentBranch ? (branchCol.get(parentBranch) ?? col) : col
       const existingCol = findColumnReservedFor(firstParent)
-      let deferredRelease: number | null = null
-      if (existingCol !== null && existingCol !== col) {
-        // Delay release until after all parent reservations so findFreeColumn
-        // doesn't immediately reuse the base branch column for merge parents
-        deferredRelease = col
-        edges.push({
-          fromRow: row, fromCol: col, toRow: -1, toCol: existingCol,
-          color: getColor(ci), type: 'curve', targetHash: firstParent
-        })
-      } else if (existingCol === null) {
-        activeColumns[col] = firstParent
+
+      if (existingCol !== null) {
+        // Already reserved — leave it (will be moved to correct col when processed)
+        if (col !== existingCol) {
+          activeColumns[col] = null
+        }
+      } else {
+        // Reserve in parent's target column
+        while (activeColumns.length <= parentTargetCol) {
+          activeColumns.push(null)
+          columnColorIndex.push(0)
+          columnBranch.push(null)
+        }
+        if (parentTargetCol === col) {
+          activeColumns[col] = firstParent
+        } else {
+          activeColumns[col] = null
+          // If parent's column is occupied, put reservation there anyway (will be resolved)
+          activeColumns[parentTargetCol] = firstParent
+        }
       }
 
       for (let p = 1; p < commit.parents.length; p++) {
         const parentHash = commit.parents[p]
         const pExisting = findColumnReservedFor(parentHash)
         if (pExisting === null) {
-          const pCol = findFreeColumn()
-          // Look up the parent's color if it exists in the list
+          const pBranch = hashToBranch.get(parentHash)
+          const pTargetCol = pBranch ? (branchCol.get(pBranch) ?? null) : null
+          let pCol: number
+          if (pTargetCol !== null) {
+            while (activeColumns.length <= pTargetCol) {
+              activeColumns.push(null)
+              columnColorIndex.push(0)
+              columnBranch.push(null)
+            }
+            pCol = pTargetCol
+          } else {
+            pCol = findFreeColumn()
+          }
           const parentCommit = commits.find(c => c.hash === parentHash)
           const pci = parentCommit ? getCommitColorIndex(parentCommit) : (nextFallbackColor++)
           columnColorIndex[pCol] = pci
           activeColumns[pCol] = parentHash
-          edges.push({
-            fromRow: row, fromCol: col, toRow: -1, toCol: pCol,
-            color: getColor(pci), type: 'curve', targetHash: parentHash
-          })
-        } else {
-          edges.push({
-            fromRow: row, fromCol: col, toRow: -1, toCol: pExisting,
-            color: getColor(columnColorIndex[pExisting]), type: 'curve', targetHash: parentHash
-          })
         }
       }
-
-      if (deferredRelease !== null) activeColumns[deferredRelease] = null
     }
   }
 
@@ -730,8 +837,13 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, renderL
     return items
   }, [visibleNodes, visibleGroups, totalRowCount])
 
+  const noMatches = matchSet !== null && matchSet.size === 0
+
   return (
     <div className={cn('relative', className)}>
+      {noMatches && (
+        <div className="flex items-center justify-center h-16 text-xs text-muted-foreground">No matches</div>
+      )}
       <svg className="absolute top-0 left-0 pointer-events-none" width={gutterWidth} height={totalHeight} style={{ zIndex: 0 }}>
         {visibleEdges.map((edge, i) => {
           const clampedEdge = edge.toRow >= maxRow

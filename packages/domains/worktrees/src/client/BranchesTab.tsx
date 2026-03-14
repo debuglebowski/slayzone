@@ -15,7 +15,7 @@ const DEFAULT_CONFIG: CommitGraphConfig = {
   baseBranch: '',  // resolved at runtime
   collapsed: false,
   includeChildBranches: true,
-  includeDeletedBranches: false,
+  includeMergedBranches: false,
   includeTags: true,
 }
 
@@ -62,10 +62,12 @@ export function useBranchGraph(
 
       const branchSet = new Set<string>([baseBranch])
 
-      if (config.includeChildBranches) {
+      if (config.includeChildBranches || config.includeMergedBranches) {
         const result = await window.api.git.resolveChildBranches(projectPath, baseBranch)
-        for (const child of result.children) branchSet.add(child)
-        if (config.includeDeletedBranches) {
+        if (config.includeChildBranches) {
+          for (const child of result.children) branchSet.add(child)
+        }
+        if (config.includeMergedBranches) {
           for (const merged of result.merged) branchSet.add(merged)
         }
       }
@@ -295,8 +297,8 @@ function DisplayPopover({ config, effectiveBaseBranch, onChange }: {
             <Switch id="display-child-branches" checked={config.includeChildBranches} onCheckedChange={(v) => onChange(c => ({ ...c, includeChildBranches: v }))} />
           </div>
           <div className="flex items-center justify-between">
-            <Label htmlFor="display-deleted-branches" className="text-sm cursor-pointer">Include deleted branches</Label>
-            <Switch id="display-deleted-branches" checked={config.includeDeletedBranches} onCheckedChange={(v) => onChange(c => ({ ...c, includeDeletedBranches: v }))} />
+            <Label htmlFor="display-merged-branches" className="text-sm cursor-pointer">Include merged branches</Label>
+            <Switch id="display-merged-branches" checked={config.includeMergedBranches} onCheckedChange={(v) => onChange(c => ({ ...c, includeMergedBranches: v }))} />
           </div>
           {config.collapsed && (
             <div className="flex items-center justify-between">

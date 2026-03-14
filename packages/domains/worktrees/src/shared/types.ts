@@ -214,8 +214,8 @@ export interface CommitGraphConfig {
   collapsed: boolean
   /** Show child branches of base branch */
   includeChildBranches: boolean
-  /** Show merged/deleted PR branches */
-  includeDeletedBranches: boolean
+  /** Show branches already merged into base */
+  includeMergedBranches: boolean
   /** Collapsed only: break collapse chain at tagged commits */
   includeTags: boolean
 }
