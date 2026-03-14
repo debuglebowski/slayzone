@@ -542,6 +542,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
   }, [sessionId, subscribe, subscribeExit, subscribeSessionInvalid, subscribeAttention, getCrashOutput, cleanupTask])
 
+  // Pause cursor blink on hidden terminals to save CPU
+  useEffect(() => {
+    if (!terminalRef.current) return
+    terminalRef.current.options.cursorBlink = isActive
+  }, [isActive])
+
   // Replay missed PTY data when task becomes active
   useEffect(() => {
     if (!isActive || !terminalRef.current) return
