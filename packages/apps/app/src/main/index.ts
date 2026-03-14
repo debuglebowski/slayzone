@@ -1005,7 +1005,11 @@ app.whenReady().then(async () => {
   if (!isPlaywright) {
     // Push new tasks to providers (two_way sync)
     ipcMain.on('db:tasks:create:done', (_event, taskId: string, projectId: string) => {
-      void pushNewTaskToProviders(db, taskId, projectId).then(notifyTasksChanged)
+      void pushNewTaskToProviders(db, taskId, projectId).then(() => {
+        // Only notify if a link was actually created
+        const hasLink = db.prepare('SELECT 1 FROM external_links WHERE task_id = ? LIMIT 1').get(taskId)
+        if (hasLink) notifyTasksChanged()
+      })
     })
 
     // Archive/unarchive sync to providers

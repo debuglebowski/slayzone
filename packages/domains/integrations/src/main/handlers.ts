@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3'
 import type { IpcMain } from 'electron'
 import {
   getIssue,
+  getIssuesBatch,
   listIssues,
   listProjects,
   listTeams,
@@ -11,6 +12,7 @@ import {
 } from './linear-client'
 import {
   getViewer as getGitHubViewer,
+  getIssuesBatch as getGithubIssuesBatch,
   listIssues as listGitHubRepositoryIssues,
   listRepositories as listGitHubRepositories,
   listProjects as listGitHubProjects,
@@ -59,7 +61,8 @@ import type {
   ProviderStatus,
   StatusResyncPreview,
   PushUnlinkedTasksInput,
-  PushUnlinkedTasksResult
+  PushUnlinkedTasksResult,
+  BatchTaskSyncStatusItem
 } from '../shared'
 import { runSyncNow, runGithubSyncNow, pushNewTaskToProviders, getDesiredLinearStateId } from './sync'
 import { providerStatusesToColumns, computeStatusDiff } from './status-sync'
@@ -1196,6 +1199,10 @@ export function registerIntegrationHandlers(
   ipcMain.handle('integrations:clear-project-provider', (_event, input: ClearProjectProviderInput) => {
     db.transaction(() => {
       clearProjectProviderData(db, input.projectId, input.provider)
+      db.prepare(`
+        DELETE FROM integration_project_connections
+        WHERE project_id = ? AND provider = ?
+      `).run(input.projectId, input.provider)
     })()
     return true
   })
@@ -1651,6 +1658,71 @@ export function registerIntegrationHandlers(
 
     const task = getTaskById(db, taskId)
     return buildGitHubTaskSyncStatus(db, link, task, remoteIssue)
+  })
+
+  ipcMain.handle('integrations:get-batch-task-sync-status', async (_event, taskIds: string[], provider: IntegrationProvider): Promise<BatchTaskSyncStatusItem[]> => {
+    if (taskIds.length === 0) return []
+    const placeholders = taskIds.map(() => '?').join(',')
+    const links = db.prepare(`
+      SELECT * FROM external_links WHERE task_id IN (${placeholders}) AND provider = ?
+    `).all(...taskIds, provider) as ExternalLink[]
+    const linkByTaskId = new Map(links.map(l => [l.task_id, l]))
+
+    const connectionIds = [...new Set(links.map(l => l.connection_id))]
+    const results: BatchTaskSyncStatusItem[] = []
+    const now = new Date().toISOString()
+
+    if (provider === 'linear') {
+      for (const connId of connectionIds) {
+        const connection = getConnection(db, connId)
+        assertConnectionProvider(connection, 'linear')
+        const apiKey = readCredential(db, connection.credential_ref)
+        const connLinks = links.filter(l => l.connection_id === connId)
+        const issueMap = await getIssuesBatch(apiKey, connLinks.map(l => l.external_id))
+
+        for (const link of connLinks) {
+          const remoteIssue = issueMap.get(link.external_id)
+          if (!remoteIssue) {
+            results.push({ taskId: link.task_id, link, status: { provider, taskId: link.task_id, state: 'unknown', fields: [], comparedAt: now } })
+            continue
+          }
+          const task = getTaskById(db, link.task_id)
+          results.push({ taskId: link.task_id, link, status: buildLinearTaskSyncStatus(db, link, task, remoteIssue) })
+        }
+      }
+    } else if (provider === 'github') {
+      for (const connId of connectionIds) {
+        const connection = getConnection(db, connId)
+        assertConnectionProvider(connection, 'github')
+        const token = readCredential(db, connection.credential_ref)
+        const connLinks = links.filter(l => l.connection_id === connId)
+        const batchInput = connLinks.map(l => {
+          const key = parseGitHubExternalKey(l.external_key)
+          return key ? { id: l.external_id, ...key } : null
+        }).filter((x): x is NonNullable<typeof x> => x !== null)
+
+        const issueMap = await getGithubIssuesBatch(token, batchInput)
+
+        for (const link of connLinks) {
+          const remoteIssue = issueMap.get(link.external_id)
+          if (!remoteIssue) {
+            results.push({ taskId: link.task_id, link, status: { provider, taskId: link.task_id, state: 'unknown', fields: [], comparedAt: now } })
+            continue
+          }
+          const task = getTaskById(db, link.task_id)
+          results.push({ taskId: link.task_id, link, status: buildGitHubTaskSyncStatus(db, link, task, remoteIssue) })
+        }
+      }
+    }
+
+    // Unlinked tasks
+    for (const taskId of taskIds) {
+      if (!linkByTaskId.has(taskId)) {
+        results.push({ taskId, link: null, status: { provider, taskId, state: 'unknown', fields: [], comparedAt: now } })
+      }
+    }
+
+    return results
   })
 
   ipcMain.handle('integrations:push-task', async (_event, input: PushTaskInput) => {

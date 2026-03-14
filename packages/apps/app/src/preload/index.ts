@@ -565,6 +565,7 @@ const api: ElectronAPI = {
     importLinearIssues: (input) => ipcRenderer.invoke('integrations:import-linear-issues', input),
     syncNow: (input) => ipcRenderer.invoke('integrations:sync-now', input),
     getTaskSyncStatus: (taskId, provider) => ipcRenderer.invoke('integrations:get-task-sync-status', taskId, provider),
+    getBatchTaskSyncStatus: (taskIds, provider) => ipcRenderer.invoke('integrations:get-batch-task-sync-status', taskIds, provider),
     pushTask: (input) => ipcRenderer.invoke('integrations:push-task', input),
     pullTask: (input) => ipcRenderer.invoke('integrations:pull-task', input),
     getLink: (taskId, provider) => ipcRenderer.invoke('integrations:get-link', taskId, provider),

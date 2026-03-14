@@ -84,7 +84,8 @@ import type {
   ProviderStatus,
   StatusResyncPreview,
   PushUnlinkedTasksInput,
-  PushUnlinkedTasksResult
+  PushUnlinkedTasksResult,
+  BatchTaskSyncStatusItem
 } from '@slayzone/integrations/shared'
 
 export type { ExecutionContext } from '@slayzone/projects/shared'
@@ -612,6 +613,7 @@ export interface ElectronAPI {
     importLinearIssues: (input: ImportLinearIssuesInput) => Promise<ImportLinearIssuesResult>
     syncNow: (input: SyncNowInput) => Promise<SyncNowResult>
     getTaskSyncStatus: (taskId: string, provider: IntegrationProvider) => Promise<TaskSyncStatus>
+    getBatchTaskSyncStatus: (taskIds: string[], provider: IntegrationProvider) => Promise<BatchTaskSyncStatusItem[]>
     pushTask: (input: PushTaskInput) => Promise<PushTaskResult>
     pullTask: (input: PullTaskInput) => Promise<PullTaskResult>
     getLink: (taskId: string, provider: IntegrationProvider) => Promise<ExternalLink | null>

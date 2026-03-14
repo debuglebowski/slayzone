@@ -185,6 +185,12 @@ export interface TaskSyncStatus {
   comparedAt: string
 }
 
+export interface BatchTaskSyncStatusItem {
+  taskId: string
+  link: ExternalLink | null
+  status: TaskSyncStatus
+}
+
 export interface PushTaskInput {
   taskId: string
   provider: IntegrationProvider

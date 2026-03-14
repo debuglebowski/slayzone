@@ -60,16 +60,6 @@ type ProjectSyncSummary = {
 type IntegrationSetupEntry = 'github_projects' | 'linear' | 'github_issues'
 type ImportIssueSort = 'updated_desc' | 'updated_asc' | 'title_asc' | 'title_desc'
 
-function createUnknownStatus(provider: IntegrationProvider, taskId: string): TaskSyncStatus {
-  return {
-    provider,
-    taskId,
-    state: 'unknown',
-    fields: [],
-    comparedAt: new Date().toISOString()
-  }
-}
-
 function summarizeSyncRows(rows: TaskSyncRow[]): ProjectSyncSummary {
   const summary: ProjectSyncSummary = {
     total: rows.length,
@@ -860,31 +850,17 @@ export function IntegrationsTab({
     if (!provider) return []
 
     const tasks = await window.api.db.getTasksByProject(project.id)
-    const linkLookups = await Promise.all(
-      tasks.map(async (task) => {
-        const link = await window.api.integrations.getLink(task.id, provider)
-        return { taskId: task.id, link }
-      })
-    )
+    const taskIds = tasks.map(t => t.id)
 
-    const rows: TaskSyncRow[] = await Promise.all(
-      linkLookups.map(async ({ taskId, link }) => {
-        if (!link) {
-          return { taskId, link: null, status: null }
-        }
-        try {
-          const status = await window.api.integrations.getTaskSyncStatus(taskId, provider)
-          return { taskId, link, status }
-        } catch (error) {
-          return {
-            taskId,
-            link,
-            status: createUnknownStatus(provider, taskId),
-            error: error instanceof Error ? error.message : String(error)
-          }
-        }
-      })
-    )
+    // Single batch call: returns link + status for all tasks
+    const batchItems = await window.api.integrations.getBatchTaskSyncStatus(taskIds, provider)
+    const itemByTaskId = new Map(batchItems.map(item => [item.taskId, item]))
+
+    const rows: TaskSyncRow[] = taskIds.map(taskId => {
+      const item = itemByTaskId.get(taskId)
+      if (!item || !item.link) return { taskId, link: null, status: null }
+      return { taskId, link: item.link, status: item.status }
+    })
 
     setSyncRows(rows)
     setSyncSummary(summarizeSyncRows(rows))
