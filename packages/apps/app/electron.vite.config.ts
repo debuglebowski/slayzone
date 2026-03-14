@@ -1,5 +1,5 @@
 import { resolve } from 'path'
-import { readFileSync } from 'fs'
+import { readFileSync, readdirSync, existsSync } from 'fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -12,6 +12,34 @@ const slayzoneDeps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }
 )
 
 const root = resolve(__dirname, '../../..')
+
+// Discover @slayzone/* client entry files so Vite's dep scanner can trace
+// through them and pre-bundle their third-party imports automatically.
+function discoverDomainClientEntries(): string[] {
+  const entries: string[] = []
+  const dirs = [
+    resolve(root, 'packages/domains'),
+    resolve(root, 'packages/shared')
+  ]
+  for (const base of dirs) {
+    if (!existsSync(base)) continue
+    for (const pkg of readdirSync(base, { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue
+      for (const candidate of [
+        resolve(base, pkg.name, 'src/client/index.ts'),
+        resolve(base, pkg.name, 'src/client/index.tsx'),
+        resolve(base, pkg.name, 'src/index.ts'),
+        resolve(base, pkg.name, 'src/index.tsx')
+      ]) {
+        if (existsSync(candidate)) {
+          entries.push(candidate)
+          break
+        }
+      }
+    }
+  }
+  return entries
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, root, '')
@@ -62,7 +90,8 @@ export default defineConfig(({ mode }) => {
         visualizer({ filename: 'bundle-report.html', gzipSize: true, template: 'treemap' })
       ],
       optimizeDeps: {
-        exclude: slayzoneDeps
+        exclude: slayzoneDeps,
+        entries: discoverDomainClientEntries()
       }
     }
   }
