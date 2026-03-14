@@ -222,6 +222,7 @@ export interface LinearIssueSummary {
   description: string | null
   priority: number
   updatedAt: string
+  archivedAt: string | null
   state: {
     id: string
     name: string

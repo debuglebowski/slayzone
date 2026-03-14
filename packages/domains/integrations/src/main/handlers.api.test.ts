@@ -17,7 +17,7 @@ const FIXTURES: Record<string, LinearIssueSummary> = {
   normal: {
     id: 'LIN-1', identifier: 'ENG-100', title: 'Normal task',
     description: '**Bold** and `code`',
-    priority: 3, updatedAt: '2025-06-01T00:00:00Z',
+    priority: 3, updatedAt: '2025-06-01T00:00:00Z', archivedAt: null,
     state: { id: 'st-started', name: 'In Progress', type: 'started' },
     assignee: { id: 'u-1', name: 'Alice' },
     team: { id: 'team-1', key: 'ENG', name: 'Engineering' },
@@ -27,7 +27,7 @@ const FIXTURES: Record<string, LinearIssueSummary> = {
   urgent: {
     id: 'LIN-2', identifier: 'ENG-101', title: 'Urgent bug',
     description: null,
-    priority: 1, updatedAt: '2025-06-02T00:00:00Z',
+    priority: 1, updatedAt: '2025-06-02T00:00:00Z', archivedAt: null,
     state: { id: 'st-triage', name: 'Triage', type: 'triage' },
     assignee: null,
     team: { id: 'team-1', key: 'ENG', name: 'Engineering' },
@@ -37,7 +37,7 @@ const FIXTURES: Record<string, LinearIssueSummary> = {
   no_priority: {
     id: 'LIN-3', identifier: 'ENG-102', title: 'No priority issue',
     description: null,
-    priority: 0, updatedAt: '2025-06-03T00:00:00Z',
+    priority: 0, updatedAt: '2025-06-03T00:00:00Z', archivedAt: null,
     state: { id: 'st-backlog', name: 'Backlog', type: 'backlog' },
     assignee: null,
     team: { id: 'team-1', key: 'ENG', name: 'Engineering' },
@@ -47,7 +47,7 @@ const FIXTURES: Record<string, LinearIssueSummary> = {
   canceled: {
     id: 'LIN-4', identifier: 'ENG-103', title: 'Canceled task',
     description: '```js\nconsole.log("hi")\n```\n\n- [x] done\n- [ ] todo',
-    priority: 4, updatedAt: '2025-06-04T00:00:00Z',
+    priority: 4, updatedAt: '2025-06-04T00:00:00Z', archivedAt: null,
     state: { id: 'st-canceled', name: 'Canceled', type: 'canceled' },
     assignee: { id: 'u-2', name: 'Bob' },
     team: { id: 'team-1', key: 'ENG', name: 'Engineering' },
@@ -57,7 +57,7 @@ const FIXTURES: Record<string, LinearIssueSummary> = {
   lowest: {
     id: 'LIN-5', identifier: 'ENG-104', title: 'Lowest priority',
     description: 'Simple text',
-    priority: 5, updatedAt: '2025-06-05T00:00:00Z',
+    priority: 5, updatedAt: '2025-06-05T00:00:00Z', archivedAt: null,
     state: { id: 'st-completed', name: 'Done', type: 'completed' },
     assignee: { id: 'u-1', name: 'Alice' },
     team: { id: 'team-1', key: 'ENG', name: 'Engineering' },

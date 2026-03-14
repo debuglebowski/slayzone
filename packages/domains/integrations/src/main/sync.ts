@@ -341,9 +341,9 @@ export async function runSyncNow(db: Database, input: SyncNowInput): Promise<Syn
           }
         }
 
-        // Archive sync: remote terminal → archive locally, remote reopened → unarchive
+        // Archive sync: remote terminal/archived → archive locally, remote reopened → unarchive
         // Only update archived_at, NOT updated_at — avoids false "local ahead" on next tick
-        const isRemoteTerminal = remoteIssue.state.type === 'completed' || remoteIssue.state.type === 'canceled'
+        const isRemoteTerminal = remoteIssue.state.type === 'completed' || remoteIssue.state.type === 'canceled' || Boolean(remoteIssue.archivedAt)
         if (isRemoteTerminal && !task.archived_at) {
           db.prepare("UPDATE tasks SET archived_at = datetime('now') WHERE id = ?").run(task.id)
         } else if (!isRemoteTerminal && task.archived_at) {

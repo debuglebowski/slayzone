@@ -62,6 +62,7 @@ interface IssuesQuery {
       description: string | null
       priority: number | null
       updatedAt: string
+      archivedAt: string | null
       url: string
       state: { id: string; name: string; type: string }
       assignee: { id: string; name: string } | null
@@ -91,6 +92,7 @@ interface IssueQuery {
     description: string | null
     priority: number | null
     updatedAt: string
+    archivedAt: string | null
     url: string
     state: { id: string; name: string; type: string }
     assignee: { id: string; name: string } | null
@@ -146,6 +148,7 @@ function mapIssue(issue: NonNullable<IssueQuery['issue']>): LinearIssueSummary {
     description: issue.description,
     priority: issue.priority ?? 0,
     updatedAt: issue.updatedAt,
+    archivedAt: issue.archivedAt,
     state: issue.state,
     assignee: issue.assignee,
     team: issue.team,
@@ -239,7 +242,7 @@ export async function listIssues(
         issues(first: $first, after: $after${updatedAtFilter}, orderBy: updatedAt) {
           pageInfo { hasNextPage endCursor }
           nodes {
-            id identifier title description priority updatedAt url
+            id identifier title description priority updatedAt archivedAt url
             state { id name type }
             assignee { id name }
             team { id key name }
@@ -272,7 +275,7 @@ export async function listIssues(
         issues(first: $first, after: $after${updatedAtFilter}, orderBy: updatedAt) {
           pageInfo { hasNextPage endCursor }
           nodes {
-            id identifier title description priority updatedAt url
+            id identifier title description priority updatedAt archivedAt url
             state { id name type }
             assignee { id name }
             team { id key name }
@@ -301,7 +304,7 @@ export async function listIssues(
       issues(first: $first, after: $after${updatedAtFilter}, orderBy: updatedAt) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id identifier title description priority updatedAt url
+          id identifier title description priority updatedAt archivedAt url
           state { id name type }
           assignee { id name }
           team { id key name }
@@ -323,7 +326,7 @@ export async function getIssue(apiKey: string, issueId: string): Promise<LinearI
     apiKey,
     `query Issue($issueId: String!) {
       issue(id: $issueId) {
-        id identifier title description priority updatedAt url
+        id identifier title description priority updatedAt archivedAt url
         state { id name type }
         assignee { id name }
         team { id key name }
@@ -348,7 +351,7 @@ export async function getIssuesBatch(
     `query IssuesBatch($ids: [ID!]!) {
       issues(filter: { id: { in: $ids } }) {
         nodes {
-          id identifier title description priority updatedAt url
+          id identifier title description priority updatedAt archivedAt url
           state { id name type }
           assignee { id name }
           team { id key name }
@@ -383,7 +386,7 @@ export async function updateIssue(
       issueUpdate(id: $issueId, input: $input) {
         success
         issue {
-          id identifier title description priority updatedAt url
+          id identifier title description priority updatedAt archivedAt url
           state { id name type }
           assignee { id name }
           team { id key name }
@@ -421,7 +424,7 @@ export async function createIssue(
       issueCreate(input: $input) {
         success
         issue {
-          id identifier title description priority updatedAt url
+          id identifier title description priority updatedAt archivedAt url
           state { id name type }
           assignee { id name }
           team { id key name }
