@@ -33,6 +33,23 @@ run_test packages/domains/worktrees/src/main/handlers.test.ts
 run_test packages/domains/integrations/src/main/handlers.api.test.ts
 run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
 
+run_test_no_loader() {
+  echo ""
+  echo "=== $1 (integration) ==="
+  if ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import'; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+if [ -n "$LINEAR_API_KEY" ]; then
+  run_test_no_loader packages/domains/integrations/src/main/handlers.integration.linear.test.ts
+fi
+if [ -n "$GITHUB_TOKEN" ]; then
+  run_test_no_loader packages/domains/integrations/src/main/handlers.integration.github.test.ts
+fi
+
 echo ""
 echo "=== Summary ==="
 echo "Suites: $PASS passed, $FAIL failed"
