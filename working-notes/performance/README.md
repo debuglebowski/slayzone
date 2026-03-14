@@ -97,12 +97,12 @@ Each git panel instance contains:
 ### 2. HIGH: Hidden tabs keep full DOM mounted (54% waste)
 Inactive tabs use `invisible` class but remain fully mounted. 3 hidden task panels contain 15,670 nodes doing nothing. Combined with #1, hidden commit graphs are the biggest offender.
 
-**Fix:** Unmount heavy sub-panels (git, editor, browser) when tab is inactive. Keep terminal mounted for session persistence, but unmount git panel SVGs.
+**Status: DEFERRED** — Unmounting panels loses internal state (scroll position, editor cursors, browser sessions). Post-virtualization savings are ~1,500-3,000 nodes (not the original 26K estimate). Real value is killing polling intervals (item #4 overlap), not DOM. Would need state preservation to justify remount cost.
 
 ### 3. HIGH: FCP at 7.7s
 All slowest resources are ~3.7s Vite HMR modules in the critical path. No code splitting means everything loads before first paint completes.
 
-**Fix:** React.lazy() for non-critical paths: toasts, settings dialog, onboarding, git diff panel. Move heavy panels out of initial bundle.
+**Status: DONE** — See "Code Splitting" in Completed Optimizations below.
 
 ### 4. MEDIUM: Renderer CPU at 27.7% idle
 With Claude Code terminal running, renderer burns 28% CPU at idle. Likely terminal polling, git status polling, or animation frames from mounted-but-invisible components.
@@ -123,7 +123,7 @@ Render only visible rows. Current: 22,000px SVG + 510 row DIVs + 510 tooltip DIV
 Unmount git panel, editor, browser panel when tab is hidden. Keep xterm mounted. Could save 15,000+ nodes.
 
 ### Code Splitting
-React.lazy() for: UserSettingsDialog, OnboardingDialog, DevServerToast, UpdateToast, SuccessToast, AnimatedPage, GitDiffPanel, AI config panels.
+**DONE** — see Completed Optimizations.
 
 ### Virtual Scrolling (Kanban)
 Kanban columns have 7-730 nodes currently (light). Not critical yet but will scale with tasks.
@@ -138,28 +138,65 @@ Disabled for CSS underline workaround. 5-10x rendering perf if re-enabled.
 Missing: cache_size, mmap_size, busy_timeout, synchronous=NORMAL.
 
 ### Bundle Analysis
-Add rollup-plugin-visualizer. Main bundle is 8.5MB (index-BZWBC6v2.js).
+**DONE** — rollup-plugin-visualizer added. Run `pnpm build` and open `packages/apps/app/bundle-report.html`.
 
 ---
 
-## Revised Priority
+## Completed Optimizations
+
+### 1. Commit Graph Virtualization (2026-03-14)
+Added `@tanstack/react-virtual` to CommitGraph. Only visible rows + 10 overscan buffer rendered.
+
+| Metric | Before | After | Reduction |
+|--------|--------|-------|-----------|
+| Total DOM nodes | 16,892 | 7,487 | **-56%** |
+| DIVs | 7,821 | 2,829 | **-64%** |
+| SVGs | 1,135 | 292 | **-74%** |
+| SVG children | 5,489 | 1,136 | **-79%** |
+| SVG % of DOM | 32% | 15% | -17pp |
+
+Commit: `920a2ce`
+
+### 2. Code Splitting (2026-03-14)
+React.lazy() + sub-path exports for heavy components not needed on first paint. Created `@slayzone/icons` package to decouple `FileIcon`/`material-file-icons` from CodeMirror.
+
+| Chunk | Size | Method |
+|-------|------|--------|
+| TaskDetailPage | 1,543 KB | Sub-path export from @slayzone/task (includes xterm) |
+| FileEditorView | 636 KB | Sub-path export from @slayzone/file-editor (CodeMirror + highlight.js) |
+| posthog-js | 246 KB | Dynamic import in telemetry module |
+| UserSettingsDialog | 194 KB | Sub-path export from @slayzone/settings |
+| TutorialAnimationModal | 133 KB | Direct file lazy import |
+
+| Metric | Before | After | Reduction |
+|--------|--------|-------|-----------|
+| Main bundle | 8,500 KB | 5,716 KB | **-33%** |
+
+**Convention:** Heavy components get sub-path exports in package.json and are always lazy-imported. Barrels are for hooks, types, and utilities only. If it's worth lazy-loading, it stays out of the barrel.
+
+**Not splittable:** framer-motion (used in @slayzone/ui core: buttons, toasts, kanban), @dnd-kit (TabBar + Kanban on first paint), @tiptap (already in TaskDetailPage chunk).
+
+Bundle analysis: `rollup-plugin-visualizer` added — run `pnpm build` and open `packages/apps/app/bundle-report.html`.
+
+Commit: `60394ae`
+
+---
+
+## Priority (remaining)
 
 | # | Action | Impact | Effort |
 |---|--------|--------|--------|
-| 1 | Virtualize commit graph | Critical — 77% DOM reduction | 2-3hr |
-| 2 | Unmount hidden tab sub-panels | High — 54% DOM reduction | 1-2hr |
-| 3 | Code splitting | High — FCP from 7.7s → <2s | 1-2hr |
-| 4 | Investigate idle CPU (28%) | Medium — battery/thermal | 1hr |
-| 5 | Bundle analysis | Medium — informs #3 | 10min |
-| 6 | SQLite pragma tuning | Medium | 5min |
-| 7 | Terminal write throttling | Medium | 30min |
-| 8 | WebGL xterm renderer | Medium | 1hr |
-| 9 | Kanban virtual scrolling | Low (for now) | 1-2hr |
-| 10 | Automated perf regression tests | Low (prevents regressions) | Done (e2e/68) |
+| 1 | Investigate idle CPU (28%) | Medium — battery/thermal | 1hr |
+| 2 | SQLite pragma tuning | Medium | 5min |
+| 3 | Terminal write throttling | Medium | 30min |
+| 4 | WebGL xterm renderer | Medium | 1hr |
+| 5 | Kanban virtual scrolling | Low (for now) | 1-2hr |
+| 6 | Unmount hidden tab sub-panels | Low — needs state preservation strategy | 2-3hr |
 
 ## Artifacts
 - `heap-live-1.heapsnapshot` — live app heap snapshot
 - `heap-snapshot-1.heapsnapshot` — earlier snapshot
 - `profiling-results.json` — E2E baseline metrics
 - `cdp-metrics.json` — CDP performance counters
+- `bundle-report.html` — rollup-plugin-visualizer treemap (in `packages/apps/app/`)
 - `e2e/68-performance-profiling.spec.ts` — automated perf test suite (11 tests, all passing)
