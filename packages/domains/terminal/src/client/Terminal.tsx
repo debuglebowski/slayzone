@@ -502,13 +502,31 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, [initTerminal, sessionId])
 
   // Subscribe to PTY events via context (survives view switches)
+  // Batch writes with rAF to avoid per-chunk canvas repaints during fast output
   useEffect(() => {
+    let pendingChunks: string[] = []
+    let pendingSeq = -1
+    let rafId: number | null = null
+
+    const flush = () => {
+      rafId = null
+      if (pendingChunks.length === 0) return
+      if (terminalRef.current && isActiveRef.current) {
+        terminalRef.current.write(pendingChunks.join(''))
+        lastRenderedSeqRef.current = pendingSeq
+      }
+      pendingChunks = []
+      pendingSeq = -1
+    }
+
     const unsubData = subscribe(sessionId, (data, seq) => {
       const cutoff = clearedSeqRef.current
       if (cutoff !== null && seq <= cutoff) return
-      if (terminalRef.current && isActiveRef.current) {
-        terminalRef.current.write(data)
-        lastRenderedSeqRef.current = seq
+      if (!terminalRef.current || !isActiveRef.current) return
+      pendingChunks.push(data)
+      pendingSeq = seq
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flush)
       }
     })
 
@@ -535,6 +553,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     })
 
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId)
+      flush()
       unsubData()
       unsubExit()
       unsubSessionInvalid()
