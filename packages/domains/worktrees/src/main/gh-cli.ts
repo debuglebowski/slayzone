@@ -108,6 +108,7 @@ export async function listOpenPrs(repoPath: string): Promise<GhPullRequest[]> {
 
   if (result.status !== 0) {
     const stderr = result.stderr?.trim() || ''
+    if (stderr.includes('no git remotes found')) return []
     throw new Error(`gh pr list failed: ${stderr}`)
   }
   const parsed = JSON.parse(result.stdout) as RawGhPr[]
