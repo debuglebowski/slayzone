@@ -220,6 +220,15 @@ export function runWorktreeSetupScriptSync(
   return { ran: true, success, output }
 }
 
+/** OS/editor artifacts that should never be copied to worktrees. */
+const ALWAYS_EXCLUDED = new Set(['.DS_Store', 'Thumbs.db', 'Desktop.ini'])
+const ALWAYS_EXCLUDED_EXTENSIONS = ['.swp', '.swo']
+function isAlwaysExcluded(name: string): boolean {
+  if (ALWAYS_EXCLUDED.has(name)) return true
+  if (name.endsWith('~')) return true
+  return ALWAYS_EXCLUDED_EXTENSIONS.some(ext => name.endsWith(ext))
+}
+
 /** Build a tree of all git-ignored files. One git call, grouped server-side. */
 export async function getIgnoredFileTree(repoPath: string): Promise<IgnoredFileNode[]> {
   try {
@@ -228,6 +237,7 @@ export async function getIgnoredFileTree(repoPath: string): Promise<IgnoredFileN
       { cwd: repoPath }
     )
     const allFiles = output.trim().split('\n').filter(Boolean)
+      .filter(f => !isAlwaysExcluded(f.split('/').pop()!))
     if (allFiles.length === 0) return []
 
     // Build nested tree
@@ -309,6 +319,7 @@ export async function copyIgnoredFiles(
       // e.g. node_modules/a/b.js, node_modules/c.js → node_modules
       const topLevel = new Set<string>()
       for (const f of allFiles) {
+        if (isAlwaysExcluded(f.split('/').pop()!)) continue
         const first = f.split('/')[0]
         topLevel.add(first)
       }
