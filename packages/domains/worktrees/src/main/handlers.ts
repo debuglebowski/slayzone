@@ -463,8 +463,8 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
     return getIgnoredFileTree(repoPath)
   })
 
-  ipcMain.handle('git:copyIgnoredFiles', (_, repoPath: string, worktreePath: string, paths: string[]) => {
-    return copyIgnoredFiles(repoPath, worktreePath, 'custom', paths)
+  ipcMain.handle('git:copyIgnoredFiles', (_, repoPath: string, worktreePath: string, paths: string[], mode?: 'all' | 'custom') => {
+    return copyIgnoredFiles(repoPath, worktreePath, mode ?? (paths.length > 0 ? 'custom' : 'all'), paths)
   })
 
   ipcMain.handle('git:getResolvedCommitDag', (_, path: string, limit: number, branches: string[] | undefined, baseBranch: string) => {

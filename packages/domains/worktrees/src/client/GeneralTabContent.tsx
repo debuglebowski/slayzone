@@ -176,7 +176,6 @@ export function GeneralTabContent({
         open={data.copyFilesDialog.open}
         onOpenChange={(open) => { if (!open) data.handleCopyFilesCancel() }}
         repoPath={data.copyFilesDialog.repoPath}
-        projectId={task.project_id}
         onConfirm={data.handleCopyFilesConfirm}
       />
 

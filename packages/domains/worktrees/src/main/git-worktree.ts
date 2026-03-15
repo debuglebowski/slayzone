@@ -295,10 +295,37 @@ export async function getIgnoredFileTree(repoPath: string): Promise<IgnoredFileN
 }
 
 
+function globToRegex(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '\0')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]')
+    .replace(/\0/g, '.*')
+  return new RegExp(`^${escaped}$`)
+}
+
+async function getIgnoredTopLevelEntries(repoPath: string): Promise<string[] | null> {
+  try {
+    const output = await execGit(
+      ['ls-files', '--others', '--ignored', '--exclude-standard'],
+      { cwd: repoPath }
+    )
+    const allFiles = output.trim().split('\n').filter(Boolean)
+    const topLevel = new Set<string>()
+    for (const f of allFiles) {
+      if (isAlwaysExcluded(f.split('/').pop()!)) continue
+      topLevel.add(f.split('/')[0])
+    }
+    return [...topLevel]
+  } catch {
+    return null
+  }
+}
+
 /**
  * Copy ignored files from the source repo into a new worktree.
- * - 'all': copies every git-ignored file (via `git ls-files --others --ignored --exclude-standard`)
- * - 'custom': copies only the specified paths
+ * - 'all': copies every git-ignored file (via git ls-files)
+ * - 'custom': copies only the specified paths (supports * and ? wildcards)
  */
 export async function copyIgnoredFiles(
   repoPath: string,
@@ -309,26 +336,19 @@ export async function copyIgnoredFiles(
   let filesToCopy: string[] = []
 
   if (behavior === 'all') {
-    try {
-      const output = await execGit(
-        ['ls-files', '--others', '--ignored', '--exclude-standard'],
-        { cwd: repoPath }
-      )
-      const allFiles = output.trim().split('\n').filter(Boolean)
-      // Deduplicate to top-level entries to avoid copying thousands of individual files
-      // e.g. node_modules/a/b.js, node_modules/c.js → node_modules
-      const topLevel = new Set<string>()
-      for (const f of allFiles) {
-        if (isAlwaysExcluded(f.split('/').pop()!)) continue
-        const first = f.split('/')[0]
-        topLevel.add(first)
-      }
-      filesToCopy = [...topLevel]
-    } catch {
-      return
-    }
+    const topLevel = await getIgnoredTopLevelEntries(repoPath)
+    if (!topLevel) return
+    filesToCopy = topLevel
   } else {
-    filesToCopy = customPaths
+    const hasGlobs = customPaths.some(p => /[*?{[]/.test(p))
+    if (hasGlobs) {
+      const topLevel = await getIgnoredTopLevelEntries(repoPath)
+      if (!topLevel) return
+      const matchers = customPaths.map(globToRegex)
+      filesToCopy = topLevel.filter(entry => matchers.some(re => re.test(entry)))
+    } else {
+      filesToCopy = customPaths
+    }
   }
 
   for (const relPath of filesToCopy) {
@@ -341,7 +361,7 @@ export async function copyIgnoredFiles(
         level: 'warn',
         source: 'git',
         event: 'worktree.copy_skipped_traversal',
-        message: `Skipped "${relPath}" — path escapes repo/worktree root`,
+        message: `Skipped "${relPath}" - path escapes repo/worktree root`,
         payload: { repoPath, worktreePath, relPath }
       })
       continue
@@ -1086,7 +1106,7 @@ export async function getDiffStats(repoPath: string, ref: string): Promise<DiffS
 
 export async function getCommitDag(repoPath: string, limit: number, branches?: string[]): Promise<DagCommit[]> {
   try {
-    const args = ['log', '--topo-order', `-${limit}`, '--decorate=full', '--format=%H%n%h%n%P%n%s%n%an%n%ar%n%D%x00']
+    const args = ['log', '--topo-order', '--ignore-missing', `-${limit}`, '--decorate=full', '--format=%H%n%h%n%P%n%s%n%an%n%ar%n%D%x00']
     if (branches && branches.length > 0) {
       args.push(...branches)
     } else {
@@ -1286,6 +1306,49 @@ export function resolveCommitGraph(commits: DagCommit[], baseBranch: string, req
     }
   }
 
+  // Pass 1b: detect diverged local/remote — promote origin/X to a real branch.
+  // For each origin/X display ref where local X exists: check if origin/X's commit
+  // is reachable from local X's tip (or vice versa). If neither, they've diverged.
+  const localTipHashes = new Map<string, string>()
+  for (const c of commits) {
+    const parsed = commitParsedRefs.get(c.hash)!
+    for (const ref of parsed.branchRefs) {
+      if (!ref.startsWith('origin/') && !localTipHashes.has(ref)) {
+        localTipHashes.set(ref, c.hash)
+      }
+    }
+  }
+  const hashToRawCommit = new Map<string, DagCommit>()
+  for (const c of commits) hashToRawCommit.set(c.hash, c)
+  for (const c of commits) {
+    const parsed = commitParsedRefs.get(c.hash)!
+    for (const ref of parsed.branchRefs) {
+      if (!ref.startsWith('origin/')) continue
+      const localName = ref.slice(7)
+      const localTipHash = localTipHashes.get(localName)
+      if (!localTipHash) continue
+      let localReachesOrigin = false
+      let walker: DagCommit | undefined = hashToRawCommit.get(localTipHash)
+      while (walker) {
+        if (walker.hash === c.hash) { localReachesOrigin = true; break }
+        walker = walker.parents.length > 0 ? hashToRawCommit.get(walker.parents[0]) : undefined
+      }
+      let originReachesLocal = false
+      walker = hashToRawCommit.get(c.hash)
+      while (walker) {
+        if (walker.hash === localTipHash) { originReachesLocal = true; break }
+        walker = walker.parents.length > 0 ? hashToRawCommit.get(walker.parents[0]) : undefined
+      }
+      if (!localReachesOrigin && !originReachesLocal) {
+        commitBranchName.set(c.hash, ref)
+      } else if (originReachesLocal && !localReachesOrigin) {
+        if (!commitBranchName.has(c.hash)) {
+          commitBranchName.set(c.hash, localName)
+        }
+      }
+    }
+  }
+
   // Pass 2: for merge commits, extract source branch name for display (mergedFrom).
   // These are NOT real branches — just metadata for the commit row label.
   // mergedFrom commits get their parents overridden to the merge's first parent
@@ -1366,7 +1429,8 @@ export function resolveCommitGraph(commits: DagCommit[], baseBranch: string, req
       branch: commitBranch,
       branchRefs: parsed.branchRefs,
       tags: parsed.tags,
-      isBranchTip: parsed.branchRefs.some(r => !r.startsWith('origin/')),
+      isBranchTip: parsed.branchRefs.some(r => !r.startsWith('origin/')) ||
+        parsed.branchRefs.some(r => r.startsWith('origin/') && commitBranchName.get(c.hash) === r),
       isHead: parsed.isHead,
       ...(mergedFromMap.has(c.hash) ? { mergedFrom: mergedFromMap.get(c.hash) } : {})
     }
@@ -1458,7 +1522,11 @@ export function resolveForkGraph(opts: {
 export async function getResolvedCommitDag(
   repoPath: string, limit: number, branches: string[] | undefined, baseBranch: string
 ): Promise<ResolvedGraph> {
-  const raw = await getCommitDag(repoPath, limit, branches)
+  // Include origin/ tracking refs so diverged remote commits appear in the DAG
+  const expandedBranches = branches
+    ? [...branches, ...branches.map(b => `origin/${b}`)]
+    : undefined
+  const raw = await getCommitDag(repoPath, limit, expandedBranches)
   return resolveCommitGraph(raw, baseBranch, branches)
 }
 

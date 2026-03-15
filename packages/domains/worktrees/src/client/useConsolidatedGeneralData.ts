@@ -57,7 +57,7 @@ export interface ConsolidatedGeneralData {
   handleInitGit: () => Promise<void>
   handleAction: (action: string) => Promise<void>
   handleConfirmedAction: (action: string, label: string) => void
-  handleCopyFilesConfirm: (selectedPaths: string[], remember: boolean) => Promise<void>
+  handleCopyFilesConfirm: (choice: import('./CopyFilesDialog').CopyChoice, remember: boolean) => Promise<void>
   handleCopyFilesCancel: () => void
   fetchGitData: () => Promise<void>
 
@@ -251,15 +251,17 @@ export function useConsolidatedGeneralData(
   const createWorktreeAndLink = useCallback(async (
     worktreePath: string,
     branch: string,
-    filesToCopy?: string[]
+    filesToCopy?: string[] | 'all'
   ) => {
     if (!projectPath) return
     // Omit projectId so server skips copy resolution — we handle it here
     await window.api.git.createWorktree({
       repoPath: projectPath, targetPath: worktreePath, branch
     })
-    if (filesToCopy && filesToCopy.length > 0) {
-      await window.api.git.copyIgnoredFiles(projectPath, worktreePath, filesToCopy)
+    if (filesToCopy === 'all') {
+      await window.api.git.copyIgnoredFiles(projectPath, worktreePath, [], 'all')
+    } else if (filesToCopy && filesToCopy.length > 0) {
+      await window.api.git.copyIgnoredFiles(projectPath, worktreePath, filesToCopy, 'custom')
     }
     await onUpdateTask({ id: task.id, worktreePath, worktreeParentBranch: currentBranch })
   }, [projectPath, task.id, currentBranch, onUpdateTask])
@@ -298,15 +300,21 @@ export function useConsolidatedGeneralData(
     }
   }, [projectPath, task.id, task.project_id, currentBranch, onUpdateTask, resolveWorktreeParams])
 
-  const handleCopyFilesConfirm = useCallback(async (selectedPaths: string[], remember: boolean) => {
+  const handleCopyFilesConfirm = useCallback(async (choice: import('./CopyFilesDialog').CopyChoice, remember: boolean) => {
     const pending = copyFilesDialogRef.current
     setCopyFilesDialog(prev => ({ ...prev, open: false }))
 
-    // Create the worktree now + copy selected files + link task
+    // Create the worktree now + copy files based on mode
     setCreating(true)
     setCreateError(null)
     try {
-      await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch, selectedPaths)
+      if (choice.mode === 'all') {
+        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch, 'all')
+      } else if (choice.mode === 'custom') {
+        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch, choice.paths)
+      } else {
+        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch)
+      }
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -316,15 +324,14 @@ export function useConsolidatedGeneralData(
     // Persist selection if "remember" checked
     if (remember && task.project_id) {
       try {
-        if (selectedPaths.length === 0) {
-          await window.api.db.updateProject({ id: task.project_id, worktreeCopyBehavior: 'none' })
-        } else {
+        if (choice.mode === 'custom') {
           await window.api.db.updateProject({
             id: task.project_id,
             worktreeCopyBehavior: 'custom',
-            // Paths must not contain commas
-            worktreeCopyPaths: selectedPaths.join(', ')
+            worktreeCopyPaths: choice.paths.join(', ')
           })
+        } else {
+          await window.api.db.updateProject({ id: task.project_id, worktreeCopyBehavior: choice.mode })
         }
       } catch { /* best-effort */ }
     }

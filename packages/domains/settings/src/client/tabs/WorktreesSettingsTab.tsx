@@ -107,7 +107,7 @@ export function WorktreesSettingsTab() {
             <div className="space-y-1">
               <Input
                 className="w-full max-w-lg"
-                placeholder=".env, node_modules, .vscode"
+                placeholder=".env*, node_modules, packages/*/dist"
                 value={customPaths}
                 onChange={(e) => setCustomPaths(e.target.value)}
                 onBlur={() => {
@@ -115,7 +115,7 @@ export function WorktreesSettingsTab() {
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                Comma-separated paths relative to the repo root.
+                Comma-separated paths relative to the repo root. Wildcards (*, ?) supported.
               </p>
             </div>
           </div>

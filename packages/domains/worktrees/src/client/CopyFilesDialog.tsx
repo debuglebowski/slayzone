@@ -1,20 +1,26 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Loader2, Folder, File, ChevronRight, Settings, FolderCheck, FolderX } from 'lucide-react'
+import { Loader2, Folder, File, ChevronRight, Files, ListChecks, FolderX } from 'lucide-react'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
   Button, Checkbox
 } from '@slayzone/ui'
+import { cn } from '@slayzone/ui'
+import { track } from '@slayzone/telemetry/client'
 import type { IgnoredFileNode } from '../shared/types'
+
+export type CopyChoice =
+  | { mode: 'all' }
+  | { mode: 'custom'; paths: string[] }
+  | { mode: 'none' }
+
+type CardMode = CopyChoice['mode']
 
 interface CopyFilesDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   repoPath: string
-  projectId?: string
-  onConfirm: (selectedPaths: string[], remember: boolean) => void
+  onConfirm: (choice: CopyChoice, remember: boolean) => void
 }
-
-type View = 'choose' | 'select'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -69,37 +75,48 @@ function TreeRow({ node, depth, expanded, onToggleExpand }: {
   )
 }
 
-export function CopyFilesDialog({ open, onOpenChange, repoPath, projectId, onConfirm }: CopyFilesDialogProps) {
-  const [view, setView] = useState<View>('choose')
+const MODE_CARDS: { mode: CardMode; icon: typeof Files; label: string }[] = [
+  { mode: 'all', icon: Files, label: 'Copy all files' },
+  { mode: 'custom', icon: ListChecks, label: 'Select files to copy' },
+  { mode: 'none', icon: FolderX, label: 'Copy no files' },
+]
+
+export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: CopyFilesDialogProps) {
+  const [mode, setMode] = useState<CardMode>('all')
   const [tree, setTree] = useState<IgnoredFileNode[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [remember, setRemember] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [treeLoaded, setTreeLoaded] = useState(false)
 
   const topLevelNames = tree.map(n => n.name)
 
   useEffect(() => {
     if (!open) return
-    setView('choose')
+    setMode('all')
     setRemember(false)
     setExpanded(new Set())
     setTree([])
+    setTreeLoaded(false)
   }, [open])
 
   const loadTree = useCallback(() => {
+    if (treeLoaded) return
     setLoading(true)
-    setView('select')
     window.api.git.getIgnoredFileTree(repoPath).then(nodes => {
       setTree(nodes)
       const preSelected = new Set<string>()
-      for (const node of nodes) {
-        if (!node.isDirectory) preSelected.add(node.name)
-      }
+      for (const node of nodes) preSelected.add(node.name)
       setSelected(preSelected)
+      setTreeLoaded(true)
       setLoading(false)
     })
-  }, [repoPath])
+  }, [repoPath, treeLoaded])
+
+  useEffect(() => {
+    if (mode === 'custom') loadTree()
+  }, [mode, loadTree])
 
   const toggle = useCallback((name: string) => {
     setSelected(prev => {
@@ -127,60 +144,44 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, projectId, onCon
     })
   }, [])
 
+  const handleCreate = () => {
+    const choice: CopyChoice = mode === 'custom'
+      ? { mode: 'custom', paths: [...selected] }
+      : { mode }
+    track('worktree_files_copied')
+    onConfirm(choice, remember)
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>Copy ignored files to worktree?</DialogTitle>
+      <DialogContent className="max-h-[80vh] max-w-lg flex flex-col">
+        <DialogHeader className="space-y-1">
+          <DialogTitle>Create new worktree</DialogTitle>
           <DialogDescription>
-            Git-ignored files (node_modules, .env, etc.) aren't included in new worktrees.
+            What ignored files should be included?
           </DialogDescription>
         </DialogHeader>
 
-        {view === 'choose' ? (
-          <div className="flex flex-col gap-2 py-2">
+        <div className="grid grid-cols-3 gap-2">
+          {MODE_CARDS.map(({ mode: m, icon: Icon, label }) => (
             <button
+              key={m}
               type="button"
-              onClick={loadTree}
-              className="flex items-center gap-3 rounded-lg border p-3 text-left hover:bg-muted transition-colors"
+              onClick={() => setMode(m)}
+              className={cn(
+                'flex flex-col items-center gap-3 rounded-lg border px-3 py-6 transition-colors',
+                mode === m
+                  ? 'border-primary bg-primary/5 text-foreground'
+                  : 'border-border text-muted-foreground hover:bg-muted'
+              )}
             >
-              <FolderCheck className="h-5 w-5 text-muted-foreground shrink-0" />
-              <div>
-                <div className="text-sm font-medium">Select files</div>
-                <div className="text-xs text-muted-foreground">Choose which ignored files to copy</div>
-              </div>
+              <Icon className="h-9 w-9" />
+              <span className="text-sm font-medium whitespace-nowrap">{label}</span>
             </button>
-            <button
-              type="button"
-              onClick={() => onConfirm([], false)}
-              className="flex items-center gap-3 rounded-lg border p-3 text-left hover:bg-muted transition-colors"
-            >
-              <FolderX className="h-5 w-5 text-muted-foreground shrink-0" />
-              <div>
-                <div className="text-sm font-medium">Create without copying</div>
-                <div className="text-xs text-muted-foreground">Skip copying ignored files</div>
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onOpenChange(false)
-                if (projectId) {
-                  window.dispatchEvent(new CustomEvent('open-project-settings', { detail: { projectId, tab: 'worktrees' } }))
-                } else {
-                  window.dispatchEvent(new CustomEvent('open-settings', { detail: 'worktrees' }))
-                }
-              }}
-              className="flex items-center gap-3 rounded-lg border p-3 text-left hover:bg-muted transition-colors"
-            >
-              <Settings className="h-5 w-5 text-muted-foreground shrink-0" />
-              <div>
-                <div className="text-sm font-medium">Go to settings</div>
-                <div className="text-xs text-muted-foreground">Configure default behavior</div>
-              </div>
-            </button>
-          </div>
-        ) : (
+          ))}
+        </div>
+
+        {mode === 'custom' && (
           <>
             {loading ? (
               <div className="flex items-center justify-center py-8">
@@ -237,25 +238,21 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, projectId, onCon
                 </div>
               </div>
             )}
-
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={remember} onCheckedChange={(v) => setRemember(v === true)} />
-              Remember for this project
-            </label>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setView('choose')}>
-                Back
-              </Button>
-              <Button
-                onClick={() => onConfirm([...selected], remember)}
-                disabled={selected.size === 0}
-              >
-                Copy and create
-              </Button>
-            </DialogFooter>
           </>
         )}
+
+        <div className="flex items-center justify-between pt-2">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox checked={remember} onCheckedChange={(v) => setRemember(v === true)} />
+            Remember for project
+          </label>
+          <Button
+            onClick={handleCreate}
+            disabled={mode === 'custom' && selected.size === 0}
+          >
+            Create worktree
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   )
