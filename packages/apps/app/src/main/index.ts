@@ -468,8 +468,7 @@ function handleOAuthDeepLink(url: string): void {
   // slayzone://task/<id> — open task in app
   if (parsed.hostname === 'task' && normalizedPath.length > 1) {
     const taskId = normalizedPath.slice(1)
-    const wc = mainWindow?.webContents
-    if (wc && !wc.isDestroyed()) wc.send('app:open-task', taskId)
+    mainWindow?.webContents.send('app:open-task', taskId)
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.show()
@@ -721,6 +720,24 @@ function createWindow(): void {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
+// Guard every webContents.send() against disposed render frames.
+// `webContents.send()` internally calls `mainFrame.send()` which throws when the
+// render frame is disposed (during reload, navigation, or close). The webContents
+// itself may still be alive (`isDestroyed()` = false) so a try-catch is the only
+// reliable guard. Patching at creation time means no call site needs to remember.
+// Only the specific "frame disposed" error is swallowed — other errors (e.g.
+// non-serializable args) are re-thrown so real bugs aren't hidden.
+app.on('browser-window-created', (_event, win) => {
+  const originalSend = win.webContents.send.bind(win.webContents)
+  win.webContents.send = (channel: string, ...args: unknown[]) => {
+    try {
+      originalSend(channel, ...args)
+    } catch (err) {
+      if (!(err instanceof Error && err.message.includes('frame was disposed'))) throw err
+    }
+  }
+})
+
 app.whenReady().then(async () => {
   logBoot('whenReady begin')
   if (SHOULD_REGISTER_PROTOCOL_CLIENT) {

@@ -24,9 +24,7 @@ const IDLE_CHECK_INTERVAL = 5 * 60 * 1000 // 5 min
 
 function notifyRenderer(): void {
   BrowserWindow.getAllWindows().forEach((win) => {
-    if (!win.isDestroyed()) {
-      try { win.webContents.send('tasks:changed') } catch { /* destroyed */ }
-    }
+    win.webContents.send('tasks:changed')
   })
 }
 
@@ -142,9 +140,7 @@ function createMcpServer(db: Database): McpServer {
       notifyRenderer()
       if (close) {
         BrowserWindow.getAllWindows().forEach((win) => {
-          if (!win.isDestroyed()) {
-            try { win.webContents.send('app:close-task', task_id) } catch { /* destroyed */ }
-          }
+          win.webContents.send('app:close-task', task_id)
         })
       }
       return {

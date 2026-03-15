@@ -69,17 +69,13 @@ export function initProcessManager(database: Database): void {
 function pushLog(proc: ManagedProcess, line: string): void {
   proc.logBuffer.push(line)
   if (proc.logBuffer.length > LOG_BUFFER_MAX) proc.logBuffer.shift()
-  if (!win?.webContents.isDestroyed()) {
-    win?.webContents.send('processes:log', proc.id, line)
-  }
+  win?.webContents.send('processes:log', proc.id, line)
   logSubscribers.get(proc.id)?.forEach((cb) => cb(line))
 }
 
 function setStatus(proc: ManagedProcess, status: ProcessStatus): void {
   proc.status = status
-  if (!win?.webContents.isDestroyed()) {
-    win?.webContents.send('processes:status', proc.id, status)
-  }
+  win?.webContents.send('processes:status', proc.id, status)
 }
 
 function doSpawn(proc: ManagedProcess): void {
