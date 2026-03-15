@@ -32,6 +32,7 @@ export interface BranchGraphState {
   effectiveBaseBranch: string
   fetching: boolean
   handleFetch: () => Promise<void>
+  refresh: () => Promise<void>
 }
 
 export function useBranchGraph(
@@ -151,7 +152,7 @@ export function useBranchGraph(
     }
   }, [projectPath, fetchData])
 
-  return { dagGraph, loading, filter, setFilter, config, setConfig: updateConfig, resetConfig, effectiveBaseBranch, fetching, handleFetch }
+  return { dagGraph, loading, filter, setFilter, config, setConfig: updateConfig, resetConfig, effectiveBaseBranch, fetching, handleFetch, refresh: fetchData }
 }
 
 // --- Toolbar buttons (display, info, fetch) ---

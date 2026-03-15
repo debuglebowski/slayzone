@@ -225,7 +225,7 @@ export function ProjectGeneralTab({ projectId, projectPath, visible, onSwitchToD
                 upstreamAB={upstreamAB}
                 targetPath={projectPath}
                 branch={currentBranch}
-                onSyncDone={fetchGitData}
+                onSyncDone={() => { fetchGitData(); branchGraph.refresh() }}
               />
             </div>
           )}

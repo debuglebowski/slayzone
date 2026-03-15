@@ -150,7 +150,7 @@ export function GeneralTabContent({
                   upstreamAB={data.upstreamAB}
                   targetPath={data.targetPath}
                   branch={activeBranch}
-                  onSyncDone={data.fetchGitData}
+                  onSyncDone={() => { data.fetchGitData(); branchGraph.refresh() }}
                 />
               )}
             </div>
