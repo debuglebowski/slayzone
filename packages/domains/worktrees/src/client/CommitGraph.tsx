@@ -163,6 +163,8 @@ export interface LayoutEdge {
   type: 'straight' | 'curve'
   targetHash?: string
   dashed?: boolean
+  /** Number of commits collapsed on this edge (collapsed view only) */
+  collapsedCount?: number
 }
 
 export interface DagLayout {
@@ -358,7 +360,8 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
 
     const col = targetCol
 
-    const ci = getCommitColorIndex(commit)
+    const isBehind = behindBranches.has(commit.branch)
+    const ci = isBehind ? BASE_BRANCH_COLOR_INDEX : getCommitColorIndex(commit)
     columnColorIndex[col] = ci
     columnBranch[col] = commit.branch
 
@@ -369,7 +372,7 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
     const isBranchTip = commit.isBranchTip
 
     const node: LayoutNode = { commit, column: col, row, isMerge, isBranchTip, colorIndex: ci }
-    if (isBranchTip && behindBranches.has(commit.branch)) {
+    if (isBranchTip && isBehind) {
       node.behindBranch = { colorIndex: hashBranchColor(commit.branch), branchName: commit.branch }
     }
     nodes.push(node)
@@ -493,35 +496,59 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
     }
   }
 
-  const maxColumn = Math.max(0, ...nodes.map(n => n.syntheticBranch?.column ?? n.column))
+  const maxColumn = Math.max(0, ...nodes.map(n => n.column))
   return { nodes, edges, maxColumn }
 }
 
-// --- Collapsed DAG: same graph topology, non-head commits grouped ---
+// --- Collapsed DAG: same graph topology, non-head commits removed ---
 
-interface CollapsedGroup {
-  row: number
-  count: number
-  columns: Array<{ col: number; colorIndex: number }>
-}
-
-interface CollapsedDag {
+export interface CollapsedDag {
   nodes: LayoutNode[]
   edges: LayoutEdge[]
-  groups: CollapsedGroup[]
   maxColumn: number
   totalRows: number
   rowOffsets: Map<number, number>
 }
 
-function computeCollapsedDag(fullLayout: DagLayout, baseBranch: string, includeTags = true, breakOnMerges = true): CollapsedDag {
+export function computeCollapsedDag(fullLayout: DagLayout, baseBranch: string, includeTags = true, breakOnMerges = true, recentRowThreshold?: number): CollapsedDag {
   const { nodes, edges, maxColumn } = fullLayout
-  if (nodes.length === 0) return { nodes: [], edges: [], groups: [], maxColumn: 0, totalRows: 0, rowOffsets: new Map() }
+  if (nodes.length === 0) return { nodes: [], edges: [], maxColumn: 0, totalRows: 0, rowOffsets: new Map() }
 
-  // Identify head rows (nodes with branchRefs, optionally synthetic branches and tags)
-  const headRows = new Set<number>()
+  // --- Step 1: Mark every node that has ANY visual significance ---
+  // Everything else is "boring" and gets collapsed. No heuristics, no special cases.
+  // A node is kept if it IS an edge endpoint that matters in the full layout.
+
+  const keepRows = new Set<number>()
+
+  // Recency filter: old branches (no commits in first N rows) get fully collapsed
+  const recentBranches = new Set<string>([baseBranch])
+  if (recentRowThreshold != null) {
+    for (const n of nodes) {
+      if (n.row < recentRowThreshold) recentBranches.add(n.commit.branch)
+    }
+  }
+  const isRecent = (n: LayoutNode) => !recentRowThreshold || recentBranches.has(n.commit.branch)
+
   for (const n of nodes) {
-    if (n.commit.branchRefs.length > 0 || (breakOnMerges && n.syntheticBranch) || (includeTags && n.commit.tags.length > 0)) headRows.add(n.row)
+    if (!isRecent(n)) continue
+    // Has branch refs (branch tip, origin pointer, etc.)
+    if (n.commit.branchRefs.length > 0) { keepRows.add(n.row); continue }
+    // Has tags
+    if (includeTags && n.commit.tags.length > 0) { keepRows.add(n.row); continue }
+    // Has synthetic branch indicator (mergedFrom)
+    if (breakOnMerges && n.syntheticBranch) { keepRows.add(n.row); continue }
+    // Is a merge commit (multiple parents in the full layout)
+    if (n.isMerge) { keepRows.add(n.row); continue }
+  }
+
+  // Every endpoint of every cross-column edge is a structural anchor (fork/merge point)
+  for (const e of edges) {
+    if (e.fromCol !== e.toCol) {
+      const fromNode = nodes[e.fromRow]
+      const toNode = nodes[e.toRow]
+      if (fromNode && isRecent(fromNode)) keepRows.add(e.fromRow)
+      if (toNode && isRecent(toNode)) keepRows.add(e.toRow)
+    }
   }
 
   // Always show first and last commit of the base branch
@@ -532,76 +559,124 @@ function computeCollapsedDag(fullLayout: DagLayout, baseBranch: string, includeT
       if (n.row > baseLast) baseLast = n.row
     }
   }
-  if (baseFirst !== Infinity) headRows.add(baseFirst)
-  if (baseLast !== -1) headRows.add(baseLast)
+  if (baseFirst !== Infinity) keepRows.add(baseFirst)
+  if (baseLast !== -1) keepRows.add(baseLast)
 
-  // Build segments: consecutive head or non-head rows
-  type Segment = { type: 'head'; row: number } | { type: 'group'; rows: number[] }
-  const segments: Segment[] = []
-  let currentGroup: number[] = []
+  // --- Step 2: Compact rows, remap edges ---
+  // Same topology as the full layout, just with boring rows removed.
+
+  const nodeByRow = new Map<number, LayoutNode>()
+  for (const n of nodes) nodeByRow.set(n.row, n)
 
   const maxRow = Math.max(...nodes.map(n => n.row))
-  for (let row = 0; row <= maxRow; row++) {
-    if (headRows.has(row)) {
-      if (currentGroup.length > 0) {
-        segments.push({ type: 'group', rows: [...currentGroup] })
-        currentGroup = []
-      }
-      segments.push({ type: 'head', row })
-    } else {
-      currentGroup.push(row)
-    }
-  }
-  if (currentGroup.length > 0) {
-    segments.push({ type: 'group', rows: currentGroup })
-  }
 
-  // Build row mapping: original row → collapsed row
+  // Build row mapping and track collapsed groups between kept rows
   const rowMap = new Map<number, number>()
   let collapsedRow = 0
   const resultNodes: LayoutNode[] = []
-  const groups: CollapsedGroup[] = []
+  const gapCounts = new Map<string, number>()
+  let lastKeptCollapsedRow = -1
+  let groupCount = 0
 
-  for (const seg of segments) {
-    if (seg.type === 'head') {
-      rowMap.set(seg.row, collapsedRow)
-      const node = nodes.find(n => n.row === seg.row)!
+  for (let row = 0; row <= maxRow; row++) {
+    if (keepRows.has(row)) {
+      // Flush any accumulated group
+      if (groupCount > 0 && lastKeptCollapsedRow >= 0) {
+        gapCounts.set(`${lastKeptCollapsedRow},${collapsedRow}`, groupCount)
+        groupCount = 0
+      }
+      rowMap.set(row, collapsedRow)
+      const node = nodeByRow.get(row)!
       resultNodes.push({ ...node, row: collapsedRow })
+      lastKeptCollapsedRow = collapsedRow
       collapsedRow++
     } else {
-      for (const r of seg.rows) {
-        rowMap.set(r, collapsedRow)
-      }
-      // Gather columns present in this group
-      const columns: CollapsedGroup['columns'] = []
-      const seenCols = new Set<number>()
-      for (const r of seg.rows) {
-        const node = nodes.find(n => n.row === r)
-        if (node && !seenCols.has(node.column)) {
-          seenCols.add(node.column)
-          columns.push({ col: node.column, colorIndex: node.colorIndex })
-        }
-      }
-      groups.push({ row: collapsedRow, count: seg.rows.length, columns })
-      collapsedRow++
+      rowMap.set(row, collapsedRow) // maps to next kept row
+      groupCount++
     }
   }
 
-  // Remap edges, dedup
+  // Remap edges, dedup, and filter phantom edges.
+  // Non-kept rows map to the next kept row, which may be on a different column.
+  // An edge is only valid if both endpoints have a node at that (row, column).
+  const nodeAtColRow = new Set<string>()
+  for (const n of resultNodes) nodeAtColRow.add(`${n.row},${n.column}`)
+
   const resultEdges: LayoutEdge[] = []
   const edgeKeys = new Set<string>()
   for (const edge of edges) {
     const fromRow = rowMap.get(edge.fromRow)
     const toRow = rowMap.get(edge.toRow)
     if (fromRow === undefined || toRow === undefined) continue
-    if (fromRow === toRow) continue // collapsed into same row
+    if (fromRow === toRow) continue
+    if (!nodeAtColRow.has(`${fromRow},${edge.fromCol}`) || !nodeAtColRow.has(`${toRow},${edge.toCol}`)) continue
     const key = `${fromRow},${edge.fromCol},${toRow},${edge.toCol}`
     if (edgeKeys.has(key)) continue
     edgeKeys.add(key)
     resultEdges.push({ ...edge, fromRow, toRow })
   }
 
-  // Carry over rowOffsets (for synthetic branch x-shifts)
+  // Reconnect consecutive kept nodes on the same column that lost edges
+  // due to intermediate non-kept rows mapping to different columns.
+  // Group full-layout nodes by column, then find consecutive kept nodes
+  // with a contiguous same-column chain between them.
+  const fullColNodes = new Map<number, number[]>() // column → sorted row list
+  for (const n of nodes) {
+    let list = fullColNodes.get(n.column)
+    if (!list) { list = []; fullColNodes.set(n.column, list) }
+    list.push(n.row)
+  }
+
+  for (const [col, fullRows] of fullColNodes) {
+    fullRows.sort((a, b) => a - b)
+    // Walk through full-layout rows on this column, tracking the last kept row.
+    // Only reconnect if on the same branch (columns get reused by unrelated branches).
+    let lastKeptRow = -1
+    let lastKeptBranch = ''
+    let gapCount = 0
+    for (const r of fullRows) {
+      const node = nodeByRow.get(r)
+      const branch = node?.commit.branch ?? ''
+      if (keepRows.has(r)) {
+        if (lastKeptRow >= 0 && branch === lastKeptBranch) {
+          const fromCollapsed = rowMap.get(lastKeptRow)!
+          const toCollapsed = rowMap.get(r)!
+          if (fromCollapsed !== toCollapsed) {
+            const key = `${fromCollapsed},${col},${toCollapsed},${col}`
+            if (!edgeKeys.has(key)) {
+              edgeKeys.add(key)
+              const color = getColor(nodeByRow.get(lastKeptRow)?.colorIndex ?? 0)
+              resultEdges.push({
+                fromRow: fromCollapsed, fromCol: col, toRow: toCollapsed, toCol: col,
+                color, type: 'straight',
+                ...(gapCount > 0 ? { collapsedCount: gapCount } : {})
+              })
+            }
+          }
+        }
+        lastKeptRow = r
+        lastKeptBranch = branch
+        gapCount = 0
+      } else {
+        // Reset chain if branch changes (column reused by different branch)
+        if (branch !== lastKeptBranch && lastKeptBranch !== '') {
+          lastKeptRow = -1
+          lastKeptBranch = ''
+          gapCount = 0
+        } else {
+          gapCount++
+        }
+      }
+    }
+  }
+
+  // Annotate edges that span collapsed groups
+  for (const edge of resultEdges) {
+    const count = gapCounts.get(`${edge.fromRow},${edge.toRow}`)
+    if (count) edge.collapsedCount = count
+  }
+
+  // Carry over rowOffsets
   const newRowOffsets = new Map<number, number>()
   for (const node of resultNodes) {
     if (node.syntheticBranch) {
@@ -609,7 +684,7 @@ function computeCollapsedDag(fullLayout: DagLayout, baseBranch: string, includeT
     }
   }
 
-  return { nodes: resultNodes, edges: resultEdges, groups, maxColumn, totalRows: collapsedRow, rowOffsets: newRowOffsets }
+  return { nodes: resultNodes, edges: resultEdges, maxColumn, totalRows: collapsedRow, rowOffsets: newRowOffsets }
 }
 
 // --- Copy hash hook ---
@@ -630,7 +705,7 @@ function useCopyHash() {
 
 // --- SVG rendering helpers ---
 
-const MERGED_DOT_OFFSET = 12
+const MERGED_DOT_OFFSET = 0
 
 function SvgStraightEdge({ edge, rowOffsets }: { edge: LayoutEdge; rowOffsets?: Map<number, number> }) {
   const x1 = colX(edge.fromCol) + (edge.fromCol === 0 ? (rowOffsets?.get(edge.fromRow) ?? 0) : 0)
@@ -763,19 +838,6 @@ function CommitRow({
 }
 
 
-function CommitGroupRow({ count, color, gutterWidth }: {
-  count: number; color: string; gutterWidth: number
-}) {
-  return (
-    <div className="flex items-center" style={{ height: ROW_HEIGHT, paddingLeft: gutterWidth }}>
-      <span className="text-[10px] px-2 py-0.5 rounded border"
-        style={{ borderColor: `${color}30`, color: `${color}aa`, backgroundColor: `${color}08` }}>
-        {count} commit{count > 1 ? 's' : ''}
-      </span>
-    </div>
-  )
-}
-
 // --- Main component ---
 
 const OVERSCAN = 10
@@ -792,8 +854,8 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOn
     [graph, hasTopology]
   )
   const collapsed = useMemo(
-    () => tipsOnly ? computeCollapsedDag(fullLayout, graph.baseBranch, includeTags, breakOnMerges) : null,
-    [fullLayout, graph.baseBranch, tipsOnly, includeTags, breakOnMerges]
+    () => tipsOnly ? computeCollapsedDag(fullLayout, graph.baseBranch, includeTags, breakOnMerges, renderLimit) : null,
+    [fullLayout, graph.baseBranch, tipsOnly, includeTags, breakOnMerges, renderLimit]
   )
 
   // Map colorIndex → branch name for tooltip overlays
@@ -835,33 +897,43 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOn
   // Choose layout: collapsed or full
   const layout = collapsed ?? fullLayout
   const activeRowOffsets = collapsed ? collapsed.rowOffsets : rowOffsets
-  const groups = collapsed?.groups ?? []
-  const maxRow = renderLimit != null ? renderLimit : layout.nodes.length + groups.length
+  const maxRow = renderLimit != null ? renderLimit : layout.nodes.length
 
-  const gutterWidth = (layout.maxColumn + 1) * COLUMN_WIDTH + GUTTER_PAD
+  // Compute maxColumn from only the rendered rows so stale branches deep in history
+  // don't inflate the gutter width when they're not visible.
+  // Synthetic branch dots render at a fixed pixel offset (MERGED_DOT_OFFSET + 12) from
+  // the main dot, not at colX(syntheticBranch.column), so don't include them here.
+  const visibleMaxColumn = useMemo(() => {
+    let max = 0
+    for (const n of layout.nodes) {
+      if (n.row >= maxRow) continue
+      if (n.column > max) max = n.column
+    }
+    for (const e of layout.edges) {
+      if (e.fromRow >= maxRow && e.toRow >= maxRow) continue
+      if (e.fromCol > max) max = e.fromCol
+      if (e.toCol > max) max = e.toCol
+    }
+    return max
+  }, [layout, maxRow])
+  // Add extra pixel space for synthetic dots if any are visible
+  const hasSyntheticDots = useMemo(() =>
+    layout.nodes.some(n => n.row < maxRow && n.syntheticBranch),
+    [layout.nodes, maxRow]
+  )
+  const gutterWidth = (visibleMaxColumn + 1) * COLUMN_WIDTH + GUTTER_PAD
+    + (hasSyntheticDots ? MERGED_DOT_OFFSET + 12 + DOT_RADIUS * 2 : 0)
   const totalRowCount = Math.min(
     collapsed ? collapsed.totalRows : layout.nodes.length,
     maxRow
   )
   const totalHeight = totalRowCount * ROW_HEIGHT
 
-  // Build ordered list of rows for rendering content (commits + groups interleaved)
-  const rowItems = useMemo(() => {
-    const allNodes = layout.nodes.filter(n => n.row < maxRow)
-    const allGroups = groups.filter(g => g.row < maxRow)
-    const items: Array<{ type: 'commit'; node: LayoutNode } | { type: 'group'; group: CollapsedGroup }> = []
-    const nodesByRow = new Map<number, LayoutNode>()
-    for (const n of allNodes) nodesByRow.set(n.row, n)
-    const groupsByRow = new Map<number, CollapsedGroup>()
-    for (const g of allGroups) groupsByRow.set(g.row, g)
-    for (let r = 0; r < totalRowCount; r++) {
-      const node = nodesByRow.get(r)
-      const group = groupsByRow.get(r)
-      if (node) items.push({ type: 'commit', node })
-      else if (group) items.push({ type: 'group', group })
-    }
-    return items
-  }, [layout.nodes, groups, totalRowCount, maxRow])
+  // Build ordered list of rows for rendering content (commits only, no group placeholders)
+  const rowItems = useMemo(() =>
+    layout.nodes.filter(n => n.row < maxRow),
+    [layout.nodes, maxRow]
+  )
 
   // Virtualizer — only render visible rows + overscan buffer
   const virtualizer = useVirtualizer({
@@ -874,14 +946,11 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOn
   const virtualItems = virtualizer.getVirtualItems()
 
   // Compute visible row range for filtering SVG/overlays
-  function itemRow(item: (typeof rowItems)[number]): number {
-    return item.type === 'commit' ? item.node.row : item.group.row
-  }
   const startRow = virtualItems.length > 0 && rowItems[virtualItems[0].index]
-    ? itemRow(rowItems[virtualItems[0].index])
+    ? rowItems[virtualItems[0].index].row
     : 0
   const endRow = virtualItems.length > 0 && rowItems[virtualItems[virtualItems.length - 1].index]
-    ? itemRow(rowItems[virtualItems[virtualItems.length - 1].index])
+    ? rowItems[virtualItems[virtualItems.length - 1].index].row
     : totalRowCount
 
   // Expand range for edge visibility (edges can span many rows)
@@ -889,14 +958,10 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOn
   const visStartRow = Math.max(0, startRow - edgeBufferRows)
   const visEndRow = Math.min(totalRowCount, endRow + edgeBufferRows)
 
-  // Filter nodes, groups, edges to visible range
+  // Filter nodes, edges to visible range
   const visibleNodes = useMemo(() =>
     layout.nodes.filter(n => n.row >= visStartRow && n.row <= visEndRow && n.row < maxRow),
     [layout.nodes, visStartRow, visEndRow, maxRow]
-  )
-  const visibleGroups = useMemo(() =>
-    groups.filter(g => g.row >= visStartRow && g.row <= visEndRow && g.row < maxRow),
-    [groups, visStartRow, visEndRow, maxRow]
   )
   const visibleEdges = useMemo(() =>
     layout.edges.filter(e => {
@@ -935,29 +1000,35 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOn
             return <g key={node.commit.hash}>
               <SvgDot cx={cx} cy={cy} color={color} type={dotType} dimmed={dimmed} />
               {node.syntheticBranch && (() => {
-                const bx = cx + MERGED_DOT_OFFSET + 12
+                const bx = cx + MERGED_DOT_OFFSET + 12 + 6
+                const by = cy + 12
                 const sc = getColor(node.syntheticBranch.colorIndex)
                 return <g opacity={dimmed ? 0.2 : undefined}>
-                  <line x1={bx} y1={cy} x2={cx + DOT_RADIUS} y2={cy} stroke={sc} strokeWidth={2} opacity={0.35} />
-                  <circle cx={bx} cy={cy} r={DOT_RADIUS} fill={sc} />
+                  <path d={`M${bx},${by} C${cx},${by} ${cx},${cy} ${cx},${cy}`} stroke={sc} strokeWidth={2} fill="none" opacity={0.35} />
+                  <circle cx={bx} cy={by} r={DOT_RADIUS} fill={sc} />
                 </g>
               })()}
               {node.behindBranch && (() => {
-                const bx = cx + DOT_RADIUS + 6
-                const by = cy - 6
+                const bx = cx + MERGED_DOT_OFFSET + 12 + 6
+                const by = cy - 12
                 const sc = getColor(node.behindBranch.colorIndex)
                 return <g opacity={dimmed ? 0.2 : undefined}>
-                  <circle cx={bx} cy={by} r={3} fill={sc} />
+                  <path d={`M${bx},${by} C${cx},${by} ${cx},${cy} ${cx},${cy}`} stroke={sc} strokeWidth={2} fill="none" opacity={0.35} />
+                  <circle cx={bx} cy={by} r={DOT_RADIUS} fill={sc} />
                 </g>
               })()}
             </g>
           })}
-          {visibleGroups.map((group) => {
-            const cy = rowY(group.row)
-            return <g key={`grp-${group.row}`}>
-              {group.columns.map(({ col, colorIndex }) => (
-                <SvgDot key={col} cx={colX(col)} cy={cy} color={getColor(colorIndex)} type="regular" dimmed />
-              ))}
+          {visibleEdges.filter(e => e.collapsedCount).map((edge, i) => {
+            const midY = (rowY(edge.fromRow) + rowY(edge.toRow)) / 2
+            const cx = edge.fromCol === edge.toCol
+              ? colX(edge.fromCol)
+              : (colX(edge.fromCol) + colX(edge.toCol)) / 2
+            return <g key={`ci-${i}`}>
+              <line x1={cx - 4} y1={midY - 1.5} x2={cx + 4} y2={midY - 1.5}
+                stroke={edge.color} strokeWidth={1.5} strokeLinecap="round" opacity={0.25} />
+              <line x1={cx - 4} y1={midY + 1.5} x2={cx + 4} y2={midY + 1.5}
+                stroke={edge.color} strokeWidth={1.5} strokeLinecap="round" opacity={0.25} />
             </g>
           })}
         </svg>
@@ -970,46 +1041,57 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOn
           ...visibleNodes.filter(n => n.syntheticBranch).map(node => ({
             key: `${node.commit.hash}-synth`, row: node.row, column: node.column,
             color: getColor(node.syntheticBranch!.colorIndex), branchName: node.syntheticBranch!.branchName,
-            xOffset: (activeRowOffsets.get(node.row) ?? 0) + MERGED_DOT_OFFSET + 12,
+            xOffset: (activeRowOffsets.get(node.row) ?? 0) + MERGED_DOT_OFFSET + 12 + 6,
+            yOffset: 12,
             isSynthetic: true
           })),
           ...visibleNodes.filter(n => n.behindBranch).map(node => ({
             key: `${node.commit.hash}-behind`, row: node.row, column: node.column,
             color: getColor(node.behindBranch!.colorIndex), branchName: node.behindBranch!.branchName,
-            xOffset: DOT_RADIUS + 6,
-            yOffset: -6
+            xOffset: MERGED_DOT_OFFSET + 12 + 6,
+            yOffset: -12
           }))
         ]} />
+        {visibleEdges.filter(e => e.collapsedCount).map((edge, i) => {
+          const midY = (rowY(edge.fromRow) + rowY(edge.toRow)) / 2
+          const cx = edge.fromCol === edge.toCol
+            ? colX(edge.fromCol)
+            : (colX(edge.fromCol) + colX(edge.toCol)) / 2
+          return (
+            <Tooltip key={`ci-tip-${i}`}>
+              <TooltipTrigger asChild>
+                <div className="absolute" style={{
+                  left: cx - DOT_HIT_SIZE / 2,
+                  top: midY - DOT_HIT_SIZE / 2,
+                  width: DOT_HIT_SIZE,
+                  height: DOT_HIT_SIZE,
+                  borderRadius: '50%',
+                  zIndex: 1,
+                }} />
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {edge.collapsedCount} commit{edge.collapsedCount! > 1 ? 's' : ''}
+              </TooltipContent>
+            </Tooltip>
+          )
+        })}
         {virtualItems.map((virtualRow) => {
-          const item = rowItems[virtualRow.index]
-          if (!item) return null
-          if (item.type === 'commit') {
-            const node = item.node
-            const dimmed = matchSet !== null && !matchSet.has(node.commit.hash)
-            const refs = [...node.commit.branchRefs, ...node.commit.tags.map(t => `🏷 ${t}`)]
-            return (
-              <div key={virtualRow.key} style={{
-                position: 'absolute', top: 0, left: 0, width: '100%',
-                height: ROW_HEIGHT, transform: `translateY(${virtualRow.start}px)`,
-              }}>
-                <CommitRow
-                  shortHash={node.commit.shortHash} message={node.commit.message}
-                  author={node.commit.author} relativeDate={node.commit.relativeDate}
-                  refs={refs.length > 0 ? refs : undefined}
-                  mergedFrom={node.commit.mergedFrom}
-                  color={getColor(node.colorIndex)} gutterWidth={gutterWidth}
-                  copiedHash={copiedHash} onCopy={handleCopy} dimmed={dimmed} />
-              </div>
-            )
-          }
-          const group = item.group
-          const primaryColor = group.columns[0] ? getColor(group.columns[0].colorIndex) : getColor(0)
+          const node = rowItems[virtualRow.index]
+          if (!node) return null
+          const dimmed = matchSet !== null && !matchSet.has(node.commit.hash)
+          const refs = [...node.commit.branchRefs, ...node.commit.tags.map(t => `🏷 ${t}`)]
           return (
             <div key={virtualRow.key} style={{
               position: 'absolute', top: 0, left: 0, width: '100%',
               height: ROW_HEIGHT, transform: `translateY(${virtualRow.start}px)`,
             }}>
-              <CommitGroupRow count={group.count} color={primaryColor} gutterWidth={gutterWidth} />
+              <CommitRow
+                shortHash={node.commit.shortHash} message={node.commit.message}
+                author={node.commit.author} relativeDate={node.commit.relativeDate}
+                refs={refs.length > 0 ? refs : undefined}
+                mergedFrom={node.commit.mergedFrom}
+                color={getColor(node.colorIndex)} gutterWidth={gutterWidth}
+                copiedHash={copiedHash} onCopy={handleCopy} dimmed={dimmed} />
             </div>
           )
         })}

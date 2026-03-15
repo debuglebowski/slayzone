@@ -343,6 +343,111 @@ describe('resolveCommitGraph — merge commit with synthetic branch name', () =>
   })
 })
 
+describe('resolveCommitGraph — "merge main into feature" does not reparent main commit', () => {
+  // Simulates: feature branch merges main INTO itself. The second parent is a main commit.
+  // The mergedFrom logic must NOT reparent that main commit or set mergedFrom on it.
+  const hFeatureTip = makeHash()
+  const hMerge = makeHash()      // "Merge branch 'main' into feature/x"
+  const hFeatureWork = makeHash()
+  const hMainCommit = makeHash()  // second parent of hMerge — should stay on main chain
+  const hMainParent = makeHash()
+
+  const commits: DagCommit[] = [
+    dag({ hash: hFeatureTip, message: 'feature work 2', refs: ['HEAD -> refs/heads/feature/x'], parents: [hMerge] }),
+    dag({ hash: hMerge, message: "Merge branch 'main' into feature/x", refs: [], parents: [hFeatureWork, hMainCommit] }),
+    dag({ hash: hFeatureWork, message: 'feature work 1', refs: [], parents: [hMainParent] }),
+    dag({ hash: hMainCommit, message: 'main commit', refs: ['refs/heads/main'], parents: [hMainParent] }),
+    dag({ hash: hMainParent, message: 'initial', refs: [], parents: [] }),
+  ]
+
+  const g = resolveCommitGraph(commits, 'main')
+
+  test('main commit has no mergedFrom', () => {
+    const mainCommit = g.commits.find(c => c.hash === hMainCommit)!
+    expect(mainCommit.mergedFrom).toBe(undefined)
+  })
+
+  test('main commit parent chain is preserved', () => {
+    const mainCommit = g.commits.find(c => c.hash === hMainCommit)!
+    expect(mainCommit.parents[0]).toBe(hMainParent)
+  })
+})
+
+describe('resolveCommitGraph — GitHub-style "from org/main" merge does not reparent main commit', () => {
+  // Same bug via the first regex: /from\s+\S+\/(.+)$/
+  // e.g. "Merge pull request #123 from myorg/main"
+  const hChild = makeHash()
+  const hMerge = makeHash()
+  const hFeatureWork = makeHash()
+  const hMainCommit = makeHash()
+  const hMainParent = makeHash()
+
+  const commits: DagCommit[] = [
+    dag({ hash: hChild, message: 'next commit', refs: ['HEAD -> refs/heads/feature/x'], parents: [hMerge] }),
+    dag({ hash: hMerge, message: 'Merge pull request #99 from myorg/main', refs: [], parents: [hFeatureWork, hMainCommit] }),
+    dag({ hash: hFeatureWork, message: 'feature work', refs: [], parents: [hMainParent] }),
+    dag({ hash: hMainCommit, message: 'main commit', refs: ['refs/heads/main'], parents: [hMainParent] }),
+    dag({ hash: hMainParent, message: 'initial', refs: [], parents: [] }),
+  ]
+
+  const g = resolveCommitGraph(commits, 'main')
+
+  test('main commit has no mergedFrom', () => {
+    const mainCommit = g.commits.find(c => c.hash === hMainCommit)!
+    expect(mainCommit.mergedFrom).toBe(undefined)
+  })
+
+  test('main commit parent chain is preserved', () => {
+    const mainCommit = g.commits.find(c => c.hash === hMainCommit)!
+    expect(mainCommit.parents[0]).toBe(hMainParent)
+  })
+})
+
+describe('resolveCommitGraph + computeDagLayout — merge-main-into-feature preserves edge in collapsed view', () => {
+  // End-to-end: the actual symptom was a missing line in collapsed mode.
+  // main: hMainTip → hMainMid → hMainBase
+  // feature: hFeatTip → hMerge(main into feat) → hFeatWork → hMainBase
+  // hMerge has second parent hMainMid (a main commit).
+  // In collapsed view, hMainTip and hMainBase should be connected through hMainMid.
+  const hMainTip = makeHash()
+  const hMainMid = makeHash()
+  const hMainBase = makeHash()
+  const hFeatTip = makeHash()
+  const hMerge = makeHash()
+  const hFeatWork = makeHash()
+
+  const commits: DagCommit[] = [
+    dag({ hash: hFeatTip, message: 'feature done', refs: ['HEAD -> refs/heads/feature/x'], parents: [hMerge] }),
+    dag({ hash: hMerge, message: "Merge branch 'main' into feature/x", refs: [], parents: [hFeatWork, hMainMid] }),
+    dag({ hash: hFeatWork, message: 'feature work', refs: [], parents: [hMainBase] }),
+    dag({ hash: hMainTip, message: 'main tip', refs: ['refs/heads/main', 'refs/remotes/origin/main'], parents: [hMainMid] }),
+    dag({ hash: hMainMid, message: 'main mid', refs: [], parents: [hMainBase] }),
+    dag({ hash: hMainBase, message: 'main base', refs: [], parents: [] }),
+  ]
+
+  const g = resolveCommitGraph(commits, 'main')
+  const layout = computeDagLayout(g.commits, 'main')
+  const collapsed = computeCollapsedDag(layout, 'main')
+
+  test('hMainMid parent is hMainBase, not reparented to feature', () => {
+    const mid = g.commits.find(c => c.hash === hMainMid)!
+    expect(mid.parents[0]).toBe(hMainBase)
+  })
+
+  test('collapsed view has edge connecting main commits across the gap', () => {
+    const tipRow = collapsed.nodes.find(n => n.commit.hash === hMainTip)?.row
+    const baseRow = collapsed.nodes.find(n => n.commit.hash === hMainBase)?.row
+    if (tipRow === undefined || baseRow === undefined) throw new Error('main tip or base missing from collapsed view')
+    // There must be a path of edges from tipRow to baseRow on the same column
+    const mainCol = collapsed.nodes.find(n => n.commit.hash === hMainTip)!.column
+    const bridgeEdge = collapsed.edges.some(e =>
+      e.fromCol === mainCol && e.toCol === mainCol &&
+      e.fromRow >= tipRow && e.toRow <= baseRow
+    )
+    if (!bridgeEdge) throw new Error('No edge on main column between tip and base — the original bug')
+  })
+})
+
 describe('resolveCommitGraph — HEAD ref without branch (detached HEAD)', () => {
   const c1Hash = makeHash()
   const commits: DagCommit[] = [
@@ -1503,6 +1608,540 @@ describe('real git history: resolveCommitGraph + computeDagLayout', () => {
     const marker = node.isMerge ? 'M' : node.isBranchTip ? 'T' : '·'
     console.log(`    col=${node.column} ${pad}${marker} ${node.commit.hash.slice(0,7)} [${node.commit.branch}] ${node.commit.message.slice(0,50)}`)
   }
+})
+
+// ─── computeCollapsedDag ───────────────────────────────────────
+
+import { computeCollapsedDag } from '../client/CommitGraph'
+import type { CollapsedDag } from '../client/CommitGraph'
+
+describe('computeCollapsedDag — fork points are preserved as head rows', () => {
+  // main: A → B → C → D → E (all col 0)
+  // feature: F → G (col 1), forking from C
+  const hA = makeHash(), hB = makeHash(), hC = makeHash(), hD = makeHash(), hE = makeHash()
+  const hF = makeHash(), hG = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: hF, message: 'feat tip', branch: 'feature', parents: [hG], branchRefs: ['feature'], isBranchTip: true }),
+    resolved({ hash: hG, message: 'feat work', branch: 'feature', parents: [hC] }),
+    resolved({ hash: hA, message: 'main tip', branch: 'main', parents: [hB], branchRefs: ['main'], isBranchTip: true }),
+    resolved({ hash: hB, message: 'main b', branch: 'main', parents: [hC] }),
+    resolved({ hash: hC, message: 'fork point', branch: 'main', parents: [hD] }),
+    resolved({ hash: hD, message: 'main d', branch: 'main', parents: [hE] }),
+    resolved({ hash: hE, message: 'main e', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main')
+
+  test('fork point commit is a visible node, not collapsed into a group', () => {
+    const forkNode = collapsed.nodes.find(n => n.commit.hash === hC)
+    if (!forkNode) throw new Error('Fork point commit (C) was collapsed — should be preserved')
+    expect(forkNode.commit.hash).toBe(hC)
+  })
+
+  test('branch tip is a visible node', () => {
+    const tipNode = collapsed.nodes.find(n => n.commit.hash === hF)
+    if (!tipNode) throw new Error('Branch tip (F) was collapsed — should be preserved')
+    expect(tipNode.commit.hash).toBe(hF)
+  })
+
+  test('cross-column edge from branch to fork point has distinct rows', () => {
+    const forkRow = collapsed.nodes.find(n => n.commit.hash === hC)!.row
+    const tipRow = collapsed.nodes.find(n => n.commit.hash === hF)!.row
+    // There should be an edge (possibly indirect) from the branch to the fork point
+    // and they should be on different collapsed rows
+    expect(tipRow !== forkRow).toBe(true)
+  })
+})
+
+describe('computeCollapsedDag — linear history collapses non-head commits', () => {
+  const hA = makeHash(), hB = makeHash(), hC = makeHash(), hD = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: hA, message: 'tip', branch: 'main', parents: [hB], branchRefs: ['main'], isBranchTip: true }),
+    resolved({ hash: hB, message: 'mid 1', branch: 'main', parents: [hC] }),
+    resolved({ hash: hC, message: 'mid 2', branch: 'main', parents: [hD] }),
+    resolved({ hash: hD, message: 'root', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main', false, false)
+
+  test('tip and root are preserved, middle commits are grouped', () => {
+    // Tip has branchRef → head. Root is last base branch commit → head.
+    // Middle commits (B, C) should be collapsed.
+    const visibleHashes = new Set(collapsed.nodes.map(n => n.commit.hash))
+    expect(visibleHashes.has(hA)).toBe(true)
+    expect(visibleHashes.has(hD)).toBe(true)
+    expect(visibleHashes.has(hB)).toBe(false)
+    expect(visibleHashes.has(hC)).toBe(false)
+  })
+
+  test('edge between preserved nodes carries collapsedCount', () => {
+    const collapsedEdge = collapsed.edges.find(e => e.collapsedCount)
+    if (!collapsedEdge) throw new Error('Expected an edge with collapsedCount for the 2 collapsed commits')
+    expect(collapsedEdge.collapsedCount).toBe(2)
+  })
+})
+
+describe('computeCollapsedDag — merge commit source preserved', () => {
+  // Simulates a merged PR: main has merge commit with syntheticBranch,
+  // second parent is the merged commit. Both should be head rows.
+  const hMerge = makeHash(), hPR = makeHash(), hBase = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: hMerge, message: 'Merge PR #1', branch: 'main', parents: [hBase], branchRefs: ['main'], isBranchTip: true }),
+    resolved({ hash: hPR, message: 'PR work', branch: 'main', parents: [hBase], mergedFrom: 'feature/foo' }),
+    resolved({ hash: hBase, message: 'base', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main', false, true)
+
+  test('merge commit with syntheticBranch is preserved', () => {
+    const mergeNode = collapsed.nodes.find(n => n.commit.hash === hMerge)
+    if (!mergeNode) throw new Error('Merge commit collapsed — should be preserved (syntheticBranch)')
+  })
+})
+
+describe('computeCollapsedDag — maxColumn reflects actual columns, not synthetic', () => {
+  const hA = makeHash(), hB = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: hA, message: 'merge', branch: 'main', parents: [hB], branchRefs: ['main'], isBranchTip: true, mergedFrom: 'feature/x' }),
+    resolved({ hash: hB, message: 'base', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+
+  test('maxColumn is 0 (only col 0 used), not inflated by syntheticBranch.column', () => {
+    expect(fullLayout.maxColumn).toBe(0)
+  })
+})
+
+describe('computeCollapsedDag — edges survive collapsing across fork points', () => {
+  const hTip = makeHash(), hFeat = makeHash(), hFork = makeHash(), hBelow = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: hTip, message: 'feat tip', branch: 'feature', parents: [hFeat], branchRefs: ['feature'], isBranchTip: true }),
+    resolved({ hash: hFeat, message: 'feat mid', branch: 'feature', parents: [hFork] }),
+    resolved({ hash: hFork, message: 'fork', branch: 'main', parents: [hBelow], branchRefs: ['main'], isBranchTip: true }),
+    resolved({ hash: hBelow, message: 'below', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main')
+
+  test('cross-column edge exists in collapsed layout', () => {
+    const forkCol = collapsed.nodes.find(n => n.commit.hash === hFork)?.column
+    const tipCol = collapsed.nodes.find(n => n.commit.hash === hTip)?.column
+    if (forkCol === undefined || tipCol === undefined) throw new Error('Missing nodes')
+    // There should be at least one edge crossing columns
+    const crossEdge = collapsed.edges.some(e => e.fromCol !== e.toCol)
+    expect(crossEdge).toBe(true)
+  })
+})
+
+describe('computeCollapsedDag — recentRowThreshold hides old branch tips', () => {
+  // 10 main commits, then a stale branch forking from row 8
+  const hashes = Array.from({ length: 12 }, () => makeHash())
+  // hashes[0..9] = main commits, hashes[10..11] = stale branch
+  const commits: ResolvedCommit[] = [
+    // Main: rows 0-9
+    resolved({ hash: hashes[0], message: 'main tip', branch: 'main', parents: [hashes[1]], branchRefs: ['main'], isBranchTip: true }),
+    ...Array.from({ length: 8 }, (_, i) =>
+      resolved({ hash: hashes[i + 1], message: `main ${i + 1}`, branch: 'main', parents: [hashes[i + 2]] })
+    ),
+    resolved({ hash: hashes[9], message: 'main root', branch: 'main', parents: [] }),
+    // Stale branch: rows 10-11, forking from hashes[8] (row 8)
+    resolved({ hash: hashes[10], message: 'stale tip', branch: 'stale-feat', parents: [hashes[11]], branchRefs: ['stale-feat'], isBranchTip: true }),
+    resolved({ hash: hashes[11], message: 'stale work', branch: 'stale-feat', parents: [hashes[8]] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+
+  test('without threshold: stale branch tip is shown', () => {
+    const collapsed = computeCollapsedDag(fullLayout, 'main', false, false)
+    const staleTip = collapsed.nodes.find(n => n.commit.hash === hashes[10])
+    if (!staleTip) throw new Error('Stale branch tip should be visible without threshold')
+  })
+
+  test('with threshold=5: stale branch tip is collapsed away', () => {
+    const collapsed = computeCollapsedDag(fullLayout, 'main', false, false, 5)
+    const staleTip = collapsed.nodes.find(n => n.commit.hash === hashes[10])
+    if (staleTip) throw new Error('Stale branch tip should be hidden — all its commits are beyond row 5')
+  })
+
+  test('with threshold=12: stale branch tip is shown (within range)', () => {
+    const collapsed = computeCollapsedDag(fullLayout, 'main', false, false, 12)
+    const staleTip = collapsed.nodes.find(n => n.commit.hash === hashes[10])
+    if (!staleTip) throw new Error('Stale branch tip should be visible — its commits are within threshold')
+  })
+})
+
+describe('computeCollapsedDag — visible branch tip always has visible fork point', () => {
+  // Main: 20 commits (rows 0-19)
+  // Branch: tip at row 20, 3 intermediates, forks from main at row 5
+  // The branch tip is beyond a threshold of 15, but without threshold it's visible.
+  // When visible: both the tip AND the fork point (row 5 on main) must be head rows.
+  const mainHashes = Array.from({ length: 20 }, () => makeHash())
+  const branchHashes = Array.from({ length: 4 }, () => makeHash()) // tip + 3 intermediates
+
+  const commits: ResolvedCommit[] = [
+    // Main: rows 0-19
+    resolved({ hash: mainHashes[0], message: 'main tip', branch: 'main', parents: [mainHashes[1]], branchRefs: ['main'], isBranchTip: true }),
+    ...Array.from({ length: 18 }, (_, i) =>
+      resolved({ hash: mainHashes[i + 1], message: `main ${i + 1}`, branch: 'main', parents: [mainHashes[i + 2]] })
+    ),
+    resolved({ hash: mainHashes[19], message: 'main root', branch: 'main', parents: [] }),
+    // Branch: rows 20-23, forks from mainHashes[5] (row 5)
+    resolved({ hash: branchHashes[0], message: 'branch tip', branch: 'my-feature', parents: [branchHashes[1]], branchRefs: ['my-feature'], isBranchTip: true }),
+    resolved({ hash: branchHashes[1], message: 'branch mid 1', branch: 'my-feature', parents: [branchHashes[2]] }),
+    resolved({ hash: branchHashes[2], message: 'branch mid 2', branch: 'my-feature', parents: [branchHashes[3]] }),
+    resolved({ hash: branchHashes[3], message: 'branch base', branch: 'my-feature', parents: [mainHashes[5]] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+
+  test('branch tip is visible → fork point on main is also visible', () => {
+    const collapsed = computeCollapsedDag(fullLayout, 'main', false, false)
+    const tip = collapsed.nodes.find(n => n.commit.hash === branchHashes[0])
+    if (!tip) throw new Error('Branch tip should be visible (has branchRef)')
+
+    // The fork point is mainHashes[5]. It must be a visible node, not collapsed.
+    const forkPoint = collapsed.nodes.find(n => n.commit.hash === mainHashes[5])
+    if (!forkPoint) throw new Error('Fork point on main must be visible when branch tip is visible')
+  })
+
+  test('branch last commit before fork is also visible', () => {
+    const collapsed = computeCollapsedDag(fullLayout, 'main', false, false)
+
+    // branchHashes[3] is the last branch commit before crossing to main.
+    // The edge from branchHashes[3] (branch col) → mainHashes[5] (main col) is cross-column.
+    // Both endpoints must be preserved.
+    const branchEnd = collapsed.nodes.find(n => n.commit.hash === branchHashes[3])
+    if (!branchEnd) throw new Error('Branch last commit (before fork) must be visible')
+  })
+
+  test('intermediate branch commits are collapsed', () => {
+    const collapsed = computeCollapsedDag(fullLayout, 'main', false, false)
+
+    // branchHashes[1] and [2] are intermediates with no refs — should be in a group
+    const mid1 = collapsed.nodes.find(n => n.commit.hash === branchHashes[1])
+    const mid2 = collapsed.nodes.find(n => n.commit.hash === branchHashes[2])
+    if (mid1) throw new Error('Branch intermediate 1 should be collapsed')
+    if (mid2) throw new Error('Branch intermediate 2 should be collapsed')
+  })
+})
+
+describe('computeCollapsedDag — no orphaned branch tips (tip shown without fork point)', () => {
+  // Simulate the normain bug: branch tip is a head row, but its fork point
+  // is NOT preserved → branch dot floats with no visible connection to main.
+  // This can happen when the branch tip is shown (branchRef) but nothing
+  // preserves the fork point because cross-column edges are filtered out.
+  //
+  // Setup: 10 main commits, 1-commit branch at row 10 forking from row 5.
+  // Threshold = 8 → branch is "old" (tip at row 10 > 8).
+  // The recency filter skips the branchRef head. But the cross-column edge
+  // from the branch to main should still NOT create an orphaned tip.
+  const mainHashes = Array.from({ length: 10 }, () => makeHash())
+  const branchTip = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: mainHashes[0], message: 'main tip', branch: 'main', parents: [mainHashes[1]], branchRefs: ['main'], isBranchTip: true }),
+    ...Array.from({ length: 8 }, (_, i) =>
+      resolved({ hash: mainHashes[i + 1], message: `main ${i + 1}`, branch: 'main', parents: [mainHashes[i + 2]] })
+    ),
+    resolved({ hash: mainHashes[9], message: 'main root', branch: 'main', parents: [] }),
+    // Single-commit branch, forking from mainHashes[5]
+    resolved({ hash: branchTip, message: 'old branch tip', branch: 'old-feat', parents: [mainHashes[5]], branchRefs: ['old-feat'], isBranchTip: true }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+
+  test('with recency threshold: branch tip must NOT appear without its fork point', () => {
+    const collapsed = computeCollapsedDag(fullLayout, 'main', false, false, 8)
+
+    const tip = collapsed.nodes.find(n => n.commit.hash === branchTip)
+    const forkPoint = collapsed.nodes.find(n => n.commit.hash === mainHashes[5])
+
+    // Either BOTH are visible, or NEITHER is visible. No orphans.
+    const tipVisible = !!tip
+    const forkVisible = !!forkPoint
+
+    if (tipVisible && !forkVisible) {
+      throw new Error('Orphaned branch tip: tip is visible but fork point is not')
+    }
+    // Recency said "hide this branch" — it should be fully hidden, not partially shown
+    if (tipVisible) {
+      throw new Error('Old branch tip should be fully hidden by recency threshold, not brought back by cross-column edge rule')
+    }
+  })
+})
+
+describe('computeCollapsedDag — plain commit correctly collapsed, syntheticBranch kept', () => {
+  // After mergedFrom parent override, the merge commit has no special significance
+  // (no refs, no syntheticBranch, single parent). It should be collapsed.
+  // The mergedFrom commit (with syntheticBranch) IS significant and stays.
+  const hTip = makeHash()
+  const hMergeA = makeHash()
+  const hFeatX = makeHash()
+  const hMergedFromA = makeHash()
+  const hBase = makeHash()
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: hTip, message: 'main tip', branch: 'main', parents: [hMergeA], branchRefs: ['main'], isBranchTip: true }),
+    resolved({ hash: hMergeA, message: 'Merge PR #191', branch: 'main', parents: [hMergedFromA] }),
+    resolved({ hash: hFeatX, message: 'feat work', branch: 'featX', parents: [hBase], branchRefs: ['featX'], isBranchTip: true }),
+    resolved({ hash: hMergedFromA, message: 'PR work', branch: 'main', parents: [hBase], mergedFrom: 'feature/foo' }),
+    resolved({ hash: hBase, message: 'base', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main', false, true)
+
+  test('plain merge commit (no refs, no syntheticBranch) is correctly collapsed', () => {
+    const mergeNode = collapsed.nodes.find(n => n.commit.hash === hMergeA)
+    if (mergeNode) throw new Error('Plain commit should be collapsed — has no visual significance')
+  })
+
+  test('mergedFrom commit is visible (has syntheticBranch)', () => {
+    const mfNode = collapsed.nodes.find(n => n.commit.hash === hMergedFromA)
+    if (!mfNode) throw new Error('mergedFrom commit should be visible (has syntheticBranch)')
+  })
+
+  test('continuous edge path on col 0 from tip to mergedFrom', () => {
+    const tipRow = collapsed.nodes.find(n => n.commit.hash === hTip)!.row
+    const mfRow = collapsed.nodes.find(n => n.commit.hash === hMergedFromA)!.row
+    // Edge path may go through intermediate collapsed rows (same as full layout)
+    const col0Edges = collapsed.edges.filter(e => e.fromCol === 0 && e.toCol === 0)
+    // Check there's a connected path from tipRow to mfRow on col 0
+    const reachable = new Set([tipRow])
+    for (const e of col0Edges) {
+      if (reachable.has(e.fromRow)) reachable.add(e.toRow)
+    }
+    if (!reachable.has(mfRow)) throw new Error('No connected path on col 0 from tip to mergedFrom')
+  })
+})
+
+// ─── Collapsed invariant tests (phantom edges, column reuse, connectivity) ──
+
+/** Helper: check that every edge endpoint has a node at that (row, column) */
+function assertNoPhantomEdges(collapsed: CollapsedDag) {
+  const nodeAt = new Set<string>()
+  for (const n of collapsed.nodes) nodeAt.add(`${n.row},${n.column}`)
+  for (const e of collapsed.edges) {
+    if (!nodeAt.has(`${e.fromRow},${e.fromCol}`))
+      throw new Error(`Phantom edge: from row=${e.fromRow} col=${e.fromCol} has no node`)
+    if (!nodeAt.has(`${e.toRow},${e.toCol}`))
+      throw new Error(`Phantom edge: to row=${e.toRow} col=${e.toCol} has no node`)
+  }
+}
+
+describe('computeCollapsedDag — no phantom edges with interleaved branches', () => {
+  // 3 branches interleaving on topo sort: main (col 0), feat-A (col 1), feat-B (col 2).
+  // Many non-kept rows on branch columns will map to kept rows on main.
+  const h = Array.from({ length: 20 }, () => makeHash())
+
+  const commits: ResolvedCommit[] = [
+    // main tip
+    resolved({ hash: h[0], message: 'main tip', branch: 'main', parents: [h[1]], branchRefs: ['main'], isBranchTip: true }),
+    // feat-A tip (interleaves between main commits)
+    resolved({ hash: h[1], message: 'main 1', branch: 'main', parents: [h[3]] }),
+    resolved({ hash: h[2], message: 'feat-A tip', branch: 'feat-A', parents: [h[4]], branchRefs: ['feat-A'], isBranchTip: true }),
+    resolved({ hash: h[3], message: 'main 2', branch: 'main', parents: [h[6]] }),
+    resolved({ hash: h[4], message: 'feat-A mid', branch: 'feat-A', parents: [h[5]] }),
+    resolved({ hash: h[5], message: 'feat-A base', branch: 'feat-A', parents: [h[6]] }),
+    // feat-B tip (interleaves further)
+    resolved({ hash: h[6], message: 'main 3', branch: 'main', parents: [h[8]] }),
+    resolved({ hash: h[7], message: 'feat-B tip', branch: 'feat-B', parents: [h[9]], branchRefs: ['feat-B'], isBranchTip: true }),
+    resolved({ hash: h[8], message: 'main 4', branch: 'main', parents: [h[11]] }),
+    resolved({ hash: h[9], message: 'feat-B mid', branch: 'feat-B', parents: [h[10]] }),
+    resolved({ hash: h[10], message: 'feat-B base', branch: 'feat-B', parents: [h[11]] }),
+    resolved({ hash: h[11], message: 'main root', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main')
+
+  test('zero phantom edges', () => {
+    assertNoPhantomEdges(collapsed)
+  })
+})
+
+describe('computeCollapsedDag — column reuse does not create false connections', () => {
+  // Two unrelated branches reuse the same column (col 1).
+  // Branch A ends, then branch B starts later at the same column.
+  // Collapsed view must NOT connect them.
+  const h = Array.from({ length: 14 }, () => makeHash())
+
+  const commits: ResolvedCommit[] = [
+    // Branch A: tip at row 0, forks from main at h[3]
+    resolved({ hash: h[0], message: 'A tip', branch: 'branch-A', parents: [h[1]], branchRefs: ['branch-A'], isBranchTip: true }),
+    resolved({ hash: h[1], message: 'A mid', branch: 'branch-A', parents: [h[2]] }),
+    resolved({ hash: h[2], message: 'A base', branch: 'branch-A', parents: [h[3]] }),
+    // Main commits
+    resolved({ hash: h[3], message: 'main 1', branch: 'main', parents: [h[4]], branchRefs: ['main'], isBranchTip: true }),
+    resolved({ hash: h[4], message: 'main 2', branch: 'main', parents: [h[5]] }),
+    resolved({ hash: h[5], message: 'main 3', branch: 'main', parents: [h[6]] }),
+    resolved({ hash: h[6], message: 'main 4', branch: 'main', parents: [h[9]] }),
+    // Branch B: tip at row 7, forks from main at h[9] — will reuse col 1 after A ends
+    resolved({ hash: h[7], message: 'B tip', branch: 'branch-B', parents: [h[8]], branchRefs: ['branch-B'], isBranchTip: true }),
+    resolved({ hash: h[8], message: 'B base', branch: 'branch-B', parents: [h[9]] }),
+    resolved({ hash: h[9], message: 'main 5', branch: 'main', parents: [h[10]] }),
+    resolved({ hash: h[10], message: 'main root', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main')
+
+  test('no phantom edges', () => {
+    assertNoPhantomEdges(collapsed)
+  })
+
+  test('no edge between branch-A and branch-B nodes', () => {
+    const aNodes = collapsed.nodes.filter(n => n.commit.branch === 'branch-A')
+    const bNodes = collapsed.nodes.filter(n => n.commit.branch === 'branch-B')
+    const aRows = new Set(aNodes.map(n => n.row))
+    const bRows = new Set(bNodes.map(n => n.row))
+    for (const e of collapsed.edges) {
+      const fromA = aRows.has(e.fromRow), toB = bRows.has(e.toRow)
+      const fromB = bRows.has(e.fromRow), toA = aRows.has(e.toRow)
+      if ((fromA && toB) || (fromB && toA)) {
+        throw new Error(`False edge between branch-A (row ${e.fromRow}) and branch-B (row ${e.toRow})`)
+      }
+    }
+  })
+})
+
+describe('computeCollapsedDag — every branch connects to main', () => {
+  // Two branches fork from main at different points.
+  // In collapsed view, both must have a cross-column edge to main.
+  const h = Array.from({ length: 10 }, () => makeHash())
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: h[0], message: 'feat tip', branch: 'feat', parents: [h[1]], branchRefs: ['feat'], isBranchTip: true }),
+    resolved({ hash: h[1], message: 'feat base', branch: 'feat', parents: [h[3]] }),
+    resolved({ hash: h[2], message: 'main tip', branch: 'main', parents: [h[3]], branchRefs: ['main'], isBranchTip: true }),
+    resolved({ hash: h[3], message: 'fork point', branch: 'main', parents: [h[4]] }),
+    resolved({ hash: h[4], message: 'main mid', branch: 'main', parents: [h[5]] }),
+    resolved({ hash: h[5], message: 'main root', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main')
+
+  test('no phantom edges', () => {
+    assertNoPhantomEdges(collapsed)
+  })
+
+  test('branch has cross-column edge to main', () => {
+    const crossCol = collapsed.edges.some(e => e.fromCol !== e.toCol)
+    if (!crossCol) throw new Error('No cross-column edge — branch is disconnected from main')
+  })
+})
+
+describe('computeCollapsedDag — same-column chain preserved across collapsed rows', () => {
+  // Main has 10 commits, only tip and root are kept.
+  // The edge between them must survive with correct collapsedCount.
+  const h = Array.from({ length: 10 }, () => makeHash())
+
+  const commits: ResolvedCommit[] = [
+    resolved({ hash: h[0], message: 'tip', branch: 'main', parents: [h[1]], branchRefs: ['main'], isBranchTip: true }),
+    ...Array.from({ length: 8 }, (_, i) =>
+      resolved({ hash: h[i + 1], message: `mid ${i}`, branch: 'main', parents: [h[i + 2]] })
+    ),
+    resolved({ hash: h[9], message: 'root', branch: 'main', parents: [] }),
+  ]
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main', false, false)
+
+  test('only 2 nodes visible (tip + root)', () => {
+    expect(collapsed.nodes.length).toBe(2)
+  })
+
+  test('edge connects them with collapsedCount = 8', () => {
+    expect(collapsed.edges.length).toBe(1)
+    expect(collapsed.edges[0].collapsedCount).toBe(8)
+  })
+
+  test('no phantom edges', () => {
+    assertNoPhantomEdges(collapsed)
+  })
+})
+
+describe('computeCollapsedDag — many branches interleaving, zero phantoms', () => {
+  // Stress test: 5 branches forking from main at different points,
+  // each with 3 commits. Total 20 commits.
+  const main = Array.from({ length: 5 }, () => makeHash())
+  const branches = Array.from({ length: 5 }, () =>
+    Array.from({ length: 3 }, () => makeHash())
+  )
+  const branchNames = ['b1', 'b2', 'b3', 'b4', 'b5']
+
+  // Interleave: main tip, b1 tip, main 1, b2 tip, main 2, b3 tip, ...
+  const commits: ResolvedCommit[] = []
+
+  // Branch tips
+  for (let i = 0; i < 5; i++) {
+    commits.push(resolved({
+      hash: branches[i][0], message: `${branchNames[i]} tip`, branch: branchNames[i],
+      parents: [branches[i][1]], branchRefs: [branchNames[i]], isBranchTip: true
+    }))
+  }
+  // Branch mids
+  for (let i = 0; i < 5; i++) {
+    commits.push(resolved({
+      hash: branches[i][1], message: `${branchNames[i]} mid`, branch: branchNames[i],
+      parents: [branches[i][2]]
+    }))
+  }
+  // Main commits
+  commits.push(resolved({
+    hash: main[0], message: 'main tip', branch: 'main',
+    parents: [main[1]], branchRefs: ['main'], isBranchTip: true
+  }))
+  for (let i = 1; i < 4; i++) {
+    commits.push(resolved({
+      hash: main[i], message: `main ${i}`, branch: 'main', parents: [main[i + 1]]
+    }))
+  }
+  commits.push(resolved({ hash: main[4], message: 'main root', branch: 'main', parents: [] }))
+
+  // Branch bases fork from main
+  for (let i = 0; i < 5; i++) {
+    commits.push(resolved({
+      hash: branches[i][2], message: `${branchNames[i]} base`, branch: branchNames[i],
+      parents: [main[i]]
+    }))
+  }
+
+  const fullLayout = computeDagLayout(commits, 'main')
+  const collapsed = computeCollapsedDag(fullLayout, 'main')
+
+  test('zero phantom edges with 5 interleaved branches', () => {
+    assertNoPhantomEdges(collapsed)
+  })
+
+  test('all 5 branch tips are visible', () => {
+    for (const name of branchNames) {
+      const tip = collapsed.nodes.find(n => n.commit.branch === name && n.isBranchTip)
+      if (!tip) throw new Error(`Branch ${name} tip missing from collapsed view`)
+    }
+  })
+
+  test('every branch has at least one cross-column edge', () => {
+    for (const name of branchNames) {
+      const branchNodes = collapsed.nodes.filter(n => n.commit.branch === name)
+      const branchRows = new Set(branchNodes.map(n => n.row))
+      const hasCross = collapsed.edges.some(e =>
+        e.fromCol !== e.toCol && (branchRows.has(e.fromRow) || branchRows.has(e.toRow))
+      )
+      if (!hasCross) throw new Error(`Branch ${name} has no cross-column edge — disconnected from main`)
+    }
+  })
 })
 
 // ─── Summary ───────────────────────────────────────────────────

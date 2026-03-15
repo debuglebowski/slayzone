@@ -1284,6 +1284,8 @@ export function resolveCommitGraph(commits: DagCommit[], baseBranch: string, req
     if (c.parents.length < 2) continue
     const mergeMatch = c.message.match(/from\s+\S+\/(.+)$/) ?? c.message.match(/Merge branch '([^']+)'/)
     if (!mergeMatch) continue
+    // Skip "merge main into feature" — reparenting a main-branch commit breaks the base chain
+    if (mergeMatch[1] === baseBranch) continue
     for (let p = 1; p < c.parents.length; p++) {
       const parentHash = c.parents[p]
       if (!commitBranchName.has(parentHash)) {
