@@ -1699,7 +1699,7 @@ app.whenReady().then(async () => {
     const wc = webContents.fromId(webviewId)
     if (!wc) return false
     wc.disableDeviceEmulation()
-    wc.setUserAgent('')
+    wc.setUserAgent(_chromeUa)
     return true
   })
 

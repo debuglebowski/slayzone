@@ -13,6 +13,32 @@ export const WEBVIEW_DESKTOP_HANDOFF_SCRIPT = `
     writable: false,
   });
 
+  // --- Patch Permissions.query to not throw (Electron rejects, triggering bot detection) ---
+  if (navigator.permissions && navigator.permissions.query) {
+    var origQuery = navigator.permissions.query.bind(navigator.permissions);
+    navigator.permissions.query = function(desc) {
+      return origQuery(desc).catch(function() {
+        return { state: 'prompt', onchange: null };
+      });
+    };
+  }
+
+  // --- Hide webdriver flag (top bot-detection signal for CAPTCHAs) ---
+  Object.defineProperty(navigator, 'webdriver', {
+    get: function() { return false; },
+    configurable: true,
+    enumerable: true,
+  });
+
+  // --- Ensure languages is populated ---
+  if (!navigator.languages || navigator.languages.length === 0) {
+    Object.defineProperty(navigator, 'languages', {
+      get: function() { return ['en-US', 'en']; },
+      configurable: true,
+      enumerable: true,
+    });
+  }
+
   // --- Fake window.chrome properties so sites detect "real Chrome" ---
   if (!window.chrome) window.chrome = {};
   if (!window.chrome.app) {
