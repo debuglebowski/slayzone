@@ -1,10 +1,7 @@
 import { useState, useMemo } from 'react'
-import { Home, Trophy, X, BarChart3 } from 'lucide-react'
+import { Home, X } from 'lucide-react'
 import { cn, Tooltip, TooltipTrigger, TooltipContent, getTerminalStateStyle, projectColorBg } from '@slayzone/ui'
 import type { TerminalState } from '@slayzone/terminal/shared'
-import { useQuery } from 'convex/react'
-import { api } from 'convex/_generated/api'
-import { useLeaderboardAuth } from '@/lib/convexAuth'
 import {
   DndContext,
   DragOverlay,
@@ -190,43 +187,6 @@ function SortableTab({
   )
 }
 
-/** Rank badge — only rendered inside ConvexProvider (auth.configured). */
-function LeaderboardTabRank({ isAuthenticated }: { isAuthenticated: boolean }): React.JSX.Element | null {
-  const bestRank = useQuery(
-    api.leaderboard.getMyBestRank,
-    isAuthenticated ? {} : 'skip'
-  ) ?? null
-
-  if (bestRank == null) return null
-  return (
-    <span className="text-[10px] font-semibold tabular-nums leading-none">
-      #{bestRank}
-    </span>
-  )
-}
-
-/** Self-contained leaderboard tab button. Guards Convex hooks behind auth.configured check. */
-function LeaderboardTab({ isActive, onClick }: { isActive: boolean; onClick: () => void }): React.JSX.Element {
-  const auth = useLeaderboardAuth()
-
-  return (
-    <div
-      className={cn(
-        'flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
-        'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
-        'border',
-        isActive
-          ? 'bg-neutral-200 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600'
-          : 'border-transparent text-neutral-500 dark:text-neutral-400'
-      )}
-      onClick={onClick}
-    >
-      <Trophy className="h-4 w-4" />
-      {auth.configured && <LeaderboardTabRank isAuthenticated={auth.isAuthenticated} />}
-    </div>
-  )
-}
-
 export function TabBar({
   tabs,
   activeIndex,
@@ -252,8 +212,6 @@ export function TabBar({
   const taskIds = taskTabs.map((t) => t.taskId)
   const activeTab = activeId ? taskTabs.find((t) => t.taskId === activeId) : null
   const homeIndex = tabs.findIndex((t) => t.type === 'home')
-  const leaderboardIndex = tabs.findIndex((t) => t.type === 'leaderboard')
-  const usageAnalyticsIndex = tabs.findIndex((t) => t.type === 'usage-analytics')
 
   // Compute group position for each task tab based on consecutive worktree colors
   const groupPositions = useMemo(() => {
@@ -298,16 +256,6 @@ export function TabBar({
     <div className="flex items-center h-11 pr-2 gap-1 bg-sidebar window-drag-region">
       {/* Scrollable tabs area */}
       <div className="flex items-center overflow-x-auto scrollbar-hide flex-1 min-w-0">
-        {/* Leaderboard tab — self-contained, guards its own Convex hooks */}
-        {leaderboardIndex >= 0 && (
-          <div className="ml-1">
-          <LeaderboardTab
-            isActive={activeIndex === leaderboardIndex}
-            onClick={() => onTabClick(leaderboardIndex)}
-          />
-          </div>
-        )}
-
         {/* Home tab - not draggable */}
         <div
           className={cn(
@@ -322,24 +270,6 @@ export function TabBar({
         >
           <Home className="h-4 w-4" />
         </div>
-
-        {/* Usage analytics tab */}
-        {usageAnalyticsIndex >= 0 && (
-          <div
-            className={cn(
-              'ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
-              'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50',
-              'border',
-              activeIndex === usageAnalyticsIndex
-                ? 'bg-neutral-200 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600'
-                : 'border-transparent text-neutral-500 dark:text-neutral-400'
-            )}
-            onClick={() => onTabClick(usageAnalyticsIndex)}
-          >
-            <BarChart3 className="h-4 w-4" />
-            <span className="text-xs">Usage</span>
-          </div>
-        )}
 
         {/* Task tabs - sortable, flat DOM for dnd-kit compatibility */}
         <DndContext

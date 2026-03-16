@@ -1312,6 +1312,13 @@ function App(): React.JSX.Element {
           onProjectDelete={setDeletingProject}
           onSettings={handleOpenSettings}
           onChangelog={() => setChangelogOpen(true)}
+          onLeaderboard={() => {
+            const store = useTabStore.getState()
+            const existing = store.tabs.findIndex((t) => t.type === 'leaderboard')
+            if (existing >= 0) {
+              setActiveTabIndex(existing)
+            }
+          }}
           onUsageAnalytics={() => {
             const store = useTabStore.getState()
             const existing = store.tabs.findIndex((t) => t.type === 'usage-analytics')

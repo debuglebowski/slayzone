@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Settings, Keyboard, ChevronDown, Megaphone, Check, CheckCheck, BarChart3 } from 'lucide-react'
+import { Settings, Keyboard, ChevronDown, Megaphone, Check, CheckCheck, Trophy, BarChart3 } from 'lucide-react'
 import { isConvexConfigured } from '@/lib/convexAuth'
 import { FeedbackDialog } from '../feedback/FeedbackDialog'
 import { FaRegHandshake } from 'react-icons/fa'
@@ -25,6 +25,7 @@ import {
 import { ProjectItem } from './ProjectItem'
 import { TerminalStatusPopover } from '@slayzone/terminal'
 import { cn, useAppearance } from '@slayzone/ui'
+import { useTabStore } from '@slayzone/settings'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
@@ -40,6 +41,7 @@ interface AppSidebarProps {
   onSettings: () => void
   onChangelog: () => void
   onUsageAnalytics: () => void
+  onLeaderboard: () => void
   onTaskClick?: (taskId: string) => void
   zenMode?: boolean
   onboardingChecklist: OnboardingChecklistState
@@ -100,6 +102,7 @@ export function AppSidebar({
   onSettings,
   onChangelog,
   onUsageAnalytics,
+  onLeaderboard,
   onTaskClick,
   zenMode,
   onboardingChecklist,
@@ -108,6 +111,7 @@ export function AppSidebar({
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const { sidebarBadgeMode } = useAppearance()
+  const activeTabType = useTabStore((s) => s.tabs[s.activeTabIndex]?.type)
 
   return (
     <Sidebar collapsible="none" className={zenMode ? "!w-0 h-svh overflow-hidden" : "w-18 h-svh"}>
@@ -155,6 +159,37 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-col items-center gap-2">
             <TerminalStatusPopover tasks={tasks} onTaskClick={onTaskClick} />
+
+            {isConvexConfigured && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <IconButton
+                    aria-label="Leaderboard"
+                    variant="ghost"
+                    size="icon-lg"
+                    onClick={onLeaderboard}
+                    className={cn('rounded-lg', activeTabType === 'leaderboard' ? 'bg-primary text-primary-foreground shadow-md ring-1 ring-primary/30 hover:!bg-primary hover:!text-primary-foreground' : 'text-muted-foreground')}
+                  >
+                    <Trophy className="size-5" />
+                  </IconButton>
+                </TooltipTrigger>
+                <TooltipContent side="right">Leaderboard</TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <IconButton
+                  aria-label="Usage Analytics"
+                  variant="ghost"
+                  size="icon-lg"
+                  onClick={onUsageAnalytics}
+                  className={cn('rounded-lg', activeTabType === 'usage-analytics' ? 'bg-primary text-primary-foreground shadow-md ring-1 ring-primary/30 hover:!bg-primary hover:!text-primary-foreground' : 'text-muted-foreground')}
+                >
+                  <BarChart3 className="size-5" />
+                </IconButton>
+              </TooltipTrigger>
+              <TooltipContent side="right">Usage</TooltipContent>
+            </Tooltip>
             <Popover open={checklistOpen} onOpenChange={setChecklistOpen}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -265,7 +300,6 @@ export function AppSidebar({
               </TooltipTrigger>
               <TooltipContent side="right">What's New</TooltipContent>
             </Tooltip>
-            {isConvexConfigured && <FeedbackDialog />}
             <Tooltip>
               <TooltipTrigger asChild>
                 <IconButton
@@ -280,6 +314,7 @@ export function AppSidebar({
               </TooltipTrigger>
               <TooltipContent side="right">Keyboard Shortcuts</TooltipContent>
             </Tooltip>
+            {isConvexConfigured && <FeedbackDialog />}
             <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
               <DialogContent className="max-h-[80vh] flex flex-col">
                 <DialogHeader>
@@ -308,20 +343,6 @@ export function AppSidebar({
                 </div>
               </DialogContent>
             </Dialog>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <IconButton
-                  aria-label="Usage Analytics"
-                  variant="ghost"
-                  size="icon-lg"
-                  onClick={onUsageAnalytics}
-                  className="rounded-lg text-muted-foreground"
-                >
-                  <BarChart3 className="size-5" />
-                </IconButton>
-              </TooltipTrigger>
-              <TooltipContent side="right">Usage</TooltipContent>
-            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <IconButton
