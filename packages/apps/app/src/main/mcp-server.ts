@@ -263,7 +263,16 @@ export function stopMcpServer(): void {
   if (httpServer) { httpServer.close(); httpServer = null }
 }
 
-export function startMcpServer(db: Database, port: number): void {
+function getPreferredPort(db: Database): number {
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'mcp_preferred_port' LIMIT 1").get() as { value: string } | undefined
+    const port = parseInt(row?.value ?? '', 10)
+    return (port >= 1024 && port <= 65535) ? port : 0
+  } catch { return 0 }
+}
+
+export function startMcpServer(db: Database): void {
+  const port = getPreferredPort(db)
   const app = express()
   app.use(express.json())
 
@@ -569,16 +578,28 @@ export function startMcpServer(db: Database, port: number): void {
     }
   })
 
-  httpServer = app.listen(port, '127.0.0.1')
-  httpServer.on('error', (err) => console.error(`[MCP] Server error:`, err))
-  httpServer.on('listening', () => {
+  stopMcpServer()
+
+  function onListening(): void {
     const addr = httpServer!.address()
     const actualPort = typeof addr === 'object' && addr ? addr.port : port
     ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
-    // Persist actual port so CLI can discover it via settings DB (handles port 0 / dynamic binding)
     try {
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)").run(String(actualPort))
     } catch { /* non-fatal — CLI falls back to default port */ }
     console.log(`[MCP] Server listening on http://127.0.0.1:${actualPort}/mcp`)
+  }
+
+  httpServer = app.listen(port, '127.0.0.1')
+  httpServer.on('listening', onListening)
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && port !== 0) {
+      console.warn(`[MCP] Port ${port} in use, falling back to dynamic port`)
+      httpServer = app.listen(0, '127.0.0.1')
+      httpServer.on('listening', onListening)
+      httpServer.on('error', (err2) => console.error(`[MCP] Server error:`, err2))
+    } else {
+      console.error(`[MCP] Server error:`, err)
+    }
   })
 }

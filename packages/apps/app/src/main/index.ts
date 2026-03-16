@@ -1005,11 +1005,9 @@ app.whenReady().then(async () => {
   startAutoBackup(db)
   logBoot('domain IPC handlers registered')
 
-  // Start MCP server (use port 0 in Playwright to avoid conflict with dev instance)
-  // keep in sync with packages/apps/cli/src/db.ts
-  const mcpPort = isPlaywright ? 0 : is.dev ? 45679 : 45678
+  // Start MCP server — preferred port from settings, falls back to dynamic port on conflict
   import('./mcp-server').then((mod) => {
-    mod.startMcpServer(db, mcpPort)
+    mod.startMcpServer(db)
     mcpCleanup = () => mod.stopMcpServer()
   }).catch((err) => {
     console.error('[MCP] Failed to start server:', err)
@@ -1757,7 +1755,7 @@ app.whenReady().then(async () => {
 
       // 8. Restart MCP (after table drop so port is persisted to fresh settings table)
       const mcpMod = await import('./mcp-server')
-      mcpMod.startMcpServer(db, 0)
+      mcpMod.startMcpServer(db)
       mcpCleanup = () => mcpMod.stopMcpServer()
       // Wait for server to be listening (listen callback sets __mcpPort)
       await new Promise<void>((resolve) => {

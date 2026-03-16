@@ -1,7 +1,12 @@
 import { getMcpPort } from './db'
 
 function baseUrl(): string {
-  return `http://127.0.0.1:${getMcpPort()}`
+  const port = getMcpPort()
+  if (!port) {
+    console.error('SlayZone MCP port not found. Is the app running?')
+    process.exit(1)
+  }
+  return `http://127.0.0.1:${port}`
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
