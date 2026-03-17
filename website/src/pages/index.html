@@ -694,7 +694,15 @@
   if (/Mac|iPhone|iPad|iPod/.test(ua)) { os='mac'; icon=icons.mac; label='Download for Mac'; }
   else if (/Win/.test(ua)) { os='win'; icon=icons.win; label='Download for Windows'; }
   else { os='linux'; icon=icons.linux; label='Download for Linux'; }
-  btns.forEach(function(b){ if(b){ b.innerHTML = icon + label; b.href = urls[os]; } });
+  btns.forEach(function(b){
+    if(!b) return;
+    b.innerHTML = icon + label; b.href = urls[os];
+    b.addEventListener('click', function(){ posthog.capture('download_clicked', { os: os }); });
+  });
+  document.querySelectorAll('a[href*="github.com/debuglebowski/SlayZone"]').forEach(function(a){
+    if(a.id === 'dl-btn' || a.id === 'dl-btn-2') return;
+    a.addEventListener('click', function(){ posthog.capture('github_clicked'); });
+  });
   // Glitter waterfall on hover
   btns.forEach(function(b) {
     if (!b) return;
