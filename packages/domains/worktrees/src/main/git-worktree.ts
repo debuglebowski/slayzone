@@ -1242,9 +1242,10 @@ function parseRef(raw: string): { type: 'branch' | 'remote' | 'tag' | 'head'; na
 
 /**
  * Resolve raw DagCommit[] into a ResolvedGraph with all git-ref semantics pre-processed.
- * Pure function — no git calls.
+ * Pure function — no git calls. When diverged, `localOnlyHashes` (from `git rev-list`)
+ * enables accurate shared-commit detection that the truncated DAG alone can't provide.
  */
-export function resolveCommitGraph(commits: DagCommit[], baseBranch: string, requestedBranches?: string[]): ResolvedGraph {
+export function resolveCommitGraph(commits: DagCommit[], baseBranch: string, requestedBranches?: string[], localOnlyHashes?: Set<string>): ResolvedGraph {
   if (commits.length === 0) return { commits: [], baseBranch, branches: [] }
 
   // Collect all known local branch names (from refs)
@@ -1298,13 +1299,14 @@ export function resolveCommitGraph(commits: DagCommit[], baseBranch: string, req
   // --- 3-pass branch ownership ---
   const commitBranchName = new Map<string, string>()
 
-  // Pass 1: map branch-tip commits to their branch name (skip origin/ display refs)
+  // Pass 1: map branch-tip commits to their branch name (skip origin/ display refs).
+  // Prefer baseBranch when multiple refs point at the same commit.
   for (const c of commits) {
     const parsed = commitParsedRefs.get(c.hash)!
-    const ownerRef = parsed.branchRefs.find(r => !r.startsWith('origin/'))
-    if (ownerRef) {
-      commitBranchName.set(c.hash, ownerRef)
-    }
+    const localRefs = parsed.branchRefs.filter(r => !r.startsWith('origin/'))
+    if (localRefs.length === 0) continue
+    const ownerRef = localRefs.includes(baseBranch) ? baseBranch : localRefs[0]
+    commitBranchName.set(c.hash, ownerRef)
   }
 
   // Pass 1b: detect diverged local/remote — promote origin/X to a real branch.
@@ -1403,6 +1405,18 @@ export function resolveCommitGraph(commits: DagCommit[], baseBranch: string, req
       }
       commitBranchName.set(parent.hash, name)
       current = parent
+    }
+  }
+
+  // Pass 4: when diverged and localOnlyHashes is available, reclaim shared commits.
+  // Any commit owned by baseBranch that is NOT in localOnlyHashes is shared history
+  // and should belong to origin/<baseBranch> (the trunk).
+  if (originBaseDiverged && localOnlyHashes) {
+    for (const c of commits) {
+      const owner = commitBranchName.get(c.hash)
+      if (owner !== baseBranch && owner !== undefined) continue
+      if (localOnlyHashes.has(c.hash)) continue
+      commitBranchName.set(c.hash, originBaseName)
     }
   }
 
@@ -1530,7 +1544,19 @@ export async function getResolvedCommitDag(
     ? [...branches, ...branches.map(b => `origin/${b}`)]
     : undefined
   const raw = await getCommitDag(repoPath, limit, expandedBranches)
-  return resolveCommitGraph(raw, baseBranch, branches)
+
+  // Detect local-only commits: commits on baseBranch that are NOT ancestors of origin/baseBranch.
+  // This requires actual git calls — the DAG alone can't determine this with truncated history.
+  let localOnlyHashes: Set<string> | undefined
+  try {
+    const output = await execGit(
+      ['rev-list', baseBranch, '--not', `origin/${baseBranch}`],
+      { cwd: repoPath }
+    )
+    localOnlyHashes = new Set(output.trim().split('\n').filter(Boolean))
+  } catch { /* no upstream or other error — skip */ }
+
+  return resolveCommitGraph(raw, baseBranch, branches, localOnlyHashes)
 }
 
 /** IPC-ready: fetch fork comparison data + resolve in one call */

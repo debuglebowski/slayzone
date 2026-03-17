@@ -293,7 +293,7 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
       // When diverged, local baseBranch itself is NOT behind — it's a diverged branch.
       const childTip = branchTipHash.get(child)
       if (childTip && baseFirstParentChain.has(childTip) && !(originBaseDiverged && child === baseBranch)) {
-        branchCol.set(child, 0)
+        branchCol.set(child, parentCol)
         behindBranches.add(child)
       } else {
         const range = branchRowRange.get(child)!
@@ -413,11 +413,13 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
     if (isBranchTip && isBehind) {
       node.behindBranch = { colorIndex: hashBranchColor(commit.branch), branchName: commit.branch }
     }
-    // Also check if this commit has branchRefs from a behind branch (tip owned by another branch)
-    if (!node.behindBranch) {
+    // Also check if this commit has branchRefs from a behind branch (tip owned by another branch).
+    // A ref is "behind" if it points at this commit but the commit is owned by a different branch
+    // and sits on the base first-parent chain.
+    if (!node.behindBranch && baseFirstParentChain.has(commit.hash)) {
       for (const ref of commit.branchRefs) {
         if (ref.startsWith('origin/')) continue
-        if (behindBranches.has(ref) && ref !== commit.branch) {
+        if (ref !== commit.branch) {
           node.behindBranch = { colorIndex: hashBranchColor(ref), branchName: ref }
           break
         }
@@ -497,7 +499,7 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
   for (let row = 0; row < commits.length; row++) {
     const commit = commits[row]
     const col = hashToCol.get(commit.hash)!
-    const color = getBranchColor(commit.branch, hashToColorIndex.get(commit.hash))
+    const commitColor = getBranchColor(commit.branch, hashToColorIndex.get(commit.hash))
     for (const parentHash of commit.parents) {
       const parentRow = hashToRow.get(parentHash)
       if (parentRow === undefined) continue
@@ -508,14 +510,20 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
         (e.fromRow === row && e.fromCol === col && e.targetHash === parentHash)
       )
       if (hasEdge) continue
+      // Cross-column edges use the side branch's color (whichever end is further from col 0)
+      let edgeColor = commitColor
+      if (parentCol !== col) {
+        const sideHash = col > parentCol ? commit.hash : parentHash
+        const sideBranch = hashToBranch.get(sideHash) ?? commit.branch
+        edgeColor = getBranchColor(sideBranch, hashToColorIndex.get(sideHash))
+      }
       edges.push({
         fromRow: row, fromCol: col, toRow: parentRow, toCol: parentCol,
-        color, type: parentCol === col ? 'straight' : 'curve'
+        color: edgeColor, type: parentCol === col ? 'straight' : 'curve'
       })
     }
   }
 
-  // Add synthetic branch indicators for mergedFrom commits.
   // Add synthetic branch indicators for mergedFrom commits.
   // These are on col 0 (main) but get a decorative side dot rendered in-row.
   const synthCol = Math.max(1, ...nodes.map(n => n.column)) + 1
@@ -549,8 +557,15 @@ export function computeDagLayout(commits: ResolvedCommit[], baseBranch: string):
     const originRow = originRowByCol.get(col)
     return originRow !== undefined && row < originRow
   }
+  const nodeAtRow = new Map<number, LayoutNode>()
+  for (const n of nodes) nodeAtRow.set(n.row, n)
   for (const edge of edges) {
     if (isLocalOnly(edge.fromRow, edge.fromCol)) {
+      // When diverged, don't dash origin/main commits on col 0 — they're shared history
+      if (originBaseDiverged) {
+        const fromNode = nodeAtRow.get(edge.fromRow)
+        if (fromNode && fromNode.commit.branch === originBaseBranch) continue
+      }
       edge.dashed = true
     }
   }
