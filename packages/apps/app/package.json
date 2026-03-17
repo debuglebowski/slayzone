@@ -49,6 +49,7 @@
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@tailwindcss/typography": "^0.5.19",
     "better-sqlite3": "^12.6.2",
