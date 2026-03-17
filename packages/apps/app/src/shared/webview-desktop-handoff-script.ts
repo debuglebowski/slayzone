@@ -52,28 +52,6 @@ export const WEBVIEW_DESKTOP_HANDOFF_SCRIPT = `
       runningState: function() { return 'cannot_run'; },
     };
   }
-  if (!window.chrome.csi) {
-    window.chrome.csi = function() { return { startE: Date.now(), onloadT: Date.now(), pageT: 0, tran: 0 }; };
-  }
-  if (!window.chrome.loadTimes) {
-    window.chrome.loadTimes = function() {
-      return {
-        commitLoadTime: Date.now() / 1000,
-        connectionInfo: 'h2',
-        finishDocumentLoadTime: Date.now() / 1000,
-        finishLoadTime: Date.now() / 1000,
-        firstPaintAfterLoadTime: 0,
-        firstPaintTime: Date.now() / 1000,
-        navigationType: 'Other',
-        npnNegotiatedProtocol: 'h2',
-        requestTime: Date.now() / 1000,
-        startLoadTime: Date.now() / 1000,
-        wasAlternateProtocolAvailable: false,
-        wasFetchedViaSpdy: true,
-        wasNpnNegotiated: true,
-      };
-    };
-  }
   if (!window.chrome.runtime) {
     window.chrome.runtime = {
       OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },

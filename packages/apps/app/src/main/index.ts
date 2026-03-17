@@ -733,6 +733,9 @@ function createWindow(): void {
 app.on('browser-window-created', (_event, win) => {
   const originalSend = win.webContents.send.bind(win.webContents)
   win.webContents.send = (channel: string, ...args: unknown[]) => {
+    // Check frame is alive before calling — avoids Electron's internal console warning
+    // that fires even when the thrown error is caught in JS.
+    try { if (win.isDestroyed() || !win.webContents.mainFrame) return } catch { return }
     try {
       originalSend(channel, ...args)
     } catch (err) {
@@ -1858,12 +1861,48 @@ app.on('web-contents-created', (_, wc) => {
     return isEncodedDesktopHandoffUrl(url, desktopHandoffPolicy)
   }
 
-  // Deny ALL popup windows from webview guest pages.
-  // Per Electron docs, the renderer's 'new-window' event fires regardless of action:'deny',
-  // so BrowserPanel (new tab) and WebPanelView (system browser) still handle http/https links.
-  // This prevents window.open('figma://...') from creating any popup window.
+  // Allow http/https popups as real BrowserWindows (needed for OAuth flows like Google Sign-In)
+  // but deny external protocol popups (figma://, slack://, etc.).
+  // The renderer's 'new-window' event still fires — BrowserPanel/WebPanelView skip
+  // disposition:'new-window' to avoid double-opening.
   if (wc.getType() === 'webview') {
-    wc.setWindowOpenHandler(() => ({ action: 'deny' }))
+    wc.setWindowOpenHandler((details) => {
+      // Webviews with desktop handoff policies (Figma, etc.) must deny popups so the
+      // renderer can apply UA spoofing, script injection, and same-host navigation.
+      if (webviewDesktopHandoffPolicy.has(wc.id)) return { action: 'deny' }
+      // Only allow window.open() with features (disposition 'new-window') for http/https.
+      // These are OAuth/payment popups that need a real BrowserWindow for postMessage.
+      // Regular target="_blank" links (disposition 'foreground-tab') stay denied —
+      // the renderer's new-window event handles them as new browser tabs.
+      if (details.disposition === 'new-window' && /^https?:\/\//i.test(details.url)) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            autoHideMenuBar: true,
+            webPreferences: {
+              session: wc.session,
+              sandbox: true,
+              contextIsolation: true,
+              nodeIntegration: false,
+            },
+          },
+        }
+      }
+      return { action: 'deny' }
+    })
+    // Track child popup windows so we can clean up when the webview is destroyed
+    const childWindows = new Set<Electron.BrowserWindow>()
+    wc.on('did-create-window', (childWindow) => {
+      childWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      childWindows.add(childWindow)
+      childWindow.on('closed', () => childWindows.delete(childWindow))
+    })
+    wc.once('destroyed', () => {
+      for (const w of childWindows) {
+        if (!w.isDestroyed()) w.close()
+      }
+      childWindows.clear()
+    })
     wc.on('will-frame-navigate', (event) => {
       if (isBlockedScheme(event.url) || shouldBlockDesktopHandoffUrl(event.url)) {
         event.preventDefault()
