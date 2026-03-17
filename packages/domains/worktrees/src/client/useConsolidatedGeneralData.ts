@@ -22,6 +22,8 @@ export interface CopyFilesDialogState {
   pendingWorktreePath: string
   pendingBranch: string
   pendingSourceBranch: string | null
+  /** When true, pendingBranch is an existing branch to check out (not a new branch to create) */
+  useExistingBranch?: boolean
 }
 
 export interface ConsolidatedGeneralData {
@@ -52,6 +54,7 @@ export interface ConsolidatedGeneralData {
 
   // Actions
   handleAddWorktree: () => Promise<void>
+  handleAddWorktreeFromBranch: (sourceBranch: string) => Promise<void>
   handleLinkWorktree: (worktreePath: string, branch: string | null) => Promise<void>
   handleRemoveWorktree: () => Promise<void>
   handleInitGit: () => Promise<void>
@@ -257,12 +260,14 @@ export function useConsolidatedGeneralData(
   const createWorktreeAndLink = useCallback(async (
     worktreePath: string,
     branch: string,
-    filesToCopy?: string[] | 'all'
+    filesToCopy?: string[] | 'all',
+    useExistingBranch?: boolean
   ) => {
     if (!projectPath) return
     // Omit projectId so server skips copy resolution — we handle it here
     await window.api.git.createWorktree({
-      repoPath: projectPath, targetPath: worktreePath, branch
+      repoPath: projectPath, targetPath: worktreePath,
+      ...(useExistingBranch ? { sourceBranch: branch } : { branch })
     })
     if (filesToCopy === 'all') {
       await window.api.git.copyIgnoredFiles(projectPath, worktreePath, [], 'all')
@@ -306,6 +311,41 @@ export function useConsolidatedGeneralData(
     }
   }, [projectPath, task.id, task.project_id, currentBranch, onUpdateTask, resolveWorktreeParams])
 
+  const handleAddWorktreeFromBranch = useCallback(async (sourceBranch: string) => {
+    if (!projectPath) return
+    setCreateError(null)
+    try {
+      const basePathTemplate = (await window.api.settings.get('worktree_base_path')) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+      const basePath = resolveWorktreeBasePathTemplate(basePathTemplate, projectPath)
+      // Use the branch name as the directory name
+      const dirName = sourceBranch.replace(/\//g, '-')
+      const worktreePath = joinWorktreePath(basePath, dirName)
+
+      const { behavior } = await window.api.git.resolveCopyBehavior(task.project_id)
+      if (behavior === 'ask') {
+        setCopyFilesDialog({
+          open: true, repoPath: projectPath,
+          pendingWorktreePath: worktreePath,
+          pendingBranch: sourceBranch,
+          pendingSourceBranch: currentBranch,
+          useExistingBranch: true
+        })
+        return
+      }
+
+      setCreating(true)
+      await window.api.git.createWorktree({
+        repoPath: projectPath, targetPath: worktreePath, sourceBranch,
+        projectId: task.project_id
+      })
+      await onUpdateTask({ id: task.id, worktreePath, worktreeParentBranch: currentBranch })
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCreating(false)
+    }
+  }, [projectPath, task.id, task.project_id, currentBranch, onUpdateTask])
+
   const handleCopyFilesConfirm = useCallback(async (choice: import('./CopyFilesDialog').CopyChoice, remember: boolean) => {
     const pending = copyFilesDialogRef.current
     setCopyFilesDialog(prev => ({ ...prev, open: false }))
@@ -315,11 +355,11 @@ export function useConsolidatedGeneralData(
     setCreateError(null)
     try {
       if (choice.mode === 'all') {
-        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch, 'all')
+        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch, 'all', pending.useExistingBranch)
       } else if (choice.mode === 'custom') {
-        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch, choice.paths)
+        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch, choice.paths, pending.useExistingBranch)
       } else {
-        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch)
+        await createWorktreeAndLink(pending.pendingWorktreePath, pending.pendingBranch, undefined, pending.useExistingBranch)
       }
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : String(err))
@@ -447,7 +487,7 @@ export function useConsolidatedGeneralData(
     branchLoading,
     hasWorktree, targetPath, totalChanges, parentBranch,
     sluggedBranch: slugify(task.title) || `task-${task.id.slice(0, 8)}`,
-    handleAddWorktree, handleLinkWorktree, handleRemoveWorktree, handleInitGit,
+    handleAddWorktree, handleAddWorktreeFromBranch, handleLinkWorktree, handleRemoveWorktree, handleInitGit,
     handleAction, handleConfirmedAction, handleMergeToParent, confirmMergeToParent, cancelMergeToParent,
     handleCopyFilesConfirm, handleCopyFilesCancel, fetchGitData,
     detectedWorktrees, copyFilesDialog, mergeToParentDialog,
