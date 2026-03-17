@@ -1,0 +1,32 @@
+# WebAuthn/Passkeys in Embedded Browser
+
+## Goal
+Support passkeys (1Password, Touch ID, iCloud Keychain) in the app's browser panels.
+
+## Findings
+
+### `<webview>` (current) does not support WebAuthn
+- `navigator.credentials.create()` / `.get()` silently fails
+- WebAuthn does NOT go through Electron's permission handlers (`setPermissionRequestHandler`, `setPermissionCheckHandler`) — nothing logs
+- Adding `publickey-credentials-create` / `publickey-credentials-get` to allowed permissions has no effect
+- This is a known Electron limitation — `<webview>` is soft-deprecated and doesn't wire up the OS authenticator
+
+### Options explored
+
+| Option | Viable? | Notes |
+|--------|---------|-------|
+| Expand permission handler | No | WebAuthn bypasses permission system entirely in webview |
+| Desktop handoff (open in system browser) | No | Session/cookies don't transfer back to webview — user stays logged out |
+| Migrate to `BrowserWindow` | Technically yes | Supports WebAuthn via OS credential provider, but can't embed in DOM — must manually sync window bounds to React layout. Painful for multi-device grid |
+| `BrowserView` | No | Deprecated since Electron 30 |
+| Inject 1Password content scripts | No | Fragile, breaks on updates, likely violates TOS |
+
+### `BrowserWindow` vs `<webview>` tradeoffs
+- BrowserWindow: WebAuthn works, first-class Electron support, but no DOM embedding — need manual bound syncing, z-order management, especially bad for multi-device grid
+- webview: trivial React integration, but no WebAuthn, soft-deprecated
+
+## Status
+**Blocked** — no clean solution exists today. Revisit when:
+- Electron adds WebAuthn support to `<webview>` (unlikely given deprecation)
+- Electron ships a new embeddable web content primitive
+- A community solution emerges for BrowserWindow ↔ React layout sync
