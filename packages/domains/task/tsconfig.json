@@ -3,5 +3,6 @@
   "compilerOptions": {
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*", "../../shared/types/src/global.d.ts", "src/vite-env.d.ts"]
+  "include": ["src/**/*", "../../shared/types/src/global.d.ts", "src/vite-env.d.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
