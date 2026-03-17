@@ -65,6 +65,7 @@ import {
   useNotificationState
 } from '@/components/notifications'
 import { UsagePopover } from '@/components/usage/UsagePopover'
+import { BoostPill } from '@/components/usage/BoostPill'
 import { useUsage } from '@/components/usage/useUsage'
 import { useOnboardingChecklist } from '@/hooks/useOnboardingChecklist'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
@@ -647,6 +648,8 @@ function App(): React.JSX.Element {
               onTabClick={(i) => setActiveTabIndex(i)} onTabClose={closeTab} onTabReorder={reorderTabs}
               rightContent={
                 <div className="flex items-center gap-1">
+                  <BoostPill />
+                  <div className="w-2" />
                   <UsagePopover data={usageData} onRefresh={refreshUsage} />
                   <div className="w-6" />
                   <Tooltip><TooltipTrigger asChild>
