@@ -1875,16 +1875,15 @@ app.on('web-contents-created', (_, wc) => {
       // Regular target="_blank" links (disposition 'foreground-tab') stay denied —
       // the renderer's new-window event handles them as new browser tabs.
       if (details.disposition === 'new-window' && /^https?:\/\//i.test(details.url)) {
+        // Don't override webPreferences — Electron internally sets opener references
+        // for window.opener cross-process proxying. Overriding replaces those via
+        // shallow merge, breaking postMessage back to the webview (needed for OAuth).
+        // The popup inherits the webview's session (persist:browser-tabs) automatically,
+        // and sandbox/contextIsolation/nodeIntegration already default to secure values.
         return {
           action: 'allow',
           overrideBrowserWindowOptions: {
             autoHideMenuBar: true,
-            webPreferences: {
-              session: wc.session,
-              sandbox: true,
-              contextIsolation: true,
-              nodeIntegration: false,
-            },
           },
         }
       }
