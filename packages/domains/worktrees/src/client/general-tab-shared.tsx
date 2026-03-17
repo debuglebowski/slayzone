@@ -3,7 +3,8 @@ import { GitBranch, GitMerge, GitPullRequest, FolderTree, Link2, Loader2, AlertT
 import {
   Button, Tooltip, TooltipContent, TooltipTrigger,
   Popover, PopoverContent, PopoverTrigger,
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from '@slayzone/ui'
 import type { ConsolidatedGeneralData } from './useConsolidatedGeneralData'
 import type { GhPullRequest } from '../shared/types'
@@ -231,44 +232,119 @@ export function StaleNudge({ data }: { data: ConsolidatedGeneralData }) {
   )
 }
 
-// --- Rebase/Merge buttons (shown inline in status section for worktree tasks) ---
+// --- Sync dropdown (rebase or merge parent into branch) ---
 
 export function RebaseMergeButtons({ data }: { data: ConsolidatedGeneralData }) {
   const { actionLoading, handleConfirmedAction, parentBranch, baseCount } = data
   const hasBehind = baseCount > 0
+  const busy = actionLoading !== null
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 h-7 px-2"
+                disabled={busy || !hasBehind}
+              >
+                {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Sync
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{hasBehind ? `${baseCount} commit${baseCount === 1 ? '' : 's'} behind ${parentBranch}` : `Already up to date with ${parentBranch}`}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => handleConfirmedAction('rebase', `Rebase onto ${parentBranch}`)}>
+          <GitMerge className="h-3.5 w-3.5" />
+          Rebase onto parent
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleConfirmedAction('merge', `Merge ${parentBranch} in`)}>
+          <GitMerge className="h-3.5 w-3.5 rotate-180" />
+          Merge parent into branch
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// --- Merge to parent split button + confirmation dialog ---
+
+export function MergeToParentButton({ data }: { data: ConsolidatedGeneralData }) {
+  const { actionLoading, handleMergeToParent, confirmMergeToParent, cancelMergeToParent, mergeToParentDialog, parentBranch, featureCount, totalChanges } = data
+  const [menuOpen, setMenuOpen] = useState(false)
+  const canMerge = featureCount > 0 && totalChanges === 0
+  const busy = actionLoading !== null
+  const disabled = busy || !canMerge
+  const disabledReason = featureCount === 0 ? `No commits ahead of ${parentBranch}` : 'Uncommitted changes — commit or stash first'
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1 h-7 px-2"
-            onClick={() => handleConfirmedAction('rebase', `Rebase onto ${parentBranch}`)}
-            disabled={actionLoading !== null || !hasBehind}
-          >
-            {actionLoading === 'rebase' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitMerge className="h-3.5 w-3.5" />}
-            Rebase
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{hasBehind ? `Rebase onto ${parentBranch}` : `Already up to date with ${parentBranch}`}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1 h-7 px-2"
-            onClick={() => handleConfirmedAction('merge', `Merge ${parentBranch} in`)}
-            disabled={actionLoading !== null || !hasBehind}
-          >
-            {actionLoading === 'merge' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitMerge className="h-3.5 w-3.5 rotate-180" />}
-            Merge
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{hasBehind ? `Merge ${parentBranch} into branch` : `Already up to date with ${parentBranch}`}</TooltipContent>
-      </Tooltip>
+      <div className="flex">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleMergeToParent(true)}
+                disabled={disabled}
+                className="gap-1.5 rounded-r-none border-r-0"
+              >
+                {actionLoading === 'mergeToParent' ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
+                Merge to {parentBranch}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{canMerge ? `Merge and delete worktree` : disabledReason}</TooltipContent>
+        </Tooltip>
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" disabled={disabled} className="px-1.5 rounded-l-none">
+              <ChevronDown className="h-3 w-3" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-fit p-1">
+            <button
+              onClick={() => { setMenuOpen(false); handleMergeToParent(false) }}
+              className="flex items-center gap-2 w-full px-2 py-1.5 text-xs hover:bg-muted rounded transition-colors text-left"
+            >
+              <GitMerge className="h-3 w-3 shrink-0 text-muted-foreground" />
+              Merge without deleting worktree
+            </button>
+          </PopoverContent>
+        </Popover>
+      </div>
+      <AlertDialog open={mergeToParentDialog.open} onOpenChange={(open) => !open && cancelMergeToParent()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merge branch into {parentBranch}</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>This will check out <span className="font-mono font-medium">{parentBranch}</span> in the main repository and merge the worktree branch into it.</p>
+                {mergeToParentDialog.deleteWorktree && (
+                  <p>The worktree directory will be deleted after merging.</p>
+                )}
+                {mergeToParentDialog.hasMainChanges && (
+                  <p className="text-destructive font-medium">The main repository has uncommitted changes that may be affected by this checkout.</p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmMergeToParent}>
+              {mergeToParentDialog.deleteWorktree ? 'Merge & delete' : 'Merge'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

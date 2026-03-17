@@ -59,6 +59,9 @@ export interface ConsolidatedGeneralData {
   handleConfirmedAction: (action: string, label: string) => void
   handleCopyFilesConfirm: (choice: import('./CopyFilesDialog').CopyChoice, remember: boolean) => Promise<void>
   handleCopyFilesCancel: () => void
+  handleMergeToParent: (deleteWorktree: boolean) => Promise<void>
+  confirmMergeToParent: () => void
+  cancelMergeToParent: () => void
   fetchGitData: () => Promise<void>
 
   // Detected worktrees for linking
@@ -66,6 +69,9 @@ export interface ConsolidatedGeneralData {
 
   // Copy files dialog
   copyFilesDialog: CopyFilesDialogState
+
+  // Merge to parent dialog
+  mergeToParentDialog: { open: boolean; hasMainChanges: boolean; deleteWorktree: boolean }
 
   // Action state
   creating: boolean
@@ -385,6 +391,12 @@ export function useConsolidatedGeneralData(
         if (result.success) { toast(`Merged ${parentBranch}`); fetchBranchData() }
         else if (result.conflicted) toast(result.error ?? 'Merge has conflicts')
         else toast(result.error ?? 'Merge failed')
+      } else if (action === 'mergeToParent') {
+        if (!projectPath) return
+        const result = await window.api.git.mergeIntoParent(projectPath, parentBranch, taskBranch)
+        if (result.success) { toast(`Merged into ${parentBranch}`); fetchBranchData() }
+        else if (result.conflicted) toast(result.error ?? 'Merge has conflicts')
+        else toast(result.error ?? 'Merge failed')
       } else if (action === 'push') {
         const result = await window.api.git.push(targetPath, taskBranch)
         toast(result.success ? 'Pushed' : (result.error ?? 'Push failed'))
@@ -406,6 +418,26 @@ export function useConsolidatedGeneralData(
     })
   }, [handleAction])
 
+  // Merge to parent with main repo check
+  const [mergeToParentDialog, setMergeToParentDialog] = useState<{ open: boolean; hasMainChanges: boolean; deleteWorktree: boolean }>({ open: false, hasMainChanges: false, deleteWorktree: false })
+
+  const handleMergeToParent = useCallback(async (deleteWorktree: boolean) => {
+    if (!projectPath || !parentBranch || !taskBranch) return
+    const hasChanges = await window.api.git.hasUncommittedChanges(projectPath)
+    setMergeToParentDialog({ open: true, hasMainChanges: hasChanges, deleteWorktree })
+  }, [projectPath, parentBranch, taskBranch])
+
+  const confirmMergeToParent = useCallback(async () => {
+    const shouldDelete = mergeToParentDialog.deleteWorktree
+    setMergeToParentDialog({ open: false, hasMainChanges: false, deleteWorktree: false })
+    await handleAction('mergeToParent')
+    if (shouldDelete) await handleRemoveWorktree()
+  }, [handleAction, handleRemoveWorktree, mergeToParentDialog.deleteWorktree])
+
+  const cancelMergeToParent = useCallback(() => {
+    setMergeToParentDialog({ open: false, hasMainChanges: false, deleteWorktree: false })
+  }, [])
+
   const totalChanges = statusSummary ? statusSummary.staged + statusSummary.unstaged + statusSummary.untracked : 0
 
   return {
@@ -416,8 +448,9 @@ export function useConsolidatedGeneralData(
     hasWorktree, targetPath, totalChanges, parentBranch,
     sluggedBranch: slugify(task.title) || `task-${task.id.slice(0, 8)}`,
     handleAddWorktree, handleLinkWorktree, handleRemoveWorktree, handleInitGit,
-    handleAction, handleConfirmedAction, handleCopyFilesConfirm, handleCopyFilesCancel, fetchGitData,
-    detectedWorktrees, copyFilesDialog,
+    handleAction, handleConfirmedAction, handleMergeToParent, confirmMergeToParent, cancelMergeToParent,
+    handleCopyFilesConfirm, handleCopyFilesCancel, fetchGitData,
+    detectedWorktrees, copyFilesDialog, mergeToParentDialog,
     creating, initializing, removing, actionLoading, createError
   }
 }

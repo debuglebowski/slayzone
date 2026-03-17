@@ -18,6 +18,7 @@ import {
   StatusChips,
   WorktreeButton,
   WorktreeRemoveButton,
+  MergeToParentButton,
   PrStatusChip,
   PrButtons,
   RebaseMergeButtons,
@@ -110,7 +111,10 @@ export function GeneralTabContent({
               )
             )}
             {data.hasWorktree ? (
-              <WorktreeRemoveButton data={data} />
+              <>
+                {data.parentBranch && <MergeToParentButton data={data} />}
+                <WorktreeRemoveButton data={data} />
+              </>
             ) : (
               <WorktreeButton data={data} />
             )}
