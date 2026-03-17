@@ -3,7 +3,7 @@
  * Run with: npx tsx packages/domains/terminal/src/client/web-link-provider.test.ts
  */
 import { URL_REGEX, FILE_REGEX, getWindowedLineStrings, mapStringIndex } from './web-link-provider'
-import type { Terminal, IBufferLine } from '@xterm/xterm'
+import type { Terminal, IBufferLine, ILink } from '@xterm/xterm'
 
 let passed = 0
 let failed = 0

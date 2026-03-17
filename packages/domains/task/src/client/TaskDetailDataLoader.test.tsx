@@ -52,7 +52,7 @@ let testCache: ReturnType<typeof createSuspenseCache>
 beforeEach(() => {
   receivedProps.mockClear()
   fetchFn = vi.fn()
-  testCache = createSuspenseCache({ taskDetail: fetchFn })
+  testCache = createSuspenseCache({ taskDetail: fetchFn as (...args: any[]) => Promise<any> })
 })
 
 // Test DataLoader that uses the test cache + stub component

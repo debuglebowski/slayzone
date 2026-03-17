@@ -1,6 +1,6 @@
 import { spawnSync, spawn } from 'child_process'
 import { platform } from 'os'
-import { existsSync, readFileSync, writeFileSync, chmodSync, constants as fsConstants, accessSync, cpSync, statSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, chmodSync, constants as fsConstants, accessSync, statSync } from 'fs'
 import { cp, stat, mkdir } from 'fs/promises'
 import path from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
