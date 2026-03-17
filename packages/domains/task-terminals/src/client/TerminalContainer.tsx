@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import { usePty } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { useTaskTerminals } from './useTaskTerminals'
@@ -72,7 +72,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     getSessionId
   } = useTaskTerminals(taskId, defaultMode)
 
-  const { subscribePrompt } = usePty()
+  const { subscribePrompt, subscribeTitle } = usePty()
   const splitGroupRef = useRef<TerminalSplitGroupHandle | null>(null)
   const pendingFocusRef = useRef(isActive)
   const terminalApiRef = useRef<{
@@ -101,6 +101,29 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       // Main tab prompt events could trigger task-level UI updates
     })
   }, [taskId, tabs, getSessionId, subscribePrompt])
+
+  // Track terminal process titles for tab labels
+  const [terminalTitles, setTerminalTitles] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    const unsubs: Array<() => void> = []
+    for (const tab of tabs) {
+      if (tab.isMain) continue
+      const sessionId = getSessionId(tab.id)
+      const unsub = subscribeTitle(sessionId, (title) => {
+        setTerminalTitles(prev => {
+          const next = new Map(prev)
+          if (title) {
+            next.set(tab.id, title)
+          } else {
+            next.delete(tab.id)
+          }
+          return next
+        })
+      })
+      unsubs.push(unsub)
+    }
+    return () => unsubs.forEach(u => u())
+  }, [tabs, getSessionId, subscribeTitle])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -274,6 +297,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       <TerminalTabBar
         groups={groups}
         activeGroupId={activeGroupId}
+        terminalTitles={terminalTitles}
         onGroupSelect={(groupId) => { pendingFocusRef.current = true; setActiveGroupId(groupId) }}
         onGroupCreate={() => { pendingFocusRef.current = true; createTab() }}
         onGroupClose={closeGroup}

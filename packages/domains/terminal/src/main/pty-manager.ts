@@ -4,7 +4,7 @@ import { execFile } from 'child_process'
 import { app, BrowserWindow, Notification, nativeTheme } from 'electron'
 import { homedir, platform, userInfo } from 'os'
 import type { Database } from 'better-sqlite3'
-import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
+import { DEV_SERVER_URL_PATTERN, extractOscTitle } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { RingBuffer, type BufferChunk } from './ring-buffer'
@@ -113,6 +113,9 @@ interface PtySession {
   detectedDevUrls: Set<string>
   // Pending partial escape sequence from previous onData chunk
   syncQueryPending: string
+  // Last emitted process title (to deduplicate pty:title-change events)
+  lastEmittedTitle: string
+  lastTitleCheckTime: number
 }
 
 export type { PtyInfo }
@@ -630,7 +633,9 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       statusOutputBuffer: '',
       // Dev server URL dedup
       detectedDevUrls: new Set(),
-      syncQueryPending: ''
+      syncQueryPending: '',
+      lastEmittedTitle: '',
+      lastTitleCheckTime: 0
     })
     notifySessionChange()
     stateMachine.register(sessionId, 'starting')
@@ -678,6 +683,9 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
         notifySessionChange()
       }, 100)
       if (!win.isDestroyed()) {
+        try {
+          win.webContents.send('pty:title-change', sessionId, '')
+        } catch { /* Window destroyed */ }
         try {
           win.webContents.send('pty:exit', sessionId, exitCode)
         } catch {
@@ -876,6 +884,23 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       if (prompt && !win.isDestroyed()) {
         try {
           win.webContents.send('pty:prompt', sessionId, prompt)
+        } catch {
+          // Window destroyed, ignore
+        }
+      }
+
+      // Emit terminal title changes: prefer OSC 0/1/2 title, fall back to PTY process name
+      // OSC titles are always processed immediately; pty.process fallback is throttled to avoid
+      // hitting the native getter on every data chunk during high-throughput output
+      const oscTitle = extractOscTitle(data)
+      const now = Date.now()
+      const processTitle = oscTitle ?? (now - session.lastTitleCheckTime >= 500
+        ? (session.lastTitleCheckTime = now, session.pty.process)
+        : undefined)
+      if (processTitle && processTitle !== session.lastEmittedTitle && !win.isDestroyed()) {
+        session.lastEmittedTitle = processTitle
+        try {
+          win.webContents.send('pty:title-change', sessionId, processTitle)
         } catch {
           // Window destroyed, ignore
         }

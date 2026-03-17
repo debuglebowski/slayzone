@@ -254,6 +254,12 @@ const api: ElectronAPI = {
       ipcRenderer.on('pty:dev-server-detected', handler)
       return () => ipcRenderer.removeListener('pty:dev-server-detected', handler)
     },
+    onTitleChange: (callback: (sessionId: string, title: string) => void) => {
+      const handler = (_event: unknown, sessionId: string, title: string) =>
+        callback(sessionId, title)
+      ipcRenderer.on('pty:title-change', handler)
+      return () => ipcRenderer.removeListener('pty:title-change', handler)
+    },
     onStats: (cb) => {
       const handler = (_event: unknown, stats: Record<string, import('@slayzone/types').ProcessStats>) => cb(stats)
       ipcRenderer.on('pty:stats', handler)
@@ -545,6 +551,11 @@ const api: ElectronAPI = {
       const handler = (_event: unknown, stats: Record<string, import('@slayzone/types').ProcessStats>) => cb(stats)
       ipcRenderer.on('processes:stats', handler)
       return () => ipcRenderer.removeListener('processes:stats', handler)
+    },
+    onTitle: (cb) => {
+      const handler = (_event: unknown, processId: string, title: string | null) => cb(processId, title)
+      ipcRenderer.on('processes:title', handler)
+      return () => ipcRenderer.removeListener('processes:title', handler)
     }
   },
   integrations: {

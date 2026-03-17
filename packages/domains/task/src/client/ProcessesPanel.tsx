@@ -27,6 +27,7 @@ interface ProcessEntry {
   startedAt: string
   restartCount: number
   spawnedAt: string | null
+  processTitle: string | null
 }
 
 function Duration({ since }: { since: string }) {
@@ -177,6 +178,11 @@ function ProcessRow({
               {proc.restartCount > 0 && (
                 <><span className="text-muted-foreground/15">·</span><span>↺{proc.restartCount}</span></>
               )}
+            </span>
+          )}
+          {proc.processTitle && (
+            <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-muted-foreground bg-muted/60 border-border">
+              {proc.processTitle}
             </span>
           )}
           <StatusBadge status={proc.status} />
@@ -353,6 +359,13 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId }: { 
 
   useEffect(() => {
     const unsub = window.api.processes.onStats((s) => setStats(s))
+    return unsub
+  }, [])
+
+  useEffect(() => {
+    const unsub = window.api.processes.onTitle((processId, title) => {
+      setProcesses(prev => prev.map(p => p.id === processId ? { ...p, processTitle: title } : p))
+    })
     return unsub
   }, [])
 

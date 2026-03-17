@@ -1,9 +1,10 @@
-import { spawn } from 'child_process'
+import { spawn, execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { createStatsPoller } from './pid-stats'
+import { extractOscTitle } from '@slayzone/terminal/shared'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
 
@@ -22,10 +23,13 @@ export interface ProcessInfo {
   startedAt: string
   restartCount: number
   spawnedAt: string | null
+  processTitle: string | null
 }
 
 interface ManagedProcess extends ProcessInfo {
   child: ChildProcess | null
+  titlePollTimer: ReturnType<typeof setInterval> | null
+  oscTitleSet: boolean
 }
 
 const LOG_BUFFER_MAX = 500
@@ -67,6 +71,9 @@ export function initProcessManager(database: Database): void {
       startedAt: new Date().toISOString(),
       restartCount: 0,
       spawnedAt: null,
+      processTitle: null,
+      titlePollTimer: null,
+      oscTitleSet: false,
     })
   }
 }
@@ -83,6 +90,50 @@ function setStatus(proc: ManagedProcess, status: ProcessStatus): void {
   win?.webContents.send('processes:status', proc.id, status)
 }
 
+function emitTitle(proc: ManagedProcess, title: string): void {
+  if (title === proc.processTitle) return
+  proc.processTitle = title
+  win?.webContents.send('processes:title', proc.id, title)
+}
+
+function pollProcessTitle(proc: ManagedProcess): void {
+  const pid = proc.pid
+  if (!pid || proc.oscTitleSet) return
+  execFile('ps', ['-o', 'comm=', '-p', String(pid)], { timeout: 2000 }, (err, stdout) => {
+    if (err || !stdout.trim() || proc.oscTitleSet) return
+    const title = stdout.trim().split('/').pop()!
+    if (title) emitTitle(proc, title)
+  })
+}
+
+function startTitlePolling(proc: ManagedProcess): void {
+  if (process.platform === 'win32') return
+  stopTitlePolling(proc)
+  pollProcessTitle(proc)
+  proc.titlePollTimer = setInterval(() => pollProcessTitle(proc), 2000)
+}
+
+function stopTitlePolling(proc: ManagedProcess): void {
+  if (proc.titlePollTimer) {
+    clearInterval(proc.titlePollTimer)
+    proc.titlePollTimer = null
+  }
+}
+
+function handleProcessData(proc: ManagedProcess, data: Buffer): void {
+  const str = data.toString()
+  // Check for OSC title sequences
+  const oscTitle = extractOscTitle(str)
+  if (oscTitle) {
+    proc.oscTitleSet = true
+    stopTitlePolling(proc)
+    emitTitle(proc, oscTitle)
+  }
+  for (const line of str.split('\n')) {
+    if (line.trim()) pushLog(proc, line)
+  }
+}
+
 function doSpawn(proc: ManagedProcess): void {
   proc.spawnedAt = new Date().toISOString()
   startStatsPolling()
@@ -95,24 +146,22 @@ function doSpawn(proc: ManagedProcess): void {
   proc.child = child
   proc.pid = child.pid ?? null
   proc.exitCode = null
+  proc.processTitle = null
+  proc.oscTitleSet = false
+  startTitlePolling(proc)
 
-  child.stdout?.on('data', (data: Buffer) => {
-    for (const line of data.toString().split('\n')) {
-      if (line.trim()) pushLog(proc, line)
-    }
-  })
-
-  child.stderr?.on('data', (data: Buffer) => {
-    for (const line of data.toString().split('\n')) {
-      if (line.trim()) pushLog(proc, line)
-    }
-  })
+  child.stdout?.on('data', (data: Buffer) => handleProcessData(proc, data))
+  child.stderr?.on('data', (data: Buffer) => handleProcessData(proc, data))
 
   child.on('exit', (code) => {
     if (proc.child !== child) return // stale exit from restarted process
+    stopTitlePolling(proc)
     proc.pid = null
     proc.child = null
     proc.exitCode = code
+    proc.processTitle = null
+    proc.oscTitleSet = false
+    win?.webContents.send('processes:title', proc.id, null)
     if (proc.autoRestart && processes.has(proc.id)) {
       proc.restartCount++
       pushLog(proc, `[exited with code ${code ?? '?'}, restarting in 1s...]`)
@@ -141,6 +190,7 @@ export function createProcess(
     logBuffer: [], child: null,
     startedAt: new Date().toISOString(),
     restartCount: 0, spawnedAt: null,
+    processTitle: null, titlePollTimer: null, oscTitleSet: false,
   }
   processes.set(id, proc)
   db?.prepare('INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -163,6 +213,7 @@ export function spawnProcess(
     logBuffer: [], child: null,
     startedAt: new Date().toISOString(),
     restartCount: 0, spawnedAt: null,
+    processTitle: null, titlePollTimer: null, oscTitleSet: false,
   }
   processes.set(id, proc)
   db?.prepare('INSERT INTO processes (id, project_id, task_id, label, command, cwd, auto_restart) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -189,6 +240,7 @@ export function updateProcess(
 export function stopProcess(id: string): boolean {
   const proc = processes.get(id)
   if (!proc) return false
+  stopTitlePolling(proc)
   // Set child to null before kill so the exit handler's `proc.child !== child`
   // guard bails out (prevents auto-restart from firing)
   const child = proc.child
@@ -203,6 +255,7 @@ export function stopProcess(id: string): boolean {
 export function killProcess(id: string): boolean {
   const proc = processes.get(id)
   if (!proc) return false
+  stopTitlePolling(proc)
   proc.autoRestart = false
   proc.child?.kill()
   proc.child = null
@@ -214,6 +267,7 @@ export function killProcess(id: string): boolean {
 export function restartProcess(id: string): boolean {
   const proc = processes.get(id)
   if (!proc) return false
+  stopTitlePolling(proc)
   proc.child?.kill()
   proc.child = null
   proc.logBuffer.push('[restarting...]')
@@ -233,11 +287,11 @@ export function killTaskProcesses(taskId: string): void {
 export function listForTask(taskId: string | null, projectId: string | null): ProcessInfo[] {
   return Array.from(processes.values())
     .filter(p => p.taskId === taskId || (p.taskId === null && p.projectId != null && p.projectId === projectId))
-    .map(({ child: _, ...info }) => info)
+    .map(({ child: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info)
 }
 
 export function listAllProcesses(): ProcessInfo[] {
-  return Array.from(processes.values()).map(({ child: _, ...info }) => info)
+  return Array.from(processes.values()).map(({ child: _, titlePollTimer: _t, oscTitleSet: _o, ...info }) => info)
 }
 
 const statsPoller = createStatsPoller(
@@ -256,6 +310,7 @@ function startStatsPolling(): void { statsPoller.ensureStarted() }
 export function killAllProcesses(): void {
   statsPoller.stop()
   for (const proc of processes.values()) {
+    stopTitlePolling(proc)
     proc.autoRestart = false
     proc.child?.kill()
     proc.child = null

@@ -137,6 +137,7 @@ export interface ProcessInfo {
   startedAt: string
   restartCount: number
   spawnedAt: string | null
+  processTitle: string | null
 }
 
 export interface DiagnosticsConfig {
@@ -364,6 +365,7 @@ export interface ElectronAPI {
     onPrompt: (callback: (sessionId: string, prompt: PromptInfo) => void) => () => void
     onSessionDetected: (callback: (sessionId: string, conversationId: string) => void) => () => void
     onDevServerDetected: (callback: (sessionId: string, url: string) => void) => () => void
+    onTitleChange: (callback: (sessionId: string, title: string) => void) => () => void
     onStats: (cb: (stats: Record<string, ProcessStats>) => void) => () => void
     getState: (sessionId: string) => Promise<TerminalState | null>
     validate: (mode: TerminalMode) => Promise<ValidationResult[]>
@@ -649,6 +651,7 @@ export interface ElectronAPI {
     onLog: (cb: (processId: string, line: string) => void) => () => void
     onStatus: (cb: (processId: string, status: ProcessStatus) => void) => () => void
     onStats: (cb: (stats: Record<string, ProcessStats>) => void) => () => void
+    onTitle: (cb: (processId: string, title: string | null) => void) => () => void
   }
   backup: {
     list: () => Promise<BackupInfo[]>

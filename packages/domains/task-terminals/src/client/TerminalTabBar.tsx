@@ -14,6 +14,7 @@ interface TerminalTabBarProps {
   onPaneClose: (tabId: string) => void
   onPaneMove: (tabId: string, targetGroupId: string | null) => void
   onGroupRename: (tabId: string, label: string | null) => void
+  terminalTitles?: Map<string, string>
   rightContent?: React.ReactNode
 }
 
@@ -27,7 +28,7 @@ const MODE_ICONS: Partial<Record<TerminalMode, typeof TerminalIcon>> = {
   'terminal': TerminalIcon
 }
 
-function getTabLabel(tab: TerminalTab): string {
+function getTabLabel(tab: TerminalTab, processTitle?: string): string {
   if (tab.label) return tab.label
   if (tab.isMain) {
     switch (tab.mode) {
@@ -40,6 +41,7 @@ function getTabLabel(tab: TerminalTab): string {
       default: return 'Terminal'
     }
   }
+  if (processTitle) return processTitle
   return 'Terminal'
 }
 
@@ -55,6 +57,7 @@ export function TerminalTabBar({
   onPaneClose,
   onPaneMove,
   onGroupRename,
+  terminalTitles,
   rightContent
 }: TerminalTabBarProps) {
   const [editingTabId, setEditingTabId] = useState<string | null>(null)
@@ -207,7 +210,7 @@ export function TerminalTabBar({
                           onClick={e => e.stopPropagation()}
                         />
                       ) : (
-                        <span className="truncate text-sm">{getTabLabel(tab)}</span>
+                        <span className="truncate text-sm">{getTabLabel(tab, terminalTitles?.get(tab.id))}</span>
                       )}
                       {tab.isMain && (
                         <span className="text-[10px] text-orange-300/80 bg-orange-400/10 px-1.5 rounded-full">main</span>
