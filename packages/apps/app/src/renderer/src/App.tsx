@@ -649,9 +649,9 @@ function App(): React.JSX.Element {
               rightContent={
                 <div className="flex items-center gap-1">
                   <BoostPill />
-                  <div className="w-2" />
+                  <div className="w-4" />
                   <UsagePopover data={usageData} onRefresh={refreshUsage} />
-                  <div className="w-6" />
+                  <div className="w-4" />
                   <Tooltip><TooltipTrigger asChild>
                     <button disabled={openTaskIds.length < 2} onClick={() => setExplodeMode((prev) => !prev)}
                       className={cn("h-7 w-7 flex items-center justify-center transition-colors border-b-2", explodeMode ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground", openTaskIds.length < 2 && "opacity-30 pointer-events-none")}>
