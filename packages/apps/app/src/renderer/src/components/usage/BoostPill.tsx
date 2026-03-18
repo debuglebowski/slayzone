@@ -129,24 +129,22 @@ function Timeline({ ptHour, isWeekend }: { ptHour: number; isWeekend: boolean })
       <div className="flex gap-px w-full">
         {slots.map((s, i) => (
           <div key={i} className="relative flex-1 flex flex-col items-center">
-            <div className={cn('w-full h-2 rounded-sm', s.isBoosted ? theme.barBoosted : theme.barPeak)} />
             {s.isCurrent && (
-              <div className="absolute -bottom-2.5 size-0 border-l-[4px] border-r-[4px] border-b-[5px] border-transparent border-b-foreground" />
+              <div className="absolute -top-2.5 size-0 border-l-[4px] border-r-[4px] border-t-[5px] border-transparent border-t-foreground" />
             )}
+            <div className={cn('w-full h-2 rounded-sm', s.isBoosted ? theme.barBoosted : theme.barPeak)} />
           </div>
         ))}
       </div>
-      <div className="flex justify-between items-center pt-1">
-        <div className="flex gap-3 text-[10px] text-muted-foreground">
-          {HOUR_LABELS.map((h) => (
-            <span key={h}>{h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`}</span>
-          ))}
-        </div>
-        <div className="flex gap-2 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span className={cn('inline-block w-2 h-2 rounded-sm', theme.legendBoosted)} /> 2×</span>
-          {!isWeekend && <span className="flex items-center gap-1"><span className={cn('inline-block w-2 h-2 rounded-sm', theme.legendPeak)} /> 1×</span>}
-        </div>
+      <div className="relative w-full h-3 text-[10px] text-muted-foreground">
+        {HOUR_LABELS.map((h) => (
+          <span key={h} className="absolute -translate-x-1/2" style={{ left: `${(h / 24) * 100}%` }}>
+            {h}:00
+          </span>
+        ))}
+        <span className="absolute right-0 translate-x-1/2">24:00</span>
       </div>
+
     </div>
   )
 }
@@ -183,7 +181,7 @@ export function BoostPill() {
       <PopoverContent
         side="bottom"
         align="end"
-        className="w-80 p-5 space-y-5"
+        className="w-80 p-5 space-y-7"
         onMouseEnter={handleEnter}
         onMouseLeave={handleLeave}
       >
@@ -191,14 +189,10 @@ export function BoostPill() {
           <span className="text-sm font-medium">
             {isBoosted ? '2× Boost Active' : 'Peak Hours (1×)'}
           </span>
-          <a
-            href="https://support.claude.com/en/articles/13163666-holiday-2025-usage-promotion"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors underline"
-          >
-            Learn more
-          </a>
+          <div className="flex gap-2 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1"><span className={cn('inline-block w-2 h-2 rounded-sm', theme.legendBoosted)} /> 2×</span>
+            {!isWeekend && <span className="flex items-center gap-1"><span className={cn('inline-block w-2 h-2 rounded-sm', theme.legendPeak)} /> 1×</span>}
+          </div>
         </div>
         <Timeline ptHour={ptHour} isWeekend={isWeekend} />
         <p className="text-xs text-muted-foreground">
@@ -209,6 +203,15 @@ export function BoostPill() {
           {isBoosted
             ? `Peak starts in ${formatCountdown(msUntilChange)}.`
             : `Boost resumes in ${formatCountdown(msUntilChange)}.`}
+          {' '}
+          <a
+            href="https://support.claude.com/en/articles/14063676-claude-march-2026-usage-promotion"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground transition-colors"
+          >
+            Learn more
+          </a>
         </p>
       </PopoverContent>
     </Popover>
