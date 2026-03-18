@@ -729,7 +729,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
         ORDER BY t."order" ASC, t.created_at DESC`)
       .all() as Record<string, unknown>[]
 
-    const projectRows = db.prepare('SELECT * FROM projects ORDER BY name').all() as Record<string, unknown>[]
+    const projectRows = db.prepare('SELECT * FROM projects ORDER BY sort_order').all() as Record<string, unknown>[]
 
     const tagRows = db.prepare('SELECT * FROM tags ORDER BY name').all()
 

@@ -137,15 +137,18 @@ function reconcileLinearStateMappingsForProject(
 export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('db:projects:getAll', () => {
-    const rows = db.prepare('SELECT * FROM projects ORDER BY name').all() as Record<string, unknown>[]
+    const rows = db.prepare('SELECT * FROM projects ORDER BY sort_order').all() as Record<string, unknown>[]
     return rows.map((row) => parseProject(row))
   })
 
   ipcMain.handle('db:projects:create', (_, data: CreateProjectInput) => {
     const prepared = prepareProjectCreate(data)
+    const { sort_order: nextOrder } = db.prepare(
+      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM projects'
+    ).get() as { sort_order: number }
     const stmt = db.prepare(`
-      INSERT INTO projects (id, name, color, path, columns_config, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO projects (id, name, color, path, columns_config, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
     stmt.run(
       prepared.id,
@@ -153,6 +156,7 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
       prepared.color,
       prepared.path,
       prepared.columnsConfigJson,
+      nextOrder,
       prepared.createdAt,
       prepared.updatedAt
     )
@@ -239,5 +243,12 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
     const result = db.prepare('DELETE FROM projects WHERE id = ?').run(id)
     db.prepare('DELETE FROM settings WHERE key = ?').run(`commit_graph:project:${id}`)
     return result.changes > 0
+  })
+
+  ipcMain.handle('db:projects:reorder', (_, projectIds: string[]) => {
+    const update = db.prepare("UPDATE projects SET sort_order = ?, updated_at = datetime('now') WHERE id = ?")
+    db.transaction(() => {
+      projectIds.forEach((id, index) => update.run(index, id))
+    })()
   })
 }

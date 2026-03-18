@@ -123,6 +123,9 @@ export function expect(actual: unknown) {
     toBeGreaterThan(n: number) {
       if (typeof actual !== 'number' || actual <= n) throw new Error(`Expected > ${n}, got ${actual}`)
     },
+    toBeGreaterThanOrEqual(n: number) {
+      if (typeof actual !== 'number' || actual < n) throw new Error(`Expected >= ${n}, got ${actual}`)
+    },
     toHaveLength(n: number) {
       if (!Array.isArray(actual) || actual.length !== n) throw new Error(`Expected length ${n}, got ${Array.isArray(actual) ? actual.length : 'not array'}`)
     },

@@ -40,13 +40,21 @@ describe('db:projects:create', () => {
       { id: 'closed', label: 'Closed', color: 'green', position: 2, category: 'completed' },
     ])
   })
+
+  test('assigns sort_order at end', () => {
+    const all = h.invoke('db:projects:getAll') as { sort_order: number }[]
+    const last = all[all.length - 1]
+    const p = h.invoke('db:projects:create', { name: 'Zeta', color: '#123456' }) as { sort_order: number }
+    expect(p.sort_order).toBe(last.sort_order + 1)
+  })
 })
 
 describe('db:projects:getAll', () => {
-  test('returns projects ordered by name', () => {
-    const all = h.invoke('db:projects:getAll') as { name: string }[]
-    expect(all[0].name).toBe('Alpha')
-    expect(all[1].name).toBe('Beta')
+  test('returns projects ordered by sort_order', () => {
+    const all = h.invoke('db:projects:getAll') as { name: string; sort_order: number }[]
+    for (let i = 1; i < all.length; i++) {
+      expect(all[i].sort_order).toBeGreaterThanOrEqual(all[i - 1].sort_order)
+    }
   })
 })
 
@@ -202,6 +210,18 @@ describe('db:projects:delete', () => {
 
   test('returns false for nonexistent', () => {
     expect(h.invoke('db:projects:delete', 'nope')).toBe(false)
+  })
+})
+
+describe('db:projects:reorder', () => {
+  test('reorders projects by given ID array', () => {
+    const before = h.invoke('db:projects:getAll') as { id: string; name: string; sort_order: number }[]
+    const reversed = [...before].reverse().map((p) => p.id)
+    h.invoke('db:projects:reorder', reversed)
+    const after = h.invoke('db:projects:getAll') as { id: string; name: string; sort_order: number }[]
+    expect(after.map((p) => p.id)).toEqual(reversed)
+    expect(after[0].sort_order).toBe(0)
+    expect(after[1].sort_order).toBe(1)
   })
 })
 
