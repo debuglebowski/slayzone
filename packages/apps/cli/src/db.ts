@@ -9,6 +9,7 @@ function defaultDir(): string {
   const dir = getStateDir()
   if (fs.existsSync(dir)) return dir
   // Fallback: CLI runs before app has migrated data on Linux
+  // TODO: remove legacy fallback once Linux migration has been out for a few releases
   if (process.platform === 'linux') {
     const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config')
     const legacyDir = path.join(configHome, 'slayzone')
