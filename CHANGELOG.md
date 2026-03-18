@@ -1,6 +1,41 @@
 # Changelog
 
 
+## v0.6.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.5.0...v0.6.1)
+
+### 🚀 Enhancements
+
+- Show process titles on terminal tabs and process rows ([c837e8f](https://github.com/debuglebowski/slayzone/commit/c837e8f))
+- **file-editor:** Add refresh button to file tree sidebar ([74ce25f](https://github.com/debuglebowski/slayzone/commit/74ce25f))
+- **usage:** Add 2x boost pill indicator for Anthropic Spring Break promo ([4b2364f](https://github.com/debuglebowski/slayzone/commit/4b2364f))
+- **projects:** Add multi-repo support with auto-detection ([37860ba](https://github.com/debuglebowski/slayzone/commit/37860ba))
+- **telemetry:** Inline dev PostHog key for local usage tracking ([cb95631](https://github.com/debuglebowski/slayzone/commit/cb95631))
+- **integrations:** Add Jira Cloud integration behind labs flag ([4f5b13a](https://github.com/debuglebowski/slayzone/commit/4f5b13a))
+- Make processes panel, integrations, and jira generally available ([27b5a83](https://github.com/debuglebowski/slayzone/commit/27b5a83))
+- **terminal:** Show process names on terminal tabs with duplicate numbering ([682ee5b](https://github.com/debuglebowski/slayzone/commit/682ee5b))
+- **integrations:** Put Jira integration behind labs flag ([5b76228](https://github.com/debuglebowski/slayzone/commit/5b76228))
+
+### 🩹 Fixes
+
+- **file-editor:** Clear collapsed folder cache on fs change ([643d0c2](https://github.com/debuglebowski/slayzone/commit/643d0c2))
+- **usage:** Normalize spacers around boost pill and usage bars to w-4 ([8ce4f5f](https://github.com/debuglebowski/slayzone/commit/8ce4f5f))
+- **usage:** Improve boost pill popover layout and fix promo link ([19622f6](https://github.com/debuglebowski/slayzone/commit/19622f6))
+
+### 💅 Refactors
+
+- **integrations:** Extract ProviderAdapter interface for Linear/GitHub ([b33cfb6](https://github.com/debuglebowski/slayzone/commit/b33cfb6))
+- **integrations:** Add generic provider-dispatched IPC + useProviderData hook ([d20a527](https://github.com/debuglebowski/slayzone/commit/d20a527))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.5.0 ([861a9c4](https://github.com/debuglebowski/slayzone/commit/861a9c4))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.5.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.4.0...v0.5.0)

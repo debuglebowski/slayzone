@@ -1,5 +1,42 @@
 [
   {
+    "version": "0.6.1",
+    "date": "2026-03-18",
+    "tagline": "Integrate everything",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Jira Cloud integration (Labs)",
+        "description": "Connect your Jira Cloud account to sync issues directly into SlayZone. Enable in Settings → Labs."
+      },
+      {
+        "category": "feature",
+        "title": "Multi-repo projects",
+        "description": "Projects now support multiple repositories with auto-detection."
+      },
+      {
+        "category": "feature",
+        "title": "Processes panel",
+        "description": "New dedicated panel to monitor and manage running processes."
+      },
+      {
+        "category": "improvement",
+        "title": "Process names on terminal tabs",
+        "description": "Terminal tabs now show the running process name with duplicate numbering."
+      },
+      {
+        "category": "improvement",
+        "title": "File tree refresh",
+        "description": "Added a refresh button to the file editor sidebar."
+      },
+      {
+        "category": "fix",
+        "title": "Usage bar layout",
+        "description": "Fixed boost pill popover layout and normalized spacer widths."
+      }
+    ]
+  },
+  {
     "version": "0.5.0",
     "date": "2026-03-17",
     "tagline": "Click & connect",
