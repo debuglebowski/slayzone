@@ -217,6 +217,7 @@ export interface ElectronAPI {
     createProject: (data: CreateProjectInput) => Promise<Project>
     updateProject: (data: UpdateProjectInput) => Promise<Project>
     deleteProject: (id: string) => Promise<boolean>
+    reorderProjects: (projectIds: string[]) => Promise<void>
 
     // Tasks
     getTasks: () => Promise<Task[]>

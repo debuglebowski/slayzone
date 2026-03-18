@@ -28,6 +28,7 @@ export interface Project {
   execution_context: ExecutionContext | null
   /** Folder name of the default child repo (for multi-repo projects) */
   selected_repo: string | null
+  sort_order: number
   created_at: string
   updated_at: string
 }
