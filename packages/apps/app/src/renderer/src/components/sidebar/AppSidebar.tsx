@@ -24,13 +24,11 @@ import {
 } from '@slayzone/ui'
 import { ProjectItem } from './ProjectItem'
 import { TerminalStatusPopover } from '@slayzone/terminal'
-import { cn, useAppearance } from '@slayzone/ui'
-import { shortcutDefinitions, formatKeysForDisplay, type ShortcutDefinition } from '@slayzone/ui'
+import { cn, useAppearance, shortcutDefinitions, formatKeysForDisplay, useShortcutStore, type ShortcutDefinition } from '@slayzone/ui'
 import { useTabStore, useDialogStore } from '@slayzone/settings'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
-import { useShortcutStore } from '@/hooks/useShortcutStore'
 import { KeyRecorder } from '@/components/KeyRecorder'
 
 interface AppSidebarProps {
@@ -51,7 +49,6 @@ interface AppSidebarProps {
 function ShortcutRow({
   def,
   effectiveKeys,
-  isCustomized,
   isRecordingThis,
   onStartRecording,
   onCancelRecording,
@@ -61,7 +58,6 @@ function ShortcutRow({
 }: {
   def: ShortcutDefinition
   effectiveKeys: string
-  isCustomized: boolean
   isRecordingThis: boolean
   onStartRecording: () => void
   onCancelRecording: () => void
@@ -89,30 +85,15 @@ function ShortcutRow({
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 group">
-            <span
-              className={cn(
-                'text-base text-muted-foreground bg-muted border px-2.5 py-0.5 rounded-md font-[system-ui] shadow-[0_1px_0_0_rgba(0,0,0,0.05)]',
-                isCustomized && 'border-green-500/30 bg-green-500/10 text-green-400',
-                customizable && 'cursor-pointer'
-              )}
-              onClick={customizable ? onStartRecording : undefined}
-            >
-              {formatKeysForDisplay(effectiveKeys)}
-            </span>
-            {isCustomized && (
-              <span className="text-[10px] text-muted-foreground">(custom)</span>
+          <span
+            className={cn(
+              'text-base text-muted-foreground bg-muted border px-2.5 py-0.5 rounded-md font-[system-ui] shadow-[0_1px_0_0_rgba(0,0,0,0.05)]',
+              customizable && 'cursor-pointer'
             )}
-            {customizable && (
-              <button
-                type="button"
-                onClick={onStartRecording}
-                className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                ✎
-              </button>
-            )}
-          </div>
+            onClick={customizable ? onStartRecording : undefined}
+          >
+            {formatKeysForDisplay(effectiveKeys)}
+          </span>
         )}
       </div>
       {conflictAction && (
@@ -164,7 +145,17 @@ export function AppSidebar({
   const { sidebarBadgeMode } = useAppearance()
   const activeView = useTabStore((s) => s.activeView)
 
-  const { getKeys, isCustomized: isCustomizedFn, findConflict, setOverride, resetAll, setRecording } = useShortcutStore()
+  const overrides = useShortcutStore((s) => s.overrides)
+  const { getKeys, findConflict, setOverride, resetAll, setRecording } = useShortcutStore()
+
+  // Derive effective keys from overrides so React re-renders when they change
+  const effectiveKeysMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const def of shortcutDefinitions) {
+      map[def.id] = overrides[def.id] ?? def.defaultKeys
+    }
+    return map
+  }, [overrides])
 
   const shortcutGroups = useMemo(() => {
     const groups: { heading: string; items: ShortcutDefinition[] }[] = []
@@ -446,8 +437,7 @@ export function AppSidebar({
                             <ShortcutRow
                               key={def.id}
                               def={def}
-                              effectiveKeys={getKeys(def.id)}
-                              isCustomized={isCustomizedFn(def.id)}
+                              effectiveKeys={effectiveKeysMap[def.id]}
                               isRecordingThis={recordingId === def.id}
                               onStartRecording={() => {
                                 handleCancelRecording()
@@ -471,7 +461,7 @@ export function AppSidebar({
                     onClick={resetAll}
                     className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    Reset All to Defaults
+                    Reset to Defaults
                   </button>
                 </div>
               </DialogContent>

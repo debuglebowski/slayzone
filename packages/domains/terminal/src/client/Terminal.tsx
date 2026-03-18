@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHand
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { matchesShortcut, useShortcutStore } from '@slayzone/ui'
 import { WebLinkProvider, FileLinkProvider } from './web-link-provider'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
@@ -213,14 +214,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
       return false
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'f' && e.type === 'keydown') {
-      setSearchOpen(true)
-      track('terminal_search_used')
-      return false
-    }
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'k' && e.type === 'keydown') {
-      void clearBufferWithoutRestart()
-      return false
+    if (e.type === 'keydown' && !useShortcutStore.getState().isRecording) {
+      if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-search'))) {
+        setSearchOpen(true)
+        track('terminal_search_used')
+        return false
+      }
+      if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-clear'))) {
+        void clearBufferWithoutRestart()
+        return false
+      }
     }
     // Ctrl+Shift+C/V handled via DOM keydown listener (useEffect below)
     // to work reliably regardless of xterm.js internal event handling.

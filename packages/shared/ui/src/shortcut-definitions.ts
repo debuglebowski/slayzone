@@ -71,6 +71,27 @@ export function formatKeysForDisplay(keys: string): string {
   }).join(' ')
 }
 
+/**
+ * Check if a KeyboardEvent matches a shortcut string like "mod+g" or "mod+shift+g".
+ * Used by raw keydown handlers that can't use react-hotkeys-hook.
+ */
+export function matchesShortcut(e: KeyboardEvent, keys: string): boolean {
+  const parts = keys.split('+')
+  const key = parts[parts.length - 1]
+  const wantMod = parts.includes('mod')
+  const wantShift = parts.includes('shift')
+  const wantAlt = parts.includes('alt')
+  const wantCtrl = parts.includes('ctrl')
+
+  const hasMod = isMac ? e.metaKey : e.ctrlKey
+  if (wantMod !== hasMod) return false
+  if (wantShift !== e.shiftKey) return false
+  if (wantAlt !== e.altKey) return false
+  if (wantCtrl !== (isMac ? e.ctrlKey : false)) return false
+
+  return e.key.toLowerCase() === key
+}
+
 export function toElectronAccelerator(keys: string): string {
   return keys.split('+').map(part => {
     if (part === 'mod') return 'CmdOrCtrl'

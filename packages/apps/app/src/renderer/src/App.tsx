@@ -51,7 +51,7 @@ import {
   toast,
   UpdateToast
 } from '@slayzone/ui'
-import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo } from '@slayzone/ui'
+import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo, matchesShortcut, useShortcutStore } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { ChangelogDialog } from '@/components/changelog/ChangelogDialog'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
@@ -76,8 +76,6 @@ import { useTerminalStateTracking } from '@/hooks/useTerminalStateTracking'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
 import { useTabColors } from '@/hooks/useTabColors'
 import { useDiagnosticsSync } from '@/hooks/useDiagnosticsSync'
-import { useShortcutStore } from '@/hooks/useShortcutStore'
-
 // Lazy-loaded: heavy components not needed for first paint
 const TaskDetailDataLoader = lazy(() => import('@slayzone/task/client/TaskDetailDataLoader').then(m => ({ default: m.TaskDetailDataLoader })))
 const FileEditorView = lazy(() => import('@slayzone/file-editor/client/FileEditorView').then(m => ({ default: m.FileEditorView })))
@@ -431,33 +429,43 @@ function App(): React.JSX.Element {
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (tabs[activeTabIndex]?.type !== 'home') return
       if (!selectedProjectId) return
-      if (!e.metaKey) return
       if ((e.target as HTMLElement)?.closest?.('.cm-editor')) return
-      if (e.shiftKey) {
-        if (e.key.toLowerCase() === 'f' && isHomePanelEnabled('editor', 'home')) {
-          e.preventDefault()
-          if (homePanel.homeEditorRef.current) {
-            if (!homePanel.homePanelVisibility.editor) homePanel.setHomePanelVisibility(prev => ({ ...prev, editor: true }))
-            homePanel.homeEditorRef.current.toggleSearch()
-          } else {
-            homePanel.pendingHomeSearchToggleRef.current = true
-            homePanel.setHomePanelVisibility(prev => ({ ...prev, editor: true }))
-          }
-        } else if (e.key.toLowerCase() === 'g' && isHomePanelEnabled('git', 'home')) {
-          e.preventDefault()
-          if (!homePanel.homePanelVisibility.git) {
-            homePanel.setHomeGitDefaultTab('changes')
-            homePanel.setHomePanelVisibility(prev => ({ ...prev, git: true }))
-          } else if (homePanel.homeGitPanelRef.current?.getActiveTab() === 'changes') {
-            homePanel.setHomePanelVisibility(prev => ({ ...prev, git: false }))
-          } else {
-            homePanel.homeGitPanelRef.current?.switchToTab('changes')
-          }
+      if (isRecording) return
+
+      // Editor search (Cmd+Shift+F — not in shortcut definitions, editor-specific)
+      if (e.metaKey && e.shiftKey && e.key.toLowerCase() === 'f' && isHomePanelEnabled('editor', 'home')) {
+        e.preventDefault()
+        if (homePanel.homeEditorRef.current) {
+          if (!homePanel.homePanelVisibility.editor) homePanel.setHomePanelVisibility(prev => ({ ...prev, editor: true }))
+          homePanel.homeEditorRef.current.toggleSearch()
+        } else {
+          homePanel.pendingHomeSearchToggleRef.current = true
+          homePanel.setHomePanelVisibility(prev => ({ ...prev, editor: true }))
         }
         return
       }
-      if (e.key === 'p' && isHomePanelEnabled('editor', 'home')) { e.preventDefault(); homePanel.setHomeQuickOpenVisible(true); return }
-      if (e.key === 'g' && isHomePanelEnabled('git', 'home')) {
+
+      // Git Diff (panel-git-diff)
+      if (matchesShortcut(e, getKeys('panel-git-diff')) && isHomePanelEnabled('git', 'home')) {
+        e.preventDefault()
+        if (!homePanel.homePanelVisibility.git) {
+          homePanel.setHomeGitDefaultTab('changes')
+          homePanel.setHomePanelVisibility(prev => ({ ...prev, git: true }))
+        } else if (homePanel.homeGitPanelRef.current?.getActiveTab() === 'changes') {
+          homePanel.setHomePanelVisibility(prev => ({ ...prev, git: false }))
+        } else {
+          homePanel.homeGitPanelRef.current?.switchToTab('changes')
+        }
+        return
+      }
+
+      // Quick Open (panel-quick-open)
+      if (matchesShortcut(e, getKeys('panel-quick-open')) && isHomePanelEnabled('editor', 'home')) {
+        e.preventDefault(); homePanel.setHomeQuickOpenVisible(true); return
+      }
+
+      // Git (panel-git)
+      if (matchesShortcut(e, getKeys('panel-git')) && isHomePanelEnabled('git', 'home')) {
         e.preventDefault()
         if (!homePanel.homePanelVisibility.git) {
           homePanel.setHomeGitDefaultTab('general')
@@ -467,20 +475,20 @@ function App(): React.JSX.Element {
         } else {
           homePanel.homeGitPanelRef.current?.switchToTab('general')
         }
-      } else if (e.key === 'e' && isHomePanelEnabled('editor', 'home')) {
+      } else if (matchesShortcut(e, getKeys('panel-editor')) && isHomePanelEnabled('editor', 'home')) {
         e.preventDefault()
         homePanel.setHomePanelVisibility(prev => ({ ...prev, editor: !prev.editor }))
       } else if (e.key === 'o' && isHomePanelEnabled('processes', 'home')) {
         e.preventDefault()
         homePanel.setHomePanelVisibility(prev => ({ ...prev, processes: !prev.processes }))
-      } else if (e.key === 'u' && testsPanelEnabled && isHomePanelEnabled('tests', 'home')) {
+      } else if (e.key === 'u' && e.metaKey && !e.shiftKey && testsPanelEnabled && isHomePanelEnabled('tests', 'home')) {
         e.preventDefault()
         homePanel.setHomePanelVisibility(prev => ({ ...prev, tests: !prev.tests }))
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [tabs, activeTabIndex, selectedProjectId, homePanel.homePanelVisibility])
+  }, [tabs, activeTabIndex, selectedProjectId, homePanel.homePanelVisibility, getKeys, isRecording])
 
   // Cmd+R: reload the active browser view (WebContentsView or webview fallback)
   useEffect(() => {

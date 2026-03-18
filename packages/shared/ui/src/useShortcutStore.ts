@@ -1,5 +1,18 @@
 import { create } from 'zustand'
-import { shortcutDefinitions, type ShortcutDefinition, type ShortcutScope } from '@slayzone/ui'
+import { shortcutDefinitions, type ShortcutDefinition, type ShortcutScope } from './shortcut-definitions'
+
+// Typed accessor for the Electron preload API. The full type lives in @slayzone/types
+// and is augmented onto Window by the preload. We use a minimal cast here so this
+// package can typecheck independently without pulling in the full ElectronAPI type.
+const api = () => (window as any).api as {
+  settings: {
+    get: (key: string) => Promise<string | null>
+    set: (key: string, value: string) => Promise<void>
+  }
+  shortcuts: {
+    changed: () => void
+  }
+}
 
 const SETTINGS_KEY = 'custom_shortcuts'
 
@@ -23,7 +36,7 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
   loaded: false,
 
   load: async () => {
-    const raw = await window.api.settings.get(SETTINGS_KEY)
+    const raw = await api().settings.get(SETTINGS_KEY)
     if (raw) {
       try {
         set({ overrides: JSON.parse(raw), loaded: true })
@@ -58,22 +71,22 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
   setOverride: async (id: string, keys: string) => {
     const newOverrides = { ...get().overrides, [id]: keys }
     set({ overrides: newOverrides })
-    await window.api.settings.set(SETTINGS_KEY, JSON.stringify(newOverrides))
-    window.api.shortcuts.changed()
+    await api().settings.set(SETTINGS_KEY, JSON.stringify(newOverrides))
+    api().shortcuts.changed()
   },
 
   removeOverride: async (id: string) => {
     const { [id]: _, ...rest } = get().overrides
     set({ overrides: rest })
     const value = Object.keys(rest).length === 0 ? '{}' : JSON.stringify(rest)
-    await window.api.settings.set(SETTINGS_KEY, value)
-    window.api.shortcuts.changed()
+    await api().settings.set(SETTINGS_KEY, value)
+    api().shortcuts.changed()
   },
 
   resetAll: async () => {
     set({ overrides: {} })
-    await window.api.settings.set(SETTINGS_KEY, '{}')
-    window.api.shortcuts.changed()
+    await api().settings.set(SETTINGS_KEY, '{}')
+    api().shortcuts.changed()
   },
 
   setRecording: (recording: boolean) => set({ isRecording: recording })

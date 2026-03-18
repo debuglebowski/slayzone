@@ -62,7 +62,7 @@ import { RichTextEditor } from '@slayzone/editor'
 import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { TerminalContainer, type TerminalContainerHandle } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
-import { buildStatusOptions, cn, getColumnStatusStyle, projectColorBg, useAppearance } from '@slayzone/ui'
+import { buildStatusOptions, cn, getColumnStatusStyle, projectColorBg, useAppearance, matchesShortcut, useShortcutStore } from '@slayzone/ui'
 import { BrowserPanel, type BrowserPanelHandle } from '@slayzone/task-browser'
 import { FileEditorView, type FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { QuickOpenDialog } from '@slayzone/file-editor/client/QuickOpenDialog'
@@ -661,14 +661,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (!isActive) return
-      if (e.metaKey && e.key === 'i') {
-        if (!isTerminalFocused()) return
+      if (useShortcutStore.getState().isRecording) return
+      if (!isTerminalFocused()) return
+      if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-inject-desc'))) {
         e.preventDefault()
-        if (e.shiftKey) {
-          handleInjectDescription()
-        } else {
-          handleInjectTitle()
-        }
+        handleInjectDescription()
+      } else if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-inject-title'))) {
+        e.preventDefault()
+        handleInjectTitle()
       }
     }
     window.addEventListener('keydown', handleKeyDown, { capture: true })

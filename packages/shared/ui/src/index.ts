@@ -4,9 +4,11 @@ export {
   shortcutDefinitions,
   formatKeysForDisplay,
   toElectronAccelerator,
+  matchesShortcut,
   type ShortcutDefinition,
   type ShortcutScope
 } from './shortcut-definitions'
+export { useShortcutStore } from './useShortcutStore'
 export { projectColorBg, type ProjectColorVariant } from './project-color'
 export { useAppearance, AppearanceContext, appearanceDefaults, type AppearanceSettings, type BrowserDeviceDefaults } from './AppearanceContext'
 export { getTerminalStateStyle, type TerminalStateStyle } from './terminal-state'
