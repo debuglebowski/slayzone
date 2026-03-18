@@ -31,8 +31,9 @@ rows.forEach((row, index) => update.run(index, row.id))
 
 ### Query changes
 
-- `getAll`: `ORDER BY name` → `ORDER BY sort_order`
-- `create`: Before insert, compute `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects` and include in the INSERT
+- `getAll` (`db:projects:getAll` in project handlers): `ORDER BY name` → `ORDER BY sort_order`
+- `loadBoardData` (`db:loadBoardData` in task handlers): also queries projects with `ORDER BY name` — change to `ORDER BY sort_order`
+- `create`: Before insert, compute `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects`. Add `sort_order` to the INSERT column list and pass the computed value in `stmt.run()`
 
 ### New IPC handler: `db:projects:reorder`
 
@@ -84,9 +85,11 @@ On `DragEnd`:
 
 Wrap with `useSortable` from `@dnd-kit/sortable`. Apply transform/transition styles via `CSS.Transform.toString()`.
 
+The component nests `Tooltip > ContextMenu > motion.button`. The `useSortable` ref and transform styles should go on an outermost wrapper `div`, not on the button itself. The `motion.button` `whileTap`/`animate` props may conflict with dnd-kit transforms — test this interaction and simplify framer-motion usage during drag if needed.
+
 ### `ProjectSelect.tsx`
 
-No changes to ordering — continues to sort alphabetically client-side via `.sort((a, b) => a.name.localeCompare(b.name))`.
+Add an explicit `.sort((a, b) => a.name.localeCompare(b.name))` before rendering — currently the dropdown renders projects in whatever order `getProjects()` returns, which was alphabetical but will become `sort_order` after this change. The sort call keeps the dropdown alphabetical for quick lookup.
 
 ## Preload Bridge
 
