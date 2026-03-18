@@ -83,11 +83,18 @@ export function matchesShortcut(e: KeyboardEvent, keys: string): boolean {
   const wantAlt = parts.includes('alt')
   const wantCtrl = parts.includes('ctrl')
 
-  const hasMod = isMac ? e.metaKey : e.ctrlKey
-  if (wantMod !== hasMod) return false
+  if (isMac) {
+    // On Mac: mod = Meta, ctrl = Control (separate physical keys)
+    if (wantMod !== e.metaKey) return false
+    if (wantCtrl !== e.ctrlKey) return false
+  } else {
+    // On non-Mac: mod = Ctrl, ctrl = also Ctrl (same physical key)
+    // Either mod or ctrl in the shortcut string means e.ctrlKey must be true
+    if ((wantMod || wantCtrl) !== e.ctrlKey) return false
+    if (e.metaKey) return false // Meta (Win key) shouldn't be pressed
+  }
   if (wantShift !== e.shiftKey) return false
   if (wantAlt !== e.altKey) return false
-  if (wantCtrl !== (isMac ? e.ctrlKey : false)) return false
 
   return e.key.toLowerCase() === key
 }

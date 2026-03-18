@@ -662,11 +662,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (!isActive) return
       if (useShortcutStore.getState().isRecording) return
-      if (!isTerminalFocused()) return
       if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-inject-desc'))) {
+        if (!isTerminalFocused()) return
         e.preventDefault()
         handleInjectDescription()
       } else if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-inject-title'))) {
+        if (!isTerminalFocused()) return
         e.preventDefault()
         handleInjectTitle()
       }

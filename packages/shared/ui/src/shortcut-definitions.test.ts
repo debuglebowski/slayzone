@@ -144,6 +144,21 @@ test('key comparison is case-insensitive', () => {
   expect(matchesShortcut(e, 'mod+k')).toBe(true)
 })
 
+test('matches ctrl+tab with ctrlKey (for ctrl-prefixed shortcuts on macOS)', () => {
+  const e = makeKeyEvent({ key: 'Tab', ctrlKey: true })
+  expect(matchesShortcut(e, 'ctrl+tab')).toBe(true)
+})
+
+test('ctrl+tab does not match when metaKey is pressed instead of ctrlKey', () => {
+  const e = makeKeyEvent({ key: 'Tab', metaKey: true })
+  expect(matchesShortcut(e, 'ctrl+tab')).toBe(false)
+})
+
+test('does not match mod+k when extra modifiers are pressed', () => {
+  const e = makeKeyEvent({ key: 'k', metaKey: true, shiftKey: true })
+  expect(matchesShortcut(e, 'mod+k')).toBe(false)
+})
+
 // --- Summary ---
 
 console.log(`\n${passed} passed, ${failed} failed`)
