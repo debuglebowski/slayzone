@@ -4,6 +4,28 @@ import { TEST_PROJECT_PATH } from './fixtures/electron'
 test.describe.serial('Custom keyboard shortcuts', () => {
   let projectAbbrev: string
 
+  const openShortcutsDialog = async (mainWindow: import('@playwright/test').Page) => {
+    await mainWindow.locator('button[aria-label="Keyboard Shortcuts"]').click()
+    await expect(mainWindow.getByRole('dialog')).toBeVisible({ timeout: 3_000 })
+  }
+
+  const closeDialog = async (mainWindow: import('@playwright/test').Page) => {
+    await mainWindow.keyboard.press('Escape')
+    await mainWindow.waitForTimeout(200)
+  }
+
+  const rebindShortcut = async (mainWindow: import('@playwright/test').Page, label: string, newKeys: string) => {
+    await openShortcutsDialog(mainWindow)
+    // Find the label span, go up to the row, then click the key badge
+    const labelSpan = mainWindow.getByRole('dialog').locator(`span.text-sm:text-is("${label}")`).first()
+    // The key badge is a sibling span with cursor-pointer in the same flex row
+    const keyBadge = labelSpan.locator('..').locator('span.cursor-pointer')
+    await keyBadge.click()
+    await expect(mainWindow.getByText('Press keys...')).toBeVisible({ timeout: 2_000 })
+    await mainWindow.keyboard.press(newKeys)
+    await closeDialog(mainWindow)
+  }
+
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
@@ -17,57 +39,29 @@ test.describe.serial('Custom keyboard shortcuts', () => {
   })
 
   test('opens shortcuts dialog via sidebar button', async ({ mainWindow }) => {
-    await mainWindow.getByLabel('Keyboard Shortcuts').click()
-    await expect(mainWindow.getByText('Keyboard Shortcuts').first()).toBeVisible({ timeout: 3_000 })
-    // Close
-    await mainWindow.keyboard.press('Escape')
+    await openShortcutsDialog(mainWindow)
+    await expect(mainWindow.getByRole('heading', { name: 'Keyboard Shortcuts' })).toBeVisible()
+    await closeDialog(mainWindow)
   })
 
   test('rebind search shortcut and verify it works', async ({ mainWindow }) => {
-    // Open shortcuts dialog
-    await mainWindow.getByLabel('Keyboard Shortcuts').click()
-    await expect(mainWindow.getByRole('dialog')).toBeVisible({ timeout: 3_000 })
-
-    // Open the General group (first group, should be open by default)
-    // Find and click the Search shortcut key badge to start recording
-    const searchRow = mainWindow.getByRole('dialog').locator('div').filter({ hasText: /^Search/ }).first()
-    // Click the key badge (the span with the shortcut display)
-    await searchRow.locator('span.cursor-pointer').click()
-
-    // Should see "Press keys..." indicating recording mode
-    await expect(mainWindow.getByText('Press keys...')).toBeVisible({ timeout: 2_000 })
-
-    // Press the new key combo
-    await mainWindow.keyboard.press('Meta+/')
-
-    // Close dialog
-    await mainWindow.keyboard.press('Escape')
-    // Small delay for dialog to close
-    await mainWindow.waitForTimeout(200)
+    await rebindShortcut(mainWindow, 'Search', 'Meta+Shift+p')
 
     // Press the NEW shortcut — should open search
-    await mainWindow.keyboard.press('Meta+/')
+    await mainWindow.keyboard.press('Meta+Shift+p')
     await expect(mainWindow.getByPlaceholder('Search tasks and projects...')).toBeVisible({ timeout: 3_000 })
     await mainWindow.keyboard.press('Escape')
 
     // Press the OLD shortcut — should NOT open search
     await mainWindow.keyboard.press('Meta+k')
-    // Wait briefly and verify search did not open
     await mainWindow.waitForTimeout(500)
     await expect(mainWindow.getByPlaceholder('Search tasks and projects...')).not.toBeVisible()
   })
 
   test('reset to defaults restores original shortcuts', async ({ mainWindow }) => {
-    // Open shortcuts dialog
-    await mainWindow.getByLabel('Keyboard Shortcuts').click()
-    await expect(mainWindow.getByRole('dialog')).toBeVisible({ timeout: 3_000 })
-
-    // Click "Reset to Defaults"
+    await openShortcutsDialog(mainWindow)
     await mainWindow.getByText('Reset to Defaults').click()
-
-    // Close dialog
-    await mainWindow.keyboard.press('Escape')
-    await mainWindow.waitForTimeout(200)
+    await closeDialog(mainWindow)
 
     // Original Cmd+K should work again
     await mainWindow.keyboard.press('Meta+k')
@@ -76,16 +70,7 @@ test.describe.serial('Custom keyboard shortcuts', () => {
   })
 
   test('shortcut persists after page reload', async ({ mainWindow }) => {
-    // Rebind search to Cmd+/
-    await mainWindow.getByLabel('Keyboard Shortcuts').click()
-    await expect(mainWindow.getByRole('dialog')).toBeVisible({ timeout: 3_000 })
-
-    const searchRow = mainWindow.getByRole('dialog').locator('div').filter({ hasText: /^Search/ }).first()
-    await searchRow.locator('span.cursor-pointer').click()
-    await expect(mainWindow.getByText('Press keys...')).toBeVisible({ timeout: 2_000 })
-    await mainWindow.keyboard.press('Meta+/')
-    await mainWindow.keyboard.press('Escape')
-    await mainWindow.waitForTimeout(200)
+    await rebindShortcut(mainWindow, 'Search', 'Meta+Shift+p')
 
     // Reload the page
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
@@ -95,14 +80,13 @@ test.describe.serial('Custom keyboard shortcuts', () => {
     await expect(mainWindow.locator('h3').getByText('Inbox', { exact: true })).toBeVisible({ timeout: 5_000 })
 
     // Custom shortcut should still work
-    await mainWindow.keyboard.press('Meta+/')
+    await mainWindow.keyboard.press('Meta+Shift+p')
     await expect(mainWindow.getByPlaceholder('Search tasks and projects...')).toBeVisible({ timeout: 3_000 })
     await mainWindow.keyboard.press('Escape')
 
     // Clean up: reset to defaults
-    await mainWindow.getByLabel('Keyboard Shortcuts').click()
-    await expect(mainWindow.getByRole('dialog')).toBeVisible({ timeout: 3_000 })
+    await openShortcutsDialog(mainWindow)
     await mainWindow.getByText('Reset to Defaults').click()
-    await mainWindow.keyboard.press('Escape')
+    await closeDialog(mainWindow)
   })
 })

@@ -51,7 +51,7 @@ import {
   toast,
   UpdateToast
 } from '@slayzone/ui'
-import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo, matchesShortcut, useShortcutStore } from '@slayzone/ui'
+import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { ChangelogDialog } from '@/components/changelog/ChangelogDialog'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
@@ -301,8 +301,15 @@ function App(): React.JSX.Element {
   useDiagnosticsSync({ tabs, activeTabIndex, activeView, selectedProjectId, projects, tasks, displayTaskCount: displayTasks.length, notificationState, projectPathMissing })
 
   // Shortcut store (dynamic hotkey bindings)
-  const getKeys = useShortcutStore((s) => s.getKeys)
+  const overrides = useShortcutStore((s) => s.overrides)
   const isRecording = useShortcutStore((s) => s.isRecording)
+  // Resolve effective keys from overrides + defaults. Subscribing to `overrides` above
+  // ensures re-render when shortcuts change, so useHotkeys picks up new key strings.
+  const getKeys = useCallback((id: string): string => {
+    if (overrides[id]) return overrides[id]
+    const def = shortcutDefinitions.find(d => d.id === id)
+    return def?.defaultKeys ?? ''
+  }, [overrides])
   useEffect(() => {
     useShortcutStore.getState().load()
   }, [])
