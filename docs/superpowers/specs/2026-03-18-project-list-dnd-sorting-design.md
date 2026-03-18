@@ -33,7 +33,8 @@ rows.forEach((row, index) => update.run(index, row.id))
 
 - `getAll` (`db:projects:getAll` in project handlers): `ORDER BY name` → `ORDER BY sort_order`
 - `loadBoardData` (`db:loadBoardData` in task handlers): also queries projects with `ORDER BY name` — change to `ORDER BY sort_order`
-- `create`: Before insert, compute `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects`. Add `sort_order` to the INSERT column list and pass the computed value in `stmt.run()`
+- `create` (Electron handler): Before insert, compute `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects`. Add `sort_order` to the INSERT column list and pass the computed value in `stmt.run()`
+- `create` (CLI at `packages/apps/cli/src/commands/projects.ts`): Same change — compute `MAX(sort_order) + 1` and include in the INSERT so CLI-created projects append to the bottom
 
 ### New IPC handler: `db:projects:reorder`
 
