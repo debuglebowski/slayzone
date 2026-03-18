@@ -316,6 +316,8 @@ export interface ElectronAPI {
     isContextManagerEnabledSync: boolean
     isTestsPanelEnabled: () => Promise<boolean>
     isTestsPanelEnabledSync: boolean
+    isJiraIntegrationEnabled: () => Promise<boolean>
+    isJiraIntegrationEnabledSync: boolean
     isPlaywright: boolean
     onGoHome: (callback: () => void) => () => void
     onOpenSettings: (callback: () => void) => () => void

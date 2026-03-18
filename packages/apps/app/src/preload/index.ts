@@ -107,6 +107,8 @@ const api: ElectronAPI = {
     isContextManagerEnabledSync: ipcRenderer.sendSync('app:is-context-manager-enabled-sync') as boolean,
     isTestsPanelEnabled: () => ipcRenderer.invoke('app:is-tests-panel-enabled'),
     isTestsPanelEnabledSync: ipcRenderer.sendSync('app:is-tests-panel-enabled-sync') as boolean,
+    isJiraIntegrationEnabled: () => ipcRenderer.invoke('app:is-jira-integration-enabled'),
+    isJiraIntegrationEnabledSync: ipcRenderer.sendSync('app:is-jira-integration-enabled-sync') as boolean,
     isPlaywright: process.env.PLAYWRIGHT === '1',
     onGoHome: (callback: () => void) => {
       const handler = () => callback()

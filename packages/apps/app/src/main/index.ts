@@ -1275,6 +1275,8 @@ app.whenReady().then(async () => {
   ipcMain.on('app:is-context-manager-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_context_manager') })
   ipcMain.handle('app:is-tests-panel-enabled', () => isLabEnabled('labs_tests_panel'))
   ipcMain.on('app:is-tests-panel-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_tests_panel') })
+  ipcMain.handle('app:is-jira-integration-enabled', () => isLabEnabled('labs_jira_integration'))
+  ipcMain.on('app:is-jira-integration-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_jira_integration') })
   ipcMain.handle('app:get-protocol-client-status', () => protocolClientStatus)
   ipcMain.handle('app:restart-for-update', () => restartForUpdate())
   ipcMain.handle('app:check-for-updates', () => checkForUpdates())
