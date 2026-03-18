@@ -47,16 +47,7 @@ export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: Database): vo
     ).get(input.taskId) as { max_pos: number }
     const position = maxPos.max_pos + 1
 
-    // Generate auto-label if not provided
-    let label = input.label ?? null
-    if (!label) {
-      const count = db.prepare(
-        'SELECT COUNT(*) as count FROM terminal_tabs WHERE task_id = ?'
-      ).get(input.taskId) as { count: number }
-      if (count.count > 0) {
-        label = `Terminal ${count.count + 1}`
-      }
-    }
+    const label = input.label ?? null
 
     const now = new Date().toISOString()
     db.prepare(`
@@ -90,23 +81,17 @@ export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: Database): vo
     ).get(target.task_id, groupId) as { max_pos: number }
     const position = maxPos.max_pos + 1
 
-    // Auto-label
-    const count = db.prepare(
-      'SELECT COUNT(*) as count FROM terminal_tabs WHERE task_id = ?'
-    ).get(target.task_id) as { count: number }
-    const label = `Terminal ${count.count + 1}`
-
     const now = new Date().toISOString()
     db.prepare(`
       INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
-      VALUES (?, ?, ?, 'terminal', 0, ?, ?, ?)
-    `).run(id, target.task_id, label, position, groupId, now)
+      VALUES (?, ?, NULL, 'terminal', 0, ?, ?, ?)
+    `).run(id, target.task_id, position, groupId, now)
 
     return {
       id,
       taskId: target.task_id,
       groupId,
-      label,
+      label: null,
       mode: 'terminal',
       isMain: false,
       position,
@@ -132,14 +117,15 @@ export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: Database): vo
 
     const mode = input.mode ?? existing.mode
 
+    const label = input.label !== undefined ? input.label : existing.label
     db.prepare(`
       UPDATE terminal_tabs
-      SET label = COALESCE(?, label),
+      SET label = ?,
           mode = ?,
           position = COALESCE(?, position)
       WHERE id = ?
     `).run(
-      input.label !== undefined ? input.label : null,
+      label,
       mode,
       input.position,
       input.id

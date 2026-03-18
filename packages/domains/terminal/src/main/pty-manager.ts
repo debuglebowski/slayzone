@@ -115,7 +115,8 @@ interface PtySession {
   syncQueryPending: string
   // Last emitted process title (to deduplicate pty:title-change events)
   lastEmittedTitle: string
-  lastTitleCheckTime: number
+  // Polls pty.process on interval — decoupled from data flow so idle shells update too
+  titlePollInterval?: NodeJS.Timeout
 }
 
 export type { PtyInfo }
@@ -428,6 +429,37 @@ export function testExecutionContext(
   })
 }
 
+const TITLE_POLL_MS = 500
+
+/** Emit a title change if the title differs from the last emitted one. */
+function emitTitle(session: PtySession, title: string): void {
+  if (!title || title === session.lastEmittedTitle) return
+  session.lastEmittedTitle = title
+  if (!session.win.isDestroyed()) {
+    try {
+      session.win.webContents.send('pty:title-change', session.sessionId, title)
+    } catch { /* Window destroyed */ }
+  }
+}
+
+/** Start polling pty.process on an interval. Decoupled from data flow so idle shells update too. */
+function startTitlePolling(session: PtySession, target: pty.IPty): void {
+  stopTitlePolling(session)
+  session.titlePollInterval = setInterval(() => {
+    const s = sessions.get(session.sessionId)
+    if (!s || s.pty !== target) { stopTitlePolling(session); return }
+    const raw = s.pty.process
+    if (raw) emitTitle(s, raw)
+  }, TITLE_POLL_MS)
+}
+
+function stopTitlePolling(session: PtySession): void {
+  if (session.titlePollInterval) {
+    clearInterval(session.titlePollInterval)
+    session.titlePollInterval = undefined
+  }
+}
+
 export interface CreatePtyOptions {
   win: BrowserWindow
   sessionId: string
@@ -634,8 +666,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       // Dev server URL dedup
       detectedDevUrls: new Set(),
       syncQueryPending: '',
-      lastEmittedTitle: '',
-      lastTitleCheckTime: 0
+      lastEmittedTitle: ''
     })
     notifySessionChange()
     stateMachine.register(sessionId, 'starting')
@@ -659,11 +690,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
     const finalizeSessionExit = (exitCode: number): void => {
       clearStartupTimeout()
       clearEarlyExitWatchdog()
-      // Clear auto-detect timer if pending
+      // Clear pending timers
       const exitSession = sessions.get(sessionId)
       if (exitSession?.sessionIdAutoDetectTimer) {
         clearTimeout(exitSession.sessionIdAutoDetectTimer)
       }
+      if (exitSession) stopTitlePolling(exitSession)
       dismissNotification(sessionId)
       transitionState(sessionId, 'dead')
       recordDiagnosticEvent({
@@ -889,21 +921,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
         }
       }
 
-      // Emit terminal title changes: prefer OSC 0/1/2 title, fall back to PTY process name
-      // OSC titles are always processed immediately; pty.process fallback is throttled to avoid
-      // hitting the native getter on every data chunk during high-throughput output
-      const oscTitle = extractOscTitle(data)
-      const now = Date.now()
-      const processTitle = oscTitle ?? (now - session.lastTitleCheckTime >= 500
-        ? (session.lastTitleCheckTime = now, session.pty.process)
-        : undefined)
-      if (processTitle && processTitle !== session.lastEmittedTitle && !win.isDestroyed()) {
-        session.lastEmittedTitle = processTitle
-        try {
-          win.webContents.send('pty:title-change', sessionId, processTitle)
-        } catch {
-          // Window destroyed, ignore
-        }
+      // OSC title handling: AI modes (claude-code, codex, etc.) set meaningful OSC titles.
+      // Plain terminals ignore OSC (shell prompts emit noisy paths like "user@host:~/dir").
+      // pty.process polling is handled separately by startTitlePolling().
+      if (session.mode !== 'terminal') {
+        const oscTitle = extractOscTitle(data)
+        if (oscTitle) emitTitle(session, oscTitle)
       }
 
       if (!win.isDestroyed()) {
@@ -1017,6 +1040,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
             armStartupTimeout(fallbackPty)
             attachPtyHandlers(fallbackPty)
             schedulePostSpawnCommand(fallbackPty)
+            startTitlePolling(session, fallbackPty)
             return
           } catch (fallbackErr) {
             recordDiagnosticEvent({
@@ -1041,6 +1065,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
     attachPtyHandlers(ptyProcess)
     armStartupTimeout(ptyProcess)
     schedulePostSpawnCommand(ptyProcess)
+    startTitlePolling(sessions.get(sessionId)!, ptyProcess)
     // Recover from rare race where an ultra-fast child can exit before handlers are attached.
     earlyExitWatchdog = setTimeout(() => {
       const session = sessions.get(sessionId)
@@ -1194,6 +1219,7 @@ export function killPty(sessionId: string): boolean {
   if (session.sessionIdAutoDetectTimer) {
     clearTimeout(session.sessionIdAutoDetectTimer)
   }
+  stopTitlePolling(session)
   // Clear state debounce timer
   stateMachine.unregister(sessionId)
   // Dismiss any lingering desktop notification

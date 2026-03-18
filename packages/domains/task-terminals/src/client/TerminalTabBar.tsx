@@ -28,22 +28,7 @@ const MODE_ICONS: Partial<Record<TerminalMode, typeof TerminalIcon>> = {
   'terminal': TerminalIcon
 }
 
-function getTabLabel(tab: TerminalTab, processTitle?: string): string {
-  if (tab.label) return tab.label
-  if (tab.isMain) {
-    switch (tab.mode) {
-      case 'claude-code': return 'Claude Code'
-      case 'codex': return 'Codex'
-      case 'cursor-agent': return 'Cursor'
-      case 'gemini': return 'Gemini'
-      case 'opencode': return 'OpenCode'
-      case 'ccs': return 'CCS'
-      default: return 'Terminal'
-    }
-  }
-  if (processTitle) return processTitle
-  return 'Terminal'
-}
+import { getTabLabel, numberDuplicateLabels } from './get-tab-label'
 
 const DRAG_TYPE = 'application/x-slayzone-pane'
 
@@ -144,6 +129,15 @@ export function TerminalTabBar({
     onPaneMove(tabId, null) // null = new standalone group
   }, [onPaneMove])
 
+  // Pre-compute numbered labels for duplicate disambiguation
+  const rawLabels = new Map<string, string>()
+  for (const group of groups) {
+    for (const tab of group.tabs) {
+      rawLabels.set(tab.id, getTabLabel(tab, terminalTitles?.get(tab.id)))
+    }
+  }
+  const displayLabels = numberDuplicateLabels(rawLabels)
+
   return (
     <div
       data-testid="terminal-tabbar"
@@ -210,7 +204,7 @@ export function TerminalTabBar({
                           onClick={e => e.stopPropagation()}
                         />
                       ) : (
-                        <span className="truncate text-sm">{getTabLabel(tab, terminalTitles?.get(tab.id))}</span>
+                        <span className="truncate text-sm">{displayLabels.get(tab.id)}</span>
                       )}
                       {tab.isMain && (
                         <span className="text-[10px] text-orange-300/80 bg-orange-400/10 px-1.5 rounded-full">main</span>
