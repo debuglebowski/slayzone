@@ -105,7 +105,7 @@ export function AppSidebar({
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const { sidebarBadgeMode } = useAppearance()
-  const activeTabType = useTabStore((s) => s.tabs[s.activeTabIndex]?.type)
+  const activeView = useTabStore((s) => s.activeView)
 
   return (
     <Sidebar collapsible="none" className={zenMode ? "!w-0 h-svh overflow-hidden" : "w-18 h-svh"}>
@@ -162,7 +162,7 @@ export function AppSidebar({
                     variant="ghost"
                     size="icon-lg"
                     onClick={onLeaderboard}
-                    className={cn('rounded-lg', activeTabType === 'leaderboard' ? 'bg-primary text-primary-foreground shadow-md ring-1 ring-primary/30 hover:!bg-primary hover:!text-primary-foreground' : 'text-muted-foreground')}
+                    className={cn('rounded-lg', activeView === 'leaderboard' ? 'bg-primary text-primary-foreground shadow-md ring-1 ring-primary/30 hover:!bg-primary hover:!text-primary-foreground' : 'text-muted-foreground')}
                   >
                     <Trophy className="size-5" />
                   </IconButton>
@@ -177,7 +177,7 @@ export function AppSidebar({
                   variant="ghost"
                   size="icon-lg"
                   onClick={onUsageAnalytics}
-                  className={cn('rounded-lg', activeTabType === 'usage-analytics' ? 'bg-primary text-primary-foreground shadow-md ring-1 ring-primary/30 hover:!bg-primary hover:!text-primary-foreground' : 'text-muted-foreground')}
+                  className={cn('rounded-lg', activeView === 'usage-analytics' ? 'bg-primary text-primary-foreground shadow-md ring-1 ring-primary/30 hover:!bg-primary hover:!text-primary-foreground' : 'text-muted-foreground')}
                 >
                   <BarChart3 className="size-5" />
                 </IconButton>

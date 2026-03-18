@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { recordDiagnosticsTimeline, updateDiagnosticsContext } from '@/lib/diagnosticsClient'
-import type { Tab } from '@slayzone/settings'
+import type { Tab, ActiveView } from '@slayzone/settings'
 
 export function useDiagnosticsSync({
   tabs,
   activeTabIndex,
+  activeView,
   selectedProjectId,
   projects,
   tasks,
@@ -14,6 +15,7 @@ export function useDiagnosticsSync({
 }: {
   tabs: Tab[]
   activeTabIndex: number
+  activeView: ActiveView
   selectedProjectId: string
   projects: { id: string; name: string }[]
   tasks: { length: number }
@@ -63,13 +65,13 @@ export function useDiagnosticsSync({
   // Timeline: tab changed
   const previousActiveTabRef = useRef('home')
   useEffect(() => {
-    const activeTab = tabs[activeTabIndex]
-    const nextTabKey =
-      activeTab?.type === 'task'
-        ? `task:${activeTab.taskId}`
-        : activeTab?.type === 'leaderboard'
-          ? 'leaderboard'
-          : 'home'
+    let nextTabKey: string
+    if (activeView !== 'tabs') {
+      nextTabKey = activeView
+    } else {
+      const activeTab = tabs[activeTabIndex]
+      nextTabKey = activeTab?.type === 'task' ? `task:${activeTab.taskId}` : 'home'
+    }
     if (previousActiveTabRef.current === nextTabKey) return
     recordDiagnosticsTimeline('tab_changed', {
       from: previousActiveTabRef.current,
@@ -77,7 +79,7 @@ export function useDiagnosticsSync({
       activeTabIndex
     })
     previousActiveTabRef.current = nextTabKey
-  }, [tabs, activeTabIndex])
+  }, [tabs, activeTabIndex, activeView])
 
   // Timeline: notification lock changed
   const previousNotificationLockedRef = useRef(notificationState.isLocked)

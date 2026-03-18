@@ -111,6 +111,7 @@ function App(): React.JSX.Element {
   // View state (tabs + selected project, persisted via zustand)
   const tabs = useTabStore((s) => s.tabs)
   const activeTabIndex = useTabStore((s) => s.activeTabIndex)
+  const activeView = useTabStore((s) => s.activeView)
   const selectedProjectId = useTabStore((s) => s.selectedProjectId)
   const { setActiveTabIndex, setSelectedProjectId, openTask: rawOpenTask, openTaskInBackground, reorderTabs, reopenClosedTab } = useTabStore.getState()
   const [, startTransition] = useTransition()
@@ -201,9 +202,7 @@ function App(): React.JSX.Element {
   // Onboarding
   const showAnimatedTour = useDialogStore((s) => s.showAnimatedTour)
   const handleChecklistCheckLeaderboard = useCallback((): void => {
-    const { tabs, setActiveTabIndex } = useTabStore.getState()
-    const idx = tabs.findIndex((t) => t.type === 'leaderboard')
-    if (idx >= 0) setActiveTabIndex(idx)
+    useTabStore.getState().setActiveView('leaderboard')
   }, [])
   const handleChecklistJoinCommunity = useCallback((): void => { void window.api.shell.openExternal(COMMUNITY_DISCORD_URL) }, [])
   const handleChecklistFollowOnX = useCallback((): void => { void window.api.shell.openExternal(COMMUNITY_X_URL) }, [])
@@ -297,7 +296,7 @@ function App(): React.JSX.Element {
   const projectsMap = new Map(projects.map((p) => [p.id, p]))
 
   // Diagnostics (extracted — fire-and-forget side effects)
-  useDiagnosticsSync({ tabs, activeTabIndex, selectedProjectId, projects, tasks, displayTaskCount: displayTasks.length, notificationState, projectPathMissing })
+  useDiagnosticsSync({ tabs, activeTabIndex, activeView, selectedProjectId, projects, tasks, displayTaskCount: displayTasks.length, notificationState, projectPathMissing })
 
   // Keyboard shortcuts
   useHotkeys('mod+n', (e) => {
@@ -646,12 +645,8 @@ function App(): React.JSX.Element {
           onSelectProject={handleSidebarSelectProject}
           onProjectSettings={(project) => openProjectSettings(project)}
           onSettings={handleOpenSettings}
-          onLeaderboard={() => { const store = useTabStore.getState(); const idx = store.tabs.findIndex((t) => t.type === 'leaderboard'); if (idx >= 0) setActiveTabIndex(idx) }}
-          onUsageAnalytics={() => {
-            const store = useTabStore.getState(); const existing = store.tabs.findIndex((t) => t.type === 'usage-analytics')
-            if (existing >= 0) setActiveTabIndex(existing)
-            else { const newTabs = [...store.tabs, { type: 'usage-analytics' as const, title: 'Usage' }]; store.setTabs(newTabs); setActiveTabIndex(newTabs.length - 1) }
-          }}
+          onLeaderboard={() => { useTabStore.getState().setActiveView('leaderboard') }}
+          onUsageAnalytics={() => { useTabStore.getState().setActiveView('usage-analytics') }}
           onTaskClick={openTask} zenMode={zenMode} onboardingChecklist={onboardingChecklist} attentionByProject={attentionByProject}
         />
 
@@ -698,11 +693,12 @@ function App(): React.JSX.Element {
             >
               {tabs.map((tab, i) => {
                 if (explodeMode && tab.type !== 'task') return null
+                const isViewActive = activeView === 'tabs' && i === activeTabIndex
                 return (
                 <div
-                  key={tab.type === 'home' ? 'home' : tab.type === 'leaderboard' ? 'leaderboard' : tab.type === 'usage-analytics' ? 'usage-analytics' : tab.taskId}
-                  className={explodeMode ? "rounded overflow-hidden border border-border min-h-0 relative" : `absolute inset-0 ${i !== activeTabIndex ? 'invisible' : 'z-10'}`}
-                  inert={!explodeMode && i !== activeTabIndex ? true : undefined}
+                  key={tab.type === 'home' ? 'home' : tab.taskId}
+                  className={explodeMode ? "rounded overflow-hidden border border-border min-h-0 relative" : `absolute inset-0 ${!isViewActive ? 'invisible' : 'z-10'}`}
+                  inert={!explodeMode && !isViewActive ? true : undefined}
                 >
                     {tab.type === 'home' ? (
                     <div className="flex flex-col flex-1 p-6 pt-4 h-full" style={{ backgroundColor: colorTintsEnabled ? projectColorBg(selectedProject?.color) : undefined }}>
@@ -786,14 +782,10 @@ function App(): React.JSX.Element {
                         </div>
                       )}
                     </div>
-                    ) : tab.type === 'leaderboard' ? (
-                    <LeaderboardPage />
-                    ) : tab.type === 'usage-analytics' ? (
-                    <UsageAnalyticsPage onTaskClick={openTask} />
                     ) : (
                     <Suspense fallback={<TaskShell />}>
                     <div className={explodeMode ? "absolute inset-0" : "h-full"}>
-                      <TaskDetailDataLoader taskId={tab.taskId} isActive={explodeMode || i === activeTabIndex} compact={explodeMode}
+                      <TaskDetailDataLoader taskId={tab.taskId} isActive={explodeMode || isViewActive} compact={explodeMode}
                         onBack={goBack} onTaskUpdated={updateTask} onArchiveTask={archiveTask} onDeleteTask={deleteTask}
                         onNavigateToTask={openTask} onConvertTask={handleConvertTask} onCloseTab={closeTabByTaskId}
                         settingsRevision={settingsRevision} terminalFocusRequestId={terminalFocusRequests[tab.taskId] ?? 0}
@@ -803,6 +795,16 @@ function App(): React.JSX.Element {
                 </div>
                 )
               })}
+              {activeView === 'leaderboard' && (
+                <div className="absolute inset-0 z-20">
+                  <LeaderboardPage />
+                </div>
+              )}
+              {activeView === 'usage-analytics' && (
+                <div className="absolute inset-0 z-20">
+                  <UsageAnalyticsPage onTaskClick={openTask} />
+                </div>
+              )}
             </div>
 
             {notificationState.isLocked && (

@@ -3,11 +3,11 @@ import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
 import type { TaskStatus } from '@slayzone/task/shared'
 
+export type ActiveView = 'tabs' | 'leaderboard' | 'usage-analytics'
+
 // Tab type (matches TabBar.tsx in app)
 export type Tab =
   | { type: 'home' }
-  | { type: 'leaderboard'; title: string }
-  | { type: 'usage-analytics'; title: string }
   | { type: 'task'; taskId: string; title: string; status?: TaskStatus; isSubTask?: boolean; isTemporary?: boolean }
 
 type TaskTab = Extract<Tab, { type: 'task' }>
@@ -38,6 +38,7 @@ interface TabState {
   // State
   tabs: Tab[]
   activeTabIndex: number
+  activeView: ActiveView
   selectedProjectId: string
   closedTabs: TaskTab[]
   isLoaded: boolean
@@ -47,6 +48,7 @@ interface TabState {
 
   // Pure tab actions
   setActiveTabIndex: (index: number) => void
+  setActiveView: (view: ActiveView) => void
   setSelectedProjectId: (id: string) => void
   setTabs: (tabs: Tab[]) => void
   reorderTabs: (from: number, to: number) => void
@@ -58,7 +60,7 @@ interface TabState {
   reopenClosedTab: () => void
 
   // Internal
-  _loadState: (state: { tabs: Tab[]; activeTabIndex: number; selectedProjectId: string }, opts?: { leaderboardEnabled?: boolean }) => void
+  _loadState: (state: { tabs: Tab[]; activeTabIndex: number; activeView?: ActiveView; selectedProjectId: string }) => void
 }
 
 function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup): number {
@@ -87,12 +89,15 @@ export const useTabStore = create<TabState>()(
   subscribeWithSelector((set, get) => ({
     tabs: [{ type: 'home' }],
     activeTabIndex: 0,
+    activeView: 'tabs' as ActiveView,
     selectedProjectId: '',
     closedTabs: [],
     isLoaded: false,
     _taskLookup: { tasks: [], projects: [] },
 
-    setActiveTabIndex: (index) => set({ activeTabIndex: index }),
+    setActiveTabIndex: (index) => set({ activeTabIndex: index, activeView: 'tabs' }),
+
+    setActiveView: (view) => set({ activeView: view }),
 
     setSelectedProjectId: (id) => set({ selectedProjectId: id }),
 
@@ -118,7 +123,7 @@ export const useTabStore = create<TabState>()(
       const { tabs, _taskLookup } = get()
       const existing = tabs.findIndex((t) => t.type === 'task' && t.taskId === taskId)
       if (existing >= 0) {
-        set({ activeTabIndex: existing })
+        set({ activeTabIndex: existing, activeView: 'tabs' })
       } else {
         const task = _taskLookup.tasks.find((t) => t.id === taskId)
         const title = task?.title || 'Task'
@@ -129,7 +134,7 @@ export const useTabStore = create<TabState>()(
         const insertAt = findWorktreeInsertIndex(taskId, tabs, _taskLookup)
         const newTabs = [...tabs]
         newTabs.splice(insertAt, 0, newTab)
-        set({ tabs: newTabs, activeTabIndex: insertAt })
+        set({ tabs: newTabs, activeTabIndex: insertAt, activeView: 'tabs' })
       }
     },
 
@@ -150,6 +155,8 @@ export const useTabStore = create<TabState>()(
       }
     },
 
+    // Note: intentionally does NOT reset activeView — closing a background tab
+    // while viewing leaderboard/usage-analytics should not dismiss the overlay.
     closeTab: (index) => {
       const { tabs, activeTabIndex, closedTabs } = get()
       const tab = tabs[index]
@@ -191,24 +198,19 @@ export const useTabStore = create<TabState>()(
       set({ closedTabs: newClosed })
     },
 
-    _loadState: (state, opts?: { leaderboardEnabled?: boolean }) => {
-      const leaderboardEnabled = opts?.leaderboardEnabled ?? true
-      const validTabs = Array.isArray(state.tabs) && state.tabs.length > 0 ? state.tabs : [{ type: 'home' as const }]
-      if (validTabs[0]?.type !== 'home') {
+    _loadState: (state) => {
+      // Strip legacy leaderboard/usage-analytics tabs from persisted state
+      const rawTabs = Array.isArray(state.tabs) && state.tabs.length > 0 ? state.tabs : [{ type: 'home' as const }]
+      const validTabs = rawTabs.filter((t: { type: string }) => t.type === 'home' || t.type === 'task')
+      if (validTabs.length === 0 || validTabs[0]?.type !== 'home') {
         validTabs.unshift({ type: 'home' })
       }
-      if (leaderboardEnabled && !validTabs.some((t) => t.type === 'leaderboard')) {
-        const homeIdx = validTabs.findIndex((t) => t.type === 'home')
-        validTabs.splice(homeIdx + 1, 0, { type: 'leaderboard', title: 'Leaderboard' })
-      }
-      if (!leaderboardEnabled) {
-        const lbIdx = validTabs.findIndex((t) => t.type === 'leaderboard')
-        if (lbIdx >= 0) validTabs.splice(lbIdx, 1)
-      }
       const clampedIndex = Math.max(0, Math.min(state.activeTabIndex ?? 0, validTabs.length - 1))
+      const activeView: ActiveView = state.activeView === 'leaderboard' || state.activeView === 'usage-analytics' ? state.activeView : 'tabs'
       set({
         tabs: validTabs,
         activeTabIndex: clampedIndex,
+        activeView,
         selectedProjectId: typeof state.selectedProjectId === 'string' ? state.selectedProjectId : '',
         isLoaded: true
       })
@@ -219,21 +221,18 @@ export const useTabStore = create<TabState>()(
 // Eagerly load persisted state at module scope — runs before any component mounts,
 // eliminating race conditions between store hydration and React effects.
 export const tabStoreReady: Promise<void> = (typeof window !== 'undefined' && window.api?.settings
-  ? (performance.mark('sz:tabStore:start'), Promise.all([
-    window.api.settings.get('viewState'),
-    window.api.settings.get('leaderboard_enabled')
-  ])).then(([value, lbVal]) => {
-    const leaderboardEnabled = lbVal !== '0'
+  ? (performance.mark('sz:tabStore:start'),
+    window.api.settings.get('viewState')
+  ).then((value) => {
     if (value) {
       try {
-        useTabStore.getState()._loadState(JSON.parse(value), { leaderboardEnabled })
+        useTabStore.getState()._loadState(JSON.parse(value))
       } catch {
         useTabStore.setState({ isLoaded: true })
       }
     } else {
       useTabStore.getState()._loadState(
-        { tabs: [], activeTabIndex: 0, selectedProjectId: '' },
-        { leaderboardEnabled }
+        { tabs: [], activeTabIndex: 0, selectedProjectId: '' }
       )
     }
   }).catch(() => {
@@ -249,7 +248,7 @@ export const tabStoreReady: Promise<void> = (typeof window !== 'undefined' && wi
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 useTabStore.subscribe(
-  (state) => ({ tabs: state.tabs, activeTabIndex: state.activeTabIndex, selectedProjectId: state.selectedProjectId }),
+  (state) => ({ tabs: state.tabs, activeTabIndex: state.activeTabIndex, activeView: state.activeView, selectedProjectId: state.selectedProjectId }),
   (slice) => {
     if (!useTabStore.getState().isLoaded) return
     if (_debounceTimer) clearTimeout(_debounceTimer)

@@ -21,8 +21,6 @@ import { CSS } from '@dnd-kit/utilities'
 
 export type Tab =
   | { type: 'home' }
-  | { type: 'leaderboard'; title: string }
-  | { type: 'usage-analytics'; title: string }
   | { type: 'task'; taskId: string; title: string; terminalState?: TerminalState; isSubTask?: boolean; isTemporary?: boolean }
 
 interface TabBarProps {

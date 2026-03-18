@@ -59,21 +59,8 @@ export function GeneralSettingsTab() {
             onCheckedChange={async (checked) => {
               setLeaderboardEnabled(checked)
               await window.api.settings.set('leaderboard_enabled', checked ? '1' : '0')
-              const store = useTabStore.getState()
-              if (checked) {
-                if (!store.tabs.some(t => t.type === 'leaderboard')) {
-                  const homeIdx = store.tabs.findIndex(t => t.type === 'home')
-                  const newTabs = [...store.tabs]
-                  newTabs.splice(homeIdx + 1, 0, { type: 'leaderboard', title: 'Leaderboard' })
-                  store.setTabs(newTabs)
-                }
-              } else {
-                const lbIdx = store.tabs.findIndex(t => t.type === 'leaderboard')
-                if (lbIdx >= 0) {
-                  const newTabs = store.tabs.filter((_, i) => i !== lbIdx)
-                  const active = store.activeTabIndex >= lbIdx ? Math.max(0, store.activeTabIndex - 1) : store.activeTabIndex
-                  useTabStore.setState({ tabs: newTabs, activeTabIndex: active })
-                }
+              if (!checked && useTabStore.getState().activeView === 'leaderboard') {
+                useTabStore.getState().setActiveView('tabs')
               }
             }}
           />
