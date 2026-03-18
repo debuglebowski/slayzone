@@ -25,6 +25,14 @@ export function migrateXdgIfNeeded(): MigrationResult {
   const oldDir = path.join(configHome, 'slayzone')
   const newDir = getStateDir()
 
+  return migrateStateDir(oldDir, newDir)
+}
+
+/**
+ * Core migration logic: move state from oldDir to newDir.
+ * Exported separately for testability (migrateXdgIfNeeded adds the platform guard + dir computation).
+ */
+export function migrateStateDir(oldDir: string, newDir: string): MigrationResult {
   // Same dir (unusual XDG config), nothing to do
   if (oldDir === newDir) return { migrated: false, failed: false }
 
@@ -47,18 +55,7 @@ export function migrateXdgIfNeeded(): MigrationResult {
       fs.renameSync(oldDir, newDir)
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
-
-      // Cross-device: copy then verify then delete
-      fs.cpSync(oldDir, newDir, { recursive: true })
-
-      // Verify critical files made it
-      for (const f of expectedFiles) {
-        if (!fs.existsSync(path.join(newDir, f))) {
-          throw new Error(`Verification failed: ${f} missing at ${newDir}`)
-        }
-      }
-
-      fs.rmSync(oldDir, { recursive: true })
+      copyVerifyDelete(oldDir, newDir, expectedFiles)
     }
 
     console.error(`[slayzone] Migrated state from ${oldDir} to ${newDir}`)
@@ -77,6 +74,22 @@ export function migrateXdgIfNeeded(): MigrationResult {
 
     return { migrated: false, failed: true }
   }
+}
+
+/**
+ * Cross-device migration: copy oldDir to newDir, verify critical files, then delete oldDir.
+ * Exported for testability — rename (EXDEV) can't be simulated on same-filesystem tmp dirs.
+ */
+export function copyVerifyDelete(oldDir: string, newDir: string, expectedFiles: string[]): void {
+  fs.cpSync(oldDir, newDir, { recursive: true })
+
+  for (const f of expectedFiles) {
+    if (!fs.existsSync(path.join(newDir, f))) {
+      throw new Error(`Verification failed: ${f} missing at ${newDir}`)
+    }
+  }
+
+  fs.rmSync(oldDir, { recursive: true })
 }
 
 /**

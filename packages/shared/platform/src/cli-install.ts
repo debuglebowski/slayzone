@@ -74,6 +74,8 @@ function installWindows(cliSrcPath: string, binDir: string, target: string): Cli
   const destJs = path.join(binDir, 'slay.js')
   if (fs.existsSync(srcJs)) {
     fs.copyFileSync(srcJs, destJs)
+  } else {
+    return { ok: false, error: `CLI JS source not found: ${srcJs}` }
   }
 
   // Write .cmd shim that detects Node version for --experimental-sqlite
