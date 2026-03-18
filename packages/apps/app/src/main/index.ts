@@ -773,9 +773,32 @@ app.whenReady().then(async () => {
   const savedTheme = row?.value as 'light' | 'dark' | 'system' | undefined
   nativeTheme.themeSource = savedTheme ?? 'dark'
 
-  // Set dock icon on macOS (needed for dev mode)
-  if (process.platform === 'darwin') {
-    app.dock?.setIcon(icon)
+  // Default keys for menu-driven shortcuts (main process only)
+  const MENU_SHORTCUT_DEFAULTS: Record<string, string> = {
+    'global-settings': 'mod+,',
+    'project-settings': 'mod+shift+,',
+    'new-temp-task': 'mod+shift+n',
+    'close-tab': 'mod+w',
+    'close-task': 'mod+shift+w',
+  }
+
+  function toElectronAccelerator(keys: string): string {
+    return keys.split('+').map(part => {
+      if (part === 'mod') return 'CmdOrCtrl'
+      if (part === 'shift') return 'Shift'
+      if (part === 'alt') return 'Alt'
+      if (part === 'ctrl') return 'Ctrl'
+      return part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)
+    }).join('+')
+  }
+
+  function getMenuAccelerator(id: string, overrides: Record<string, string>): string {
+    const keys = overrides[id] ?? MENU_SHORTCUT_DEFAULTS[id] ?? ''
+    return toElectronAccelerator(keys)
+  }
+
+  function buildAppMenu(overrides: Record<string, string>): void {
+    if (process.platform !== 'darwin') return
 
     // Set custom application menu to show correct app name in menu items
     const appName = 'SlayZone'
@@ -790,12 +813,12 @@ app.whenReady().then(async () => {
           },
           {
             label: 'Settings...',
-            accelerator: 'Cmd+,',
+            accelerator: getMenuAccelerator('global-settings', overrides),
             click: () => emitOpenSettings()
           },
           {
             label: 'Project Settings...',
-            accelerator: 'Cmd+Shift+,',
+            accelerator: getMenuAccelerator('project-settings', overrides),
             click: () => emitOpenProjectSettings()
           },
           { type: 'separator' },
@@ -818,7 +841,7 @@ app.whenReady().then(async () => {
         submenu: [
           {
             label: 'New Temporary Task',
-            accelerator: 'CmdOrCtrl+Shift+N',
+            accelerator: getMenuAccelerator('new-temp-task', overrides),
             click: () => emitNewTemporaryTask()
           }
         ]
@@ -868,12 +891,12 @@ app.whenReady().then(async () => {
           { role: 'zoom' },
           {
             label: 'Close Tab',
-            accelerator: 'CmdOrCtrl+W',
+            accelerator: getMenuAccelerator('close-tab', overrides),
             click: () => mainWindow?.webContents.send('app:close-current-focus')
           },
           {
             label: 'Close Task',
-            accelerator: 'CmdOrCtrl+Shift+W',
+            accelerator: getMenuAccelerator('close-task', overrides),
             click: () => mainWindow?.webContents.send('app:close-active-task')
           },
           { type: 'separator' },
@@ -885,6 +908,23 @@ app.whenReady().then(async () => {
     ]
     Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   }
+
+  // Set dock icon on macOS (needed for dev mode)
+  if (process.platform === 'darwin') {
+    app.dock?.setIcon(icon)
+  }
+
+  // Build initial menu with saved shortcut overrides
+  const raw = db.prepare('SELECT value FROM settings WHERE key = ?').get('custom_shortcuts') as { value: string } | undefined
+  const initialOverrides: Record<string, string> = raw?.value ? JSON.parse(raw.value) : {}
+  buildAppMenu(initialOverrides)
+
+  // Rebuild menu whenever shortcuts change
+  ipcMain.on('shortcuts:changed', () => {
+    const raw = db.prepare('SELECT value FROM settings WHERE key = ?').get('custom_shortcuts') as { value: string } | undefined
+    const overrides: Record<string, string> = raw?.value ? JSON.parse(raw.value) : {}
+    buildAppMenu(overrides)
+  })
 
   // Register diagnostics first so IPC handlers below are instrumented.
   registerDiagnosticsHandlers(ipcMain, db, diagDb)
