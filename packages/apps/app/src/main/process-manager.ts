@@ -5,6 +5,7 @@ import type { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { createStatsPoller } from './pid-stats'
 import { extractOscTitle } from '@slayzone/terminal/shared'
+import { resolveUserShell } from '@slayzone/terminal/main'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
 
@@ -137,9 +138,14 @@ function handleProcessData(proc: ManagedProcess, data: Buffer): void {
 function doSpawn(proc: ManagedProcess): void {
   proc.spawnedAt = new Date().toISOString()
   startStatsPolling()
-  const child = spawn(proc.command, [], {
+  const shell = resolveUserShell()
+  const isFish = shell.endsWith('/fish')
+  const isWin = process.platform === 'win32'
+  // fish needs -i (interactive) for PATH init inside `if status is-interactive` blocks
+  // bash/zsh only need -l (login) to source profile — -i without a TTY causes side effects
+  const shellArgs = isWin ? ['/c', proc.command] : [...(isFish ? ['-i', '-l'] : ['-l']), '-c', proc.command]
+  const child = spawn(shell, shellArgs, {
     cwd: proc.cwd,
-    shell: true,
     env: { ...process.env }
   })
 

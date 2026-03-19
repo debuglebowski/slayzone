@@ -392,6 +392,23 @@ test.describe('CLI: slay', () => {
       expect(r.status).not.toBe(0)
       expect(r.stderr).toContain('not found')
     })
+
+    test('spawns command via user shell and captures output', async ({ electronApp }) => {
+      const id = await electronApp.evaluate(() => {
+        const spawn = (globalThis as Record<string, unknown>).__spawnProcess as (
+          projectId: string | null, taskId: string | null, label: string, command: string, cwd: string, autoRestart: boolean
+        ) => string
+        return spawn(null, null, 'shell test', 'echo "hello from $SHELL"', '/tmp', false)
+      })
+      await new Promise((r) => setTimeout(r, 500))
+
+      const r = runProcessesCli('processes', 'logs', id.slice(0, 8))
+      expect(r.status).toBe(0)
+      // Verifies command runs through a real shell (variable expansion works)
+      expect(r.stdout).toContain('hello from /')
+
+      runProcessesCli('processes', 'kill', id.slice(0, 8))
+    })
   })
 
   // --- slay tasks subtasks ---
