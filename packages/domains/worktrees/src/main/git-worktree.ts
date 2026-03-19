@@ -399,16 +399,30 @@ export async function copyIgnoredFiles(
   })
 }
 
-export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
+export async function removeWorktree(
+  repoPath: string,
+  worktreePath: string,
+  branchToDelete?: string
+): Promise<{ branchDeleted?: boolean; branchError?: string }> {
   try {
     await execGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath })
   } catch (err) {
     if (!existsSync(worktreePath)) {
       await execGit(['worktree', 'prune'], { cwd: repoPath })
-      return
+    } else {
+      throw err
     }
-    throw err
   }
+
+  if (!branchToDelete) return {}
+
+  const currentBranch = await getCurrentBranch(repoPath)
+  if (currentBranch === branchToDelete) {
+    return { branchDeleted: false, branchError: `Cannot delete branch "${branchToDelete}" — it is the current branch` }
+  }
+
+  const result = await deleteBranch(repoPath, branchToDelete, true)
+  return { branchDeleted: result.success, branchError: result.error }
 }
 
 export async function initRepo(repoPath: string): Promise<void> {
@@ -429,7 +443,7 @@ export async function listBranches(repoPath: string): Promise<string[]> {
     const output = await execGit(['branch', '--list', '--no-color'], { cwd: repoPath })
     return output
       .split('\n')
-      .map(line => line.replace(/^\*?\s+/, '').trim())
+      .map(line => line.replace(/^[*+]?\s+/, '').trim())
       .filter(Boolean)
   } catch {
     return []
@@ -1152,7 +1166,7 @@ export async function resolveChildBranches(repoPath: string, baseBranch: string)
     ])
 
     const mergedBranches = new Set(
-      mergedOutput.split('\n').map(l => l.replace(/^\*?\s+/, '').trim()).filter(Boolean)
+      mergedOutput.split('\n').map(l => l.replace(/^[*+]?\s+/, '').trim()).filter(Boolean)
     )
 
     const otherBranches = allBranches.filter(b => b !== baseBranch)

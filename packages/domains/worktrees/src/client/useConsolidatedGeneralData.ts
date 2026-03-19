@@ -56,7 +56,7 @@ export interface ConsolidatedGeneralData {
   handleAddWorktree: () => Promise<void>
   handleAddWorktreeFromBranch: (sourceBranch: string) => Promise<void>
   handleLinkWorktree: (worktreePath: string, branch: string | null) => Promise<void>
-  handleRemoveWorktree: () => Promise<void>
+  handleRemoveWorktree: (branchToDelete?: string) => Promise<void>
   handleInitGit: () => Promise<void>
   handleAction: (action: string) => Promise<void>
   handleConfirmedAction: (action: string, label: string) => void
@@ -396,12 +396,15 @@ export function useConsolidatedGeneralData(
     }
   }, [task.id, currentBranch, onUpdateTask])
 
-  const handleRemoveWorktree = useCallback(async () => {
+  const handleRemoveWorktree = useCallback(async (branchToDelete?: string) => {
     if (!projectPath || !task.worktree_path) return
     setRemoving(true)
     try {
-      await window.api.git.removeWorktree(projectPath, task.worktree_path)
+      const result = await window.api.git.removeWorktree(projectPath, task.worktree_path, branchToDelete)
       await onUpdateTask({ id: task.id, worktreePath: null, worktreeParentBranch: null })
+      if (result.branchError) {
+        toast(result.branchError)
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to remove worktree')
     } finally {

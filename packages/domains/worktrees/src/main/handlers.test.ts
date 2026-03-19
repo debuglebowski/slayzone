@@ -156,7 +156,6 @@ describe('git:removeWorktree', () => {
   test('removes worktree', () => {
     const wtPath = path.join(root, 'wt-1')
     h.invoke('git:removeWorktree', repoPath, wtPath)
-    // Worktree dir should be gone
     expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
   })
 })

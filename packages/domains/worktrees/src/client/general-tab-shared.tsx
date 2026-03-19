@@ -267,23 +267,34 @@ export function WorktreeRemoveButton({ data }: { data: ConsolidatedGeneralData }
         <TooltipContent>Delete worktree directory from disk. Branch is kept, but uncommitted changes will be lost.</TooltipContent>
       </Tooltip>
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete worktree</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="space-y-2">
+              <div className="space-y-4 pt-1">
                 <p>This will permanently delete the worktree directory from disk and unlink it from this task.</p>
-                <p className="font-mono text-[11px] bg-muted px-2 py-1 rounded break-all">{data.metadata?.path ?? data.targetPath}</p>
-                <ul className="text-xs space-y-1 list-disc pl-4">
-                  <li>The branch <span className="font-mono font-medium">{data.worktreeBranch ?? data.taskBranch}</span> will be kept in the repository</li>
-                  <li className="text-destructive font-medium">Any uncommitted changes in the worktree will be permanently lost</li>
-                </ul>
+                <p className="font-mono text-[11px] bg-muted px-3 py-2 rounded break-all">{data.metadata?.path ?? data.targetPath}</p>
+                <p className="text-xs text-destructive font-medium">Any uncommitted changes in the worktree will be permanently lost.</p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex justify-between sm:justify-between mt-4">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => data.handleRemoveWorktree()}>Delete worktree</AlertDialogAction>
+            <div className="flex gap-2">
+              <AlertDialogAction
+                className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                onClick={() => data.handleRemoveWorktree()}
+              >
+                Delete worktree
+              </AlertDialogAction>
+              <AlertDialogAction
+                className="bg-destructive text-white hover:bg-destructive/90"
+                disabled={!(data.worktreeBranch ?? data.taskBranch)}
+                onClick={() => data.handleRemoveWorktree(data.worktreeBranch ?? data.taskBranch ?? undefined)}
+              >
+                Delete worktree & branch
+              </AlertDialogAction>
+            </div>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

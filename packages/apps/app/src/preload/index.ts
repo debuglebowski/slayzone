@@ -284,8 +284,8 @@ const api: ElectronAPI = {
     detectWorktrees: (repoPath) => ipcRenderer.invoke('git:detectWorktrees', repoPath),
     createWorktree: (opts) =>
       ipcRenderer.invoke('git:createWorktree', opts),
-    removeWorktree: (repoPath, worktreePath) =>
-      ipcRenderer.invoke('git:removeWorktree', repoPath, worktreePath),
+    removeWorktree: (repoPath, worktreePath, branchToDelete?) =>
+      ipcRenderer.invoke('git:removeWorktree', repoPath, worktreePath, branchToDelete),
     init: (path) => ipcRenderer.invoke('git:init', path),
     getCurrentBranch: (path) => ipcRenderer.invoke('git:getCurrentBranch', path),
     listBranches: (path) => ipcRenderer.invoke('git:listBranches', path),

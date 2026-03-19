@@ -395,7 +395,7 @@ export interface ElectronAPI {
     detectChildRepos: (projectPath: string) => Promise<{ name: string; path: string }[]>
     detectWorktrees: (repoPath: string) => Promise<DetectedWorktree[]>
     createWorktree: (opts: CreateWorktreeOpts) => Promise<{ setupResult: { ran: boolean; success?: boolean; output?: string } }>
-    removeWorktree: (repoPath: string, worktreePath: string) => Promise<void>
+    removeWorktree: (repoPath: string, worktreePath: string, branchToDelete?: string) => Promise<{ branchDeleted?: boolean; branchError?: string }>
     init: (path: string) => Promise<void>
     getCurrentBranch: (path: string) => Promise<string | null>
     listBranches: (path: string) => Promise<string[]>
