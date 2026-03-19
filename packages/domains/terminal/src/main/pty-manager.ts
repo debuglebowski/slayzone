@@ -12,6 +12,7 @@ import { getAdapter, type TerminalMode, type TerminalAdapter, type SpawnConfig, 
 import { interpolateTemplate } from './adapters/template-interpolation'
 import { StateMachine, activityToTerminalState } from './state-machine'
 import { quoteForShell, buildExecCommand, resolveUserShell, getShellStartupArgs } from './shell-env'
+import { shouldShellFallback, shouldNotifySessionNotFound, buildRecoveryMessage } from './pty-exit-strategy'
 
 // Database reference for notifications
 let db: Database | null = null
@@ -617,6 +618,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
     const canRetryInteractiveOnly = !transport && initialArgs.includes('-i') && initialArgs.includes('-l')
     let usedArgs = [...initialArgs]
     let usedFallback = false
+    let usedShellFallback = false
     const spawnStartTs = Date.now()
     let ptyProcess: pty.IPty
     try {
@@ -1053,6 +1055,85 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
               payload: {
                 shell: spawnConfig.shell,
                 attemptedArgs: fallbackArgs
+              }
+            })
+          }
+        }
+
+        // #6: Notify renderer on stale resume (any provider, not just text-match)
+        const exitCtx = { exitCode, terminalMode, hasPostSpawnCommand: !!spawnConfig.postSpawnCommand, resuming, usedShellFallback }
+        if (shouldNotifySessionNotFound(exitCtx) && !win.isDestroyed()) {
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'pty.resume_fast_exit',
+            sessionId,
+            taskId: taskIdFromSessionId(sessionId),
+            payload: {
+              exitCode,
+              mode: terminalMode,
+              reason: firstOutputTs === null ? 'resume_nonzero_exit_no_output' : 'resume_nonzero_exit_with_output'
+            }
+          })
+          try {
+            win.webContents.send('pty:session-not-found', sessionId)
+          } catch {
+            // Window destroyed, ignore
+          }
+        }
+
+        // #5: Shell fallback — spawn interactive shell when AI provider exits non-zero
+        if (shouldShellFallback(exitCtx)) {
+          const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
+          const previousArgs = [...usedArgs]
+          try {
+            const fallbackShellPty = pty.spawn(spawnFile, shellOnlyArgs, spawnOptions)
+            usedShellFallback = true
+            ptyProcess = fallbackShellPty
+            session.pty = fallbackShellPty
+            usedArgs = shellOnlyArgs
+            usedFallback = true
+
+            const infoLine = buildRecoveryMessage(terminalMode, exitCode)
+            session.buffer.append(infoLine)
+            if (!win.isDestroyed()) {
+              try {
+                win.webContents.send('pty:data', sessionId, infoLine, session.buffer.getCurrentSeq())
+              } catch {
+                // Window destroyed, ignore
+              }
+            }
+
+            recordDiagnosticEvent({
+              level: 'warn',
+              source: 'pty',
+              event: 'pty.shell_fallback',
+              sessionId,
+              taskId: taskIdFromSessionId(sessionId),
+              message: `${terminalMode} exited with code ${String(exitCode)}; falling back to interactive shell`,
+              payload: {
+                exitCode,
+                mode: terminalMode,
+                previousArgs,
+                fallbackArgs: shellOnlyArgs
+              }
+            })
+
+            armStartupTimeout(fallbackShellPty)
+            attachPtyHandlers(fallbackShellPty)
+            startTitlePolling(session, fallbackShellPty)
+            return
+          } catch (fallbackErr) {
+            recordDiagnosticEvent({
+              level: 'error',
+              source: 'pty',
+              event: 'pty.shell_fallback_failed',
+              sessionId,
+              taskId: taskIdFromSessionId(sessionId),
+              message: (fallbackErr as Error).message,
+              payload: {
+                shell: spawnFile,
+                attemptedArgs: shellOnlyArgs
               }
             })
           }
