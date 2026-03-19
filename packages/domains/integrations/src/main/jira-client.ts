@@ -19,7 +19,11 @@ export function parseJiraCredential(credential: string): JiraCredential {
 
 export function buildJiraCredential(email: string, apiToken: string, domain: string): string {
   const token = Buffer.from(`${email}:${apiToken}`).toString('base64')
-  return JSON.stringify({ token, domain })
+  // Strip protocol, trailing slashes, and paths so only the hostname remains
+  const cleanDomain = domain
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+  return JSON.stringify({ token, domain: cleanDomain })
 }
 
 async function requestJira<T>(
@@ -39,15 +43,21 @@ async function requestJira<T>(
     }
   }
 
-  const res = await fetch(url.toString(), {
-    method: options?.method ?? 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Basic ${token}`,
-      Accept: 'application/json'
-    },
-    body: options?.body ? JSON.stringify(options.body) : undefined
-  })
+  let res: Response
+  try {
+    res = await fetch(url.toString(), {
+      method: options?.method ?? 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Basic ${token}`,
+        Accept: 'application/json'
+      },
+      body: options?.body ? JSON.stringify(options.body) : undefined
+    })
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err)
+    throw new Error(`Could not reach ${domain} — check that the domain is correct and you're online (${cause})`)
+  }
 
   if (!res.ok) {
     let detail = ''
