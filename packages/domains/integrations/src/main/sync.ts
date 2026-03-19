@@ -765,35 +765,71 @@ export async function runDiscovery(db: Database): Promise<number> {
   `).all() as Array<IntegrationProjectMapping & { credential_ref: string }>
 
   let totalDiscovered = 0
+  let networkDown = false
   for (const mapping of mappings) {
     try {
       const adapter = getAdapter(mapping.provider as IntegrationProvider)
       const credential = readCredential(db, mapping.credential_ref)
       totalDiscovered += await discoverIssues(db, adapter, mapping, credential)
     } catch (err) {
+      if (isNetworkError(err)) {
+        if (!networkDown) {
+          networkDown = true
+          console.warn(`[discovery] network unavailable, skipping remaining mappings`)
+        }
+        continue
+      }
       console.error(`[discovery] failed for mapping ${mapping.id} (${mapping.provider}):`, err)
     }
   }
+  if (networkDown) throw new Error('fetch failed') // propagate to poller for backoff
   return totalDiscovered
 }
 
 let discoveryRunning = false
+let consecutiveFailures = 0
+const BASE_INTERVAL = 60 * 1000
+const MAX_INTERVAL = 30 * 60 * 1000 // 30 min cap
+
+function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const msg = err.message + (err.cause instanceof Error ? err.cause.message : '')
+  return msg.includes('ENOTFOUND') || msg.includes('CONNECT_TIMEOUT') || msg.includes('fetch failed') || msg.includes('ENETUNREACH')
+}
 
 export function startDiscoveryPoller(db: Database, onChanged?: () => void): NodeJS.Timeout {
   void runDiscovery(db).then((discovered) => {
+    consecutiveFailures = 0
     if (discovered && discovered > 0) onChanged?.()
   }).catch((err) => {
-    console.error('Initial discovery failed:', err)
+    consecutiveFailures++
+    console.error('Initial discovery failed:', isNetworkError(err) ? `[offline] ${(err as Error).message}` : err)
   })
   return setInterval(() => {
     if (discoveryRunning) return
+    // Exponential backoff: skip ticks when backing off
+    const backoffInterval = Math.min(BASE_INTERVAL * Math.pow(2, consecutiveFailures), MAX_INTERVAL)
+    if (consecutiveFailures > 0 && backoffInterval > BASE_INTERVAL) {
+      // Only run every Nth tick based on backoff multiplier
+      const ticksToSkip = Math.floor(backoffInterval / BASE_INTERVAL)
+      if (Math.random() > 1 / ticksToSkip) return
+    }
     discoveryRunning = true
     void runDiscovery(db).then((discovered) => {
+      consecutiveFailures = 0
       if (discovered && discovered > 0) onChanged?.()
     }).catch((err) => {
-      console.error('Discovery poll failed:', err)
+      consecutiveFailures++
+      if (isNetworkError(err)) {
+        // Log once, then suppress until success
+        if (consecutiveFailures <= 2) {
+          console.warn(`[discovery] offline, backing off (attempt ${consecutiveFailures})`)
+        }
+      } else {
+        console.error('Discovery poll failed:', err)
+      }
     }).finally(() => {
       discoveryRunning = false
     })
-  }, 60 * 1000)
+  }, BASE_INTERVAL)
 }
