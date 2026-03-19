@@ -238,8 +238,6 @@
     background: #ffffff;
     color: #1a1a2e;
   }
-  .bottom-section .pitch h2 { color: #1a1a2e; }
-  .bottom-section .pitch p { color: #555; }
   .bottom-section .features-grid { background: #e0e0e8; border-color: #e0e0e8; }
   .bottom-section .feature { background: #fff; }
   .bottom-section .feature h3 { color: #1a1a2e; }
@@ -254,15 +252,18 @@
   .bottom-section .stat-line { color: #666; }
   .bottom-section .stat-line .num { color: var(--accent); }
   .bottom-section .stat-line .sep { color: #ccc; }
-  .bottom-section .pitch strong { color: #1a1a2e; }
   .stat-line { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--text-dim); }
   .stat-line .num { color: var(--accent); font-weight: 700; font-size: 18px; }
   .stat-line .sep { margin: 0 16px; color: var(--border); }
-  .pitch { padding: 0 0 80px; max-width: 600px; margin: 0 auto; text-align: center; }
-  .pitch h2 { font-size: 28px; font-weight: 700; letter-spacing: -1px; margin-bottom: 20px; }
-  .pitch p { color: var(--text-dim); font-size: 16px; line-height: 1.7; }
-  .pitch p + p { margin-top: 16px; }
-  .pitch strong { color: var(--text); font-weight: 500; }
+  /* Terminal love banner — deep ocean */
+  .terminal-love-banner { margin-left: calc(-50vw + 50%); margin-right: calc(-50vw + 50%); padding: 80px 24px; text-align: center; background: linear-gradient(180deg, #151530 0%, #0a1628 50%, #0d1f2d 100%); position: relative; overflow: hidden; cursor: default; transition: background 0.6s ease; }
+  .terminal-love-banner::before { content: ''; position: absolute; inset: 0; opacity: 0.03; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); pointer-events: none; }
+  .terminal-love-banner canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .terminal-love-banner h2 { font-size: clamp(24px, 3.5vw, 32px); font-weight: 700; letter-spacing: -1px; line-height: 1.3; color: #fff; position: relative; z-index: 1; transition: text-shadow 0.4s ease; }
+  .terminal-love-banner:hover h2 { text-shadow: 0 0 30px rgba(56, 182, 255, 0.3), 0 0 60px rgba(56, 182, 255, 0.1); }
+  .terminal-love-banner .love { font-family: 'Caveat', cursive; font-weight: 500; font-size: 1.2em; background: linear-gradient(135deg, var(--accent), var(--accent-light)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; padding: 0 4px; }
+  .terminal-love-banner .cursor { display: inline-block; width: 2px; height: 0.85em; background: var(--accent); margin-left: 3px; vertical-align: baseline; animation: blink 1s step-end infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
   .features { padding: 80px 0 0; }
   .features-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
   .feature { background: var(--surface); padding: 32px 28px; }
@@ -340,7 +341,7 @@
   .bench-footnote .bench-fn-highlight { color: #999; }
 
   /* TESTIMONIALS */
-  .testimonials { padding: 80px 0 40px; }
+  .testimonials { padding: 80px 0 100px; }
   .testimonials h2 { font-size: 28px; font-weight: 700; letter-spacing: -1px; text-align: center; margin-bottom: 24px; color: #1a1a2e; }
   .testimonials .test-sub { font-size: 14px; color: #999; text-align: center; margin-bottom: 48px; font-family: 'JetBrains Mono', monospace; }
   .test-grid { columns: 3; column-gap: 16px; }
@@ -768,6 +769,11 @@
     </div>
   </section>
 
+  <section class="terminal-love-banner" id="deep-banner">
+    <canvas id="deep-canvas"></canvas>
+    <h2>Let's make the world <span class="love">fall in love</span> with terminals<span class="cursor"></span></h2>
+  </section>
+
   <section class="cta-section">
     <h2>Ready to Slay?</h2>
     <p class="cta-sub">(This actually is a real app)<br>All platforms. Free. Open source.</p>
@@ -1027,6 +1033,143 @@ function run() {
 })();
 
 setTimeout(run, 1200);
+</script>
+<script>
+// Deep ocean banner — bioluminescent particles + caustic light
+(function() {
+  var banner = document.getElementById('deep-banner');
+  var canvas = document.getElementById('deep-canvas');
+  var ctx = canvas.getContext('2d');
+  var particles = [];
+  var caustics = [];
+  var hovering = false;
+  var hoverFade = 0; // 0-1
+  var raf;
+  var W, H;
+
+  function resize() {
+    var r = banner.getBoundingClientRect();
+    W = canvas.width = r.width;
+    H = canvas.height = r.height;
+  }
+
+  // Bioluminescent particle
+  function makeParticle() {
+    var hues = [190, 200, 210, 170, 240]; // cyan-blue range
+    var hue = hues[Math.floor(Math.random() * hues.length)];
+    return {
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: Math.random() * 2.5 + 0.5,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: -Math.random() * 0.4 - 0.1, // drift upward slowly
+      alpha: 0,
+      maxAlpha: Math.random() * 0.6 + 0.2,
+      pulse: Math.random() * Math.PI * 2,
+      pulseSpeed: Math.random() * 0.02 + 0.01,
+      hue: hue,
+      glowSize: Math.random() * 15 + 8
+    };
+  }
+
+  // Caustic light patch
+  function makeCaustic() {
+    return {
+      x: Math.random() * W,
+      y: Math.random() * H,
+      rx: Math.random() * 80 + 40,
+      ry: Math.random() * 40 + 20,
+      alpha: 0,
+      maxAlpha: Math.random() * 0.04 + 0.01,
+      phase: Math.random() * Math.PI * 2,
+      speed: Math.random() * 0.008 + 0.003,
+      drift: Math.random() * 0.2 + 0.05,
+      angle: Math.random() * Math.PI
+    };
+  }
+
+  function init() {
+    resize();
+    particles = [];
+    caustics = [];
+    for (var i = 0; i < 50; i++) particles.push(makeParticle());
+    for (var j = 0; j < 6; j++) caustics.push(makeCaustic());
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Fade toward target
+    var target = hovering ? 1 : 0;
+    hoverFade += (target - hoverFade) * 0.04;
+
+    if (hoverFade < 0.005 && !hovering) {
+      hoverFade = 0;
+      ctx.clearRect(0, 0, W, H);
+      raf = null;
+      return;
+    }
+
+    // Caustic light patches
+    for (var c = 0; c < caustics.length; c++) {
+      var cs = caustics[c];
+      cs.phase += cs.speed;
+      cs.x += cs.drift;
+      if (cs.x > W + 100) cs.x = -100;
+      var a = (Math.sin(cs.phase) * 0.5 + 0.5) * cs.maxAlpha * hoverFade;
+      ctx.save();
+      ctx.translate(cs.x, cs.y);
+      ctx.rotate(cs.angle);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, cs.rx, cs.ry, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(56, 182, 255, ' + a + ')';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Particles
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      p.pulse += p.pulseSpeed;
+      p.x += p.vx;
+      p.y += p.vy;
+
+      // Wrap
+      if (p.y < -10) { p.y = H + 10; p.x = Math.random() * W; }
+      if (p.x < -10) p.x = W + 10;
+      if (p.x > W + 10) p.x = -10;
+
+      var targetAlpha = hovering ? p.maxAlpha : 0;
+      p.alpha += (targetAlpha - p.alpha) * 0.03;
+
+      var pulse = Math.sin(p.pulse) * 0.3 + 0.7;
+      var a = p.alpha * pulse * hoverFade;
+
+      // Glow
+      var grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.glowSize);
+      grad.addColorStop(0, 'hsla(' + p.hue + ', 100%, 75%, ' + (a * 0.5) + ')');
+      grad.addColorStop(1, 'hsla(' + p.hue + ', 100%, 50%, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.glowSize, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Core
+      ctx.fillStyle = 'hsla(' + p.hue + ', 100%, 85%, ' + a + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    raf = requestAnimationFrame(draw);
+  }
+
+  banner.addEventListener('mouseenter', function() { hovering = true; if (!raf) raf = requestAnimationFrame(draw); });
+  banner.addEventListener('mouseleave', function() { hovering = false; });
+  window.addEventListener('resize', resize);
+
+  init();
+})();
 </script>
 {{easter-eggs}}
 </body>
