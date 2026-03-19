@@ -339,6 +339,22 @@
   .bench-footnote { margin-top: 32px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #bbb; line-height: 1.8; }
   .bench-footnote .bench-fn-highlight { color: #999; }
 
+  /* TESTIMONIALS */
+  .testimonials { padding: 80px 0 40px; }
+  .testimonials h2 { font-size: 28px; font-weight: 700; letter-spacing: -1px; text-align: center; margin-bottom: 8px; color: #1a1a2e; }
+  .testimonials .test-sub { font-size: 14px; color: #999; text-align: center; margin-bottom: 48px; font-family: 'JetBrains Mono', monospace; }
+  .test-grid { columns: 3; column-gap: 16px; }
+  .test-card { break-inside: avoid; background: #f6f5f3; border: 1px solid #e0e0e8; border-radius: 12px; padding: 20px; margin-bottom: 16px; transition: border-color 0.2s; }
+  .test-card:hover { border-color: rgba(244,104,23,0.3); }
+  .test-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .test-avatar { width: 36px; height: 36px; border-radius: 50%; background: #e0e0e8; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+  .test-name { font-size: 13px; font-weight: 700; color: #1a1a2e; line-height: 1.2; }
+  .test-handle { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #999; }
+  .test-body { font-size: 14px; color: #555; line-height: 1.6; }
+  .test-body strong { color: #1a1a2e; font-weight: 500; }
+  @media (max-width: 800px) { .test-grid { columns: 2; } }
+  @media (max-width: 500px) { .test-grid { columns: 1; } }
+
   @media (max-width: 800px) { .features-grid { grid-template-columns: 1fr; } .comparison-table { font-size: 12px; } .comparison-table th, .comparison-table td { padding: 10px 8px; } }
   @media (max-width: 500px) { .cta-group { flex-direction: column; align-items: center; } .hero { padding: 64px 0 32px; } .nav-links { display: none; } .social-links-header { gap: 12px; } .social-links-header svg { width: 14px; height: 14px; } footer { flex-direction: column; gap: 16px; text-align: center; }
     h1 { line-height: 1.2; }
@@ -631,6 +647,125 @@
     </div><!-- bench-card -->
     <div class="bench-footnote">
       †Peer-reviewed by the authors. n=1. p=vibes. Funded by zero venture capital.
+    </div>
+  </section>
+
+  <section class="testimonials">
+    <h2>Developers love SlayZone!</h2>
+    <p class="test-sub">Real quotes from real people*</p>
+    <div class="test-grid">
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🧑‍💻</div>
+          <div><div class="test-name">Some Dev</div><div class="test-handle">@some_dev</div></div>
+        </div>
+        <div class="test-body">I hate @SlayZone so much that I wrote an MCP server for it</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">👴</div>
+          <div><div class="test-name">Some Body</div><div class="test-handle">@dont_know</div></div>
+        </div>
+        <div class="test-body">Emacs had this in 1985</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🔥</div>
+          <div><div class="test-name">Vibe Coder</div><div class="test-handle">@vibecoder2026</div></div>
+        </div>
+        <div class="test-body">Finally I can mass-assign tasks to AI and take credit in standup</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🤔</div>
+          <div><div class="test-name">Confused PM</div><div class="test-handle">@product_mgr</div></div>
+        </div>
+        <div class="test-body">My devs are using this thing and tickets just... close? I'm scared.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🏗️</div>
+          <div><div class="test-name">Over-Engineer</div><div class="test-handle">@abstractfactory</div></div>
+        </div>
+        <div class="test-body">This is terrible. It doesn't even have a plugin system with a lifecycle hook for pre-post-init-teardown events.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">💀</div>
+          <div><div class="test-name">Kalle</div><div class="test-handle">@debuglebowski</div></div>
+        </div>
+        <div class="test-body">I used to sleep 6 hours a night. Now I sleep 4 hours. Per month.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">📋</div>
+          <div><div class="test-name">Jira Refugee</div><div class="test-handle">@escaped_jira</div></div>
+        </div>
+        <div class="test-body">Wait, you're telling me a kanban board can just... run code? Why did I spend 3 years configuring Jira workflows?</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🤖</div>
+          <div><div class="test-name">Claude</div><div class="test-handle">@claude</div></div>
+        </div>
+        <div class="test-body">I was not compensated for this testimonial. I was, however, given a very nice terminal to live in.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🙄</div>
+          <div><div class="test-name">The Skeptic</div><div class="test-handle">@well_actually</div></div>
+        </div>
+        <div class="test-body">"It's just tmux with extra steps" — and I've never been happier about extra steps.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🪦</div>
+          <div><div class="test-name">The Convert</div><div class="test-handle">@mass_adopter</div></div>
+        </div>
+        <div class="test-body">I mass-adopted AI agents without SlayZone. I mass-adopted SlayZone without AI agents. One of these went well.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🖥️</div>
+          <div><div class="test-name">Terminal Hoarder</div><div class="test-handle">@47_sessions</div></div>
+        </div>
+        <div class="test-body">I have 47 Claude Code sessions open. I can see all of them. This is either a productivity tool or a cry for help.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">😤</div>
+          <div><div class="test-name">Electron Hater</div><div class="test-handle">@ram_is_precious</div></div>
+        </div>
+        <div class="test-body">"Electron app" I said, closing my 34 Chrome tabs to free up RAM</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🔒</div>
+          <div><div class="test-name">Local-First Stan</div><div class="test-handle">@no_cloud_plz</div></div>
+        </div>
+        <div class="test-body">No cloud. No accounts. No "we've updated our privacy policy" emails. Just vibes and SQLite.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🌿</div>
+          <div><div class="test-name">Worktree Discoverer</div><div class="test-handle">@no_conflicts</div></div>
+        </div>
+        <div class="test-body">I mass-assigned 6 tasks and they all ran on separate worktrees. No merge conflicts. I cried a little.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">✅</div>
+          <div><div class="test-name">The Minimalist</div><div class="test-handle">@less_is_more</div></div>
+        </div>
+        <div class="test-body">It's good.</div>
+      </div>
+      <div class="test-card">
+        <div class="test-card-head">
+          <div class="test-avatar">🕵️</div>
+          <div><div class="test-name">Conspiracy Theorist</div><div class="test-handle">@whats_the_catch</div></div>
+        </div>
+        <div class="test-body">How is this free? What's the catch? Are you mining bitcoin in my terminal?</div>
+      </div>
     </div>
   </section>
 
