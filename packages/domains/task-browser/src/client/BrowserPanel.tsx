@@ -105,6 +105,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [loadError, setLoadError] = useState<{ code: number; description: string; url: string } | null>(null)
   const [isFocused, setIsFocused] = useState(false)
   const [webviewReady, setWebviewReady] = useState(false)
   const [otherTaskUrls, setOtherTaskUrls] = useState<TaskUrlEntry[]>([])
@@ -308,6 +309,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     if (!wv) return
 
     const handleNavigate = () => {
+      setLoadError(null)
       setCanGoBack(wv.canGoBack())
       setCanGoForward(wv.canGoForward())
       const url = wv.getURL().replace(/^slz-file:\/\//, 'file://')
@@ -364,6 +366,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     }
 
     const handleDomReady = () => {
+      setLoadError(null)
       setWebviewReady(true)
       darkModeCSSKeyRef.current = null
       try {
@@ -383,6 +386,24 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
     const handleWebviewFocus = () => wv.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
 
+    const handleFailLoad = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      const errorCode = detail?.errorCode ?? 0
+      // ERR_ABORTED (-3) fires on normal navigation cancellation — ignore
+      if (errorCode === -3) return
+      setIsLoading(false)
+      setLoadError({
+        code: errorCode,
+        description: detail?.errorDescription ?? 'Unknown error',
+        url: detail?.validatedURL ?? '',
+      })
+    }
+
+    const handleCrashed = () => {
+      setIsLoading(false)
+      setLoadError({ code: -1, description: 'Webview process crashed', url: '' })
+    }
+
     wv.addEventListener('dom-ready', handleDomReady)
     wv.addEventListener('did-navigate', handleNavigate)
     wv.addEventListener('did-navigate-in-page', handleNavigate)
@@ -392,6 +413,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     wv.addEventListener('page-favicon-updated', handleFaviconUpdate)
     wv.addEventListener('new-window', handleNewWindow)
     wv.addEventListener('focus', handleWebviewFocus)
+    wv.addEventListener('did-fail-load', handleFailLoad)
+    wv.addEventListener('crashed', handleCrashed)
 
     return () => {
       wv.removeEventListener('dom-ready', handleDomReady)
@@ -403,6 +426,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       wv.removeEventListener('page-favicon-updated', handleFaviconUpdate)
       wv.removeEventListener('focus', handleWebviewFocus)
       wv.removeEventListener('new-window', handleNewWindow)
+      wv.removeEventListener('did-fail-load', handleFailLoad)
+      wv.removeEventListener('crashed', handleCrashed)
     }
   }, []) // stable callbacks via refs
 
@@ -1101,6 +1126,21 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               // @ts-expect-error - webview attributes not in React types
               allowpopups="true"
             />
+            {loadError && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#1a1a1a] text-neutral-400 gap-3">
+                <div className="text-sm font-medium text-neutral-300">Failed to load page</div>
+                <div className="text-xs text-neutral-500 max-w-xs text-center truncate" title={loadError.url}>
+                  {loadError.description} ({loadError.code})
+                </div>
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-700"
+                  onClick={() => { setLoadError(null); webviewRef.current?.reload() }}
+                >
+                  <RotateCw className="size-3.5" />
+                  Retry
+                </button>
+              </div>
+            )}
             {isPickingElement && (
               <div data-testid="browser-picker-active-overlay" className="absolute inset-0 z-10 pointer-events-none border-2 border-amber-500/70 bg-amber-500/8">
                 <div className="absolute top-2 left-2 rounded bg-amber-500 text-black text-[11px] px-2 py-1 font-medium">

@@ -30,6 +30,7 @@ export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigge
   const webviewRef = useRef<WebviewElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [webviewReady, setWebviewReady] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [containerSize, setContainerSize] = useState<{ width: number; height: number } | null>(null)
   const prevEmulationRef = useRef<{ w: number; h: number; dpr: number; mobile: boolean; ua?: string } | null>(null)
 
@@ -51,9 +52,21 @@ export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigge
   useEffect(() => {
     const wv = webviewRef.current
     if (!wv) return
-    const handleDomReady = () => setWebviewReady(true)
+    const handleDomReady = () => { setWebviewReady(true); setLoadError(null) }
+    const handleFailLoad = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if ((detail?.errorCode ?? 0) === -3) return
+      setLoadError(detail?.errorDescription ?? 'Load failed')
+    }
+    const handleCrashed = () => setLoadError('Webview crashed')
     wv.addEventListener('dom-ready', handleDomReady)
-    return () => wv.removeEventListener('dom-ready', handleDomReady)
+    wv.addEventListener('did-fail-load', handleFailLoad)
+    wv.addEventListener('crashed', handleCrashed)
+    return () => {
+      wv.removeEventListener('dom-ready', handleDomReady)
+      wv.removeEventListener('did-fail-load', handleFailLoad)
+      wv.removeEventListener('crashed', handleCrashed)
+    }
   }, [containerSize !== null])
 
   const widthScale = containerSize ? Math.min(1, containerSize.width / preset.width) : 1
@@ -158,6 +171,11 @@ export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigge
             // @ts-expect-error - webview attributes not in React types
             allowpopups="true"
           />
+        )}
+        {loadError && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-900/90 text-neutral-400 text-[11px] text-center p-2">
+            {loadError}
+          </div>
         )}
       </div>
       {isResizing && <div id="dw-resize-overlay" className="absolute inset-0 z-10" />}

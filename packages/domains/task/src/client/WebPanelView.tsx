@@ -49,12 +49,14 @@ export function WebPanelView({
   const [webviewReady, setWebviewReady] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [loadError, setLoadError] = useState<{ code: number; description: string } | null>(null)
   const [initialSrc] = useState(() => (url || 'about:blank').replace(/^file:\/\//, 'slz-file://'))
   const loadedUrlRef = useRef(url)
 
   const handleNavigate = useCallback(() => {
     const wv = webviewRef.current
     if (!wv) return
+    setLoadError(null)
     const currentUrl = wv.getURL().replace(/^slz-file:\/\//, 'file://')
     loadedUrlRef.current = currentUrl
     onUrlChange(panelId, currentUrl)
@@ -87,6 +89,7 @@ export function WebPanelView({
       syncDesktopHandoffPolicy(wv)
     }
     const onDomReady = () => {
+      setLoadError(null)
       setWebviewReady(true)
       loadedUrlRef.current = wv.getURL().replace(/^slz-file:\/\//, 'file://')
       syncDesktopHandoffPolicy(wv)
@@ -143,6 +146,19 @@ export function WebPanelView({
 
     const onFocus = () => wv.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
 
+    const onFailLoad = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      const errorCode = detail?.errorCode ?? 0
+      if (errorCode === -3) return
+      setIsLoading(false)
+      setLoadError({ code: errorCode, description: detail?.errorDescription ?? 'Load failed' })
+    }
+
+    const onCrashed = () => {
+      setIsLoading(false)
+      setLoadError({ code: -1, description: 'Webview process crashed' })
+    }
+
     wv.addEventListener('did-attach', onDidAttach)
     wv.addEventListener('dom-ready', onDomReady)
     wv.addEventListener('will-navigate', onWillNavigate)
@@ -154,6 +170,8 @@ export function WebPanelView({
     wv.addEventListener('page-favicon-updated', onFavicon)
     wv.addEventListener('new-window', onNewWindow)
     wv.addEventListener('focus', onFocus)
+    wv.addEventListener('did-fail-load', onFailLoad)
+    wv.addEventListener('crashed', onCrashed)
 
     return () => {
       wv.removeEventListener('did-attach', onDidAttach)
@@ -167,6 +185,8 @@ export function WebPanelView({
       wv.removeEventListener('page-favicon-updated', onFavicon)
       wv.removeEventListener('new-window', onNewWindow)
       wv.removeEventListener('focus', onFocus)
+      wv.removeEventListener('did-fail-load', onFailLoad)
+      wv.removeEventListener('crashed', onCrashed)
     }
   }, [handleNavigate, panelId, onFaviconChange, desktopHandoffPolicy, syncDesktopHandoffPolicy])
 
@@ -235,6 +255,20 @@ export function WebPanelView({
           // @ts-expect-error - webview attributes not in React types
           allowpopups="true"
         />
+        {loadError && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#1a1a1a] text-neutral-400 gap-2">
+            <div className="text-xs font-medium text-neutral-300">Failed to load</div>
+            <div className="text-[11px] text-neutral-500">{loadError.description}</div>
+            <IconButton
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Retry"
+              onClick={() => { setLoadError(null); webviewRef.current?.reload() }}
+            >
+              <RotateCw className="size-3.5" />
+            </IconButton>
+          </div>
+        )}
         {isResizing && <div className="absolute inset-0 z-10" />}
       </div>
     </div>

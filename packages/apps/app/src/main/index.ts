@@ -1128,7 +1128,13 @@ app.whenReady().then(async () => {
 
     // Block path traversal outside user home directory
     if (!filePath.startsWith(userHome + sep)) {
-      return new Response('Forbidden', { status: 403 })
+      return new Response(
+        `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Forbidden</title>
+<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;background:#1a1a1a;color:#888}
+div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:12px;margin:8px 0 0;word-break:break-all;max-width:400px}</style>
+</head><body><div><h1>Access denied</h1><p>Path outside home directory</p></div></body></html>`,
+        { status: 200, headers: { 'content-type': 'text/html' } }
+      )
     }
     const mimeTypes: Record<string, string> = {
       '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css',
@@ -1145,7 +1151,14 @@ app.whenReady().then(async () => {
         headers: { 'content-type': mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream' }
       })
     } catch {
-      return new Response('Not found', { status: 404 })
+      const escaped = filePath.replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+      return new Response(
+        `<!DOCTYPE html><html><head><meta charset="utf-8"><title>File not found</title>
+<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;background:#1a1a1a;color:#888}
+div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:12px;margin:8px 0 0;word-break:break-all;max-width:400px}</style>
+</head><body><div><h1>File not found</h1><p>${escaped}</p></div></body></html>`,
+        { status: 200, headers: { 'content-type': 'text/html' } }
+      )
     }
   }
   const webPanelSession = session.fromPartition('persist:web-panels')
@@ -1194,18 +1207,23 @@ app.whenReady().then(async () => {
     return true
   }
 
-  const blockLoopbackHandoff = (
+  const handleBeforeRequest = (
     details: Electron.OnBeforeRequestListenerDetails,
     callback: (response: Electron.CallbackResponse) => void
   ) => {
+    // Redirect file:// → slz-file:// so local files load via our secure handler
+    if (details.url.startsWith('file://')) {
+      callback({ redirectURL: details.url.replace(/^file:\/\//, 'slz-file://') })
+      return
+    }
     if (shouldCancelLoopbackHandoffRequest(details)) {
       callback({ cancel: true })
       return
     }
     callback({ cancel: false })
   }
-  browserSession.webRequest.onBeforeRequest(blockLoopbackHandoff)
-  webPanelSession.webRequest.onBeforeRequest(blockLoopbackHandoff)
+  browserSession.webRequest.onBeforeRequest(handleBeforeRequest)
+  webPanelSession.webRequest.onBeforeRequest(handleBeforeRequest)
 
   browserSession.protocol.handle('slz-file', slzFileHandler)
   webPanelSession.protocol.handle('slz-file', slzFileHandler)
