@@ -13,7 +13,7 @@ export class CcsAdapter implements TerminalAdapter {
   // CCS runs Claude Code underneath — reuse Claude's activity patterns
   detectActivity(data: string, _current: ActivityState): ActivityState | null {
     const stripped = data
-      .replace(/\x1b\][^\x07]*\x07/g, '')
+      .replace(/\x1b\]([^\x07\x1b]|\x1b(?!\\))*(\x07|\x1b\\|\x9c)/g, '')
       .replace(/\x1b\[[?0-9;]*[A-Za-z]/g, '')
       .replace(/\x1b[()][AB012]/g, '')
       .trimStart()

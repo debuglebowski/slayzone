@@ -12,7 +12,7 @@ export class ClaudeAdapter implements TerminalAdapter {
   detectActivity(data: string, _current: ActivityState): ActivityState | null {
     // Strip ANSI escape codes for pattern matching
     const stripped = data
-      .replace(/\x1b\][^\x07]*\x07/g, '')  // OSC sequences
+      .replace(/\x1b\]([^\x07\x1b]|\x1b(?!\\))*(\x07|\x1b\\|\x9c)/g, '')  // OSC sequences (BEL or ST)
       .replace(/\x1b\[[?0-9;]*[A-Za-z]/g, '')  // CSI (including ?)
       .replace(/\x1b[()][AB012]/g, '')  // Character set
       .trimStart()  // Remove leading whitespace including \r (keep trailing for prompt detection)

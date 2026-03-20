@@ -85,10 +85,8 @@ export async function parseCodexFiles(
     const endOffset = await new Promise<number>((resolve, reject) => {
       const stream = createReadStream(filePath, { start: startOffset, encoding: 'utf-8' })
       const rl = createInterface({ input: stream, crlfDelay: Infinity })
-      let bytesRead = startOffset
 
       rl.on('line', (line) => {
-        bytesRead += Buffer.byteLength(line, 'utf-8') + 1
 
         let entry: CodexEntry
         try {
@@ -131,7 +129,7 @@ export async function parseCodexFiles(
         }
       })
 
-      rl.on('close', () => resolve(bytesRead))
+      rl.on('close', () => resolve(startOffset + stream.bytesRead))
       rl.on('error', reject)
       stream.on('error', reject)
     })

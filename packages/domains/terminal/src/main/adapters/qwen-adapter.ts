@@ -3,8 +3,12 @@ import { whichBinary, validateShellEnv } from '../shell-env'
 
 /**
  * Adapter for Qwen Code CLI (Alibaba).
- * Fork of Claude Code — shares identical session flags (--session-id, --resume, --yolo)
- * but uses braille spinner characters (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) instead of Claude's symbols.
+ * Fork of Claude Code — shares identical session flags (--session-id, --resume, --yolo).
+ *
+ * Note: SlayZone uses `--session-id` when starting a *new* session and `--resume` when resuming.
+ * If Qwen ever changes `--session-id` semantics to mean "resume only", initial launches would fail.
+ *
+ * Qwen uses braille spinner characters (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) instead of Claude's symbols.
  */
 export class QwenAdapter implements TerminalAdapter {
   readonly mode = 'qwen-code' as const
@@ -12,7 +16,7 @@ export class QwenAdapter implements TerminalAdapter {
 
   private static stripAnsi(data: string): string {
     return data
-      .replace(/\x1b\][^\x07]*\x07/g, '') // OSC sequences
+      .replace(/\x1b\]([^\x07\x1b]|\x1b(?!\\))*(\x07|\x1b\\|\x9c)/g, '') // OSC sequences (BEL or ST)
       .replace(/\x1b\[[?0-9;]*[A-Za-z]/g, '') // CSI sequences
       .replace(/\x1b[()][AB012]/g, '') // Character set
       .trimStart()
@@ -87,7 +91,7 @@ export class QwenAdapter implements TerminalAdapter {
       check: 'Binary found',
       ok: !!found,
       detail: found ?? 'qwen not found in PATH',
-      fix: found ? undefined : 'npm install -g @qwen-ai/qwen-code',
+      fix: found ? undefined : 'Install qwen-code (e.g. npm install -g @qwen-code/qwen-code)',
     })
     return results
   }

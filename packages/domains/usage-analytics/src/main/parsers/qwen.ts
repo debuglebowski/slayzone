@@ -69,10 +69,8 @@ export async function parseQwenFiles(
       const endOffset = await new Promise<number>((resolve, reject) => {
         const stream = createReadStream(filePath, { start: startOffset, encoding: 'utf-8' })
         const rl = createInterface({ input: stream, crlfDelay: Infinity })
-        let bytesRead = startOffset
 
         rl.on('line', (line) => {
-          bytesRead += Buffer.byteLength(line, 'utf-8') + 1
 
           let entry: QwenAssistantEntry
           try {
@@ -85,9 +83,11 @@ export async function parseQwenFiles(
           const usage = entry.usageMetadata
           if (!usage) return
 
-          const id = createHash('md5')
-            .update(`qwen:${entry.uuid ?? ''}:${entry.sessionId ?? ''}:${entry.timestamp ?? ''}`)
-            .digest('hex')
+          const baseKey = `qwen:${entry.uuid ?? ''}:${entry.sessionId ?? ''}:${entry.timestamp ?? ''}`
+          const idKey = (entry.uuid || entry.sessionId || entry.timestamp)
+            ? baseKey
+            : `qwen:fallback:${filePath}:${startOffset + stream.bytesRead}:${line}`
+          const id = createHash('md5').update(idKey).digest('hex')
 
           records.push({
             id,
@@ -105,7 +105,7 @@ export async function parseQwenFiles(
           })
         })
 
-        rl.on('close', () => resolve(bytesRead))
+        rl.on('close', () => resolve(startOffset + stream.bytesRead))
         rl.on('error', reject)
         stream.on('error', reject)
       })
