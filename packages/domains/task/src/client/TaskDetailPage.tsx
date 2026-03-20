@@ -1947,7 +1947,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             <CollapsibleContent className="border-l border-border ml-2 pl-4 pt-2">
               <DndContext sensors={subTaskSensors} collisionDetection={closestCenter} onDragEnd={handleSubTaskDragEnd}>
               <SortableContext items={subTasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5 max-h-[40vh] overflow-y-auto">
                 {subTasks.map(sub => (
                   <SortableSubTask
                     key={sub.id}
