@@ -33,6 +33,9 @@ import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
 import { stripUnderlineCodes } from '@slayzone/terminal/shared'
 import { track } from '@slayzone/telemetry/client'
 
+// Kitty keyboard protocol CSI u: keycode 13 (Enter), modifier 2 (Shift)
+const KITTY_SHIFT_ENTER = '\x1b[13;2u'
+
 // Wait for container to have non-zero dimensions before opening terminal
 function waitForDimensions(
   container: HTMLElement,
@@ -204,6 +207,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const handleTerminalKeyEvent = useCallback((e: KeyboardEvent): boolean => {
     if (e.ctrlKey && e.key === 'Tab') return false
+    // Shift+Enter in AI modes: send kitty protocol sequence so CLI apps
+    // can insert a newline instead of submitting.
+    if (mode === 'claude-code' && e.shiftKey && e.key === 'Enter') {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.type === 'keydown') {
+        window.api.pty.write(sessionId, KITTY_SHIFT_ENTER)
+      }
+      return false
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'f' && e.type === 'keydown') {
       setSearchOpen(true)
       track('terminal_search_used')
@@ -227,7 +240,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       return false
     }
     return true
-  }, [clearBufferWithoutRestart])
+  }, [mode, sessionId, clearBufferWithoutRestart])
 
   const initTerminal = useCallback(async (signal: AbortSignal) => {
     if (!containerRef.current || initializedRef.current) return
