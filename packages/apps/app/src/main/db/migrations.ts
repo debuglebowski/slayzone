@@ -1355,6 +1355,14 @@ const migrations: Migration[] = [
         ALTER TABLE tasks ADD COLUMN repo_name TEXT;
       `)
     }
+  },
+  {
+    version: 78,
+    up: (db) => {
+      // Seed Qwen Code as a new CLI provider in the Context Manager
+      db.prepare(`INSERT OR IGNORE INTO ai_config_sources (id, name, kind, enabled, status) VALUES (?, ?, ?, ?, ?)`)
+        .run('provider-qwen', 'Qwen Code', 'qwen', 0, 'active')
+    }
   }
 ]
 
