@@ -217,22 +217,34 @@
   .wt-status-dot.idle { background: var(--text-dim); opacity: 0.4; }
 
   /* ═══════ FEAT 5: GIT PANEL ═══════ */
-  .feat-git { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .git-files { flex: 1; padding: 8px 0; overflow: hidden; }
-  .gf-row { display: flex; align-items: center; gap: 10px; padding: 6px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; transition: background 0.2s; }
-  .gf-row:hover { background: rgba(255,255,255,0.02); }
-  .gf-check { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 9px; transition: all 0.2s; flex-shrink: 0; }
-  .gf-check.on { border-color: var(--green); color: var(--green); background: rgba(77,255,136,0.1); }
-  .gf-badge { width: 18px; text-align: center; font-weight: 700; font-size: 10px; flex-shrink: 0; }
-  .gf-badge.m { color: var(--amber); }
-  .gf-badge.a { color: var(--green); }
-  .gf-badge.d { color: var(--red); }
-  .gf-badge.q { color: var(--text-dim); }
-  .gf-name { color: var(--text); flex: 1; }
-  .git-commit { padding: 12px 16px; border-top: 1px solid var(--border); }
-  .gc-input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text); width: 100%; box-sizing: border-box; margin-bottom: 8px; }
-  .gc-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; cursor: default; opacity: 0.5; transition: all 0.3s; }
-  .gc-btn.ready { opacity: 1; box-shadow: 0 2px 8px rgba(244,104,23,0.3); }
+  .feat-git-split { flex: 1; display: flex; gap: 10px; padding: 10px; overflow: hidden; }
+  .feat-git-left { flex: 1; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); overflow: hidden; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.7; }
+  .feat-git-right { flex: 0; width: 0; overflow: hidden; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); transition: flex 0.5s ease, width 0.5s ease, opacity 0.3s ease; opacity: 0; display: flex; flex-direction: column; }
+  .feat-git-right.open { flex: 1.2; width: auto; opacity: 1; }
+  .gp-content { flex: 1; padding: 8px; overflow: visible; font-family: 'JetBrains Mono', monospace; font-size: 10px; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+  .gp-card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  .gp-branch-row { display: flex; align-items: center; gap: 6px; }
+  .gp-branch-tag { padding: 2px 8px; border-radius: 4px; background: var(--surface); color: var(--text); font-size: 10px; }
+  .gp-action-btn { padding: 3px 10px; border-radius: 4px; font-size: 9px; border: 1px solid var(--border); color: var(--text-dim); cursor: default; }
+  .gp-stats { display: flex; gap: 10px; font-size: 10px; }
+  .gp-stat-staged { color: var(--blue); }
+  .gp-stat-modified { color: var(--amber); }
+  .gp-stat-untracked { color: var(--text-dim); }
+  .gp-section-title { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 4px; }
+  /* Commit graph: SVG overlay + rows */
+  .gp-commits { position: relative; }
+  .gp-commits svg { position: absolute; top: 0; left: 0; pointer-events: none; }
+  .gp-commit { height: 32px; display: flex; flex-direction: column; justify-content: center; padding-left: 56px; }
+  .gp-commit-msg { font-size: 10px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+  .gp-commit-meta { font-size: 9px; color: var(--text-dim); display: flex; gap: 6px; align-items: center; line-height: 1.2; }
+  .gp-commit-hash { color: var(--text-dim); }
+  .gp-commit-branch { padding: 1px 5px; border-radius: 3px; background: var(--surface); color: var(--text-dim); font-size: 8px; }
+  .gp-commit-branch.blue { background: rgba(77,166,255,0.1); color: var(--blue); }
+  .gp-diff { font-family: 'JetBrains Mono', monospace; font-size: 9px; line-height: 1.6; border-radius: 4px; overflow: hidden; }
+  .gp-diff-line { padding: 0 6px; white-space: pre; }
+  .gp-diff-ctx { color: var(--text-dim); }
+  .gp-diff-add { background: rgba(77,255,136,0.08); color: var(--green); }
+  .gp-diff-del { background: rgba(255,77,77,0.08); color: var(--red, #ff5555); }
 
   /* ═══════ FEAT 7: COMMIT GRAPH ═══════ */
   .feat-graph { flex: 1; padding: 16px; overflow: hidden; }
@@ -547,8 +559,21 @@
     <!-- ═══════ 3. BROWSER ═══════ -->
     <div class="feature-section" id="feat-3">
       <div class="feature-visual"><div class="scale-wrap">
-        <div class="app-frame">
-          <div class="app-bar"><span class="app-dot r"></span><span class="app-dot y"></span><span class="app-dot g"></span><span class="app-bar-title">Auth refactor — ⎇ feat/auth-refactor</span></div>
+        <div class="app-frame" style="flex-direction:row;">
+          <div class="fk-sidebar">
+            <div class="fk-sidebar-dots"><span class="app-dot r"></span><span class="app-dot y"></span><span class="app-dot g"></span></div>
+            <div class="fk-proj" style="background:#4466ff;">SZ<div class="fk-proj-dot" style="background:var(--green)"></div></div>
+            <div class="fk-proj active" style="background:#ee8833;">WD</div>
+            <div class="fk-proj" style="background:#44bb55;">HC</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+          <div class="tab-bar">
+            <div class="tab-bar-home">🏠</div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--amber)"></span> PR#24 <span class="tab-x">×</span></div>
+            <div class="tab-item active"><span class="tab-dot" style="background:var(--green)"></span> Auth refactor <span class="tab-x">×</span></div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--green)"></span> Search endpoint <span class="tab-x">×</span></div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--amber)"></span> Rate limiting <span class="tab-x">×</span></div>
+          </div>
           <div class="task-bar"><div class="task-bar-left"><span class="task-name">Auth refactor</span></div><div class="task-bar-right"><span class="tb-btn active">▸_ Terminal</span><span class="tb-btn" id="f3-browser-btn">◧ Browser</span><span class="tb-btn">± Diff</span></div></div>
           <div class="feat-split">
             <div class="feat-split-left">
@@ -592,6 +617,7 @@
                 </div>
               </div>
             </div>
+          </div>
           </div>
         </div>
       </div></div>
@@ -643,25 +669,74 @@
       </div>
     </div>
 
-    <div style="display:none"> <!-- HIDDEN: sections 5-16 while implementing -->
     <!-- ═══════ 5. GIT PANEL ═══════ -->
     <div class="feature-section" id="feat-5">
       <div class="feature-visual"><div class="scale-wrap">
-        <div class="app-frame">
-          <div class="app-bar"><span class="app-dot r"></span><span class="app-dot y"></span><span class="app-dot g"></span><span class="app-bar-title">Auth refactor — git</span></div>
-          <div class="pane-hd"><span class="pane-dot green"></span> Changes — 5 files</div>
-          <div class="feat-git">
-            <div class="git-files" id="f5-files">
-              <div class="gf-row"><div class="gf-check" id="f5-c1"></div><div class="gf-badge m">M</div><div class="gf-name">src/middleware/auth.ts</div></div>
-              <div class="gf-row"><div class="gf-check" id="f5-c2"></div><div class="gf-badge a">A</div><div class="gf-name">src/utils/jwt.ts</div></div>
-              <div class="gf-row"><div class="gf-check" id="f5-c3"></div><div class="gf-badge m">M</div><div class="gf-name">src/types/auth.d.ts</div></div>
-              <div class="gf-row"><div class="gf-check" id="f5-c4"></div><div class="gf-badge d">D</div><div class="gf-name">src/utils/session.ts</div></div>
-              <div class="gf-row"><div class="gf-check" id="f5-c5"></div><div class="gf-badge m">M</div><div class="gf-name">tests/auth.test.ts</div></div>
+        <div class="app-frame" style="flex-direction:row;">
+          <div class="fk-sidebar">
+            <div class="fk-sidebar-dots"><span class="app-dot r"></span><span class="app-dot y"></span><span class="app-dot g"></span></div>
+            <div class="fk-proj" style="background:#4466ff;">SZ<div class="fk-proj-dot" style="background:var(--green)"></div></div>
+            <div class="fk-proj active" style="background:#ee8833;">WD</div>
+            <div class="fk-proj" style="background:#44bb55;">HC</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+          <div class="tab-bar">
+            <div class="tab-bar-home">🏠</div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--amber)"></span> PR#24 <span class="tab-x">×</span></div>
+            <div class="tab-item active"><span class="tab-dot" style="background:var(--green)"></span> Auth refactor <span class="tab-x">×</span></div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--green)"></span> Search endpoint <span class="tab-x">×</span></div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--amber)"></span> Rate limiting <span class="tab-x">×</span></div>
+          </div>
+          <div class="task-bar"><div class="task-bar-left"><span class="task-name">Auth refactor</span></div><div class="task-bar-right"><span class="tb-btn active">▸_ Terminal</span><span class="tb-btn">◧ Browser</span><span class="tb-btn active" id="f5-git-btn">⎇ Git</span></div></div>
+          <div class="feat-git-split">
+            <div class="feat-git-left">
+              <div style="color:var(--text-dim)"><span class="t-green">✓</span> JWT middleware rewritten<br><span class="t-green">✓</span> Token refresh added<br><span class="t-file">  src/types/auth.d.ts</span> — updated<br><br><span class="t-out">Running tests...</span> <span class="t-green">14 passed</span><br><br><span class="t-prompt">❯</span> <span class="cursor-blink"></span></div>
             </div>
-            <div class="git-commit">
-              <div class="gc-input" id="f5-msg">refactor: replace session auth with JWT validation</div>
-              <div class="gc-btn" id="f5-btn">Commit</div>
+            <div class="feat-git-right" id="f5-panel">
+              <div class="gp-content">
+                <div class="gp-card">
+                  <div class="gp-branch-row" style="justify-content:space-between;"><span class="gp-branch-tag">main</span><div style="display:flex;gap:6px;"><span class="gp-action-btn">Create PR</span><span class="gp-action-btn">Branch to worktree</span></div></div>
+                </div>
+                <div class="gp-card">
+                  <div class="gp-stats"><span class="gp-stat-staged">1 staged</span><span class="gp-stat-modified">3 modified</span><span style="margin-left:auto;display:flex;gap:6px;"><span class="gp-action-btn">↓ Pull</span><span class="gp-action-btn">↑ Push</span></span></div>
+                </div>
+                <div class="gp-card">
+                  <div class="gp-section-title">Commits</div>
+                  <div class="gp-commits">
+                  <svg width="44" height="160">
+                    <line x1="16" y1="16" x2="16" y2="144" stroke="var(--accent)" stroke-width="2" opacity="0.35"/>
+                    <path d="M16,16 C16,28.8 36,35.2 36,48" stroke="var(--blue)" stroke-width="2" fill="none" opacity="0.35"/>
+                    <line x1="36" y1="48" x2="36" y2="80" stroke="var(--blue)" stroke-width="2" opacity="0.35"/>
+                    <path d="M36,80 C36,92.8 16,99.2 16,112" stroke="var(--blue)" stroke-width="2" fill="none" opacity="0.35"/>
+                    <!-- Merge dot (hollow ring) -->
+                    <circle cx="16" cy="16" r="5" fill="none" stroke="var(--accent)" stroke-width="2"/>
+                    <circle cx="16" cy="16" r="2.5" fill="var(--surface2)"/>
+                    <circle cx="16" cy="112" r="4" fill="var(--accent)"/>
+                    <circle cx="16" cy="144" r="4" fill="var(--accent)"/>
+                    <circle cx="36" cy="48" r="4" fill="var(--blue)"/>
+                    <circle cx="36" cy="80" r="4" fill="var(--blue)"/>
+                  </svg>
+                  <div class="gp-commit"><div class="gp-commit-msg">Merge feat/auth into main</div><div class="gp-commit-meta"><span class="gp-commit-hash">a3f8c21</span> · 2m <span class="gp-commit-branch">main</span> <span class="gp-commit-branch blue">feat/auth</span></div></div>
+                  <div class="gp-commit"><div class="gp-commit-msg">add token refresh + expiry</div><div class="gp-commit-meta"><span class="gp-commit-hash">b72e9f4</span> · 1h</div></div>
+                  <div class="gp-commit"><div class="gp-commit-msg">replace session auth with JWT</div><div class="gp-commit-meta"><span class="gp-commit-hash">c91d3a8</span> · 2h</div></div>
+                  <div class="gp-commit"><div class="gp-commit-msg">fix: pagination offset</div><div class="gp-commit-meta"><span class="gp-commit-hash">d45b1e7</span> · 3h</div></div>
+                  <div class="gp-commit"><div class="gp-commit-msg">chore: upgrade express to v5</div><div class="gp-commit-meta"><span class="gp-commit-hash">e88a2c3</span> · 5h</div></div>
+                  </div>
+                </div>
+                <div class="gp-card">
+                  <div class="gp-section-title">Diff · src/auth/jwt.ts</div>
+                  <div class="gp-diff">
+                    <div class="gp-diff-line gp-diff-ctx"> import { verify } from 'jsonwebtoken'</div>
+                    <div class="gp-diff-line gp-diff-del">-export function auth(req) {</div>
+                    <div class="gp-diff-line gp-diff-add">+export function auth(req, res) {</div>
+                    <div class="gp-diff-line gp-diff-ctx">   const token = req.headers.auth</div>
+                    <div class="gp-diff-line gp-diff-add">+  if (!token) return res.status(401)</div>
+                    <div class="gp-diff-line gp-diff-ctx">   const payload = verify(token)</div>
+                  </div>
+                </div>
+              </div>
             </div>
+          </div>
           </div>
         </div>
       </div></div>
@@ -671,6 +746,7 @@
       </div>
     </div>
 
+    <div style="display:none"> <!-- HIDDEN: sections 6-16 while implementing -->
     <!-- ═══════ 6. DIFF ═══════ -->
     <div class="feature-section" id="feat-6">
       <div class="feature-visual"><div class="scale-wrap">
@@ -1295,18 +1371,17 @@
 
   // ═══════ FEAT 5: GIT PANEL ═══════
   loopOnVisible(document.getElementById('feat-5'), async function() {
-    const checks = [document.getElementById('f5-c1'), document.getElementById('f5-c2'), document.getElementById('f5-c3'), document.getElementById('f5-c4'), document.getElementById('f5-c5')];
-    const btn = document.getElementById('f5-btn');
-    checks.forEach(c => { c.classList.remove('on'); c.textContent = ''; });
-    btn.classList.remove('ready');
-    await sleep(600);
-    for (const c of checks) {
-      c.classList.add('on'); c.textContent = '✓';
-      await sleep(400);
-    }
-    await sleep(300);
-    btn.classList.add('ready');
-    await sleep(2500);
+    var panel = document.getElementById('f5-panel');
+    var btn = document.getElementById('f5-git-btn');
+    panel.classList.remove('open');
+    btn.classList.remove('active');
+    await sleep(1200);
+    btn.classList.add('active');
+    panel.classList.add('open');
+    await sleep(4300);
+    btn.classList.remove('active');
+    panel.classList.remove('open');
+    await sleep(800);
   });
 
   // ═══════ FEAT 8: PR ═══════
