@@ -298,14 +298,20 @@
   .ed-check.done span { text-decoration: line-through; opacity: 0.5; }
 
   /* ═══════ FEAT 10: PROCESSES ═══════ */
-  .feat-proc { flex: 1; padding: 8px 0; overflow: hidden; }
-  .proc-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,0.03); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
-  .proc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .proc-name { color: var(--text); width: 120px; flex-shrink: 0; }
-  .proc-pid { color: var(--text-dim); width: 50px; font-size: 10px; }
-  .proc-bars { flex: 1; display: flex; gap: 8px; align-items: center; }
-  .proc-bar-label { font-size: 9px; color: var(--text-dim); width: 28px; }
-  .proc-uptime { color: var(--text-dim); font-size: 10px; width: 50px; text-align: right; }
+  .feat-proc { flex: 1; padding: 12px; overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .proc-header { display: flex; justify-content: space-between; align-items: center; padding: 0 4px 8px; }
+  .proc-header-title { font-size: 12px; font-weight: 600; color: var(--text); }
+  .proc-header-btn { font-size: 10px; color: var(--text-dim); }
+  .proc-scope { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); padding: 0 4px 4px; }
+  .proc-card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
+  .proc-card-info { flex: 1; min-width: 0; }
+  .proc-card-name { font-size: 11px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .proc-card-cmd { font-size: 9px; color: var(--text-dim); }
+  .proc-card-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .proc-badge { font-size: 8px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .proc-badge.running { background: rgba(77,255,136,0.12); color: var(--green); }
+  .proc-badge.idle { background: rgba(255,255,255,0.06); color: var(--text-dim); }
+  .proc-card-actions { display: flex; gap: 6px; color: var(--text-dim); font-size: 11px; }
 
   /* ═══════ FEAT 11: TOKEN BURN ═══════ */
   .feat-burn { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
@@ -1016,23 +1022,55 @@
         </div>
       </div></div>
       <div class="feature-text">
-        <h2>Notes that aren't a sticky</h2>
+        <h2>Rich text editor, per task</h2>
         <p>TipTap rich text editor per task. Markdown, nested checklists, code blocks. For when "TODO: figure this out" needs more than a terminal comment.</p>
       </div>
     </div>
 
-    <div style="display:none"> <!-- HIDDEN: sections 10-16 while implementing -->
     <!-- ═══════ 10. PROCESSES ═══════ -->
     <div class="feature-section" id="feat-10">
       <div class="feature-visual"><div class="scale-wrap">
-        <div class="app-frame">
-          <div class="app-bar"><span class="app-dot r"></span><span class="app-dot y"></span><span class="app-dot g"></span><span class="app-bar-title">Auth refactor — processes</span></div>
-          <div class="pane-hd"><span class="pane-dot green"></span> Processes — 3 running</div>
-          <div class="feat-proc" id="f10-proc">
-            <div class="proc-row"><div class="proc-dot" style="background:var(--green)"></div><div class="proc-name">vite dev</div><div class="proc-pid">PID 4821</div><div class="proc-bars"><span class="proc-bar-label">CPU</span><div class="bar-track"><div class="bar-fill green" data-w="35"></div></div><span class="proc-bar-label">MEM</span><div class="bar-track"><div class="bar-fill blue" data-w="52"></div></div></div><div class="proc-uptime">2h 14m</div></div>
-            <div class="proc-row"><div class="proc-dot" style="background:var(--green)"></div><div class="proc-name">tsc --watch</div><div class="proc-pid">PID 4822</div><div class="proc-bars"><span class="proc-bar-label">CPU</span><div class="bar-track"><div class="bar-fill green" data-w="12"></div></div><span class="proc-bar-label">MEM</span><div class="bar-track"><div class="bar-fill blue" data-w="28"></div></div></div><div class="proc-uptime">2h 14m</div></div>
-            <div class="proc-row"><div class="proc-dot" style="background:var(--amber);animation:pulse 2s ease infinite"></div><div class="proc-name">jest --watch</div><div class="proc-pid">PID 4830</div><div class="proc-bars"><span class="proc-bar-label">CPU</span><div class="bar-track"><div class="bar-fill amber" data-w="68"></div></div><span class="proc-bar-label">MEM</span><div class="bar-track"><div class="bar-fill blue" data-w="41"></div></div></div><div class="proc-uptime">0h 03m</div></div>
-            <div class="proc-row" style="opacity:0.4;"><div class="proc-dot" style="background:var(--text-dim)"></div><div class="proc-name">eslint</div><div class="proc-pid">—</div><div class="proc-bars"><span class="proc-bar-label">CPU</span><div class="bar-track"><div class="bar-fill" data-w="0"></div></div><span class="proc-bar-label">MEM</span><div class="bar-track"><div class="bar-fill" data-w="0"></div></div></div><div class="proc-uptime">stopped</div></div>
+        <div class="app-frame" style="flex-direction:row;">
+          <div class="fk-sidebar">
+            <div class="fk-sidebar-dots"><span class="app-dot r"></span><span class="app-dot y"></span><span class="app-dot g"></span></div>
+            <div class="fk-proj" style="background:#4466ff;">SZ<div class="fk-proj-dot" style="background:var(--green)"></div></div>
+            <div class="fk-proj active" style="background:#ee8833;">WD</div>
+            <div class="fk-proj" style="background:#44bb55;">HC</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+          <div class="tab-bar">
+            <div class="tab-bar-home">🏠</div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--amber)"></span> PR#24 <span class="tab-x">×</span></div>
+            <div class="tab-item active"><span class="tab-dot" style="background:var(--green)"></span> Auth refactor <span class="tab-x">×</span></div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--green)"></span> Search endpoint <span class="tab-x">×</span></div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--amber)"></span> Rate limiting <span class="tab-x">×</span></div>
+          </div>
+          <div class="task-bar"><div class="task-bar-left"><span class="task-name">Auth refactor</span></div><div class="task-bar-right"><span class="tb-btn active">▸_ Terminal</span><span class="tb-btn">◧ Browser</span><span class="tb-btn">± Diff</span><span class="tb-btn">⎇ Git</span></div></div>
+          <div class="feat-git-split">
+            <div class="feat-git-left">
+              <div style="color:var(--text-dim)"><span class="t-green">✓</span> JWT middleware rewritten<br><span class="t-green">✓</span> Token refresh added<br><span class="t-file">  src/types/auth.d.ts</span> — updated<br><br><span class="t-out">Running tests...</span> <span class="t-green">14 passed</span><br><br><span class="t-prompt">❯</span> <span class="cursor-blink"></span></div>
+            </div>
+            <div class="feat-git-right" id="f10-panel">
+              <div class="feat-proc" id="f10-proc">
+                <div class="proc-header"><span class="proc-header-title">Processes</span><span class="proc-header-btn">+ New process</span></div>
+                <div class="proc-card">
+                  <div class="proc-card-info"><div class="proc-card-name">Vite Dev</div><div class="proc-card-cmd">pnpm dev</div></div>
+                  <div class="proc-card-meta"><span class="proc-badge running">● Running</span></div>
+                  <div class="proc-card-actions">□ ↻ ⏎ ···</div>
+                </div>
+                <div class="proc-card">
+                  <div class="proc-card-info"><div class="proc-card-name">TypeScript Watch</div><div class="proc-card-cmd">tsc --watch</div></div>
+                  <div class="proc-card-meta"><span class="proc-badge running">● Running</span></div>
+                  <div class="proc-card-actions">□ ↻ ⏎ ···</div>
+                </div>
+                <div class="proc-card">
+                  <div class="proc-card-info"><div class="proc-card-name">Jest Watch</div><div class="proc-card-cmd">jest --watchAll</div></div>
+                  <div class="proc-card-meta"><span class="proc-badge idle">● Idle</span></div>
+                  <div class="proc-card-actions">▷ □ ⏎ ···</div>
+                </div>
+              </div>
+            </div>
+          </div>
           </div>
         </div>
       </div></div>
@@ -1042,6 +1080,7 @@
       </div>
     </div>
 
+    <div style="display:none"> <!-- HIDDEN: sections 11-16 while implementing -->
     <!-- ═══════ 11. TOKEN BURN ═══════ -->
     <div class="feature-section" id="feat-11">
       <div class="feature-visual"><div class="scale-wrap">
@@ -1604,19 +1643,16 @@
     await sleep(1200);
   });
 
-  // ═══════ FEAT 10: PROCESSES (bar animation) ═══════
-  (function() {
-    const el = document.getElementById('feat-10');
-    const obs = new IntersectionObserver((entries) => {
-      entries.forEach(e => {
-        if (e.isIntersecting) {
-          el.querySelectorAll('.bar-fill[data-w]').forEach(b => { b.style.width = b.dataset.w + '%'; });
-          obs.unobserve(el);
-        }
-      });
-    }, { threshold: 0.2 });
-    obs.observe(el);
-  })();
+  // ═══════ FEAT 10: PROCESSES ═══════
+  loopOnVisible(document.getElementById('feat-10'), async function() {
+    var panel = document.getElementById('f10-panel');
+    panel.classList.remove('open');
+    await sleep(1200);
+    panel.classList.add('open');
+    await sleep(8000);
+    panel.classList.remove('open');
+    await sleep(1200);
+  });
 
   // ═══════ FEAT 11: TOKEN BURN ═══════
   loopOnVisible(document.getElementById('feat-11'), async function() {
