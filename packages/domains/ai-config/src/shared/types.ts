@@ -82,7 +82,7 @@ export interface SkillValidationState {
 }
 
 // CLI provider types
-export type CliProvider = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' | 'qwen'
+export type CliProvider = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' | 'qwen' | 'copilot'
 export type CliProviderStatus = 'active' | 'placeholder'
 
 export interface CliProviderInfo {

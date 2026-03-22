@@ -1473,6 +1473,13 @@ const migrations: Migration[] = [
         update.run(i, rows[i].id)
       }
     }
+  },
+  {
+    version: 81,
+    up: (db) => {
+      const stmt = db.prepare(`INSERT OR IGNORE INTO ai_config_sources (id, name, kind, enabled, status) VALUES (?, ?, ?, ?, ?)`)
+      stmt.run('provider-copilot', 'Copilot', 'copilot', 0, 'active')
+    }
   }
 ]
 

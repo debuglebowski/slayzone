@@ -98,6 +98,7 @@ const PROVIDER_LABELS: Partial<Record<McpTarget, string>> = {
   cursor: 'Cursor',
   gemini: 'Gemini',
   opencode: 'OpenCode',
+  copilot: 'Copilot',
 }
 
 const ALL_PROVIDERS: McpTarget[] = getConfigurableMcpTargets({ writableOnly: true })

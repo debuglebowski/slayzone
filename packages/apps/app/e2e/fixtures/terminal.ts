@@ -70,6 +70,7 @@ export async function switchTerminalMode(page: Page, mode: TerminalMode): Promis
     'cursor-agent': ['Cursor', 'Cursor Agent'],
     gemini: ['Gemini'],
     opencode: ['OpenCode'],
+    copilot: ['Copilot'],
     terminal: ['Terminal'],
   }
 

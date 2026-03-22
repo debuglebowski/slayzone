@@ -12,6 +12,7 @@ const MCP_CONFIG_PATHS: Partial<Record<McpTarget, string>> = {
   cursor: '.cursor/mcp.json',
   gemini: '.gemini/settings.json',
   opencode: 'opencode.json',
+  copilot: '.copilot/mcp-config.json',
 }
 
 interface MergedServer {
@@ -32,7 +33,7 @@ interface McpFlatSectionProps {
   onChanged: () => void
 }
 
-const MCP_PROVIDER_ORDER: McpTarget[] = ['claude', 'cursor', 'gemini', 'opencode']
+const MCP_PROVIDER_ORDER: McpTarget[] = ['claude', 'cursor', 'gemini', 'opencode', 'copilot']
 
 function normalizeMcpConfig(config: McpServerConfig): { command: string; args: string[]; env: Record<string, string> } {
   const envEntries = Object.entries(config.env ?? {}).sort(([a], [b]) => a.localeCompare(b))

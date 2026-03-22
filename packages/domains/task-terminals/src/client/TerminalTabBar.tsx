@@ -24,6 +24,7 @@ const MODE_ICONS: Partial<Record<TerminalMode, typeof TerminalIcon>> = {
   'cursor-agent': MousePointerClick,
   'gemini': Sparkles,
   'opencode': Code,
+  'copilot': Command,
   'ccs': Bot,
   'terminal': TerminalIcon
 }

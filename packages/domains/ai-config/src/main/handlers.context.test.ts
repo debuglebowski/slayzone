@@ -903,12 +903,13 @@ describe('ai-config:discover-mcp-configs', () => {
     const results = h.invoke('ai-config:discover-mcp-configs', root) as {
       provider: string; exists: boolean; servers: Record<string, unknown>
     }[]
-    expect(results.length).toBe(4)  // claude, cursor, gemini, opencode
+    expect(results.length).toBe(5)  // claude, cursor, gemini, opencode, copilot
     const providers = results.map(r => r.provider).sort()
     expect(providers).toContain('claude')
     expect(providers).toContain('cursor')
     expect(providers).toContain('gemini')
     expect(providers).toContain('opencode')
+    expect(providers).toContain('copilot')
     expect(providers.includes('codex')).toBe(false)
   })
 

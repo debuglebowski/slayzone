@@ -25,6 +25,10 @@ export const PROVIDER_PATHS: Record<CliProvider, ProviderPathMapping> = {
     rootInstructions: 'QWEN.md',
     skillsDir: '.qwen/skills',
   },
+  copilot: {
+    rootInstructions: 'AGENTS.md',
+    skillsDir: '.copilot/skills',
+  },
 }
 
 export interface GlobalProviderPaths {
@@ -40,6 +44,7 @@ export const GLOBAL_PROVIDER_PATHS: Record<string, GlobalProviderPaths> = {
   gemini:   { label: 'Gemini',      baseDir: '.gemini', instructions: 'GEMINI.md', skillsDir: 'skills' },
   opencode: { label: 'OpenCode',    baseDir: '.config/opencode', instructions: 'AGENTS.md', skillsDir: 'skills' },
   qwen:     { label: 'Qwen Code',   baseDir: '.qwen',   instructions: 'QWEN.md',   skillsDir: 'skills' },
+  copilot: { label: 'Copilot',    baseDir: '.copilot', instructions: 'AGENTS.md', skillsDir: 'skills' },
 }
 
 export const PROVIDER_LABELS: Record<CliProvider, string> = {
@@ -49,6 +54,7 @@ export const PROVIDER_LABELS: Record<CliProvider, string> = {
   gemini: 'Gemini',
   opencode: 'OpenCode',
   qwen: 'Qwen Code',
+  copilot: 'Copilot',
 }
 
 export interface ProviderCapabilities {
@@ -64,6 +70,7 @@ export const PROVIDER_CAPABILITIES: Record<CliProvider, ProviderCapabilities> = 
   gemini: { configurable: true, mcpReadable: true, mcpWritable: false },
   opencode: { configurable: true, mcpReadable: true, mcpWritable: false },
   qwen: { configurable: true, mcpReadable: true, mcpWritable: true },
+  copilot: { configurable: true, mcpReadable: true, mcpWritable: false },
 }
 
 export interface McpTargetCapabilities {
@@ -78,9 +85,10 @@ export const MCP_TARGET_CAPABILITIES: Record<McpTarget, McpTargetCapabilities> =
   gemini: { configurable: PROVIDER_CAPABILITIES.gemini.mcpReadable, writable: PROVIDER_CAPABILITIES.gemini.mcpWritable },
   opencode: { configurable: PROVIDER_CAPABILITIES.opencode.mcpReadable, writable: PROVIDER_CAPABILITIES.opencode.mcpWritable },
   qwen: { configurable: PROVIDER_CAPABILITIES.qwen.mcpReadable, writable: PROVIDER_CAPABILITIES.qwen.mcpWritable },
+  copilot: { configurable: PROVIDER_CAPABILITIES.copilot.mcpReadable, writable: PROVIDER_CAPABILITIES.copilot.mcpWritable },
 }
 
-const MCP_TARGET_ORDER: McpTarget[] = ['claude', 'codex', 'cursor', 'gemini', 'opencode', 'qwen']
+const MCP_TARGET_ORDER: McpTarget[] = ['claude', 'codex', 'cursor', 'gemini', 'opencode', 'qwen', 'copilot']
 
 export function isConfigurableCliProvider(provider: string): provider is CliProvider {
   if (!Object.hasOwn(PROVIDER_CAPABILITIES, provider)) return false

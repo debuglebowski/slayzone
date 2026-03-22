@@ -32,6 +32,10 @@ test('main tab shows Codex for codex mode', () => {
   expect(getTabLabel(makeTab({ isMain: true, mode: 'codex' }))).toBe('Codex')
 })
 
+test('main tab shows Copilot for copilot mode', () => {
+  expect(getTabLabel(makeTab({ isMain: true, mode: 'copilot' }))).toBe('Copilot')
+})
+
 test('main tab shows Terminal for terminal mode', () => {
   expect(getTabLabel(makeTab({ isMain: true, mode: 'terminal' }))).toBe('Terminal')
 })

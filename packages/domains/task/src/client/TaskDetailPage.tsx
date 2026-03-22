@@ -1500,7 +1500,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 flex items-center gap-2">
               <Info className="h-3.5 w-3.5 text-amber-500 shrink-0" />
               <span className="text-xs text-amber-500">
-                Session ID detection not available for this provider — don't close the tab or resume won't work. Providers with resume: Claude Code, Codex, Gemini, Qwen
+                Session ID detection not available for this provider — don't close the tab or resume won't work. Providers with resume: Claude Code, Codex, Gemini, Qwen, Copilot
               </span>
               <button
                 className="ml-auto text-amber-500 hover:text-amber-400 shrink-0"

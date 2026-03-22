@@ -50,8 +50,10 @@ import type { GlobalFileEntry } from '../shared'
 
 const KNOWN_CONTEXT_FILES: Array<{ relative: string; name: string; category: ContextFileCategory }> = [
   { relative: 'CLAUDE.md', name: 'CLAUDE.md', category: 'claude' },
+  { relative: 'AGENTS.md', name: 'AGENTS.md', category: 'agents' },
   { relative: '.mcp.json', name: '.mcp.json', category: 'mcp' },
   { relative: '.cursor/mcp.json', name: '.cursor/mcp.json', category: 'mcp' },
+  { relative: '.copilot/mcp-config.json', name: '.copilot/mcp-config.json', category: 'mcp' },
 ]
 
 function contentHash(content: string): string {
@@ -523,6 +525,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       name: '~/.claude/CLAUDE.md',
       exists: fs.existsSync(globalClaude),
       category: 'claude'
+    })
+
+    const globalCopilot = path.join(app.getPath('home'), '.copilot', 'AGENTS.md')
+    results.push({
+      path: globalCopilot,
+      name: '~/.copilot/AGENTS.md',
+      exists: fs.existsSync(globalCopilot),
+      category: 'agents'
     })
 
     return results
@@ -1804,6 +1814,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     cursor:   jsonSpec('.cursor/mcp.json', 'mcpServers'),
     gemini:   jsonSpec('.gemini/settings.json', 'mcpServers', { writable: false }),
     opencode: opencodeSpec,
+    copilot:  jsonSpec('.copilot/mcp-config.json', 'mcpServers', { writable: false }),
   }
 
   ipcMain.handle('ai-config:discover-mcp-configs', (_event, projectPath: string): McpConfigFileResult[] => {

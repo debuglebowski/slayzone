@@ -13,6 +13,7 @@ export function getTabLabel(tab: TerminalTab, processTitle?: string): string {
       case 'cursor-agent': return 'Cursor'
       case 'gemini': return 'Gemini'
       case 'opencode': return 'OpenCode'
+      case 'copilot': return 'Copilot'
       case 'ccs': return 'CCS'
       default: return 'Terminal'
     }
