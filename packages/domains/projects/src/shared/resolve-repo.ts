@@ -11,7 +11,7 @@ export interface ResolvedRepo {
  * - No detected repos → single-repo mode, return projectPath
  * - repoName matches a detected repo → return that repo's path
  * - repoName set but no match (repo renamed/deleted) → fallback to first, flag stale
- * - repoName null → return first detected repo
+ * - repoName null → return projectPath (user hasn't picked a child repo yet)
  */
 export function resolveRepoPath(
   projectPath: string | null,
@@ -29,5 +29,6 @@ export function resolveRepoPath(
     return { path: detectedRepos[0].path, stale: true }
   }
 
-  return { path: detectedRepos[0].path, stale: false }
+  // No repo selected yet — fall back to project root, not an arbitrary child repo
+  return { path: projectPath, stale: false }
 }
