@@ -1,4 +1,5 @@
 packages:
+  - 'website'
   - 'packages/apps/*'
   - 'packages/domains/*'
   - 'packages/shared/*'

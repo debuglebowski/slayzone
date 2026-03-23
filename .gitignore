@@ -8,6 +8,8 @@ out
 bundle-report.html
 graph-visual-report.html
 logs/
+website/.astro-public/
+website/.astro/
 
 # Environment
 .env
@@ -28,4 +30,3 @@ test-results/
 playwright-report/
 .e2e-userdata/
 .e2e-runtime/
-

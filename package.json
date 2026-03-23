@@ -40,8 +40,8 @@
     "release:minor": "pnpm --filter @slayzone/app exec npm version minor && pnpm release:tag",
     "release:major": "pnpm --filter @slayzone/app exec npm version major && pnpm release:tag",
     "release:tag": "bash scripts/tag-release.sh",
-    "build:website": "bash website/build.sh",
-    "dev:website": "bash website/build.sh --watch"
+    "build:website": "pnpm --filter @slayzone/website build",
+    "dev:website": "pnpm --filter @slayzone/website dev"
   },
   "devDependencies": {
     "@auth/core": "^0.37.4",
