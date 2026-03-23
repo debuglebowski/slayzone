@@ -30,17 +30,6 @@ interface ProcessEntry {
   processTitle: string | null
 }
 
-function Duration({ since }: { since: string }) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => tick(t => t + 1), 1000)
-    return () => clearInterval(id)
-  }, [])
-  const s = Math.floor((Date.now() - new Date(since).getTime()) / 1000)
-  if (s < 60) return <>{s}s</>
-  if (s < 3600) return <>{Math.floor(s / 60)}m {s % 60}s</>
-  return <>{Math.floor(s / 3600)}h {Math.floor((s % 3600) / 60)}m</>
-}
 
 interface AddFormState {
   label: string
@@ -165,8 +154,6 @@ function ProcessRow({
           )}
           {proc.status === 'running' && (
             <span className="text-[10px] text-muted-foreground/30 font-mono flex items-center gap-1.5">
-              {proc.pid && <span>pid {proc.pid}</span>}
-              {proc.spawnedAt && <><span className="text-muted-foreground/15">·</span><Duration since={proc.spawnedAt} /></>}
               {stats && (
                 <>
                   <span className="text-muted-foreground/15">·</span>
