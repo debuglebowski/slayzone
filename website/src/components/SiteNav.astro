@@ -1,0 +1,20 @@
+---
+import SocialLinks from './SocialLinks.astro'
+
+const { current = '' } = Astro.props
+---
+
+<nav class="site-nav">
+  <a href="/index.html" class="logo">Slay<span class="slash">/</span>Zone</a>
+  <div class="nav-right">
+    <ul class="nav-links" aria-label="Primary">
+      <li><a href="/features.html" aria-current={current === 'features' ? 'page' : undefined}>Features</a></li>
+      <li><a href="/comparison.html" aria-current={current === 'comparison' ? 'page' : undefined}>Comparison</a></li>
+      <li><a href="/docs.html" aria-current={current === 'docs' ? 'page' : undefined}>Docs</a></li>
+      <li><a href="/faq.html" aria-current={current === 'faq' ? 'page' : undefined}>FAQ</a></li>
+    </ul>
+    <div class="social-links" aria-label="Social links">
+      <SocialLinks />
+    </div>
+  </div>
+</nav>

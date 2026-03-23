@@ -1,0 +1,32 @@
+---
+import { loadLegacySegments } from '../lib/legacy.js'
+
+const { page } = Astro.props
+const { html, styles, bodyHtml, scripts } = loadLegacySegments(page)
+
+const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i)
+let headHtml = headMatch ? headMatch[1] : ''
+
+headHtml = headHtml
+  .replace(/<!DOCTYPE html>/gi, '')
+  .replace(/<html[^>]*>/gi, '')
+  .replace(/<\/html>/gi, '')
+  .replace(/<head[^>]*>/gi, '')
+  .replace(/<\/head>/gi, '')
+  .replace(/<body[^>]*>/gi, '')
+  .replace(/<\/body>/gi, '')
+  .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+  .trim()
+---
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <Fragment set:html={headHtml} />
+    <style is:global set:html={styles} />
+  </head>
+  <body>
+    <Fragment set:html={bodyHtml} />
+    {scripts.map((code) => <script is:inline set:html={code} />)}
+  </body>
+</html>

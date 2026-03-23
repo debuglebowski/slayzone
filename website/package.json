@@ -1,0 +1,14 @@
+{
+  "name": "@slayzone/website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:legacy": "node ./scripts/build-legacy.mjs",
+    "build": "pnpm run build:legacy && astro build",
+    "dev": "pnpm run build:legacy && astro dev",
+    "preview": "astro preview"
+  },
+  "devDependencies": {
+    "astro": "^5.14.3"
+  }
+}

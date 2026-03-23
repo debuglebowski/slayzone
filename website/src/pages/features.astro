@@ -1,0 +1,178 @@
+---
+import { features, featurePath } from '../data/features.js'
+import { loadLegacySegments } from '../lib/legacy.js'
+
+const { styles, bodyHtml, scripts } = loadLegacySegments('features.html')
+const featureLinks = features.map((feature) => ({
+  legacyId: feature.legacyId,
+  href: featurePath(feature),
+  label: `Read more about ${feature.title}`,
+}))
+
+const enhancementStyles = `
+  .feature-text { display: flex; flex-direction: column; align-items: flex-start; }
+  .feature-section {
+    position: relative;
+    cursor: pointer;
+  }
+  .feature-section + .feature-section {
+    border-top: 0;
+  }
+  .feature-visual,
+  .feature-text {
+    position: relative;
+    z-index: 2;
+  }
+  .feature-visual {
+    pointer-events: auto;
+    z-index: 6;
+    transition: transform 0.35s ease, box-shadow 0.35s ease;
+    transform-origin: left center;
+  }
+  .feature-visual:hover {
+    z-index: 10;
+    transform: scale(1.2);
+    box-shadow: 0 18px 48px rgba(17, 20, 40, 0.16);
+  }
+  .feature-section:nth-child(even) .feature-visual {
+    transform-origin: right center;
+  }
+  .feature-detail-link {
+    position: relative;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #5f6478;
+    text-decoration: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .feature-detail-link:hover {
+    color: var(--accent);
+  }
+  .feature-detail-link {
+    pointer-events: auto;
+  }
+  .feature-detail-link::after {
+    content: '→';
+    opacity: 0.82;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+  .feature-detail-link:hover::after {
+    opacity: 1;
+    transform: translateX(2px);
+  }
+  .feature-detail-noscript {
+    max-width: 960px;
+    margin: 0 auto 72px;
+    padding: 0 24px;
+  }
+  .feature-detail-noscript h2 {
+    font-size: 18px;
+    margin: 0 0 12px;
+    letter-spacing: -0.04em;
+  }
+  .feature-detail-noscript ul {
+    margin: 0;
+    padding-left: 18px;
+    color: #555;
+  }
+  .feature-detail-noscript a { color: var(--accent); }
+  @media (max-width: 800px) {
+    .feature-visual {
+      transform: none !important;
+    }
+    .feature-visual:hover {
+      transform: none !important;
+      box-shadow: none;
+    }
+  }
+`
+---
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SlayZone — Features</title>
+    <meta
+      name="description"
+      content="Every feature in SlayZone. Kanban, terminals, git, browser panels, usage tracking, and more."
+    />
+    <meta property="og:title" content="SlayZone — All Features" />
+    <meta
+      property="og:description"
+      content="Every feature in SlayZone. Kanban, terminals, git, browser panels, usage tracking, and more."
+    />
+    <meta property="og:image" content="https://slay.zone/assets/og-preview.jpg" />
+    <meta property="og:url" content="https://slay.zone/features.html" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SlayZone — All Features" />
+    <meta
+      name="twitter:description"
+      content="Every feature in SlayZone. Kanban, terminals, git, browser panels, and more."
+    />
+    <meta name="twitter:image" content="https://slay.zone/assets/og-preview.jpg" />
+    <link rel="canonical" href="https://slay.zone/features.html" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet" />
+    <script is:inline>
+      !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group identify setPersonProperties setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags resetGroups onFeatureFlags addFeatureFlagsHandler onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+      posthog.init('phc_bq0dPCUn63ZN28UAz47fKCIcR3rtLSq4YqW06vMaBad', {
+        api_host: 'https://t.slay.zone',
+        defaults: '2026-01-30',
+        persistence: 'memory',
+        person_profiles: 'identified_only',
+        autocapture: false,
+        disable_session_recording: true
+      });
+    </script>
+    <style is:global set:html={`${styles}\n${enhancementStyles}`} />
+  </head>
+  <body>
+    <Fragment set:html={bodyHtml} />
+    <noscript>
+      <section class="feature-detail-noscript">
+        <h2>Feature deep dives</h2>
+        <ul>
+          {features.map((feature) => (
+            <li><a href={featurePath(feature)}>{feature.title}</a></li>
+          ))}
+        </ul>
+      </section>
+    </noscript>
+    {scripts.map((code) => <script is:inline set:html={code} />)}
+    <script is:inline define:vars={{ featureLinks }}>
+    const detailLinks = Array.isArray(featureLinks) ? featureLinks : [];
+      detailLinks.forEach((feature) => {
+        const section = document.getElementById(feature.legacyId);
+        if (!section) return;
+        const text = section.querySelector('.feature-text');
+        if (!text) return;
+        section.dataset.href = feature.href;
+        section.setAttribute('aria-label', feature.label);
+        const link = document.createElement('a');
+        link.className = 'feature-detail-link';
+        link.href = feature.href;
+        link.textContent = 'More on this feature';
+        link.setAttribute('aria-label', feature.label);
+        text.appendChild(link);
+        section.addEventListener('click', (event) => {
+          if (event.target instanceof Element && event.target.closest('.feature-detail-link')) return;
+          window.location.href = feature.href;
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,36 @@
+---
+import { featureDemoPath } from '../data/features.js'
+
+const { feature } = Astro.props
+---
+
+<div class="feature-animation">
+  <iframe
+    src={featureDemoPath(feature)}
+    title={`${feature.title} animation`}
+    loading="lazy"
+  ></iframe>
+</div>
+
+<style>
+  .feature-animation {
+    width: 100%;
+    margin: 0 0 28px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: #f3f4f8;
+  }
+  .feature-animation iframe {
+    display: block;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    border: 0;
+    background: transparent;
+  }
+  @media (max-width: 640px) {
+    .feature-animation {
+      margin-bottom: 22px;
+      border-radius: 16px;
+    }
+  }
+</style>
