@@ -32,7 +32,7 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   const { tabId, taskId, url, partition, visible = true, hidden, isResizing } = opts
 
   const { viewId } = useBrowserViewLifecycle({ tabId, taskId, url, partition })
-  const { placeholderRef } = useBrowserViewBounds(viewId, { visible, hidden, isResizing })
+  const { placeholderRef, hiddenByOverlay } = useBrowserViewBounds(viewId, { visible, hidden, isResizing })
   const state = useBrowserViewEvents(viewId)
 
   const actions: BrowserViewActions = useMemo(() => ({
@@ -48,5 +48,5 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
     focus: () => { if (viewId) void window.api.browser.focus(viewId) },
   }), [viewId])
 
-  return { viewId, state, actions, placeholderRef }
+  return { viewId, state, actions, placeholderRef, hiddenByOverlay }
 }

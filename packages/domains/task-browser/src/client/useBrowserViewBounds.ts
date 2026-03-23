@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from 'react'
+import { useCallback, useRef, useEffect, useState } from 'react'
 
 interface UseBrowserViewBoundsOpts {
   visible: boolean
@@ -9,7 +9,7 @@ interface UseBrowserViewBoundsOpts {
 export function useBrowserViewBounds(
   viewId: string | null,
   opts: UseBrowserViewBoundsOpts
-): { placeholderRef: (el: HTMLDivElement | null) => void } {
+): { placeholderRef: (el: HTMLDivElement | null) => void; hiddenByOverlay: boolean } {
   const { visible, hidden, isResizing } = opts
   const effectivelyVisible = visible && !hidden && !isResizing
 
@@ -29,6 +29,7 @@ export function useBrowserViewBounds(
   }, [viewId, effectivelyVisible])
 
   // Track whether we've hidden this view due to a dialog overlay
+  const [hiddenByOverlay, setHiddenByOverlay] = useState(false)
   const hiddenByOverlayRef = useRef(false)
 
   // rAF bounds tracking loop
@@ -37,27 +38,43 @@ export function useBrowserViewBounds(
       const el = elementRef.current
       const vid = viewIdRef.current
       if (!el || !vid || !effectivelyVisibleRef.current) {
+        // Reset overlay state so we don't get stuck hidden when loop restarts
+        if (hiddenByOverlayRef.current) {
+          hiddenByOverlayRef.current = false
+          setHiddenByOverlay(false)
+        }
         rafRef.current = 0
         return
       }
 
-      // Check if a dialog overlay or popover is present — hide ALL views
-      const hasOverlay = !!document.querySelector('[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="popover-content"]')
-      if (hasOverlay && !hiddenByOverlayRef.current) {
+      // Check if a dialog overlay or popover overlaps this view
+      const overlayEls = document.querySelectorAll('[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="popover-content"]')
+      const viewRect = el.getBoundingClientRect()
+      let overlaps = false
+      for (const oel of overlayEls) {
+        const or = oel.getBoundingClientRect()
+        // Two rects overlap when neither is fully left/right/above/below the other
+        if (or.left < viewRect.right && or.right > viewRect.left && or.top < viewRect.bottom && or.bottom > viewRect.top) {
+          overlaps = true
+          break
+        }
+      }
+      if (overlaps && !hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = true
-        void window.api.browser.hideAll()
-      } else if (!hasOverlay && hiddenByOverlayRef.current) {
+        setHiddenByOverlay(true)
+        void window.api.browser.setVisible(vid, false)
+      } else if (!overlaps && hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = false
-        void window.api.browser.showAll()
+        setHiddenByOverlay(false)
+        void window.api.browser.setVisible(vid, true)
       }
 
       // Only sync bounds when not hidden by overlay
       if (!hiddenByOverlayRef.current) {
-        const rect = el.getBoundingClientRect()
-        const x = Math.round(rect.left)
-        const y = Math.round(rect.top)
-        const width = Math.round(rect.width)
-        const height = Math.round(rect.height)
+        const x = Math.round(viewRect.left)
+        const y = Math.round(viewRect.top)
+        const width = Math.round(viewRect.width)
+        const height = Math.round(viewRect.height)
 
         const last = lastBoundsRef.current
         if (!last || last.x !== x || last.y !== y || last.width !== width || last.height !== height) {
@@ -121,5 +138,5 @@ export function useBrowserViewBounds(
     }
   }, [handleMouseDown, startLoop, stopLoop])
 
-  return { placeholderRef }
+  return { placeholderRef, hiddenByOverlay }
 }

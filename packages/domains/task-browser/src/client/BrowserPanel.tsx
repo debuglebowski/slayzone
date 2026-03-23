@@ -388,6 +388,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     url: '', title: '', favicon: '', canGoBack: false, canGoForward: false,
     isLoading: false, error: null, domReady: false,
   })
+  const [hiddenByOverlay, setHiddenByOverlay] = useState(false)
 
   // Convenience accessors for active tab
   // getActiveHandle reads the ref at call time — safe for event handlers where
@@ -1285,6 +1286,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               isResizing={isResizing}
               className="absolute inset-0"
               onStateChange={tab.id === tabs.activeTabId ? setActiveViewState : undefined}
+              onOverlayChange={tab.id === tabs.activeTabId ? setHiddenByOverlay : undefined}
             />
           ))}
           {loadError && (
@@ -1310,6 +1312,31 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
             </div>
           )}
           {isResizing && <div className="absolute inset-0 z-10" />}
+          {hiddenByOverlay && !loadError && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-background/95 via-background/90 to-background/95 overflow-hidden">
+              {/* Decorative ornaments */}
+              <div className="pointer-events-none absolute inset-0">
+                {/* Dot grid */}
+                <svg className="absolute inset-0 size-full opacity-[0.07]">
+                  <defs>
+                    <pattern id="browser-dots" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
+                      <circle cx="2" cy="2" r="1" fill="currentColor" />
+                    </pattern>
+                  </defs>
+                  <rect width="100%" height="100%" fill="url(#browser-dots)" />
+                </svg>
+                {/* Concentric arcs */}
+                <svg className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 size-[32rem]" viewBox="0 0 400 400" fill="none">
+                  <circle cx="200" cy="200" r="180" stroke="currentColor" strokeWidth="0.5" strokeDasharray="8 12" className="text-muted-foreground/10" />
+                  <circle cx="200" cy="200" r="140" stroke="currentColor" strokeWidth="0.5" strokeDasharray="4 16" className="text-muted-foreground/8" />
+                  <path d="M 200 40 A 160 160 0 0 1 360 200" stroke="currentColor" strokeWidth="1" className="text-muted-foreground/15" />
+                  <path d="M 200 360 A 160 160 0 0 1 40 200" stroke="currentColor" strokeWidth="1" className="text-muted-foreground/15" />
+                </svg>
+              </div>
+              <p className="text-3xl font-semibold tracking-tight text-muted-foreground/60">Browser paused</p>
+              <p className="text-base text-muted-foreground/40">Temporarily hidden while a popup is open</p>
+            </div>
+          )}
         </div>
       )}
     </div>

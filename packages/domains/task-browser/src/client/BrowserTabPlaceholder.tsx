@@ -4,6 +4,7 @@ import { useBrowserView, type BrowserViewState } from './useBrowserView'
 export interface BrowserTabPlaceholderHandle {
   viewId: string | null
   state: BrowserViewState
+  hiddenByOverlay: boolean
   actions: {
     navigate: (url: string) => void
     goBack: () => void
@@ -28,11 +29,12 @@ interface BrowserTabPlaceholderProps {
   isResizing?: boolean
   className?: string
   onStateChange?: (state: BrowserViewState) => void
+  onOverlayChange?: (hidden: boolean) => void
 }
 
 export const BrowserTabPlaceholder = forwardRef<BrowserTabPlaceholderHandle, BrowserTabPlaceholderProps>(
-  function BrowserTabPlaceholder({ tabId, taskId, url, partition, visible, hidden, isResizing, className, onStateChange }, ref) {
-    const { viewId, state, actions, placeholderRef } = useBrowserView({
+  function BrowserTabPlaceholder({ tabId, taskId, url, partition, visible, hidden, isResizing, className, onStateChange, onOverlayChange }, ref) {
+    const { viewId, state, actions, placeholderRef, hiddenByOverlay } = useBrowserView({
       tabId,
       taskId,
       url,
@@ -42,11 +44,15 @@ export const BrowserTabPlaceholder = forwardRef<BrowserTabPlaceholderHandle, Bro
       isResizing,
     })
 
-    useImperativeHandle(ref, () => ({ viewId, state, actions }), [viewId, state, actions])
+    useImperativeHandle(ref, () => ({ viewId, state, actions, hiddenByOverlay }), [viewId, state, actions, hiddenByOverlay])
 
     useEffect(() => {
       if (visible) onStateChange?.(state)
     }, [visible, state, onStateChange])
+
+    useEffect(() => {
+      if (visible) onOverlayChange?.(hiddenByOverlay)
+    }, [visible, hiddenByOverlay, onOverlayChange])
 
     return (
       <div
