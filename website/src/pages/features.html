@@ -330,19 +330,21 @@
   .usage-footer { display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: var(--text-dim); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 
   /* ═══════ FEAT 12: USAGE STATS ═══════ */
-  .feat-usage { flex: 1; padding: 16px; overflow: hidden; display: flex; flex-direction: column; }
-  .usage-chart { display: flex; align-items: flex-end; gap: 6px; height: 100px; margin-bottom: 16px; padding: 0 8px; }
-  .usage-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-  .usage-bar { width: 100%; border-radius: 4px 4px 0 0; transition: height 1s cubic-bezier(0.22,1,0.36,1); background: var(--accent); }
-  .usage-bar.secondary { background: var(--blue); }
-  .usage-day { font-family: 'JetBrains Mono', monospace; font-size: 8px; color: var(--text-dim); }
-  .usage-table { flex: 1; }
-  .usage-table-hd { display: flex; gap: 8px; padding: 6px 8px; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #3a3e5a; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
-  .usage-table-hd span { flex: 1; }
-  .usage-table-hd span:first-child { flex: 2; }
-  .usage-table-row { display: flex; gap: 8px; padding: 6px 8px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); border-bottom: 1px solid rgba(255,255,255,0.02); }
-  .usage-table-row span { flex: 1; }
-  .usage-table-row span:first-child { flex: 2; color: var(--text); }
+  .feat-usage { flex: 1; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-family: 'JetBrains Mono', monospace; }
+  .us-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
+  .us-stat { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  .us-stat-label { font-size: 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .us-stat-val { font-size: 16px; font-weight: 700; color: var(--text); margin-top: 2px; }
+  .us-stat-sub { font-size: 8px; color: var(--text-dim); }
+  .us-card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  .us-card-title { font-size: 9px; color: var(--text-dim); margin-bottom: 6px; }
+  .us-chart-area { height: 80px; position: relative; }
+  .us-charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .us-bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 50px; padding-top: 4px; }
+  .us-bar { flex: 1; border-radius: 2px 2px 0 0; transition: height 1s cubic-bezier(0.22,1,0.36,1); }
+  .us-task-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 9px; border-bottom: 1px solid rgba(255,255,255,0.02); }
+  .us-task-name { color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 8px; }
+  .us-task-val { color: var(--text-dim); flex-shrink: 0; }
 
   /* ═══════ FEAT 13: INTEGRATIONS ═══════ */
   .feat-int { flex: 1; padding: 20px; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
@@ -1138,29 +1140,74 @@
       </div>
     </div>
 
-    <div style="display:none"> <!-- HIDDEN: sections 12-16 while implementing -->
     <!-- ═══════ 12. USAGE STATS ═══════ -->
     <div class="feature-section" id="feat-12">
       <div class="feature-visual"><div class="scale-wrap">
-        <div class="app-frame">
-          <div class="app-bar"><span class="app-dot r"></span><span class="app-dot y"></span><span class="app-dot g"></span><span class="app-bar-title">slayzone — usage analytics</span></div>
+        <div class="app-frame" style="flex-direction:row;">
+          <div class="fk-sidebar">
+            <div class="fk-sidebar-dots"><span class="app-dot r"></span><span class="app-dot y"></span><span class="app-dot g"></span></div>
+            <div class="fk-proj" style="background:#4466ff;">SZ<div class="fk-proj-dot" style="background:var(--green)"></div></div>
+            <div class="fk-proj active" style="background:#ee8833;">WD</div>
+            <div class="fk-proj" style="background:#44bb55;">HC</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+          <div class="tab-bar">
+            <div class="tab-bar-home">🏠</div>
+            <div class="tab-item active"><span class="tab-dot" style="background:var(--green)"></span> Auth refactor <span class="tab-x">×</span></div>
+            <div class="tab-item"><span class="tab-dot" style="background:var(--amber)"></span> Rate limiting <span class="tab-x">×</span></div>
+          </div>
+          <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);">Usage</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);padding:2px 8px;background:var(--surface);border-radius:4px;">Claude ▾</span><span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);">7d</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#fff;background:var(--blue);padding:2px 8px;border-radius:4px;">30d</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);">90d</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);">All</span></div>
           <div class="feat-usage" id="f12-usage">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);padding:0 8px 8px;">Daily token usage — last 7 days</div>
-            <div class="usage-chart" id="f12-chart">
-              <div class="usage-bar-wrap"><div class="usage-bar" data-h="40"></div><div class="usage-day">Mon</div></div>
-              <div class="usage-bar-wrap"><div class="usage-bar" data-h="65"></div><div class="usage-day">Tue</div></div>
-              <div class="usage-bar-wrap"><div class="usage-bar" data-h="35"></div><div class="usage-day">Wed</div></div>
-              <div class="usage-bar-wrap"><div class="usage-bar" data-h="80"></div><div class="usage-day">Thu</div></div>
-              <div class="usage-bar-wrap"><div class="usage-bar secondary" data-h="55"></div><div class="usage-day">Fri</div></div>
-              <div class="usage-bar-wrap"><div class="usage-bar" data-h="20"></div><div class="usage-day">Sat</div></div>
-              <div class="usage-bar-wrap"><div class="usage-bar secondary" data-h="70"></div><div class="usage-day">Sun</div></div>
+            <!-- Stat cards -->
+            <div class="us-stats">
+              <div class="us-stat"><div class="us-stat-label">Total</div><div class="us-stat-val">3.3M</div><div class="us-stat-sub">tokens</div></div>
+              <div class="us-stat"><div class="us-stat-label">Output</div><div class="us-stat-val">3.0M</div><div class="us-stat-sub">93% of total</div></div>
+              <div class="us-stat"><div class="us-stat-label">Input</div><div class="us-stat-val">244.6K</div><div class="us-stat-sub">7% of total</div></div>
+              <div class="us-stat"><div class="us-stat-label">Cache Hit</div><div class="us-stat-val">97.1%</div><div class="us-stat-sub">3.4B read</div></div>
             </div>
-            <div class="usage-table">
-              <div class="usage-table-hd"><span>Provider</span><span>Tokens</span><span>Cost</span><span>Tasks</span></div>
-              <div class="usage-table-row"><span>Claude Code</span><span>847K</span><span>$12.40</span><span>6</span></div>
-              <div class="usage-table-row"><span>Codex</span><span>234K</span><span>$3.80</span><span>3</span></div>
-              <div class="usage-table-row"><span>Gemini</span><span>156K</span><span>$1.20</span><span>2</span></div>
+            <!-- Daily tokens area chart -->
+            <div class="us-card">
+              <div class="us-card-title">Daily Tokens</div>
+              <div class="us-chart-area">
+                <svg width="100%" height="80" preserveAspectRatio="none" viewBox="0 0 400 80">
+                  <defs><linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.02"/></linearGradient></defs>
+                  <path d="M0,70 L20,55 40,60 60,30 80,35 100,25 120,40 140,45 160,50 180,55 200,35 220,30 240,45 260,50 280,55 300,20 320,15 340,10 360,25 380,18 400,30 L400,80 L0,80 Z" fill="url(#areaFill)"/>
+                  <path d="M0,70 L20,55 40,60 60,30 80,35 100,25 120,40 140,45 160,50 180,55 200,35 220,30 240,45 260,50 280,55 300,20 320,15 340,10 360,25 380,18 400,30" stroke="var(--accent)" stroke-width="2" fill="none"/>
+                </svg>
+              </div>
             </div>
+            <!-- Breakdown + By Model -->
+            <div class="us-charts-row">
+              <div class="us-card">
+                <div class="us-card-title">Token Breakdown</div>
+                <div class="us-bar-chart">
+                  <div class="us-bar" style="height:8px;background:var(--text-dim);" data-h="8"></div>
+                  <div class="us-bar" style="height:12px;background:var(--accent);" data-h="12"></div>
+                  <div class="us-bar" style="height:45px;background:var(--green);" data-h="45"></div>
+                  <div class="us-bar" style="height:6px;background:var(--accent);" data-h="6"></div>
+                </div>
+                <div style="display:flex;gap:8px;font-size:7px;color:var(--text-dim);margin-top:4px;"><span>Output</span><span>Input</span><span>Cache Read</span><span>Cache Write</span></div>
+              </div>
+              <div class="us-card">
+                <div class="us-card-title">By Model</div>
+                <div class="us-bar-chart">
+                  <div class="us-bar" style="height:40px;background:#a78bfa;" data-h="40"></div>
+                  <div class="us-bar" style="height:35px;background:#a78bfa;" data-h="35"></div>
+                  <div class="us-bar" style="height:15px;background:#f59e0b;" data-h="15"></div>
+                </div>
+                <div style="display:flex;gap:8px;font-size:7px;color:var(--text-dim);margin-top:4px;"><span>opus-4</span><span>sonnet-4</span><span>gpt-4.5</span></div>
+              </div>
+            </div>
+            <!-- Top tasks -->
+            <div class="us-card" style="flex:1;min-height:0;">
+              <div class="us-card-title">Top Tasks by Tokens</div>
+              <div class="us-task-row"><span class="us-task-name">Auth refactor</span><span class="us-task-val">158.5M</span></div>
+              <div class="us-task-row"><span class="us-task-name">Git branch fixes</span><span class="us-task-val">100.8M</span></div>
+              <div class="us-task-row"><span class="us-task-name">JIRA integration</span><span class="us-task-val">90.7M</span></div>
+              <div class="us-task-row"><span class="us-task-name">Usage stats</span><span class="us-task-val">89.0M</span></div>
+              <div class="us-task-row"><span class="us-task-name">Re-implement website</span><span class="us-task-val">52.6M</span></div>
+            </div>
+          </div>
           </div>
         </div>
       </div></div>
@@ -1170,6 +1217,7 @@
       </div>
     </div>
 
+    <div style="display:none"> <!-- HIDDEN: sections 13-16 while implementing -->
     <!-- ═══════ 13. INTEGRATIONS ═══════ -->
     <div class="feature-section" id="feat-13">
       <div class="feature-visual"><div class="scale-wrap">
@@ -1746,7 +1794,7 @@
     const obs = new IntersectionObserver((entries) => {
       entries.forEach(e => {
         if (e.isIntersecting) {
-          el.querySelectorAll('.usage-bar[data-h]').forEach(b => { b.style.height = b.dataset.h + 'px'; });
+          el.querySelectorAll('.us-bar[data-h]').forEach(b => { b.style.height = b.dataset.h + 'px'; });
           obs.unobserve(el);
         }
       });
