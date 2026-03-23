@@ -1,5 +1,77 @@
 [
   {
+    "version": "0.7.0",
+    "date": "2026-03-23",
+    "tagline": "Browse better",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Faster browser panel",
+        "description": "The built-in browser is now significantly faster and more stable."
+      },
+      {
+        "category": "feature",
+        "title": "Browser keyboard capture",
+        "description": "Choose whether keyboard shortcuts go to the browser or SlayZone with a single toggle."
+      },
+      {
+        "category": "feature",
+        "title": "AI crash recovery",
+        "description": "If an AI agent crashes, its terminal drops into a regular shell so you can keep working."
+      },
+      {
+        "category": "feature",
+        "title": "Automatic data backups",
+        "description": "Your data is automatically backed up before updates for extra safety."
+      },
+      {
+        "category": "feature",
+        "title": "Linux support improvements",
+        "description": "SlayZone now follows Linux conventions for file and config locations."
+      },
+      {
+        "category": "improvement",
+        "title": "Quick status changes",
+        "description": "Click the status icon on any task or column header to change it instantly."
+      },
+      {
+        "category": "improvement",
+        "title": "Cleaner worktree removal",
+        "description": "Deleting a worktree now offers to clean up its branch too."
+      },
+      {
+        "category": "improvement",
+        "title": "Worktree file presets",
+        "description": "Pick from ready-made presets when setting up files for new worktrees."
+      },
+      {
+        "category": "improvement",
+        "title": "Scrollable sub-tasks",
+        "description": "Long sub-task lists now scroll neatly instead of stretching the page."
+      },
+      {
+        "category": "fix",
+        "title": "Crash recovery",
+        "description": "SlayZone now recovers automatically instead of showing a blank screen after a rare crash."
+      },
+      {
+        "category": "fix",
+        "title": "Newlines in AI prompts",
+        "description": "Shift+Enter now correctly adds a new line when typing AI prompts."
+      },
+      {
+        "category": "fix",
+        "title": "Project switching cleanup",
+        "description": "Switching projects now properly resets task state so nothing carries over by accident."
+      },
+      {
+        "category": "fix",
+        "title": "Editor folder memory",
+        "description": "Folders you expanded in the file tree stay open when you come back."
+      }
+    ]
+  },
+  {
     "version": "0.6.1",
     "date": "2026-03-18",
     "tagline": "Integrate everything",

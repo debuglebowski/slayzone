@@ -1,6 +1,98 @@
 # Changelog
 
 
+## v0.7.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.6.1...v0.7.0)
+
+### 🚀 Enhancements
+
+- **platform:** Add @slayzone/platform package with Linux XDG compliance ([314156e](https://github.com/debuglebowski/slayzone/commit/314156e))
+- **platform:** Cross-platform CLI install via @slayzone/platform ([0ef2a96](https://github.com/debuglebowski/slayzone/commit/0ef2a96))
+- **terminal:** Shell fallback + session-not-found on CLI crash ([715cc64](https://github.com/debuglebowski/slayzone/commit/715cc64))
+- **task:** Clickable status icon in task header ([d2e572b](https://github.com/debuglebowski/slayzone/commit/d2e572b))
+- **tasks:** Add status icons to kanban column headers ([5e26ae9](https://github.com/debuglebowski/slayzone/commit/5e26ae9))
+- **worktree:** Branch deletion on remove, fix listBranches regex ([d628330](https://github.com/debuglebowski/slayzone/commit/d628330))
+- **backup:** Auto-backup database before schema migrations ([aefa768](https://github.com/debuglebowski/slayzone/commit/aefa768))
+- **website:** Add "Developers love SlayZone" testimonials section ([51d6e80](https://github.com/debuglebowski/slayzone/commit/51d6e80))
+- **website:** Add "fall in love with terminals" deep-ocean banner ([15d8905](https://github.com/debuglebowski/slayzone/commit/15d8905))
+- **website:** Rename testimonials heading, add Drizzle testimonial ([f85811a](https://github.com/debuglebowski/slayzone/commit/f85811a))
+- **website:** Add canonical tags to all pages ([bb0ed50](https://github.com/debuglebowski/slayzone/commit/bb0ed50))
+- **task:** Add scroll support for sub-task list ([77c5c21](https://github.com/debuglebowski/slayzone/commit/77c5c21))
+- **website:** Add features page with animated sections ([246a564](https://github.com/debuglebowski/slayzone/commit/246a564))
+- **browser:** Add keyboard capture toggle for browser panel ([21b6974](https://github.com/debuglebowski/slayzone/commit/21b6974))
+- **website:** Refine features page animations and add sections 2-4 ([531fd97](https://github.com/debuglebowski/slayzone/commit/531fd97))
+- **worktree:** Copy presets for ignored files ([e5e524e](https://github.com/debuglebowski/slayzone/commit/e5e524e))
+- **website:** Rebuild section 6 diff + section 7 commit graph with SVG, scroll animation ([4176e3f](https://github.com/debuglebowski/slayzone/commit/4176e3f))
+- **website:** Unhide section 8 PR with terminal split layout ([85edaed](https://github.com/debuglebowski/slayzone/commit/85edaed))
+- **website:** Unhide section 9 editor with filetree toggle, file tabs ([e4d7524](https://github.com/debuglebowski/slayzone/commit/e4d7524))
+- **website:** Unhide sections 10 processes + 9 editor title, process card layout ([3208b8f](https://github.com/debuglebowski/slayzone/commit/3208b8f))
+- **website:** Unhide section 11 usage popover with cursor animation, blurred terminal bg ([7c73fdb](https://github.com/debuglebowski/slayzone/commit/7c73fdb))
+- **website:** Rebuild section 12 usage stats with dashboard layout, area chart, stat cards ([39bc76b](https://github.com/debuglebowski/slayzone/commit/39bc76b))
+- **website:** Unhide sections 11-13, integrations hub animation, logo asset ([c6ee488](https://github.com/debuglebowski/slayzone/commit/c6ee488))
+- **website:** Unhide sections 14-16, app shell for all, explode grid, attention cursor animation ([e68a9ea](https://github.com/debuglebowski/slayzone/commit/e68a9ea))
+- **browser:** Migrate browser panel from webview to WebContentsView ([fb652ef](https://github.com/debuglebowski/slayzone/commit/fb652ef))
+- **website:** Migrate site to astro ([d395833](https://github.com/debuglebowski/slayzone/commit/d395833))
+- **browser:** Show pause overlay when popover overlaps WebContentsView ([4ee5b9d](https://github.com/debuglebowski/slayzone/commit/4ee5b9d))
+
+### 🩹 Fixes
+
+- **file-editor:** Hide scrollbar on editor tab bar ([853e076](https://github.com/debuglebowski/slayzone/commit/853e076))
+- **platform:** Validate CLI source exists before creating symlink ([499886a](https://github.com/debuglebowski/slayzone/commit/499886a))
+- **platform:** Validate CLI source on Windows, add cleanup TODOs ([97f21da](https://github.com/debuglebowski/slayzone/commit/97f21da))
+- **platform:** Guard Windows shim write, add migration tests ([9c8b5e3](https://github.com/debuglebowski/slayzone/commit/9c8b5e3))
+- **platform:** Port tests to vitest, show-once migration dialog, cleanup ([d7a403d](https://github.com/debuglebowski/slayzone/commit/d7a403d))
+- **file-editor:** Load persisted expanded folders on mount ([a5c3351](https://github.com/debuglebowski/slayzone/commit/a5c3351))
+- **website:** Add www→apex 301 redirect for Cloudflare Pages ([f6efd62](https://github.com/debuglebowski/slayzone/commit/f6efd62))
+- **worktree:** Normalize relative paths, reset sessions on worktree change ([2a1f781](https://github.com/debuglebowski/slayzone/commit/2a1f781))
+- **app:** Recover from renderer crashes by reloading on render-process-gone ([d346d45](https://github.com/debuglebowski/slayzone/commit/d346d45))
+- **integrations:** Backoff discovery polling when offline ([0cc736f](https://github.com/debuglebowski/slayzone/commit/0cc736f))
+- **integrations:** Sanitize Jira domain input, improve fetch error message ([0340089](https://github.com/debuglebowski/slayzone/commit/0340089))
+- **processes:** Spawn via user shell instead of /bin/sh ([5043dad](https://github.com/debuglebowski/slayzone/commit/5043dad))
+- **app:** Recover from renderer crash, enrich crash diagnostics ([c00f489](https://github.com/debuglebowski/slayzone/commit/c00f489))
+- **backup:** Clean up old migration backups, keep last 3 ([1909517](https://github.com/debuglebowski/slayzone/commit/1909517))
+- **browser:** Handle webview load failures to prevent renderer crash ([3bba164](https://github.com/debuglebowski/slayzone/commit/3bba164))
+- **terminal:** Support Shift+Enter for newline in AI mode prompts ([#37](https://github.com/debuglebowski/slayzone/pull/37))
+- **terminal:** Remove unused toast import and variables ([266f415](https://github.com/debuglebowski/slayzone/commit/266f415))
+- **cwd:** Fall back to project root when no repo selected ([#41](https://github.com/debuglebowski/slayzone/pull/41))
+- **task:** Clear worktree fields + conversation IDs only on actual project change ([57baf8e](https://github.com/debuglebowski/slayzone/commit/57baf8e))
+
+### 💅 Refactors
+
+- **settings:** Decouple leaderboard/usage-analytics from tab system ([bd76d7a](https://github.com/debuglebowski/slayzone/commit/bd76d7a))
+- **worktree:** Remove "remember for project" from copy dialog ([3d8b073](https://github.com/debuglebowski/slayzone/commit/3d8b073))
+- **website:** Rebuild section 5 git panel with SVG graph, card layout, diff ([6e4a820](https://github.com/debuglebowski/slayzone/commit/6e4a820))
+- **website:** Unify section 5/6 layout, move diff to dedicated section ([f101b97](https://github.com/debuglebowski/slayzone/commit/f101b97))
+- **terminal:** Require Cmd+Click for links, remove pointer cursor ([1a514ff](https://github.com/debuglebowski/slayzone/commit/1a514ff))
+- **task:** Remove pid and timer from process items ([c11da43](https://github.com/debuglebowski/slayzone/commit/c11da43))
+- **website:** Section 16 terminal→kanban animation, faster timing, fix reset flash ([0668dcf](https://github.com/debuglebowski/slayzone/commit/0668dcf))
+
+### 📖 Documentation
+
+- **website:** Update features page section titles and descriptions ([41992b9](https://github.com/debuglebowski/slayzone/commit/41992b9))
+- **browser:** Working note for WebContentsView migration ([29de01a](https://github.com/debuglebowski/slayzone/commit/29de01a))
+- **browser:** Platform options research note ([e77d1e1](https://github.com/debuglebowski/slayzone/commit/e77d1e1))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.6.1 ([7d8b5ac](https://github.com/debuglebowski/slayzone/commit/7d8b5ac))
+- **website:** Tweak testimonials title, remove subtitle, nerf VS Code dopamine ([7d3bb00](https://github.com/debuglebowski/slayzone/commit/7d3bb00))
+- Upgrade electron 39→41, electron-builder 25→26 ([f7e90ac](https://github.com/debuglebowski/slayzone/commit/f7e90ac))
+- **website:** Increase worktree animation size, tighten spacing ([73b1b99](https://github.com/debuglebowski/slayzone/commit/73b1b99))
+- **website:** Swap diff/commits order, increase git panel display time ([55ccabd](https://github.com/debuglebowski/slayzone/commit/55ccabd))
+- Relicense from Apache 2.0 to GPL v3 ([afddd80](https://github.com/debuglebowski/slayzone/commit/afddd80))
+- Add website to pnpm workspace, update build scripts ([14ffe7f](https://github.com/debuglebowski/slayzone/commit/14ffe7f))
+
+### ✅ Tests
+
+- **browser:** E2E tests for WebContentsView browser panel ([a565ac0](https://github.com/debuglebowski/slayzone/commit/a565ac0))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Shivansh Singh ([@wise-toddler](https://github.com/wise-toddler))
+- Adam Scott ([@adamsco](https://github.com/adamsco))
+
 ## v0.6.1
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.5.0...v0.6.1)
