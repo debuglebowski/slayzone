@@ -323,8 +323,9 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.dueDate !== undefined) { fields.push('due_date = ?'); values.push(data.dueDate) }
   if (data.projectId !== undefined) {
     fields.push('project_id = ?'); values.push(data.projectId)
-    // Clear repo_name when moving to a different project — child repos may differ
+    // Clear repo_name and worktree_path when moving to a different project — child repos may differ
     if (data.repoName === undefined) { fields.push('repo_name = ?'); values.push(null) }
+    if (data.worktreePath === undefined) { fields.push('worktree_path = ?'); values.push(null) }
   }
   if (data.claudeSessionId !== undefined) { fields.push('claude_session_id = ?'); values.push(data.claudeSessionId) }
   if (data.terminalMode !== undefined) { fields.push('terminal_mode = ?'); values.push(data.terminalMode) }
