@@ -1,10 +1,12 @@
 import { defineConfig } from 'astro/config'
+import sitemap from '@astrojs/sitemap'
 
 export default defineConfig({
   site: 'https://slay.zone',
   output: 'static',
   outDir: './dist',
-  publicDir: './.astro-public',
+  publicDir: './public',
+  integrations: [sitemap()],
   image: {
     remotePatterns: [],
   },
