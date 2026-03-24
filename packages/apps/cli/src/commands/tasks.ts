@@ -119,6 +119,7 @@ export function tasksCommand(): Command {
     .command('create <title>')
     .description('Create a new task')
     .requiredOption('--project <name|id>', 'Project name (partial, case-insensitive) or ID')
+    .option('--description <text>', 'Task description')
     .option('--status <status>', 'Initial status key')
     .option('--priority <n>', 'Priority 1-5 (1=highest)', '3')
     .action(async (title, opts) => {
@@ -161,14 +162,15 @@ export function tasksCommand(): Command {
       const now = new Date().toISOString()
 
       db.run(
-        `INSERT INTO tasks (id, project_id, title, status, priority, "order", created_at, updated_at)
-         VALUES (:id, :projectId, :title, :status, :priority,
+        `INSERT INTO tasks (id, project_id, title, description, status, priority, "order", created_at, updated_at)
+         VALUES (:id, :projectId, :title, :description, :status, :priority,
            (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
            :now, :now)`,
         {
           ':id': id,
           ':projectId': project.id,
           ':title': title,
+          ':description': opts.description ?? null,
           ':status': status,
           ':priority': priority,
           ':now': now,
@@ -255,12 +257,13 @@ export function tasksCommand(): Command {
     .command('update [id]')
     .description('Update a task (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
     .option('--title <title>', 'New title')
+    .option('--description <text>', 'New description')
     .option('--status <status>', 'New status key')
     .option('--priority <n>', 'New priority 1-5')
     .action(async (idPrefix, opts) => {
       idPrefix = resolveId(idPrefix)
-      if (!opts.title && !opts.status && !opts.priority) {
-        console.error('Provide at least one of --title, --status, --priority')
+      if (!opts.title && !opts.description && !opts.status && !opts.priority) {
+        console.error('Provide at least one of --title, --description, --status, --priority')
         process.exit(1)
       }
 
@@ -293,9 +296,10 @@ export function tasksCommand(): Command {
       const sets: string[] = ['updated_at = :now']
       const params: Record<string, string | number | null> = { ':now': new Date().toISOString(), ':id': task.id }
 
-      if (opts.title)    { sets.push('title = :title');       params[':title'] = opts.title }
-      if (opts.status)   { sets.push('status = :status');     params[':status'] = opts.status }
-      if (opts.priority) { sets.push('priority = :priority'); params[':priority'] = parseInt(opts.priority, 10) }
+      if (opts.title)       { sets.push('title = :title');             params[':title'] = opts.title }
+      if (opts.description) { sets.push('description = :description'); params[':description'] = opts.description }
+      if (opts.status)      { sets.push('status = :status');           params[':status'] = opts.status }
+      if (opts.priority)    { sets.push('priority = :priority');       params[':priority'] = parseInt(opts.priority, 10) }
 
       db.run(`UPDATE tasks SET ${sets.join(', ')} WHERE id = :id`, params)
       db.close()
@@ -432,6 +436,7 @@ export function tasksCommand(): Command {
   cmd
     .command('subtask-add [parentId] <title>')
     .description('Add a subtask (parentId defaults to $SLAYZONE_TASK_ID)')
+    .option('--description <text>', 'Subtask description')
     .option('--status <status>', 'Initial status key')
     .option('--priority <n>', 'Priority 1-5', '3')
     .action(async (parentId, title, opts) => {
@@ -471,8 +476,8 @@ export function tasksCommand(): Command {
       const now = new Date().toISOString()
 
       db.run(
-        `INSERT INTO tasks (id, project_id, parent_id, title, status, priority, terminal_mode, "order", created_at, updated_at, is_temporary)
-         VALUES (:id, :projectId, :parentId, :title, :status, :priority, :terminalMode,
+        `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, terminal_mode, "order", created_at, updated_at, is_temporary)
+         VALUES (:id, :projectId, :parentId, :title, :description, :status, :priority, :terminalMode,
            (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
            :now, :now, 0)`,
         {
@@ -480,6 +485,7 @@ export function tasksCommand(): Command {
           ':projectId': parent.project_id,
           ':parentId': parent.id,
           ':title': title,
+          ':description': opts.description ?? null,
           ':status': status,
           ':priority': priority,
           ':terminalMode': terminalMode,
