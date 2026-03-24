@@ -174,18 +174,23 @@ jobs:
         include:
           - name: macos-arm64
             os: macos-latest
+            arch: arm64
             build_args: --mac --arm64
           - name: macos-x64
             os: macos-latest
+            arch: x64
             build_args: --mac --x64
           - name: linux-x64
             os: ubuntu-latest
+            arch: x64
             build_args: --linux --x64
           - name: windows-x64
             os: windows-latest
+            arch: x64
             build_args: --win --x64
           - name: windows-arm64
             os: windows-latest
+            arch: arm64
             build_args: --win --arm64
 
     runs-on: ${{ matrix.os }}
@@ -271,6 +276,20 @@ jobs:
           export DEPLOY_DIR
           node -e "const p=require('path'),f=p.join(process.env.DEPLOY_DIR,'electron-builder.yml');require('fs').writeFileSync(f,require('fs').readFileSync(f,'utf8').replace(/\.\.\/cli\//g,'./cli/'))"
           echo "DEPLOY_DIR=$DEPLOY_DIR" >> "$GITHUB_ENV"
+
+      - name: Rebuild native modules for Electron
+        shell: bash
+        working-directory: ${{ env.DEPLOY_DIR }}
+        run: |
+          set -euo pipefail
+          REBUILD_CLI="$(node -e "const p=require('path'); console.log(p.join(p.dirname(require.resolve('@electron/rebuild', {paths: ['${{ github.workspace }}/packages/apps/app']})), 'cli.js'))")"
+          node "$REBUILD_CLI" \
+            --version "${{ env.ELECTRON_VERSION }}" \
+            --module-dir . \
+            --only better-sqlite3,node-pty \
+            --arch ${{ matrix.arch }} \
+            --build-from-source \
+            --force
 
       - name: Package
         shell: bash
