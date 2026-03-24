@@ -262,7 +262,7 @@ export function tasksCommand(): Command {
     .option('--priority <n>', 'New priority 1-5')
     .action(async (idPrefix, opts) => {
       idPrefix = resolveId(idPrefix)
-      if (!opts.title && !opts.description && !opts.status && !opts.priority) {
+      if (opts.title === undefined && opts.description === undefined && opts.status === undefined && opts.priority === undefined) {
         console.error('Provide at least one of --title, --description, --status, --priority')
         process.exit(1)
       }
