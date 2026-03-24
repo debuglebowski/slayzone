@@ -160,6 +160,12 @@
   --modal-border: oklch(1 0 0 / 25%);
 }
 
+[data-sonner-toaster][dir='ltr'] {
+  --toast-close-button-start: unset !important;
+  --toast-close-button-end: 0 !important;
+  --toast-close-button-transform: translate(35%, -35%) !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

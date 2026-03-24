@@ -886,7 +886,7 @@ function App(): React.JSX.Element {
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction autoFocus onClick={handleCompleteTaskConfirm}>Complete</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
         </AlertDialog>
         <UpdateToast version={updateVersion} onRestart={() => window.api.app.restartForUpdate()} onDismiss={() => setUpdateVersion(null)} />
-        <Toaster position="bottom-right" theme="dark" />
+        <Toaster position="bottom-right" theme="dark" closeButton />
       </div>
     </SidebarProvider>
     </AppearanceProvider>
