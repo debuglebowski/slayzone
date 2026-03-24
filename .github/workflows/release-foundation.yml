@@ -268,7 +268,8 @@ jobs:
           mkdir -p "$DEPLOY_DIR/cli/dist" "$DEPLOY_DIR/cli/bin"
           cp packages/apps/cli/dist/slay.js "$DEPLOY_DIR/cli/dist/slay.js"
           cp packages/apps/cli/bin/slay "$DEPLOY_DIR/cli/bin/slay"
-          node -e "const f='$DEPLOY_DIR/electron-builder.yml';require('fs').writeFileSync(f,require('fs').readFileSync(f,'utf8').replace(/\.\.\/cli\//g,'./cli/'))"
+          export DEPLOY_DIR
+          node -e "const p=require('path'),f=p.join(process.env.DEPLOY_DIR,'electron-builder.yml');require('fs').writeFileSync(f,require('fs').readFileSync(f,'utf8').replace(/\.\.\/cli\//g,'./cli/'))"
           echo "DEPLOY_DIR=$DEPLOY_DIR" >> "$GITHUB_ENV"
 
       - name: Package
