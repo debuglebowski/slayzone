@@ -297,7 +297,7 @@ export function tasksCommand(): Command {
       const params: Record<string, string | number | null> = { ':now': new Date().toISOString(), ':id': task.id }
 
       if (opts.title)       { sets.push('title = :title');             params[':title'] = opts.title }
-      if (opts.description) { sets.push('description = :description'); params[':description'] = opts.description }
+      if (opts.description !== undefined) { sets.push('description = :description'); params[':description'] = opts.description || null }
       if (opts.status)      { sets.push('status = :status');           params[':status'] = opts.status }
       if (opts.priority)    { sets.push('priority = :priority');       params[':priority'] = parseInt(opts.priority, 10) }
 
