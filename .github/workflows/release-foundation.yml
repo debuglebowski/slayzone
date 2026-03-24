@@ -181,9 +181,12 @@ jobs:
           - name: linux-x64
             os: ubuntu-latest
             build_args: --linux --x64
-          - name: windows
+          - name: windows-x64
             os: windows-latest
-            build_args: --win --x64 --arm64
+            build_args: --win --x64
+          - name: windows-arm64
+            os: windows-latest
+            build_args: --win --arm64
 
     runs-on: ${{ matrix.os }}
 
