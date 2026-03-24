@@ -399,30 +399,73 @@ export async function copyIgnoredFiles(
   })
 }
 
+/**
+ * Look up the branch associated with a worktree path via `git worktree list --porcelain`.
+ * Returns null if not found (e.g. detached HEAD or worktree already removed).
+ */
+async function getWorktreeBranchForPath(repoPath: string, worktreePath: string): Promise<string | null> {
+  try {
+    const resolved = path.resolve(repoPath, worktreePath)
+    const worktrees = await detectWorktrees(repoPath)
+    return worktrees.find(wt => path.resolve(wt.path) === resolved)?.branch ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function removeWorktree(
   repoPath: string,
   worktreePath: string,
-  branchToDelete?: string
+  branchHint?: string
 ): Promise<{ branchDeleted?: boolean; branchError?: string }> {
+  const resolvedPath = path.resolve(repoPath, worktreePath)
+
+  // Only gather branch candidates when caller wants branch deletion.
+  // Collect BEFORE removing — metadata disappears after removal.
+  const wantsBranchDeletion = branchHint !== undefined
+  let metadataBranch: string | null = null
+  let liveBranch: string | null = null
+  if (wantsBranchDeletion) {
+    metadataBranch = await getWorktreeBranchForPath(repoPath, resolvedPath)
+    liveBranch = await getCurrentBranch(resolvedPath)
+  }
+
   try {
-    await execGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoPath })
+    await execGit(['worktree', 'remove', resolvedPath, '--force'], { cwd: repoPath })
   } catch (err) {
-    if (!existsSync(worktreePath)) {
+    if (!existsSync(resolvedPath)) {
       await execGit(['worktree', 'prune'], { cwd: repoPath })
     } else {
       throw err
     }
   }
 
-  if (!branchToDelete) return {}
+  if (!wantsBranchDeletion) return {}
 
-  const currentBranch = await getCurrentBranch(repoPath)
-  if (currentBranch === branchToDelete) {
-    return { branchDeleted: false, branchError: `Cannot delete branch "${branchToDelete}" — it is the current branch` }
+  // Build ordered candidate list: metadata (most reliable), caller hint, live branch, path basename
+  const candidates = [metadataBranch, branchHint, liveBranch]
+    .map(b => b?.replace(/^refs\/heads\//, '').trim())
+    .filter((b): b is string => Boolean(b))
+
+  const basename = path.basename(resolvedPath)
+  const allBranches = await listBranches(repoPath)
+  if (basename && allBranches.includes(basename) && !candidates.includes(basename)) {
+    candidates.push(basename)
   }
 
-  const result = await deleteBranch(repoPath, branchToDelete, true)
-  return { branchDeleted: result.success, branchError: result.error }
+  const uniqueCandidates = [...new Set(candidates)]
+  if (uniqueCandidates.length === 0) return {}
+
+  const repoBranch = await getCurrentBranch(repoPath)
+  for (const branch of uniqueCandidates) {
+    if (branch === repoBranch) continue
+    const result = await deleteBranch(repoPath, branch, true)
+    if (result.success) {
+      return { branchDeleted: true }
+    }
+  }
+
+  return { branchDeleted: false, branchError: `Could not delete branch (tried: ${uniqueCandidates.join(', ')})` }
 }
 
 export async function initRepo(repoPath: string): Promise<void> {

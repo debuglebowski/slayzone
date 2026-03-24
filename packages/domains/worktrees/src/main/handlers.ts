@@ -206,8 +206,8 @@ export function registerWorktreeHandlers(ipcMain: IpcMain, db: Database): void {
     return { setupResult }
   })
 
-  ipcMain.handle('git:removeWorktree', (_, repoPath: string, worktreePath: string, branchToDelete?: string) => {
-    return removeWorktree(repoPath, worktreePath, branchToDelete)
+  ipcMain.handle('git:removeWorktree', (_, repoPath: string, worktreePath: string, branchHint?: string) => {
+    return removeWorktree(repoPath, worktreePath, branchHint)
   })
 
   ipcMain.handle('git:init', (_, path: string) => {

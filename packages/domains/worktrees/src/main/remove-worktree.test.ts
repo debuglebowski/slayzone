@@ -1,5 +1,5 @@
 /**
- * Tests for removeWorktree with branch deletion.
+ * Tests for removeWorktree multi-fallback branch cleanup.
  * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/worktrees/src/main/remove-worktree.test.ts
  */
 import { createWorktree, removeWorktree, listBranches } from './git-worktree.js'
@@ -30,6 +30,7 @@ function expect(actual: unknown) {
       if (actual !== expected) throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
     },
     toBeTruthy() { if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`) },
+    toBeFalsy() { if (actual) throw new Error(`Expected falsy, got ${JSON.stringify(actual)}`) },
   }
 }
 
@@ -48,45 +49,94 @@ fs.writeFileSync(path.join(repoPath, 'README.md'), '# Test')
 git('git add -A')
 git('git commit -m "initial"')
 
-console.log('\nremoveWorktree')
+console.log('\nremoveWorktree — backward compat')
 
-await test('backward compat: no branch param returns empty object', async () => {
+await test('no hint = removes worktree, preserves branch', async () => {
   const wtPath = path.join(root, 'wt-compat')
   await createWorktree(repoPath, wtPath, 'feature-compat')
+
   const result = await removeWorktree(repoPath, wtPath)
   expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
   expect(result.branchDeleted).toBe(undefined)
-  // Branch should still exist
   expect(git('git branch --list feature-compat').length > 0).toBe(true)
+  // Cleanup leaked branch
+  git('git branch -D feature-compat')
 })
 
-await test('deletes branch when branchToDelete provided', async () => {
-  const wtPath = path.join(root, 'wt-del')
-  await createWorktree(repoPath, wtPath, 'feature-del')
-  const result = await removeWorktree(repoPath, wtPath, 'feature-del')
+console.log('\nremoveWorktree — multi-fallback branch cleanup')
+
+await test('hint activates fallback: finds branch via metadata even if hint is wrong', async () => {
+  const wtPath = path.join(root, 'wt-meta')
+  await createWorktree(repoPath, wtPath, 'feature-meta')
+
+  // Pass a wrong hint — metadata should still find "feature-meta"
+  const result = await removeWorktree(repoPath, wtPath, 'nonexistent-branch')
   expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
   expect(result.branchDeleted).toBe(true)
-  expect(git('git branch --list feature-del')).toBe('')
+  expect(git('git branch --list feature-meta')).toBe('')
 })
 
-await test('refuses to delete current branch', async () => {
-  const wtPath = path.join(root, 'wt-safe')
-  await createWorktree(repoPath, wtPath, 'feature-safe')
+await test('deletes branch via exact caller hint', async () => {
+  const wtPath = path.join(root, 'wt-hint')
+  await createWorktree(repoPath, wtPath, 'feature-hint')
+
+  const result = await removeWorktree(repoPath, wtPath, 'feature-hint')
+  expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
+  expect(result.branchDeleted).toBe(true)
+  expect(git('git branch --list feature-hint')).toBe('')
+})
+
+await test('falls back to path basename', async () => {
+  const wtPath = path.join(root, 'feature-basename')
+  await createWorktree(repoPath, wtPath, 'feature-basename')
+
+  // Pass wrong hint — basename "feature-basename" matches a real branch
+  const result = await removeWorktree(repoPath, wtPath, 'wrong-hint')
+  expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
+  expect(result.branchDeleted).toBe(true)
+  expect(git('git branch --list feature-basename')).toBe('')
+})
+
+await test('reports failure when no candidate branch exists', async () => {
+  const wtPath = path.join(root, 'wt-gone')
+  await createWorktree(repoPath, wtPath, 'branch-gone')
+  git('git worktree remove ' + wtPath + ' --force')
+  git('git branch -D branch-gone')
+
+  const result = await removeWorktree(repoPath, wtPath, 'branch-gone')
+  expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
+  expect(result.branchDeleted).toBeFalsy()
+})
+
+await test('skips current branch in candidates', async () => {
+  const wtPath = path.join(root, 'wt-skip')
+  await createWorktree(repoPath, wtPath, 'feature-skip')
+
+  // "main" is the current branch — passed as hint but should be skipped; metadata finds "feature-skip"
   const result = await removeWorktree(repoPath, wtPath, 'main')
-  expect(result.branchDeleted).toBe(false)
-  expect(result.branchError).toBeTruthy()
+  expect(result.branchDeleted).toBe(true)
+  expect(git('git branch --list feature-skip')).toBe('')
+})
+
+await test('handles relative worktree path', async () => {
+  const relPath = '../wt-rel'
+  const absPath = path.join(root, 'wt-rel')
+  await createWorktree(repoPath, relPath, 'feature-rel')
+
+  const result = await removeWorktree(repoPath, relPath, 'feature-rel')
+  expect(fs.existsSync(path.join(absPath, '.git'))).toBe(false)
+  expect(result.branchDeleted).toBe(true)
+  expect(git('git branch --list feature-rel')).toBe('')
 })
 
 console.log('\nlistBranches regex')
 
 await test('handles + prefix for worktree branches', async () => {
-  // Create a worktree so one branch gets + prefix in git branch output
   const wtPath = path.join(root, 'wt-plus')
   await createWorktree(repoPath, wtPath, 'feature-plus')
   const branches = await listBranches(repoPath)
   expect(branches.some(b => b === 'feature-plus')).toBe(true)
   expect(branches.every(b => !b.startsWith('+'))).toBe(true)
-  // Cleanup
   await removeWorktree(repoPath, wtPath)
 })
 
