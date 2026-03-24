@@ -149,6 +149,10 @@ function SortableSubTask({ sub, columns, statusOptions, onNavigate, onUpdate, on
 
 export interface TaskDetailPageProps {
   taskId: string
+  /** Live task object from global state (source of truth). */
+  task: Task | null
+  /** Live project object from global state (source of truth). */
+  project: Project | null
   isActive?: boolean
   compact?: boolean
   onBack: () => void
@@ -167,6 +171,8 @@ export interface TaskDetailPageProps {
 
 export const TaskDetailPage = React.memo(function TaskDetailPage({
   taskId,
+  task,
+  project,
   isActive,
   compact,
   onBack,
@@ -187,8 +193,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Main tab session ID format used by TerminalContainer/useTaskTerminals.
   const getMainSessionId = useCallback((id: string) => `${id}:${id}`, [])
 
-  const [task, setTask] = useState<Task | null>(initialData?.task ?? null)
-  const [project, setProject] = useState<Project | null>(initialData?.project ?? null)
   const [tags] = useState<Tag[]>(initialData?.tags ?? [])
   const [taskTagIds, setTaskTagIds] = useState<string[]>(initialData?.taskTagIds ?? [])
   const statusOptions = useMemo(() => buildStatusOptions(project?.columns_config), [project?.columns_config])
@@ -216,7 +220,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const handleRepoChange = useCallback((repoName: string) => {
     if (!task) return
     window.api.db.updateTask({ id: task.id, repoName }).then((updated) => {
-      setTask(updated)
       onTaskUpdated(updated)
     })
   }, [task?.id, onTaskUpdated])
@@ -229,7 +232,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Title editing state
   const [editingTitle, setEditingTitle] = useState(false)
-  const [titleValue, setTitleValue] = useState(initialData?.task?.title ?? '')
+  const [titleValue, setTitleValue] = useState(task?.title ?? '')
   const titleInputRef = useRef<HTMLInputElement>(null)
 
   // Delete/archive dialog state
@@ -247,7 +250,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // In-progress prompt state
 
   // Description editing state
-  const [descriptionValue, setDescriptionValue] = useState(initialData?.task?.description ?? '')
+  const [descriptionValue, setDescriptionValue] = useState(task?.description ?? '')
 
   // Terminal restart key (changing this forces remount)
   const [terminalKey, setTerminalKey] = useState(0)
@@ -262,6 +265,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Panel visibility state
   const defaultPanelVisibility: PanelVisibility = { terminal: true, browser: false, diff: false, settings: true, editor: false, processes: false }
   const [panelVisibility, setPanelVisibility] = useState<PanelVisibility>(initialData?.panelVisibility ?? defaultPanelVisibility)
+
+  // Sync title/description from global state when changed externally
+  useEffect(() => {
+    if (task && !editingTitle) setTitleValue(task.title)
+  }, [task?.title, editingTitle])
+
+  useEffect(() => {
+    if (task) setDescriptionValue(task.description ?? '')
+  }, [task?.description])
 
   // Browser tabs state
   const defaultBrowserTabs: BrowserTabsState = {
@@ -415,38 +427,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     return () => window.removeEventListener('focus', handleFocus)
   }, [project?.path])
 
-  // Keep project in sync when task project assignment changes.
+  // Check project path exists when project changes
   useEffect(() => {
-    if (!task) return
+    if (!project?.path) { setProjectPathMissing(false); return }
+    const pathExists = window.api.files?.pathExists
+    if (typeof pathExists !== 'function') return
     let cancelled = false
-
-    const checkProjectPathExists = async (path: string): Promise<boolean> => {
-      const pathExists = window.api.files?.pathExists
-      if (typeof pathExists === 'function') return pathExists(path)
-      console.warn('window.api.files.pathExists is unavailable; skipping path validation')
-      return true
-    }
-
-    const syncProject = async (): Promise<void> => {
-      const projects = await window.api.db.getProjects()
-      const taskProject = projects.find((p) => p.id === task.project_id) || null
-      if (cancelled) return
-
-      setProject(taskProject)
-
-      if (taskProject?.path) {
-        const exists = await checkProjectPathExists(taskProject.path)
-        if (!cancelled) setProjectPathMissing(!exists)
-      } else if (!cancelled) {
-        setProjectPathMissing(false)
-      }
-    }
-
-    void syncProject()
-    return () => {
-      cancelled = true
-    }
-  }, [task?.project_id, task?.id])
+    pathExists(project.path).then((exists) => { if (!cancelled) setProjectPathMissing(!exists) })
+    return () => { cancelled = true }
+  }, [project?.path])
 
   // Handle session ID creation from terminal — persist to DB only.
   // Don't setTask/onTaskUpdated: the conversation ID is internal terminal state.
@@ -512,7 +501,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       id: task.id,
       providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, detectedSessionId)
     })
-    setTask(updated)
     onTaskUpdated(updated)
     setDetectedSessionId(null)
   }, [task, detectedSessionId, onTaskUpdated])
@@ -532,7 +520,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, detectedSessionId)
       })
       if (cancelled) return
-      setTask(updated)
       onTaskUpdated(updated)
       setDetectedSessionId(null)
     })()
@@ -552,7 +539,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       id: task.id,
       providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, null)
     })
-    setTask(updated)
     onTaskUpdated(updated)
 
     // Kill the current PTY so we can restart fresh
@@ -581,7 +567,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       id: task.id,
       providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, null)
     })
-    setTask(updated)
     onTaskUpdated(updated)
     await new Promise((r) => setTimeout(r, 100))
     markSkipCache(mainSessionId)
@@ -794,7 +779,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         claudeSessionId: null
       })
       if (!updated) return
-      setTask(updated)
       onTaskUpdated(updated)
       // Remount terminal (mark skip to prevent cleanup from re-caching old content)
       markSkipCache(mainSessionId)
@@ -820,7 +804,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
 
       const updated = await window.api.db.updateTask(update)
-      setTask(updated)
       onTaskUpdated(updated)
 
       const mainSessionId = `${task.id}:${task.id}`
@@ -869,7 +852,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         id: task.id,
         panelVisibility: newVisibility
       })
-      setTask(updated)
       onTaskUpdated(updated)
     },
     [task, panelVisibility, onTaskUpdated, resetPanelSize]
@@ -999,7 +981,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       id: task.id,
       title: titleValue
     })
-    setTask(updated)
     onTaskUpdated(updated)
     setEditingTitle(false)
   }
@@ -1021,7 +1002,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       id: task.id,
       description: descriptionValue || undefined
     })
-    setTask(updated)
     onTaskUpdated(updated)
   }
 
@@ -1069,7 +1049,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }
 
   const handleTaskUpdate = (updated: Task): void => {
-    setTask(updated)
     setTitleValue(updated.title)
     setDescriptionValue(updated.description ?? '')
     onTaskUpdated(updated)
@@ -1164,11 +1143,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const id = taskIdRef.current
     const urlSnapshot = { ...webPanelUrlsRef.current }
     webPanelUrlTimerRef.current = setTimeout(async () => {
-      const updated = await window.api.db.updateTask({
+      await window.api.db.updateTask({
         id,
         webPanelUrls: urlSnapshot
       })
-      setTask(updated)
     }, 500)
   }, [])
 
@@ -1178,11 +1156,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const id = taskIdRef.current
     editorStateTimerRef.current = setTimeout(async () => {
       if (!id) return
-      const updated = await window.api.db.updateTask({
+      await window.api.db.updateTask({
         id,
         editorOpenFiles: state
       })
-      setTask(updated)
     }, 500)
   }, [])
 
@@ -1516,13 +1493,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           <div className="flex-1 min-h-0 overflow-hidden">
               {isResizing ? (
                 <div className="h-full bg-black" />
-              ) : project?.id === task.project_id && (effectiveRepoPath || project.path) && !projectPathMissing ? (
+              ) : (effectiveRepoPath || project?.path) && !projectPathMissing ? (
                 <TerminalContainer
                   ref={terminalContainerRef}
                   key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${task.worktree_path || ''}`}
                   taskId={task.id}
                   isActive={isActive}
-                  cwd={effectiveRepoPath || project.path!}
+                  cwd={effectiveRepoPath || project?.path || ''}
                   defaultMode={task.terminal_mode}
                   conversationId={getConversationIdForMode(task) || undefined}
                   existingConversationId={getConversationIdForMode(task) || undefined}
@@ -1600,7 +1577,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                       providerConfig: setProviderFlags(task.provider_config, 'ccs', profile)
                                     })
                                     if (updated) {
-                                      setTask(updated)
                                       onTaskUpdated(updated)
                                     }
                                   }}

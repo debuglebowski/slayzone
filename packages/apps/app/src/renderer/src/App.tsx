@@ -257,9 +257,12 @@ function App(): React.JSX.Element {
     if (!selectedProjectId || !projects.some((p) => p.id === selectedProjectId)) setSelectedProjectId(projects[0].id)
   }, [projects, selectedProjectId, setSelectedProjectId])
 
+  // Task lookup map (used for tab props and active-tab project switching)
+  const tasksMap = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
+
   // Auto-switch project when activating a task tab
   const activeTab = tabs[activeTabIndex]
-  const activeTaskProjectId = activeTab?.type === 'task' ? tasks.find((t) => t.id === activeTab.taskId)?.project_id : undefined
+  const activeTaskProjectId = activeTab?.type === 'task' ? tasksMap.get(activeTab.taskId)?.project_id : undefined
   useEffect(() => {
     if (activeTaskProjectId && activeTaskProjectId !== selectedProjectId) setSelectedProjectId(activeTaskProjectId)
   }, [activeTaskProjectId, selectedProjectId, setSelectedProjectId])
@@ -536,9 +539,9 @@ function App(): React.JSX.Element {
   const handleCompleteTaskConfirm = async (): Promise<void> => {
     const activeTab = tabs[activeTabIndex]
     if (activeTab.type !== 'task') return
-    const task = tasks.find((item) => item.id === activeTab.taskId)
+    const task = tasksMap.get(activeTab.taskId)
     if (!task) return
-    const project = projects.find((item) => item.id === task.project_id)
+    const project = projectsMap.get(task.project_id)
     const doneStatus = getDoneStatus(project?.columns_config)
     const prevStatus = task.status
     await window.api.db.updateTask({ id: activeTab.taskId, status: doneStatus })
@@ -812,7 +815,9 @@ function App(): React.JSX.Element {
                     ) : (
                     <Suspense fallback={<TaskShell />}>
                     <div className={explodeMode ? "absolute inset-0" : "h-full"}>
-                      <TaskDetailDataLoader taskId={tab.taskId} isActive={explodeMode || isViewActive} compact={explodeMode}
+                      <TaskDetailDataLoader taskId={tab.taskId}
+                        task={tasksMap.get(tab.taskId) ?? null} project={projectsMap.get(tasksMap.get(tab.taskId)?.project_id ?? '') ?? null}
+                        isActive={explodeMode || isViewActive} compact={explodeMode}
                         onBack={goBack} onTaskUpdated={updateTask} onArchiveTask={archiveTask} onDeleteTask={deleteTask}
                         onNavigateToTask={openTask} onConvertTask={handleConvertTask} onCloseTab={closeTabByTaskId}
                         settingsRevision={settingsRevision} terminalFocusRequestId={terminalFocusRequests[tab.taskId] ?? 0}
