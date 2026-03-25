@@ -223,6 +223,34 @@ describe('db:projects:reorder', () => {
     expect(after[0].sort_order).toBe(0)
     expect(after[1].sort_order).toBe(1)
   })
+
+  test('reorders single project', () => {
+    const all = h.invoke('db:projects:getAll') as { id: string; sort_order: number }[]
+    const first = all[0]
+    h.invoke('db:projects:reorder', [first.id])
+    const after = h.invoke('db:projects:getAll') as { id: string; sort_order: number }[]
+    const updated = after.find((p) => p.id === first.id)!
+    expect(updated.sort_order).toBe(0)
+  })
+
+  test('no-ops on empty array', () => {
+    const before = h.invoke('db:projects:getAll') as { id: string; sort_order: number }[]
+    h.invoke('db:projects:reorder', [])
+    const after = h.invoke('db:projects:getAll') as { id: string; sort_order: number }[]
+    expect(after.map((p) => p.id)).toEqual(before.map((p) => p.id))
+  })
+})
+
+describe('db:projects:create sort_order edge cases', () => {
+  test('first project gets sort_order 0', () => {
+    // Delete all projects
+    const all = h.invoke('db:projects:getAll') as { id: string }[]
+    for (const p of all) {
+      h.invoke('db:projects:delete', p.id)
+    }
+    const p = h.invoke('db:projects:create', { name: 'First', color: '#111111' }) as { sort_order: number }
+    expect(p.sort_order).toBe(0)
+  })
 })
 
 h.cleanup()

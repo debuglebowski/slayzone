@@ -186,6 +186,7 @@ export function AppSidebar({
     const newOrder = arrayMove(projects, oldIndex, newIndex)
     onReorderProjects(newOrder.map((p) => p.id))
   }
+
   const { sidebarBadgeMode } = useAppearance()
   const activeView = useTabStore((s) => s.activeView)
 

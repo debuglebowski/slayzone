@@ -143,25 +143,27 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('db:projects:create', (_, data: CreateProjectInput) => {
     const prepared = prepareProjectCreate(data)
-    const { sort_order: nextOrder } = db.prepare(
-      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM projects'
-    ).get() as { sort_order: number }
-    const stmt = db.prepare(`
-      INSERT INTO projects (id, name, color, path, columns_config, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-    stmt.run(
-      prepared.id,
-      prepared.name,
-      prepared.color,
-      prepared.path,
-      prepared.columnsConfigJson,
-      nextOrder,
-      prepared.createdAt,
-      prepared.updatedAt
-    )
-    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(prepared.id) as Record<string, unknown> | undefined
-    return parseProject(row)
+    return db.transaction(() => {
+      const { sort_order: nextOrder } = db.prepare(
+        'SELECT COALESCE(MAX(sort_order), -1) + 1 AS sort_order FROM projects'
+      ).get() as { sort_order: number }
+      const stmt = db.prepare(`
+        INSERT INTO projects (id, name, color, path, columns_config, sort_order, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      stmt.run(
+        prepared.id,
+        prepared.name,
+        prepared.color,
+        prepared.path,
+        prepared.columnsConfigJson,
+        nextOrder,
+        prepared.createdAt,
+        prepared.updatedAt
+      )
+      const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(prepared.id) as Record<string, unknown> | undefined
+      return parseProject(row)
+    })()
   })
 
   ipcMain.handle('db:projects:update', (_, data: UpdateProjectInput) => {
@@ -246,6 +248,7 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
   })
 
   ipcMain.handle('db:projects:reorder', (_, projectIds: string[]) => {
+    if (!Array.isArray(projectIds) || projectIds.length === 0) return
     const update = db.prepare("UPDATE projects SET sort_order = ?, updated_at = datetime('now') WHERE id = ?")
     db.transaction(() => {
       projectIds.forEach((id, index) => update.run(index, id))
