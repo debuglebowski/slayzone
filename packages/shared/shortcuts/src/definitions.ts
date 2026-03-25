@@ -21,6 +21,8 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'global-settings', label: 'Global Settings', group: 'General', defaultKeys: 'mod+,', scope: 'global' },
   { id: 'project-settings', label: 'Project Settings', group: 'General', defaultKeys: 'mod+shift+,', scope: 'global' },
   { id: 'go-home', label: 'Go Home', group: 'General', defaultKeys: 'mod+§', scope: 'global', platform: 'mac' },
+  { id: 'reload-browser', label: 'Reload Browser', group: 'General', defaultKeys: 'mod+r', scope: 'global', customizable: false },
+  { id: 'reload-app', label: 'Reload App', group: 'General', defaultKeys: 'mod+shift+r', scope: 'global', customizable: false },
   { id: 'undo', label: 'Undo', group: 'General', defaultKeys: 'mod+z', scope: 'global', customizable: false },
   { id: 'redo', label: 'Redo', group: 'General', defaultKeys: 'mod+shift+z', scope: 'global', customizable: false },
 
@@ -42,6 +44,10 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'panel-git', label: 'Git', group: 'Task Panels', defaultKeys: 'mod+g', scope: 'task-panel' },
   { id: 'panel-git-diff', label: 'Git Diff', group: 'Task Panels', defaultKeys: 'mod+shift+g', scope: 'task-panel' },
   { id: 'panel-settings', label: 'Settings', group: 'Task Panels', defaultKeys: 'mod+s', scope: 'task-panel' },
+  { id: 'panel-processes', label: 'Processes', group: 'Task Panels', defaultKeys: 'mod+o', scope: 'task-panel' },
+  { id: 'panel-tests', label: 'Tests', group: 'Task Panels', defaultKeys: 'mod+u', scope: 'task-panel' },
+  { id: 'editor-search', label: 'Editor Search', group: 'Task Panels', defaultKeys: 'mod+shift+f', scope: 'task-panel' },
+  { id: 'browser-element-picker', label: 'Element Picker', group: 'Task Panels', defaultKeys: 'mod+shift+l', scope: 'task-panel' },
 
   // Terminal (terminal scope)
   { id: 'terminal-inject-title', label: 'Inject Title', group: 'Terminal', defaultKeys: 'mod+i', scope: 'terminal' },

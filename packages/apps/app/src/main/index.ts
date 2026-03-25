@@ -656,14 +656,12 @@ function createMainWindow(): void {
       mainWindow?.webContents.send('app:screenshot-trigger')
     }
 
-    // Cmd+R: reload browser view (not customizable)
-    if (input.type === 'keyDown' && input.key.toLowerCase() === 'r' && input.meta && !input.shift && !input.alt) {
+    if (matchesElectronInput(ei, getEffectiveKeys('reload-browser', currentOverrides))) {
       event.preventDefault()
       mainWindow?.webContents.send('app:reload-browser')
     }
 
-    // Cmd+Shift+R: reload the app (not customizable)
-    if (input.type === 'keyDown' && input.key.toLowerCase() === 'r' && input.meta && input.shift && !input.alt) {
+    if (matchesElectronInput(ei, getEffectiveKeys('reload-app', currentOverrides))) {
       event.preventDefault()
       mainWindow?.webContents.send('app:reload-app')
     }

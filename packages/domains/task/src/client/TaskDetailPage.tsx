@@ -873,89 +873,87 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (!isActive) return
       // Cmd+Shift+G: git diff tab toggle
-      if (e.metaKey && e.shiftKey) {
-        // Cmd+Shift+F: open editor panel + search sidebar
-        if (e.key.toLowerCase() === 'f' && isBuiltinEnabled('editor', 'task')) {
-          e.preventDefault()
-          if (fileEditorRef.current) {
-            if (!panelVisibility.editor) handlePanelToggle('editor', true)
-            fileEditorRef.current.toggleSearch()
-          } else {
-            pendingSearchToggleRef.current = true
-            handlePanelToggle('editor', true)
-          }
-          return
+      if (useShortcutStore.getState().isRecording) return
+      const keys = (id: string) => useShortcutStore.getState().getKeys(id)
+
+      if (matchesShortcut(e, keys('editor-search')) && isBuiltinEnabled('editor', 'task')) {
+        e.preventDefault()
+        if (fileEditorRef.current) {
+          if (!panelVisibility.editor) handlePanelToggle('editor', true)
+          fileEditorRef.current.toggleSearch()
+        } else {
+          pendingSearchToggleRef.current = true
+          handlePanelToggle('editor', true)
         }
-        if (e.key.toLowerCase() === 'l' && isBuiltinEnabled('browser', 'task') && panelVisibility.browser) {
-          e.preventDefault()
-          browserPanelRef.current?.pickElement()
-          return
+        return
+      }
+      if (matchesShortcut(e, keys('browser-element-picker')) && isBuiltinEnabled('browser', 'task') && panelVisibility.browser) {
+        e.preventDefault()
+        browserPanelRef.current?.pickElement()
+        return
+      }
+      if (matchesShortcut(e, keys('panel-git-diff')) && isBuiltinEnabled('diff', 'task')) {
+        e.preventDefault()
+        if (!panelVisibility.diff) {
+          setGitDefaultTab('changes')
+          handlePanelToggle('diff', true)
+        } else if (gitPanelRef.current?.getActiveTab() === 'changes') {
+          handlePanelToggle('diff', false)
+        } else {
+          gitPanelRef.current?.switchToTab('changes')
         }
-        if (e.key.toLowerCase() === 'g' && isBuiltinEnabled('diff', 'task')) {
-          e.preventDefault()
-          if (!panelVisibility.diff) {
-            setGitDefaultTab('changes')
-            handlePanelToggle('diff', true)
-          } else if (gitPanelRef.current?.getActiveTab() === 'changes') {
-            handlePanelToggle('diff', false)
-          } else {
-            gitPanelRef.current?.switchToTab('changes')
-          }
-        }
+        return
       }
 
-      if (e.metaKey && !e.shiftKey) {
-        // Cmd+P: quick open — works even inside CodeMirror
-        if (e.key === 'p' && isBuiltinEnabled('editor', 'task') && effectiveRepoPath) {
-          e.preventDefault()
-          setQuickOpenVisible(true)
-          return
-        }
+      // Cmd+P: quick open — works even inside CodeMirror
+      if (matchesShortcut(e, keys('panel-quick-open')) && isBuiltinEnabled('editor', 'task') && effectiveRepoPath) {
+        e.preventDefault()
+        setQuickOpenVisible(true)
+        return
+      }
 
-        // Cmd+E: toggle editor panel — works even inside CodeMirror
-        if (e.key === 'e' && isBuiltinEnabled('editor', 'task')) {
-          e.preventDefault()
-          handlePanelToggle('editor', !panelVisibility.editor)
-          return
-        }
+      // Cmd+E: toggle editor panel — works even inside CodeMirror
+      if (matchesShortcut(e, keys('panel-editor')) && isBuiltinEnabled('editor', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('editor', !panelVisibility.editor)
+        return
+      }
 
-        // Skip shortcuts when focus is in CodeMirror or contenteditable editors
-        const target = e.target as HTMLElement
-        const inEditor = target?.closest?.('[contenteditable="true"]')
-        const inCodeMirror = target?.closest?.('.cm-editor')
-        if (inCodeMirror) return
+      // Skip shortcuts when focus is in CodeMirror or contenteditable editors
+      const target = e.target as HTMLElement
+      const inEditor = target?.closest?.('[contenteditable="true"]')
+      const inCodeMirror = target?.closest?.('.cm-editor')
+      if (inCodeMirror) return
 
-        // Cmd+G: git general tab toggle
-        if (e.key === 'g' && isBuiltinEnabled('diff', 'task')) {
-          e.preventDefault()
-          if (!panelVisibility.diff) {
-            setGitDefaultTab('general')
-            handlePanelToggle('diff', true)
-          } else if (gitPanelRef.current?.getActiveTab() === 'general') {
-            handlePanelToggle('diff', false)
-          } else {
-            gitPanelRef.current?.switchToTab('general')
-          }
-        } else if (e.key === 't' && isBuiltinEnabled('terminal', 'task')) {
-          e.preventDefault()
-          handlePanelToggle('terminal', !panelVisibility.terminal)
-        } else if (e.key === 'b' && !inEditor && isBuiltinEnabled('browser', 'task')) {
-          e.preventDefault()
-          handlePanelToggle('browser', !panelVisibility.browser)
-        } else if (e.key === 's' && isBuiltinEnabled('settings', 'task')) {
-          e.preventDefault()
-          handlePanelToggle('settings', !panelVisibility.settings)
-        } else if (e.key === 'o' && isBuiltinEnabled('processes', 'task')) {
-          e.preventDefault()
-          handlePanelToggle('processes', !panelVisibility.processes)
+      if (matchesShortcut(e, keys('panel-git')) && isBuiltinEnabled('diff', 'task')) {
+        e.preventDefault()
+        if (!panelVisibility.diff) {
+          setGitDefaultTab('general')
+          handlePanelToggle('diff', true)
+        } else if (gitPanelRef.current?.getActiveTab() === 'general') {
+          handlePanelToggle('diff', false)
         } else {
-          // Web panel shortcuts
-          for (const wp of enabledWebPanels) {
-            if (wp.shortcut && e.key === wp.shortcut) {
-              e.preventDefault()
-              handlePanelToggle(wp.id, !panelVisibility[wp.id])
-              return
-            }
+          gitPanelRef.current?.switchToTab('general')
+        }
+      } else if (matchesShortcut(e, keys('panel-terminal')) && isBuiltinEnabled('terminal', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('terminal', !panelVisibility.terminal)
+      } else if (matchesShortcut(e, keys('panel-browser')) && !inEditor && isBuiltinEnabled('browser', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('browser', !panelVisibility.browser)
+      } else if (matchesShortcut(e, keys('panel-settings')) && isBuiltinEnabled('settings', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('settings', !panelVisibility.settings)
+      } else if (matchesShortcut(e, keys('panel-processes')) && isBuiltinEnabled('processes', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('processes', !panelVisibility.processes)
+      } else {
+        // Web panel shortcuts (not in registry — dynamic per-project config)
+        for (const wp of enabledWebPanels) {
+          if (wp.shortcut && e.key === wp.shortcut) {
+            e.preventDefault()
+            handlePanelToggle(wp.id, !panelVisibility[wp.id])
+            return
           }
         }
       }

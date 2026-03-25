@@ -439,8 +439,7 @@ function App(): React.JSX.Element {
       if ((e.target as HTMLElement)?.closest?.('.cm-editor')) return
       if (isRecording) return
 
-      // Editor search (Cmd+Shift+F — not in shortcut definitions, editor-specific)
-      if (e.metaKey && e.shiftKey && e.key.toLowerCase() === 'f' && isHomePanelEnabled('editor', 'home')) {
+      if (matchesShortcut(e, getKeys('editor-search')) && isHomePanelEnabled('editor', 'home')) {
         e.preventDefault()
         if (homePanel.homeEditorRef.current) {
           if (!homePanel.homePanelVisibility.editor) homePanel.setHomePanelVisibility(prev => ({ ...prev, editor: true }))
@@ -485,10 +484,10 @@ function App(): React.JSX.Element {
       } else if (matchesShortcut(e, getKeys('panel-editor')) && isHomePanelEnabled('editor', 'home')) {
         e.preventDefault()
         homePanel.setHomePanelVisibility(prev => ({ ...prev, editor: !prev.editor }))
-      } else if (e.key === 'o' && isHomePanelEnabled('processes', 'home')) {
+      } else if (matchesShortcut(e, getKeys('panel-processes')) && isHomePanelEnabled('processes', 'home')) {
         e.preventDefault()
         homePanel.setHomePanelVisibility(prev => ({ ...prev, processes: !prev.processes }))
-      } else if (e.key === 'u' && e.metaKey && !e.shiftKey && testsPanelEnabled && isHomePanelEnabled('tests', 'home')) {
+      } else if (matchesShortcut(e, getKeys('panel-tests')) && testsPanelEnabled && isHomePanelEnabled('tests', 'home')) {
         e.preventDefault()
         homePanel.setHomePanelVisibility(prev => ({ ...prev, tests: !prev.tests }))
       }
