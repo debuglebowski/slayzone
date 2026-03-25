@@ -1,6 +1,38 @@
 # Changelog
 
 
+## v0.9.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.8.0...v0.9.0)
+
+### 🚀 Enhancements
+
+- **shortcuts:** Add Cmd+Alt+R terminal restart and Cmd+L browser URL focus ([8da253a](https://github.com/debuglebowski/slayzone/commit/8da253a))
+- **shortcuts:** Show ⌘⌥R hint in terminal restart dropdown menu item ([774418f](https://github.com/debuglebowski/slayzone/commit/774418f))
+- **browser:** Add loading animation before first page load ([d7ca198](https://github.com/debuglebowski/slayzone/commit/d7ca198))
+- **browser:** Auto-open panel on CLI navigate, add --panel flag ([7394cd5](https://github.com/debuglebowski/slayzone/commit/7394cd5))
+- **feedback:** Add GitHub/Discord banner to feedback dialog ([7677dd3](https://github.com/debuglebowski/slayzone/commit/7677dd3))
+- **feedback:** Widen dialog to 1100px, reduce height to 60vh ([db7a333](https://github.com/debuglebowski/slayzone/commit/db7a333))
+- **shortcuts:** Add Cmd+Shift+A shortcut for attention panel ([13a6e60](https://github.com/debuglebowski/slayzone/commit/13a6e60))
+- **ai-config:** Improve skill frontmatter workflow ([c052cd3](https://github.com/debuglebowski/slayzone/commit/c052cd3))
+- **skills:** Update local skill definitions ([375695a](https://github.com/debuglebowski/slayzone/commit/375695a))
+
+### 🩹 Fixes
+
+- **terminal:** Prevent stuck loading spinner on task reopen ([8cddb07](https://github.com/debuglebowski/slayzone/commit/8cddb07))
+- **shortcuts:** Use e.code fallback for macOS Alt dead-key characters ([db9c2a3](https://github.com/debuglebowski/slayzone/commit/db9c2a3))
+- **processes:** Resolve user PATH from interactive shell for spawned processes ([04cef9a](https://github.com/debuglebowski/slayzone/commit/04cef9a))
+- **terminal:** Handle OSC 8 links, add hover tooltips, restore pointer cursor ([4f1cf49](https://github.com/debuglebowski/slayzone/commit/4f1cf49))
+- **usage:** Enforce rate-limit backoff for all providers, show stale data on error ([b8b4110](https://github.com/debuglebowski/slayzone/commit/b8b4110))
+
+### 💅 Refactors
+
+- **shortcuts:** Replace hardcoded shortcut displays with useShortcutDisplay hook ([5a3814d](https://github.com/debuglebowski/slayzone/commit/5a3814d))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.8.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.7.0...v0.8.0)

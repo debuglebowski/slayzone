@@ -1,5 +1,57 @@
 [
   {
+    "version": "0.9.0",
+    "date": "2026-03-25",
+    "tagline": "Shortcuts & polish",
+    "items": [
+      {
+        "category": "feature",
+        "title": "New keyboard shortcuts",
+        "description": "Restart terminals, focus the browser URL bar, and jump to the attention panel — all from the keyboard."
+      },
+      {
+        "category": "feature",
+        "title": "Browser loading animation",
+        "description": "See a smooth loading animation while the browser panel starts up."
+      },
+      {
+        "category": "feature",
+        "title": "Auto-open browser from CLI",
+        "description": "Running a navigate command from the CLI now opens the browser panel automatically."
+      },
+      {
+        "category": "improvement",
+        "title": "Shortcut hints stay in sync",
+        "description": "Shortcut hints throughout the app update to reflect your custom keybindings."
+      },
+      {
+        "category": "improvement",
+        "title": "Better feedback dialog",
+        "description": "Redesigned feedback dialog with quick links to GitHub and Discord."
+      },
+      {
+        "category": "fix",
+        "title": "Stuck loading spinner",
+        "description": "Fixed a bug where reopening a task could leave the loading spinner spinning forever."
+      },
+      {
+        "category": "fix",
+        "title": "Alt shortcuts on macOS",
+        "description": "Alt-based keyboard shortcuts now work reliably on macOS."
+      },
+      {
+        "category": "fix",
+        "title": "Clickable links in terminals",
+        "description": "Links printed in terminals are now clickable with hover tooltips."
+      },
+      {
+        "category": "fix",
+        "title": "Smoother usage tracking",
+        "description": "Usage data now handles rate limits gracefully instead of showing errors."
+      }
+    ]
+  },
+  {
     "version": "0.8.0",
     "date": "2026-03-25",
     "tagline": "Your keys, your way",
