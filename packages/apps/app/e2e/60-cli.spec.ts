@@ -3,6 +3,7 @@ import { spawnSync } from 'child_process'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
+import os from 'os'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SLAY_JS = path.resolve(__dirname, '..', '..', 'cli', 'dist', 'slay.js')
@@ -408,6 +409,47 @@ test.describe('CLI: slay', () => {
       expect(r.stdout).toContain('hello from /')
 
       runProcessesCli('processes', 'kill', id.slice(0, 8))
+    })
+
+    test('process inherits enriched PATH even with bare shell and minimal env', async ({ electronApp, mainWindow }) => {
+      // Simulate a system where the spawning shell does NOT enrich PATH
+      // (e.g. /bin/sh on Linux). The cached enrichedPath from init should
+      // be injected into the process env regardless.
+      const fakeShell = path.join(os.tmpdir(), 'slayzone-test-bare-shell.sh')
+      fs.writeFileSync(fakeShell, [
+        '#!/bin/bash',
+        'while [ $# -gt 0 ] && [ "$1" != "-c" ]; do shift; done',
+        'if [ "$1" = "-c" ]; then shift; exec /bin/sh -c "$*"; fi',
+      ].join('\n'), { mode: 0o755 })
+
+      await mainWindow.evaluate((shell: string) => window.api.pty.setShellOverride(shell), fakeShell)
+      const originalPath = await electronApp.evaluate(() => {
+        const orig = process.env.PATH
+        process.env.PATH = '/usr/bin:/bin'
+        return orig
+      })
+
+      try {
+        const id = await electronApp.evaluate(() => {
+          const spawn = (globalThis as Record<string, unknown>).__spawnProcess as (
+            projectId: string | null, taskId: string | null, label: string, command: string, cwd: string, autoRestart: boolean
+          ) => string
+          return spawn(null, null, 'path test', 'echo "PROC_PATH=$PATH"', '/tmp', false)
+        })
+        await new Promise((r) => setTimeout(r, 1500))
+
+        const r = runProcessesCli('processes', 'logs', id.slice(0, 8))
+        expect(r.status).toBe(0)
+        const match = r.stdout.match(/PROC_PATH=(.+)/)
+        expect(match).toBeTruthy()
+        expect(match![1].split(':').length).toBeGreaterThan(2)
+
+        runProcessesCli('processes', 'kill', id.slice(0, 8))
+      } finally {
+        await mainWindow.evaluate(() => window.api.pty.setShellOverride(null))
+        await electronApp.evaluate((p: string) => { process.env.PATH = p }, originalPath)
+        try { fs.unlinkSync(fakeShell) } catch {}
+      }
     })
   })
 

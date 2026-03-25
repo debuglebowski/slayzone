@@ -1,11 +1,11 @@
-import { spawn, execFile } from 'child_process'
+import { spawn, execFile, execFileSync } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { createStatsPoller } from './pid-stats'
 import { extractOscTitle } from '@slayzone/terminal/shared'
-import { resolveUserShell } from '@slayzone/terminal/main'
+import { resolveUserShell, getShellStartupArgs } from '@slayzone/terminal/main'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
 
@@ -39,6 +39,28 @@ let win: BrowserWindow | null = null
 let db: Database | null = null
 const processes = new Map<string, ManagedProcess>()
 const logSubscribers = new Map<string, Set<(line: string) => void>>()
+let enrichedPath: string | null = null
+
+function resolveEnrichedPath(): string | null {
+  const shell = resolveUserShell()
+  const isFish = shell.endsWith('/fish')
+  const cmd = isFish ? 'string join ":" $PATH' : 'echo $PATH'
+
+  // Try interactive login shell first (sources .zshrc/.bashrc where pnpm/nvm add PATH)
+  try {
+    const args = getShellStartupArgs(shell) // [-i, -l]
+    const result = execFileSync(shell, [...args, '-c', cmd], { timeout: 5000, encoding: 'utf-8' }).trim()
+    if (result) return result
+  } catch { /* fall through */ }
+
+  // Fallback: login shell only (sources .zprofile/.bash_profile)
+  try {
+    const result = execFileSync(shell, ['-l', '-c', cmd], { timeout: 5000, encoding: 'utf-8' }).trim()
+    if (result) return result
+  } catch { /* fall through */ }
+
+  return null
+}
 
 export function subscribeToProcessLogs(id: string, cb: (line: string) => void): () => void {
   if (!logSubscribers.has(id)) logSubscribers.set(id, new Set())
@@ -52,6 +74,7 @@ export function setProcessManagerWindow(window: BrowserWindow): void {
 
 export function initProcessManager(database: Database): void {
   db = database
+  if (!enrichedPath) enrichedPath = resolveEnrichedPath()
   const rows = db.prepare('SELECT * FROM processes ORDER BY created_at').all() as Array<{
     id: string; task_id: string | null; project_id: string | null; label: string; command: string; cwd: string; auto_restart: number
   }>
@@ -144,10 +167,9 @@ function doSpawn(proc: ManagedProcess): void {
   // fish needs -i (interactive) for PATH init inside `if status is-interactive` blocks
   // bash/zsh only need -l (login) to source profile — -i without a TTY causes side effects
   const shellArgs = isWin ? ['/c', proc.command] : [...(isFish ? ['-i', '-l'] : ['-l']), '-c', proc.command]
-  const child = spawn(shell, shellArgs, {
-    cwd: proc.cwd,
-    env: { ...process.env }
-  })
+  const env: Record<string, string | undefined> = { ...process.env }
+  if (enrichedPath) env.PATH = enrichedPath
+  const child = spawn(shell, shellArgs, { cwd: proc.cwd, env })
 
   proc.child = child
   proc.pid = child.pid ?? null
