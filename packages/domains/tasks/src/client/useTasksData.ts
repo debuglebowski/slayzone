@@ -204,12 +204,15 @@ export function useTasksData(): UseTasksDataReturn {
     setProjects((prev) => {
       snapshot = prev
       const byId = new Map(prev.map((p) => [p.id, p]))
-      return projectIds
+      const reordered = projectIds
         .map((id, index) => {
           const p = byId.get(id)
           return p ? { ...p, sort_order: index } : null
         })
         .filter((p): p is Project => p !== null)
+      const seen = new Set(projectIds)
+      const rest = prev.filter((p) => !seen.has(p.id))
+      return [...reordered, ...rest]
     })
 
     window.api.db.reorderProjects(projectIds).catch(() => {
