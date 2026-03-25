@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Plus, X, Columns2, Terminal as TerminalIcon, Bot, Command, MousePointerClick, Sparkles, Code } from 'lucide-react'
+import { Plus, X, Columns2, Terminal as TerminalIcon, Bot, Command, MousePointerClick, Sparkles, Code, Glasses } from 'lucide-react'
 import { cn, useShortcutDisplay } from '@slayzone/ui'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal/shared'
@@ -24,7 +24,7 @@ const MODE_ICONS: Partial<Record<TerminalMode, typeof TerminalIcon>> = {
   'cursor-agent': MousePointerClick,
   'gemini': Sparkles,
   'opencode': Code,
-  'copilot': Command,
+  'copilot': Glasses,
   'ccs': Bot,
   'terminal': TerminalIcon
 }

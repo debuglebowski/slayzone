@@ -42,7 +42,7 @@ export class CopilotAdapter implements TerminalAdapter {
       }
     }
 
-    if (/429|too many requests|rate limit|quota exceeded/i.test(stripped)) {
+    if (/\b429\b|too many requests|rate limit|quota exceeded/i.test(stripped)) {
       return {
         code: 'RATE_LIMIT',
         message: 'Rate limit exceeded',
