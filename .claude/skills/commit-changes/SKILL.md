@@ -1,6 +1,6 @@
 ---
 name: commit-changes
-description: "Create focused git commits from local workspace changes using Conventional Commits. Use when the user asks to commit, finalize, or save completed work to git. Include only changes made for the current task, exclude unrelated edits, and ask the user whenever authorship or inclusion is ambiguous."
+trigger: auto
 ---
 
 Prepare a git commit for the current task. User context: $ARGUMENTS

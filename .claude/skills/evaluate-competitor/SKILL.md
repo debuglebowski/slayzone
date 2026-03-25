@@ -1,6 +1,6 @@
 ---
 name: evaluate-competitor
-description: "Evaluate a competitor for the SlayZone comparison table"
+trigger: auto
 ---
 
 You are evaluating a competitor for the SlayZone comparison table. The competitor is: $ARGUMENTS
