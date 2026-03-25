@@ -3,8 +3,9 @@ import { CHANGELOG } from './changelog-data'
 
 const SETTINGS_KEY = 'last_seen_changelog_version'
 
-export function useChangelogAutoOpen(): [boolean, () => void] {
+export function useChangelogAutoOpen(): [boolean, string | null, () => void] {
   const [shouldOpen, setShouldOpen] = useState(false)
+  const [lastSeenVersion, setLastSeenVersion] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -22,6 +23,7 @@ export function useChangelogAutoOpen(): [boolean, () => void] {
       }
 
       if (lastSeen !== currentVersion && CHANGELOG.length > 0) {
+        setLastSeenVersion(lastSeen as string)
         setShouldOpen(true)
       }
     }
@@ -34,5 +36,5 @@ export function useChangelogAutoOpen(): [boolean, () => void] {
     window.api.app.getVersion().then((v) => window.api.settings.set(SETTINGS_KEY, v))
   }
 
-  return [shouldOpen, dismiss]
+  return [shouldOpen, lastSeenVersion, dismiss]
 }

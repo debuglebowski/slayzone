@@ -16,6 +16,7 @@ import { CHANGELOG, type ChangelogEntry, type ChangeCategory } from './changelog
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
+  lastSeenVersion?: string | null
 }
 
 const categoryConfig: Record<ChangeCategory, { label: string; icon: typeof Sparkles; color: string }> = {
@@ -24,9 +25,11 @@ const categoryConfig: Record<ChangeCategory, { label: string; icon: typeof Spark
   fix: { label: 'Fixed', icon: Bug, color: 'text-amber-400' },
 }
 
-export function ChangelogDialog({ open, onOpenChange }: Props) {
+export function ChangelogDialog({ open, onOpenChange, lastSeenVersion }: Props) {
   useEffect(() => { if (open) track('changelog_viewed') }, [open])
   const entries = CHANGELOG.slice(0, 6)
+  const lastSeenIndex = lastSeenVersion ? entries.findIndex((e) => e.version === lastSeenVersion) : -1
+  const isNew = (i: number) => lastSeenVersion ? (lastSeenIndex === -1 || i < lastSeenIndex) : i === 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -54,7 +57,7 @@ export function ChangelogDialog({ open, onOpenChange }: Props) {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.05 + i * 0.05, duration: 0.3 }}
                 >
-                  <VersionAccordion entry={entry} isLatest={i === 0} />
+                  <VersionAccordion entry={entry} isLatest={i === 0} defaultOpen={isNew(i)} />
                 </motion.div>
               ))}
             </motion.div>
@@ -92,9 +95,9 @@ function ItemList({ items }: { items: ChangelogEntry['items'] }) {
   )
 }
 
-function VersionAccordion({ entry, isLatest }: { entry: ChangelogEntry; isLatest: boolean }) {
+function VersionAccordion({ entry, isLatest, defaultOpen }: { entry: ChangelogEntry; isLatest: boolean; defaultOpen: boolean }) {
   return (
-    <Collapsible.Root defaultOpen={isLatest}>
+    <Collapsible.Root defaultOpen={defaultOpen}>
       <div className="pt-4">
         <Collapsible.Trigger className="flex w-full items-center gap-3 group/version cursor-pointer rounded-lg -mx-2 px-2 py-2 hover:bg-muted/50 transition-colors">
           <ChevronRight className="size-4 text-muted-foreground shrink-0 transition-transform duration-200 group-data-[state=open]/version:rotate-90" />

@@ -144,7 +144,7 @@ function App(): React.JSX.Element {
   const [settingsInitialAiConfigSection, setSettingsInitialAiConfigSection] = useState<GlobalAiConfigSection | null>(null)
   const onboardingOpen = useDialogStore((s) => s.onboardingOpen)
   const changelogOpen = useDialogStore((s) => s.changelogOpen)
-  const [autoChangelogOpen, dismissAutoChangelog] = useChangelogAutoOpen()
+  const [autoChangelogOpen, lastSeenVersion, dismissAutoChangelog] = useChangelogAutoOpen()
   const searchOpen = useDialogStore((s) => s.searchOpen)
   const completeTaskDialogOpen = useDialogStore((s) => s.completeTaskDialogOpen)
   const [terminalFocusRequests, setTerminalFocusRequests] = useState<Record<string, number>>({})
@@ -902,7 +902,7 @@ function App(): React.JSX.Element {
           if (!prompted) { void window.api.settings.set('tutorial_prompted', 'true'); toast('Want a quick tour?', { duration: 8000, action: { label: 'Take the tour', onClick: startTour } }) }
         }} />
         <Suspense><TutorialAnimationModal open={showAnimatedTour} onClose={() => useDialogStore.getState().closeAnimatedTour()} /></Suspense>
-        <ChangelogDialog open={changelogOpen || autoChangelogOpen} onOpenChange={(open) => { if (!open) { useDialogStore.getState().closeChangelog(); dismissAutoChangelog() } }} />
+        <ChangelogDialog open={changelogOpen || autoChangelogOpen} onOpenChange={(open) => { if (!open) { useDialogStore.getState().closeChangelog(); dismissAutoChangelog() } }} lastSeenVersion={autoChangelogOpen ? lastSeenVersion : null} />
         <AlertDialog open={completeTaskDialogOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeCompleteTaskDialog() }}>
           <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Complete Task</AlertDialogTitle><AlertDialogDescription>Mark as complete and close tab?</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction autoFocus onClick={handleCompleteTaskConfirm}>Complete</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
