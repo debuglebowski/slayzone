@@ -389,9 +389,23 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Active tab's state (updated via onStateChange callback from placeholder)
   const [activeViewState, setActiveViewState] = useState<BrowserViewState>({
     url: '', title: '', favicon: '', canGoBack: false, canGoForward: false,
-    isLoading: false, error: null, domReady: false,
+    isLoading: false, error: null, domReady: false, hasLoadedRealPage: false,
   })
   const [hiddenByOverlay, setHiddenByOverlay] = useState(false)
+
+  // Reset view state when active tab changes so stale hasLoadedRealPage doesn't leak
+  useEffect(() => {
+    if (!tabs.activeTabId) return
+    const handle = tabRefsRef.current.get(tabs.activeTabId)?.current
+    if (handle) {
+      setActiveViewState(handle.state)
+    } else {
+      setActiveViewState({
+        url: '', title: '', favicon: '', canGoBack: false, canGoForward: false,
+        isLoading: false, error: null, domReady: false, hasLoadedRealPage: false,
+      })
+    }
+  }, [tabs.activeTabId])
 
   // Convenience accessors for active tab
   // getActiveHandle reads the ref at call time — safe for event handlers where
@@ -1290,15 +1304,15 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               url={tab.url || 'about:blank'}
               partition="persist:browser-tabs"
               visible={tab.id === tabs.activeTabId && isActive !== false && !extensionsManagerOpen}
-              hidden={!!loadError || extensionsManagerOpen || (isLoading && !activeViewState.domReady)}
+              hidden={!!loadError || extensionsManagerOpen || !activeViewState.hasLoadedRealPage}
               isResizing={isResizing}
               className="absolute inset-0"
               onStateChange={tab.id === tabs.activeTabId ? setActiveViewState : undefined}
               onOverlayChange={tab.id === tabs.activeTabId ? setHiddenByOverlay : undefined}
             />
           ))}
-          {isLoading && !activeViewState.domReady && !loadError && !hiddenByOverlay && (
-            <div className="absolute inset-0 z-10 bg-[#0a0a0a]">
+          {!activeViewState.hasLoadedRealPage && !loadError && !hiddenByOverlay && (
+            <div data-testid="browser-loading-animation" className="absolute inset-0 z-10 bg-background">
               <BrowserLoadingAnimation />
             </div>
           )}

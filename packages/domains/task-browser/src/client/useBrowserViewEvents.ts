@@ -15,6 +15,8 @@ export interface BrowserViewState {
   isLoading: boolean
   error: LoadError | null
   domReady: boolean
+  /** True once dom-ready has fired for a real page (not about:blank) */
+  hasLoadedRealPage: boolean
 }
 
 const INITIAL_STATE: BrowserViewState = {
@@ -26,6 +28,7 @@ const INITIAL_STATE: BrowserViewState = {
   isLoading: false,
   error: null,
   domReady: false,
+  hasLoadedRealPage: false,
 }
 
 export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
@@ -75,7 +78,12 @@ export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
         }
 
         case 'dom-ready':
-          setState((prev) => ({ ...prev, domReady: true, error: null }))
+          setState((prev) => ({
+            ...prev,
+            domReady: true,
+            error: null,
+            hasLoadedRealPage: prev.hasLoadedRealPage || (prev.url !== '' && prev.url !== 'about:blank'),
+          }))
           break
 
         case 'did-fail-load':
