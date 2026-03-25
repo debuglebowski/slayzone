@@ -51,7 +51,7 @@ import {
   toast,
   UpdateToast
 } from '@slayzone/ui'
-import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions } from '@slayzone/ui'
+import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { ChangelogDialog } from '@/components/changelog/ChangelogDialog'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
@@ -314,6 +314,15 @@ function App(): React.JSX.Element {
     useShortcutStore.getState().load()
   }, [])
 
+  // Shortcut display strings (reactive to user customization)
+  const explodeModeShortcut = useShortcutDisplay('explode-mode')
+  const newTempTaskShortcut = useShortcutDisplay('new-temp-task')
+  const panelGitShortcut = useShortcutDisplay('panel-git')
+  const panelEditorShortcut = useShortcutDisplay('panel-editor')
+  const panelProcessesShortcut = useShortcutDisplay('panel-processes')
+  const panelTestsShortcut = useShortcutDisplay('panel-tests')
+  const attentionPanelShortcut = useShortcutDisplay('attention-panel')
+
   // Keyboard shortcuts
   useHotkeys(getKeys('new-task'), (e) => {
     if (projects.length > 0) { e.preventDefault(); trackShortcut('mod+n'); useDialogStore.getState().openCreateTask() }
@@ -430,6 +439,8 @@ function App(): React.JSX.Element {
   }, { enableOnFormTags: true, enabled: !isRecording })
 
   useHotkeys(getKeys('exit-zen-explode'), () => { if (explodeMode) setExplodeMode(false); else if (zenMode) setZenMode(false) }, { enableOnFormTags: true, enabled: !isRecording })
+
+  useHotkeys(getKeys('attention-panel'), (e) => { e.preventDefault(); trackShortcut('mod+shift+a'); setNotificationState({ isLocked: !notificationState.isLocked }) }, { enableOnFormTags: true, enabled: !isRecording })
 
   // Home tab panel shortcuts
   useEffect(() => {
@@ -719,20 +730,20 @@ function App(): React.JSX.Element {
                       className={cn("h-7 w-7 flex items-center justify-center transition-colors border-b-2", explodeMode ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground", openTaskIds.length < 2 && "opacity-30 pointer-events-none")}>
                       <LayoutGrid className="size-4" />
                     </button>
-                  </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{explodeMode ? 'Exit explode mode' : 'Explode mode'} (⌘⇧E)</TooltipContent></Tooltip>
+                  </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{explodeMode ? 'Exit explode mode' : 'Explode mode'} ({explodeModeShortcut})</TooltipContent></Tooltip>
                   <Tooltip><TooltipTrigger asChild>
                     <button onClick={selectedProjectId ? handleCreateScratchTerminal : undefined} disabled={!selectedProjectId}
                       className={cn("h-7 w-7 flex items-center justify-center transition-colors", selectedProjectId ? "text-muted-foreground hover:text-foreground" : "text-muted-foreground/40 cursor-not-allowed")}>
                       <TerminalSquare className="size-4" />
                     </button>
                   </TooltipTrigger><TooltipContent side="bottom" className="text-xs max-w-64">
-                    {selectedProjectId ? <div className="space-y-1"><p>New temporary task (⌘⇧N)</p><p className="text-muted-foreground">Temporary tasks auto-delete on close.</p></div> : <p>Select a project first</p>}
+                    {selectedProjectId ? <div className="space-y-1"><p>New temporary task ({newTempTaskShortcut})</p><p className="text-muted-foreground">Temporary tasks auto-delete on close.</p></div> : <p>Select a project first</p>}
                   </TooltipContent></Tooltip>
                   <DesktopNotificationToggle enabled={notificationState.desktopEnabled} onToggle={() => {
                     if (notificationState.desktopEnabled) window.api.pty.dismissAllNotifications()
                     setNotificationState({ desktopEnabled: !notificationState.desktopEnabled })
                   }} />
-                  <NotificationButton active={notificationState.isLocked} count={attentionTasks.length} onClick={() => setNotificationState({ isLocked: !notificationState.isLocked })} />
+                  <NotificationButton active={notificationState.isLocked} count={attentionTasks.length} onClick={() => setNotificationState({ isLocked: !notificationState.isLocked })} shortcutHint={attentionPanelShortcut} />
                 </div>
               }
             />
@@ -770,10 +781,10 @@ function App(): React.JSX.Element {
                             <PanelToggle
                               panels={[
                                 { id: 'kanban', icon: Kanban, label: 'Kanban', active: homePanel.homePanelVisibility.kanban, disabled: !selectedProjectId },
-                                { id: 'git', icon: GitBranch, label: 'Git', shortcut: '⌘G', active: homePanel.homePanelVisibility.git, disabled: !selectedProjectId },
-                                { id: 'editor', icon: FileCode, label: 'Editor', shortcut: '⌘E', active: homePanel.homePanelVisibility.editor, disabled: !selectedProjectId },
-                                { id: 'processes', icon: Cpu, label: 'Processes', shortcut: '⌘O', active: homePanel.homePanelVisibility.processes, disabled: !selectedProjectId },
-                                ...(testsPanelEnabled ? [{ id: 'tests', icon: FlaskConical, label: 'Tests', shortcut: '⌘U', active: homePanel.homePanelVisibility.tests, disabled: !selectedProjectId }] : []),
+                                { id: 'git', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut, active: homePanel.homePanelVisibility.git, disabled: !selectedProjectId },
+                                { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut, active: homePanel.homePanelVisibility.editor, disabled: !selectedProjectId },
+                                { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut, active: homePanel.homePanelVisibility.processes, disabled: !selectedProjectId },
+                                ...(testsPanelEnabled ? [{ id: 'tests', icon: FlaskConical, label: 'Tests', shortcut: panelTestsShortcut, active: homePanel.homePanelVisibility.tests, disabled: !selectedProjectId }] : []),
                               ].filter(p => p.id === 'kanban' || isHomePanelEnabled(p.id, 'home'))}
                               onChange={(id, active) => homePanel.setHomePanelVisibility(prev => ({ ...prev, [id]: active }))}
                             />

@@ -1,6 +1,6 @@
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { Check, X, SkipForward, AlertTriangle, RefreshCw, Plus } from 'lucide-react'
-import { Button, Checkbox, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, cn } from '@slayzone/ui'
+import { Button, Checkbox, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, cn, useShortcutDisplay } from '@slayzone/ui'
 import type { Task, UpdateTaskInput, MergeContext } from '@slayzone/task/shared'
 import type { FilterState } from '@slayzone/tasks'
 import type { Project, DetectedRepo } from '@slayzone/projects/shared'
@@ -12,9 +12,6 @@ import { WorktreesTab, type WorktreesTabHandle } from './WorktreesTab'
 import { PullRequestTab } from './PullRequestTab'
 import { ProjectPrTab } from './ProjectPrTab'
 export type GitTabId = 'general' | 'changes' | 'conflicts' | 'worktrees' | 'pr'
-const isMac = navigator.platform.startsWith('Mac')
-const gitGeneralShortcut = isMac ? '⌘G' : 'Ctrl+G'
-const gitDiffShortcut = isMac ? '⌘⇧G' : 'Ctrl+Shift+G'
 
 type UnifiedGitPanelProps = {
   task?: Task | null
@@ -89,6 +86,9 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
   isRepoStale,
   onRepoChange
 }, ref) {
+  const gitGeneralShortcut = useShortcutDisplay('panel-git')
+  const gitDiffShortcut = useShortcutDisplay('panel-git-diff')
+
   const [activeTab, setActiveTabRaw] = useState<GitTabId>(defaultTab)
   const setActiveTab = useCallback((tab: GitTabId) => {
     setActiveTabRaw(tab)

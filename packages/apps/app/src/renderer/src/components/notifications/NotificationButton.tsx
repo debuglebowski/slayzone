@@ -5,9 +5,10 @@ interface NotificationButtonProps {
   active: boolean
   count: number
   onClick: () => void
+  shortcutHint?: string
 }
 
-export function NotificationButton({ active, count, onClick }: NotificationButtonProps) {
+export function NotificationButton({ active, count, onClick, shortcutHint }: NotificationButtonProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -29,7 +30,7 @@ export function NotificationButton({ active, count, onClick }: NotificationButto
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs">
-        {active ? 'Hide notifications panel' : 'Show notifications panel'}
+        {active ? 'Hide notifications panel' : 'Show notifications panel'}{shortcutHint && ` (${shortcutHint})`}
       </TooltipContent>
     </Tooltip>
   )

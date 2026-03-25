@@ -13,7 +13,7 @@ export function formatKeysForDisplay(keys: string, platform?: Platform): string 
     const mapped = map[part]
     if (mapped) return mapped
     return part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)
-  }).join(' ')
+  }).join('')
 }
 
 export function toElectronAccelerator(keys: string): string {

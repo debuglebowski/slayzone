@@ -134,8 +134,8 @@ describe('formatKeysForDisplay', () => {
   })
 
   it('accepts explicit platform override', () => {
-    expect(formatKeysForDisplay('mod+n', 'mac')).toBe('⌘ N')
-    expect(formatKeysForDisplay('mod+n', 'other')).toBe('Ctrl N')
+    expect(formatKeysForDisplay('mod+n', 'mac')).toBe('⌘N')
+    expect(formatKeysForDisplay('mod+n', 'other')).toBe('CtrlN')
   })
 })
 

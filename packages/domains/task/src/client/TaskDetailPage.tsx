@@ -62,7 +62,7 @@ import { RichTextEditor } from '@slayzone/editor'
 import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { TerminalContainer, type TerminalContainerHandle } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
-import { buildStatusOptions, cn, getColumnStatusStyle, projectColorBg, useAppearance, matchesShortcut, useShortcutStore } from '@slayzone/ui'
+import { buildStatusOptions, cn, getColumnStatusStyle, projectColorBg, useAppearance, matchesShortcut, useShortcutStore, useShortcutDisplay } from '@slayzone/ui'
 import { BrowserPanel, type BrowserPanelHandle } from '@slayzone/task-browser'
 import { FileEditorView, type FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { QuickOpenDialog } from '@slayzone/file-editor/client/QuickOpenDialog'
@@ -226,6 +226,18 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // PTY context for buffer management
   const { resetTaskState, subscribeSessionDetected, subscribeDevServer, getQuickRunPrompt, clearQuickRunPrompt } = usePty()
+
+  // Shortcut display strings (reactive to user customization)
+  const panelTerminalShortcut = useShortcutDisplay('panel-terminal')
+  const panelBrowserShortcut = useShortcutDisplay('panel-browser')
+  const panelEditorShortcut = useShortcutDisplay('panel-editor')
+  const panelGitShortcut = useShortcutDisplay('panel-git')
+  const panelProcessesShortcut = useShortcutDisplay('panel-processes')
+  const panelSettingsShortcut = useShortcutDisplay('panel-settings')
+  const terminalScreenshotShortcut = useShortcutDisplay('terminal-screenshot')
+  const terminalInjectTitleShortcut = useShortcutDisplay('terminal-inject-title')
+  const terminalInjectDescShortcut = useShortcutDisplay('terminal-inject-desc')
+  const terminalRestartShortcut = useShortcutDisplay('terminal-restart')
 
   // Detected session ID from /status command
   const [detectedSessionId, setDetectedSessionId] = useState<string | null>(null)
@@ -1369,12 +1381,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               <PanelToggle
                 panels={(() => {
                   const builtins: { id: string; icon: typeof Globe; label: string; shortcut?: string }[] = [
-                    { id: 'terminal', icon: TerminalIcon, label: 'Terminal', shortcut: '⌘T' },
-                    { id: 'browser', icon: Globe, label: 'Browser', shortcut: '⌘B' },
-                    { id: 'editor', icon: FileCode, label: 'Editor', shortcut: '⌘E' },
-                    { id: 'diff', icon: GitBranch, label: 'Git', shortcut: '⌘G' },
-                    { id: 'processes', icon: Cpu, label: 'Processes', shortcut: '⌘O' },
-                    { id: 'settings', icon: Settings2, label: 'Settings', shortcut: '⌘S' },
+                    { id: 'terminal', icon: TerminalIcon, label: 'Terminal', shortcut: panelTerminalShortcut },
+                    { id: 'browser', icon: Globe, label: 'Browser', shortcut: panelBrowserShortcut },
+                    { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut },
+                    { id: 'diff', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut },
+                    { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut },
+                    { id: 'settings', icon: Settings2, label: 'Settings', shortcut: panelSettingsShortcut },
                   ].filter(p => isBuiltinEnabled(p.id, 'task') && !(task.is_temporary && p.id === 'settings'))
 
                   // Insert web panels after editor
@@ -1698,7 +1710,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                 <Camera className="size-3.5" />
                               </IconButton>
                             </TooltipTrigger>
-                            <TooltipContent>Screenshot to terminal (⌘⇧S)</TooltipContent>
+                            <TooltipContent>Screenshot to terminal ({terminalScreenshotShortcut})</TooltipContent>
                           </Tooltip>
 
                           <DropdownMenu>
@@ -1715,11 +1727,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               )}
                               <DropdownMenuItem onClick={handleInjectTitle}>
                                 Inject title
-                                <span className="ml-auto text-xs text-muted-foreground">⌘I</span>
+                                <span className="ml-auto text-xs text-muted-foreground">{terminalInjectTitleShortcut}</span>
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => void handleInjectDescription()}>
                                 Inject description
-                                <span className="ml-auto text-xs text-muted-foreground">⌘⇧I</span>
+                                <span className="ml-auto text-xs text-muted-foreground">{terminalInjectDescShortcut}</span>
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={handleReattachTerminal}>
@@ -1727,7 +1739,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={handleRestartTerminal}>
                                 Restart terminal
-                                <span className="ml-auto pl-4 text-xs text-muted-foreground">⌘⌥R</span>
+                                <span className="ml-auto pl-4 text-xs text-muted-foreground">{terminalRestartShortcut}</span>
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={handleResetTerminal}>
                                 Reset terminal

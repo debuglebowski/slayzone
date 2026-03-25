@@ -28,6 +28,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuShortcut,
+  useShortcutDisplay,
 } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
 import type { BrowserTab, BrowserTabsState, MultiDeviceConfig, GridLayout, DeviceSlot } from '../shared'
@@ -356,6 +357,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   canUseDomPicker = true,
 }: BrowserPanelProps, ref) {
   const { browserDefaultUrl, browserDefaultZoom, browserDeviceDefaults } = useAppearance()
+  const elementPickerShortcut = useShortcutDisplay('browser-element-picker')
   const urlInputRef = useRef<HTMLInputElement>(null)
   const [inputUrl, setInputUrl] = useState('')
   const [isFocused, setIsFocused] = useState(false)
@@ -1116,7 +1118,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               ? 'Open terminal panel to pick element'
                 : isPickingElement
                 ? 'Element picker active (click again to exit)'
-                : 'Pick element (⌘⇧L)'}
+                : `Pick element (${elementPickerShortcut})`}
           </TooltipContent>
         </Tooltip>
 
