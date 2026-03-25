@@ -262,8 +262,8 @@ export class BrowserViewManager {
 
   async executeJs(viewId: string, code: string): Promise<unknown> {
     const wc = this.getWebContents(viewId)
-    if (!wc) return undefined
-    return wc.executeJavaScript(code, true)
+    if (!wc || !wc.mainFrame) return undefined
+    return wc.mainFrame.executeJavaScript(code, true)
   }
 
   async insertCss(viewId: string, css: string): Promise<string> {
@@ -419,13 +419,14 @@ export class BrowserViewManager {
     })();`
 
     const inject = (url?: string) => {
+      if (!wc.mainFrame) return
       // Inject chrome.csi/loadTimes on all pages (lightweight, no Object.defineProperty)
-      wc.executeJavaScript(CSI_LOADTIMES_SCRIPT).catch(() => {})
+      wc.mainFrame.executeJavaScript(CSI_LOADTIMES_SCRIPT).catch(() => {})
       // Inject full desktop handoff hardening on non-Google sites (Figma, etc.)
       try {
         if (url && new URL(url).hostname.endsWith('.google.com')) return
       } catch { /* invalid URL — inject */ }
-      wc.executeJavaScript(WEBVIEW_DESKTOP_HANDOFF_SCRIPT).catch(() => {})
+      wc.mainFrame.executeJavaScript(WEBVIEW_DESKTOP_HANDOFF_SCRIPT).catch(() => {})
     }
     wc.on('did-navigate', (_event, url) => inject(url))
   }

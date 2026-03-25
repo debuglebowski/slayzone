@@ -2077,7 +2077,7 @@ app.on('web-contents-created', (_, wc) => {
       const desktopHandoffPolicy = webviewDesktopHandoffPolicy.get(wc.id)
       if (!desktopHandoffPolicy) return
       void ensureDesktopHandoffSpoofing()
-      wc.executeJavaScript(WEBVIEW_INIT_SCRIPT).catch(() => {})
+      wc.mainFrame?.executeJavaScript(WEBVIEW_INIT_SCRIPT).catch(() => {})
     }
 
     wc.on('did-start-navigation', (_event, _navigationUrl, _isInPlace, isMainFrame) => {

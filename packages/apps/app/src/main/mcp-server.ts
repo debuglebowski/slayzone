@@ -453,7 +453,7 @@ export function startMcpServer(db: Database): void {
 
   function execJs<T>(wc: Electron.WebContents, code: string): Promise<T> {
     return Promise.race([
-      wc.executeJavaScript(code) as Promise<T>,
+      (wc.mainFrame?.executeJavaScript(code) ?? Promise.reject(new Error('No main frame'))) as Promise<T>,
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Browser script timed out (10s)')), BROWSER_JS_TIMEOUT)
       ),
