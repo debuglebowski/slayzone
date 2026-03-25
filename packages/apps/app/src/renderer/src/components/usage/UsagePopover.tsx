@@ -5,6 +5,9 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from '@slayzone/ui'
 import type { ProviderUsage, UsageWindow } from '@slayzone/terminal/shared'
 
@@ -105,7 +108,12 @@ function ProviderSection({
   pinned: string[]
   onTogglePin: (key: string) => void
 }) {
-  if (usage.error) {
+  const hasWindows = usage.windows.length > 0
+  const isStale = hasWindows && usage.error !== null
+  const staleAge = isStale ? formatAgo(usage.fetchedAt) : null
+
+  // Error-only (no cached data to show)
+  if (usage.error && !hasWindows) {
     return (
       <div className="space-y-1">
         <div className="text-xs font-medium">{usage.label}</div>
@@ -117,7 +125,7 @@ function ProviderSection({
     )
   }
 
-  if (usage.windows.length === 0) return null
+  if (!hasWindows) return null
 
   return (
     <div className="space-y-1.5">
@@ -125,6 +133,12 @@ function ProviderSection({
         <span className="text-xs font-medium flex-1">{usage.label}</span>
         <span className="text-[10px] text-muted-foreground w-16 shrink-0 text-right">Resets in</span>
       </div>
+      {isStale && (
+        <div className="flex items-center gap-1 text-[10px] text-yellow-500/80">
+          <AlertTriangle className="size-2.5 shrink-0" />
+          <span>{usage.error} · {staleAge} old</span>
+        </div>
+      )}
       {usage.windows.map((w) => (
         <WindowRow
           key={w.key}
@@ -141,7 +155,7 @@ function ProviderSection({
 function defaultPins(data: ProviderUsage[]): PinnedBars {
   const pins: PinnedBars = {}
   for (const p of data) {
-    if (p.error || p.windows.length === 0) continue
+    if (p.windows.length === 0) continue
     pins[p.provider] = [p.windows[0].key]
   }
   return pins
@@ -213,6 +227,8 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
       .filter(Boolean) as { label: string; pct: number }[]
   })
 
+  const hasError = data.some((p) => p.error !== null)
+
   if (data.length === 0) return null
 
   return (
@@ -223,6 +239,16 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
           onMouseEnter={handleEnter}
           onMouseLeave={handleLeave}
         >
+          {hasError && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertTriangle className="size-3 text-yellow-500 shrink-0" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs max-w-64">
+                {data.filter((p) => p.error).map((p) => `${p.label}: ${p.error}`).join('\n')}
+              </TooltipContent>
+            </Tooltip>
+          )}
           {inlineBars.length > 0 ? (
             inlineBars.map((b) => <InlineBar key={b.label} pct={b.pct} label={b.label} />)
           ) : (

@@ -8,6 +8,7 @@ import type Database from 'better-sqlite3'
 import type { ProviderUsage, UsageWindow, UsageProviderConfig } from '@slayzone/terminal/shared'
 
 const TIMEOUT_MS = 10_000
+const MIN_BACKOFF_MS = 30_000    // minimum backoff on 429 (even if retry-after says 0)
 
 // ── Provider metadata ────────────────────────────────────────────────
 
@@ -24,7 +25,7 @@ function usageError(p: ProviderMeta, error: string): ProviderUsage {
 class RateLimitError extends Error {
   retryAfterMs: number
   constructor(retryAfterMs: number) {
-    super(`Too many requests — try again in ${Math.ceil(retryAfterMs / 1000)}s`)
+    super('Rate limited')
     this.retryAfterMs = retryAfterMs
   }
 }
@@ -344,13 +345,24 @@ let lastFetchAt = 0
 const BUILTIN_USAGE_IDS = new Set(['claude', 'codex'])
 
 function fetchProvider(p: ProviderMeta, fetcher: () => Promise<ProviderUsage>): Promise<ProviderUsage> {
+  // Skip fetch if provider is in backoff — return cached result as-is
+  const existing = cache.get(p.id)
+  if (existing && Date.now() < existing.backoffUntil) {
+    return Promise.resolve(existing.result)
+  }
+
   return fetcher().catch((e): ProviderUsage => {
     if (e instanceof RateLimitError) {
-      const entry = cache.get(p.id)
-      const backoffUntil = Math.max(entry?.backoffUntil ?? 0, Date.now() + e.retryAfterMs)
-      if (entry) entry.backoffUntil = backoffUntil
+      const backoff = Math.max(e.retryAfterMs, MIN_BACKOFF_MS)
+      const backoffUntil = Math.max(existing?.backoffUntil ?? 0, Date.now() + backoff)
+      if (existing) existing.backoffUntil = backoffUntil
     }
-    return usageError(p, e instanceof RateLimitError ? e.message : friendlyError(e))
+    const errorMsg = e instanceof RateLimitError ? e.message : friendlyError(e)
+    // Preserve last valid windows so UI can show stale data + error indicator
+    if (existing?.result.windows.length) {
+      return { ...existing.result, error: errorMsg }
+    }
+    return usageError(p, errorMsg)
   })
 }
 
@@ -388,11 +400,6 @@ export function registerUsageHandlers(ipcMain: IpcMain, db: Database.Database): 
       try {
         const config: UsageProviderConfig = JSON.parse(row.usage_config)
         if (!config.enabled) continue
-        const entry = cache.get(row.id)
-        if (entry && now < entry.backoffUntil) {
-          fetchers.push(Promise.resolve(entry.result))
-          continue
-        }
         const meta: ProviderMeta = { id: row.id, label: row.label, cli: row.id, vendor: row.label }
         fetchers.push(fetchProvider(meta, () => fetchCustomUsage(row.id, row.label, config)))
       } catch { /* skip corrupt config */ }
