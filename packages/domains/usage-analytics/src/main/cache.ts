@@ -133,6 +133,19 @@ function dateRangeToSql(range: DateRange): string {
   }
 }
 
+/** Total tokens per day across all providers (no date filtering). */
+export function queryDailyTotals(db: Database.Database): Array<{ date: string; totalTokens: number }> {
+  return db
+    .prepare(
+      `SELECT date(timestamp) as date,
+        SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
+      FROM usage_records
+      GROUP BY date(timestamp)
+      ORDER BY date ASC`
+    )
+    .all() as Array<{ date: string; totalTokens: number }>
+}
+
 export function queryAnalytics(db: Database.Database, range: DateRange): AnalyticsSummary {
   const since = dateRangeToSql(range)
 

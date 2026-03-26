@@ -1,48 +1,12 @@
-import { execFile } from 'child_process'
-import { platform } from 'os'
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { LocalLeaderboardStats } from '@slayzone/types'
-import { resolveUserShell } from '@slayzone/terminal/main'
+import { refreshUsageData, queryDailyTotals } from '@slayzone/usage-analytics/main'
 import { isCompletedStatus, parseColumnsConfig } from '@slayzone/projects/shared'
 
-interface CcusageDailyEntry {
-  date: string
-  totalTokens: number
-}
-
-function runCcusage(): Promise<CcusageDailyEntry[]> {
-  return new Promise((resolve) => {
-    const shell = resolveUserShell()
-    let shellArgs: string[]
-    if (platform() === 'win32') {
-      shellArgs = ['/c', 'npx ccusage --json']
-    } else if (shell.includes('fish')) {
-      shellArgs = ['-i', '-c', 'npx ccusage --json']
-    } else {
-      shellArgs = ['-lc', 'npx ccusage --json']
-    }
-
-    execFile(shell, shellArgs, { timeout: 20_000 }, (_err, stdout) => {
-      if (!stdout?.trim()) return resolve([])
-      try {
-        const data = JSON.parse(stdout.trim()) as { daily?: unknown[] }
-        const daily = data?.daily
-        if (!Array.isArray(daily)) return resolve([])
-        resolve(
-          daily
-            .filter((d): d is Record<string, unknown> => typeof d === 'object' && d !== null)
-            .map((d) => ({
-              date: String(d.date ?? ''),
-              totalTokens: Number(d.totalTokens ?? 0)
-            }))
-            .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date))
-        )
-      } catch {
-        resolve([])
-      }
-    })
-  })
+async function getDailyTokens(db: Database): Promise<Array<{ date: string; totalTokens: number }>> {
+  try { await refreshUsageData(db) } catch { /* best-effort: still query stale data */ }
+  return queryDailyTotals(db)
 }
 
 function getTodayCompletedTasks(db: Database): number {
@@ -67,9 +31,9 @@ export function registerLeaderboardHandlers(ipcMain: IpcMain, db: Database): voi
   ipcMain.handle('leaderboard:get-local-stats', async (): Promise<LocalLeaderboardStats> => {
     const today = new Date().toISOString().slice(0, 10)
     const todayCompletedTasks = getTodayCompletedTasks(db)
-    const ccusageDays = await runCcusage()
+    const tokenDays = await getDailyTokens(db)
 
-    const days = ccusageDays
+    const days = tokenDays
       .map((d) => ({
         date: d.date,
         totalTokens: d.totalTokens,
