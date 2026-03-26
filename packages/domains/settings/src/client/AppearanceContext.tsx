@@ -43,6 +43,11 @@ export function AppearanceProvider({
       window.api.settings.get('terminal_theme_follow_app'),
       window.api.settings.get('terminal_theme_dark'),
       window.api.settings.get('terminal_theme_light'),
+      window.api.settings.get('notes_font_family'),
+      window.api.settings.get('notes_line_spacing'),
+      window.api.settings.get('notes_checked_highlight'),
+      window.api.settings.get('notes_show_toolbar'),
+      window.api.settings.get('notes_spellcheck'),
     ]).then(([
       termSize, editorSize, reduceMotion, colorTints,
       wordWrap, tabSize, indentTabs, renderWs,
@@ -51,6 +56,7 @@ export function AppearanceProvider({
       browserZoom, browserUrl, browserDevices,
       sidebarBadge,
       termThemeFollow, termThemeDark, termThemeLight,
+      notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck,
     ]) => {
       const d = appearanceDefaults
       performance.mark('sz:appearance:end')
@@ -74,6 +80,11 @@ export function AppearanceProvider({
         terminalThemeFollowApp: termThemeFollow !== '0',
         terminalThemeDark: termThemeDark || d.terminalThemeDark,
         terminalThemeLight: termThemeLight || d.terminalThemeLight,
+        notesFontFamily: notesFontFamily === 'mono' ? 'mono' : 'sans',
+        notesLineSpacing: notesLineSpacing === 'compact' ? 'compact' : 'normal',
+        notesCheckedHighlight: notesCheckedHighlight === '1',
+        notesShowToolbar: notesShowToolbar === '1',
+        notesSpellcheck: notesSpellcheck !== '0',
       })
     })
   }, [settingsRevision])

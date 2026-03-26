@@ -188,7 +188,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 }: TaskDetailPageProps): React.JSX.Element {
   const { modes } = useTerminalModes()
 
-  const { colorTintsEnabled } = useAppearance()
+  const { colorTintsEnabled, notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
   // Main tab session ID format used by TerminalContainer/useTaskTerminals.
   const getMainSessionId = useCallback((id: string) => `${id}:${id}`, [])
 
@@ -1911,6 +1911,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               maxHeight="300px"
               className="rounded-md border border-input bg-transparent p-3"
               testId="task-description-editor"
+              fontFamily={notesFontFamily}
+              lineSpacing={notesLineSpacing}
+              checkedHighlight={notesCheckedHighlight}
+              showToolbar={notesShowToolbar}
+              spellcheck={notesSpellcheck}
             />
             <IconButton
               type="button"
@@ -2122,6 +2127,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         value={descriptionValue}
         onChange={setDescriptionValue}
         onSave={handleDescriptionSave}
+        fontFamily={notesFontFamily}
+        lineSpacing={notesLineSpacing}
+        checkedHighlight={notesCheckedHighlight}
+        showToolbar={notesShowToolbar}
+        spellcheck={notesSpellcheck}
       />
 
     </div>
