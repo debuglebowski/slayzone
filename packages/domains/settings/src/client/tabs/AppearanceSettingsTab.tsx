@@ -17,6 +17,11 @@ export function AppearanceSettingsTab({
   const [editorFontSize, setEditorFontSize] = useState('13')
   const [reduceMotion, setReduceMotion] = useState(false)
   const [sidebarBadgeMode, setSidebarBadgeMode] = useState<'none' | 'blob' | 'count'>('blob')
+  const [notesFontFamily, setNotesFontFamily] = useState<'sans' | 'mono'>('sans')
+  const [notesLineSpacing, setNotesLineSpacing] = useState<'compact' | 'normal'>('normal')
+  const [notesCheckedHighlight, setNotesCheckedHighlight] = useState(false)
+  const [notesShowToolbar, setNotesShowToolbar] = useState(false)
+  const [notesSpellcheck, setNotesSpellcheck] = useState(true)
   const [terminalThemeFollowApp, setTerminalThemeFollowApp] = useState(true)
   const [terminalThemeDark, setTerminalThemeDark] = useState('slay')
   const [terminalThemeLight, setTerminalThemeLight] = useState('slay-light')
@@ -30,6 +35,11 @@ export function AppearanceSettingsTab({
     window.api.settings.get('terminal_theme_follow_app').then(val => setTerminalThemeFollowApp(val !== '0'))
     window.api.settings.get('terminal_theme_dark').then(val => { if (val) setTerminalThemeDark(val) })
     window.api.settings.get('terminal_theme_light').then(val => { if (val) setTerminalThemeLight(val) })
+    window.api.settings.get('notes_font_family').then(val => setNotesFontFamily(val === 'mono' ? 'mono' : 'sans'))
+    window.api.settings.get('notes_line_spacing').then(val => setNotesLineSpacing(val === 'compact' ? 'compact' : 'normal'))
+    window.api.settings.get('notes_checked_highlight').then(val => setNotesCheckedHighlight(val === '1'))
+    window.api.settings.get('notes_show_toolbar').then(val => setNotesShowToolbar(val === '1'))
+    window.api.settings.get('notes_spellcheck').then(val => setNotesSpellcheck(val !== '0'))
   }, [])
 
   return (
@@ -151,6 +161,64 @@ export function AppearanceSettingsTab({
             </Select>
           </div>
         ))}
+      </div>
+
+      <div className="space-y-3">
+        <Label className="text-base font-semibold">Notes editor</Label>
+        <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+          <span className="text-sm">Font family</span>
+          <Select value={notesFontFamily} onValueChange={(v) => { setNotesFontFamily(v as 'sans' | 'mono'); window.api.settings.set('notes_font_family', v) }}>
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sans">Sans-serif</SelectItem>
+              <SelectItem value="mono">Monospace</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+          <span className="text-sm">Line spacing</span>
+          <Select value={notesLineSpacing} onValueChange={(v) => { setNotesLineSpacing(v as 'compact' | 'normal'); window.api.settings.set('notes_line_spacing', v) }}>
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="normal">Normal</SelectItem>
+              <SelectItem value="compact">Compact</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+          <span className="text-sm">Highlight checked items</span>
+          <Switch
+            checked={notesCheckedHighlight}
+            onCheckedChange={(checked) => {
+              setNotesCheckedHighlight(checked)
+              window.api.settings.set('notes_checked_highlight', checked ? '1' : '0')
+            }}
+          />
+        </div>
+        <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+          <span className="text-sm">Show formatting toolbar</span>
+          <Switch
+            checked={notesShowToolbar}
+            onCheckedChange={(checked) => {
+              setNotesShowToolbar(checked)
+              window.api.settings.set('notes_show_toolbar', checked ? '1' : '0')
+            }}
+          />
+        </div>
+        <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+          <span className="text-sm">Spellcheck</span>
+          <Switch
+            checked={notesSpellcheck}
+            onCheckedChange={(checked) => {
+              setNotesSpellcheck(checked)
+              window.api.settings.set('notes_spellcheck', checked ? '1' : '0')
+            }}
+          />
+        </div>
       </div>
 
       <div className="space-y-3">

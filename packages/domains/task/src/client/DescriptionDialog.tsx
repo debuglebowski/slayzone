@@ -8,6 +8,11 @@ interface DescriptionDialogProps {
   value: string
   onChange: (html: string) => void
   onSave: () => void
+  fontFamily?: 'sans' | 'mono'
+  lineSpacing?: 'compact' | 'normal'
+  checkedHighlight?: boolean
+  showToolbar?: boolean
+  spellcheck?: boolean
 }
 
 function getWordCount(editor: Editor | null): number {
@@ -15,7 +20,7 @@ function getWordCount(editor: Editor | null): number {
   return editor.state.doc.textContent.split(/\s+/).filter(Boolean).length
 }
 
-export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave }: DescriptionDialogProps) {
+export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave, fontFamily, lineSpacing, checkedHighlight, showToolbar, spellcheck }: DescriptionDialogProps) {
   const editorRef = useRef<Editor | null>(null)
   const [wordCount, setWordCount] = useState(0)
 
@@ -54,6 +59,11 @@ export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave 
           autoFocus
           editorRef={editorRef}
           onReady={handleEditorReady}
+          fontFamily={fontFamily}
+          lineSpacing={lineSpacing}
+          checkedHighlight={checkedHighlight}
+          showToolbar={showToolbar}
+          spellcheck={spellcheck}
         />
       </DialogContent>
     </Dialog>

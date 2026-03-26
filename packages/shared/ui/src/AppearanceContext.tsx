@@ -29,6 +29,12 @@ export interface AppearanceSettings {
   browserDefaultZoom: number
   browserDefaultUrl: string
   browserDeviceDefaults: BrowserDeviceDefaults | null
+  // Notes editor
+  notesFontFamily: 'sans' | 'mono'
+  notesLineSpacing: 'compact' | 'normal'
+  notesCheckedHighlight: boolean
+  notesShowToolbar: boolean
+  notesSpellcheck: boolean
   // Sidebar
   sidebarBadgeMode: 'none' | 'blob' | 'count'
 }
@@ -52,6 +58,11 @@ export const appearanceDefaults: AppearanceSettings = {
   browserDefaultZoom: 100,
   browserDefaultUrl: '',
   browserDeviceDefaults: null,
+  notesFontFamily: 'sans',
+  notesLineSpacing: 'normal',
+  notesCheckedHighlight: false,
+  notesShowToolbar: false,
+  notesSpellcheck: true,
   sidebarBadgeMode: 'blob',
 }
 

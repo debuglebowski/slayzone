@@ -267,7 +267,7 @@
 
 .ProseMirror ul[data-type="taskList"] li {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.5rem;
 }
 
@@ -283,6 +283,42 @@
 
 .ProseMirror ul[data-type="taskList"] li > div {
   flex: 1;
+}
+
+/* Compact line spacing for notes editor */
+.prose-tight .ProseMirror.prose > * + * {
+  margin-top: 0.125em;
+}
+
+.prose-tight .ProseMirror.prose p {
+  margin-top: 0.125em;
+  margin-bottom: 0.125em;
+}
+
+.prose-tight .ProseMirror.prose ul,
+.prose-tight .ProseMirror.prose ol,
+.prose-tight .ProseMirror.prose ul[data-type="taskList"] {
+  margin-top: 0.125em;
+  margin-bottom: 0.125em;
+}
+
+.prose-tight .ProseMirror.prose li {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.prose-tight .ProseMirror.prose h1,
+.prose-tight .ProseMirror.prose h2,
+.prose-tight .ProseMirror.prose h3 {
+  margin-top: 0.375em;
+  margin-bottom: 0.125em;
+}
+
+/* Checked task item highlight */
+.checked-highlight .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: #4ade80;
+  text-decoration: line-through;
+  text-decoration-color: #4ade8080;
 }
 
 /* Prevent Tailwind .visible/.invisible class names from colliding with xterm's
