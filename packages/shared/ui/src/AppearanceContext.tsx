@@ -29,7 +29,7 @@ export interface AppearanceSettings {
   browserDefaultZoom: number
   browserDefaultUrl: string
   browserDeviceDefaults: BrowserDeviceDefaults | null
-  // Notes editor
+  // Editor
   notesFontFamily: 'sans' | 'mono'
   notesLineSpacing: 'compact' | 'normal'
   notesCheckedHighlight: boolean

@@ -5,7 +5,7 @@ import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ListItemMove } from './list-item-move'
-import { useEffect, type MutableRefObject } from 'react'
+import { useEffect, type MutableRefObject, type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { cn } from '@slayzone/ui'
 
 export type { Editor }
@@ -98,6 +98,13 @@ export function RichTextEditor({
     if (editorRef) editorRef.current = editor
   }, [editor, editorRef])
 
+  // Sync spellcheck attribute reactively
+  useEffect(() => {
+    if (editor?.view?.dom) {
+      (editor.view.dom as HTMLElement).spellcheck = spellcheck !== false
+    }
+  }, [editor, spellcheck])
+
   // Sync external value changes
   useEffect(() => {
     if (editor && value !== editor.getHTML()) {
@@ -179,8 +186,8 @@ function ToolbarButton({
 }: {
   active: boolean
   onClick: () => void
-  children: React.ReactNode
-} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  children: ReactNode
+} & ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="button"

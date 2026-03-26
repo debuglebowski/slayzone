@@ -164,7 +164,7 @@ export function AppearanceSettingsTab({
       </div>
 
       <div className="space-y-3">
-        <Label className="text-base font-semibold">Notes editor</Label>
+        <Label className="text-base font-semibold">Editor</Label>
         <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
           <span className="text-sm">Font family</span>
           <Select value={notesFontFamily} onValueChange={(v) => { setNotesFontFamily(v as 'sans' | 'mono'); window.api.settings.set('notes_font_family', v) }}>
