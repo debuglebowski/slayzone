@@ -488,7 +488,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
     return parseTask(row)
   })
 
-  ipcMain.handle('db:tasks:create', (_, data: CreateTaskInput) => {
+  ipcMain.handle('db:tasks:create', async (_, data: CreateTaskInput) => {
     const id = crypto.randomUUID()
     const projectColumns = getProjectColumns(db, data.projectId)
     const initialStatus =
@@ -536,7 +536,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       ccsDefaultProfile,
       data.repoName ?? null
     )
-    void maybeAutoCreateWorktree(db, id, data.projectId, data.title, data.repoName)
+    await maybeAutoCreateWorktree(db, id, data.projectId, data.title, data.repoName)
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
     const task = parseTask(row)
     if (task) {
