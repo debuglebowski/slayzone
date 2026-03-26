@@ -4,6 +4,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { ListItemMove } from './list-item-move'
 import { useEffect, type MutableRefObject } from 'react'
 import { cn } from '@slayzone/ui'
 
@@ -53,7 +54,8 @@ export function RichTextEditor({
       TaskList,
       TaskItem.configure({
         nested: true
-      })
+      }),
+      ListItemMove
     ],
     content: value,
     autofocus: autoFocus ? 'end' : false,
