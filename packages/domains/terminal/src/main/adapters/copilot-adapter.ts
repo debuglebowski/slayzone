@@ -26,7 +26,7 @@ export class CopilotAdapter implements TerminalAdapter {
   detectError(data: string): ErrorInfo | null {
     const stripped = CopilotAdapter.stripAnsi(data)
 
-    if (/no saved session found with id|no conversation found with (?:session )?id|session .* not found/i.test(stripped)) {
+    if (/no saved session found with id|no conversation found with (?:session )?id|session \S+ not found/i.test(stripped)) {
       return {
         code: 'SESSION_NOT_FOUND',
         message: 'Session not found',

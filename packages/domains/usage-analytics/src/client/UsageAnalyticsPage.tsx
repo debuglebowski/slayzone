@@ -9,6 +9,16 @@ import { ModelBreakdown } from './ModelBreakdown'
 import { TopTasksTable } from './TopTasksTable'
 import { PROVIDER_USAGE_SUPPORT } from '../shared/types'
 
+const SUPPORTED_PROVIDER_LABELS = Object.values(PROVIDER_USAGE_SUPPORT)
+  .filter((p) => p.supported)
+  .map((p) => p.label)
+
+function formatSupportedProviders(): string {
+  if (SUPPORTED_PROVIDER_LABELS.length === 0) return 'no providers'
+  if (SUPPORTED_PROVIDER_LABELS.length === 1) return SUPPORTED_PROVIDER_LABELS[0]
+  return `${SUPPORTED_PROVIDER_LABELS.slice(0, -1).join(', ')}, and ${SUPPORTED_PROVIDER_LABELS[SUPPORTED_PROVIDER_LABELS.length - 1]}`
+}
+
 interface Props {
   onTaskClick?: (taskId: string) => void
 }
@@ -50,7 +60,7 @@ export function UsageAnalyticsPage({ onTaskClick }: Props) {
         {!providerSupported ? (
           <div className="rounded-lg border bg-card p-8 text-center">
             <p className="text-sm text-muted-foreground">
-              {providerLabel} does not store usage data locally. Usage tracking is only available for Claude, Codex, OpenCode, and Qwen.
+              {providerLabel} does not store usage data locally. Usage tracking is only available for {formatSupportedProviders()}.
             </p>
           </div>
         ) : (

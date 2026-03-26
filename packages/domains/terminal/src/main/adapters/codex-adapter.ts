@@ -52,7 +52,7 @@ export class CodexAdapter implements TerminalAdapter {
     if (
       /no saved session found with id/i.test(stripped)
       || /no conversation found with (?:session )?id/i.test(stripped)
-      || /session .* not found/i.test(stripped)
+      || /session \S+ not found/i.test(stripped)
     ) {
       return {
         code: 'SESSION_NOT_FOUND',

@@ -15,6 +15,7 @@ export const PROVIDER_USAGE_SUPPORT: Record<string, { label: string; supported: 
   'qwen-code': { label: 'Qwen', supported: true },
   gemini: { label: 'Gemini', supported: false },
   'cursor-agent': { label: 'Cursor', supported: false },
+  copilot: { label: 'Copilot', supported: false },
 }
 
 /** Special value meaning show all providers */
