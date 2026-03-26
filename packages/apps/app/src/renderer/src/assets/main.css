@@ -274,6 +274,7 @@
 .ProseMirror ul[data-type="taskList"] li > label {
   flex-shrink: 0;
   user-select: none;
+  padding-top: 0.2em; /* optically align checkbox with first line of text */
 }
 
 .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
