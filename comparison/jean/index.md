@@ -185,7 +185,12 @@ comparison_axes:
       - github-readme
     last_checked: 2026-03-27
 
-assets: []
+assets:
+  - path: assets/product-screenshot.png
+    caption: Jean homepage showing worktree-centric workspace — project sidebar with worktree list, session counts, review status badges, and diff stats.
+    proves: Confirms worktree-first design, session-based workflow, review status tracking, and multi-worktree project organization.
+    source_url: https://jean.build/
+    captured_on: 2026-03-27
 
 sources:
   - id: website-home
