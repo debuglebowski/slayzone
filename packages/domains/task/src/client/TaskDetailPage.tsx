@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronRight, ChevronDown, ChevronUp, Plus, GripVertical, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, Maximize2, Circle } from 'lucide-react'
+import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronRight, Plus, GripVertical, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, Circle } from 'lucide-react'
+import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
 import { DescriptionDialog } from './DescriptionDialog'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
@@ -253,6 +254,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Description fullscreen dialog
   const [descriptionFullscreen, setDescriptionFullscreen] = useState(false)
   const [descriptionExpanded, setDescriptionExpanded] = useState(false)
+  const [descriptionOpen, setDescriptionOpen] = useState(true)
 
   // Doctor dialog state
   const [doctorDialogOpen, setDoctorDialogOpen] = useState(false)
@@ -1902,56 +1904,64 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
 
           {/* Description */}
-          <div className={cn("flex flex-col min-h-0 relative", descriptionExpanded && "flex-1")}>
-            <RichTextEditor
-              value={descriptionValue}
-              onChange={setDescriptionValue}
-              onBlur={handleDescriptionSave}
-              placeholder="Add description..."
-              minHeight={descriptionExpanded ? undefined : "150px"}
-              maxHeight={descriptionExpanded ? undefined : "300px"}
-              className="rounded-md border border-input bg-transparent p-3"
-              testId="task-description-editor"
-              fontFamily={notesFontFamily}
-              lineSpacing={notesLineSpacing}
-              checkedHighlight={notesCheckedHighlight}
-              showToolbar={notesShowToolbar}
-              spellcheck={notesSpellcheck}
-            />
-            <div className="absolute bottom-1 right-1 flex items-center gap-0.5">
-              <IconButton
-                type="button"
-                variant="ghost"
-                aria-label={descriptionExpanded ? "Collapse description" : "Expand description"}
-                className="size-6 text-muted-foreground hover:text-foreground"
-                onClick={() => setDescriptionExpanded((v) => !v)}
-              >
-                {descriptionExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-              </IconButton>
-              <IconButton
-                type="button"
-                variant="ghost"
-                aria-label="Fullscreen description"
-                className="size-6 text-muted-foreground hover:text-foreground"
-                onClick={() => setDescriptionFullscreen(true)}
-              >
-                <Maximize2 className="size-3" />
-              </IconButton>
+          <Collapsible open={descriptionOpen} onOpenChange={setDescriptionOpen} className={cn("flex flex-col min-h-0 rounded-md border border-border overflow-hidden", descriptionExpanded && descriptionOpen && "flex-1")}>
+            <div className={cn("flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground", descriptionOpen && "border-b border-border")}>
+              <CollapsibleTrigger className="flex items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
+                <ChevronRight className="size-3 transition-transform" />
+                Description
+              </CollapsibleTrigger>
+              <div className="ml-auto flex items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconButton type="button" variant="ghost" aria-label={descriptionExpanded ? "Default height" : "Full height"} className={cn("size-5 hover:text-foreground", descriptionExpanded ? "text-foreground bg-muted" : "text-muted-foreground")} onClick={() => setDescriptionExpanded((v) => !v)}>
+                      <IconArrowsVertical size={12} />
+                    </IconButton>
+                  </TooltipTrigger>
+                  <TooltipContent>{descriptionExpanded ? "Default height" : "Full height"}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconButton type="button" variant="ghost" aria-label="Fullscreen" className="size-5 text-muted-foreground hover:text-foreground" onClick={() => setDescriptionFullscreen(true)}>
+                      <IconArrowsMaximize size={12} />
+                    </IconButton>
+                  </TooltipTrigger>
+                  <TooltipContent>Fullscreen</TooltipContent>
+                </Tooltip>
+              </div>
             </div>
-          </div>
+            {descriptionOpen && (
+              <div className={cn("flex flex-col min-h-0 flex-1", !descriptionExpanded && "min-h-[150px] max-h-[300px]")}>
+                <RichTextEditor
+                  value={descriptionValue}
+                  onChange={setDescriptionValue}
+                  onBlur={handleDescriptionSave}
+                  placeholder="Add description..."
+                  className="bg-transparent p-3"
+                  testId="task-description-editor"
+                  fontFamily={notesFontFamily}
+                  lineSpacing={notesLineSpacing}
+                  checkedHighlight={notesCheckedHighlight}
+                  showToolbar={notesShowToolbar}
+                  spellcheck={notesSpellcheck}
+                />
+              </div>
+            )}
+          </Collapsible>
 
           {/* Sub-tasks (only for top-level tasks) */}
-          {!descriptionExpanded && !parentTask && <Collapsible defaultOpen>
-            <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
-              <ChevronRight className="size-3 transition-transform" />
-              Sub-tasks
+          {!parentTask && <Collapsible defaultOpen className="group/sub rounded-md border border-border overflow-hidden">
+            <div className="flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground group-data-[state=open]/sub:border-b border-border">
+              <CollapsibleTrigger className="flex items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
+                <ChevronRight className="size-3 transition-transform" />
+                Sub-tasks
+              </CollapsibleTrigger>
               {subTasks.length > 0 && (
                 <span className="ml-auto text-muted-foreground/60 text-[10px]">
                   {subTasks.filter((s) => isTerminalStatus(s.status, project?.columns_config ?? null)).length}/{subTasks.length}
                 </span>
               )}
-            </CollapsibleTrigger>
-            <CollapsibleContent className="border-l border-border ml-2 pl-4 pt-2">
+            </div>
+            <CollapsibleContent className="p-2">
               <DndContext sensors={subTaskSensors} collisionDetection={closestCenter} onDragEnd={handleSubTaskDragEnd}>
               <SortableContext items={subTasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
               <div className="flex flex-col gap-0.5 max-h-[40vh] overflow-y-auto">
@@ -1997,9 +2007,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             </CollapsibleContent>
           </Collapsible>}
 
-          {!descriptionExpanded && <>
           {/* Spacer — pushes remaining groups to bottom */}
-          <div className="flex-1" />
+          {!(descriptionExpanded && descriptionOpen) && <div className="flex-1" />}
 
           {/* Details */}
           <TaskMetadataSidebar
@@ -2024,7 +2033,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             </Button>
             </div>
           </div>
-          </>}
 
         </div>
         )}
