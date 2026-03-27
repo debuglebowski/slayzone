@@ -114,6 +114,26 @@ test.describe('CLI: slay', () => {
       await expect(mainWindow.getByText(title)).toBeVisible({ timeout: 10_000 })
     })
 
+    test('created task has provider_config with default flags', async ({ mainWindow }) => {
+      const title = `CLI flags ${Date.now()}`
+      const r = runCli('tasks', 'create', title, '--project', 'cli test')
+      expect(r.status).toBe(0)
+
+      // Wait for notify → refreshData so getTask can find it
+      await expect(mainWindow.getByText(title)).toBeVisible({ timeout: 10_000 })
+
+      const tasks = await mainWindow.evaluate(() => window.api.db.getTasks()) as {
+        title: string; terminal_mode: string;
+        provider_config: Record<string, { flags?: string }>
+      }[]
+      const task = tasks.find((t) => t.title === title)!
+      expect(task).toBeTruthy()
+      expect(task.terminal_mode).toBeTruthy()
+      expect(task.provider_config).toBeTruthy()
+      expect(task.provider_config['claude-code']?.flags).toContain('--allow-dangerously-skip-permissions')
+      expect(task.provider_config['codex']?.flags).toContain('--full-auto')
+    })
+
     test('UI updates when CLI discovers port from DB (production path)', async ({ mainWindow }) => {
       const title = `CLI prod-path ${Date.now()}`
       // No SLAYZONE_MCP_PORT — CLI must read port from settings table (like production)
@@ -493,6 +513,22 @@ test.describe('CLI: slay', () => {
       const r2 = runCli('tasks', 'subtasks', parentTaskId.slice(0, 8), '--json')
       const subtasks = JSON.parse(r2.stdout) as { title: string }[]
       expect(subtasks.some((t) => t.title === title)).toBe(true)
+    })
+
+    test('subtask-add populates provider_config with default flags', async ({ mainWindow }) => {
+      const title = `CLI subtask flags ${Date.now()}`
+      const r = runCli('tasks', 'subtask-add', parentTaskId.slice(0, 8), title)
+      expect(r.status).toBe(0)
+
+      const subtasks = await mainWindow.evaluate(
+        (pid) => window.api.db.getSubTasks(pid),
+        parentTaskId,
+      ) as { title: string; provider_config: Record<string, { flags?: string }> }[]
+      const subtask = subtasks.find((t) => t.title === title)!
+      expect(subtask).toBeTruthy()
+      expect(subtask.provider_config).toBeTruthy()
+      expect(subtask.provider_config['claude-code']?.flags).toContain('--allow-dangerously-skip-permissions')
+      expect(subtask.provider_config['codex']?.flags).toContain('--full-auto')
     })
 
     test('search finds tasks by title', () => {
