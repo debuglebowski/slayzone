@@ -38,10 +38,19 @@ Add a new entry at the top of the JSON array for the new version:
 - `version`: the new version string (without `v` prefix)
 - `date`: today's date in `YYYY-MM-DD` format
 - `tagline`: a short, catchy 2-4 word tagline summarizing the release theme
-- `items`: user-facing changes only (features, improvements, fixes). Skip CI, docs, tests, chores, website-only changes. Keep descriptions concise (1 sentence). Match the tone and style of existing entries.
+- `items`: user-facing changes only (features, improvements, fixes). Skip CI, docs, tests, chores, website-only changes.
 
-Categories:
-- `feature` — new user-facing capabilities
+Writing style — write for humans, not developers:
+- Use plain language. Avoid jargon (PTY, xterm, process tree, CLI, REST API, etc.)
+- Describe what changed from the user's perspective, not what was done technically
+- Good: "Terminals now keep receiving output even when their tab isn't visible."
+- Bad: "Terminal data is now written to xterm even when the tab is in the background."
+- Good: "New terminals now match the actual panel size instead of starting too small."
+- Bad: "New terminals now use actual panel dimensions instead of hardcoded 80x24."
+- Keep descriptions to 1 sentence
+
+Categorization:
+- `feature` — genuinely new capabilities. Small conveniences (new shortcuts, better click handling) are improvements, not features
 - `improvement` — enhancements to existing features
 - `fix` — bug fixes users would notice
 
