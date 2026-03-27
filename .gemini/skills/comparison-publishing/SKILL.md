@@ -1,9 +1,3 @@
----
-name: comparison-publishing
-description: ""
-trigger: auto
----
-
 Turn canonical competitor data into website-ready outputs.
 
 Use this skill when the task is to create comparison table rows, filters, summaries, or SEO page inputs from the canon.
