@@ -267,14 +267,16 @@
 
 .ProseMirror ul[data-type="taskList"] li {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .ProseMirror ul[data-type="taskList"] li > label {
   flex-shrink: 0;
   user-select: none;
-  padding-top: 0.2em; /* optically align checkbox with first line of text */
+  padding-top: 0.3em;
 }
 
 .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
@@ -284,6 +286,7 @@
 
 .ProseMirror ul[data-type="taskList"] li > div {
   flex: 1;
+  line-height: 1.25;
 }
 
 /* Compact line spacing for notes editor */
