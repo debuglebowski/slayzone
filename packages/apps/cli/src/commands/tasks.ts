@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { execSync } from 'child_process'
-import { openDb, notifyApp } from '../db'
+import { openDb, notifyApp, type SlayDb } from '../db'
 import { browserCommand } from './browser'
 import {
   getDefaultStatus,
@@ -9,6 +9,7 @@ import {
   isKnownStatus,
   parseColumnsConfig,
 } from '@slayzone/projects/shared'
+import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 
 interface TaskRow extends Record<string, unknown> {
   id: string
@@ -26,6 +27,25 @@ function getProjectColumnsConfig(db: ReturnType<typeof openDb>, projectId: strin
     { ':projectId': projectId }
   )
   return parseColumnsConfig(rows[0]?.columns_config)
+}
+
+function buildProviderConfig(db: SlayDb): Record<string, { flags: string }> {
+  let rows: { id: string; default_flags: string | null }[] = []
+  try {
+    rows = db.query('SELECT id, default_flags FROM terminal_modes WHERE enabled = 1')
+  } catch { /* table may not exist */ }
+
+  if (rows.length === 0) {
+    rows = DEFAULT_TERMINAL_MODES
+      .filter((m) => m.enabled)
+      .map((m) => ({ id: m.id, default_flags: m.defaultFlags ?? '' }))
+  }
+
+  const config: Record<string, { flags: string }> = {}
+  for (const row of rows) {
+    config[row.id] = { flags: row.default_flags ?? '' }
+  }
+  return config
 }
 
 function resolveId(explicit?: string): string {
@@ -158,12 +178,20 @@ export function tasksCommand(): Command {
       }
       const status = opts.status ?? getDefaultStatus(projectColumns)
 
+      const terminalMode =
+        db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'default_terminal_mode' LIMIT 1`)[0]?.value
+        ?? 'claude-code'
+
+      const providerConfig = buildProviderConfig(db)
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
 
       db.run(
-        `INSERT INTO tasks (id, project_id, title, description, status, priority, "order", created_at, updated_at)
-         VALUES (:id, :projectId, :title, :description, :status, :priority,
+        `INSERT INTO tasks (id, project_id, title, description, status, priority, terminal_mode, provider_config,
+           claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
+           "order", created_at, updated_at)
+         VALUES (:id, :projectId, :title, :description, :status, :priority, :terminalMode, :providerConfig,
+           :claudeFlags, :codexFlags, :cursorFlags, :geminiFlags, :opencodeFlags,
            (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
            :now, :now)`,
         {
@@ -173,6 +201,13 @@ export function tasksCommand(): Command {
           ':description': opts.description ?? null,
           ':status': status,
           ':priority': priority,
+          ':terminalMode': terminalMode,
+          ':providerConfig': JSON.stringify(providerConfig),
+          ':claudeFlags': providerConfig['claude-code']?.flags ?? '',
+          ':codexFlags': providerConfig['codex']?.flags ?? '',
+          ':cursorFlags': providerConfig['cursor-agent']?.flags ?? '',
+          ':geminiFlags': providerConfig['gemini']?.flags ?? '',
+          ':opencodeFlags': providerConfig['opencode']?.flags ?? '',
           ':now': now,
         }
       )
@@ -472,12 +507,16 @@ export function tasksCommand(): Command {
         ?? (db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'default_terminal_mode' LIMIT 1`)[0]?.value)
         ?? 'claude-code'
 
+      const providerConfig = buildProviderConfig(db)
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
 
       db.run(
-        `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, terminal_mode, "order", created_at, updated_at, is_temporary)
-         VALUES (:id, :projectId, :parentId, :title, :description, :status, :priority, :terminalMode,
+        `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, terminal_mode, provider_config,
+           claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
+           "order", created_at, updated_at, is_temporary)
+         VALUES (:id, :projectId, :parentId, :title, :description, :status, :priority, :terminalMode, :providerConfig,
+           :claudeFlags, :codexFlags, :cursorFlags, :geminiFlags, :opencodeFlags,
            (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
            :now, :now, 0)`,
         {
@@ -489,6 +528,12 @@ export function tasksCommand(): Command {
           ':status': status,
           ':priority': priority,
           ':terminalMode': terminalMode,
+          ':providerConfig': JSON.stringify(providerConfig),
+          ':claudeFlags': providerConfig['claude-code']?.flags ?? '',
+          ':codexFlags': providerConfig['codex']?.flags ?? '',
+          ':cursorFlags': providerConfig['cursor-agent']?.flags ?? '',
+          ':geminiFlags': providerConfig['gemini']?.flags ?? '',
+          ':opencodeFlags': providerConfig['opencode']?.flags ?? '',
           ':now': now,
         }
       )

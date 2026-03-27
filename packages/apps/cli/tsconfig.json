@@ -5,7 +5,8 @@
     "moduleResolution": "bundler",
     "paths": {
       "*": ["./*"],
-      "@slayzone/projects/shared": ["../../domains/projects/src/shared/index.ts"]
+      "@slayzone/projects/shared": ["../../domains/projects/src/shared/index.ts"],
+      "@slayzone/terminal/shared": ["../../domains/terminal/src/shared/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,
