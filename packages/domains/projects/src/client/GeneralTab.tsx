@@ -29,7 +29,7 @@ export function GeneralTab({ project, onUpdated, onClose }: GeneralTabProps) {
     const result = await window.api.dialog.showOpenDialog({
       title: 'Select Project Directory',
       defaultPath: path || undefined,
-      properties: ['openDirectory']
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
     })
     if (!result.canceled && result.filePaths[0]) {
       setPath(result.filePaths[0])

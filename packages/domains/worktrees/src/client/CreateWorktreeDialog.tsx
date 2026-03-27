@@ -27,7 +27,7 @@ export function CreateWorktreeDialog({
   const handleBrowse = async () => {
     const result = await window.api.dialog.showOpenDialog({
       title: 'Select Worktree Directory',
-      properties: ['openDirectory']
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
     })
     if (!result.canceled && result.filePaths[0]) {
       setPath(result.filePaths[0])

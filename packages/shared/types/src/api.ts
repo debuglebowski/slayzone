@@ -307,7 +307,7 @@ export interface ElectronAPI {
     showOpenDialog: (options: {
       title?: string
       defaultPath?: string
-      properties?: Array<'openFile' | 'openDirectory' | 'multiSelections'>
+      properties?: Array<'openFile' | 'openDirectory' | 'multiSelections' | 'showHiddenFiles' | 'createDirectory' | 'promptToCreate' | 'noResolveAliases' | 'treatPackageAsDirectory' | 'dontAddToRecent'>
     }) => Promise<{ canceled: boolean; filePaths: string[] }>
   }
   app: {

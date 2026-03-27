@@ -53,7 +53,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const handleBrowse = async () => {
     const result = await window.api.dialog.showOpenDialog({
       title: 'Select Project Directory',
-      properties: ['openDirectory']
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
     })
     if (!result.canceled && result.filePaths[0]) {
       setPath(result.filePaths[0])

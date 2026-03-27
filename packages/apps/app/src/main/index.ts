@@ -1385,7 +1385,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       options: {
         title?: string
         defaultPath?: string
-        properties?: Array<'openFile' | 'openDirectory' | 'multiSelections'>
+        properties?: Array<'openFile' | 'openDirectory' | 'multiSelections' | 'showHiddenFiles' | 'createDirectory' | 'promptToCreate' | 'noResolveAliases' | 'treatPackageAsDirectory' | 'dontAddToRecent'>
       }
     ) => {
       return dialog.showOpenDialog(options)
