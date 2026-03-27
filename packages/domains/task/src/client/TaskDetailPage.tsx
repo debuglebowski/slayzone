@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronRight, Plus, GripVertical, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, Circle } from 'lucide-react'
 import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
 import { DescriptionDialog } from './DescriptionDialog'
-import { DndContext, PointerSensor, useSensors, useSensor, closestCenter, type DragEndEvent } from '@dnd-kit/core'
-import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
+import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Task, PanelVisibility } from '@slayzone/task/shared'
 import type { TaskDetailData } from './taskDetailCache'
@@ -71,6 +71,8 @@ import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
 import { track } from '@slayzone/telemetry/client'
 import { usePanelSizes, resolveWidths } from './usePanelSizes'
 import { usePanelConfig } from './usePanelConfig'
+import { useSubTasks } from './useSubTasks'
+import { useTaskTagIds } from './useTaskTagIds'
 import { WebPanelView } from './WebPanelView'
 import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
@@ -194,13 +196,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const getMainSessionId = useCallback((id: string) => `${id}:${id}`, [])
 
   const [tags] = useState<Tag[]>(initialData?.tags ?? [])
-  const [taskTagIds, setTaskTagIds] = useState<string[]>(initialData?.taskTagIds ?? [])
+  const { tagIds: taskTagIds, setTagIds: setTaskTagIds } = useTaskTagIds(task?.id, initialData?.taskTagIds)
   const statusOptions = useMemo(() => buildStatusOptions(project?.columns_config), [project?.columns_config])
   const completedStatus = useMemo(() => getDoneStatus(project?.columns_config), [project?.columns_config])
   const [statusPopoverOpen, setStatusPopoverOpen] = useState(false)
 
   // Sub-tasks
-  const [subTasks, setSubTasks] = useState<Task[]>(initialData?.subTasks ?? [])
+  const { subTasks, createSubTask, updateSubTask: handleUpdateSubTask, deleteSubTask: handleDeleteSubTask, handleDragEnd: handleSubTaskDragEnd } = useSubTasks(task?.id, initialData?.subTasks)
   const [addingSubTask, setAddingSubTask] = useState(false)
   const [subTaskTitle, setSubTaskTitle] = useState('')
   const subTaskInputRef = useRef<HTMLInputElement>(null)
@@ -1017,45 +1019,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const handleCreateSubTask = async (): Promise<void> => {
     if (!task || !subTaskTitle.trim()) return
-    const sub = await window.api.db.createTask({
+    await createSubTask({
       projectId: task.project_id,
       title: subTaskTitle.trim(),
-      parentId: task.id,
-      status: getDefaultStatus(project?.columns_config)
+      status: getDefaultStatus(project?.columns_config),
     })
-    if (sub) {
-      setSubTasks(prev => [...prev, sub])
-      track('subtask_created')
-    }
     setSubTaskTitle('')
     setAddingSubTask(false)
   }
 
-  const handleUpdateSubTask = async (subId: string, updates: Record<string, unknown>): Promise<void> => {
-    const updated = await window.api.db.updateTask({ id: subId, ...updates })
-    if (updated) {
-      setSubTasks(prev => prev.map(s => s.id === subId ? updated : s))
-    }
-  }
-
-  const handleDeleteSubTask = async (subId: string): Promise<void> => {
-    await window.api.db.deleteTask(subId)
-    setSubTasks(prev => prev.filter(s => s.id !== subId))
-  }
-
   const subTaskSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
-
-  const handleSubTaskDragEnd = (event: DragEndEvent): void => {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    setSubTasks(prev => {
-      const oldIndex = prev.findIndex(s => s.id === active.id)
-      const newIndex = prev.findIndex(s => s.id === over.id)
-      const reordered = arrayMove(prev, oldIndex, newIndex)
-      window.api.db.reorderTasks(reordered.map(t => t.id))
-      return reordered
-    })
-  }
 
   const handleTaskUpdate = (updated: Task): void => {
     setTitleValue(updated.title)
