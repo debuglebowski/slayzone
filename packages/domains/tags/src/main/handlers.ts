@@ -6,15 +6,18 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
 
   // Tags CRUD
   ipcMain.handle('db:tags:getAll', () => {
-    return db.prepare('SELECT * FROM tags ORDER BY name').all()
+    return db.prepare('SELECT * FROM tags ORDER BY sort_order, name').all()
   })
 
   ipcMain.handle('db:tags:create', (_, data: CreateTagInput) => {
     const id = crypto.randomUUID()
-    db.prepare('INSERT INTO tags (id, name, color) VALUES (?, ?, ?)').run(
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM tags WHERE project_id = ?').get(data.projectId) as { m: number }
+    db.prepare('INSERT INTO tags (id, project_id, name, color, sort_order) VALUES (?, ?, ?, ?, ?)').run(
       id,
+      data.projectId,
       data.name,
-      data.color ?? '#6b7280'
+      data.color ?? '#6b7280',
+      maxOrder.m + 1
     )
     return db.prepare('SELECT * FROM tags WHERE id = ?').get(id)
   })
@@ -31,6 +34,10 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
       fields.push('color = ?')
       values.push(data.color)
     }
+    if (data.sort_order !== undefined) {
+      fields.push('sort_order = ?')
+      values.push(data.sort_order)
+    }
 
     if (fields.length > 0) {
       values.push(data.id)
@@ -45,13 +52,23 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
     return result.changes > 0
   })
 
+  ipcMain.handle('db:tags:reorder', (_, tagIds: string[]) => {
+    const stmt = db.prepare('UPDATE tags SET sort_order = ? WHERE id = ?')
+    db.transaction(() => {
+      for (let i = 0; i < tagIds.length; i++) {
+        stmt.run(i, tagIds[i])
+      }
+    })()
+  })
+
   // Task-Tag associations
   ipcMain.handle('db:taskTags:getForTask', (_, taskId: string) => {
     return db
       .prepare(
         `SELECT tags.* FROM tags
          JOIN task_tags ON tags.id = task_tags.tag_id
-         WHERE task_tags.task_id = ?`
+         WHERE task_tags.task_id = ?
+         ORDER BY tags.sort_order, tags.name`
       )
       .all(taskId)
   })

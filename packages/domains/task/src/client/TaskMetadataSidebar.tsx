@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { format } from 'date-fns'
-import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, Loader2, Plus, X } from 'lucide-react'
+import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, Loader2, Pencil, Plus, X } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import { priorityOptions } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -112,7 +112,8 @@ export function TaskMetadataSidebar({
     onUpdate(updated)
   }
 
-  const [createTagOpen, setCreateTagOpen] = useState(false)
+  const [tagDialogOpen, setTagDialogOpen] = useState(false)
+  const [editingTag, setEditingTag] = useState<Tag | null>(null)
 
   const handleTagCreated = async (tag: Tag): Promise<void> => {
     onTagCreated?.(tag)
@@ -216,7 +217,7 @@ export function TaskMetadataSidebar({
         <label className="mb-1 block text-sm text-muted-foreground">Tags</label>
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="outline" className="w-full justify-start">
+            <Button variant="outline" className="w-full justify-start p-1">
               {selectedTags.length === 0 ? (
                 <span className="text-muted-foreground">None</span>
               ) : (
@@ -224,7 +225,7 @@ export function TaskMetadataSidebar({
                   {selectedTags.slice(0, 3).map((tag) => (
                     <span
                       key={tag.id}
-                      className="rounded px-2 py-1 text-sm font-medium"
+                      className="rounded px-1.5 py-1 text-xs font-medium h-full"
                       style={{ backgroundColor: tag.color + '30', color: tag.color }}
                     >
                       {tag.name}
@@ -243,16 +244,23 @@ export function TaskMetadataSidebar({
             {tags.length > 0 && (
               <div className="space-y-0.5">
                 {tags.map((tag) => (
-                  <label key={tag.id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted/50">
+                  <label key={tag.id} className="group flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted/50">
                     <Checkbox
                       checked={taskTagIds.includes(tag.id)}
                       onCheckedChange={(checked) => handleTagToggle(tag.id, checked === true)}
                     />
                     <span
-                      className="rounded px-2 py-1 text-sm font-medium"
+                      className="flex-1 rounded px-2 py-1 text-sm font-medium inline-flex items-center justify-between gap-1"
                       style={{ backgroundColor: tag.color + '30', color: tag.color }}
                     >
                       {tag.name}
+                      <button
+                        type="button"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => { e.preventDefault(); setEditingTag(tag); setTagDialogOpen(true) }}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
                     </span>
                   </label>
                 ))}
@@ -263,7 +271,7 @@ export function TaskMetadataSidebar({
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start text-muted-foreground h-7 px-1.5"
-                onClick={() => setCreateTagOpen(true)}
+                onClick={() => { setEditingTag(null); setTagDialogOpen(true) }}
               >
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
                 New tag
@@ -272,10 +280,14 @@ export function TaskMetadataSidebar({
           </PopoverContent>
         </Popover>
         <CreateTagDialog
-          open={createTagOpen}
-          onOpenChange={setCreateTagOpen}
+          open={tagDialogOpen}
+          onOpenChange={(open) => { setTagDialogOpen(open); if (!open) setEditingTag(null) }}
           projectId={task.project_id}
+          tag={editingTag}
           onCreated={handleTagCreated}
+          onUpdated={(updated) => {
+            onTagCreated?.(updated)
+          }}
         />
       </div>
 

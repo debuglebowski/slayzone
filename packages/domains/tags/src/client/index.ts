@@ -1,2 +1,1 @@
-// Tags client components (none currently)
-export {}
+export { CreateTagDialog } from './CreateTagDialog'

@@ -12,6 +12,7 @@ export interface CardProperties {
   blocked: boolean
   subtasks: boolean
   merge: boolean
+  tags: boolean
 }
 
 /** Per-view-mode display settings */
@@ -42,7 +43,8 @@ export const defaultCardProperties: CardProperties = {
   linear: true,
   blocked: true,
   subtasks: true,
-  merge: true
+  merge: true,
+  tags: true
 }
 
 export const defaultBoardConfig: ViewConfig = {

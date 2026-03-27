@@ -74,9 +74,21 @@ export function useTasksData(): UseTasksDataReturn {
     loadData()
     ;(window as any).__slayzone_refreshData = loadData
     const cleanup = window.api?.app?.onTasksChanged?.(loadData)
+    const handleTagCreated = (e: Event) => {
+      const tag = (e as CustomEvent).detail as Tag
+      setTags((prev) => prev.some((t) => t.id === tag.id) ? prev : [...prev, tag])
+    }
+    const handleTagUpdated = (e: Event) => {
+      const tag = (e as CustomEvent).detail as Tag
+      setTags((prev) => prev.map((t) => t.id === tag.id ? tag : t))
+    }
+    window.addEventListener('slayzone:tag-created', handleTagCreated)
+    window.addEventListener('slayzone:tag-updated', handleTagUpdated)
     return () => {
       delete (window as any).__slayzone_refreshData
       cleanup?.()
+      window.removeEventListener('slayzone:tag-created', handleTagCreated)
+      window.removeEventListener('slayzone:tag-updated', handleTagUpdated)
     }
   }, [])
 

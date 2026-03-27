@@ -83,7 +83,7 @@ export async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | 
   return {
     task: loadedTask,
     project,
-    tags: loadedTags,
+    tags: loadedTags.filter((t) => t.project_id === loadedTask.project_id),
     taskTagIds: loadedTaskTags.map((t) => t.id),
     subTasks: loadedSubTasks,
     parentTask,

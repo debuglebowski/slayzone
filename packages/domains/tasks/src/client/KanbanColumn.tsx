@@ -34,6 +34,8 @@ interface SortableKanbanCardProps {
   onMouseEnter?: () => void
   cardRefs?: React.MutableRefObject<Map<string, HTMLDivElement>>
   subTaskCount?: { done: number; total: number }
+  taskTagIds?: string[]
+  tags?: Tag[]
   // Context menu props
   allProjects?: Project[]
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
@@ -54,6 +56,8 @@ function SortableKanbanCard({
   onMouseEnter,
   cardRefs,
   subTaskCount,
+  taskTagIds,
+  tags,
   allProjects,
   onUpdateTask,
   onArchiveTask,
@@ -96,6 +100,8 @@ function SortableKanbanCard({
         isBlocked={isBlocked}
         subTaskCount={subTaskCount}
         cardProperties={cardProperties}
+        taskTagIds={taskTagIds}
+        tags={tags}
       />
     </div>
   )
@@ -156,6 +162,8 @@ export function KanbanColumn({
   showProjectDot,
   disableDrag,
   cardProperties,
+  taskTags,
+  tags,
   blockedTaskIds,
   subTaskCounts,
   focusedTaskId,
@@ -242,6 +250,8 @@ export function KanbanColumn({
                 showProject={showProjectDot}
                 disableDrag={disableDrag}
                 cardProperties={cardProperties}
+                taskTagIds={taskTags?.get(task.id)}
+                tags={tags}
                 isBlocked={blockedTaskIds?.has(task.id)}
                 isFocused={focusedTaskId === task.id}
                 onMouseEnter={() => onCardMouseEnter?.(task.id)}

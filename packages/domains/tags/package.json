@@ -15,7 +15,8 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@slayzone/telemetry": "workspace:*"
+    "@slayzone/telemetry": "workspace:*",
+    "@slayzone/ui": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",

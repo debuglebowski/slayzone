@@ -379,7 +379,7 @@ export function seed(page: Page) {
 
     archiveTasks: (ids: string[]) => page.evaluate((i) => window.api.db.archiveTasks(i), ids),
 
-    createTag: (data: { name: string; color?: string }) =>
+    createTag: (data: { name: string; color?: string; projectId: string }) =>
       page.evaluate((d) => window.api.tags.createTag(d), data),
 
     updateTag: (data: { id: string; name?: string; color?: string }) =>

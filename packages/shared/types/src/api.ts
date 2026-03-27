@@ -248,6 +248,7 @@ export interface ElectronAPI {
     createTag: (data: CreateTagInput) => Promise<Tag>
     updateTag: (data: UpdateTagInput) => Promise<Tag>
     deleteTag: (id: string) => Promise<boolean>
+    reorderTags: (tagIds: string[]) => Promise<void>
   }
   taskTags: {
     getAll: () => Promise<Record<string, string[]>>

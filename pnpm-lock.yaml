@@ -557,6 +557,9 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
       electron:
         specifier: ^41.0.0
         version: 41.0.3

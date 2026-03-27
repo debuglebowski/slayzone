@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
-import { CalendarIcon } from 'lucide-react'
+import { CalendarIcon, Plus } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
+import { CreateTagDialog } from '@slayzone/tags/client'
 import type { Project } from '@slayzone/projects/shared'
 import { getDefaultStatus } from '@slayzone/projects/shared'
 import { SuccessToast } from '@slayzone/ui'
@@ -64,7 +65,7 @@ export function CreateTaskDialog({
   tags,
   onTagCreated
 }: CreateTaskDialogProps): React.JSX.Element {
-  const [newTagName, setNewTagName] = useState('')
+  const [createTagOpen, setCreateTagOpen] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const form = useForm<CreateTaskFormData>({
@@ -337,7 +338,7 @@ export function CreateTaskDialog({
                               {selectedTags.slice(0, 3).map((tag) => (
                                 <span
                                   key={tag.id}
-                                  className="rounded px-1.5 py-0.5 text-xs"
+                                  className="rounded px-2 py-1 text-sm font-medium"
                                   style={{ backgroundColor: tag.color + '30', color: tag.color }}
                                 >
                                   {tag.name}
@@ -353,52 +354,53 @@ export function CreateTaskDialog({
                         </Button>
                       </FormControl>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[200px] p-2" align="start">
-                      <div className="space-y-2">
-                        {tags.map((tag) => (
-                          <label key={tag.id} className="flex cursor-pointer items-center gap-2">
-                            <Checkbox
-                              checked={field.value.includes(tag.id)}
-                              onCheckedChange={(checked) => {
-                                const newValue = checked
-                                  ? [...field.value, tag.id]
-                                  : field.value.filter((id: string) => id !== tag.id)
-                                field.onChange(newValue)
-                              }}
-                            />
-                            <span
-                              className="rounded px-1.5 py-0.5 text-sm"
-                              style={{ backgroundColor: tag.color + '30', color: tag.color }}
-                            >
-                              {tag.name}
-                            </span>
-                          </label>
-                        ))}
-                        {tags.length > 0 && <div className="border-t my-2" />}
-                        <div className="flex gap-1">
-                          <Input
-                            placeholder="New tag..."
-                            value={newTagName}
-                            onChange={(e) => setNewTagName(e.target.value)}
-                            onKeyDown={async (e) => {
-                              if (e.key === 'Enter' && newTagName.trim()) {
-                                e.preventDefault()
-                                const tag = await window.api.tags.createTag({
-                                  name: newTagName.trim(),
-                                  color: '#6366f1'
-                                })
-                                track('tag_created')
-                                onTagCreated?.(tag)
-                                field.onChange([...field.value, tag.id])
-                                setNewTagName('')
-                              }
-                            }}
-                            className="h-7 text-sm"
-                          />
+                    <PopoverContent className="w-[200px] p-1.5" align="start">
+                      {tags.length > 0 && (
+                        <div className="space-y-0.5">
+                          {tags.map((tag) => (
+                            <label key={tag.id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted/50">
+                              <Checkbox
+                                checked={field.value.includes(tag.id)}
+                                onCheckedChange={(checked) => {
+                                  const newValue = checked
+                                    ? [...field.value, tag.id]
+                                    : field.value.filter((id: string) => id !== tag.id)
+                                  field.onChange(newValue)
+                                }}
+                              />
+                              <span
+                                className="rounded px-2 py-1 text-sm font-medium"
+                                style={{ backgroundColor: tag.color + '30', color: tag.color }}
+                              >
+                                {tag.name}
+                              </span>
+                            </label>
+                          ))}
                         </div>
+                      )}
+                      <div className={tags.length > 0 ? 'border-t mt-1.5 pt-1' : ''}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start text-muted-foreground h-7 px-1.5"
+                          onClick={() => setCreateTagOpen(true)}
+                        >
+                          <Plus className="h-3.5 w-3.5 mr-1.5" />
+                          New tag
+                        </Button>
                       </div>
                     </PopoverContent>
                   </Popover>
+                  <CreateTagDialog
+                    open={createTagOpen}
+                    onOpenChange={setCreateTagOpen}
+                    projectId={selectedProjectId}
+                    onCreated={(tag) => {
+                      onTagCreated?.(tag)
+                      field.onChange([...field.value, tag.id])
+                    }}
+                  />
                   <FormMessage />
                 </FormItem>
               )}

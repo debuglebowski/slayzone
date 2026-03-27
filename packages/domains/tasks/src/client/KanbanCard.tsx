@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 import type { Task } from '@slayzone/task/shared'
+import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'
@@ -23,6 +24,8 @@ interface KanbanCardProps {
   isBlocked?: boolean
   subTaskCount?: { done: number; total: number }
   cardProperties?: CardProperties
+  taskTagIds?: string[]
+  tags?: Tag[]
 }
 
 const PRIORITY_BAR_COLORS: Record<number, string> = {
@@ -43,8 +46,13 @@ export function KanbanCard({
   showProject,
   isBlocked,
   subTaskCount,
-  cardProperties: cp
+  cardProperties: cp,
+  taskTagIds,
+  tags
 }: KanbanCardProps): React.JSX.Element {
+  const resolvedTags = (cp?.tags ?? true) && tags && taskTagIds
+    ? tags.filter((t) => taskTagIds.includes(t.id))
+    : []
   const { reduceMotion } = useAppearance()
   const today = todayISO()
   const isOverdue = task.due_date && task.due_date < today && !isTerminalStatus(task.status, columns)
@@ -189,6 +197,19 @@ export function KanbanCard({
               )}
               </div>
             </div>
+            {resolvedTags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {resolvedTags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="rounded px-1 py-0 text-[9px] leading-tight"
+                    style={{ backgroundColor: tag.color + '30', color: tag.color }}
+                  >
+                    {tag.name}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </CardContent>

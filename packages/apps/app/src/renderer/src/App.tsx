@@ -294,6 +294,7 @@ function App(): React.JSX.Element {
 
   // Computed values
   const projectTasks = selectedProjectId ? tasks.filter((t) => t.project_id === selectedProjectId) : []
+  const projectTags = selectedProjectId ? tags.filter((t) => t.project_id === selectedProjectId) : tags
   const displayTasks = applyFilters(projectTasks, filter, taskTags, selectedProject?.columns_config)
   const projectsMap = new Map(projects.map((p) => [p.id, p]))
 
@@ -775,7 +776,7 @@ function App(): React.JSX.Element {
                               className={cn('text-2xl font-bold bg-transparent border-none outline-none resize-none p-0', selectedProject ? 'cursor-text' : 'cursor-default select-none')}
                               style={{ caretColor: 'currentColor', fieldSizing: 'content' } as React.CSSProperties} rows={1} />
                           </div>
-                          {projects.length > 0 && !(projectPathMissing && selectedProjectId) && <FilterBar filter={filter} onChange={setFilter} tags={tags} />}
+                          {projects.length > 0 && !(projectPathMissing && selectedProjectId) && <FilterBar filter={filter} onChange={setFilter} tags={projectTags} />}
                           {projects.length > 0 && (
                             <div>
                             <PanelToggle
@@ -816,7 +817,7 @@ function App(): React.JSX.Element {
                                   {id === 'kanban' && filter.viewMode !== 'list' && (
                                     <KanbanBoard tasks={displayTasks} columns={selectedProject?.columns_config} viewConfig={getViewConfig(filter)} isActive={tabs[activeTabIndex]?.type === 'home'}
                                       onTaskMove={handleTaskMove} onTaskReorder={reorderTasks} onTaskClick={handleTaskClick}
-                                      projectsMap={projectsMap} showProjectDot={false} cardProperties={filter.cardProperties} taskTags={taskTags} tags={tags} blockedTaskIds={blockedTaskIds}
+                                      projectsMap={projectsMap} showProjectDot={false} cardProperties={filter.cardProperties} taskTags={taskTags} tags={projectTags} blockedTaskIds={blockedTaskIds}
                                       allProjects={projects} onUpdateTask={contextMenuUpdate} onArchiveTask={archiveTask} onDeleteTask={deleteTask} onArchiveAllTasks={archiveTasks} />
                                   )}
                                   {id === 'kanban' && filter.viewMode === 'list' && (
@@ -894,7 +895,7 @@ function App(): React.JSX.Element {
         <CreateTaskDialog open={createTaskOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeCreateTask() }} onCreated={handleTaskCreated} onCreatedAndOpen={handleTaskCreatedAndOpen}
           defaultProjectId={selectedProjectId || projects[0]?.id} defaultStatus={createTaskDefaults.status}
           defaultPriority={createTaskDefaults.priority} defaultDueDate={createTaskDefaults.dueDate}
-          tags={tags} onTagCreated={(tag: Tag) => setTags((prev) => [...prev, tag])} />
+          tags={projectTags} onTagCreated={(tag: Tag) => setTags((prev) => [...prev, tag])} />
         <EditTaskDialog task={editingTask} open={!!editingTask} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeEditTask() }} onUpdated={handleTaskUpdated} />
         <DeleteTaskDialog task={deletingTask} open={!!deletingTask} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeDeleteTask() }} onDeleted={handleTaskDeleted} />
         <CreateProjectDialog open={createProjectOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeCreateProject() }} onCreated={handleProjectCreated} />

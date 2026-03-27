@@ -43,7 +43,8 @@ const api: ElectronAPI = {
     getTags: () => ipcRenderer.invoke('db:tags:getAll'),
     createTag: (data) => ipcRenderer.invoke('db:tags:create', data),
     updateTag: (data) => ipcRenderer.invoke('db:tags:update', data),
-    deleteTag: (id) => ipcRenderer.invoke('db:tags:delete', id)
+    deleteTag: (id) => ipcRenderer.invoke('db:tags:delete', id),
+    reorderTags: (tagIds) => ipcRenderer.invoke('db:tags:reorder', tagIds)
   },
   taskTags: {
     getAll: () => ipcRenderer.invoke('db:taskTags:getAll'),
