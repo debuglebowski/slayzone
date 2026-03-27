@@ -34,17 +34,17 @@ It exists because this is a long-term effort. We cannot migrate, normalize, and 
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | CLI agent | core | legacy-flat | date not normalized | Migrate existing file into canonical folder. |
 | OpenAI Codex | CLI agent | core | legacy-flat | date not normalized | Migrate existing file into canonical folder. |
-| Codex Monitor | Codex orchestration app | core | missing | none | Create new canonical folder from scratch. |
-| Jean | Desktop environment | core | missing | none | Create new canonical folder from scratch. |
+| Codex Monitor | Codex orchestration app | core | publish-ready | 2026-03-27 | Done. |
+| Jean | Desktop environment | core | canon-reviewed | 2026-03-27 | Capture product screenshot for publish-ready. |
 | Conductor | Agent orchestrator | core | publish-ready | 2026-03-27 | Done. |
-| VibeKanban | Agent orchestrator | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
+| VibeKanban | Agent orchestrator | core | publish-ready | 2026-03-27 | Done. |
 | Superset.sh | Agent orchestrator | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | AutoClaude | Agent orchestrator | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | Maestro | Agent orchestrator | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | Cursor | AI IDE | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | Linear | PM | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | Zeroshot | Headless orchestrator | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
-| Polyscope | Agent-first dev environment | core | missing | none | Create new canonical folder from scratch. |
+| Polyscope | Agent-first dev environment | core | publish-ready | 2026-03-27 | Done. |
 
 ## Wave 2: High-Priority Strategic Adjacents
 
