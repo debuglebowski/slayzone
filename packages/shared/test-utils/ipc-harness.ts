@@ -80,22 +80,40 @@ export async function createTestHarness(): Promise<TestHarness> {
   }
 }
 
-// Minimal test runner (matches existing project convention)
+// Minimal test runner — chains async tests sequentially, runs sync tests immediately
+let _testQueue: Promise<void> = Promise.resolve()
+let _hasAsync = false
+
 export function test(name: string, fn: () => void | Promise<void>) {
-  try {
-    const result = fn()
-    if (result instanceof Promise) {
-      result.then(
-        () => console.log(`  \u2713 ${name}`),
-        (e) => { console.log(`  \u2717 ${name}`); console.error(`    ${e}`); process.exitCode = 1 }
-      )
-    } else {
-      console.log(`  \u2713 ${name}`)
+  if (_hasAsync) {
+    // Once async mode is entered, queue everything to preserve ordering
+    _testQueue = _testQueue.then(async () => {
+      try {
+        await fn()
+        console.log(`  \u2713 ${name}`)
+      } catch (e) {
+        console.log(`  \u2717 ${name}`)
+        console.error(`    ${e}`)
+        process.exitCode = 1
+      }
+    })
+  } else {
+    try {
+      const result = fn()
+      if (result instanceof Promise) {
+        _hasAsync = true
+        _testQueue = result.then(
+          () => console.log(`  \u2713 ${name}`),
+          (e) => { console.log(`  \u2717 ${name}`); console.error(`    ${e}`); process.exitCode = 1 }
+        )
+      } else {
+        console.log(`  \u2713 ${name}`)
+      }
+    } catch (e) {
+      console.log(`  \u2717 ${name}`)
+      console.error(`    ${e}`)
+      process.exitCode = 1
     }
-  } catch (e) {
-    console.log(`  \u2717 ${name}`)
-    console.error(`    ${e}`)
-    process.exitCode = 1
   }
 }
 
@@ -141,7 +159,9 @@ export function expect(actual: unknown) {
   }
 }
 
-export function describe(name: string, fn: () => void) {
+export async function describe(name: string, fn: () => void) {
   console.log(`\n${name}`)
+  _hasAsync = false
   fn()
+  if (_hasAsync) await _testQueue
 }

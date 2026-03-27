@@ -80,3 +80,8 @@ export function execGit(args: string[], options: { cwd: string }): Promise<strin
     return result.stdout
   })
 }
+
+/** Like execGit, but appends -z for NUL-delimited output and returns a parsed filename array. */
+export function execGitFileList(args: string[], options: { cwd: string }): Promise<string[]> {
+  return execGit([...args, '-z'], options).then(out => out.split('\0').filter(Boolean))
+}

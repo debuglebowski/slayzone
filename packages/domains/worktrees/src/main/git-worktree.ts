@@ -6,7 +6,7 @@ import path from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, IgnoredFileNode, ResolvedCommit, ResolvedGraph, ForkGraphResult } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
-import { execAsync, execGit, trimOutput } from './exec-async'
+import { execAsync, execGit, execGitFileList, trimOutput } from './exec-async'
 
 export async function isGitRepo(repoPath: string): Promise<boolean> {
   try {
@@ -233,12 +233,10 @@ function isAlwaysExcluded(name: string): boolean {
 /** Build a tree of all git-ignored files. One git call, grouped server-side. */
 export async function getIgnoredFileTree(repoPath: string): Promise<IgnoredFileNode[]> {
   try {
-    const output = await execGit(
+    const allFiles = (await execGitFileList(
       ['ls-files', '--others', '--ignored', '--exclude-standard'],
       { cwd: repoPath }
-    )
-    const allFiles = output.trim().split('\n').filter(Boolean)
-      .filter(f => !isAlwaysExcluded(f.split('/').pop()!))
+    )).filter(f => !isAlwaysExcluded(f.split('/').pop()!))
     if (allFiles.length === 0) return []
 
     // Build nested tree
@@ -307,11 +305,10 @@ function globToRegex(pattern: string): RegExp {
 
 async function getIgnoredTopLevelEntries(repoPath: string): Promise<string[] | null> {
   try {
-    const output = await execGit(
+    const allFiles = await execGitFileList(
       ['ls-files', '--others', '--ignored', '--exclude-standard'],
       { cwd: repoPath }
     )
-    const allFiles = output.trim().split('\n').filter(Boolean)
     const topLevel = new Set<string>()
     for (const f of allFiles) {
       if (isAlwaysExcluded(f.split('/').pop()!)) continue
@@ -551,8 +548,7 @@ export async function abortMerge(repoPath: string): Promise<void> {
 
 export async function getConflictedFiles(repoPath: string): Promise<string[]> {
   try {
-    const output = await execGit(['diff', '--name-only', '--diff-filter=U'], { cwd: repoPath })
-    return output.trim().split('\n').filter(Boolean)
+    return execGitFileList(['diff', '--name-only', '--diff-filter=U'], { cwd: repoPath })
   } catch {
     return []
   }
@@ -626,6 +622,7 @@ export async function unstageAll(repoPath: string): Promise<void> {
 }
 
 export async function getUntrackedFileDiff(repoPath: string, filePath: string): Promise<string> {
+  if (!filePath) return ''
   try {
     const devNull = platform() === 'win32' ? 'NUL' : '/dev/null'
     return await execGit(['diff', '--no-index', '--no-ext-diff', '--', devNull, filePath], { cwd: repoPath })
@@ -676,17 +673,13 @@ export async function getWorkingDiff(repoPath: string, opts?: { contextLines?: s
   }
 
   // Run independent git queries in parallel
-  const [unstagedFilesRaw, stagedFilesRaw, untrackedFilesRaw, unstagedPatch, stagedPatch] = await Promise.all([
-    execGit(['diff', '--name-only'], { cwd: repoPath }),
-    execGit(['diff', '--cached', '--name-only'], { cwd: repoPath }),
-    execGit(['ls-files', '--others', '--exclude-standard'], { cwd: repoPath }),
+  const [unstagedFiles, stagedFiles, untrackedFiles, unstagedPatch, stagedPatch] = await Promise.all([
+    execGitFileList(['diff', '--name-only'], { cwd: repoPath }),
+    execGitFileList(['diff', '--cached', '--name-only'], { cwd: repoPath }),
+    execGitFileList(['ls-files', '--others', '--exclude-standard'], { cwd: repoPath }),
     execGit(['diff', '--no-ext-diff', ...extraFlags], { cwd: repoPath }),
     execGit(['diff', '--cached', '--no-ext-diff', ...extraFlags], { cwd: repoPath }),
   ])
-
-  const unstagedFiles = unstagedFilesRaw.trim().split('\n').filter(Boolean)
-  const stagedFiles = stagedFilesRaw.trim().split('\n').filter(Boolean)
-  const untrackedFiles = untrackedFilesRaw.trim().split('\n').filter(Boolean)
 
   return {
     targetPath: repoPath,

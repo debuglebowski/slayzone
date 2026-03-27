@@ -23,11 +23,10 @@ function git(cmd: string, cwd = repoPath) {
 
 // --- git:init ---
 
-// --- git:init ---
+await h.invoke('git:init', repoPath)
 
-describe('git:init', () => {
-  test('initializes a git repo', () => {
-    h.invoke('git:init', repoPath)
+await describe('git:init', () => {
+  test('repo was initialized', () => {
     expect(fs.existsSync(path.join(repoPath, '.git'))).toBe(true)
   })
 })
@@ -39,46 +38,46 @@ git('git commit -m "initial"')
 
 // --- git:isGitRepo ---
 
-describe('git:isGitRepo', () => {
-  test('returns true for git repo', () => {
-    expect(h.invoke('git:isGitRepo', repoPath)).toBe(true)
+await describe('git:isGitRepo', () => {
+  test('returns true for git repo', async () => {
+    expect(await h.invoke('git:isGitRepo', repoPath)).toBe(true)
   })
 
-  test('returns false for non-repo', () => {
+  test('returns false for non-repo', async () => {
     const noRepo = path.join(root, 'not-a-repo')
     fs.mkdirSync(noRepo)
-    expect(h.invoke('git:isGitRepo', noRepo)).toBe(false)
+    expect(await h.invoke('git:isGitRepo', noRepo)).toBe(false)
   })
 })
 
 // --- git:getCurrentBranch ---
 
-describe('git:getCurrentBranch', () => {
-  test('returns current branch name', () => {
-    const branch = h.invoke('git:getCurrentBranch', repoPath)
+await describe('git:getCurrentBranch', () => {
+  test('returns current branch name', async () => {
+    const branch = await h.invoke('git:getCurrentBranch', repoPath)
     expect(branch).toBeTruthy()
   })
 })
 
 // --- git:hasUncommittedChanges ---
 
-describe('git:hasUncommittedChanges', () => {
-  test('returns false when clean', () => {
-    expect(h.invoke('git:hasUncommittedChanges', repoPath)).toBe(false)
+await describe('git:hasUncommittedChanges', () => {
+  test('returns false when clean', async () => {
+    expect(await h.invoke('git:hasUncommittedChanges', repoPath)).toBe(false)
   })
 
-  test('returns true when tracked file modified', () => {
+  test('returns true when tracked file modified', async () => {
     fs.writeFileSync(path.join(repoPath, 'README.md'), '# Modified')
-    expect(h.invoke('git:hasUncommittedChanges', repoPath)).toBe(true)
+    expect(await h.invoke('git:hasUncommittedChanges', repoPath)).toBe(true)
     git('git checkout -- README.md') // restore
   })
 })
 
 // --- git:detectWorktrees ---
 
-describe('git:detectWorktrees', () => {
-  test('detects main worktree', () => {
-    const worktrees = h.invoke('git:detectWorktrees', repoPath) as { path: string; branch: string | null; isMain: boolean }[]
+await describe('git:detectWorktrees', () => {
+  test('detects main worktree', async () => {
+    const worktrees = await h.invoke('git:detectWorktrees', repoPath) as { path: string; branch: string | null; isMain: boolean }[]
     expect(worktrees.length).toBeGreaterThan(0)
     const main = worktrees.find(w => w.isMain)
     expect(main).toBeTruthy()
@@ -87,7 +86,7 @@ describe('git:detectWorktrees', () => {
 
 // --- git:createWorktree + git:removeWorktree ---
 
-describe('git:createWorktree', () => {
+await describe('git:createWorktree', () => {
   test('creates worktree with new branch', async () => {
     const wtPath = path.join(root, 'wt-1')
     await createWorktree(repoPath, wtPath, 'feature-1')
@@ -108,13 +107,13 @@ describe('git:createWorktree', () => {
     expect(fs.existsSync(wtPath)).toBe(true)
     expect(fs.existsSync(path.join(wtPath, 'release.txt'))).toBe(true)
     // Clean up
-    h.invoke('git:removeWorktree', repoPath, wtPath)
+    await h.invoke('git:removeWorktree', repoPath, wtPath)
   })
 })
 
 // --- .slay/worktree-setup.sh ---
 
-describe('worktree setup script', () => {
+await describe('worktree setup script', () => {
   test('runs .slay/worktree-setup.sh with env vars', async () => {
     fs.mkdirSync(path.join(repoPath, '.slay'), { recursive: true })
     fs.writeFileSync(
@@ -134,7 +133,7 @@ describe('worktree setup script', () => {
     expect(marker.includes(`WORKTREE=${wtPath}`)).toBe(true)
     expect(marker.includes(`REPO=${repoPath}`)).toBe(true)
     // Clean up
-    h.invoke('git:removeWorktree', repoPath, wtPath)
+    await h.invoke('git:removeWorktree', repoPath, wtPath)
   })
 
   test('returns ran=false when no setup script', async () => {
@@ -148,14 +147,14 @@ describe('worktree setup script', () => {
     const result = runWorktreeSetupScriptSync(wtPath, repoPath)
     expect(result.ran).toBe(false)
     // Clean up
-    h.invoke('git:removeWorktree', repoPath, wtPath)
+    await h.invoke('git:removeWorktree', repoPath, wtPath)
   })
 })
 
-describe('git:removeWorktree', () => {
-  test('removes worktree', () => {
+await describe('git:removeWorktree', () => {
+  test('removes worktree', async () => {
     const wtPath = path.join(root, 'wt-1')
-    h.invoke('git:removeWorktree', repoPath, wtPath)
+    await h.invoke('git:removeWorktree', repoPath, wtPath)
     expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
   })
 })
@@ -167,25 +166,25 @@ git('git checkout -b staging-test')
 fs.writeFileSync(path.join(repoPath, 'staged.txt'), 'staged content')
 fs.writeFileSync(path.join(repoPath, 'unstaged.txt'), 'unstaged content')
 
-describe('git:stageFile', () => {
-  test('stages a file', () => {
-    h.invoke('git:stageFile', repoPath, 'staged.txt')
+await describe('git:stageFile', () => {
+  test('stages a file', async () => {
+    await h.invoke('git:stageFile', repoPath, 'staged.txt')
     const status = git('git status --porcelain')
     expect(status.includes('A  staged.txt')).toBe(true)
   })
 })
 
-describe('git:unstageFile', () => {
-  test('unstages a file', () => {
-    h.invoke('git:unstageFile', repoPath, 'staged.txt')
+await describe('git:unstageFile', () => {
+  test('unstages a file', async () => {
+    await h.invoke('git:unstageFile', repoPath, 'staged.txt')
     const status = git('git status --porcelain')
     expect(status.includes('?? staged.txt')).toBe(true)
   })
 })
 
-describe('git:stageAll', () => {
-  test('stages all files', () => {
-    h.invoke('git:stageAll', repoPath)
+await describe('git:stageAll', () => {
+  test('stages all files', async () => {
+    await h.invoke('git:stageAll', repoPath)
     const status = git('git status --porcelain')
     // Both files staged
     expect(status.includes('A  staged.txt')).toBe(true)
@@ -193,21 +192,21 @@ describe('git:stageAll', () => {
   })
 })
 
-describe('git:unstageAll', () => {
-  test('unstages all files', () => {
-    h.invoke('git:unstageAll', repoPath)
+await describe('git:unstageAll', () => {
+  test('unstages all files', async () => {
+    await h.invoke('git:unstageAll', repoPath)
     const status = git('git status --porcelain')
     expect(status.includes('?? staged.txt')).toBe(true)
   })
 })
 
-describe('git:discardFile', () => {
-  test('discards changes to tracked file', () => {
+await describe('git:discardFile', () => {
+  test('discards changes to tracked file', async () => {
     // Stage + commit a file first, then modify it
     git('git add staged.txt unstaged.txt')
     git('git commit -m "add files"')
     fs.writeFileSync(path.join(repoPath, 'staged.txt'), 'MODIFIED')
-    h.invoke('git:discardFile', repoPath, 'staged.txt')
+    await h.invoke('git:discardFile', repoPath, 'staged.txt')
     const content = fs.readFileSync(path.join(repoPath, 'staged.txt'), 'utf-8')
     expect(content).toBe('staged content')
   })
@@ -215,11 +214,11 @@ describe('git:discardFile', () => {
 
 // --- Diff operations ---
 
-describe('git:getWorkingDiff', () => {
-  test('returns diff snapshot', () => {
+await describe('git:getWorkingDiff', () => {
+  test('returns diff snapshot', async () => {
     // Make a change
     fs.writeFileSync(path.join(repoPath, 'staged.txt'), 'diff test')
-    const diff = h.invoke('git:getWorkingDiff', repoPath) as {
+    const diff = await h.invoke('git:getWorkingDiff', repoPath) as {
       targetPath: string
       files: string[]
       stagedFiles: string[]
@@ -233,24 +232,49 @@ describe('git:getWorkingDiff', () => {
     // Restore
     git('git checkout -- staged.txt')
   })
+
+  test('lists untracked files with unicode names', async () => {
+    const name = 'ändringar.txt'
+    fs.writeFileSync(path.join(repoPath, name), 'swedish chars')
+    const diff = await h.invoke('git:getWorkingDiff', repoPath) as {
+      untrackedFiles: string[]
+      files: string[]
+    }
+    expect(diff.untrackedFiles).toContain(name)
+    expect(diff.files).toContain(name)
+    fs.unlinkSync(path.join(repoPath, name))
+  })
 })
 
-describe('git:getUntrackedFileDiff', () => {
-  test('returns diff for untracked file', () => {
+await describe('git:getUntrackedFileDiff', () => {
+  test('returns diff for untracked file', async () => {
     fs.writeFileSync(path.join(repoPath, 'new-untracked.txt'), 'hello')
-    const diff = h.invoke('git:getUntrackedFileDiff', repoPath, 'new-untracked.txt') as string
+    const diff = await h.invoke('git:getUntrackedFileDiff', repoPath, 'new-untracked.txt') as string
     expect(diff.includes('hello')).toBe(true)
     fs.unlinkSync(path.join(repoPath, 'new-untracked.txt'))
+  })
+
+  test('returns empty string for null filePath', async () => {
+    const diff = await h.invoke('git:getUntrackedFileDiff', repoPath, null as unknown as string) as string
+    expect(diff).toBe('')
+  })
+
+  test('returns diff for file with unicode name', async () => {
+    const name = 'protokoll från möte.txt'
+    fs.writeFileSync(path.join(repoPath, name), 'unicode content')
+    const diff = await h.invoke('git:getUntrackedFileDiff', repoPath, name) as string
+    expect(diff.includes('unicode content')).toBe(true)
+    fs.unlinkSync(path.join(repoPath, name))
   })
 })
 
 // --- Commit ---
 
-describe('git:commitFiles', () => {
-  test('creates a commit', () => {
+await describe('git:commitFiles', () => {
+  test('creates a commit', async () => {
     fs.writeFileSync(path.join(repoPath, 'commit-test.txt'), 'commit me')
     git('git add commit-test.txt')
-    h.invoke('git:commitFiles', repoPath, 'test commit message')
+    await h.invoke('git:commitFiles', repoPath, 'test commit message')
     const log = git('git log --oneline -1')
     expect(log.includes('test commit message')).toBe(true)
   })
@@ -258,9 +282,9 @@ describe('git:commitFiles', () => {
 
 // --- Merge operations ---
 
-describe('git:isMergeInProgress', () => {
-  test('returns false when no merge', () => {
-    expect(h.invoke('git:isMergeInProgress', repoPath)).toBe(false)
+await describe('git:isMergeInProgress', () => {
+  test('returns false when no merge', async () => {
+    expect(await h.invoke('git:isMergeInProgress', repoPath)).toBe(false)
   })
 })
 
@@ -272,9 +296,9 @@ git('git add merge-file.txt')
 git('git commit -m "source branch commit"')
 git(`git checkout ${mainBranch}`)
 
-describe('git:mergeIntoParent', () => {
-  test('merges clean branch', () => {
-    const result = h.invoke('git:mergeIntoParent', repoPath, mainBranch, 'merge-source') as {
+await describe('git:mergeIntoParent', () => {
+  test('merges clean branch', async () => {
+    const result = await h.invoke('git:mergeIntoParent', repoPath, mainBranch, 'merge-source') as {
       success: boolean; merged: boolean; conflicted: boolean
     }
     expect(result.success).toBe(true)
@@ -297,9 +321,9 @@ git('git add conflict.txt')
 git('git commit -m "conflict B"')
 git('git checkout conflict-a')
 
-describe('git:mergeIntoParent (conflict)', () => {
-  test('detects merge conflicts', () => {
-    const result = h.invoke('git:mergeIntoParent', repoPath, 'conflict-a', 'conflict-b') as {
+await describe('git:mergeIntoParent (conflict)', () => {
+  test('detects merge conflicts', async () => {
+    const result = await h.invoke('git:mergeIntoParent', repoPath, 'conflict-a', 'conflict-b') as {
       success: boolean; conflicted: boolean; error?: string
     }
     expect(result.conflicted).toBe(true)
@@ -307,16 +331,16 @@ describe('git:mergeIntoParent (conflict)', () => {
   })
 })
 
-describe('git:getConflictedFiles', () => {
-  test('lists conflicted files', () => {
-    const files = h.invoke('git:getConflictedFiles', repoPath) as string[]
+await describe('git:getConflictedFiles', () => {
+  test('lists conflicted files', async () => {
+    const files = await h.invoke('git:getConflictedFiles', repoPath) as string[]
     expect(files).toContain('conflict.txt')
   })
 })
 
-describe('git:getConflictContent', () => {
-  test('returns base/ours/theirs/merged', () => {
-    const content = h.invoke('git:getConflictContent', repoPath, 'conflict.txt') as {
+await describe('git:getConflictContent', () => {
+  test('returns base/ours/theirs/merged', async () => {
+    const content = await h.invoke('git:getConflictContent', repoPath, 'conflict.txt') as {
       path: string; base: string | null; ours: string | null; theirs: string | null; merged: string | null
     }
     expect(content.path).toBe('conflict.txt')
@@ -326,7 +350,7 @@ describe('git:getConflictContent', () => {
   })
 })
 
-describe('git:writeResolvedFile', () => {
+await describe('git:writeResolvedFile', () => {
   test('writes resolved content', () => {
     h.invoke('git:writeResolvedFile', repoPath, 'conflict.txt', 'resolved content')
     const content = fs.readFileSync(path.join(repoPath, 'conflict.txt'), 'utf-8')
@@ -334,17 +358,17 @@ describe('git:writeResolvedFile', () => {
   })
 })
 
-describe('git:abortMerge', () => {
-  test('aborts merge in progress', () => {
-    h.invoke('git:abortMerge', repoPath)
-    expect(h.invoke('git:isMergeInProgress', repoPath)).toBe(false)
+await describe('git:abortMerge', () => {
+  test('aborts merge in progress', async () => {
+    await h.invoke('git:abortMerge', repoPath)
+    expect(await h.invoke('git:isMergeInProgress', repoPath)).toBe(false)
   })
 })
 
 // --- mergeWithAI (logic only, no AI call) ---
 
-describe('git:mergeWithAI', () => {
-  test('returns success on clean merge', () => {
+await describe('git:mergeWithAI', () => {
+  test('returns success on clean merge', async () => {
     // Create a branch that merges cleanly
     git(`git checkout ${mainBranch}`)
     git('git checkout -b clean-merge-src')
@@ -353,13 +377,13 @@ describe('git:mergeWithAI', () => {
     git('git commit -m "clean merge source"')
     git(`git checkout ${mainBranch}`)
 
-    const result = h.invoke('git:mergeWithAI', repoPath, repoPath, mainBranch, 'clean-merge-src') as {
+    const result = await h.invoke('git:mergeWithAI', repoPath, repoPath, mainBranch, 'clean-merge-src') as {
       success?: boolean; resolving?: boolean
     }
     expect(result.success).toBe(true)
   })
 
-  test('returns resolving with prompt on conflict', () => {
+  test('returns resolving with prompt on conflict', async () => {
     // Set up conflicting branches
     git('git checkout -b ai-base')
     fs.writeFileSync(path.join(repoPath, 'ai-conflict.txt'), 'ai base')
@@ -374,7 +398,7 @@ describe('git:mergeWithAI', () => {
     git('git add ai-conflict.txt')
     git('git commit -m "ai mine"')
 
-    const result = h.invoke('git:mergeWithAI', repoPath, repoPath, 'ai-base', 'ai-other') as {
+    const result = await h.invoke('git:mergeWithAI', repoPath, repoPath, 'ai-base', 'ai-other') as {
       resolving?: boolean; prompt?: string; conflictedFiles?: string[]
     }
     expect(result.resolving).toBe(true)
