@@ -458,7 +458,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   return parseTask(row)
 }
 
-export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
+export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?: () => void): void {
 
   // Purge stale soft-deleted tasks from previous sessions
   const stale = db.prepare(
@@ -567,6 +567,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
     const task = parseTask(row)
     if (task) {
       ipcMain.emit('db:tasks:create:done', null, id, data.projectId)
+      onMutation?.()
     }
     return task
   })
@@ -588,6 +589,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
     const result = updateTask(db, data)
     if (result) {
       ipcMain.emit('db:tasks:update:done', null, data.id)
+      onMutation?.()
     }
     return result
   })
@@ -606,6 +608,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
     const result = db.prepare(`
       UPDATE tasks SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
     `).run(id)
+    if (result.changes > 0) onMutation?.()
     return result.changes > 0
   })
 
@@ -614,6 +617,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
     db.prepare(`
       UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?
     `).run(id)
+    onMutation?.()
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
     return parseTask(row)
   })
@@ -629,6 +633,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       WHERE id = ? OR parent_id = ?
     `).run(id, id)
     ipcMain.emit('db:tasks:archive:done', null, id)
+    onMutation?.()
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
     return parseTask(row)
   })
@@ -651,6 +656,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
     for (const id of allIds) {
       ipcMain.emit('db:tasks:archive:done', null, id)
     }
+    onMutation?.()
   })
 
   ipcMain.handle('db:tasks:unarchive', (_, id: string) => {
@@ -659,6 +665,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database): void {
       WHERE id = ?
     `).run(id)
     ipcMain.emit('db:tasks:unarchive:done', null, id)
+    onMutation?.()
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
     return parseTask(row)
   })

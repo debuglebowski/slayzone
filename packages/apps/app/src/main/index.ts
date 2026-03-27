@@ -940,8 +940,9 @@ app.whenReady().then(async () => {
   logBoot('task runtime adapters configured')
 
   // Register domain handlers (inject ipcMain and db)
+  const notifyTasksChanged = (): void => { mainWindow?.webContents.send('tasks:changed') }
   registerProjectHandlers(ipcMain, db)
-  registerTaskHandlers(ipcMain, db)
+  registerTaskHandlers(ipcMain, db, notifyTasksChanged)
   registerTagHandlers(ipcMain, db)
   registerSettingsHandlers(ipcMain, db)
 
@@ -1028,7 +1029,6 @@ app.whenReady().then(async () => {
     console.error('[MCP] Failed to start server:', err)
   })
 
-  const notifyTasksChanged = () => { mainWindow?.webContents.send('tasks:changed') }
   linearSyncPoller = startSyncPoller(db, notifyTasksChanged)
   discoveryPoller = startDiscoveryPoller(db, notifyTasksChanged)
   logBoot('integration pollers started (sync 10s, discovery 60s)')
