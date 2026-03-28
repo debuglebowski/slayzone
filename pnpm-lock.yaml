@@ -372,6 +372,36 @@ importers:
       '@codemirror/view':
         specifier: ^6.36.5
         version: 6.39.12
+      '@milkdown/core':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/ctx':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/plugin-history':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/plugin-indent':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/plugin-listener':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/preset-commonmark':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/preset-gfm':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/prose':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/transformer':
+        specifier: ^7.19.2
+        version: 7.19.2
+      '@milkdown/utils':
+        specifier: ^7.19.2
+        version: 7.19.2
       '@slayzone/icons':
         specifier: workspace:*
         version: link:../../shared/icons
@@ -390,9 +420,6 @@ importers:
       electron:
         specifier: ^41.0.0
         version: 41.0.3
-      highlight.js:
-        specifier: ^11.11.1
-        version: 11.11.1
       ignore:
         specifier: ^5.3.2
         version: 5.3.2
@@ -402,18 +429,9 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.3
-      react-markdown:
-        specifier: ^10.1.0
-        version: 10.1.0(@types/react@19.2.8)(react@19.2.3)
-      rehype-highlight:
-        specifier: ^7.0.2
-        version: 7.0.2
-      rehype-raw:
-        specifier: ^7.0.0
-        version: 7.0.0
-      remark-gfm:
-        specifier: ^4.0.1
-        version: 4.0.1
+      remark-frontmatter:
+        specifier: ^5.0.0
+        version: 5.0.0
     devDependencies:
       '@types/react':
         specifier: ^19.2.7
@@ -421,6 +439,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@24.12.0)(jsdom@26.1.0)(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
 
   packages/domains/integrations:
     dependencies:
@@ -2533,6 +2554,39 @@ packages:
   '@mermaid-js/parser@1.0.1':
     resolution: {integrity: sha512-opmV19kN1JsK0T6HhhokHpcVkqKpF+x2pPDKKM2ThHtZAB5F4PROopk0amuVYK5qMrIA4erzpNm8gmPNJgMDxQ==}
 
+  '@milkdown/core@7.19.2':
+    resolution: {integrity: sha512-6ZMQHML2AyaYXYTNrmBWO6jGmPQ1kuWhj7KoX2+2736ji98xr8XmcQVG7reXGd7POQ5WSsIFfV/6N+zeaeHfzw==}
+
+  '@milkdown/ctx@7.19.2':
+    resolution: {integrity: sha512-py6wMaleIbD6q5YeasZH3VgWQ5NsEt8EkC/n7yyqpiAsNLfsvisylAq1EQmoYHrosjo0hM5EwKr+vNBgmlLvZw==}
+
+  '@milkdown/exception@7.19.2':
+    resolution: {integrity: sha512-4QMhjp5stRkTOf1Uh7TPWRLsfKkSAVe3q1gRrT9gYVbsm/YobCpseeQ9x8PRKCwlsC6ThO9JPiTecvIiPRTZ2g==}
+
+  '@milkdown/plugin-history@7.19.2':
+    resolution: {integrity: sha512-V7dd//e97sS8Qk+jkz+m0whCGo8oTtfTH0qs4zOc/kFneQZMdTsQdgiG/dbUob7YQNQl3IdcN8Hy0eJPo3NJXA==}
+
+  '@milkdown/plugin-indent@7.19.2':
+    resolution: {integrity: sha512-CoOtIOeQq23LOrUv6vP9Fmg25U2ZKIVqwqlMf2JTyuFyc3Dabn5kVtNxN+wWuvHpDDHP7omwcgRTQLjFqG9NlQ==}
+
+  '@milkdown/plugin-listener@7.19.2':
+    resolution: {integrity: sha512-4hZ7OBkdsRhOS9c8S0nktcUMxZJcZ08vRg2mbrko1bTZOQTooCSJ93BuF6obpPndCbUWs8JJmKxNQAIumrh/Ow==}
+
+  '@milkdown/preset-commonmark@7.19.2':
+    resolution: {integrity: sha512-9iKBIBUBKmmwhbFKBum1OcOmlrcgCb/Dst8fr35Nyq1RjOVUnPENncvGK35PS+9qeYPt7iaaOkzBgP97gOC3BA==}
+
+  '@milkdown/preset-gfm@7.19.2':
+    resolution: {integrity: sha512-uLL5N6+i8AzG7hC9oPGE+GJPC5yANAXu35HIzUXNT/7hcVC6wsNrW8vEd6CSnpOJ6LUqBk+owdmdjHI0T8Fdbg==}
+
+  '@milkdown/prose@7.19.2':
+    resolution: {integrity: sha512-XWwUx3khzJREQiv3At/1Hx0e5xNbn9+u7F37NKfcbuhwWoPGVrs6BY9Yoyf6Bkdq7K9/TBnO0Kx0yZwfooD+fw==}
+
+  '@milkdown/transformer@7.19.2':
+    resolution: {integrity: sha512-DBPDTPQ/kbQJSqfMWhsxWGfKwSW4HZV70xmcpbMkRm/PFj98g753BGfvW7K8qQUIIS0+cOwxxyeEXmpoK+hyrQ==}
+
+  '@milkdown/utils@7.19.2':
+    resolution: {integrity: sha512-lYX0nwA748hnFzxqOj7k0h0PlzPfj1OXRbph70lWBaMDPqk4c1ILKZQFHMRowgonGP2CkuE+t2PcYBsJyBXS4g==}
+
   '@modelcontextprotocol/sdk@1.26.0':
     resolution: {integrity: sha512-Y5RmPncpiDtTXDbLKswIJzTqu2hyBKxTNsgKqKclDbhIgg1wgtf1fRuvxgTnRfcnxtvvgbIEcqUOzZrJ6iSReg==}
     engines: {node: '>=18'}
@@ -3975,6 +4029,12 @@ packages:
 
   '@types/linkify-it@5.0.0':
     resolution: {integrity: sha512-sVDA58zAw4eWAffKOaQH5/5j3XeayukzDk+ewSsnv3p4yJEZHCCzMDiZM8e0OUrRvmpGZ85jf4yDHkHsgBNr9Q==}
+
+  '@types/lodash-es@4.17.12':
+    resolution: {integrity: sha512-0NgftHUcV4v34VhXm8QBSftKVXtbkBG3ViCjs6+eJ5a6y6Mi/jiFGPc1sC7QK+9BFhWrURE3EOggmWaSxL9OzQ==}
+
+  '@types/lodash@4.17.24':
+    resolution: {integrity: sha512-gIW7lQLZbue7lRSWEFql49QJJWThrTFFeIMJdp3eH4tKoxm1OvEPg02rm4wCCSHS0cL3/Fizimb35b7k8atwsQ==}
 
   '@types/markdown-it@14.1.2':
     resolution: {integrity: sha512-promo4eFwuiW+TfGxhi+0x3czqTYJkG8qB17ZUJiVF10Xm7NLVRSLUsfRTU/6h1e24VvRnXCx+hG7li58lkzog==}
@@ -5444,6 +5504,9 @@ packages:
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
 
+  fault@2.0.1:
+    resolution: {integrity: sha512-WtySTkS4OKev5JtpHXnib4Gxiurzh5NCGvWrFaZ34m6JehfTUhKZvn9njTfw48t6JumVQOmrKqpmGcdwxnhqBQ==}
+
   fd-package-json@2.0.0:
     resolution: {integrity: sha512-jKmm9YtsNXN789RS/0mSzOC1NUq9mkVd65vbSSVsKdjGvYXBuE4oWe2QOEoFeRmJg+lPuZxpmrfFclNhoRMneQ==}
 
@@ -5509,6 +5572,10 @@ packages:
   form-data@4.0.5:
     resolution: {integrity: sha512-8RipRLol37bNs2bhoV67fiTEvdTrbMUYcFTiy3+wuuOnUog2QBHCZWXDRijWQfAkhBj2Uf5UnVaiWwA5vdd82w==}
     engines: {node: '>= 6'}
+
+  format@0.2.2:
+    resolution: {integrity: sha512-wzsgA6WOq+09wrU1tsJ09udeR/YZRaeArL9e1wPbFg3GG2yDnC2ldKpxs4xunpFF9DgqCqOIra3bc1HWrJ37Ww==}
+    engines: {node: '>=0.4.x'}
 
   formatly@0.3.0:
     resolution: {integrity: sha512-9XNj/o4wrRFyhSMJOvsuyMwy8aUfBaZ1VrqHVfohyXf0Sw0e+yfKG+xZaY3arGCOMdwFsqObtzVOc1gU9KiT9w==}
@@ -5735,10 +5802,6 @@ packages:
 
   hastscript@9.0.1:
     resolution: {integrity: sha512-g7df9rMFX/SPi34tyGCyUBREQoKkapwdY/T04Qn9TDWfHhAYt4/I0gMVirzK5wEzeUqIjEB+LXC/ypb7Aqno5w==}
-
-  highlight.js@11.11.1:
-    resolution: {integrity: sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w==}
-    engines: {node: '>=12.0.0'}
 
   hono@4.11.9:
     resolution: {integrity: sha512-Eaw2YTGM6WOxA6CXbckaEvslr2Ne4NFsKrvc0v97JD5awbmeBLO5w9Ho9L9kmKonrwF9RJlW6BxT1PVv/agBHQ==}
@@ -6209,9 +6272,6 @@ packages:
     resolution: {integrity: sha512-tqNXrS78oMOE73NMxK4EMLQsQowWf8jKooH9g7xPavRT706R6bkQJ6DY2Te7QukaZsulxa30wQ7bk0pm4XiHmA==}
     engines: {node: '>=8'}
 
-  lowlight@3.3.0:
-    resolution: {integrity: sha512-0JNhgFoPvP6U6lE/UdVsSq99tn6DhjjpAj5MxG49ewd2mOBVtwWYIT8ClyABhq198aXXODMU6Ox8DrGy/CpTZQ==}
-
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
@@ -6289,6 +6349,9 @@ packages:
   mdast-util-from-markdown@2.0.2:
     resolution: {integrity: sha512-uZhTV/8NBuw0WHkPTrCqDOl0zVe1BIng5ZtHoDk49ME1qqcjYmmLmOf0gELgcRMxN4w2iuIeVso5/6QymSrgmA==}
 
+  mdast-util-frontmatter@2.0.1:
+    resolution: {integrity: sha512-LRqI9+wdgC25P0URIJY9vwocIzCcksduHQ9OF2joxQoyTNVduwLAFUzjoopuRJbJAReaKrNQKAZKL3uCMugWJA==}
+
   mdast-util-gfm-autolink-literal@2.0.1:
     resolution: {integrity: sha512-5HVP2MKaP6L+G6YaxPNjuL0BPrq9orG3TsrZ9YXbA3vDw/ACI4MEsnoDpn6ZNm7GnZgtAcONJyPhOP8tNJQavQ==}
 
@@ -6354,6 +6417,9 @@ packages:
 
   micromark-core-commonmark@2.0.3:
     resolution: {integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==}
+
+  micromark-extension-frontmatter@2.0.0:
+    resolution: {integrity: sha512-C4AkuM3dA58cgZha7zVnuVxBhDsbttIMiytjgsM2XbHAB2faRVaHRle40558FBN+DJcrLNCoqG5mlrpdU4cRtg==}
 
   micromark-extension-gfm-autolink-literal@2.1.0:
     resolution: {integrity: sha512-oOg7knzhicgQ3t4QCjCWgTmfNhvQbDDnJeVu9v81r7NltNCVmhPy1fJRX27pISafdjL+SVc4d3l48Gb6pbRypw==}
@@ -6570,6 +6636,11 @@ packages:
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
+    hasBin: true
+
+  nanoid@5.1.7:
+    resolution: {integrity: sha512-ua3NDgISf6jdwezAheMOk4mbE1LXjm1DfMUDMuJf4AqxLFK3ccGpgWizwa5YV7Yz9EpXwEaWoRXSb/BnV0t5dQ==}
+    engines: {node: ^18 || >=20}
     hasBin: true
 
   napi-build-utils@2.0.0:
@@ -6993,6 +7064,9 @@ packages:
   prosemirror-model@1.25.4:
     resolution: {integrity: sha512-PIM7E43PBxKce8OQeezAs9j4TP+5yDpZVbuurd1h5phUxEKIu+G2a+EUZzIC5nS1mJktDJWzbqS23n1tsAf5QA==}
 
+  prosemirror-safari-ime-span@1.0.2:
+    resolution: {integrity: sha512-QJqD8s1zE/CuK56kDsUhndh5hiHh/gFnAuPOA9ytva2s85/ZEt2tNWeALTJN48DtWghSKOmiBsvVn2OlnJ5H2w==}
+
   prosemirror-schema-basic@1.2.4:
     resolution: {integrity: sha512-ELxP4TlX3yr2v5rM7Sb70SqStq5NvI15c0j9j/gjsrO5vaw+fnnpovCLEGIcpeGfifkuqJwl4fon6b+KdrODYQ==}
 
@@ -7208,9 +7282,6 @@ packages:
   regex@6.1.0:
     resolution: {integrity: sha512-6VwtthbV4o/7+OaAF9I5L5V3llLEsoPyq9P1JVXkedTP33c7MfCG0/5NOPcSJn0TzXcG9YUrR0gQSWioew3LDg==}
 
-  rehype-highlight@7.0.2:
-    resolution: {integrity: sha512-k158pK7wdC2qL3M5NcZROZ2tR/l7zOzjxXd5VGdcfIyoijjQqpHd3JKtYSBDpDZ38UI2WJWuFAtkMDxmx5kstA==}
-
   rehype-parse@9.0.1:
     resolution: {integrity: sha512-ksCzCD0Fgfh7trPDxr2rSylbwq9iYDkSn8TCDmEJ49ljEUBxDVCzCHv7QNzZOfODanX4+bWQ4WZqLCRWYLfhag==}
 
@@ -7223,8 +7294,14 @@ packages:
   rehype@13.0.2:
     resolution: {integrity: sha512-j31mdaRFrwFRUIlxGeuPXXKWQxet52RBQRvCmzl5eCefn/KGbomK5GMHNMsOJf55fgo3qw5tST5neDuarDYR2A==}
 
+  remark-frontmatter@5.0.0:
+    resolution: {integrity: sha512-XTFYvNASMe5iPN0719nPrdItC9aU0ssC4v14mH1BCi1u0n1gAocqcujWUrByftZTbLhRtiKRyjYTSIOcr69UVQ==}
+
   remark-gfm@4.0.1:
     resolution: {integrity: sha512-1quofZ2RQ9EWdeN34S79+KExV1764+wCUGop5CPL1WGdD0ocPpu91lzPGbwWMECpEpd42kJGQwzRfyov9j4yNg==}
+
+  remark-inline-links@7.0.0:
+    resolution: {integrity: sha512-4uj1pPM+F495ySZhTIB6ay2oSkTsKgmYaKk/q5HIdhX2fuyLEegpjWa0VdJRJ01sgOqAFo7MBKdDUejIYBMVMQ==}
 
   remark-parse@11.0.0:
     resolution: {integrity: sha512-FCxlKLNGknS5ba/1lmpYijMUzX2esxW5xQqjWxw2eHFfS2MSdaHVINFmhjo+qN1WhZhNimq0dZATN9pH0IDrpA==}
@@ -7238,6 +7315,9 @@ packages:
 
   remark-stringify@11.0.0:
     resolution: {integrity: sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw==}
+
+  remark@15.0.1:
+    resolution: {integrity: sha512-Eht5w30ruCXgFmxVUSlNWQ9iiimq07URKeFS3hNc8cUWy1llX4KDWfyEDZRycMc+znsN9Ux5/tJ/BFdgdOwA3A==}
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -9467,6 +9547,116 @@ snapshots:
     dependencies:
       langium: 4.2.1
 
+  '@milkdown/core@7.19.2':
+    dependencies:
+      '@milkdown/ctx': 7.19.2
+      '@milkdown/exception': 7.19.2
+      '@milkdown/prose': 7.19.2
+      '@milkdown/transformer': 7.19.2
+      remark-parse: 11.0.0
+      remark-stringify: 11.0.0
+      unified: 11.0.5
+    transitivePeerDependencies:
+      - supports-color
+
+  '@milkdown/ctx@7.19.2':
+    dependencies:
+      '@milkdown/exception': 7.19.2
+
+  '@milkdown/exception@7.19.2': {}
+
+  '@milkdown/plugin-history@7.19.2':
+    dependencies:
+      '@milkdown/core': 7.19.2
+      '@milkdown/ctx': 7.19.2
+      '@milkdown/prose': 7.19.2
+      '@milkdown/utils': 7.19.2
+    transitivePeerDependencies:
+      - supports-color
+
+  '@milkdown/plugin-indent@7.19.2':
+    dependencies:
+      '@milkdown/ctx': 7.19.2
+      '@milkdown/prose': 7.19.2
+      '@milkdown/utils': 7.19.2
+    transitivePeerDependencies:
+      - supports-color
+
+  '@milkdown/plugin-listener@7.19.2':
+    dependencies:
+      '@milkdown/core': 7.19.2
+      '@milkdown/ctx': 7.19.2
+      '@milkdown/prose': 7.19.2
+      '@types/lodash-es': 4.17.12
+      lodash-es: 4.17.23
+    transitivePeerDependencies:
+      - supports-color
+
+  '@milkdown/preset-commonmark@7.19.2':
+    dependencies:
+      '@milkdown/core': 7.19.2
+      '@milkdown/ctx': 7.19.2
+      '@milkdown/exception': 7.19.2
+      '@milkdown/prose': 7.19.2
+      '@milkdown/transformer': 7.19.2
+      '@milkdown/utils': 7.19.2
+      remark-inline-links: 7.0.0
+      unist-util-visit: 5.1.0
+      unist-util-visit-parents: 6.0.2
+    transitivePeerDependencies:
+      - supports-color
+
+  '@milkdown/preset-gfm@7.19.2':
+    dependencies:
+      '@milkdown/core': 7.19.2
+      '@milkdown/ctx': 7.19.2
+      '@milkdown/exception': 7.19.2
+      '@milkdown/preset-commonmark': 7.19.2
+      '@milkdown/prose': 7.19.2
+      '@milkdown/transformer': 7.19.2
+      '@milkdown/utils': 7.19.2
+      prosemirror-safari-ime-span: 1.0.2
+      remark-gfm: 4.0.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@milkdown/prose@7.19.2':
+    dependencies:
+      '@milkdown/exception': 7.19.2
+      prosemirror-changeset: 2.3.1
+      prosemirror-commands: 1.7.1
+      prosemirror-dropcursor: 1.8.2
+      prosemirror-gapcursor: 1.4.0
+      prosemirror-history: 1.5.0
+      prosemirror-inputrules: 1.5.1
+      prosemirror-keymap: 1.2.3
+      prosemirror-model: 1.25.4
+      prosemirror-schema-list: 1.5.1
+      prosemirror-state: 1.4.4
+      prosemirror-tables: 1.8.5
+      prosemirror-transform: 1.11.0
+      prosemirror-view: 1.41.5
+
+  '@milkdown/transformer@7.19.2':
+    dependencies:
+      '@milkdown/exception': 7.19.2
+      '@milkdown/prose': 7.19.2
+      remark: 15.0.1
+      unified: 11.0.5
+    transitivePeerDependencies:
+      - supports-color
+
+  '@milkdown/utils@7.19.2':
+    dependencies:
+      '@milkdown/core': 7.19.2
+      '@milkdown/ctx': 7.19.2
+      '@milkdown/exception': 7.19.2
+      '@milkdown/prose': 7.19.2
+      '@milkdown/transformer': 7.19.2
+      nanoid: 5.1.7
+    transitivePeerDependencies:
+      - supports-color
+
   '@modelcontextprotocol/sdk@1.26.0(zod@4.3.5)':
     dependencies:
       '@hono/node-server': 1.19.9(hono@4.11.9)
@@ -10871,6 +11061,12 @@ snapshots:
       '@types/node': 22.19.7
 
   '@types/linkify-it@5.0.0': {}
+
+  '@types/lodash-es@4.17.12':
+    dependencies:
+      '@types/lodash': 4.17.24
+
+  '@types/lodash@4.17.24': {}
 
   '@types/markdown-it@14.1.2':
     dependencies:
@@ -12764,6 +12960,10 @@ snapshots:
     dependencies:
       reusify: 1.1.0
 
+  fault@2.0.1:
+    dependencies:
+      format: 0.2.2
+
   fd-package-json@2.0.0:
     dependencies:
       walk-up-path: 4.0.0
@@ -12837,6 +13037,8 @@ snapshots:
       es-set-tostringtag: 2.1.0
       hasown: 2.0.2
       mime-types: 2.1.35
+
+  format@0.2.2: {}
 
   formatly@0.3.0:
     dependencies:
@@ -13169,8 +13371,6 @@ snapshots:
       hast-util-parse-selector: 4.0.0
       property-information: 7.1.0
       space-separated-tokens: 2.0.2
-
-  highlight.js@11.11.1: {}
 
   hono@4.11.9: {}
 
@@ -13579,12 +13779,6 @@ snapshots:
 
   lowercase-keys@2.0.0: {}
 
-  lowlight@3.3.0:
-    dependencies:
-      '@types/hast': 3.0.4
-      devlop: 1.1.0
-      highlight.js: 11.11.1
-
   lru-cache@10.4.3: {}
 
   lru-cache@11.2.7: {}
@@ -13707,6 +13901,17 @@ snapshots:
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.2
       unist-util-stringify-position: 4.0.0
+    transitivePeerDependencies:
+      - supports-color
+
+  mdast-util-frontmatter@2.0.1:
+    dependencies:
+      '@types/mdast': 4.0.4
+      devlop: 1.1.0
+      escape-string-regexp: 5.0.0
+      mdast-util-from-markdown: 2.0.2
+      mdast-util-to-markdown: 2.1.2
+      micromark-extension-frontmatter: 2.0.0
     transitivePeerDependencies:
       - supports-color
 
@@ -13891,6 +14096,13 @@ snapshots:
       micromark-util-normalize-identifier: 2.0.1
       micromark-util-resolve-all: 2.0.1
       micromark-util-subtokenize: 2.1.0
+      micromark-util-symbol: 2.0.1
+      micromark-util-types: 2.0.2
+
+  micromark-extension-frontmatter@2.0.0:
+    dependencies:
+      fault: 2.0.1
+      micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.2
 
@@ -14186,6 +14398,8 @@ snapshots:
   ms@2.1.3: {}
 
   nanoid@3.3.11: {}
+
+  nanoid@5.1.7: {}
 
   napi-build-utils@2.0.0: {}
 
@@ -14683,6 +14897,11 @@ snapshots:
     dependencies:
       orderedmap: 2.1.1
 
+  prosemirror-safari-ime-span@1.0.2:
+    dependencies:
+      prosemirror-state: 1.4.4
+      prosemirror-view: 1.41.5
+
   prosemirror-schema-basic@1.2.4:
     dependencies:
       prosemirror-model: 1.25.4
@@ -14946,14 +15165,6 @@ snapshots:
     dependencies:
       regex-utilities: 2.3.0
 
-  rehype-highlight@7.0.2:
-    dependencies:
-      '@types/hast': 3.0.4
-      hast-util-to-text: 4.0.2
-      lowlight: 3.3.0
-      unist-util-visit: 5.1.0
-      vfile: 6.0.3
-
   rehype-parse@9.0.1:
     dependencies:
       '@types/hast': 3.0.4
@@ -14979,6 +15190,15 @@ snapshots:
       rehype-stringify: 10.0.1
       unified: 11.0.5
 
+  remark-frontmatter@5.0.0:
+    dependencies:
+      '@types/mdast': 4.0.4
+      mdast-util-frontmatter: 2.0.1
+      micromark-extension-frontmatter: 2.0.0
+      unified: 11.0.5
+    transitivePeerDependencies:
+      - supports-color
+
   remark-gfm@4.0.1:
     dependencies:
       '@types/mdast': 4.0.4
@@ -14989,6 +15209,12 @@ snapshots:
       unified: 11.0.5
     transitivePeerDependencies:
       - supports-color
+
+  remark-inline-links@7.0.0:
+    dependencies:
+      '@types/mdast': 4.0.4
+      mdast-util-definitions: 6.0.0
+      unist-util-visit: 5.1.0
 
   remark-parse@11.0.0:
     dependencies:
@@ -15019,6 +15245,15 @@ snapshots:
       '@types/mdast': 4.0.4
       mdast-util-to-markdown: 2.1.2
       unified: 11.0.5
+
+  remark@15.0.1:
+    dependencies:
+      '@types/mdast': 4.0.4
+      remark-parse: 11.0.0
+      remark-stringify: 11.0.0
+      unified: 11.0.5
+    transitivePeerDependencies:
+      - supports-color
 
   require-directory@2.1.1: {}
 

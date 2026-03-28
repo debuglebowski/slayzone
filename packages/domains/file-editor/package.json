@@ -14,7 +14,8 @@
     "./client/QuickOpenDialog": "./src/client/QuickOpenDialog.tsx"
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -27,18 +28,24 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.36.5",
+    "@milkdown/core": "^7.19.2",
+    "@milkdown/plugin-history": "^7.19.2",
+    "@milkdown/plugin-indent": "^7.19.2",
+    "@milkdown/ctx": "^7.19.2",
+    "@milkdown/plugin-listener": "^7.19.2",
+    "@milkdown/preset-commonmark": "^7.19.2",
+    "@milkdown/preset-gfm": "^7.19.2",
+    "@milkdown/prose": "^7.19.2",
+    "@milkdown/transformer": "^7.19.2",
+    "@milkdown/utils": "^7.19.2",
+    "@slayzone/icons": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "codemirror": "^6.0.1",
-    "highlight.js": "^11.11.1",
     "ignore": "^5.3.2",
     "lucide-react": "^0.562.0",
-    "@slayzone/icons": "workspace:*",
-    "react-markdown": "^10.1.0",
-    "rehype-highlight": "^7.0.2",
-    "rehype-raw": "^7.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-frontmatter": "^5.0.0"
   },
   "peerDependencies": {
     "electron": "^41.0.0",
@@ -46,6 +53,7 @@
   },
   "devDependencies": {
     "@types/react": "^19.2.7",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   }
 }

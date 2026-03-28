@@ -3,6 +3,7 @@ import { useAppearance } from '@slayzone/settings/client'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
 import { keymap, highlightWhitespace } from '@codemirror/view'
+import { indentWithTab } from '@codemirror/commands'
 import { indentUnit } from '@codemirror/language'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
@@ -86,6 +87,7 @@ export function CodeEditor({ filePath, content, onChange, onSave, version }: Cod
       editorTheme,
       oneDark,
       keymap.of([
+        indentWithTab,
         {
           key: 'Mod-s',
           run: () => {
