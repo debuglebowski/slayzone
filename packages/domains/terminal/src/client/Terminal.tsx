@@ -958,6 +958,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       if (paths.length > 0) {
         insertPath(paths.join(' '))
+        terminalRef.current?.focus()
       }
     }
 
@@ -967,7 +968,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       setIsDragOver(false)
 
       const files = e.dataTransfer?.files
-      if (!files?.length) return
+      if (!files?.length) {
+        terminalRef.current?.focus()
+        return
+      }
 
       const paths: string[] = []
       for (const file of files) {
@@ -978,6 +982,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (paths.length > 0) {
         insertPath(paths.join(' '))
       }
+      terminalRef.current?.focus()
     }
 
     const handleDragOver = (e: DragEvent) => {
