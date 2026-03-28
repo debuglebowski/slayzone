@@ -5,8 +5,9 @@ import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ListItemMove } from './list-item-move'
-import { useEffect, type MutableRefObject, type ReactNode, type ButtonHTMLAttributes } from 'react'
+import { useEffect, type CSSProperties, type MutableRefObject, type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { cn } from '@slayzone/ui'
+import type { EditorThemeColors } from './editor-themes'
 
 export type { Editor }
 
@@ -27,6 +28,7 @@ interface RichTextEditorProps {
   checkedHighlight?: boolean
   showToolbar?: boolean
   spellcheck?: boolean
+  themeColors?: EditorThemeColors
 }
 
 export function RichTextEditor({
@@ -45,7 +47,8 @@ export function RichTextEditor({
   lineSpacing,
   checkedHighlight,
   showToolbar,
-  spellcheck
+  spellcheck,
+  themeColors
 }: RichTextEditorProps) {
   const editor = useEditor({
     extensions: [
@@ -80,7 +83,7 @@ export function RichTextEditor({
     },
     editorProps: {
       attributes: {
-        class: 'prose prose-sm dark:prose-invert max-w-none focus:outline-none',
+        class: `prose prose-sm max-w-none focus:outline-none${themeColors ? '' : ' dark:prose-invert'}`,
       },
       handleKeyDown: (view, event) => {
         if (event.key === 'Escape') {
@@ -97,12 +100,37 @@ export function RichTextEditor({
     if (editorRef) editorRef.current = editor
   }, [editor, editorRef])
 
+  // Sync prose class when themeColors toggles
+  useEffect(() => {
+    if (!editor) return
+    editor.setOptions({
+      editorProps: {
+        attributes: {
+          class: `prose prose-sm max-w-none focus:outline-none${themeColors ? '' : ' dark:prose-invert'}`,
+        },
+      },
+    })
+  }, [editor, !!themeColors])
+
   // Sync external value changes
   useEffect(() => {
     if (editor && value !== editor.getHTML()) {
       editor.commands.setContent(value)
     }
   }, [value, editor])
+
+  const themeStyle = themeColors ? {
+    '--prose-body': themeColors.foreground,
+    '--prose-headings': themeColors.heading,
+    '--prose-links': themeColors.link,
+    '--prose-code': themeColors.keyword,
+    '--prose-selection': themeColors.selection,
+    '--prose-muted': themeColors.comment,
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+    minHeight,
+    maxHeight,
+  } as CSSProperties : { minHeight, maxHeight }
 
   return (
     <div
@@ -112,9 +140,10 @@ export function RichTextEditor({
         fontFamily === 'mono' && 'font-mono',
         lineSpacing === 'compact' && 'prose-tight',
         checkedHighlight && 'checked-highlight',
+        themeColors && 'editor-themed rounded',
         className
       )}
-      style={{ minHeight, maxHeight }}
+      style={themeStyle}
       spellCheck={spellcheck !== false}
     >
       {showToolbar && editor && <EditorToolbar editor={editor} />}

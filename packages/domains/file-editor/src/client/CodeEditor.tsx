@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useAppearance } from '@slayzone/settings/client'
+import { useTheme } from '@slayzone/settings/client'
+import { getEditorThemeById, editorThemes } from '@slayzone/editor'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
 import { keymap, highlightWhitespace } from '@codemirror/view'
@@ -11,7 +13,7 @@ import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { markdown } from '@codemirror/lang-markdown'
 import { python } from '@codemirror/lang-python'
-import { oneDark } from '@codemirror/theme-one-dark'
+import { buildCodeMirrorTheme } from './codemirror-theme'
 
 function getLanguage(filePath: string) {
   const ext = filePath.split('.').pop()?.toLowerCase()
@@ -52,14 +54,25 @@ interface CodeEditorProps {
 }
 
 export function CodeEditor({ filePath, content, onChange, onSave, version }: CodeEditorProps) {
+  const { theme } = useTheme()
   const {
-    editorFontSize, editorWordWrap, editorTabSize, editorIndentTabs, editorRenderWhitespace
+    editorFontSize, editorWordWrap, editorTabSize, editorIndentTabs, editorRenderWhitespace,
+    contentThemeFollowApp, contentThemeDark, contentThemeLight
   } = useAppearance()
-  const editorTheme = useMemo(() => EditorView.theme({
-    '&': { height: '100%', fontSize: `${editorFontSize}px`, backgroundColor: 'transparent' },
+
+  const resolvedThemeId = contentThemeFollowApp
+    ? (theme === 'dark' ? contentThemeDark : contentThemeLight)
+    : contentThemeDark
+  const resolvedVariant = editorThemes.find(t => t.id === resolvedThemeId)?.variant ?? 'dark'
+  const cmThemeExt = useMemo(
+    () => buildCodeMirrorTheme(getEditorThemeById(resolvedThemeId), resolvedVariant === 'dark'),
+    [resolvedThemeId, resolvedVariant]
+  )
+
+  const sizeTheme = useMemo(() => EditorView.theme({
+    '&': { height: '100%', fontSize: `${editorFontSize}px` },
     '.cm-scroller': { overflow: 'auto' },
     '.cm-content': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
-    '.cm-gutters': { backgroundColor: 'transparent', border: 'none' }
   }), [editorFontSize])
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -72,6 +85,7 @@ export function CodeEditor({ filePath, content, onChange, onSave, version }: Cod
   contentRef.current = content
 
   // Compartments for runtime-reconfigurable extensions
+  const themeComp = useRef(new Compartment())
   const tabSizeComp = useRef(new Compartment())
   const indentComp = useRef(new Compartment())
   const wrapComp = useRef(new Compartment())
@@ -84,8 +98,8 @@ export function CodeEditor({ filePath, content, onChange, onSave, version }: Cod
     const lang = getLanguage(filePath)
     const extensions = [
       basicSetup,
-      editorTheme,
-      oneDark,
+      sizeTheme,
+      themeComp.current.of(cmThemeExt),
       keymap.of([
         indentWithTab,
         {
@@ -117,7 +131,14 @@ export function CodeEditor({ filePath, content, onChange, onSave, version }: Cod
       viewRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, editorTheme])
+  }, [filePath, sizeTheme])
+
+  // Reconfigure theme at runtime
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: [themeComp.current.reconfigure(cmThemeExt)] })
+  }, [cmThemeExt])
 
   // Reconfigure editor settings at runtime without destroying the view
   useEffect(() => {

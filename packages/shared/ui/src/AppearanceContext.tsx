@@ -19,9 +19,9 @@ export interface AppearanceSettings {
   // Terminal
   terminalFontFamily: string
   terminalScrollback: number
-  terminalThemeFollowApp: boolean
-  terminalThemeDark: string
-  terminalThemeLight: string
+  contentThemeFollowApp: boolean
+  contentThemeDark: string
+  contentThemeLight: string
   // Diff
   diffContextLines: '0' | '3' | '5' | 'all'
   diffIgnoreWhitespace: boolean
@@ -50,9 +50,9 @@ export const appearanceDefaults: AppearanceSettings = {
   editorRenderWhitespace: 'none',
   terminalFontFamily: 'Menlo, Monaco, "Courier New", monospace',
   terminalScrollback: 5000,
-  terminalThemeFollowApp: true,
-  terminalThemeDark: 'slay',
-  terminalThemeLight: 'slay-light',
+  contentThemeFollowApp: true,
+  contentThemeDark: 'slay',
+  contentThemeLight: 'slay-light',
   diffContextLines: '3',
   diffIgnoreWhitespace: false,
   browserDefaultZoom: 100,

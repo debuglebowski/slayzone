@@ -198,11 +198,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const { subscribe, subscribeExit, subscribeSessionInvalid, subscribeAttention, subscribeState, getState, getCrashOutput, resetTaskState, cleanupTask } = usePty()
   const { theme } = useTheme()
-  const { terminalFontSize, terminalFontFamily, terminalScrollback, terminalThemeFollowApp, terminalThemeDark, terminalThemeLight } = useAppearance()
+  const { terminalFontSize, terminalFontFamily, terminalScrollback, contentThemeFollowApp, contentThemeDark, contentThemeLight } = useAppearance()
 
-  const resolvedTerminalThemeId = terminalThemeFollowApp
-    ? (theme === 'dark' ? terminalThemeDark : terminalThemeLight)
-    : terminalThemeDark
+  const resolvedTerminalThemeId = contentThemeFollowApp
+    ? (theme === 'dark' ? contentThemeDark : contentThemeLight)
+    : contentThemeDark
   const resolvedTerminalTheme = getTerminalThemeById(resolvedTerminalThemeId)
   const resolvedTerminalVariant = terminalThemes.find(t => t.id === resolvedTerminalThemeId)?.variant ?? 'dark'
 
@@ -811,7 +811,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       background: resolvedTerminalTheme.background ?? '#000000',
       cursor: resolvedTerminalTheme.cursor ?? '#ffffff',
     })
-  }, [theme, terminalThemeDark, terminalThemeLight, terminalThemeFollowApp])
+  }, [theme, contentThemeDark, contentThemeLight, contentThemeFollowApp])
 
   // Handle resize
   useEffect(() => {

@@ -16,8 +16,12 @@
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.3",
+    "@codemirror/language": "^6.12.2",
     "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.36.5",
+    "@lezer/highlight": "^1.0.0",
     "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/editor": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",

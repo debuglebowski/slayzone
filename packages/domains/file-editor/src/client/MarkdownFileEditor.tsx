@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { Editor, rootCtx, defaultValueCtx, editorViewCtx } from '@milkdown/core'
 import { commonmark } from '@milkdown/preset-commonmark'
 import { gfm } from '@milkdown/preset-gfm'
@@ -7,6 +7,9 @@ import { indent } from '@milkdown/plugin-indent'
 import { listener, listenerCtx } from '@milkdown/plugin-listener'
 import { replaceAll } from '@milkdown/utils'
 import { remarkFrontmatterPlugin, frontmatterSchema, frontmatterView } from './milkdown-frontmatter'
+import { useAppearance } from '@slayzone/settings/client'
+import { useTheme } from '@slayzone/settings/client'
+import { getEditorThemeById, editorThemes } from '@slayzone/editor'
 
 // --- Component ---
 
@@ -20,6 +23,14 @@ interface MarkdownFileEditorProps {
 }
 
 export function MarkdownFileEditor({ filePath, content, onChange, onSave, version }: MarkdownFileEditorProps) {
+  const { theme } = useTheme()
+  const { contentThemeFollowApp, contentThemeDark, contentThemeLight } = useAppearance()
+  const resolvedThemeId = contentThemeFollowApp
+    ? (theme === 'dark' ? contentThemeDark : contentThemeLight)
+    : contentThemeDark
+  const themeColors = useMemo(() => getEditorThemeById(resolvedThemeId), [resolvedThemeId])
+  const resolvedVariant = editorThemes.find(t => t.id === resolvedThemeId)?.variant ?? 'dark'
+
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const onChangeRef = useRef(onChange)
@@ -87,12 +98,26 @@ export function MarkdownFileEditor({ filePath, content, onChange, onSave, versio
     suppressOnChange.current = false
   }, [version])
 
+  const themeStyle = {
+    '--mk-bg': themeColors.background,
+    '--mk-fg': themeColors.foreground,
+    '--mk-heading': themeColors.heading,
+    '--mk-link': themeColors.link,
+    '--mk-code': themeColors.keyword,
+    '--mk-code-bg': themeColors.selection,
+    '--mk-comment': themeColors.comment,
+    '--mk-string': themeColors.string,
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  } as CSSProperties
+
   return (
     <div className="h-full w-full overflow-auto">
       <div
         ref={containerRef}
-        className="milkdown-editor prose prose-sm dark:prose-invert max-w-none px-6 py-4 focus-within:outline-none"
-        style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
+        className={`milkdown-editor milkdown-themed prose prose-sm ${resolvedVariant === 'dark' ? 'prose-invert' : ''} max-w-none px-6 py-4 focus-within:outline-none`}
+        style={themeStyle}
       />
     </div>
   )

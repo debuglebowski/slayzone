@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Info } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Switch, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { darkThemes, lightThemes } from '@slayzone/terminal/client'
+import { editorThemes } from '@slayzone/editor'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 function SettingLabel({ children, tip }: { children: React.ReactNode; tip: string }) {
@@ -39,9 +40,9 @@ export function AppearanceSettingsTab({
   const [notesCheckedHighlight, setNotesCheckedHighlight] = useState(false)
   const [notesShowToolbar, setNotesShowToolbar] = useState(false)
   const [notesSpellcheck, setNotesSpellcheck] = useState(true)
-  const [terminalThemeFollowApp, setTerminalThemeFollowApp] = useState(true)
-  const [terminalThemeDark, setTerminalThemeDark] = useState('slay')
-  const [terminalThemeLight, setTerminalThemeLight] = useState('slay-light')
+  const [contentThemeFollowApp, setContentThemeFollowApp] = useState(true)
+  const [contentThemeDark, setContentThemeDark] = useState('slay')
+  const [contentThemeLight, setContentThemeLight] = useState('slay-light')
 
   useEffect(() => {
     window.api.settings.get('project_color_tints_enabled').then(val => setProjectColorTints(val !== '0'))
@@ -49,9 +50,9 @@ export function AppearanceSettingsTab({
     window.api.settings.get('editor_font_size').then(val => setEditorFontSize(val ?? '13'))
     window.api.settings.get('reduce_motion').then(val => setReduceMotion(val === '1'))
     window.api.settings.get('sidebar_badge_mode').then(val => setSidebarBadgeMode((val === 'none' || val === 'count') ? val : 'blob'))
-    window.api.settings.get('terminal_theme_follow_app').then(val => setTerminalThemeFollowApp(val !== '0'))
-    window.api.settings.get('terminal_theme_dark').then(val => { if (val) setTerminalThemeDark(val) })
-    window.api.settings.get('terminal_theme_light').then(val => { if (val) setTerminalThemeLight(val) })
+    window.api.settings.get('content_theme_follow_app').then(v => v ?? window.api.settings.get('terminal_theme_follow_app')).then(val => setContentThemeFollowApp(val !== '0'))
+    window.api.settings.get('content_theme_dark').then(v => v ?? window.api.settings.get('terminal_theme_dark')).then(val => { if (val) setContentThemeDark(val) })
+    window.api.settings.get('content_theme_light').then(v => v ?? window.api.settings.get('terminal_theme_light')).then(val => { if (val) setContentThemeLight(val) })
     window.api.settings.get('notes_font_family').then(val => setNotesFontFamily(val === 'mono' ? 'mono' : 'sans'))
     window.api.settings.get('notes_line_spacing').then(val => setNotesLineSpacing(val === 'compact' ? 'compact' : 'normal'))
     window.api.settings.get('notes_checked_highlight').then(val => setNotesCheckedHighlight(val === '1'))
@@ -85,6 +86,64 @@ export function AppearanceSettingsTab({
               </SelectContent>
             </Select>
           </div>
+          <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+            <SettingLabel tip="Automatically switch content colors when the app theme changes">Follow application theme</SettingLabel>
+            <Switch
+              checked={contentThemeFollowApp}
+              onCheckedChange={(checked) => {
+                setContentThemeFollowApp(checked)
+                window.api.settings.set('content_theme_follow_app', checked ? '1' : '0')
+              }}
+            />
+          </div>
+          {contentThemeFollowApp ? (
+            <>
+              <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+                <SettingLabel tip="Color scheme for terminal and editors in dark mode">Dark content theme</SettingLabel>
+                <div className="flex items-center gap-2">
+                  <Select value={contentThemeDark} onValueChange={(v) => { setContentThemeDark(v); window.api.settings.set('content_theme_dark', v) }}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {darkThemes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <ContentThemePreview themeId={contentThemeDark} />
+                </div>
+              </div>
+              <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+                <SettingLabel tip="Color scheme for terminal and editors in light mode">Light content theme</SettingLabel>
+                <div className="flex items-center gap-2">
+                  <Select value={contentThemeLight} onValueChange={(v) => { setContentThemeLight(v); window.api.settings.set('content_theme_light', v) }}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lightThemes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <ContentThemePreview themeId={contentThemeLight} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+              <SettingLabel tip="Color scheme for terminal and editors">Content theme</SettingLabel>
+              <div className="flex items-center gap-2">
+                <Select value={contentThemeDark} onValueChange={(v) => { setContentThemeDark(v); window.api.settings.set('content_theme_dark', v) }}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {darkThemes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                    {lightThemes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <ContentThemePreview themeId={contentThemeDark} />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -107,64 +166,6 @@ export function AppearanceSettingsTab({
               </SelectContent>
             </Select>
           </div>
-          <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
-            <SettingLabel tip="Automatically switch terminal colors when the app theme changes">Follow application theme</SettingLabel>
-            <Switch
-              checked={terminalThemeFollowApp}
-              onCheckedChange={(checked) => {
-                setTerminalThemeFollowApp(checked)
-                window.api.settings.set('terminal_theme_follow_app', checked ? '1' : '0')
-              }}
-            />
-          </div>
-          {terminalThemeFollowApp ? (
-            <>
-              <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
-                <SettingLabel tip="Terminal color scheme used in dark mode">Dark theme</SettingLabel>
-                <div className="flex items-center gap-2">
-                  <Select value={terminalThemeDark} onValueChange={(v) => { setTerminalThemeDark(v); window.api.settings.set('terminal_theme_dark', v) }}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {darkThemes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <TerminalThemePreview themeId={terminalThemeDark} />
-                </div>
-              </div>
-              <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
-                <SettingLabel tip="Terminal color scheme used in light mode">Light theme</SettingLabel>
-                <div className="flex items-center gap-2">
-                  <Select value={terminalThemeLight} onValueChange={(v) => { setTerminalThemeLight(v); window.api.settings.set('terminal_theme_light', v) }}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {lightThemes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <TerminalThemePreview themeId={terminalThemeLight} />
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
-              <SettingLabel tip="Terminal color scheme">Theme</SettingLabel>
-              <div className="flex items-center gap-2">
-                <Select value={terminalThemeDark} onValueChange={(v) => { setTerminalThemeDark(v); window.api.settings.set('terminal_theme_dark', v) }}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {darkThemes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                    {lightThemes.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <TerminalThemePreview themeId={terminalThemeDark} />
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -289,18 +290,26 @@ export function AppearanceSettingsTab({
   )
 }
 
-function TerminalThemePreview({ themeId }: { themeId: string }) {
-  const theme = useMemo(() => [...darkThemes, ...lightThemes].find(t => t.id === themeId), [themeId])
-  if (!theme) return null
-  const c = theme.colors
-  const colors = [c.red, c.green, c.yellow, c.blue, c.magenta, c.cyan]
+function ContentThemePreview({ themeId }: { themeId: string }) {
+  const termTheme = useMemo(() => [...darkThemes, ...lightThemes].find(t => t.id === themeId), [themeId])
+  const editorTheme = useMemo(() => editorThemes.find(t => t.id === themeId), [themeId])
+  const bg = termTheme?.colors.background ?? editorTheme?.colors.background ?? '#000'
+  const dots: string[] = []
+  if (termTheme) {
+    const c = termTheme.colors
+    dots.push(c.red ?? '#888', c.green ?? '#888', c.yellow ?? '#888', c.blue ?? '#888', c.magenta ?? '#888', c.cyan ?? '#888')
+  } else if (editorTheme) {
+    const c = editorTheme.colors
+    dots.push(c.keyword, c.string, c.function, c.type, c.comment, c.number)
+  }
+  if (!dots.length) return null
   return (
     <div
       className="flex items-center gap-px rounded px-1.5 py-1 border"
-      style={{ backgroundColor: c.background ?? '#000' }}
+      style={{ backgroundColor: bg }}
     >
-      {colors.map((color, i) => (
-        <div key={i} className="size-2.5 rounded-full" style={{ backgroundColor: color ?? '#888' }} />
+      {dots.map((color, i) => (
+        <div key={i} className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
       ))}
     </div>
   )

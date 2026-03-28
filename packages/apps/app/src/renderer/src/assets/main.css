@@ -325,6 +325,30 @@
   text-decoration-color: #4ade8080;
 }
 
+/* Editor-themed prose overrides */
+.editor-themed .ProseMirror.prose {
+  --tw-prose-body: var(--prose-body);
+  --tw-prose-headings: var(--prose-headings);
+  --tw-prose-links: var(--prose-links);
+  --tw-prose-bold: var(--prose-headings);
+  --tw-prose-code: var(--prose-code);
+  --tw-prose-pre-bg: var(--prose-selection);
+  --tw-prose-pre-code: var(--prose-body);
+  --tw-prose-counters: var(--prose-body);
+  --tw-prose-bullets: var(--prose-body);
+  --tw-prose-quotes: var(--prose-body);
+  --tw-prose-quote-borders: var(--prose-muted);
+  --tw-prose-hr: var(--prose-muted);
+  --tw-prose-th-borders: var(--prose-muted);
+  --tw-prose-td-borders: var(--prose-muted);
+}
+.editor-themed .ProseMirror.prose a {
+  color: var(--prose-links);
+}
+.editor-themed .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+  accent-color: var(--prose-links);
+}
+
 /* Prevent Tailwind .visible/.invisible class names from colliding with xterm's
    identically-named scrollbar classes. Tailwind's .visible adds
    `visibility: visible` which overrides a parent's `visibility: hidden`,
@@ -384,20 +408,55 @@
 .milkdown-editor .ProseMirror code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.875em;
-  background: hsl(var(--muted) / 0.5);
+  background: var(--muted);
   border-radius: 3px;
   padding: 2px 5px;
 }
 .milkdown-editor .ProseMirror pre {
-  background: hsl(var(--muted) / 0.3);
-  border-radius: 6px;
-  padding: 0.75em 1em;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.875em 1em;
+  margin: 0.75em 0;
   overflow-x: auto;
+  font-size: 0.875em;
 }
 .milkdown-editor .ProseMirror pre code {
   background: none;
   padding: 0;
   border-radius: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.6;
+}
+/* Milkdown themed overrides — uses CSS vars injected by MarkdownFileEditor */
+.milkdown-themed .ProseMirror {
+  color: var(--mk-fg);
+}
+.milkdown-themed .ProseMirror h1,
+.milkdown-themed .ProseMirror h2,
+.milkdown-themed .ProseMirror h3 {
+  color: var(--mk-heading);
+}
+.milkdown-themed .ProseMirror a {
+  color: var(--mk-link);
+}
+.milkdown-themed .ProseMirror code {
+  color: var(--mk-code);
+  background: var(--mk-code-bg);
+}
+.milkdown-themed .ProseMirror pre {
+  background: var(--mk-code-bg);
+  border-color: color-mix(in srgb, var(--mk-comment) 40%, transparent);
+}
+.milkdown-themed .ProseMirror pre code {
+  color: var(--mk-fg);
+}
+.milkdown-themed .ProseMirror blockquote {
+  border-color: var(--mk-comment);
+  color: var(--mk-comment);
+}
+.milkdown-themed .ProseMirror hr {
+  border-color: var(--mk-comment);
 }
 
 /* Milkdown frontmatter block */

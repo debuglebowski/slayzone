@@ -59,7 +59,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
-import { RichTextEditor } from '@slayzone/editor'
+import { RichTextEditor, getEditorThemeById, type EditorThemeColors } from '@slayzone/editor'
+import { useTheme } from '@slayzone/settings/client'
 import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { TerminalContainer, type TerminalContainerHandle } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
@@ -191,7 +192,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 }: TaskDetailPageProps): React.JSX.Element {
   const { modes } = useTerminalModes()
 
-  const { colorTintsEnabled, notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
+  const { theme } = useTheme()
+  const { colorTintsEnabled, notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck, contentThemeFollowApp, contentThemeDark, contentThemeLight } = useAppearance()
+  const resolvedEditorThemeId = contentThemeFollowApp
+    ? (theme === 'dark' ? contentThemeDark : contentThemeLight)
+    : contentThemeDark
+  const notesThemeColors: EditorThemeColors = useMemo(
+    () => getEditorThemeById(resolvedEditorThemeId),
+    [resolvedEditorThemeId]
+  )
   // Main tab session ID format used by TerminalContainer/useTaskTerminals.
   const getMainSessionId = useCallback((id: string) => `${id}:${id}`, [])
 
@@ -1937,13 +1946,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onChange={setDescriptionValue}
                   onBlur={handleDescriptionSave}
                   placeholder="Add description..."
-                  className="bg-transparent p-3"
+                  className="p-3"
                   testId="task-description-editor"
                   fontFamily={notesFontFamily}
                   lineSpacing={notesLineSpacing}
                   checkedHighlight={notesCheckedHighlight}
                   showToolbar={notesShowToolbar}
                   spellcheck={notesSpellcheck}
+                  themeColors={notesThemeColors}
                 />
               </div>
             )}
@@ -2221,6 +2231,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         checkedHighlight={notesCheckedHighlight}
         showToolbar={notesShowToolbar}
         spellcheck={notesSpellcheck}
+        themeColors={notesThemeColors}
       />
 
     </div>

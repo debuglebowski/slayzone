@@ -17,6 +17,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/editor": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@slayzone/ui": "workspace:*",

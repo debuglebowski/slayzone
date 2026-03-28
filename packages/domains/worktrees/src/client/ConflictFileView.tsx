@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Sparkles, Check, ArrowLeft, ArrowRight, Info, Layers } from 'lucide-react'
 import { Button, Tooltip, TooltipContent, TooltipTrigger, cn } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
+import { useTheme } from '@slayzone/settings/client'
+import { getEditorThemeById, editorThemes } from '@slayzone/editor'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
+import { buildCodeMirrorTheme } from './codemirror-theme'
 import type { ConflictFileContent, ConflictAnalysis } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
 
@@ -37,8 +40,17 @@ function resolveLabels(ctx: MergeContext): { oursLabel: string; oursDesc: string
 }
 
 export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved, branchContext }: ConflictFileViewProps) {
-  const { editorFontSize } = useAppearance()
-  const editorTheme = useMemo(() => EditorView.theme({
+  const { theme } = useTheme()
+  const { editorFontSize, contentThemeFollowApp, contentThemeDark, contentThemeLight } = useAppearance()
+  const resolvedThemeId = contentThemeFollowApp
+    ? (theme === 'dark' ? contentThemeDark : contentThemeLight)
+    : contentThemeDark
+  const resolvedVariant = editorThemes.find(t => t.id === resolvedThemeId)?.variant ?? 'dark'
+  const cmThemeExt = useMemo(
+    () => buildCodeMirrorTheme(getEditorThemeById(resolvedThemeId), resolvedVariant === 'dark'),
+    [resolvedThemeId, resolvedVariant]
+  )
+  const sizeTheme = useMemo(() => EditorView.theme({
     '&': { height: '100%', fontSize: `${editorFontSize}px` },
     '.cm-scroller': { overflow: 'auto' },
     '.cm-content': { fontFamily: 'ui-monospace, monospace' }
@@ -73,7 +85,7 @@ export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved,
 
     const state = EditorState.create({
       doc: content.merged,
-      extensions: [basicSetup, javascript(), editorTheme]
+      extensions: [basicSetup, javascript(), sizeTheme, cmThemeExt]
     })
 
     const view = new EditorView({ state, parent: editorRef.current })

@@ -1,6 +1,6 @@
 import { useRef, useCallback, useState } from 'react'
 import { Dialog, DialogContent } from '@slayzone/ui'
-import { RichTextEditor, type Editor } from '@slayzone/editor'
+import { RichTextEditor, type Editor, type EditorThemeColors } from '@slayzone/editor'
 
 interface DescriptionDialogProps {
   open: boolean
@@ -13,6 +13,7 @@ interface DescriptionDialogProps {
   checkedHighlight?: boolean
   showToolbar?: boolean
   spellcheck?: boolean
+  themeColors?: EditorThemeColors
 }
 
 function getWordCount(editor: Editor | null): number {
@@ -20,7 +21,7 @@ function getWordCount(editor: Editor | null): number {
   return editor.state.doc.textContent.split(/\s+/).filter(Boolean).length
 }
 
-export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave, fontFamily, lineSpacing, checkedHighlight, showToolbar, spellcheck }: DescriptionDialogProps) {
+export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave, fontFamily, lineSpacing, checkedHighlight, showToolbar, spellcheck, themeColors }: DescriptionDialogProps) {
   const editorRef = useRef<Editor | null>(null)
   const [wordCount, setWordCount] = useState(0)
 
@@ -64,6 +65,7 @@ export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave,
           checkedHighlight={checkedHighlight}
           showToolbar={showToolbar}
           spellcheck={spellcheck}
+          themeColors={themeColors}
         />
       </DialogContent>
     </Dialog>
