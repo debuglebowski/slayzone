@@ -39,7 +39,7 @@ It exists because this is a long-term effort. We cannot migrate, normalize, and 
 | Conductor | Agent orchestrator | core | publish-ready | 2026-03-27 | Done. |
 | VibeKanban | Agent orchestrator | core | publish-ready | 2026-03-27 | Done. |
 | Superset.sh | Agent orchestrator | core | publish-ready | 2026-03-27 | Done. |
-| AutoClaude | Agent orchestrator | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
+| AutoClaude (Aperant) | Agent orchestrator | core | publish-ready | 2026-03-28 | Done. Rebranded to Aperant Mar 2026. License MIT→AGPL-3.0. Stars 3.6k→14k. |
 | Maestro | Agent orchestrator | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | Cursor | AI IDE | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | Linear | PM | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
@@ -90,7 +90,7 @@ It exists because this is a long-term effort. We cannot migrate, normalize, and 
 
 | Item | Status | Next step |
 | --- | --- | --- |
-| `comparison/_legacy/autoclaude.md` alias file | legacy-flat | Retire or convert to redirect note once `auto-claude` has a canonical folder. |
+| `comparison/_legacy/autoclaude.md` alias file | done | Canonical folder `auto-claude/` now exists. Legacy files retained as input archive. |
 | Legacy flat-file corpus in `comparison/_legacy/` | active | Migrate incrementally by priority wave. |
 | `comparison/_research/` narrative notes | active | Keep only market synthesis there; no source-of-truth tables. |
 
