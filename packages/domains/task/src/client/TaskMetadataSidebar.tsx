@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
-import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, Loader2, Pencil, Plus, X } from 'lucide-react'
+import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, Loader2, X } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import { priorityOptions } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import { CreateTagDialog } from '@slayzone/tags/client'
+import { TagSelector } from '@slayzone/tags/client'
 import type { ExternalLink, TaskSyncStatus } from '@slayzone/integrations/shared'
 import {
   Select,
@@ -18,10 +18,10 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { Calendar } from '@slayzone/ui'
 import { Button } from '@slayzone/ui'
-import { Checkbox } from '@slayzone/ui'
 import {
   buildStatusOptions,
-  cn
+  cn,
+  PriorityIcon
 } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
@@ -112,17 +112,6 @@ export function TaskMetadataSidebar({
     onUpdate(updated)
   }
 
-  const [tagDialogOpen, setTagDialogOpen] = useState(false)
-  const [editingTag, setEditingTag] = useState<Tag | null>(null)
-
-  const handleTagCreated = async (tag: Tag): Promise<void> => {
-    onTagCreated?.(tag)
-    // Auto-assign to current task
-    const newTagIds = [...taskTagIds, tag.id]
-    await window.api.taskTags.setTagsForTask(task.id, newTagIds)
-    onTagsChange(newTagIds)
-  }
-
   const handleTagToggle = async (tagId: string, checked: boolean): Promise<void> => {
     if (checked) track('tag_assigned')
     const newTagIds = checked ? [...taskTagIds, tagId] : taskTagIds.filter((id) => id !== tagId)
@@ -197,13 +186,7 @@ export function TaskMetadataSidebar({
               {priorityOptions.map((opt) => (
                 <SelectItem key={opt.value} value={String(opt.value)}>
                   <span className="flex items-center gap-1.5">
-                    <span className={cn('size-2 rounded-full', {
-                      'bg-red-500': opt.value === 1,
-                      'bg-orange-500': opt.value === 2,
-                      'bg-yellow-500': opt.value === 3,
-                      'bg-blue-400': opt.value === 4,
-                      'bg-neutral-400': opt.value === 5,
-                    })} />
+                    <PriorityIcon priority={opt.value} className="h-3.5 w-3.5" />
                     {opt.label}
                   </span>
                 </SelectItem>
@@ -277,52 +260,18 @@ export function TaskMetadataSidebar({
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-[200px] p-1.5">
-            {tags.length > 0 && (
-              <div className="space-y-0.5">
-                {tags.map((tag) => (
-                  <label key={tag.id} className="group flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted/50">
-                    <Checkbox
-                      checked={taskTagIds.includes(tag.id)}
-                      onCheckedChange={(checked) => handleTagToggle(tag.id, checked === true)}
-                    />
-                    <span
-                      className="flex-1 rounded px-2 py-1 text-sm font-medium inline-flex items-center justify-between gap-1"
-                      style={{ backgroundColor: tag.color, color: tag.text_color }}
-                    >
-                      {tag.name}
-                      <button
-                        type="button"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingTag(tag); setTagDialogOpen(true) }}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-            <div className={tags.length > 0 ? 'border-t mt-1.5 pt-1' : ''}>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start text-muted-foreground h-7 px-1.5"
-                onClick={() => { setEditingTag(null); setTagDialogOpen(true) }}
-              >
-                <Plus className="h-3.5 w-3.5 mr-1.5" />
-                New tag
-              </Button>
-            </div>
+            <TagSelector
+              tags={tags}
+              selectedTagIds={taskTagIds}
+              projectId={task.project_id}
+              onToggle={handleTagToggle}
+              onTagCreated={(tag) => {
+                onTagCreated?.(tag)
+                window.dispatchEvent(new CustomEvent('slayzone:tag-created', { detail: tag }))
+              }}
+            />
           </PopoverContent>
         </Popover>
-        <CreateTagDialog
-          open={tagDialogOpen}
-          onOpenChange={setTagDialogOpen}
-          projectId={task.project_id}
-          tag={editingTag}
-          onCreated={handleTagCreated}
-          onUpdated={() => {}}
-        />
       </div>
 
       {/* Blocked By */}

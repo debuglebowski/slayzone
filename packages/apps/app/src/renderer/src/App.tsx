@@ -93,7 +93,7 @@ function App(): React.JSX.Element {
   // Core data from domain hook
   const {
     tasks, projects, tags, taskTags, blockedTaskIds,
-    setTasks, setProjects, setTags,
+    setTasks, setProjects, setTags, setTaskTags,
     updateTask, moveTask, reorderTasks,
     archiveTask: rawArchiveTask, archiveTasks: rawArchiveTasks,
     deleteTask: rawDeleteTask, contextMenuUpdate: rawContextMenuUpdate,
@@ -297,6 +297,11 @@ function App(): React.JSX.Element {
   const projectTags = selectedProjectId ? tags.filter((t) => t.project_id === selectedProjectId) : tags
   const displayTasks = applyFilters(projectTasks, filter, taskTags, selectedProject?.columns_config)
   const projectsMap = new Map(projects.map((p) => [p.id, p]))
+
+  const handleTaskTagsChange = async (taskId: string, tagIds: string[]) => {
+    await window.api.taskTags.setTagsForTask(taskId, tagIds)
+    setTaskTags((prev) => { const next = new Map(prev); next.set(taskId, tagIds); return next })
+  }
 
   // Diagnostics (extracted — fire-and-forget side effects)
   useDiagnosticsSync({ tabs, activeTabIndex, activeView, selectedProjectId, projects, tasks, displayTaskCount: displayTasks.length, notificationState, projectPathMissing })
@@ -817,7 +822,7 @@ function App(): React.JSX.Element {
                                   {id === 'kanban' && filter.viewMode !== 'list' && (
                                     <KanbanBoard tasks={displayTasks} columns={selectedProject?.columns_config} viewConfig={getViewConfig(filter)} isActive={tabs[activeTabIndex]?.type === 'home'}
                                       onTaskMove={handleTaskMove} onTaskReorder={reorderTasks} onTaskClick={handleTaskClick}
-                                      projectsMap={projectsMap} showProjectDot={false} cardProperties={filter.cardProperties} taskTags={taskTags} tags={projectTags} blockedTaskIds={blockedTaskIds}
+                                      projectsMap={projectsMap} showProjectDot={false} cardProperties={filter.cardProperties} taskTags={taskTags} tags={projectTags} onTaskTagsChange={handleTaskTagsChange} blockedTaskIds={blockedTaskIds}
                                       allProjects={projects} onUpdateTask={contextMenuUpdate} onArchiveTask={archiveTask} onDeleteTask={deleteTask} onArchiveAllTasks={archiveTasks} />
                                   )}
                                   {id === 'kanban' && filter.viewMode === 'list' && (

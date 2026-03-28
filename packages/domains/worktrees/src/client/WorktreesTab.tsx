@@ -32,7 +32,8 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-  Input
+  Input,
+  PriorityIcon
 } from '@slayzone/ui'
 import { type FilterState, groupTasksBy, getViewConfig, type Column } from '@slayzone/tasks'
 import { resolveColumns } from '@slayzone/projects/shared'
@@ -41,13 +42,6 @@ import type { DetectedWorktree } from '../shared/types'
 import { CreateWorktreeDialog } from './CreateWorktreeDialog'
 import { useGitPanelContext } from './UnifiedGitPanel'
 
-const PRIORITY_BAR_COLORS: Record<number, string> = {
-  1: 'bg-red-500',
-  2: 'bg-orange-500',
-  3: 'bg-yellow-500',
-  4: 'bg-blue-400',
-  5: 'bg-muted-foreground/30'
-}
 
 interface WorktreesTabProps {
   visible: boolean
@@ -463,20 +457,7 @@ function TaskItem({
           onClick={() => onClick?.(task)}
           className="flex items-center gap-2.5 w-full rounded-md border transition-all group/task px-2.5 py-2 bg-surface-2 text-sm text-foreground hover:border-primary/50 hover:bg-muted/50 shadow-sm"
         >
-          <div className="flex items-end gap-[1px] shrink-0">
-            {[3, 5, 7, 9].map((h, i) => (
-              <div
-                key={i}
-                className={cn(
-                  'w-[1.5px] rounded-[0.5px]',
-                  i < 5 - task.priority
-                    ? PRIORITY_BAR_COLORS[task.priority]
-                    : 'bg-muted-foreground/20'
-                )}
-                style={{ height: h }}
-              />
-            ))}
-          </div>
+          <PriorityIcon priority={task.priority} className="h-3.5 w-3.5 shrink-0" />
           <TerminalSquare className="h-4 w-4 shrink-0 text-primary/70 group-hover/task:text-primary" />
           <span className="truncate flex-1 text-left font-medium">{task.title}</span>
         </button>

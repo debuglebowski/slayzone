@@ -21,7 +21,7 @@ import type { TerminalState } from '@slayzone/terminal/shared'
 import { groupTasksBy, columnToCreateTaskDefaults, PRIORITY_LABELS, todayISO, type Column } from './kanban'
 import type { ViewConfig, CardProperties } from './FilterState'
 import { TaskContextMenu } from './TaskContextMenu'
-import { cn, getColumnStatusStyle, getTerminalStateStyle, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
+import { cn, getColumnStatusStyle, getTerminalStateStyle, Tooltip, TooltipContent, TooltipTrigger, PriorityIcon } from '@slayzone/ui'
 import { IconButton } from '@slayzone/ui'
 import { ChevronDown, Plus, AlertCircle, Check, GitMerge, Link2 } from 'lucide-react'
 import { usePty, useActiveTaskIds } from '@slayzone/terminal'
@@ -47,32 +47,11 @@ interface KanbanListViewProps {
   onDeleteTask?: (taskId: string) => void
 }
 
-// ── Priority bar (same as KanbanCard) ──
-
-const PRIORITY_BAR_COLORS: Record<number, string> = {
-  1: 'bg-red-500',
-  2: 'bg-orange-500',
-  3: 'bg-yellow-500',
-  4: 'bg-blue-400',
-  5: 'bg-muted-foreground/30'
-}
-
 function PriorityBar({ priority }: { priority: number }): React.JSX.Element {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="flex items-end justify-center gap-[1.5px] shrink-0 w-[14px]">
-          {[3, 5, 7, 9].map((h, i) => (
-            <span
-              key={i}
-              className={cn(
-                'w-[2px] rounded-[0.5px]',
-                i < 5 - priority ? PRIORITY_BAR_COLORS[priority] : 'bg-muted-foreground/20'
-              )}
-              style={{ height: h }}
-            />
-          ))}
-        </span>
+        <span className="shrink-0"><PriorityIcon priority={priority} /></span>
       </TooltipTrigger>
       <TooltipContent>{PRIORITY_LABELS[priority]}</TooltipContent>
     </Tooltip>

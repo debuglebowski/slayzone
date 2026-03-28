@@ -2,14 +2,16 @@ import { motion } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 import type { Task } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
+import { TagSelector } from '@slayzone/tags/client'
 import type { Project } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'
 import type { TerminalState } from '@slayzone/terminal/shared'
-import { Card, CardContent, Tooltip, TooltipContent, TooltipTrigger, cn, getTerminalStateStyle } from '@slayzone/ui'
+import { Card, CardContent, Tooltip, TooltipContent, TooltipTrigger, Popover, PopoverContent, PopoverTrigger, cn, getTerminalStateStyle, PriorityIcon } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
-import { todayISO, PRIORITY_LABELS } from './kanban'
-import { AlertCircle, Check, GitMerge, Link2 } from 'lucide-react'
+import { todayISO } from './kanban'
+import { priorityOptions } from '@slayzone/task/shared'
+import { AlertCircle, GitMerge, Link2 } from 'lucide-react'
 import { usePty } from '@slayzone/terminal'
 import type { CardProperties } from './FilterState'
 
@@ -26,15 +28,10 @@ interface KanbanCardProps {
   cardProperties?: CardProperties
   taskTagIds?: string[]
   tags?: Tag[]
+  onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
+  onTaskTagsChange?: (taskId: string, tagIds: string[]) => void
 }
 
-const PRIORITY_BAR_COLORS: Record<number, string> = {
-  1: 'bg-red-500',
-  2: 'bg-orange-500',
-  3: 'bg-yellow-500',
-  4: 'bg-blue-400',
-  5: 'bg-muted-foreground/30'
-}
 
 export function KanbanCard({
   task,
@@ -48,11 +45,14 @@ export function KanbanCard({
   subTaskCount,
   cardProperties: cp,
   taskTagIds,
-  tags
+  tags,
+  onUpdateTask,
+  onTaskTagsChange
 }: KanbanCardProps): React.JSX.Element {
   const resolvedTags = (cp?.tags ?? true) && tags && taskTagIds
     ? tags.filter((t) => taskTagIds.includes(t.id))
     : []
+  const [prioOpen, setPrioOpen] = useState(false)
   const { reduceMotion } = useAppearance()
   const today = todayISO()
   const isOverdue = task.due_date && task.due_date < today && !isTerminalStatus(task.status, columns)
@@ -104,7 +104,7 @@ export function KanbanCard({
         data-task-id={task.id}
         onClick={(e) => onClick?.(e)}
       >
-      <CardContent className="px-2.5 py-5">
+      <CardContent className={cn("px-2.5 pt-5", resolvedTags.length > 0 || (subTaskCount && subTaskCount.total > 0) ? "pb-3" : "pb-5")}>
         <div className="flex items-start gap-3">
           {/* Project color dot - shown in All view */}
           {showProject && project ? (
@@ -118,7 +118,32 @@ export function KanbanCard({
           ) : null}
           <div className="flex-1 min-w-0">
             {/* Title row */}
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-1.5">
+              {(cp?.priority ?? true) && (
+                <Popover open={prioOpen} onOpenChange={setPrioOpen}>
+                  <PopoverTrigger asChild>
+                    <button type="button" className="shrink-0 leading-tight text-xs inline-flex items-center h-[1em]" onClick={(e) => e.stopPropagation()}>
+                      <PriorityIcon priority={task.priority} className="h-4 w-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[140px] p-1" align="start" onClick={(e) => e.stopPropagation()}>
+                    {priorityOptions.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={cn(
+                          'flex items-center gap-2 w-full rounded px-2 py-1 text-xs hover:bg-muted/50',
+                          task.priority === opt.value && 'bg-muted'
+                        )}
+                        onClick={() => { onUpdateTask?.(task.id, { priority: opt.value }); setPrioOpen(false) }}
+                      >
+                        <PriorityIcon priority={opt.value} className="h-3.5 w-3.5" />
+                        {opt.label}
+                      </button>
+                    ))}
+                  </PopoverContent>
+                </Popover>
+              )}
               <p className="text-xs font-medium line-clamp-3 flex-1 leading-tight whitespace-pre-wrap break-words">{task.title}</p>
               <div className="flex items-start gap-1.5 shrink-0">
               {(cp?.terminal ?? true) && (() => {
@@ -163,80 +188,87 @@ export function KanbanCard({
               {(cp?.dueDate ?? true) && task.due_date && !isOverdue && (
                 <span className="text-muted-foreground text-[9px] shrink-0">{task.due_date}</span>
               )}
-              {(cp?.subtasks ?? true) && subTaskCount && subTaskCount.total > 0 && (
-                <span className={cn(
-                  "flex items-center gap-0.5 text-[9px] shrink-0",
-                  subTaskCount.done === subTaskCount.total ? "text-green-500" : "text-muted-foreground"
-                )}>
-                  <Check className="size-2" />
-                  {subTaskCount.done}/{subTaskCount.total}
-                </span>
-              )}
               </div>
             </div>
-            {/* Bottom row: priority + tags */}
-            {((cp?.priority ?? true) || resolvedTags.length > 0) && (
+            {/* Bottom row: subtasks + tags */}
+            {(resolvedTags.length > 0 || (subTaskCount && subTaskCount.total > 0)) && (
               <div className="flex items-center gap-3 mt-3">
-                {(cp?.priority ?? true) && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="flex items-end gap-[1.5px] shrink-0">
-                        {[3, 5, 7, 9].map((h, i) => (
-                          <span
-                            key={i}
-                            className={cn(
-                              'w-[2px] rounded-[0.5px]',
-                              i < 5 - task.priority
-                                ? PRIORITY_BAR_COLORS[task.priority]
-                                : 'bg-muted-foreground/20'
-                            )}
-                            style={{ height: h }}
-                          />
-                        ))}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{PRIORITY_LABELS[task.priority]}</TooltipContent>
-                  </Tooltip>
-                )}
-                {resolvedTags.length === 1 && (
-                  <span
-                    className="h-5 rounded-full px-2 text-[10px] leading-none flex items-center truncate max-w-[80px]"
-                    style={{ backgroundColor: resolvedTags[0].color, color: resolvedTags[0].text_color }}
-                  >
-                    {resolvedTags[0].name}
-                  </span>
-                )}
-                {resolvedTags.length > 1 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="flex items-center h-5">
-                        <span
-                          className="h-5 rounded-full px-2 text-[10px] leading-none flex items-center truncate max-w-[70px] z-10"
-                          style={{ backgroundColor: resolvedTags[0].color, color: resolvedTags[0].text_color }}
-                        >
-                          {resolvedTags[0].name}
+                {(cp?.subtasks ?? true) && subTaskCount && subTaskCount.total > 0 && (() => {
+                  const pct = subTaskCount.done / subTaskCount.total
+                  const r = 8
+                  const circ = 2 * Math.PI * r
+                  const isDone = subTaskCount.done === subTaskCount.total
+                  return (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="h-5 shrink-0 flex items-center gap-1">
+                          <svg viewBox="0 0 20 20" className="h-5 w-5">
+                            <circle cx="10" cy="10" r={r} fill="none" strokeWidth="2"
+                              className="stroke-muted-foreground/20" />
+                            <circle cx="10" cy="10" r={r} fill="none" strokeWidth="2"
+                              strokeDasharray={circ} strokeDashoffset={circ * (1 - pct)}
+                              strokeLinecap="round"
+                              className={isDone ? 'stroke-green-500' : 'stroke-current'}
+                              transform="rotate(-90 10 10)" />
+                          </svg>
+                          <span className={cn(
+                            "text-[9px] shrink-0",
+                            isDone ? "text-green-500" : "text-muted-foreground"
+                          )}>
+                            {subTaskCount.done}/{subTaskCount.total}
+                          </span>
                         </span>
-                        {resolvedTags.slice(1).map((tag, i) => (
+                      </TooltipTrigger>
+                      <TooltipContent>{subTaskCount.done} of {subTaskCount.total} subtasks done</TooltipContent>
+                    </Tooltip>
+                  )
+                })()}
+                {resolvedTags.length > 0 && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button type="button" className="flex items-center h-5" onClick={(e) => e.stopPropagation()}>
+                        {resolvedTags.length === 1 ? (
                           <span
-                            key={tag.id}
-                            className="h-5 w-5 rounded-full border-2 border-background shrink-0"
-                            style={{
-                              backgroundColor: tag.color,
-                              marginLeft: i === 0 ? -10 : -10,
-                              zIndex: 9 - i
-                            }}
-                          />
-                        ))}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <div className="flex flex-col gap-1">
-                        {resolvedTags.map((tag) => (
-                          <span key={tag.id}>{tag.name}</span>
-                        ))}
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
+                            className="h-5 rounded-full px-2 text-[10px] leading-none flex items-center truncate max-w-[80px]"
+                            style={{ backgroundColor: resolvedTags[0].color, color: resolvedTags[0].text_color }}
+                          >
+                            {resolvedTags[0].name}
+                          </span>
+                        ) : (
+                          <>
+                            <span
+                              className="h-5 rounded-full px-2 text-[10px] leading-none flex items-center truncate max-w-[70px] z-10"
+                              style={{ backgroundColor: resolvedTags[0].color, color: resolvedTags[0].text_color }}
+                            >
+                              {resolvedTags[0].name}
+                            </span>
+                            {resolvedTags.slice(1).map((tag, i) => (
+                              <span
+                                key={tag.id}
+                                className="h-5 w-5 rounded-full border-2 border-background shrink-0"
+                                style={{ backgroundColor: tag.color, marginLeft: -10, zIndex: 9 - i }}
+                              />
+                            ))}
+                          </>
+                        )}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[200px] p-1.5" align="start" onClick={(e) => e.stopPropagation()}>
+                      <TagSelector
+                        tags={tags ?? []}
+                        selectedTagIds={taskTagIds ?? []}
+                        projectId={task.project_id}
+                        onToggle={(tagId, checked) => {
+                          const current = taskTagIds ?? []
+                          const next = checked ? [...current, tagId] : current.filter((id) => id !== tagId)
+                          onTaskTagsChange?.(task.id, next)
+                        }}
+                        onTagCreated={(tag) => {
+                          window.dispatchEvent(new CustomEvent('slayzone:tag-created', { detail: tag }))
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
                 )}
               </div>
             )}

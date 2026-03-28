@@ -20,6 +20,7 @@ interface UseTasksDataReturn {
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>
   setTags: React.Dispatch<React.SetStateAction<Tag[]>>
+  setTaskTags: React.Dispatch<React.SetStateAction<Map<string, string[]>>>
 
   // Task handlers
   updateTask: (task: Task | null | undefined) => void
@@ -262,6 +263,7 @@ export function useTasksData(): UseTasksDataReturn {
     setTasks,
     setProjects,
     setTags,
+    setTaskTags,
     updateTask,
     moveTask,
     reorderTasks,

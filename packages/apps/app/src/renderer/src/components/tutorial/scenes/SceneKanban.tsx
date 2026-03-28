@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, LayoutGroup } from 'framer-motion'
 import { Home, Plus, X } from 'lucide-react'
-import { cn } from '@slayzone/ui'
+import { cn, PriorityIcon } from '@slayzone/ui'
 
 interface MockTask {
   id: string
@@ -9,28 +9,8 @@ interface MockTask {
   priority: number
 }
 
-const PRIORITY_COLORS: Record<number, string> = {
-  1: 'bg-red-500',
-  2: 'bg-orange-500',
-  3: 'bg-yellow-500',
-  4: 'bg-blue-400',
-  5: 'bg-muted-foreground/30',
-}
-
 function PriorityBars({ priority }: { priority: number }): React.JSX.Element {
-  const filled = 5 - priority
-  const color = PRIORITY_COLORS[priority]
-  return (
-    <span className="flex items-end gap-[1.5px] shrink-0 mt-0.5">
-      {[3, 5, 7, 9].map((h, i) => (
-        <span
-          key={i}
-          className={`w-[2px] rounded-[0.5px] ${i < filled ? color : 'bg-muted-foreground/20'}`}
-          style={{ height: h }}
-        />
-      ))}
-    </span>
-  )
+  return <PriorityIcon priority={priority} />
 }
 
 function MockCard({ task, highlighted }: { task: MockTask; highlighted?: boolean }): React.JSX.Element {

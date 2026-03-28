@@ -36,6 +36,7 @@ interface SortableKanbanCardProps {
   subTaskCount?: { done: number; total: number }
   taskTagIds?: string[]
   tags?: Tag[]
+  onTaskTagsChange?: (taskId: string, tagIds: string[]) => void
   // Context menu props
   allProjects?: Project[]
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
@@ -58,6 +59,7 @@ function SortableKanbanCard({
   subTaskCount,
   taskTagIds,
   tags,
+  onTaskTagsChange,
   allProjects,
   onUpdateTask,
   onArchiveTask,
@@ -102,6 +104,8 @@ function SortableKanbanCard({
         cardProperties={cardProperties}
         taskTagIds={taskTagIds}
         tags={tags}
+        onUpdateTask={onUpdateTask}
+        onTaskTagsChange={onTaskTagsChange}
       />
     </div>
   )
@@ -138,6 +142,7 @@ interface KanbanColumnProps {
   cardProperties?: CardProperties
   taskTags?: Map<string, string[]>
   tags?: Tag[]
+  onTaskTagsChange?: (taskId: string, tagIds: string[]) => void
   blockedTaskIds?: Set<string>
   subTaskCounts?: Map<string, { done: number; total: number }>
   focusedTaskId?: string | null
@@ -164,6 +169,7 @@ export function KanbanColumn({
   cardProperties,
   taskTags,
   tags,
+  onTaskTagsChange,
   blockedTaskIds,
   subTaskCounts,
   focusedTaskId,
@@ -252,6 +258,7 @@ export function KanbanColumn({
                 cardProperties={cardProperties}
                 taskTagIds={taskTags?.get(task.id)}
                 tags={tags}
+                onTaskTagsChange={onTaskTagsChange}
                 isBlocked={blockedTaskIds?.has(task.id)}
                 isFocused={focusedTaskId === task.id}
                 onMouseEnter={() => onCardMouseEnter?.(task.id)}

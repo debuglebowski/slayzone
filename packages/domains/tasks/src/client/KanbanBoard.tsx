@@ -40,6 +40,7 @@ interface KanbanBoardProps {
   cardProperties?: CardProperties
   taskTags?: Map<string, string[]>
   tags?: Tag[]
+  onTaskTagsChange?: (taskId: string, tagIds: string[]) => void
   blockedTaskIds?: Set<string>
   // Context menu props
   allProjects?: Project[]
@@ -62,6 +63,7 @@ export function KanbanBoard({
   cardProperties,
   taskTags,
   tags,
+  onTaskTagsChange,
   blockedTaskIds,
   allProjects,
   onUpdateTask,
@@ -235,6 +237,7 @@ export function KanbanBoard({
             cardProperties={cardProperties}
             taskTags={taskTags}
             tags={tags}
+            onTaskTagsChange={onTaskTagsChange}
             blockedTaskIds={blockedTaskIds}
             subTaskCounts={subTaskCounts}
             focusedTaskId={focusedTaskId}

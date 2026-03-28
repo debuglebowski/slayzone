@@ -396,6 +396,7 @@ export function CreateTaskDialog({
                     open={createTagOpen}
                     onOpenChange={setCreateTagOpen}
                     projectId={selectedProjectId}
+                    existingTags={tags}
                     onCreated={(tag) => {
                       onTagCreated?.(tag)
                       field.onChange([...field.value, tag.id])

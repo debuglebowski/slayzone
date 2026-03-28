@@ -134,6 +134,7 @@ export function TagsSettingsTab() {
             open={createTagOpen}
             onOpenChange={setCreateTagOpen}
             projectId={selectedProjectId}
+            existingTags={tags}
             onCreated={(tag) => {
               setAllTags((prev) => [...prev, tag])
             }}

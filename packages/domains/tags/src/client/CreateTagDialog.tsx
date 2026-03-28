@@ -55,13 +55,20 @@ interface CreateTagDialogProps {
   projectId: string
   /** If provided, dialog edits this tag instead of creating a new one */
   tag?: Tag | null
+  /** Existing tags — their colors will be dimmed in the picker */
+  existingTags?: Tag[]
   onCreated: (tag: Tag) => void
   onUpdated?: (tag: Tag) => void
 }
 
 const DEFAULT_PRESET = TAG_PRESETS[17] // indigo
 
-export function CreateTagDialog({ open, onOpenChange, projectId, tag, onCreated, onUpdated }: CreateTagDialogProps) {
+export function CreateTagDialog({ open, onOpenChange, projectId, tag, existingTags, onCreated, onUpdated }: CreateTagDialogProps) {
+  const usedColors = new Set(
+    (existingTags ?? [])
+      .filter((t) => !tag || t.id !== tag.id) // don't exclude the tag being edited
+      .map((t) => `${t.color}:${t.text_color}`)
+  )
   const isEditing = !!tag
   const [name, setName] = useState('')
   const [selected, setSelected] = useState(DEFAULT_PRESET)
@@ -125,7 +132,7 @@ export function CreateTagDialog({ open, onOpenChange, projectId, tag, onCreated,
           <div className="space-y-1.5">
             <Label>Color</Label>
             <div className="grid grid-cols-10 gap-1.5">
-              {TAG_PRESETS.map((preset, i) => (
+              {TAG_PRESETS.filter((preset) => !usedColors.has(`${preset.bg}:${preset.text}`)).map((preset, i) => (
                 <button
                   key={i}
                   type="button"
