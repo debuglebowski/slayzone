@@ -117,31 +117,10 @@ export function KanbanCard({
             <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30 shrink-0 mt-1" />
           ) : null}
           <div className="flex-1 min-w-0">
+            {/* Title row */}
             <div className="flex items-start gap-3">
-              {(cp?.priority ?? true) && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex items-end gap-[1.5px] shrink-0 mt-0.5">
-                    {[3, 5, 7, 9].map((h, i) => (
-                      <span
-                        key={i}
-                        className={cn(
-                          'w-[2px] rounded-[0.5px]',
-                          i < 5 - task.priority
-                            ? PRIORITY_BAR_COLORS[task.priority]
-                            : 'bg-muted-foreground/20'
-                        )}
-                        style={{ height: h }}
-                      />
-                    ))}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>{PRIORITY_LABELS[task.priority]}</TooltipContent>
-              </Tooltip>
-              )}
               <p className="text-xs font-medium line-clamp-3 flex-1 leading-tight whitespace-pre-wrap break-words">{task.title}</p>
               <div className="flex items-start gap-1.5 shrink-0">
-              {/* Terminal state indicator - hide when starting */}
               {(cp?.terminal ?? true) && (() => {
                 const stateStyle = terminalState !== 'starting' ? getTerminalStateStyle(terminalState) : null
                 return stateStyle ? (
@@ -181,11 +160,9 @@ export function KanbanCard({
                   <AlertCircle className="h-2 w-2" />
                 </span>
               )}
-              {/* Due date */}
               {(cp?.dueDate ?? true) && task.due_date && !isOverdue && (
                 <span className="text-muted-foreground text-[9px] shrink-0">{task.due_date}</span>
               )}
-              {/* Sub-task count */}
               {(cp?.subtasks ?? true) && subTaskCount && subTaskCount.total > 0 && (
                 <span className={cn(
                   "flex items-center gap-0.5 text-[9px] shrink-0",
@@ -197,17 +174,70 @@ export function KanbanCard({
               )}
               </div>
             </div>
-            {resolvedTags.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {resolvedTags.map((tag) => (
+            {/* Bottom row: priority + tags */}
+            {((cp?.priority ?? true) || resolvedTags.length > 0) && (
+              <div className="flex items-center gap-3 mt-3">
+                {(cp?.priority ?? true) && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex items-end gap-[1.5px] shrink-0">
+                        {[3, 5, 7, 9].map((h, i) => (
+                          <span
+                            key={i}
+                            className={cn(
+                              'w-[2px] rounded-[0.5px]',
+                              i < 5 - task.priority
+                                ? PRIORITY_BAR_COLORS[task.priority]
+                                : 'bg-muted-foreground/20'
+                            )}
+                            style={{ height: h }}
+                          />
+                        ))}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{PRIORITY_LABELS[task.priority]}</TooltipContent>
+                  </Tooltip>
+                )}
+                {resolvedTags.length === 1 && (
                   <span
-                    key={tag.id}
-                    className="rounded px-1 py-0 text-[9px] leading-tight"
-                    style={{ backgroundColor: tag.color, color: tag.text_color }}
+                    className="h-5 rounded-full px-2 text-[10px] leading-none flex items-center truncate max-w-[80px]"
+                    style={{ backgroundColor: resolvedTags[0].color, color: resolvedTags[0].text_color }}
                   >
-                    {tag.name}
+                    {resolvedTags[0].name}
                   </span>
-                ))}
+                )}
+                {resolvedTags.length > 1 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex items-center h-5">
+                        <span
+                          className="h-5 rounded-full px-2 text-[10px] leading-none flex items-center truncate max-w-[70px] z-10"
+                          style={{ backgroundColor: resolvedTags[0].color, color: resolvedTags[0].text_color }}
+                        >
+                          {resolvedTags[0].name}
+                        </span>
+                        {resolvedTags.slice(1).map((tag, i) => (
+                          <span
+                            key={tag.id}
+                            className="h-5 w-5 rounded-full border-2 border-background shrink-0"
+                            style={{
+                              backgroundColor: tag.color,
+                              marginLeft: i === 0 ? -10 : -10,
+                              zIndex: 9 - i
+                            }}
+                          />
+                        ))}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <div className="flex flex-col gap-1">
+                        {resolvedTags.map((tag) => (
+                          <span key={tag.id}>{tag.name}</span>
+                        ))}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
               </div>
             )}
           </div>
