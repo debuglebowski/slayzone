@@ -939,12 +939,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         return
       }
 
-      // Skip shortcuts when focus is in CodeMirror or contenteditable editors
-      const target = e.target as HTMLElement
-      const inEditor = target?.closest?.('[contenteditable="true"]')
-      const inCodeMirror = target?.closest?.('.cm-editor')
-      if (inCodeMirror) return
-
+      // Safe panel toggles — work even inside CodeMirror / contenteditable
       if (matchesShortcut(e, keys('panel-git')) && isBuiltinEnabled('diff', 'task')) {
         e.preventDefault()
         if (!panelVisibility.diff) {
@@ -955,18 +950,36 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         } else {
           gitPanelRef.current?.switchToTab('general')
         }
-      } else if (matchesShortcut(e, keys('panel-terminal')) && isBuiltinEnabled('terminal', 'task')) {
+        return
+      }
+      if (matchesShortcut(e, keys('panel-terminal')) && isBuiltinEnabled('terminal', 'task')) {
         e.preventDefault()
         handlePanelToggle('terminal', !panelVisibility.terminal)
-      } else if (matchesShortcut(e, keys('panel-browser')) && !inEditor && isBuiltinEnabled('browser', 'task')) {
+        return
+      }
+      if (matchesShortcut(e, keys('panel-processes')) && isBuiltinEnabled('processes', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('processes', !panelVisibility.processes)
+        return
+      }
+      if (matchesShortcut(e, keys('panel-tests')) && isBuiltinEnabled('tests', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('tests', !panelVisibility.tests)
+        return
+      }
+
+      // Skip shortcuts that conflict with editor bindings (Mod+S, Mod+B)
+      const target = e.target as HTMLElement
+      const inEditor = target?.closest?.('[contenteditable="true"]')
+      const inCodeMirror = target?.closest?.('.cm-editor')
+      if (inCodeMirror) return
+
+      if (matchesShortcut(e, keys('panel-browser')) && !inEditor && isBuiltinEnabled('browser', 'task')) {
         e.preventDefault()
         handlePanelToggle('browser', !panelVisibility.browser)
       } else if (matchesShortcut(e, keys('panel-settings')) && isBuiltinEnabled('settings', 'task')) {
         e.preventDefault()
         handlePanelToggle('settings', !panelVisibility.settings)
-      } else if (matchesShortcut(e, keys('panel-processes')) && isBuiltinEnabled('processes', 'task')) {
-        e.preventDefault()
-        handlePanelToggle('processes', !panelVisibility.processes)
       } else {
         // Web panel shortcuts (not in registry — dynamic per-project config)
         for (const wp of enabledWebPanels) {

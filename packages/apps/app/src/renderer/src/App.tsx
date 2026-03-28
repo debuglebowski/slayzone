@@ -453,9 +453,9 @@ function App(): React.JSX.Element {
     const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {
       if (tabs[activeTabIndex]?.type !== 'home') return
       if (!selectedProjectId) return
-      if ((e.target as HTMLElement)?.closest?.('.cm-editor') || (e.target as HTMLElement)?.closest?.('.milkdown-editor')) return
       if (isRecording) return
 
+      // These shortcuts work even inside editors (no binding conflict)
       if (matchesShortcut(e, getKeys('editor-search')) && isHomePanelEnabled('editor', 'home')) {
         e.preventDefault()
         if (homePanel.homeEditorRef.current) {
