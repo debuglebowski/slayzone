@@ -89,13 +89,12 @@ export function LeaderboardPage(): React.JSX.Element {
 function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboardAuth> }): React.JSX.Element {
   const [period, setPeriod] = useState<Period>('all-time')
   const [authBusy, setAuthBusy] = useState(false)
-  const [syncing, setSyncing] = useState(false)
+
   const [resolvedGithubLogin, setResolvedGithubLogin] = useState<string | null>(null)
   const [resolvedGithubAvatar, setResolvedGithubAvatar] = useState<string | null>(null)
   const [resolvedGithubUrl, setResolvedGithubUrl] = useState<string | null>(null)
   const [devProtocolBanner, setDevProtocolBanner] = useState<string | null>(null)
   const syncViewerProfile = useMutation(api.leaderboard.syncViewerProfile)
-  const syncDailyStats = useMutation(api.leaderboard.syncDailyStats)
   const forgetMeMutation = useMutation(api.leaderboard.forgetMe)
   const myTotals = useQuery(api.leaderboard.getMyTotals, auth.isAuthenticated ? {} : 'skip')
   const topTokens = useQuery(api.leaderboard.topByTotalTokens, auth.configured ? { period, limit: 25 } : 'skip')
@@ -119,20 +118,6 @@ function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboard
     if (!auth.isAuthenticated) return
     void syncViewerProfile({}).catch(() => {})
   }, [auth.isAuthenticated, syncViewerProfile])
-
-  useEffect(() => {
-    if (!auth.isAuthenticated) return
-    let cancelled = false
-    setSyncing(true)
-    window.api.leaderboard?.getLocalStats()
-      .then((stats) => {
-        if (cancelled || stats.days.length === 0) return
-        return syncDailyStats({ days: stats.days })
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setSyncing(false) })
-    return () => { cancelled = true }
-  }, [auth.isAuthenticated, syncDailyStats])
 
   useEffect(() => {
     if (auth.isAuthenticated && viewer) return
@@ -252,9 +237,7 @@ function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboard
                     <DropdownMenuLabel className="flex flex-col gap-0.5">
                       <span>{canParticipate ? viewerName : 'Guest'}</span>
                       <span className="text-xs font-normal text-muted-foreground">
-                        {canParticipate
-                          ? syncing ? 'Syncing stats…' : 'Participating in leaderboard'
-                          : 'Sign in to participate'}
+                        {canParticipate ? 'Participating in leaderboard' : 'Sign in to participate'}
                       </span>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />

@@ -1,6 +1,9 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { ConvexReactClient, useConvexAuth } from 'convex/react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
+import { api } from 'convex/_generated/api'
+
+const TWELVE_HOURS = 12 * 60 * 60 * 1000
 
 interface LeaderboardAuthState {
   configured: boolean
@@ -134,6 +137,20 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
     }),
     [actions, completeOAuthCode, isAuthenticated, isLoading, lastError]
   )
+
+  // Background leaderboard stats sync every 12 hours
+  const syncDailyStats = useMutation(api.leaderboard.syncDailyStats)
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const sync = (): void => {
+      window.api.leaderboard?.getLocalStats()
+        .then((stats) => { if (stats.days.length > 0) syncDailyStats({ days: stats.days }) })
+        .catch(() => {})
+    }
+    sync()
+    const id = setInterval(sync, TWELVE_HOURS)
+    return () => clearInterval(id)
+  }, [isAuthenticated, syncDailyStats])
 
   return <LeaderboardAuthContext.Provider value={value}>{children}</LeaderboardAuthContext.Provider>
 }
