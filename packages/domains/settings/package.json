@@ -10,7 +10,8 @@
     "./shared": "./src/shared/index.ts",
     "./main": "./src/main/index.ts",
     "./client": "./src/client/index.ts",
-    "./client/UserSettingsDialog": "./src/client/UserSettingsDialog.tsx"
+    "./client/UserSettingsDialog": "./src/client/UserSettingsDialog.tsx",
+    "./client/tabs/TagsSettingsTab": "./src/client/tabs/TagsSettingsTab.tsx"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

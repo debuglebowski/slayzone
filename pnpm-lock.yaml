@@ -492,6 +492,9 @@ importers:
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../integrations
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry

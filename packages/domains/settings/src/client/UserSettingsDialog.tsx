@@ -14,7 +14,6 @@ import { GeneralSettingsTab } from './tabs/GeneralSettingsTab'
 import { AppearanceSettingsTab } from './tabs/AppearanceSettingsTab'
 import { PanelsSettingsTab } from './tabs/PanelsSettingsTab'
 import { AiProvidersSettingsTab } from './tabs/AiProvidersSettingsTab'
-import { TagsSettingsTab } from './tabs/TagsSettingsTab'
 import { DataSettingsTab } from './tabs/DataSettingsTab'
 import { DiagnosticsSettingsTab } from './tabs/DiagnosticsSettingsTab'
 import { AboutSettingsTab } from './tabs/AboutSettingsTab'
@@ -89,7 +88,6 @@ export function UserSettingsDialog({
       ]
     },
     ...(contextManagerEnabled ? [{ key: 'ai-config', label: 'Context Manager' }] : []),
-    { key: 'tags', label: 'Tags' },
     { key: 'data', label: 'Import & Export' },
     { key: 'backup', label: 'Backup' },
     { key: 'labs', label: 'Labs' },
@@ -155,8 +153,6 @@ export function UserSettingsDialog({
                 </div>
               </div>
             )}
-
-            {activeTab === 'tags' && <TagsSettingsTab />}
 
             {activeTab === 'data' && <DataSettingsTab />}
 

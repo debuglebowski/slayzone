@@ -13,13 +13,14 @@ import { AiConfigTab } from './AiConfigTab'
 import { TestsTab } from '@slayzone/test-panel/client'
 import { WorktreesTab } from './WorktreesTab'
 import { ReposTab } from './ReposTab'
+import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 import { useDetectedRepos } from './useDetectedRepos'
 
 interface ProjectSettingsDialogProps {
   project: Project | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  initialTab?: 'general' | 'environment' | 'columns' | 'worktrees' | 'repos' | 'integrations' | 'ai-config' | 'tests'
+  initialTab?: 'general' | 'environment' | 'columns' | 'worktrees' | 'repos' | 'integrations' | 'ai-config' | 'tests' | 'tags'
   groupBy?: 'none' | 'path' | 'label'
   onGroupByChange?: (value: 'none' | 'path' | 'label') => void
   integrationOnboardingProvider?: IntegrationProvider | null
@@ -40,7 +41,7 @@ export function ProjectSettingsDialog({
   onOpenGlobalAiConfig,
   onUpdated
 }: ProjectSettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'columns' | 'worktrees' | 'repos' | 'integrations' | 'ai-config' | 'tests'>('general')
+  const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'columns' | 'worktrees' | 'repos' | 'tags' | 'integrations' | 'ai-config' | 'tests'>('general')
   const detectedRepos = useDetectedRepos(open ? project?.path ?? null : null)
   const [contextManagerEnabled, setContextManagerEnabled] = useState(window.api.app.isContextManagerEnabledSync)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
@@ -91,6 +92,7 @@ export function ProjectSettingsDialog({
     { key: 'columns', label: 'Task statuses' },
     { key: 'worktrees', label: 'Worktrees' },
     ...(detectedRepos.length > 0 ? [{ key: 'repos' as const, label: 'Repositories' }] : []),
+    { key: 'tags', label: 'Tags' },
     { key: 'tests', label: 'Tests' },
     { key: 'integrations' as const, label: 'Integrations' },
   ]
@@ -161,6 +163,10 @@ export function ProjectSettingsDialog({
               integrationOnboardingProvider={integrationOnboardingProvider}
               onIntegrationOnboardingHandled={onIntegrationOnboardingHandled}
             />
+          )}
+
+          {activeTab === 'tags' && project && (
+            <TagsSettingsTab projectId={project.id} />
           )}
 
           {activeTab === 'tests' && project && (
