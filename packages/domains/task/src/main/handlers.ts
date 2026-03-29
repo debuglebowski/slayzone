@@ -522,7 +522,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     const projectColumns = getProjectColumns(db, data.projectId)
 
     // Resolve template (explicit > project default > none)
-    const template = data.isTemporary ? null : getTemplateForTask(db, data.projectId, data.templateId)
+    const template = getTemplateForTask(db, data.projectId, data.templateId)
 
     const initialStatus =
       data.status && isKnownStatus(data.status, projectColumns)

@@ -5,7 +5,8 @@ import { DescriptionDialog } from './DescriptionDialog'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Task, PanelVisibility } from '@slayzone/task/shared'
+import type { Task, PanelVisibility, UpdateTaskInput } from '@slayzone/task/shared'
+import type { TaskTemplate } from '@slayzone/task/shared'
 import type { TaskDetailData } from './taskDetailCache'
 import { BUILTIN_PANEL_IDS, getProviderConversationId, getProviderFlags, setProviderConversationId, setProviderFlags, clearAllConversationIds } from '@slayzone/task/shared'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
@@ -267,6 +268,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Delete/archive dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
+
+  // Templates for temporary tasks
+  const [templates, setTemplates] = useState<TaskTemplate[]>([])
+  useEffect(() => {
+    if (!task?.is_temporary || !task.project_id) return
+    window.api.taskTemplates.getByProject(task.project_id).then(setTemplates)
+  }, [task?.is_temporary, task?.project_id])
 
   // Description fullscreen dialog
   const [descriptionFullscreen, setDescriptionFullscreen] = useState(false)
@@ -1084,6 +1092,31 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onTaskUpdated(updated)
   }
 
+  const applyTemplate = useCallback(async (template: TaskTemplate) => {
+    if (!task) return
+    const updates: UpdateTaskInput = { id: task.id }
+    if (template.terminal_mode) updates.terminalMode = template.terminal_mode
+    if (template.provider_config) updates.providerConfig = template.provider_config
+    if (template.panel_visibility) updates.panelVisibility = template.panel_visibility
+    if (template.browser_tabs) updates.browserTabs = template.browser_tabs
+    if (template.web_panel_urls) updates.webPanelUrls = template.web_panel_urls
+
+    const modeChanged = template.terminal_mode && template.terminal_mode !== task.terminal_mode
+    if (modeChanged) {
+      const mainSessionId = getMainSessionId(task.id)
+      resetTaskState(mainSessionId)
+      await window.api.pty.kill(mainSessionId)
+      markSkipCache(mainSessionId)
+    }
+
+    const updated = await window.api.db.updateTask(updates)
+    handleTaskUpdate(updated)
+
+    if (modeChanged) {
+      setTerminalKey(k => k + 1)
+    }
+  }, [task, getMainSessionId, resetTaskState])
+
   // Wrapper for GitPanel that calls API and notifies parent
   const updateTaskAndNotify = async (data: { id: string; worktreePath?: string | null; worktreeParentBranch?: string | null; baseDir?: string | null; browserUrl?: string | null; status?: Task['status'] }): Promise<Task> => {
     // Only reset PTY when the effective working directory actually changes
@@ -1296,7 +1329,29 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               <div className="flex flex-1 min-w-0">
                 <div className="relative min-w-0 w-full">
                   <div className="flex items-center gap-3">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="size-5 text-muted-foreground/55 shrink-0" />
+                      </TooltipTrigger>
+                      <TooltipContent>Auto-deletes on terminal exit or tab close</TooltipContent>
+                    </Tooltip>
                     <span className="text-2xl italic text-muted-foreground">Temporary task</span>
+                    {templates.length > 0 && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm" className="h-7 px-2.5 shrink-0">
+                            Apply template
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start">
+                          {templates.map(t => (
+                            <DropdownMenuItem key={t.id} onClick={() => applyTemplate(t)}>
+                              {t.name}{t.is_default ? ' \u2666' : ''}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -1312,9 +1367,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       Turn into task
                     </Button>
                   </div>
-                  <p className="pointer-events-none absolute left-0 top-full z-10 -mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground/55">
-                    Auto-deletes on terminal exit or tab close.
-                  </p>
                 </div>
               </div>
             ) : (<div className="flex items-center gap-2 flex-1 min-w-0">
