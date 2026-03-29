@@ -61,7 +61,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
 import { RichTextEditor } from '@slayzone/editor'
 import { useTheme } from '@slayzone/settings/client'
-import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, LoopModeBanner, LoopModeDialog } from '@slayzone/terminal'
+import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, LoopModeBanner, LoopModeDialog } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal/shared'
 import { TerminalContainer, type TerminalContainerHandle } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
@@ -354,11 +354,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     clearBuffer: () => Promise<void>
   } | null>(null)
 
-  // Loop mode (labs feature)
+  // Loop command (labs feature)
   const [loopModeAvailable, setLoopModeAvailable] = useState(false)
   const [loopDialogOpen, setLoopDialogOpen] = useState(false)
   const loopConfigured = task?.loop_config != null && !!(task.loop_config.prompt.trim() && task.loop_config.criteriaPattern.trim())
-  const loopModeOpen = loopConfigured
   useEffect(() => {
     window.api.app.isLoopModeEnabled().then(setLoopModeAvailable)
   }, [])
@@ -369,7 +368,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       if (updated) onTaskUpdated(updated)
     })
   }, [task?.id, onTaskUpdated])
-  const { loopState, startLoop, pauseLoop, resumeLoop, stopLoop, updateConfig: updateLoopConfig } = useLoopMode({
+  const { status: loopStatus, iteration: loopIteration, startLoop, pauseLoop, resumeLoop, stopLoop } = useLoopMode({
     sessionId: mainSessionId,
     config: task?.loop_config ?? null,
     onConfigChange: handleLoopConfigChange
@@ -1568,9 +1567,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onOpenUrl={openDevServerInBrowser}
                   onOpenFile={handleQuickOpenFile}
                   onMainReset={handleResetTerminal}
-                  overlay={loopModeOpen ? (
+                  overlay={isActive && loopConfigured ? (
                     <LoopModeBanner
-                      loopState={loopState}
+                      config={task.loop_config!}
+                      status={loopStatus}
+                      iteration={loopIteration}
                       onStart={startLoop}
                       onPause={pauseLoop}
                       onResume={resumeLoop}
@@ -1739,12 +1740,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <IconButton
-                                  variant={loopModeOpen ? 'default' : 'ghost'}
+                                  variant={loopConfigured ? 'default' : 'ghost'}
                                   className="size-7"
                                   aria-label="Loop command"
                                   onClick={() => {
-                                    if (loopState.active) stopLoop()
-                                    if (loopModeOpen) {
+                                    if (isLoopActive(loopStatus)) stopLoop()
+                                    if (loopConfigured) {
                                       handleLoopConfigChange(null)
                                     } else {
                                       setLoopDialogOpen(true)

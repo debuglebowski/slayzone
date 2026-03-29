@@ -4,21 +4,7 @@ import { usePty } from './PtyContext'
 
 export type { LoopConfig, CriteriaType }
 
-export type LoopStatus = 'idle' | 'sending' | 'waiting' | 'checking' | 'paused' | 'passed' | 'stopped' | 'error' | 'max-reached'
-
-export interface LoopState {
-  active: boolean
-  iteration: number
-  status: LoopStatus
-  config: LoopConfig
-}
-
-const DEFAULT_CONFIG: LoopConfig = {
-  prompt: '',
-  criteriaType: 'contains',
-  criteriaPattern: '',
-  maxIterations: 50
-}
+export type LoopStatus = 'idle' | 'running' | 'paused' | 'passed' | 'stopped' | 'error' | 'max-reached'
 
 export function stripAnsi(str: string): string {
   return str
@@ -43,6 +29,10 @@ export function checkCriteria(output: string, type: CriteriaType, pattern: strin
   }
 }
 
+export function isLoopActive(status: LoopStatus): boolean {
+  return status === 'running'
+}
+
 interface UseLoopModeOptions {
   sessionId: string
   config: LoopConfig | null
@@ -52,23 +42,13 @@ interface UseLoopModeOptions {
 export function useLoopMode({ sessionId, config, onConfigChange }: UseLoopModeOptions) {
   const { subscribeState, subscribeExit, getLastSeq } = usePty()
 
-  const currentConfig = config ?? DEFAULT_CONFIG
-  const [state, setState] = useState<LoopState>({
-    active: false,
-    iteration: 0,
-    status: 'idle',
-    config: currentConfig
-  })
+  const [status, setStatus] = useState<LoopStatus>('idle')
+  const [iteration, setIteration] = useState(0)
 
-  // Keep state.config in sync with prop
-  useEffect(() => {
-    setState(s => ({ ...s, config: config ?? DEFAULT_CONFIG }))
-    configRef.current = config ?? DEFAULT_CONFIG
-  }, [config])
-
-  // Refs for the loop engine (avoids stale closures)
+  // Refs for async callbacks
   const activeRef = useRef(false)
-  const configRef = useRef(currentConfig)
+  const configRef = useRef(config)
+  configRef.current = config
   const iterationRef = useRef(0)
   const seqRef = useRef(-1)
   const sessionIdRef = useRef(sessionId)
@@ -76,112 +56,90 @@ export function useLoopMode({ sessionId, config, onConfigChange }: UseLoopModeOp
   const onConfigChangeRef = useRef(onConfigChange)
   onConfigChangeRef.current = onConfigChange
 
-  // Run one iteration: send prompt, wait for attention, check output
   const runIteration = useCallback(() => {
-    if (!activeRef.current) return
-
+    if (!activeRef.current || !configRef.current) return
     const sid = sessionIdRef.current
     if (!sid) return
 
     iterationRef.current++
-    const iteration = iterationRef.current
+    setIteration(iterationRef.current)
+    setStatus('running')
 
-    setState(s => ({ ...s, iteration, status: 'sending' }))
-
-    // Record seq before sending
     seqRef.current = getLastSeq(sid)
-
-    // Send prompt
-    window.api.pty.write(sid, configRef.current.prompt + '\r').then((ok) => {
-      if (!ok || !activeRef.current) return
-      setState(s => ({ ...s, status: 'waiting' }))
-    })
+    window.api.pty.write(sid, configRef.current.prompt + '\r')
   }, [getLastSeq])
 
-  // Handle state transitions from PTY
-  const handleStateChange = useCallback((newState: TerminalState, _oldState: TerminalState) => {
-    if (!activeRef.current) return
-
-    // Only proceed when terminal reaches attention (AI finished responding)
-    if (newState !== 'attention') return
+  const handleStateChange = useCallback((newState: TerminalState) => {
+    if (!activeRef.current || newState !== 'attention') return
 
     const sid = sessionIdRef.current
-    setState(s => ({ ...s, status: 'checking' }))
+    const cfg = configRef.current
+    if (!cfg) return
 
-    // Read output since prompt was sent
     window.api.pty.getBufferSince(sid, seqRef.current).then((result) => {
       if (!activeRef.current) return
       if (!result) {
-        setState(s => ({ ...s, status: 'error', active: false }))
         activeRef.current = false
+        setStatus('error')
         return
       }
 
       const output = result.chunks.map(c => c.data).join('')
-      const { criteriaType, criteriaPattern, maxIterations } = configRef.current
-      const passed = checkCriteria(output, criteriaType, criteriaPattern)
-
-      if (passed) {
-        setState(s => ({ ...s, status: 'passed', active: false }))
+      if (checkCriteria(output, cfg.criteriaType, cfg.criteriaPattern)) {
         activeRef.current = false
+        setStatus('passed')
         return
       }
 
-      if (iterationRef.current >= maxIterations) {
-        setState(s => ({ ...s, status: 'max-reached', active: false }))
+      if (iterationRef.current >= cfg.maxIterations) {
         activeRef.current = false
+        setStatus('max-reached')
         return
       }
 
-      // Schedule next iteration with a small delay to let the terminal settle
       setTimeout(() => runIteration(), 500)
     })
   }, [runIteration])
 
-  // Subscribe to PTY state changes and exit events
   useEffect(() => {
     if (!sessionId) return
     const unsubState = subscribeState(sessionId, handleStateChange)
     const unsubExit = subscribeExit(sessionId, () => {
       if (activeRef.current) {
         activeRef.current = false
-        setState(s => ({ ...s, status: 'stopped', active: false }))
+        setStatus('stopped')
       }
     })
     return () => { unsubState(); unsubExit() }
   }, [sessionId, subscribeState, subscribeExit, handleStateChange])
 
   const startLoop = useCallback((loopConfig: LoopConfig) => {
-    configRef.current = loopConfig
     onConfigChangeRef.current(loopConfig)
+    configRef.current = loopConfig
     iterationRef.current = 0
+    setIteration(0)
     activeRef.current = true
-    setState({ active: true, iteration: 0, status: 'idle', config: loopConfig })
+    setStatus('idle')
     runIteration()
   }, [runIteration])
 
   const pauseLoop = useCallback(() => {
     activeRef.current = false
-    setState(s => ({ ...s, status: 'paused', active: false }))
+    setStatus('paused')
   }, [])
 
   const resumeLoop = useCallback(() => {
     activeRef.current = true
-    setState(s => ({ ...s, status: 'idle', active: true }))
+    setStatus('idle')
     runIteration()
   }, [runIteration])
 
   const stopLoop = useCallback(() => {
     activeRef.current = false
-    setState(s => ({ ...s, status: 'stopped', active: false, iteration: 0 }))
+    iterationRef.current = 0
+    setIteration(0)
+    setStatus('stopped')
   }, [])
 
-  const updateConfig = useCallback((partial: Partial<LoopConfig>) => {
-    const updated = { ...configRef.current, ...partial }
-    configRef.current = updated
-    onConfigChangeRef.current(updated)
-    setState(s => ({ ...s, config: updated }))
-  }, [])
-
-  return { loopState: state, startLoop, pauseLoop, resumeLoop, stopLoop, updateConfig }
+  return { status, iteration, startLoop, pauseLoop, resumeLoop, stopLoop }
 }
