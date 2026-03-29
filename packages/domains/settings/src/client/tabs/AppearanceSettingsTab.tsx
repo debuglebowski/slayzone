@@ -13,7 +13,7 @@ function SettingLabel({ children, tip }: { children: React.ReactNode; tip: strin
         <TooltipTrigger asChild>
           <Info className="size-3 text-muted-foreground/50 hover:text-muted-foreground shrink-0 cursor-default" />
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-72 text-xs leading-relaxed">
+        <TooltipContent side="top" className="text-xs leading-relaxed">
           {tip}
         </TooltipContent>
       </Tooltip>
