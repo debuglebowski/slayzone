@@ -32,6 +32,13 @@ export interface SearchFilesOptions {
   maxResults?: number
 }
 
+export type GitFileStatus = 'modified' | 'staged' | 'untracked' | 'added' | 'deleted' | 'renamed' | 'conflicted'
+
+export interface GitStatusMap {
+  files: Record<string, GitFileStatus>
+  isGitRepo: boolean
+}
+
 export interface EditorOpenFilesState {
   files: string[]
   activeFile: string | null

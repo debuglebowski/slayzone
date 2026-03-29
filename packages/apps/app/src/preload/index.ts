@@ -498,6 +498,7 @@ const api: ElectronAPI = {
     showInFinder: (rootPath, targetPath) => ipcRenderer.invoke('fs:showInFinder', rootPath, targetPath),
     listAllFiles: (rootPath) => ipcRenderer.invoke('fs:listAllFiles', rootPath),
     searchFiles: (rootPath, query, opts) => ipcRenderer.invoke('fs:searchFiles', rootPath, query, opts),
+    gitStatus: (rootPath) => ipcRenderer.invoke('fs:gitStatus', rootPath),
     watch: (rootPath) => ipcRenderer.invoke('fs:watch', rootPath),
     unwatch: (rootPath) => ipcRenderer.invoke('fs:unwatch', rootPath),
     onFileChanged: (callback) => {

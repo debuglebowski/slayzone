@@ -42,8 +42,9 @@ import type {
   RemoveMcpServerInput,
   GlobalFileEntry
 } from '@slayzone/ai-config/shared'
-import type { DirEntry, ReadFileResult, FileSearchResult, SearchFilesOptions } from '@slayzone/file-editor/shared'
+import type { DirEntry, ReadFileResult, FileSearchResult, SearchFilesOptions, GitStatusMap } from '@slayzone/file-editor/shared'
 import type { TestCategory, CreateTestCategoryInput, UpdateTestCategoryInput, TestProfile, ScanResult, TestLabel, CreateTestLabelInput, UpdateTestLabelInput, TestFileLabel, TestFileNote } from '@slayzone/test-panel/shared'
+import type { Automation, AutomationRun, CreateAutomationInput, UpdateAutomationInput } from '@slayzone/automations/shared'
 import type {
   ConnectGithubInput,
   ConnectLinearInput,
@@ -569,6 +570,7 @@ export interface ElectronAPI {
     showInFinder: (rootPath: string, targetPath: string) => Promise<void>
     listAllFiles: (rootPath: string) => Promise<string[]>
     searchFiles: (rootPath: string, query: string, options?: SearchFilesOptions) => Promise<FileSearchResult[]>
+    gitStatus: (rootPath: string) => Promise<GitStatusMap>
     watch: (rootPath: string) => Promise<void>
     unwatch: (rootPath: string) => Promise<void>
     onFileChanged: (callback: (rootPath: string, relPath: string) => void) => () => void

@@ -33,11 +33,57 @@ import {
   ContextMenuTrigger,
   Input
 } from '@slayzone/ui'
-import type { DirEntry } from '../shared'
+import type { DirEntry, GitFileStatus } from '../shared'
 import { FileIcon } from './FileIcon'
 
 const INDENT_PX = 20
 const BASE_PAD = 12
+
+const STATUS_PRIORITY: Record<GitFileStatus, number> = {
+  conflicted: 6, modified: 5, deleted: 4, staged: 3, added: 2, renamed: 1, untracked: 0
+}
+
+function gitStatusColor(status: GitFileStatus | undefined): string | undefined {
+  switch (status) {
+    case 'modified': case 'deleted': return 'text-amber-400'
+    case 'staged': case 'added': case 'renamed': return 'text-green-400'
+    case 'untracked': return 'text-muted-foreground/70'
+    case 'conflicted': return 'text-red-400'
+    default: return undefined
+  }
+}
+
+interface CompactedEntry {
+  entry: DirEntry
+  displayName: string
+  /** All dir paths in a compacted chain (including the leaf). Empty for files / non-compacted dirs. */
+  chainPaths: string[]
+}
+
+function compactChildren(parentPath: string, dirContents: Map<string, DirEntry[]>): CompactedEntry[] {
+  const children = dirContents.get(parentPath) ?? []
+  return children.map((child) => {
+    if (child.type !== 'directory') {
+      return { entry: child, displayName: child.name, chainPaths: [] }
+    }
+    // Walk single-child directory chains
+    const segments = [child.name]
+    const chain = [child.path]
+    let current = child
+    while (true) {
+      const sub = dirContents.get(current.path)
+      if (!sub || sub.length !== 1 || sub[0].type !== 'directory') break
+      current = sub[0]
+      segments.push(current.name)
+      chain.push(current.path)
+    }
+    return {
+      entry: current, // leaf directory
+      displayName: segments.join('/'),
+      chainPaths: chain
+    }
+  })
+}
 
 interface EditorFileTreeProps {
   projectPath: string
@@ -98,15 +144,41 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   // --- Internal clipboard for copy/cut ---
   const [clipboard, setClipboard] = useState<{ paths: string[]; mode: 'copy' | 'cut' } | null>(null)
 
+  // --- Git status ---
+  const [gitStatus, setGitStatus] = useState<Map<string, GitFileStatus>>(new Map())
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.fs.gitStatus(projectPath).then((result) => {
+      if (cancelled || !result.isGitRepo) return
+      setGitStatus(new Map(Object.entries(result.files)))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [projectPath, refreshKey])
+
+  const dirGitStatus = useMemo(() => {
+    const dirs = new Map<string, GitFileStatus>()
+    for (const [filePath, status] of gitStatus) {
+      const parts = filePath.split('/')
+      for (let i = 1; i < parts.length; i++) {
+        const dirPath = parts.slice(0, i).join('/')
+        const current = dirs.get(dirPath)
+        if (!current || STATUS_PRIORITY[status] > STATUS_PRIORITY[current]) {
+          dirs.set(dirPath, status)
+        }
+      }
+    }
+    return dirs
+  }, [gitStatus])
+
   // --- Flat visible entries for keyboard nav + shift-click ---
   const visibleEntries = useMemo(() => {
-    const result: Array<{ entry: DirEntry; depth: number }> = []
-    function walk(dirPath: string, depth: number) {
-      const children = dirContents.get(dirPath) ?? []
-      for (const child of children) {
-        result.push({ entry: child, depth })
-        if (child.type === 'directory' && expandedFolders.has(child.path)) {
-          walk(child.path, depth + 1)
+    const result: Array<{ entry: DirEntry; depth: number; displayName: string; chainPaths: string[] }> = []
+    function walk(parentPath: string, depth: number) {
+      for (const c of compactChildren(parentPath, dirContents)) {
+        result.push({ entry: c.entry, depth, displayName: c.displayName, chainPaths: c.chainPaths })
+        if (c.entry.type === 'directory' && expandedFolders.has(c.entry.path)) {
+          walk(c.entry.path, depth + 1)
         }
       }
     }
@@ -164,19 +236,21 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   }), [])
 
   const handleToggleFolder = useCallback(
-    (folderPath: string) => {
+    (folderPath: string, chainPaths?: string[]) => {
+      const allPaths = chainPaths?.length ? chainPaths : [folderPath]
       setExpandedFolders((prev) => {
         const next = new Set(prev)
         if (next.has(folderPath)) {
-          next.delete(folderPath)
+          for (const p of allPaths) next.delete(p)
         } else {
-          next.add(folderPath)
-          if (!dirContents.has(folderPath)) {
-            loadDir(folderPath)
-          }
+          for (const p of allPaths) next.add(p)
         }
         return next
       })
+      // Load any uncached directories in the chain
+      for (const p of allPaths) {
+        if (!dirContents.has(p)) loadDir(p)
+      }
     },
     [loadDir, dirContents]
   )
@@ -384,7 +458,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   }, [projectPath])
 
   // --- Click handler with modifier support ---
-  const handleEntryClick = useCallback((e: React.MouseEvent, entry: DirEntry) => {
+  const handleEntryClick = useCallback((e: React.MouseEvent, entry: DirEntry, chainPaths?: string[]) => {
     const isMeta = e.metaKey || e.ctrlKey
     const isShift = e.shiftKey
 
@@ -408,7 +482,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       setSelectedPaths(new Set([entry.path]))
       lastClickedRef.current = entry.path
       if (entry.type === 'file') onOpenFile(entry.path)
-      else handleToggleFolder(entry.path)
+      else handleToggleFolder(entry.path, chainPaths)
     }
     setFocusedPath(entry.path)
   }, [visibleEntries, onOpenFile, handleToggleFolder])
@@ -618,10 +692,10 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     if (e.key === 'ArrowRight') {
       e.preventDefault()
       if (currentIdx < 0) return
-      const entry = visibleEntries[currentIdx].entry
+      const { entry, chainPaths } = visibleEntries[currentIdx]
       if (entry.type === 'directory') {
         if (!expandedFolders.has(entry.path)) {
-          handleToggleFolder(entry.path)
+          handleToggleFolder(entry.path, chainPaths.length ? chainPaths : undefined)
         } else {
           // Move focus to first child
           if (currentIdx + 1 < visibleEntries.length) {
@@ -640,9 +714,9 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     if (e.key === 'ArrowLeft') {
       e.preventDefault()
       if (currentIdx < 0) return
-      const entry = visibleEntries[currentIdx].entry
+      const { entry, chainPaths } = visibleEntries[currentIdx]
       if (entry.type === 'directory' && expandedFolders.has(entry.path)) {
-        handleToggleFolder(entry.path)
+        handleToggleFolder(entry.path, chainPaths.length ? chainPaths : undefined)
       } else {
         // Move focus to parent
         const parentPath = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : ''
@@ -724,15 +798,15 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     )
   }, [getEffectiveSelection, visibleEntries, clipboard, handleCut, handleCopy, handlePaste, handleDuplicate, handleCopyPath, handleRevealInFinder, handleDeleteSelected, startCreate, startRename])
 
-  const renderEntry = (entry: DirEntry, depth: number) => {
+  const renderEntry = (entry: DirEntry, depth: number, displayName?: string, chainPaths?: string[]) => {
     const pad = depth * INDENT_PX + BASE_PAD
     const isSelected = selectedPaths.has(entry.path)
     const isFocused = focusedPath === entry.path
     const isCut = clipboard?.mode === 'cut' && clipboard.paths.includes(entry.path)
+    const label = displayName ?? entry.name
 
     if (entry.type === 'directory') {
       const expanded = expandedFolders.has(entry.path)
-      const children = dirContents.get(entry.path) ?? []
       const isDropHover = dropTarget === entry.path
       return (
         <div
@@ -758,12 +832,12 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
                   entry.ignored && 'opacity-40'
                 )}
                 style={{ paddingLeft: pad }}
-                onClick={(e) => handleEntryClick(e, entry)}
+                onClick={(e) => handleEntryClick(e, entry, chainPaths)}
               >
                 {expanded
                   ? <FolderOpen className="size-4 shrink-0 text-amber-400" />
                   : <Folder className="size-4 shrink-0 text-amber-500/80" />}
-                <span className="truncate font-mono">{entry.name}</span>
+                <span className={cn("truncate font-mono", gitStatusColor(dirGitStatus.get(entry.path)))}>{label}</span>
                 {entry.isSymlink && (
                   <span title="Symbolic link"><ArrowUpRight className="size-3 shrink-0 text-muted-foreground/60" /></span>
                 )}
@@ -774,7 +848,9 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
             </ContextMenuContent>
           </ContextMenu>
 
-          {expanded && children.map((child) => renderEntry(child, depth + 1))}
+          {expanded && compactChildren(entry.path, dirContents).map((c) =>
+            renderEntry(c.entry, depth + 1, c.displayName, c.chainPaths)
+          )}
 
           {/* Inline create input inside this folder */}
           {creating && creating.parentPath === entry.path && (
@@ -835,7 +911,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
               onClick={(e) => handleEntryClick(e, entry)}
             >
               <FileIcon fileName={entry.name} className="size-4 shrink-0 flex items-center [&>svg]:size-full" />
-              <span className="truncate font-mono">{entry.name}</span>
+              <span className={cn("truncate font-mono", gitStatusColor(gitStatus.get(entry.path)))}>{entry.name}</span>
               {entry.isSymlink && (
                 <span title="Symbolic link"><ArrowUpRight className="size-3 shrink-0 text-muted-foreground/60" /></span>
               )}
@@ -849,7 +925,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     )
   }
 
-  const rootEntries = dirContents.get('') ?? []
+  const rootCompacted = compactChildren('', dirContents)
   const isRootDropHover = dropTarget === ''
 
   return (
@@ -886,7 +962,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
         }}
         onDrop={(e) => handleFolderDrop(e, '')}
       >
-        {rootEntries.map((entry) => renderEntry(entry, 0))}
+        {rootCompacted.map((c) => renderEntry(c.entry, 0, c.displayName, c.chainPaths))}
 
         {/* Root-level create input */}
         {creating && creating.parentPath === '' && (

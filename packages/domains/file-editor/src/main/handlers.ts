@@ -3,7 +3,8 @@ import * as path from 'node:path'
 import type { IpcMain } from 'electron'
 import { BrowserWindow } from 'electron'
 import ignore from 'ignore'
-import type { DirEntry, ReadFileResult, FileSearchResult, FileSearchMatch, SearchFilesOptions } from '../shared'
+import { spawn } from 'node:child_process'
+import type { DirEntry, ReadFileResult, FileSearchResult, FileSearchMatch, SearchFilesOptions, GitStatusMap, GitFileStatus } from '../shared'
 
 const ALWAYS_IGNORED = new Set(['.git', '.DS_Store'])
 
@@ -262,6 +263,54 @@ export function registerFileEditorHandlers(ipcMain: IpcMain): void {
     const abs = targetPath ? assertWithinRoot(rootPath, targetPath) : path.resolve(rootPath)
     const { shell } = require('electron') as typeof import('electron')
     shell.showItemInFolder(abs)
+  })
+
+  ipcMain.handle('fs:gitStatus', (_event, rootPath: string): Promise<GitStatusMap> => {
+    const root = path.resolve(rootPath)
+    // Quick check — no .git dir means not a repo
+    if (!fs.existsSync(path.join(root, '.git'))) {
+      return Promise.resolve({ files: {}, isGitRepo: false })
+    }
+
+    return new Promise((resolve) => {
+      const chunks: Buffer[] = []
+      const proc = spawn('git', ['status', '--porcelain'], { cwd: root })
+      proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
+      proc.on('error', () => resolve({ files: {}, isGitRepo: false }))
+      proc.on('close', (code) => {
+        if (code !== 0) { resolve({ files: {}, isGitRepo: true }); return }
+        const output = Buffer.concat(chunks).toString('utf-8')
+        const files: Record<string, GitFileStatus> = {}
+        for (const line of output.split('\n')) {
+          if (line.length < 4) continue
+          const x = line[0] // index (staged) status
+          const y = line[1] // worktree status
+          let filePath = line.slice(3)
+          // Renamed entries: "R  old -> new"
+          const arrow = filePath.indexOf(' -> ')
+          if (arrow !== -1) filePath = filePath.slice(arrow + 4)
+
+          let status: GitFileStatus
+          // Conflict markers
+          if ((x === 'U' || y === 'U') || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) {
+            status = 'conflicted'
+          } else if (x === '?' && y === '?') {
+            status = 'untracked'
+          } else if (y !== ' ') {
+            // Worktree change takes visual priority
+            status = y === 'D' ? 'deleted' : 'modified'
+          } else {
+            // Staged only
+            if (x === 'A') status = 'added'
+            else if (x === 'D') status = 'deleted'
+            else if (x === 'R') status = 'renamed'
+            else status = 'staged'
+          }
+          files[filePath] = status
+        }
+        resolve({ files, isGitRepo: true })
+      })
+    })
   })
 
   ipcMain.handle('fs:searchFiles', (_event, rootPath: string, query: string, options?: SearchFilesOptions): FileSearchResult[] => {
