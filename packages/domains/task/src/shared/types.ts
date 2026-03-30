@@ -133,6 +133,7 @@ export interface Task {
   parent_id: string | null
   title: string
   description: string | null
+  description_format: 'html' | 'markdown'
   assignee: string | null
   status: TaskStatus
   priority: number // 1-5, default 3

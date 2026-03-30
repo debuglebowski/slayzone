@@ -264,7 +264,7 @@
   margin-bottom: 0.25em;
 }
 
-/* Task list checkbox styling */
+/* Task list checkbox styling (TipTap legacy) */
 .ProseMirror ul[data-type="taskList"] {
   list-style: none;
   padding-left: 0;
@@ -294,6 +294,34 @@
   line-height: 1.25;
 }
 
+/* Task list checkbox styling (Milkdown GFM) */
+.ProseMirror li[data-item-type="task"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  list-style: none;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.ProseMirror li[data-item-type="task"] > label {
+  flex-shrink: 0;
+  user-select: none;
+  padding-top: 0.3em;
+}
+
+.ProseMirror li[data-item-type="task"] input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.ProseMirror li[data-item-type="task"] > span,
+.ProseMirror li[data-item-type="task"] > div,
+.ProseMirror li[data-item-type="task"] > p {
+  flex: 1;
+  line-height: 1.25;
+}
+
 /* Compact line spacing for notes editor */
 .prose-tight .ProseMirror.prose > * + * {
   margin-top: 0.125em;
@@ -305,8 +333,7 @@
 }
 
 .prose-tight .ProseMirror.prose ul,
-.prose-tight .ProseMirror.prose ol,
-.prose-tight .ProseMirror.prose ul[data-type="taskList"] {
+.prose-tight .ProseMirror.prose ol {
   margin-top: 0.125em;
   margin-bottom: 0.125em;
 }
@@ -324,7 +351,10 @@
 }
 
 /* Checked task item highlight */
-.checked-highlight .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+.checked-highlight .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div,
+.checked-highlight .ProseMirror li[data-item-type="task"][data-checked="true"] > span,
+.checked-highlight .ProseMirror li[data-item-type="task"][data-checked="true"] > div,
+.checked-highlight .ProseMirror li[data-item-type="task"][data-checked="true"] > p {
   color: #4ade80;
   text-decoration: line-through;
   text-decoration-color: #4ade8080;
@@ -350,7 +380,8 @@
 .editor-themed .ProseMirror.prose a {
   color: var(--prose-links);
 }
-.editor-themed .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+.editor-themed .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"],
+.editor-themed .ProseMirror li[data-item-type="task"] input[type="checkbox"] {
   accent-color: var(--prose-links);
 }
 

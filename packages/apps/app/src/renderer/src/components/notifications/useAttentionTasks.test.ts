@@ -41,6 +41,7 @@ function makeTask(id: string, projectId: string, title: string): Task {
     id,
     title,
     description: null,
+    description_format: 'html',
     assignee: null,
     status: 'todo',
     project_id: projectId,

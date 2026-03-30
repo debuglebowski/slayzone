@@ -339,7 +339,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   const values: unknown[] = []
 
   if (data.title !== undefined) { fields.push('title = ?'); values.push(data.title) }
-  if (data.description !== undefined) { fields.push('description = ?'); values.push(data.description) }
+  if (data.description !== undefined) { fields.push('description = ?', "description_format = 'markdown'"); values.push(data.description) }
   if (data.status !== undefined || normalizedStatusForWrite !== undefined) {
     fields.push('status = ?')
     values.push(normalizedStatusForWrite ?? data.status)
@@ -568,12 +568,12 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
 
     const stmt = db.prepare(`
       INSERT INTO tasks (
-        id, project_id, parent_id, title, description, assignee,
+        id, project_id, parent_id, title, description, description_format, assignee,
         status, priority, due_date, terminal_mode, provider_config,
         claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
         is_temporary, ccs_profile, repo_name,
         dangerously_skip_permissions, panel_visibility, browser_tabs, web_panel_urls
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, 'markdown', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     stmt.run(
       id, data.projectId, data.parentId ?? null,

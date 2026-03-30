@@ -12,15 +12,17 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@slayzone/ui": "workspace:*",
-    "@tiptap/core": "^3.15.3",
-    "@tiptap/extension-link": "^3.15.3",
-    "@tiptap/extension-placeholder": "^3.15.3",
-    "@tiptap/extension-task-item": "^3.15.3",
-    "@tiptap/extension-task-list": "^3.15.3",
-    "@tiptap/pm": "^3.15.3",
-    "@tiptap/react": "^3.15.3",
-    "@tiptap/starter-kit": "^3.15.3"
+    "@milkdown/core": "^7.19.2",
+    "@milkdown/ctx": "^7.19.2",
+    "@milkdown/plugin-history": "^7.19.2",
+    "@milkdown/plugin-indent": "^7.19.2",
+    "@milkdown/plugin-listener": "^7.19.2",
+    "@milkdown/preset-commonmark": "^7.19.2",
+    "@milkdown/preset-gfm": "^7.19.2",
+    "@milkdown/prose": "^7.19.2",
+    "@milkdown/transformer": "^7.19.2",
+    "@milkdown/utils": "^7.19.2",
+    "@slayzone/ui": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0"

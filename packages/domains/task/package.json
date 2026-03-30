@@ -26,6 +26,7 @@
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@milkdown/core": "^7.19.2",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/integrations": "workspace:*",

@@ -1,14 +1,14 @@
-import { Extension, type Editor } from '@tiptap/core'
-import { Fragment } from '@tiptap/pm/model'
-import { TextSelection } from '@tiptap/pm/state'
+import { $prose } from '@milkdown/utils'
+import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state'
+import { Fragment } from '@milkdown/prose/model'
+import type { EditorState } from '@milkdown/prose/state'
+import type { EditorView } from '@milkdown/prose/view'
 
-const LIST_ITEM_TYPES = ['listItem', 'taskItem']
+const LIST_ITEM_TYPES = ['list_item']
 
-function moveListItem(editor: Editor, direction: 'up' | 'down'): boolean {
-  const { state } = editor
+function moveListItem(state: EditorState, dispatch: EditorView['dispatch'] | undefined, direction: 'up' | 'down'): boolean {
   const { $from } = state.selection
 
-  // Find the closest list item ancestor
   let depth: number | null = null
   for (let d = $from.depth; d > 0; d--) {
     if (LIST_ITEM_TYPES.includes($from.node(d).type.name)) {
@@ -21,11 +21,9 @@ function moveListItem(editor: Editor, direction: 'up' | 'down'): boolean {
   const parent = $from.node(depth - 1)
   const itemIndex = $from.index(depth - 1)
 
-  // Boundary check
   if (direction === 'up' && itemIndex === 0) return false
   if (direction === 'down' && itemIndex === parent.childCount - 1) return false
 
-  // Compute positions of all children in the parent list
   const parentContentStart = $from.start(depth - 1)
   const positions: { from: number; to: number }[] = []
   parent.forEach((child, offset) => {
@@ -45,33 +43,33 @@ function moveListItem(editor: Editor, direction: 'up' | 'down'): boolean {
   const currentNode = parent.child(itemIndex)
   const targetNode = parent.child(targetIndex)
 
-  // 'up': rangeFrom = target (above), so currentNode first moves it up
-  // 'down': rangeFrom = current, so targetNode first moves current down
   const swapped =
     direction === 'up'
       ? Fragment.from([currentNode, targetNode])
       : Fragment.from([targetNode, currentNode])
 
-  const { tr } = state
-  tr.replaceWith(rangeFrom, rangeTo, swapped)
-
-  // Restore cursor position inside the moved item
-  const offsetInItem = $from.pos - currentPos.from
-  const newItemStart = direction === 'up' ? rangeFrom : rangeFrom + targetNode.nodeSize
-  const newPos = Math.min(newItemStart + offsetInItem, newItemStart + currentNode.nodeSize - 1)
-  tr.setSelection(TextSelection.create(tr.doc, newPos))
-
-  editor.view.dispatch(tr)
+  if (dispatch) {
+    const { tr } = state
+    tr.replaceWith(rangeFrom, rangeTo, swapped)
+    const offsetInItem = $from.pos - currentPos.from
+    const newItemStart = direction === 'up' ? rangeFrom : rangeFrom + targetNode.nodeSize
+    const newPos = Math.min(newItemStart + offsetInItem, newItemStart + currentNode.nodeSize - 1)
+    tr.setSelection(TextSelection.create(tr.doc, newPos))
+    dispatch(tr)
+  }
   return true
 }
 
-export const ListItemMove = Extension.create({
-  name: 'listItemMove',
-
-  addKeyboardShortcuts() {
-    return {
-      'Alt-ArrowUp': () => moveListItem(this.editor, 'up'),
-      'Alt-ArrowDown': () => moveListItem(this.editor, 'down'),
-    }
-  },
+export const listItemMovePlugin = $prose(() => {
+  return new Plugin({
+    key: new PluginKey('listItemMove'),
+    props: {
+      handleKeyDown(view, event) {
+        if (!event.altKey) return false
+        if (event.key === 'ArrowUp') return moveListItem(view.state, view.dispatch, 'up')
+        if (event.key === 'ArrowDown') return moveListItem(view.state, view.dispatch, 'down')
+        return false
+      },
+    },
+  })
 })

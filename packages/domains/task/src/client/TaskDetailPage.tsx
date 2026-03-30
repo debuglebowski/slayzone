@@ -61,6 +61,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
 import { RichTextEditor } from '@slayzone/editor'
+import { normalizeDescription, stripMarkdown } from '@slayzone/task/shared'
 import { useTheme } from '@slayzone/settings/client'
 import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, LoopModeBanner, LoopModeDialog } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal/shared'
@@ -289,7 +290,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // In-progress prompt state
 
   // Description editing state
-  const [descriptionValue, setDescriptionValue] = useState(task?.description ?? '')
+  const [descriptionValue, setDescriptionValue] = useState(() => normalizeDescription(task?.description ?? null, task?.description_format ?? 'html'))
+  const descriptionDirty = useRef(false)
 
   // Terminal restart key (changing this forces remount)
   const [terminalKey, setTerminalKey] = useState(0)
@@ -311,8 +313,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [task?.title, editingTitle])
 
   useEffect(() => {
-    if (task) setDescriptionValue(task.description ?? '')
-  }, [task?.description])
+    if (task) {
+      setDescriptionValue(normalizeDescription(task.description, task.description_format))
+      descriptionDirty.current = false
+    }
+  }, [task?.description, task?.description_format])
 
   // Browser tabs state
   const defaultBrowserTabs: BrowserTabsState = {
@@ -686,12 +691,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Inject task description into terminal (no execute)
   const handleInjectDescription = useCallback(async () => {
     if (!terminalApiRef.current || !descriptionValue) return
-    // Strip HTML tags to get plain text
-    const tmp = document.createElement('div')
-    tmp.innerHTML = descriptionValue
-    const plainText = tmp.textContent || tmp.innerText || ''
-    if (plainText.trim()) {
-      await terminalApiRef.current.sendInput(plainText.trim())
+    const plainText = stripMarkdown(descriptionValue)
+    if (plainText) {
+      await terminalApiRef.current.sendInput(plainText)
     }
   }, [descriptionValue])
 
@@ -1063,11 +1065,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }
 
   const handleDescriptionSave = async (): Promise<void> => {
-    if (!task) return
+    if (!task || !descriptionDirty.current) return
+    descriptionDirty.current = false
 
     const updated = await window.api.db.updateTask({
       id: task.id,
-      description: descriptionValue || undefined
+      description: descriptionValue || undefined,
     })
     onTaskUpdated(updated)
   }
@@ -2048,7 +2051,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               <div className={cn("flex flex-col min-h-0 flex-1", !descriptionExpanded && "min-h-[150px] max-h-[300px]")}>
                 <RichTextEditor
                   value={descriptionValue}
-                  onChange={setDescriptionValue}
+                  onChange={(md) => { descriptionDirty.current = true; setDescriptionValue(md) }}
                   onBlur={handleDescriptionSave}
                   placeholder="Add description..."
                   className="p-3"

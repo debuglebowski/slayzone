@@ -1,12 +1,13 @@
 import { useRef, useCallback, useState } from 'react'
 import { Dialog, DialogContent } from '@slayzone/ui'
 import { RichTextEditor, type Editor, type EditorThemeColors } from '@slayzone/editor'
+import { editorViewCtx } from '@milkdown/core'
 
 interface DescriptionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   value: string
-  onChange: (html: string) => void
+  onChange: (markdown: string) => void
   onSave: () => void
   fontFamily?: 'sans' | 'mono'
   lineSpacing?: 'compact' | 'normal'
@@ -18,7 +19,11 @@ interface DescriptionDialogProps {
 
 function getWordCount(editor: Editor | null): number {
   if (!editor) return 0
-  return editor.state.doc.textContent.split(/\s+/).filter(Boolean).length
+  try {
+    let text = ''
+    editor.action((ctx) => { text = ctx.get(editorViewCtx).state.doc.textContent })
+    return text.split(/\s+/).filter(Boolean).length
+  } catch { return 0 }
 }
 
 export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave, fontFamily, lineSpacing, checkedHighlight, showToolbar, spellcheck, themeColors }: DescriptionDialogProps) {
