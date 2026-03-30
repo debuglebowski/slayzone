@@ -486,6 +486,45 @@ test('Claude Code OAuth URL pattern', async () => {
   assert(linksBelow.length, 0, 'blank line below should have no links')
 })
 
+// Synchronous helper — provideLinks calls callback synchronously
+function getLinksSync(term: Terminal, bufferLineNumber: number): ILink[] {
+  const provider = new WebLinkProvider(term, () => {})
+  let result: ILink[] = []
+  provider.provideLinks(bufferLineNumber, (links) => { result = links ?? [] })
+  return result
+}
+
+test('first-line link range extends through soft-continuation lines', () => {
+  const term = mockTerminal([
+    { text: '  https://example.com/auth?client_id=abc&response_type=', isWrapped: false },
+    { text: '  code&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback', isWrapped: false },
+    { text: '  &scope=read+write&state=xyz123', isWrapped: false },
+  ])
+  const links = getLinksSync(term, 1)
+  assert(links.length, 1, 'should find 1 link')
+  // Range should start on line 1 after indent
+  assert(links[0].range.start.y, 1, 'start.y')
+  assert(links[0].range.start.x, 3, 'start.x')
+  // Range should END on the last continuation line (line 3), not line 1
+  assert(links[0].range.end.y, 3, 'end.y should be last continuation line')
+})
+
+test('OAuth URL first-line range spans all continuation lines', () => {
+  const term = mockTerminal([
+    { text: '                                                                                                ', isWrapped: false },
+    { text: '  https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=', isWrapped: false },
+    { text: '  code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key+', isWrapped: false },
+    { text: '  user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3Amcp_servers+user%3Afile_upload&code_', isWrapped: false },
+    { text: '  challenge=O44F0Xd8JqqCj_xNOrBLO88VYMQ-PdpZZooZ4_g63Bk&code_challenge_method=S256&state=AYImunry9UZ6y_JIYR', isWrapped: false },
+    { text: '  ziVxJESlTyNu4t-tYKiNqy2Wg', isWrapped: false },
+    { text: '                                                                                                ', isWrapped: false },
+  ])
+  const links = getLinksSync(term, 2) // first URL line
+  assert(links.length, 1, 'should find 1 link')
+  assert(links[0].range.start.y, 2, 'start on first URL line')
+  assert(links[0].range.end.y, 6, 'end on last continuation line')
+})
+
 console.log('─'.repeat(40))
 console.log(`\n${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

@@ -143,14 +143,18 @@ export class WebLinkProvider implements ILinkProvider {
       let uri = match[0]
 
       const [startY, startX] = mapStringIndex(this._terminal, topLineIndex, 0, match.index)
-      const [endY, endX] = mapStringIndex(this._terminal, topLineIndex, 0, match.index + uri.length)
+      let [endY, endX] = mapStringIndex(this._terminal, topLineIndex, 0, match.index + uri.length)
       if (startY === -1 || endY === -1) continue
 
       // If URL reaches near end of joined text, extend through soft-wrapped
       // continuation lines (TUI apps that format long URLs across lines)
       if (match.index + uri.length >= joinedText.length - 2) {
-        const fullUri = this._extendUrlSoft(uri, topLineIndex + lines.length)
-        if (fullUri) uri = fullUri
+        const extended = this._extendUrlSoft(uri, topLineIndex + lines.length)
+        if (extended) {
+          uri = extended.uri
+          endY = extended.endLine
+          endX = extended.endCol
+        }
       }
 
       links.push({
@@ -191,10 +195,11 @@ export class WebLinkProvider implements ILinkProvider {
   }
 
   /** Extend a partial URL through subsequent non-wrapped indented lines */
-  private _extendUrlSoft(partialUri: string, fromLineIndex: number): string | null {
+  private _extendUrlSoft(partialUri: string, fromLineIndex: number): { uri: string; endLine: number; endCol: number } | null {
     const buf = this._terminal.buffer.active
     let extended = partialUri
     let found = false
+    const consumed: { lineIndex: number; indent: number; trimmedLen: number }[] = []
 
     for (let idx = fromLineIndex; extended.length < 4096; idx++) {
       const line = buf.getLine(idx)
@@ -202,13 +207,25 @@ export class WebLinkProvider implements ILinkProvider {
       const content = line.translateToString(true)
       const trimmed = content.trimStart()
       if (!trimmed || /\s/.test(trimmed)) break
+      consumed.push({ lineIndex: idx, indent: content.length - trimmed.length, trimmedLen: trimmed.length })
       extended += trimmed
       found = true
     }
 
     if (!found) return null
     const m = new RegExp('^' + URL_REGEX.source).exec(extended)
-    return m ? m[0] : null
+    if (!m) return null
+
+    // Compute end position within continuation lines
+    let remaining = m[0].length - partialUri.length
+    for (const c of consumed) {
+      if (remaining <= c.trimmedLen) {
+        return { uri: m[0], endLine: c.lineIndex, endCol: c.indent + remaining }
+      }
+      remaining -= c.trimmedLen
+    }
+    const last = consumed[consumed.length - 1]
+    return { uri: m[0], endLine: last.lineIndex, endCol: last.indent + last.trimmedLen }
   }
 
   /** Look upward from a continuation line to find and assemble the full URL */

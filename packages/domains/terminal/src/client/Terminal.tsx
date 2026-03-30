@@ -369,7 +369,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         if (!tooltipEl) {
           tooltipEl = document.createElement('div')
           tooltipEl.className = 'xterm-hover'
-          tooltipEl.style.cssText = 'display:none;position:fixed;z-index:50;padding:2px 6px;border-radius:3px;font-size:11px;line-height:1.3;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;opacity:0.85;background:#1e1e1e;color:#aaa;border:1px solid #333'
+          tooltipEl.style.cssText = 'display:none;position:fixed;z-index:50;padding:2px 6px;border-radius:3px;font-size:11px;line-height:1.3;max-width:600px;white-space:normal;word-break:break-all;pointer-events:none;opacity:0.85;background:#1e1e1e;color:#aaa;border:1px solid #333'
         }
         return tooltipEl
       }
