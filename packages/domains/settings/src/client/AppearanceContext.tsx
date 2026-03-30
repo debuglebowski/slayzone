@@ -20,6 +20,13 @@ export function AppearanceProvider({
   children: ReactNode
 }) {
   const [settings, setSettings] = useState<AppearanceSettings>(appearanceDefaults)
+  const [localRevision, setLocalRevision] = useState(0)
+
+  useEffect(() => {
+    const handler = () => setLocalRevision(r => r + 1)
+    window.addEventListener('sz:settings-changed', handler)
+    return () => window.removeEventListener('sz:settings-changed', handler)
+  }, [])
 
   useEffect(() => {
     performance.mark('sz:appearance:start')
@@ -40,9 +47,6 @@ export function AppearanceProvider({
       window.api.settings.get('browser_default_url'),
       window.api.settings.get('browser_default_devices'),
       window.api.settings.get('sidebar_badge_mode'),
-      window.api.settings.get('content_theme_follow_app').then(v => v ?? window.api.settings.get('terminal_theme_follow_app')),
-      window.api.settings.get('content_theme_dark').then(v => v ?? window.api.settings.get('terminal_theme_dark')),
-      window.api.settings.get('content_theme_light').then(v => v ?? window.api.settings.get('terminal_theme_light')),
       window.api.settings.get('notes_font_family'),
       window.api.settings.get('notes_line_spacing'),
       window.api.settings.get('notes_checked_highlight'),
@@ -55,7 +59,6 @@ export function AppearanceProvider({
       diffContext, diffWs,
       browserZoom, browserUrl, browserDevices,
       sidebarBadge,
-      termThemeFollow, termThemeDark, termThemeLight,
       notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck,
     ]) => {
       const d = appearanceDefaults
@@ -77,9 +80,6 @@ export function AppearanceProvider({
         browserDefaultUrl: browserUrl || '',
         browserDeviceDefaults: tryParseJson<BrowserDeviceDefaults | null>(browserDevices, null),
         sidebarBadgeMode: (sidebarBadge === 'none' || sidebarBadge === 'count') ? sidebarBadge : 'blob',
-        contentThemeFollowApp: termThemeFollow !== '0',
-        contentThemeDark: termThemeDark || d.contentThemeDark,
-        contentThemeLight: termThemeLight || d.contentThemeLight,
         notesFontFamily: notesFontFamily === 'mono' ? 'mono' : 'sans',
         notesLineSpacing: notesLineSpacing === 'compact' ? 'compact' : 'normal',
         notesCheckedHighlight: notesCheckedHighlight === '1',
@@ -87,7 +87,7 @@ export function AppearanceProvider({
         notesSpellcheck: notesSpellcheck !== '0',
       })
     })
-  }, [settingsRevision])
+  }, [settingsRevision, localRevision])
 
   return (
     <AppearanceContext.Provider value={settings}>

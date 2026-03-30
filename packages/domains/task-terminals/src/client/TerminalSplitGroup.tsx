@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import { Terminal, type TerminalHandle } from '@slayzone/terminal/client/Terminal'
 import type { TerminalTab } from '../shared/types'
+import { TerminalContextMenu } from './TerminalContextMenu'
 
 interface PaneProps {
   tab: TerminalTab
@@ -21,6 +22,12 @@ interface PaneProps {
   }) => void
   onFirstInput?: () => void
   onRetry?: () => void
+  // Context menu callbacks
+  onSplit?: () => void
+  onNewGroup?: () => void
+  onClose?: (() => void) | null
+  onRename?: (() => void) | null
+  onResetSession?: (() => void) | null
 }
 
 export interface TerminalSplitGroupHandle {
@@ -112,31 +119,56 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
     document.addEventListener('mouseup', handleMouseUp)
   }, [sizes])
 
+  const renderPane = (pane: PaneProps) => {
+    const hasContextMenu = pane.onSplit && pane.onNewGroup
+    const terminal = (
+      <Terminal
+        ref={paneRefs.current[pane.sessionId]}
+        key={pane.sessionId}
+        sessionId={pane.sessionId}
+        cwd={pane.cwd}
+        mode={pane.tab.mode}
+        conversationId={pane.conversationId}
+        existingConversationId={pane.existingConversationId}
+        initialPrompt={pane.initialPrompt}
+        providerFlags={pane.providerFlags}
+        executionContext={pane.executionContext}
+        isActive={isActive}
+        onAttached={onAttached}
+        onConversationCreated={pane.onConversationCreated}
+        onSessionInvalid={pane.onSessionInvalid}
+        onReady={pane.onReady}
+        onFirstInput={pane.onFirstInput}
+        onRetry={pane.onRetry}
+        onOpenUrl={onOpenUrl}
+        onOpenFile={onOpenFile}
+      />
+    )
+
+    if (!hasContextMenu) return terminal
+
+    return (
+      <TerminalContextMenu
+        terminalRef={paneRefs.current[pane.sessionId]}
+        sessionId={pane.sessionId}
+        mode={pane.tab.mode}
+        conversationId={pane.conversationId}
+        onSplit={pane.onSplit!}
+        onNewGroup={pane.onNewGroup!}
+        onClose={pane.onClose ?? null}
+        onRename={pane.onRename ?? null}
+        onResetSession={pane.onResetSession ?? null}
+      >
+        <div className="h-full">{terminal}</div>
+      </TerminalContextMenu>
+    )
+  }
+
   if (panes.length === 1) {
     const pane = panes[0]
     return (
       <div className="h-full" data-session-id={pane.sessionId}>
-        <Terminal
-          ref={paneRefs.current[pane.sessionId]}
-          key={pane.sessionId}
-          sessionId={pane.sessionId}
-          cwd={pane.cwd}
-          mode={pane.tab.mode}
-          conversationId={pane.conversationId}
-          existingConversationId={pane.existingConversationId}
-          initialPrompt={pane.initialPrompt}
-          providerFlags={pane.providerFlags}
-          executionContext={pane.executionContext}
-          isActive={isActive}
-          onAttached={onAttached}
-          onConversationCreated={pane.onConversationCreated}
-          onSessionInvalid={pane.onSessionInvalid}
-          onReady={pane.onReady}
-          onFirstInput={pane.onFirstInput}
-          onRetry={pane.onRetry}
-          onOpenUrl={onOpenUrl}
-          onOpenFile={onOpenFile}
-        />
+        {renderPane(pane)}
       </div>
     )
   }
@@ -146,25 +178,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
       {panes.map((pane, i) => (
         <div key={pane.sessionId} className="flex" style={{ width: `${sizes[i]}%` }} data-session-id={pane.sessionId}>
           <div className="flex-1 min-w-0">
-            <Terminal
-              ref={paneRefs.current[pane.sessionId]}
-              key={pane.sessionId}
-              sessionId={pane.sessionId}
-              cwd={pane.cwd}
-              mode={pane.tab.mode}
-              conversationId={pane.conversationId}
-              existingConversationId={pane.existingConversationId}
-              initialPrompt={pane.initialPrompt}
-                  providerFlags={pane.providerFlags}
-              executionContext={pane.executionContext}
-              isActive={isActive}
-              onAttached={onAttached}
-              onConversationCreated={pane.onConversationCreated}
-              onSessionInvalid={pane.onSessionInvalid}
-              onReady={pane.onReady}
-              onFirstInput={pane.onFirstInput}
-              onRetry={pane.onRetry}
-            />
+            {renderPane(pane)}
           </div>
           {i < panes.length - 1 && (
             <div

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { Plus, X, Columns2, Terminal as TerminalIcon, Bot, Command, MousePointerClick, Sparkles, Code, Glasses, RotateCcw } from 'lucide-react'
 import { cn, useShortcutDisplay } from '@slayzone/ui'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
@@ -32,9 +32,13 @@ const MODE_ICONS: Partial<Record<TerminalMode, typeof TerminalIcon>> = {
 
 import { getTabLabel, numberDuplicateLabels } from './get-tab-label'
 
+export interface TerminalTabBarHandle {
+  startRename: (tabId: string) => void
+}
+
 const DRAG_TYPE = 'application/x-slayzone-pane'
 
-export function TerminalTabBar({
+export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarProps>(function TerminalTabBar({
   groups,
   activeGroupId,
   onGroupSelect,
@@ -47,7 +51,7 @@ export function TerminalTabBar({
   terminalTitles,
   onMainReset,
   rightContent
-}: TerminalTabBarProps) {
+}: TerminalTabBarProps, ref: React.Ref<TerminalTabBarHandle>) {
   const terminalSplitShortcut = useShortcutDisplay('terminal-split')
   const [editingTabId, setEditingTabId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -55,6 +59,15 @@ export function TerminalTabBar({
   const [dragOverNewGroup, setDragOverNewGroup] = useState(false)
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  useImperativeHandle(ref, () => ({
+    startRename: (tabId: string) => {
+      const tab = groups.flatMap(g => g.tabs).find(t => t.id === tabId)
+      if (!tab || tab.isMain) return
+      setEditingTabId(tabId)
+      setEditValue(tab.label || '')
+    }
+  }))
 
   useEffect(() => {
     if (editingTabId && inputRef.current) {
@@ -285,4 +298,4 @@ export function TerminalTabBar({
       )}
     </div>
   )
-}
+})

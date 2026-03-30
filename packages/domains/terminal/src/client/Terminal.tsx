@@ -24,7 +24,7 @@ document.head.appendChild(underlineOverride)
 import { getTerminal, setTerminal, disposeTerminal, updateAllThemes } from './terminal-cache'
 import { usePty } from './PtyContext'
 import { useTheme, useAppearance } from '@slayzone/settings/client'
-import { getTerminalThemeById, terminalThemes } from './terminal-themes'
+import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
 import { stripUnderlineCodes } from '@slayzone/terminal/shared'
@@ -116,6 +116,12 @@ function stripAnsi(str: string): string {
 
 export interface TerminalHandle {
   focus: () => void
+  hasSelection: () => boolean
+  getSelection: () => string
+  selectAll: () => void
+  scrollToBottom: () => void
+  openSearch: () => void
+  clearBuffer: () => Promise<void>
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({
@@ -140,9 +146,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
 
-  useImperativeHandle(ref, () => ({
-    focus: () => terminalRef.current?.focus()
-  }))
   const fitAddonRef = useRef<FitAddon | null>(null)
   const serializeAddonRef = useRef<SerializeAddon | null>(null)
   const searchAddonRef = useRef<SearchAddon | null>(null)
@@ -197,14 +200,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   executionContextRef.current = executionContext
 
   const { subscribe, subscribeExit, subscribeSessionInvalid, subscribeAttention, subscribeState, getState, getCrashOutput, resetTaskState, cleanupTask } = usePty()
-  const { theme } = useTheme()
-  const { terminalFontSize, terminalFontFamily, terminalScrollback, contentThemeFollowApp, contentThemeDark, contentThemeLight } = useAppearance()
+  const { terminalThemeId, contentVariant } = useTheme()
+  const { terminalFontSize, terminalFontFamily, terminalScrollback } = useAppearance()
 
-  const resolvedTerminalThemeId = contentThemeFollowApp
-    ? (theme === 'dark' ? contentThemeDark : contentThemeLight)
-    : contentThemeDark
-  const resolvedTerminalTheme = getTerminalThemeById(resolvedTerminalThemeId)
-  const resolvedTerminalVariant = terminalThemes.find(t => t.id === resolvedTerminalThemeId)?.variant ?? 'dark'
+  const resolvedTerminalTheme = getThemeTerminalColors(terminalThemeId, contentVariant)
+  const resolvedTerminalVariant = contentVariant
 
   const [ptyState, setPtyState] = useState<TerminalState>(() => getState(sessionId))
 
@@ -216,6 +216,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     terminalRef.current?.clear()
     terminalRef.current?.write('\x1b[0m')
   }, [sessionId])
+
+  useImperativeHandle(ref, () => ({
+    focus: () => terminalRef.current?.focus(),
+    hasSelection: () => terminalRef.current?.hasSelection() ?? false,
+    getSelection: () => terminalRef.current?.getSelection() ?? '',
+    selectAll: () => terminalRef.current?.selectAll(),
+    scrollToBottom: () => terminalRef.current?.scrollToBottom(),
+    openSearch: () => setSearchOpen(true),
+    clearBuffer: clearBufferWithoutRestart
+  }))
 
   const handleTerminalKeyEvent = useCallback((e: KeyboardEvent): boolean => {
     if (e.ctrlKey && e.key === 'Tab') return false
@@ -811,7 +821,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       background: resolvedTerminalTheme.background ?? '#000000',
       cursor: resolvedTerminalTheme.cursor ?? '#ffffff',
     })
-  }, [theme, contentThemeDark, contentThemeLight, contentThemeFollowApp])
+  }, [terminalThemeId, contentVariant])
 
   // Handle resize
   useEffect(() => {

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import { usePty } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
-import { matchesShortcut, useShortcutStore, withModalGuard } from '@slayzone/ui'
+import { matchesShortcut, useShortcutStore, withModalGuard, getThemeChrome, getChromeStyleOverrides } from '@slayzone/ui'
+import { useTheme } from '@slayzone/settings/client'
 import { useTaskTerminals } from './useTaskTerminals'
-import { TerminalTabBar } from './TerminalTabBar'
+import { TerminalTabBar, type TerminalTabBarHandle } from './TerminalTabBar'
 import { TerminalSplitGroup, type TerminalSplitGroupHandle } from './TerminalSplitGroup'
 
 export interface TerminalContainerHandle {
@@ -78,7 +79,13 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   } = useTaskTerminals(taskId, defaultMode)
 
   const { subscribePrompt, subscribeTitle } = usePty()
+  const { terminalOverrideThemeId, contentVariant } = useTheme()
+  const terminalPanelStyle = useMemo(() => {
+    if (!terminalOverrideThemeId) return undefined
+    return getChromeStyleOverrides(getThemeChrome(terminalOverrideThemeId, contentVariant))
+  }, [terminalOverrideThemeId, contentVariant])
   const splitGroupRef = useRef<TerminalSplitGroupHandle | null>(null)
+  const tabBarRef = useRef<TerminalTabBarHandle | null>(null)
   const pendingFocusRef = useRef(isActive)
   const terminalApiRef = useRef<{
     sendInput: (text: string) => Promise<void>
@@ -282,26 +289,42 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   // Build pane props for the active group
   const paneProps = useMemo(() => {
     if (!activeGroup) return []
-    return activeGroup.tabs.map(tab => ({
-      tab,
-      sessionId: getSessionId(tab.id),
-      cwd,
-      conversationId: tab.isMain ? conversationId : undefined,
-      existingConversationId: tab.isMain ? existingConversationId : undefined,
-      initialPrompt: tab.isMain ? initialPrompt : undefined,
-      providerFlags: tab.isMain ? providerFlags : undefined,
-      executionContext,
-      onConversationCreated: tab.isMain ? handleConversationCreated : undefined,
-      onSessionInvalid: tab.isMain ? onSessionInvalid : undefined,
-      onReady: tab.isMain ? handleTerminalReady : undefined,
-      onFirstInput: tab.isMain ? onFirstInput : undefined,
-      onRetry: tab.isMain ? onRetry : undefined
-    }))
-  }, [activeGroup, getSessionId, cwd, conversationId, existingConversationId, initialPrompt, providerFlags, executionContext, handleConversationCreated, onSessionInvalid, handleTerminalReady, onFirstInput, onRetry])
+    return activeGroup.tabs.map(tab => {
+      const canClose = !tab.isMain
+      return {
+        tab,
+        sessionId: getSessionId(tab.id),
+        cwd,
+        conversationId: tab.isMain ? conversationId : undefined,
+        existingConversationId: tab.isMain ? existingConversationId : undefined,
+        initialPrompt: tab.isMain ? initialPrompt : undefined,
+        providerFlags: tab.isMain ? providerFlags : undefined,
+        executionContext,
+        onConversationCreated: tab.isMain ? handleConversationCreated : undefined,
+        onSessionInvalid: tab.isMain ? onSessionInvalid : undefined,
+        onReady: tab.isMain ? handleTerminalReady : undefined,
+        onFirstInput: tab.isMain ? onFirstInput : undefined,
+        onRetry: tab.isMain ? onRetry : undefined,
+        // Context menu callbacks
+        onSplit: () => handleSplitGroup(activeGroup.id),
+        onNewGroup: () => { pendingFocusRef.current = true; createTab() },
+        onClose: canClose ? () => {
+          if (activeGroup.tabs.length === 1) {
+            void closeGroup(activeGroup.id)
+          } else {
+            void closeTab(tab.id)
+          }
+        } : null,
+        onRename: tab.isMain ? null : () => tabBarRef.current?.startRename(tab.id),
+        onResetSession: tab.isMain && onMainReset ? onMainReset : null
+      }
+    })
+  }, [activeGroup, getSessionId, cwd, conversationId, existingConversationId, initialPrompt, providerFlags, executionContext, handleConversationCreated, onSessionInvalid, handleTerminalReady, onFirstInput, onRetry, handleSplitGroup, createTab, closeGroup, closeTab, onMainReset])
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col" style={terminalPanelStyle as React.CSSProperties | undefined}>
       <TerminalTabBar
+        ref={tabBarRef}
         groups={groups}
         activeGroupId={activeGroupId}
         terminalTitles={terminalTitles}
