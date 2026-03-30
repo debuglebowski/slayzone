@@ -3,6 +3,7 @@ import { tasksCommand } from './commands/tasks'
 import { projectsCommand } from './commands/projects'
 import { processesCommand } from './commands/processes'
 import { completionsCommand } from './commands/completions'
+import { initCommand } from './commands/init'
 import { ptyCommand } from './commands/pty'
 
 const program = new Command()
@@ -19,6 +20,7 @@ program.addCommand(tasksCommand())
 program.addCommand(projectsCommand())
 program.addCommand(processesCommand())
 program.addCommand(completionsCommand())
+program.addCommand(initCommand())
 program.addCommand(ptyCommand())
 
 program.parseAsync(process.argv).catch((err) => {
