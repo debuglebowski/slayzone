@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { X, ChevronRight } from 'lucide-react'
 import { IconButton, cn, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
 import type { AttentionTask } from './useAttentionTasks'
@@ -36,16 +36,31 @@ export function NotificationPanel({
   selectedProjectId,
   currentProjectName
 }: NotificationPanelProps) {
-  const getProjectColor = (projectId: string | null): string | undefined => {
-    if (!projectId) return undefined
-    return projects.find((p) => p.id === projectId)?.color
-  }
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
+  // Reset collapsed state when filter toggle changes
+  useEffect(() => {
+    setCollapsedGroups(new Set())
+  }, [filterCurrentProject])
 
   // Group tasks by status
   const groupedTasks = useMemo(
     () => groupAttentionTasksByStatus(attentionTasks, projects, filterCurrentProject, selectedProjectId),
     [attentionTasks, projects, selectedProjectId, filterCurrentProject]
   )
+
+  const toggleGroup = (status: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      next.has(status) ? next.delete(status) : next.add(status)
+      return next
+    })
+  }
+
+  const getProjectColor = (projectId: string | null): string | undefined => {
+    if (!projectId) return undefined
+    return projects.find((p) => p.id === projectId)?.color
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -81,10 +96,20 @@ export function NotificationPanel({
         {attentionTasks.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">No tasks need attention</p>
         ) : (
-          groupedTasks.map(({ status, label, tasks }) => (
+          groupedTasks.map(({ status, label, tasks }) => {
+            const collapsed = collapsedGroups.has(status)
+            return (
             <div key={status} className="mb-3">
-              <div className="text-xs font-medium text-muted-foreground px-2 py-1">{label}</div>
-              <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => toggleGroup(status)}
+                className="flex w-full items-center gap-1 px-2 py-1 rounded hover:bg-muted/50 transition-colors"
+              >
+                <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', !collapsed && 'rotate-90')} />
+                <span className="text-xs font-medium text-muted-foreground">{label}</span>
+                {collapsed && <span className="ml-auto text-[10px] text-muted-foreground/60">{tasks.length}</span>}
+              </button>
+              {!collapsed && <div className="space-y-2 mt-1">
                 {tasks.map(({ task, sessionId, lastOutputTime }) => (
                   <div
                     key={task.id}
@@ -128,9 +153,9 @@ export function NotificationPanel({
                     </div>
                   </div>
                 ))}
-              </div>
+              </div>}
             </div>
-          ))
+          )})
         )}
         </div>
       </div>
