@@ -90,7 +90,7 @@ export function KanbanBoard({
     useSensor(KeyboardSensor)
   )
 
-  const allColumns = groupTasksBy(tasks, groupBy, sortBy, projectColumns)
+  const allColumns = groupTasksBy(tasks, groupBy, sortBy, projectColumns, { blockedTaskIds, viewConfig })
   const visibleColumns = showEmptyColumns ? allColumns : allColumns.filter((c) => c.tasks.length > 0)
   const activeTask = activeId ? tasks.find((t) => t.id === activeId) : null
 
@@ -174,7 +174,7 @@ export function KanbanBoard({
       targetIndex = targetColumn.tasks.findIndex((t) => t.id === overId)
     }
 
-    if (targetColumn.id === '__unknown__') return
+    if (targetColumn.id.startsWith('__')) return // skip __unknown__, __blocked__, __snoozed__
 
     const isSameColumn = currentColumn.id === targetColumn.id
 
@@ -209,6 +209,10 @@ export function KanbanBoard({
     } else {
       // Move to different column at specific position
       onTaskMove(taskId, targetColumn.id, targetIndex)
+      // Clear snooze when dragging out of snoozed column
+      if (currentColumn.id === '__snoozed__' && onUpdateTask) {
+        onUpdateTask(taskId, { snoozed_until: null } as Partial<Task>)
+      }
     }
   }
 

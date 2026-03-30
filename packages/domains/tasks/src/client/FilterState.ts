@@ -23,6 +23,10 @@ export interface ViewConfig {
   completedFilter: CompletedFilter
   showArchived: boolean
   showSubTasks: boolean
+  showBlockedColumn: boolean
+  blockedColumnAfter: string | null
+  showSnoozedColumn: boolean
+  snoozedColumnAfter: string | null
 }
 
 export interface FilterState {
@@ -53,7 +57,11 @@ export const defaultBoardConfig: ViewConfig = {
   showEmptyColumns: true,
   completedFilter: 'all',
   showArchived: false,
-  showSubTasks: false
+  showSubTasks: false,
+  showBlockedColumn: false,
+  blockedColumnAfter: null,
+  showSnoozedColumn: false,
+  snoozedColumnAfter: null
 }
 
 export const defaultListConfig: ViewConfig = {
@@ -62,7 +70,11 @@ export const defaultListConfig: ViewConfig = {
   showEmptyColumns: true,
   completedFilter: 'all',
   showArchived: false,
-  showSubTasks: false
+  showSubTasks: false,
+  showBlockedColumn: false,
+  blockedColumnAfter: null,
+  showSnoozedColumn: false,
+  snoozedColumnAfter: null
 }
 
 export const defaultFilterState: FilterState = {

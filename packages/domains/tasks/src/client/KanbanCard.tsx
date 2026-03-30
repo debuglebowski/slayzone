@@ -11,9 +11,20 @@ import { Card, CardContent, Tooltip, TooltipContent, TooltipTrigger, Popover, Po
 import { useAppearance } from '@slayzone/settings/client'
 import { todayISO } from './kanban'
 import { priorityOptions } from '@slayzone/task/shared'
-import { AlertCircle, GitMerge, Link2 } from 'lucide-react'
+import { AlertCircle, AlarmClockOff, GitMerge, Link2 } from 'lucide-react'
 import { usePty } from '@slayzone/terminal'
 import type { CardProperties } from './FilterState'
+
+function formatTimeLeft(until: string): string {
+  const ms = new Date(until).getTime() - Date.now()
+  if (ms <= 0) return '0m'
+  const mins = Math.floor(ms / 60_000)
+  if (mins < 60) return `${mins}m`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h`
+  const days = Math.floor(hrs / 24)
+  return `${days}d`
+}
 
 interface KanbanCardProps {
   task: Task
@@ -179,6 +190,17 @@ export function KanbanCard({
                 <span className="flex items-center text-amber-500 shrink-0" title="Blocked">
                   <Link2 className="h-2.5 w-2.5" />
                 </span>
+              )}
+              {task.snoozed_until && new Date(task.snoozed_until) > new Date() && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="flex items-center gap-0.5 text-orange-500 shrink-0">
+                      <AlarmClockOff className="h-2.5 w-2.5" />
+                      <span className="text-[9px] font-medium">{formatTimeLeft(task.snoozed_until)}</span>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Snoozed until {new Date(task.snoozed_until).toLocaleString()}</TooltipContent>
+                </Tooltip>
               )}
               {(cp?.dueDate ?? true) && isOverdue && (
                 <span className="flex items-center text-destructive shrink-0">

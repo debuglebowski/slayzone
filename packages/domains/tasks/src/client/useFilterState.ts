@@ -20,6 +20,10 @@ function migrateViewConfig(raw: Record<string, unknown>, defaults: ViewConfig, a
   else if ('showDone' in raw) config.completedFilter = raw.showDone ? 'all' : 'none'
   if (typeof raw.showArchived === 'boolean') config.showArchived = raw.showArchived
   if (typeof raw.showSubTasks === 'boolean') config.showSubTasks = raw.showSubTasks
+  if (typeof raw.showBlockedColumn === 'boolean') config.showBlockedColumn = raw.showBlockedColumn
+  if (typeof raw.blockedColumnAfter === 'string' || raw.blockedColumnAfter === null) config.blockedColumnAfter = raw.blockedColumnAfter as string | null
+  if (typeof raw.showSnoozedColumn === 'boolean') config.showSnoozedColumn = raw.showSnoozedColumn
+  if (typeof raw.snoozedColumnAfter === 'string' || raw.snoozedColumnAfter === null) config.snoozedColumnAfter = raw.snoozedColumnAfter as string | null
   return config
 }
 

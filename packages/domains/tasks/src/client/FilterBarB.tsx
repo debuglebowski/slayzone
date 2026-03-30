@@ -1,4 +1,5 @@
 import type { Tag } from '@slayzone/tags/shared'
+import { resolveColumns, type ColumnConfig } from '@slayzone/projects/shared'
 import type { FilterState, GroupKey, DueDateRange, SortKey, ViewMode, ViewConfig } from './FilterState'
 import { getViewConfig } from './FilterState'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
@@ -13,6 +14,7 @@ interface FilterBarBProps {
   filter: FilterState
   onChange: (f: FilterState) => void
   tags: Tag[]
+  columns?: ColumnConfig[] | null
 }
 
 const PRIORITY_OPTIONS = [
@@ -51,7 +53,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 ]
 
 
-export function FilterBarB({ filter, onChange, tags }: FilterBarBProps): React.JSX.Element {
+export function FilterBarB({ filter, onChange, tags, columns }: FilterBarBProps): React.JSX.Element {
   const activeFilterCount =
     (filter.priority !== null ? 1 : 0) +
     (filter.dueDateRange !== 'all' ? 1 : 0) +
@@ -256,24 +258,65 @@ export function FilterBarB({ filter, onChange, tags }: FilterBarBProps): React.J
                 </div>
               </div>
 
-              {/* Settings */}
+              {/* Tasks */}
               <div className="space-y-3">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-3 block">Tasks</span>
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="display-completed" className="text-sm cursor-pointer">Show completed tasks</Label>
+                  <Label htmlFor="display-completed" className="text-sm cursor-pointer">Show completed</Label>
                   <Switch id="display-completed" checked={vc.completedFilter === 'all'} onCheckedChange={(v) => setVc({ completedFilter: v ? 'all' : 'none' })} />
                 </div>
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="display-archived" className="text-sm cursor-pointer">Show archived tasks</Label>
+                  <Label htmlFor="display-archived" className="text-sm cursor-pointer">Show archived</Label>
                   <Switch id="display-archived" checked={vc.showArchived} onCheckedChange={(v) => setVc({ showArchived: v })} />
                 </div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="display-subtasks" className="text-sm cursor-pointer">Show sub-tasks</Label>
                   <Switch id="display-subtasks" checked={vc.showSubTasks} onCheckedChange={(v) => setVc({ showSubTasks: v })} />
                 </div>
+              </div>
+
+              {/* Columns */}
+              <div className="space-y-3">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-3 block">{isList ? 'Groups' : 'Columns'}</span>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="display-empty-cols" className="text-sm cursor-pointer">{isList ? 'Show empty groups' : 'Show empty columns'}</Label>
                   <Switch id="display-empty-cols" checked={vc.showEmptyColumns} onCheckedChange={(v) => setVc({ showEmptyColumns: v })} />
                 </div>
+                {(() => {
+                  const positionOptions = resolveColumns(columns)
+                  return [
+                    { key: 'showBlockedColumn' as const, afterKey: 'blockedColumnAfter' as const, label: 'blocked' },
+                    { key: 'showSnoozedColumn' as const, afterKey: 'snoozedColumnAfter' as const, label: 'snoozed' }
+                  ].map(({ key, afterKey, label }) => {
+                    const enabled = vc[key]
+                    const afterId = vc[afterKey]
+                    return (
+                      <div key={key} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor={`display-${label}`} className="text-sm cursor-pointer">Show {label}</Label>
+                          <Switch id={`display-${label}`} checked={enabled} onCheckedChange={(v) => setVc({ [key]: v })} />
+                        </div>
+                        {enabled && (
+                          <div className="flex items-center justify-between pl-4">
+                            <Label className="text-xs text-muted-foreground">Position after</Label>
+                            <Select
+                              value={afterId ?? '__default__'}
+                              onValueChange={(v) => setVc({ [afterKey]: v === '__default__' ? null : v })}
+                            >
+                              <SelectTrigger size="sm" className="h-7 w-30 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__default__">Default</SelectItem>
+                                {positionOptions.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                })()}
               </div>
             </div>
           </PopoverContent>

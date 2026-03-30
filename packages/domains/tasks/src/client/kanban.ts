@@ -2,7 +2,7 @@ import type { Task } from '@slayzone/task/shared'
 import type { CreateTaskDefaults } from '@slayzone/settings/client'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isTerminalStatus, resolveColumns } from '@slayzone/projects/shared'
-import { type FilterState, type DueDateRange, type SortKey, type GroupKey, getViewConfig } from './FilterState'
+import { type FilterState, type ViewConfig, type DueDateRange, type SortKey, type GroupKey, getViewConfig } from './FilterState'
 
 export type { GroupKey }
 
@@ -26,7 +26,7 @@ export function todayISO(): string {
 
 export function columnToCreateTaskDefaults(column: Column, groupBy: string): CreateTaskDefaults {
   const defaults: CreateTaskDefaults = {}
-  if (groupBy === 'status') { if (column.id !== '__unknown__') defaults.status = column.id as Task['status'] }
+  if (groupBy === 'status') { if (!column.id.startsWith('__')) defaults.status = column.id as Task['status'] }
   else if (groupBy === 'priority') { const p = parseInt(column.id.slice(1), 10); if (!isNaN(p)) defaults.priority = p }
   else if (groupBy === 'due_date') {
     const today = todayISO()
@@ -65,20 +65,71 @@ function sortTasks(tasks: Task[], sortBy: SortKey): Task[] {
   })
 }
 
-function groupByStatus(tasks: Task[], sortBy: SortKey, columns?: ColumnConfig[] | null): Column[] {
+export interface GroupOpts {
+  blockedTaskIds?: Set<string>
+  viewConfig?: ViewConfig
+}
+
+function isSnoozed(task: Task): boolean {
+  return !!task.snoozed_until && new Date(task.snoozed_until) > new Date()
+}
+
+function insertVirtualColumn(columns: Column[], virtual: Column, afterId: string | null, statusColumns: ColumnConfig[]): void {
+  if (afterId) {
+    const idx = columns.findIndex((c) => c.id === afterId)
+    if (idx >= 0) { columns.splice(idx + 1, 0, virtual); return }
+  }
+  // Default: blocked after last 'started', snoozed after last 'backlog'
+  const defaultCategory = virtual.id === '__blocked__' ? 'started' : 'backlog'
+  const lastCategoryCol = statusColumns.reduce((acc, c, i) => c.category === defaultCategory ? i : acc, -1)
+  const targetId = lastCategoryCol >= 0 ? statusColumns[lastCategoryCol].id : null
+  const targetIdx = targetId ? columns.findIndex((c) => c.id === targetId) : -1
+  if (targetIdx >= 0) columns.splice(targetIdx + 1, 0, virtual)
+  else columns.push(virtual)
+}
+
+function groupByStatus(tasks: Task[], sortBy: SortKey, columns?: ColumnConfig[] | null, opts?: GroupOpts): Column[] {
   const sorted = sortTasks(tasks, sortBy)
   const statusColumns = resolveColumns(columns)
-  const seen = new Set(statusColumns.map((column) => column.id))
+  const vc = opts?.viewConfig
+  const blockedIds = opts?.blockedTaskIds
 
+  // Determine which tasks go to virtual columns
+  const showBlocked = vc?.showBlockedColumn && blockedIds
+  const showSnoozed = vc?.showSnoozedColumn
+  const virtualBlocked: Task[] = []
+  const virtualSnoozed: Task[] = []
+  const virtualSet = new Set<string>()
+
+  for (const t of sorted) {
+    // Snoozed takes priority over blocked (deliberately deferred)
+    if (showSnoozed && isSnoozed(t)) {
+      virtualSnoozed.push(t)
+      virtualSet.add(t.id)
+    } else if (showBlocked && blockedIds.has(t.id)) {
+      virtualBlocked.push(t)
+      virtualSet.add(t.id)
+    }
+  }
+
+  const seen = new Set(statusColumns.map((column) => column.id))
   const grouped = statusColumns.map((column) => ({
     id: column.id,
     title: column.label,
-    tasks: sorted.filter((t) => t.status === column.id)
+    tasks: sorted.filter((t) => t.status === column.id && !virtualSet.has(t.id))
   }))
 
-  const unknownTasks = sorted.filter((task) => !seen.has(task.status))
+  const unknownTasks = sorted.filter((task) => !seen.has(task.status) && !virtualSet.has(task.id))
   if (unknownTasks.length > 0) {
     grouped.push({ id: '__unknown__', title: 'Unknown', tasks: unknownTasks })
+  }
+
+  // Insert virtual columns at specified positions
+  if (showSnoozed) {
+    insertVirtualColumn(grouped, { id: '__snoozed__', title: 'Snoozed', tasks: virtualSnoozed }, vc.snoozedColumnAfter, statusColumns)
+  }
+  if (showBlocked) {
+    insertVirtualColumn(grouped, { id: '__blocked__', title: 'Blocked', tasks: virtualBlocked }, vc.blockedColumnAfter, statusColumns)
   }
 
   return grouped
@@ -131,21 +182,21 @@ export function groupTasksBy(
   tasks: Task[],
   groupBy: GroupKey,
   sortBy: SortKey = 'manual',
-  columns?: ColumnConfig[] | null
+  columns?: ColumnConfig[] | null,
+  opts?: GroupOpts
 ): Column[] {
   switch (groupBy) {
     case 'none':
     case 'active':
       return [{ id: 'all', title: 'All Tasks', tasks: sortTasks(tasks, sortBy) }]
     case 'status':
-      return groupByStatus(tasks, sortBy, columns)
+      return groupByStatus(tasks, sortBy, columns, opts)
     case 'priority':
       return groupByPriority(tasks, sortBy)
     case 'due_date':
       return groupByDueDate(tasks, sortBy)
     default:
-      // Runtime guard for unexpected persisted values.
-      return groupByStatus(tasks, sortBy, columns)
+      return groupByStatus(tasks, sortBy, columns, opts)
   }
 }
 
@@ -225,8 +276,8 @@ export function applyFilters(
       return false
     }
 
-    // Hide snoozed tasks (snoozed_until is in the future)
-    if (task.snoozed_until && new Date(task.snoozed_until) > new Date()) {
+    // Hide snoozed tasks unless snoozed column is shown
+    if (!vc.showSnoozedColumn && task.snoozed_until && new Date(task.snoozed_until) > new Date()) {
       return false
     }
 

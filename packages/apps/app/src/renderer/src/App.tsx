@@ -799,7 +799,7 @@ function App(): React.JSX.Element {
                               className={cn('text-2xl font-bold bg-transparent border-none outline-none resize-none p-0', selectedProject ? 'cursor-text' : 'cursor-default select-none')}
                               style={{ caretColor: 'currentColor', fieldSizing: 'content' } as React.CSSProperties} rows={1} />
                           </div>
-                          {projects.length > 0 && !(projectPathMissing && selectedProjectId) && <FilterBar filter={filter} onChange={setFilter} tags={projectTags} />}
+                          {projects.length > 0 && !(projectPathMissing && selectedProjectId) && <FilterBar filter={filter} onChange={setFilter} tags={projectTags} columns={selectedProject?.columns_config} />}
                           {projects.length > 0 && (
                             <div>
                             <PanelToggle

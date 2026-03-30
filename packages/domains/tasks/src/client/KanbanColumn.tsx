@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { MoreHorizontal, Plus } from 'lucide-react'
+import { MoreHorizontal, Plus, ShieldAlert, AlarmClockOff } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
@@ -199,6 +199,8 @@ export function KanbanColumn({
       <div className="mb-2 flex items-center justify-between px-2 select-none">
         <div className="flex items-center gap-2">
           {(() => {
+            if (column.id === '__blocked__') return <ShieldAlert className="size-4 text-red-500" strokeWidth={2.5} />
+            if (column.id === '__snoozed__') return <AlarmClockOff className="size-4 text-orange-500" strokeWidth={2.5} />
             const style = getColumnStatusStyle(column.id, columns)
             if (!style) return null
             const Icon = style.icon

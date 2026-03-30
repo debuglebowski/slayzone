@@ -24,10 +24,21 @@ import type { ViewConfig, CardProperties } from './FilterState'
 import { TaskContextMenu } from './TaskContextMenu'
 import { cn, getColumnStatusStyle, getTerminalStateStyle, Tooltip, TooltipContent, TooltipTrigger, PriorityIcon } from '@slayzone/ui'
 import { IconButton } from '@slayzone/ui'
-import { ChevronDown, Plus, AlertCircle, Check, GitMerge, Link2 } from 'lucide-react'
+import { ChevronDown, Plus, AlertCircle, AlarmClockOff, Check, GitMerge, Link2 } from 'lucide-react'
 import { usePty, useActiveTaskIds } from '@slayzone/terminal'
 import { useDialogStore } from '@slayzone/settings/client'
 import { useEffect } from 'react'
+
+function formatSnoozeTimeLeft(until: string): string {
+  const ms = new Date(until).getTime() - Date.now()
+  if (ms <= 0) return '0m'
+  const mins = Math.floor(ms / 60_000)
+  if (mins < 60) return `${mins}m`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h`
+  const days = Math.floor(hrs / 24)
+  return `${days}d`
+}
 
 // ── Types ──
 
@@ -220,6 +231,13 @@ function ListRowContent({
             <Link2 className="h-3 w-3" />
           </span>
         )}
+        {/* Snoozed */}
+        {task.snoozed_until && new Date(task.snoozed_until) > new Date() && (
+          <span className="flex items-center gap-0.5 text-orange-500 shrink-0" title={`Snoozed until ${new Date(task.snoozed_until).toLocaleString()}`}>
+            <AlarmClockOff className="h-3 w-3" />
+            <span className="text-[10px] font-medium">{formatSnoozeTimeLeft(task.snoozed_until)}</span>
+          </span>
+        )}
 
         {/* Due date */}
         {(cp?.dueDate ?? true) && isOverdue && (
@@ -406,7 +424,7 @@ export function KanbanListView({
   const activeTaskIds = useActiveTaskIds()
 
   const allColumns = useMemo(() => {
-    const base = groupTasksBy(tasks, groupBy, sortBy, projectColumns)
+    const base = groupTasksBy(tasks, groupBy, sortBy, projectColumns, { blockedTaskIds, viewConfig })
     if (shouldTrackActive && base.length === 1) {
       const all = base[0].tasks
       const active: Task[] = []
