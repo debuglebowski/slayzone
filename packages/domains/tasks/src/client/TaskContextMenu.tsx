@@ -11,7 +11,9 @@ import {
   ContextMenuTrigger,
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
-  buildStatusOptions
+  buildStatusOptions,
+  getColumnStatusStyle,
+  PriorityIcon
 } from '@slayzone/ui'
 import {
   AlertDialog,
@@ -28,9 +30,10 @@ import type { Project } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
-import { Plus, AlarmClock, X, Sun, Moon, Calendar as CalendarIcon } from 'lucide-react'
+import { Plus, AlarmClock, X, CircleDot, Signal, Tag as TagIcon, FolderInput, Copy, Archive, Trash2 } from 'lucide-react'
 import { track } from '@slayzone/telemetry/client'
-import { setHours, setMinutes, addHours, addDays, nextMonday, isAfter, format } from 'date-fns'
+import { format } from 'date-fns'
+import { getSnoozePresets, CustomSnoozeDialog } from '@slayzone/task/client'
 
 interface TaskContextMenuProps {
   task: Task
@@ -69,6 +72,7 @@ export function TaskContextMenu({
 }: TaskContextMenuProps): React.JSX.Element {
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [customSnoozeOpen, setCustomSnoozeOpen] = useState(false)
   const [tagDialogOpen, setTagDialogOpen] = useState(false)
   const statusOptions = buildStatusOptions(columns)
 
@@ -106,20 +110,7 @@ export function TaskContextMenu({
 
   const isSnoozed = task.snoozed_until && new Date(task.snoozed_until) > new Date()
 
-  const snoozePresets = (() => {
-    const now = new Date()
-    const laterToday = (() => {
-      const fourPm = setMinutes(setHours(now, 16), 0)
-      return isAfter(fourPm, addHours(now, 1)) ? fourPm : addHours(now, 3)
-    })()
-    const tomorrow = setMinutes(setHours(addDays(now, 1), 9), 0)
-    const nextWeek = setMinutes(setHours(nextMonday(now), 9), 0)
-    return [
-      { label: 'Later today', icon: <Sun className="mr-2 size-3.5" />, date: laterToday },
-      { label: 'Tomorrow', icon: <Moon className="mr-2 size-3.5" />, date: tomorrow },
-      { label: 'Next week', icon: <CalendarIcon className="mr-2 size-3.5" />, date: nextWeek }
-    ]
-  })()
+  const snoozePresets = getSnoozePresets()
 
   const handleCopyTitle = async (): Promise<void> => {
     track('copy_title')
@@ -149,21 +140,26 @@ export function TaskContextMenu({
         <ContextMenuContent className="w-48">
           {/* Status submenu */}
           <ContextMenuSub>
-            <ContextMenuSubTrigger>Status</ContextMenuSubTrigger>
+            <ContextMenuSubTrigger><CircleDot className="mr-2 size-3.5" />Status</ContextMenuSubTrigger>
             <ContextMenuSubContent>
               <ContextMenuRadioGroup value={task.status} onValueChange={handleStatusChange}>
-                {statusOptions.map((s) => (
-                  <ContextMenuRadioItem key={s.value} value={s.value}>
-                    {s.label}
-                  </ContextMenuRadioItem>
-                ))}
+                {statusOptions.map((s) => {
+                  const style = getColumnStatusStyle(s.value, columns)
+                  const Icon = style?.icon
+                  return (
+                    <ContextMenuRadioItem key={s.value} value={s.value}>
+                      {Icon && <Icon className={`mr-1.5 size-3.5 ${style?.iconClass ?? ''}`} />}
+                      {s.label}
+                    </ContextMenuRadioItem>
+                  )
+                })}
               </ContextMenuRadioGroup>
             </ContextMenuSubContent>
           </ContextMenuSub>
 
           {/* Priority submenu */}
           <ContextMenuSub>
-            <ContextMenuSubTrigger>Priority</ContextMenuSubTrigger>
+            <ContextMenuSubTrigger><Signal className="mr-2 size-3.5" />Priority</ContextMenuSubTrigger>
             <ContextMenuSubContent>
               <ContextMenuRadioGroup
                 value={String(task.priority)}
@@ -171,6 +167,7 @@ export function TaskContextMenu({
               >
                 {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
                   <ContextMenuRadioItem key={value} value={value}>
+                    <PriorityIcon priority={Number(value)} className="mr-1.5 size-3.5" />
                     {label}
                   </ContextMenuRadioItem>
                 ))}
@@ -181,7 +178,7 @@ export function TaskContextMenu({
           {/* Tags submenu */}
           {tags && onTaskTagsChange && (
             <ContextMenuSub>
-              <ContextMenuSubTrigger>Tags</ContextMenuSubTrigger>
+              <ContextMenuSubTrigger><TagIcon className="mr-2 size-3.5" />Tags</ContextMenuSubTrigger>
               <ContextMenuSubContent>
                 {tags.map((tag) => (
                   <ContextMenuCheckboxItem
@@ -223,13 +220,22 @@ export function TaskContextMenu({
                   <ContextMenuSeparator />
                 </>
               )}
-              {snoozePresets.map((preset) => (
-                <ContextMenuItem key={preset.label} onSelect={() => handleSnooze(preset.date)}>
-                  {preset.icon}
-                  <span className="flex-1">{preset.label}</span>
-                  <span className="ml-4 text-xs text-muted-foreground">{format(preset.date, 'EEE, MMM d')}</span>
-                </ContextMenuItem>
-              ))}
+              {snoozePresets.map((preset) => {
+                const Icon = preset.icon
+                const date = preset.getDate()
+                return (
+                  <ContextMenuItem key={preset.label} onSelect={() => handleSnooze(date)}>
+                    <Icon className="mr-2 size-3.5" />
+                    <span className="flex-1">{preset.label}</span>
+                    <span className="ml-4 text-xs text-muted-foreground">{format(date, 'EEE, MMM d')}</span>
+                  </ContextMenuItem>
+                )
+              })}
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => setCustomSnoozeOpen(true)}>
+                <AlarmClock className="mr-2 size-3.5" />
+                Custom...
+              </ContextMenuItem>
             </ContextMenuSubContent>
           </ContextMenuSub>
 
@@ -237,7 +243,7 @@ export function TaskContextMenu({
 
           {/* Move to project */}
           <ContextMenuSub>
-            <ContextMenuSubTrigger>Move to</ContextMenuSubTrigger>
+            <ContextMenuSubTrigger><FolderInput className="mr-2 size-3.5" />Move to</ContextMenuSubTrigger>
             <ContextMenuSubContent>
               <ContextMenuRadioGroup
                 value={task.project_id}
@@ -258,7 +264,7 @@ export function TaskContextMenu({
 
           {/* Copy submenu */}
           <ContextMenuSub>
-            <ContextMenuSubTrigger>Copy</ContextMenuSubTrigger>
+            <ContextMenuSubTrigger><Copy className="mr-2 size-3.5" />Copy</ContextMenuSubTrigger>
             <ContextMenuSubContent>
               <ContextMenuItem onSelect={handleCopyTitle}>Title</ContextMenuItem>
               <ContextMenuItem onSelect={handleCopyLink}>Link</ContextMenuItem>
@@ -268,11 +274,11 @@ export function TaskContextMenu({
           <ContextMenuSeparator />
 
           {/* Archive */}
-          <ContextMenuItem onSelect={() => setArchiveDialogOpen(true)}>Archive</ContextMenuItem>
+          <ContextMenuItem onSelect={() => setArchiveDialogOpen(true)}><Archive className="mr-2 size-3.5" />Archive</ContextMenuItem>
 
           {/* Delete */}
           <ContextMenuItem variant="destructive" onSelect={() => setDeleteDialogOpen(true)}>
-            Delete
+            <Trash2 className="mr-2 size-3.5" />Delete
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
@@ -308,6 +314,16 @@ export function TaskContextMenu({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Custom snooze dialog */}
+      <CustomSnoozeDialog
+        open={customSnoozeOpen}
+        onOpenChange={setCustomSnoozeOpen}
+        onSnooze={(until) => {
+          track('task_snoozed')
+          onUpdateTask(task.id, { snoozed_until: until } as Partial<Task>)
+        }}
+      />
 
       {/* Create tag dialog */}
       {tags && (
