@@ -48,7 +48,7 @@ export function useBrowserViewBounds(
       }
 
       // Check if a dialog overlay or popover overlaps this view
-      const overlayEls = document.querySelectorAll('[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="popover-content"]')
+      const overlayEls = document.querySelectorAll('[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-radix-popper-content-wrapper]')
       const viewRect = el.getBoundingClientRect()
       let overlaps = false
       for (const oel of overlayEls) {
