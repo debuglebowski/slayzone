@@ -21,7 +21,7 @@ underlineOverride.textContent = `
 `
 document.head.appendChild(underlineOverride)
 
-import { getTerminal, setTerminal, disposeTerminal, updateAllThemes } from './terminal-cache'
+import { getTerminal, setTerminal, disposeTerminal, updateAllThemes, registerActiveAddon, unregisterActiveAddon } from './terminal-cache'
 import { usePty } from './PtyContext'
 import { useTheme, useAppearance } from '@slayzone/settings/client'
 import { getThemeTerminalColors } from '@slayzone/ui'
@@ -317,6 +317,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           fitAddonRef.current = cached.fitAddon
           serializeAddonRef.current = cached.serializeAddon
           searchAddonRef.current = cached.searchAddon
+          registerActiveAddon(sessionId, cached.serializeAddon)
           if (cached.lastRenderedSeq !== undefined) {
             lastRenderedSeqRef.current = cached.lastRenderedSeq
           }
@@ -493,6 +494,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       fitAddonRef.current = fitAddon
       serializeAddonRef.current = serializeAddon
       searchAddonRef.current = searchAddon
+      registerActiveAddon(sessionId, serializeAddon)
 
       terminal.open(containerRef.current)
       onAttachedRef.current?.({ focus: () => terminal.focus() })
@@ -636,6 +638,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     return () => {
       controller.abort()
+      unregisterActiveAddon(sessionId)
       // Serialize state before caching
       let serializedState: string | undefined
       if (serializeAddonRef.current && terminalRef.current) {

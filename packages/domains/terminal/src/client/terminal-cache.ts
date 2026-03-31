@@ -15,8 +15,11 @@ export interface CachedTerminal {
   lastRenderedSeq?: number
 }
 
-// Module-level cache for terminal instances
+// Module-level cache for terminal instances (unmounted terminals)
 const cache = new Map<string, CachedTerminal>()
+
+// Active (mounted) terminal serialize addons — terminals in the DOM aren't in the cache
+const activeAddons = new Map<string, SerializeAddon>()
 
 // Track sessionIds that shouldn't be re-cached (e.g., during restart/mode-change)
 const skipCacheSet = new Set<string>()
@@ -95,4 +98,19 @@ export function updateAllThemes(theme: ITheme, minimumContrastRatio?: number): v
 
 export function getCacheSize(): number {
   return cache.size
+}
+
+export function registerActiveAddon(sessionId: string, addon: SerializeAddon): void {
+  activeAddons.set(sessionId, addon)
+}
+
+export function unregisterActiveAddon(sessionId: string): void {
+  activeAddons.delete(sessionId)
+}
+
+export function serializeTerminalHistory(sessionId: string): string {
+  const addon = activeAddons.get(sessionId) ?? cache.get(sessionId)?.serializeAddon
+  if (!addon) return ''
+  try { return addon.serialize() }
+  catch { return '' }
 }

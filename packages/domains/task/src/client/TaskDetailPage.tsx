@@ -63,7 +63,7 @@ import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
 import { RichTextEditor } from '@slayzone/editor'
 import { normalizeDescription, stripMarkdown } from '@slayzone/task/shared'
 import { useTheme } from '@slayzone/settings/client'
-import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, LoopModeBanner, LoopModeDialog } from '@slayzone/terminal'
+import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal/shared'
 import { TerminalContainer, type TerminalContainerHandle } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
@@ -80,7 +80,6 @@ import { useTaskTagIds } from './useTaskTagIds'
 import { WebPanelView } from './WebPanelView'
 import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
-// ErrorBoundary should be provided by the app when rendering this component
 
 function SortableSubTask({ sub, columns, statusOptions, onNavigate, onUpdate, onDelete }: {
   sub: Task
@@ -840,6 +839,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     },
     [task, onTaskUpdated, resetTaskState]
   )
+
+  const getMainHistory = useCallback(() => {
+    if (!task) return ''
+    const raw = serializeTerminalHistory(`${task.id}:${task.id}`)
+    return stripAnsi(raw)
+  }, [task])
+
+  const handleCopyHistory = useCallback(() => {
+    const history = getMainHistory()
+    if (history) void navigator.clipboard.writeText(history)
+  }, [getMainHistory])
 
   const getProviderFlagsForMode = useCallback((currentTask: Task): string => {
     return getProviderFlags(currentTask.provider_config, currentTask.terminal_mode)
@@ -1842,6 +1852,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               <DropdownMenuItem onClick={() => void handleInjectDescription()}>
                                 Inject description
                                 <span className="ml-auto text-xs text-muted-foreground">{terminalInjectDescShortcut}</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={handleCopyHistory}>
+                                Copy history
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={handleReattachTerminal}>
