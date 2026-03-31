@@ -1,6 +1,6 @@
 ---
 name: competitor-discovery
-description: ""
+description: "Find new competitors worth adding to the comparison program."
 trigger: auto
 ---
 

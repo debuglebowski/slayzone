@@ -1,9 +1,3 @@
----
-name: release
-description: "Create a new release for SlayZone"
-trigger: none
----
-
 Create a new release for SlayZone. The version argument is: $ARGUMENTS
 
 ## Steps

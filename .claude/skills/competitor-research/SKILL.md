@@ -1,6 +1,6 @@
 ---
 name: competitor-research
-description: ""
+description: "Create or refresh one competitor record in the comparison canon."
 trigger: auto
 ---
 
@@ -60,17 +60,6 @@ When updating or migrating a competitor:
 - lower confidence or use `unknown` when evidence is weak
 - do not quietly preserve stale conclusions from the legacy record
 - only refresh `last_checked` after revalidation is complete
-
-## Screenshot Rules
-
-Every `publish-ready` record needs at least one product screenshot.
-
-- prefer the product screenshot from the competitor's official homepage or docs — most sites include one prominently
-- capture the product UI element directly, not the surrounding marketing page
-- use Chrome DevTools to navigate to the page, identify the product image element in the snapshot, and screenshot that element by uid
-- if the image is hosted on a CDN that blocks direct download, screenshot the element from the rendered page instead
-- one clean product screenshot is sufficient for `publish-ready` status
-- save to `comparison/<slug>/assets/` and document in the `assets:` frontmatter block with caption, proves, source_url, and captured_on
 
 ## Migration Rules
 

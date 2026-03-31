@@ -1,6 +1,6 @@
 ---
 name: comparison-publishing
-description: ""
+description: "Turn canonical competitor data into website-ready outputs."
 trigger: auto
 ---
 

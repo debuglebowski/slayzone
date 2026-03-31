@@ -1,6 +1,6 @@
 ---
 name: comparison-taxonomy
-description: ""
+description: "Maintain the comparison schema across the canon."
 trigger: auto
 ---
 
