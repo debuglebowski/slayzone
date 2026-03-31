@@ -3,7 +3,6 @@ import type { Project } from '@slayzone/projects/shared'
 import type { AttentionTask } from './useAttentionTasks'
 
 export interface GroupedAttentionTasks {
-  status: string
   label: string
   tasks: AttentionTask[]
 }
@@ -34,7 +33,9 @@ export function groupAttentionTasksByStatus(
     const optionIndex = options.findIndex((option) => option.value === status)
     const label = optionIndex >= 0 ? options[optionIndex].label : status
     const order = optionIndex >= 0 ? optionIndex : Number.MAX_SAFE_INTEGER
-    const existing = groups.get(status) ?? {
+    // Group by label so custom columns with the same name but different IDs
+    // across projects are merged into a single group
+    const existing = groups.get(label) ?? {
       tasks: [],
       minOrder: Number.MAX_SAFE_INTEGER,
       labelCounts: new Map<string, number>()
@@ -42,15 +43,12 @@ export function groupAttentionTasksByStatus(
     existing.tasks.push(item)
     existing.minOrder = Math.min(existing.minOrder, order)
     existing.labelCounts.set(label, (existing.labelCounts.get(label) ?? 0) + 1)
-    groups.set(status, existing)
+    groups.set(label, existing)
   }
 
   return [...groups.entries()]
-    .map(([status, group]) => {
-      const label =
-        [...group.labelCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? status
+    .map(([label, group]) => {
       return {
-        status,
         label,
         tasks: group.tasks,
         order: group.minOrder

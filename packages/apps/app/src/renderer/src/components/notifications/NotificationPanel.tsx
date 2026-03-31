@@ -81,8 +81,8 @@ export function NotificationPanel({
         {attentionTasks.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">No tasks need attention</p>
         ) : (
-          groupedTasks.map(({ status, label, tasks }) => (
-            <div key={status} className="mb-3">
+          groupedTasks.map(({ label, tasks }) => (
+            <div key={label} className="mb-3">
               <div className="text-xs font-medium text-muted-foreground px-2 py-1">{label}</div>
               <div className="space-y-2">
                 {tasks.map(({ task, sessionId, lastOutputTime }) => (
