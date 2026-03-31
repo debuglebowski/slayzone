@@ -153,6 +153,56 @@ test.describe('CLI: slay', () => {
       expect(r.status).not.toBe(0)
       expect(r.stderr).toContain('--project')
     })
+
+    test('--external-id deduplicates within a project', () => {
+      const extId = `dedup-${Date.now()}`
+      const title = `CLI dedup first ${extId}`
+
+      const r1 = runCli('tasks', 'create', title, '--project', 'cli test', '--external-id', extId)
+      expect(r1.status).toBe(0)
+      expect(r1.stdout).toContain('Created:')
+
+      // Same external-id → skip
+      const r2 = runCli('tasks', 'create', 'CLI dedup second', '--project', 'cli test', '--external-id', extId)
+      expect(r2.status).toBe(0)
+      expect(r2.stdout).toContain('Exists:')
+      expect(r2.stdout).toContain(title)
+    })
+
+    test('--external-id allows same id in different projects', () => {
+      const extId = `cross-proj-${Date.now()}`
+      const projName = `CLI dedup proj ${Date.now()}`
+      runCli('projects', 'create', projName, '--path', TEST_PROJECT_PATH)
+
+      const r1 = runCli('tasks', 'create', 'Task in proj1', '--project', 'cli test', '--external-id', extId)
+      expect(r1.status).toBe(0)
+      expect(r1.stdout).toContain('Created:')
+
+      const r2 = runCli('tasks', 'create', 'Task in proj2', '--project', projName, '--external-id', extId)
+      expect(r2.status).toBe(0)
+      expect(r2.stdout).toContain('Created:')
+    })
+
+    test('--external-provider namespaces dedup', () => {
+      const extId = `provider-${Date.now()}`
+
+      const r1 = runCli('tasks', 'create', 'CLI provider task', '--project', 'cli test',
+        '--external-id', extId, '--external-provider', 'email')
+      expect(r1.status).toBe(0)
+      expect(r1.stdout).toContain('Created:')
+
+      // Same external-id, different provider → creates
+      const r2 = runCli('tasks', 'create', 'CLI provider task 2', '--project', 'cli test',
+        '--external-id', extId, '--external-provider', 'calendar')
+      expect(r2.status).toBe(0)
+      expect(r2.stdout).toContain('Created:')
+
+      // Same external-id + same provider → dedup
+      const r3 = runCli('tasks', 'create', 'CLI provider task 3', '--project', 'cli test',
+        '--external-id', extId, '--external-provider', 'email')
+      expect(r3.status).toBe(0)
+      expect(r3.stdout).toContain('Exists:')
+    })
   })
 
   // --- slay projects list ---
@@ -513,6 +563,20 @@ test.describe('CLI: slay', () => {
       const r2 = runCli('tasks', 'subtasks', parentTaskId.slice(0, 8), '--json')
       const subtasks = JSON.parse(r2.stdout) as { title: string }[]
       expect(subtasks.some((t) => t.title === title)).toBe(true)
+    })
+
+    test('subtask-add --external-id deduplicates', () => {
+      const extId = `sub-dedup-${Date.now()}`
+      const title = `CLI subtask dedup ${extId}`
+
+      const r1 = runCli('tasks', 'subtask-add', parentTaskId.slice(0, 8), title, '--external-id', extId)
+      expect(r1.status).toBe(0)
+      expect(r1.stdout).toContain('Created subtask:')
+
+      const r2 = runCli('tasks', 'subtask-add', parentTaskId.slice(0, 8), 'duplicate', '--external-id', extId)
+      expect(r2.status).toBe(0)
+      expect(r2.stdout).toContain('Exists:')
+      expect(r2.stdout).toContain(title)
     })
 
     test('subtask-add populates provider_config with default flags', async ({ mainWindow }) => {

@@ -154,6 +154,8 @@ export function tasksCommand(): Command {
     .option('--description <text>', 'Task description')
     .option('--status <status>', 'Initial status key')
     .option('--priority <n>', 'Priority 1-5 (1=highest)', '3')
+    .option('--external-id <id>', 'External ID for deduplication (skips if already exists)')
+    .option('--external-provider <provider>', 'External provider namespace', 'cli')
     .action(async (title, opts) => {
       const db = openDb()
 
@@ -178,6 +180,21 @@ export function tasksCommand(): Command {
 
       const project = projects[0]
 
+      if (opts.externalId) {
+        const existing = db.query<{ id: string; title: string; status: string }>(
+          `SELECT id, title, status FROM tasks
+           WHERE project_id = :projectId AND external_provider = :provider AND external_id = :externalId
+           LIMIT 1`,
+          { ':projectId': project.id, ':provider': opts.externalProvider, ':externalId': opts.externalId }
+        )
+        if (existing.length > 0) {
+          const t = existing[0]
+          db.close()
+          console.log(`Exists: ${t.id.slice(0, 8)}  ${t.title}  [${t.status}]  ${project.name}`)
+          return
+        }
+      }
+
       const priority = parseInt(opts.priority, 10)
       if (isNaN(priority) || priority < 1 || priority > 5) {
         console.error('Priority must be 1-5.')
@@ -198,31 +215,53 @@ export function tasksCommand(): Command {
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
 
-      db.run(
-        `INSERT INTO tasks (id, project_id, title, description, status, priority, terminal_mode, provider_config,
-           claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
-           "order", created_at, updated_at)
-         VALUES (:id, :projectId, :title, :description, :status, :priority, :terminalMode, :providerConfig,
-           :claudeFlags, :codexFlags, :cursorFlags, :geminiFlags, :opencodeFlags,
-           (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
-           :now, :now)`,
-        {
-          ':id': id,
-          ':projectId': project.id,
-          ':title': title,
-          ':description': opts.description ?? null,
-          ':status': status,
-          ':priority': priority,
-          ':terminalMode': terminalMode,
-          ':providerConfig': JSON.stringify(providerConfig),
-          ':claudeFlags': providerConfig['claude-code']?.flags ?? '',
-          ':codexFlags': providerConfig['codex']?.flags ?? '',
-          ':cursorFlags': providerConfig['cursor-agent']?.flags ?? '',
-          ':geminiFlags': providerConfig['gemini']?.flags ?? '',
-          ':opencodeFlags': providerConfig['opencode']?.flags ?? '',
-          ':now': now,
+      try {
+        db.run(
+          `INSERT INTO tasks (id, project_id, title, description, status, priority, terminal_mode, provider_config,
+             claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
+             external_id, external_provider,
+             "order", created_at, updated_at)
+           VALUES (:id, :projectId, :title, :description, :status, :priority, :terminalMode, :providerConfig,
+             :claudeFlags, :codexFlags, :cursorFlags, :geminiFlags, :opencodeFlags,
+             :externalId, :externalProvider,
+             (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
+             :now, :now)`,
+          {
+            ':id': id,
+            ':projectId': project.id,
+            ':title': title,
+            ':description': opts.description ?? null,
+            ':status': status,
+            ':priority': priority,
+            ':terminalMode': terminalMode,
+            ':providerConfig': JSON.stringify(providerConfig),
+            ':claudeFlags': providerConfig['claude-code']?.flags ?? '',
+            ':codexFlags': providerConfig['codex']?.flags ?? '',
+            ':cursorFlags': providerConfig['cursor-agent']?.flags ?? '',
+            ':geminiFlags': providerConfig['gemini']?.flags ?? '',
+            ':opencodeFlags': providerConfig['opencode']?.flags ?? '',
+            ':externalId': opts.externalId ?? null,
+            ':externalProvider': opts.externalId ? opts.externalProvider : null,
+            ':now': now,
+          }
+        )
+      } catch (err: unknown) {
+        if (opts.externalId && err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
+          const existing = db.query<{ id: string; title: string; status: string }>(
+            `SELECT id, title, status FROM tasks
+             WHERE project_id = :projectId AND external_provider = :provider AND external_id = :externalId
+             LIMIT 1`,
+            { ':projectId': project.id, ':provider': opts.externalProvider, ':externalId': opts.externalId }
+          )
+          if (existing.length > 0) {
+            const t = existing[0]
+            db.close()
+            console.log(`Exists: ${t.id.slice(0, 8)}  ${t.title}  [${t.status}]  ${project.name}`)
+            return
+          }
         }
-      )
+        throw err
+      }
 
       db.close()
       await notifyApp()
@@ -488,6 +527,8 @@ export function tasksCommand(): Command {
     .option('--description <text>', 'Subtask description')
     .option('--status <status>', 'Initial status key')
     .option('--priority <n>', 'Priority 1-5', '3')
+    .option('--external-id <id>', 'External ID for deduplication (skips if already exists)')
+    .option('--external-provider <provider>', 'External provider namespace', 'cli')
     .action(async (parentId, title, opts) => {
       parentId = resolveId(parentId)
       const db = openDb()
@@ -504,6 +545,21 @@ export function tasksCommand(): Command {
       }
 
       const parent = parents[0]
+
+      if (opts.externalId) {
+        const existing = db.query<{ id: string; title: string; status: string }>(
+          `SELECT id, title, status FROM tasks
+           WHERE project_id = :projectId AND external_provider = :provider AND external_id = :externalId
+           LIMIT 1`,
+          { ':projectId': parent.project_id, ':provider': opts.externalProvider, ':externalId': opts.externalId }
+        )
+        if (existing.length > 0) {
+          const t = existing[0]
+          db.close()
+          console.log(`Exists: ${t.id.slice(0, 8)}  ${t.title}  [${t.status}]`)
+          return
+        }
+      }
 
       const priority = parseInt(opts.priority, 10)
       if (isNaN(priority) || priority < 1 || priority > 5) {
@@ -525,32 +581,54 @@ export function tasksCommand(): Command {
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
 
-      db.run(
-        `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, terminal_mode, provider_config,
-           claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
-           "order", created_at, updated_at, is_temporary)
-         VALUES (:id, :projectId, :parentId, :title, :description, :status, :priority, :terminalMode, :providerConfig,
-           :claudeFlags, :codexFlags, :cursorFlags, :geminiFlags, :opencodeFlags,
-           (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
-           :now, :now, 0)`,
-        {
-          ':id': id,
-          ':projectId': parent.project_id,
-          ':parentId': parent.id,
-          ':title': title,
-          ':description': opts.description ?? null,
-          ':status': status,
-          ':priority': priority,
-          ':terminalMode': terminalMode,
-          ':providerConfig': JSON.stringify(providerConfig),
-          ':claudeFlags': providerConfig['claude-code']?.flags ?? '',
-          ':codexFlags': providerConfig['codex']?.flags ?? '',
-          ':cursorFlags': providerConfig['cursor-agent']?.flags ?? '',
-          ':geminiFlags': providerConfig['gemini']?.flags ?? '',
-          ':opencodeFlags': providerConfig['opencode']?.flags ?? '',
-          ':now': now,
+      try {
+        db.run(
+          `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, terminal_mode, provider_config,
+             claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
+             external_id, external_provider,
+             "order", created_at, updated_at, is_temporary)
+           VALUES (:id, :projectId, :parentId, :title, :description, :status, :priority, :terminalMode, :providerConfig,
+             :claudeFlags, :codexFlags, :cursorFlags, :geminiFlags, :opencodeFlags,
+             :externalId, :externalProvider,
+             (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
+             :now, :now, 0)`,
+          {
+            ':id': id,
+            ':projectId': parent.project_id,
+            ':parentId': parent.id,
+            ':title': title,
+            ':description': opts.description ?? null,
+            ':status': status,
+            ':priority': priority,
+            ':terminalMode': terminalMode,
+            ':providerConfig': JSON.stringify(providerConfig),
+            ':claudeFlags': providerConfig['claude-code']?.flags ?? '',
+            ':codexFlags': providerConfig['codex']?.flags ?? '',
+            ':cursorFlags': providerConfig['cursor-agent']?.flags ?? '',
+            ':geminiFlags': providerConfig['gemini']?.flags ?? '',
+            ':opencodeFlags': providerConfig['opencode']?.flags ?? '',
+            ':externalId': opts.externalId ?? null,
+            ':externalProvider': opts.externalId ? opts.externalProvider : null,
+            ':now': now,
+          }
+        )
+      } catch (err: unknown) {
+        if (opts.externalId && err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
+          const existing = db.query<{ id: string; title: string; status: string }>(
+            `SELECT id, title, status FROM tasks
+             WHERE project_id = :projectId AND external_provider = :provider AND external_id = :externalId
+             LIMIT 1`,
+            { ':projectId': parent.project_id, ':provider': opts.externalProvider, ':externalId': opts.externalId }
+          )
+          if (existing.length > 0) {
+            const t = existing[0]
+            db.close()
+            console.log(`Exists: ${t.id.slice(0, 8)}  ${t.title}  [${t.status}]`)
+            return
+          }
         }
-      )
+        throw err
+      }
 
       db.close()
       await notifyApp()

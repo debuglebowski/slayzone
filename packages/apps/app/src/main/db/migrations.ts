@@ -1637,6 +1637,18 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(`ALTER TABLE tasks ADD COLUMN description_format TEXT NOT NULL DEFAULT 'html';`)
     }
+  },
+  {
+    version: 91,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE tasks ADD COLUMN external_id TEXT DEFAULT NULL;
+        ALTER TABLE tasks ADD COLUMN external_provider TEXT DEFAULT NULL;
+        CREATE UNIQUE INDEX idx_tasks_external_dedup
+          ON tasks(project_id, external_provider, external_id)
+          WHERE external_id IS NOT NULL;
+      `)
+    }
   }
 ]
 
