@@ -68,7 +68,7 @@
         "category": "fix",
         "title": "Menus behind browser",
         "description": "Dropdown menus no longer hide behind the browser panel."
-      },
+      }
     ]
   },
   {
