@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useTheme } from './ThemeContext'
 import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
@@ -49,9 +48,6 @@ export function UserSettingsDialog({
 }: UserSettingsDialogProps) {
   // Modes list is SHARED because multiple tabs (AI Providers, Panels) need it
   const { modes, createMode, updateMode, deleteMode, testMode, restoreDefaults, resetToDefaultState } = useTerminalModes()
-  
-  // Theme is SHARED because it affects the entire modal/app appearance
-  const { preference, setPreference } = useTheme()
   
   const [activeTab, setActiveTab] = useState(initialTab)
   const [contextManagerEnabled, setContextManagerEnabled] = useState(false)
@@ -115,10 +111,7 @@ export function UserSettingsDialog({
             {activeTab === 'worktrees' && <WorktreesSettingsTab />}
 
             {activeTab === 'appearance' && (
-              <AppearanceSettingsTab
-                preference={preference}
-                setPreference={setPreference}
-              />
+              <AppearanceSettingsTab />
             )}
 
             {(activeTab === 'ai-providers' || activeTab.startsWith('ai-providers/')) && (
