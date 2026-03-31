@@ -115,7 +115,7 @@ export function KanbanCard({
         data-task-id={task.id}
         onClick={(e) => onClick?.(e)}
       >
-      <CardContent className={cn("px-2.5 pt-5", resolvedTags.length > 0 || (subTaskCount && subTaskCount.total > 0) ? "pb-3" : "pb-5")}>
+      <CardContent className={cn("px-2.5 pt-5", resolvedTags.length > 0 || (subTaskCount && subTaskCount.total > 0) || ((cp?.dueDate ?? true) && task.due_date) ? "pb-3" : "pb-5")}>
         <div className="flex items-start gap-3">
           {/* Project color dot - shown in All view */}
           {showProject && project ? (
@@ -202,18 +202,10 @@ export function KanbanCard({
                   <TooltipContent>Snoozed until {new Date(task.snoozed_until).toLocaleString()}</TooltipContent>
                 </Tooltip>
               )}
-              {(cp?.dueDate ?? true) && isOverdue && (
-                <span className="flex items-center text-destructive shrink-0">
-                  <AlertCircle className="h-2 w-2" />
-                </span>
-              )}
-              {(cp?.dueDate ?? true) && task.due_date && !isOverdue && (
-                <span className="text-muted-foreground text-[9px] shrink-0">{task.due_date}</span>
-              )}
               </div>
             </div>
-            {/* Bottom row: subtasks + tags */}
-            {(resolvedTags.length > 0 || (subTaskCount && subTaskCount.total > 0)) && (
+            {/* Bottom row: subtasks + tags + due date */}
+            {(resolvedTags.length > 0 || (subTaskCount && subTaskCount.total > 0) || ((cp?.dueDate ?? true) && task.due_date)) && (
               <div className="flex items-center gap-3 mt-3">
                 {(cp?.subtasks ?? true) && subTaskCount && subTaskCount.total > 0 && (() => {
                   const pct = subTaskCount.done / subTaskCount.total
@@ -291,6 +283,16 @@ export function KanbanCard({
                       />
                     </PopoverContent>
                   </Popover>
+                )}
+                {(cp?.dueDate ?? true) && task.due_date && (
+                  <span className={cn(
+                    "ml-auto shrink-0 h-5 rounded-full ring-1 px-2 text-[10px] font-medium leading-none flex items-center",
+                    isOverdue
+                      ? "text-destructive ring-destructive"
+                      : "text-muted-foreground ring-border"
+                  )}>
+                    {task.due_date}
+                  </span>
                 )}
               </div>
             )}
