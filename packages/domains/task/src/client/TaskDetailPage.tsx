@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronRight, Plus, GripVertical, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, Circle, Repeat } from 'lucide-react'
+import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronRight, Plus, GripVertical, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, Circle, Repeat, Zap } from 'lucide-react'
 import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
 import { DescriptionDialog } from './DescriptionDialog'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
@@ -252,6 +252,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const panelEditorShortcut = useShortcutDisplay('panel-editor')
   const panelGitShortcut = useShortcutDisplay('panel-git')
   const panelProcessesShortcut = useShortcutDisplay('panel-processes')
+  const panelAutomationsShortcut = useShortcutDisplay('panel-automations')
   const panelSettingsShortcut = useShortcutDisplay('panel-settings')
 
   const terminalInjectTitleShortcut = useShortcutDisplay('terminal-inject-title')
@@ -1004,6 +1005,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         handlePanelToggle('tests', !panelVisibility.tests)
         return
       }
+      if (matchesShortcut(e, keys('panel-automations')) && isBuiltinEnabled('automations', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('automations', !panelVisibility.automations)
+        return
+      }
 
       // Skip shortcuts that conflict with editor bindings (Mod+S, Mod+B)
       const target = e.target as HTMLElement
@@ -1460,6 +1466,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut },
                     { id: 'diff', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut },
                     { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut },
+                    { id: 'automations', icon: Zap, label: 'Automations', shortcut: panelAutomationsShortcut },
                     { id: 'settings', icon: Settings2, label: 'Settings', shortcut: panelSettingsShortcut },
                   ].filter(p => isBuiltinEnabled(p.id, 'task') && !(task.is_temporary && p.id === 'settings'))
 

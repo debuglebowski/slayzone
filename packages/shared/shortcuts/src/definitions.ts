@@ -47,6 +47,7 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'panel-settings', label: 'Settings', group: 'Task Panels', defaultKeys: 'mod+s', scope: 'task-panel' },
   { id: 'panel-processes', label: 'Processes', group: 'Task Panels', defaultKeys: 'mod+o', scope: 'task-panel' },
   { id: 'panel-tests', label: 'Tests', group: 'Task Panels', defaultKeys: 'mod+u', scope: 'task-panel' },
+  { id: 'panel-automations', label: 'Automations', group: 'Task Panels', defaultKeys: 'mod+y', scope: 'task-panel' },
   { id: 'editor-search', label: 'Editor Search', group: 'Task Panels', defaultKeys: 'mod+shift+f', scope: 'task-panel' },
   { id: 'browser-element-picker', label: 'Element Picker', group: 'Task Panels', defaultKeys: 'mod+shift+l', scope: 'task-panel' },
 

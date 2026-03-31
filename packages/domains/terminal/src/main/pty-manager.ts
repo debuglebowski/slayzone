@@ -302,6 +302,7 @@ function emitStateChange(session: PtySession, sessionId: string, newState: Termi
       }
     } catch { /* Window destroyed */ }
   }
+
 }
 
 // Delegate state transitions to the extracted state machine

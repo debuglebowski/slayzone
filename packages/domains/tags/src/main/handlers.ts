@@ -98,5 +98,7 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
         insertStmt.run(taskId, tagId)
       }
     })()
+
+    ipcMain.emit('db:taskTags:setForTask:done', null, taskId, tagIds)
   })
 }

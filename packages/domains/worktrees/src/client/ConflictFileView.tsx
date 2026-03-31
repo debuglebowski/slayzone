@@ -3,7 +3,7 @@ import { Sparkles, Check, ArrowLeft, ArrowRight, Info, Layers } from 'lucide-rea
 import { Button, Tooltip, TooltipContent, TooltipTrigger, cn } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
 import { useTheme } from '@slayzone/settings/client'
-import { getEditorThemeById, editorThemes } from '@slayzone/editor'
+import { getThemeEditorColors } from '@slayzone/ui'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
@@ -40,15 +40,12 @@ function resolveLabels(ctx: MergeContext): { oursLabel: string; oursDesc: string
 }
 
 export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved, branchContext }: ConflictFileViewProps) {
-  const { theme } = useTheme()
-  const { editorFontSize, contentThemeFollowApp, contentThemeDark, contentThemeLight } = useAppearance()
-  const resolvedThemeId = contentThemeFollowApp
-    ? (theme === 'dark' ? contentThemeDark : contentThemeLight)
-    : contentThemeDark
-  const resolvedVariant = editorThemes.find(t => t.id === resolvedThemeId)?.variant ?? 'dark'
+  const { editorThemeId, contentVariant } = useTheme()
+  const { editorFontSize } = useAppearance()
+  const resolvedEditorColors = getThemeEditorColors(editorThemeId, contentVariant)
   const cmThemeExt = useMemo(
-    () => buildCodeMirrorTheme(getEditorThemeById(resolvedThemeId), resolvedVariant === 'dark'),
-    [resolvedThemeId, resolvedVariant]
+    () => buildCodeMirrorTheme(resolvedEditorColors, contentVariant === 'dark'),
+    [editorThemeId, contentVariant]
   )
   const sizeTheme = useMemo(() => EditorView.theme({
     '&': { height: '100%', fontSize: `${editorFontSize}px` },

@@ -228,7 +228,7 @@ export interface TelemetryEventProps {
   ai_config_changed: { section: string }
   // Settings
   settings_changed: { key: string }
-  theme_changed: { mode: 'light' | 'dark' | 'system' }
+  theme_changed: { mode?: 'light' | 'dark' | 'system'; themeId?: string }
   telemetry_tier_changed: { tier: TelemetryTier }
   // Processes
   process_created: Record<string, never>
