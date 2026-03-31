@@ -4,6 +4,9 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { getStateDir } from '@slayzone/platform'
+export { resolveProject } from './db-helpers.mjs'
+export type { SlayDb } from './db-helpers.mjs'
+import type { SlayDb } from './db-helpers.mjs'
 
 function defaultDir(): string {
   const dir = getStateDir()
@@ -27,12 +30,6 @@ function getDbPath(dev: boolean): string {
 }
 
 type SqlParams = Record<string, string | number | bigint | null | Uint8Array>
-
-export interface SlayDb {
-  query<T extends object>(sql: string, params?: SqlParams): T[]
-  run(sql: string, params?: SqlParams): void
-  close(): void
-}
 
 export function getMcpPort(): number | null {
   if (process.env.SLAYZONE_MCP_PORT) return parseInt(process.env.SLAYZONE_MCP_PORT, 10) || null

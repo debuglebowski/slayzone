@@ -5,11 +5,17 @@ const FISH_SCRIPT = `\
 complete -c slay -f
 complete -c slay -n '__fish_use_subcommand' -a 'tasks' -d 'Manage tasks'
 complete -c slay -n '__fish_use_subcommand' -a 'projects' -d 'Manage projects'
+complete -c slay -n '__fish_use_subcommand' -a 'tags' -d 'Manage tags'
+complete -c slay -n '__fish_use_subcommand' -a 'templates' -d 'Manage task templates'
+complete -c slay -n '__fish_use_subcommand' -a 'automations' -d 'Manage automations'
 complete -c slay -n '__fish_use_subcommand' -a 'processes' -d 'Manage processes'
 complete -c slay -n '__fish_use_subcommand' -a 'completions' -d 'Print shell completions'
-complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add'
+complete -c slay -n '__fish_seen_subcommand_from tasks' -a 'list create view done update archive delete open search subtasks subtask-add tag'
 complete -c slay -n '__fish_seen_subcommand_from processes' -a 'list logs kill follow'
-complete -c slay -n '__fish_seen_subcommand_from projects' -a 'list create'
+complete -c slay -n '__fish_seen_subcommand_from projects' -a 'list create update'
+complete -c slay -n '__fish_seen_subcommand_from tags' -a 'list create delete'
+complete -c slay -n '__fish_seen_subcommand_from templates' -a 'list view create update delete'
+complete -c slay -n '__fish_seen_subcommand_from automations' -a 'list view create update delete toggle run runs'
 complete -c slay -n '__fish_seen_subcommand_from completions' -a 'fish zsh bash'
 `
 
@@ -21,6 +27,9 @@ _slay() {
   commands=(
     'tasks:Manage tasks'
     'projects:Manage projects'
+    'tags:Manage tags'
+    'templates:Manage task templates'
+    'automations:Manage automations'
     'processes:Manage processes'
     'completions:Print shell completions'
   )
@@ -37,6 +46,7 @@ _slay() {
     'search:Search tasks'
     'subtasks:List subtasks'
     'subtask-add:Add a subtask'
+    'tag:View or modify task tags'
   )
   local -a process_commands
   process_commands=(
@@ -44,6 +54,31 @@ _slay() {
     'logs:Show process logs'
     'kill:Kill a process'
     'follow:Stream process logs'
+  )
+  local -a tag_commands
+  tag_commands=(
+    'list:List tags'
+    'create:Create a tag'
+    'delete:Delete a tag'
+  )
+  local -a template_commands
+  template_commands=(
+    'list:List templates'
+    'view:View template details'
+    'create:Create a template'
+    'update:Update a template'
+    'delete:Delete a template'
+  )
+  local -a automation_commands
+  automation_commands=(
+    'list:List automations'
+    'view:View automation details'
+    'create:Create an automation'
+    'update:Update an automation'
+    'delete:Delete an automation'
+    'toggle:Toggle automation on/off'
+    'run:Run automation manually'
+    'runs:View execution history'
   )
   case $words[2] in
     tasks)
@@ -53,7 +88,16 @@ _slay() {
       _describe 'process commands' process_commands
       ;;
     projects)
-      _arguments ':command:(list create)'
+      _arguments ':command:(list create update)'
+      ;;
+    tags)
+      _describe 'tag commands' tag_commands
+      ;;
+    templates)
+      _describe 'template commands' template_commands
+      ;;
+    automations)
+      _describe 'automation commands' automation_commands
       ;;
     completions)
       _arguments ':shell:(fish zsh bash)'
@@ -74,17 +118,26 @@ _slay_completions() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
   if [ $COMP_CWORD -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "tasks projects processes completions" -- "$cur") )
+    COMPREPLY=( $(compgen -W "tasks projects tags templates automations processes completions" -- "$cur") )
   elif [ $COMP_CWORD -eq 2 ]; then
     case "$prev" in
       tasks)
-        COMPREPLY=( $(compgen -W "list create view done update archive delete open search subtasks subtask-add" -- "$cur") )
+        COMPREPLY=( $(compgen -W "list create view done update archive delete open search subtasks subtask-add tag" -- "$cur") )
         ;;
       processes)
         COMPREPLY=( $(compgen -W "list logs kill follow" -- "$cur") )
         ;;
       projects)
-        COMPREPLY=( $(compgen -W "list create" -- "$cur") )
+        COMPREPLY=( $(compgen -W "list create update" -- "$cur") )
+        ;;
+      tags)
+        COMPREPLY=( $(compgen -W "list create delete" -- "$cur") )
+        ;;
+      templates)
+        COMPREPLY=( $(compgen -W "list view create update delete" -- "$cur") )
+        ;;
+      automations)
+        COMPREPLY=( $(compgen -W "list view create update delete toggle run runs" -- "$cur") )
         ;;
       completions)
         COMPREPLY=( $(compgen -W "fish zsh bash" -- "$cur") )

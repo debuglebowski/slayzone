@@ -48,6 +48,14 @@ run_test_no_loader() {
   fi
 }
 
+# CLI command tests (need Electron Node for better-sqlite3 + ESM interop)
+run_test_no_loader packages/apps/cli/test/db.test.ts
+run_test_no_loader packages/apps/cli/test/tags.test.ts
+run_test_no_loader packages/apps/cli/test/templates.test.ts
+run_test_no_loader packages/apps/cli/test/automations.test.ts
+run_test_no_loader packages/apps/cli/test/tasks-ext.test.ts
+run_test_no_loader packages/apps/cli/test/projects-update.test.ts
+
 if [ -n "$LINEAR_API_KEY" ]; then
   run_test_no_loader packages/domains/integrations/src/main/handlers.integration.linear.test.ts
 fi

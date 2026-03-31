@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { execSync } from 'child_process'
-import { openDb, notifyApp, type SlayDb } from '../db'
+import { openDb, notifyApp, resolveProject, type SlayDb } from '../db'
 import { browserCommand } from './browser'
 import {
   getDefaultStatus,
@@ -47,6 +47,64 @@ function buildProviderConfig(db: SlayDb): Record<string, { flags: string }> {
     config[row.id] = { flags: row.default_flags ?? '' }
   }
   return config
+}
+
+interface TemplateRow extends Record<string, unknown> {
+  id: string
+  terminal_mode: string | null
+  default_status: string | null
+  default_priority: number | null
+  provider_config: string | null
+}
+
+function resolveTaskTemplate(db: SlayDb, projectId: string, templateRef?: string): TemplateRow | null {
+  if (templateRef) {
+    // Try ID prefix first
+    let rows = db.query<TemplateRow>(
+      `SELECT * FROM task_templates WHERE id LIKE :prefix || '%' AND project_id = :pid LIMIT 2`,
+      { ':prefix': templateRef, ':pid': projectId }
+    )
+    if (rows.length === 1) return rows[0]
+    if (rows.length > 1) {
+      console.error(`Ambiguous template id "${templateRef}". Matches: ${rows.map((r) => r.id.slice(0, 8)).join(', ')}`)
+      process.exit(1)
+    }
+    // Try name match
+    rows = db.query<TemplateRow>(
+      `SELECT * FROM task_templates WHERE project_id = :pid AND LOWER(name) = LOWER(:name) LIMIT 2`,
+      { ':pid': projectId, ':name': templateRef }
+    )
+    if (rows.length === 1) return rows[0]
+    if (rows.length > 1) {
+      console.error(`Ambiguous template name "${templateRef}".`)
+      process.exit(1)
+    }
+    console.error(`Template not found: "${templateRef}"`)
+    process.exit(1)
+  }
+  // Check for project default
+  const defaults = db.query<TemplateRow>(
+    `SELECT * FROM task_templates WHERE project_id = :pid AND is_default = 1 LIMIT 1`,
+    { ':pid': projectId }
+  )
+  return defaults[0] ?? null
+}
+
+function mergeTemplateProviderConfig(
+  base: Record<string, { flags: string }>,
+  template: TemplateRow | null
+): Record<string, { flags: string }> {
+  if (!template?.provider_config) return base
+  try {
+    const tpc = JSON.parse(template.provider_config) as Record<string, { flags?: string }>
+    const merged = { ...base }
+    for (const [mode, conf] of Object.entries(tpc)) {
+      if (conf.flags !== undefined) merged[mode] = { ...merged[mode], flags: conf.flags }
+    }
+    return merged
+  } catch {
+    return base
+  }
 }
 
 function resolveId(explicit?: string): string {
@@ -140,7 +198,27 @@ export function tasksCommand(): Command {
         : tasks
 
       if (opts.json) {
-        console.log(JSON.stringify(filteredTasks, null, 2))
+        // Augment with tags and due_date
+        const taskIds = filteredTasks.map((t) => t.id)
+        const tagMap: Record<string, string[]> = {}
+        if (taskIds.length > 0) {
+          const placeholders = taskIds.map((_, i) => `:t${i}`).join(', ')
+          const tagParams: Record<string, string> = {}
+          taskIds.forEach((id, i) => { tagParams[`:t${i}`] = id })
+          const tagRows = db.query<{ task_id: string; name: string }>(
+            `SELECT tt.task_id, tg.name FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id
+             WHERE tt.task_id IN (${placeholders})`,
+            tagParams
+          )
+          for (const r of tagRows) {
+            (tagMap[r.task_id] ??= []).push(r.name)
+          }
+        }
+        const enriched = filteredTasks.map((t) => ({
+          ...t,
+          tags: tagMap[t.id] ?? [],
+        }))
+        console.log(JSON.stringify(enriched, null, 2))
       } else {
         printTasks(filteredTasks)
       }
@@ -153,32 +231,14 @@ export function tasksCommand(): Command {
     .requiredOption('--project <name|id>', 'Project name (partial, case-insensitive) or ID')
     .option('--description <text>', 'Task description')
     .option('--status <status>', 'Initial status key')
-    .option('--priority <n>', 'Priority 1-5 (1=highest)', '3')
+    .option('--priority <n>', 'Priority 1-5 (1=highest)')
+    .option('--due <date>', 'Due date (YYYY-MM-DD or ISO 8601)')
+    .option('--template <name|id>', 'Task template for defaults')
     .option('--external-id <id>', 'External ID for deduplication (skips if already exists)')
     .option('--external-provider <provider>', 'External provider namespace', 'cli')
     .action(async (title, opts) => {
       const db = openDb()
-
-      const projects = db.query<{ id: string; name: string }>(
-        `SELECT id, name FROM projects WHERE id = :proj OR LOWER(name) LIKE :projLike LIMIT 10`,
-        { ':proj': opts.project, ':projLike': `%${opts.project.toLowerCase()}%` }
-      )
-
-      if (projects.length === 0) {
-        const all = db.query<{ name: string }>('SELECT name FROM projects ORDER BY name')
-        console.error(`No project matching "${opts.project}".`)
-        console.error(`Available: ${all.map((p) => p.name).join(', ')}`)
-        console.error('Use --project <name|id> to specify.')
-        process.exit(1)
-      }
-
-      if (projects.length > 1) {
-        console.error(`Ambiguous project "${opts.project}". Matches: ${projects.map((p) => p.name).join(', ')}`)
-        console.error('Be more specific.')
-        process.exit(1)
-      }
-
-      const project = projects[0]
+      const project = resolveProject(db, opts.project)
 
       if (opts.externalId) {
         const existing = db.query<{ id: string; title: string; status: string }>(
@@ -195,33 +255,43 @@ export function tasksCommand(): Command {
         }
       }
 
-      const priority = parseInt(opts.priority, 10)
-      if (isNaN(priority) || priority < 1 || priority > 5) {
-        console.error('Priority must be 1-5.')
-        process.exit(1)
+      // Resolve template
+      const template = resolveTaskTemplate(db, project.id, opts.template)
+
+      if (opts.priority) {
+        const p = parseInt(opts.priority, 10)
+        if (isNaN(p) || p < 1 || p > 5) { console.error('Priority must be 1-5.'); process.exit(1) }
       }
+      const effectivePriority = opts.priority
+        ? parseInt(opts.priority, 10)
+        : (template?.default_priority ?? 3)
+
       const projectColumns = getProjectColumnsConfig(db, project.id)
-      const status = opts.status ? resolveStatusId(opts.status, projectColumns) : getDefaultStatus(projectColumns)
+      const status = opts.status
+        ? resolveStatusId(opts.status, projectColumns)
+        : (template?.default_status
+          ? (resolveStatusId(template.default_status, projectColumns) ?? getDefaultStatus(projectColumns))
+          : getDefaultStatus(projectColumns))
       if (opts.status && !status) {
         console.error(`Unknown status "${opts.status}" for project "${project.name}".`)
         process.exit(1)
       }
 
-      const terminalMode =
-        db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'default_terminal_mode' LIMIT 1`)[0]?.value
+      const terminalMode = template?.terminal_mode
+        ?? db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'default_terminal_mode' LIMIT 1`)[0]?.value
         ?? 'claude-code'
 
-      const providerConfig = buildProviderConfig(db)
+      const providerConfig = mergeTemplateProviderConfig(buildProviderConfig(db), template)
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
 
       try {
         db.run(
-          `INSERT INTO tasks (id, project_id, title, description, status, priority, terminal_mode, provider_config,
+          `INSERT INTO tasks (id, project_id, title, description, status, priority, due_date, terminal_mode, provider_config,
              claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
              external_id, external_provider,
              "order", created_at, updated_at)
-           VALUES (:id, :projectId, :title, :description, :status, :priority, :terminalMode, :providerConfig,
+           VALUES (:id, :projectId, :title, :description, :status, :priority, :dueDate, :terminalMode, :providerConfig,
              :claudeFlags, :codexFlags, :cursorFlags, :geminiFlags, :opencodeFlags,
              :externalId, :externalProvider,
              (SELECT COALESCE(MAX("order"), 0) + 1 FROM tasks WHERE project_id = :projectId),
@@ -232,7 +302,8 @@ export function tasksCommand(): Command {
             ':title': title,
             ':description': opts.description ?? null,
             ':status': status,
-            ':priority': priority,
+            ':priority': effectivePriority,
+            ':dueDate': opts.due ?? null,
             ':terminalMode': terminalMode,
             ':providerConfig': JSON.stringify(providerConfig),
             ':claudeFlags': providerConfig['claude-code']?.flags ?? '',
@@ -293,11 +364,21 @@ export function tasksCommand(): Command {
       }
 
       const t = tasks[0]
+
+      const tagNames = db.query<{ name: string }>(
+        `SELECT tg.name FROM tags tg JOIN task_tags tt ON tg.id = tt.tag_id
+         WHERE tt.task_id = :tid ORDER BY tg.sort_order, tg.name`,
+        { ':tid': t.id }
+      ).map((r) => r.name)
+      db.close()
+
       console.log(`ID:       ${t.id}`)
       console.log(`Title:    ${t.title}`)
       console.log(`Status:   ${t.status}`)
       console.log(`Priority: ${t.priority}`)
       console.log(`Project:  ${t.project_name}`)
+      if (t.due_date) console.log(`Due:      ${t.due_date}`)
+      if (tagNames.length > 0) console.log(`Tags:     ${tagNames.join(', ')}`)
       console.log(`Created:  ${t.created_at}`)
       if (t.description) console.log(`\n${t.description}`)
     })
@@ -346,10 +427,13 @@ export function tasksCommand(): Command {
     .option('--description <text>', 'New description')
     .option('--status <status>', 'New status key')
     .option('--priority <n>', 'New priority 1-5')
+    .option('--due <date>', 'Set due date (YYYY-MM-DD or ISO 8601)')
+    .option('--no-due', 'Clear due date')
     .action(async (idPrefix, opts) => {
       idPrefix = resolveId(idPrefix)
-      if (opts.title === undefined && opts.description === undefined && opts.status === undefined && opts.priority === undefined) {
-        console.error('Provide at least one of --title, --description, --status, --priority')
+      if (opts.title === undefined && opts.description === undefined && opts.status === undefined
+        && opts.priority === undefined && opts.due === undefined) {
+        console.error('Provide at least one of --title, --description, --status, --priority, --due, --no-due')
         process.exit(1)
       }
 
@@ -388,6 +472,8 @@ export function tasksCommand(): Command {
       if (opts.description !== undefined) { sets.push('description = :description'); params[':description'] = opts.description || null }
       if (resolvedStatus)   { sets.push('status = :status');           params[':status'] = resolvedStatus }
       if (opts.priority)    { sets.push('priority = :priority');       params[':priority'] = parseInt(opts.priority, 10) }
+      if (typeof opts.due === 'string') { sets.push('due_date = :dueDate'); params[':dueDate'] = opts.due }
+      else if (opts.due === false)      { sets.push('due_date = NULL') }
 
       db.run(`UPDATE tasks SET ${sets.join(', ')} WHERE id = :id`, params)
       db.close()
@@ -671,6 +757,92 @@ export function tasksCommand(): Command {
         console.log(JSON.stringify(tasks, null, 2))
       } else {
         printTasks(tasks)
+      }
+    })
+
+  // slay tasks tag [taskId]
+  cmd
+    .command('tag [taskId]')
+    .description('View or modify tags on a task (defaults to $SLAYZONE_TASK_ID)')
+    .option('--set <names...>', 'Replace all tags with these (by name)')
+    .option('--add <name>', 'Add a tag by name')
+    .option('--remove <name>', 'Remove a tag by name')
+    .option('--clear', 'Remove all tags')
+    .option('--json', 'Output as JSON')
+    .action(async (taskId, opts) => {
+      taskId = resolveId(taskId)
+      const db = openDb()
+
+      const tasks = db.query<{ id: string; project_id: string }>(
+        `SELECT id, project_id FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
+        { ':prefix': taskId }
+      )
+      if (tasks.length === 0) { console.error(`Task not found: ${taskId}`); process.exit(1) }
+      if (tasks.length > 1) {
+        console.error(`Ambiguous id prefix "${taskId}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`)
+        process.exit(1)
+      }
+
+      const task = tasks[0]
+
+      function resolveTagByName(name: string): string {
+        const tags = db.query<{ id: string; name: string }>(
+          `SELECT id, name FROM tags WHERE project_id = :pid AND LOWER(name) = LOWER(:name)`,
+          { ':pid': task.project_id, ':name': name }
+        )
+        if (tags.length === 0) {
+          console.error(`Tag not found: "${name}" in this project`)
+          process.exit(1)
+        }
+        return tags[0].id
+      }
+
+      const isWrite = opts.set || opts.add || opts.remove || opts.clear
+
+      if (isWrite) {
+        db.run('BEGIN')
+        try {
+          if (opts.set) {
+            const tagIds = (opts.set as string[]).map(resolveTagByName)
+            db.run(`DELETE FROM task_tags WHERE task_id = :tid`, { ':tid': task.id })
+            for (const tagId of tagIds) {
+              db.run(`INSERT INTO task_tags (task_id, tag_id) VALUES (:tid, :tagId)`, { ':tid': task.id, ':tagId': tagId })
+            }
+          } else if (opts.add) {
+            const tagId = resolveTagByName(opts.add)
+            db.run(
+              `INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (:tid, :tagId)`,
+              { ':tid': task.id, ':tagId': tagId }
+            )
+          } else if (opts.remove) {
+            const tagId = resolveTagByName(opts.remove)
+            db.run(`DELETE FROM task_tags WHERE task_id = :tid AND tag_id = :tagId`, { ':tid': task.id, ':tagId': tagId })
+          } else if (opts.clear) {
+            db.run(`DELETE FROM task_tags WHERE task_id = :tid`, { ':tid': task.id })
+          }
+          db.run('COMMIT')
+        } catch (e) {
+          db.run('ROLLBACK')
+          throw e
+        }
+      }
+
+      // Show current tags
+      const tagNames = db.query<{ name: string }>(
+        `SELECT tg.name FROM tags tg JOIN task_tags tt ON tg.id = tt.tag_id
+         WHERE tt.task_id = :tid ORDER BY tg.sort_order, tg.name`,
+        { ':tid': task.id }
+      ).map((r) => r.name)
+      db.close()
+
+      if (isWrite) await notifyApp()
+
+      if (opts.json) {
+        console.log(JSON.stringify(tagNames))
+      } else if (tagNames.length > 0) {
+        console.log(tagNames.join(', '))
+      } else {
+        console.log('No tags.')
       }
     })
 

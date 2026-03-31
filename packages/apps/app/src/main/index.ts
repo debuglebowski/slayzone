@@ -1032,7 +1032,7 @@ app.whenReady().then(async () => {
 
   // Start MCP server — preferred port from settings, falls back to dynamic port on conflict
   import('./mcp-server').then((mod) => {
-    mod.startMcpServer(db)
+    mod.startMcpServer(db, { automationEngine })
     mcpCleanup = () => mod.stopMcpServer()
   }).catch((err) => {
     console.error('[MCP] Failed to start server:', err)
@@ -1898,7 +1898,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
       // 8. Restart MCP (after table drop so port is persisted to fresh settings table)
       const mcpMod = await import('./mcp-server')
-      mcpMod.startMcpServer(db)
+      mcpMod.startMcpServer(db, { automationEngine })
       mcpCleanup = () => mcpMod.stopMcpServer()
       // Wait for server to be listening (listen callback sets __mcpPort)
       await new Promise<void>((resolve) => {

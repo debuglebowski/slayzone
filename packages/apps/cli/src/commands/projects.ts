@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import fs from 'node:fs'
 import path from 'node:path'
-import { openDb, notifyApp } from '../db'
+import { openDb, notifyApp, resolveProject } from '../db'
 import { prepareProjectCreate } from '@slayzone/projects/shared'
 
 interface ProjectRow extends Record<string, unknown> {
@@ -179,6 +179,50 @@ export function projectsCommand(): Command {
 
       const location = project.path ? `  ${project.path}` : ''
       console.log(`Created project: ${project.id.slice(0, 8)}  ${project.name}${location}`)
+    })
+
+  // slay projects update
+  cmd
+    .command('update <name|id>')
+    .description('Update a project')
+    .option('--name <name>', 'New project name')
+    .option('--color <hex>', 'New project color (#RRGGBB)')
+    .option('--path <path>', 'New repository path')
+    .option('--json', 'Output updated project as JSON')
+    .action(async (proj: string, opts: { name?: string; color?: string; path?: string; json?: boolean }) => {
+      if (opts.name === undefined && opts.color === undefined && opts.path === undefined) {
+        console.error('Provide at least one of --name, --color, --path')
+        process.exit(1)
+      }
+
+      const db = openDb()
+      const project = resolveProject(db, proj)
+      const sets: string[] = ['updated_at = :now']
+      const params: Record<string, string | number | null> = { ':now': new Date().toISOString(), ':id': project.id }
+
+      if (opts.name !== undefined) { sets.push('name = :name'); params[':name'] = opts.name }
+      if (opts.color !== undefined) { sets.push('color = :color'); params[':color'] = opts.color }
+      if (opts.path !== undefined) {
+        const resolved = normalizeProjectPath(opts.path)
+        if (resolved) ensureProjectPath(resolved)
+        sets.push('path = :path')
+        params[':path'] = resolved
+      }
+
+      db.run(`UPDATE projects SET ${sets.join(', ')} WHERE id = :id`, params)
+
+      const updated = db.query<CreatedProjectRow>(
+        `SELECT id, name, color, path, created_at, updated_at FROM projects WHERE id = :id LIMIT 1`,
+        { ':id': project.id }
+      )[0]
+      db.close()
+      await notifyApp()
+
+      if (opts.json) {
+        console.log(JSON.stringify(updated, null, 2))
+        return
+      }
+      console.log(`Updated project: ${project.id.slice(0, 8)}  ${opts.name ?? project.name}`)
     })
 
   return cmd

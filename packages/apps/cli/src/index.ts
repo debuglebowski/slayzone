@@ -5,6 +5,9 @@ import { processesCommand } from './commands/processes'
 import { completionsCommand } from './commands/completions'
 import { initCommand } from './commands/init'
 import { ptyCommand } from './commands/pty'
+import { tagsCommand } from './commands/tags'
+import { templatesCommand } from './commands/templates'
+import { automationsCommand } from './commands/automations'
 
 const program = new Command()
   .name('slay')
@@ -18,6 +21,9 @@ const program = new Command()
 
 program.addCommand(tasksCommand())
 program.addCommand(projectsCommand())
+program.addCommand(tagsCommand())
+program.addCommand(templatesCommand())
+program.addCommand(automationsCommand())
 program.addCommand(processesCommand())
 program.addCommand(completionsCommand())
 program.addCommand(initCommand())

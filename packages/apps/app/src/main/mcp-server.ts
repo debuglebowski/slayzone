@@ -272,7 +272,7 @@ function getPreferredPort(db: Database): number {
   } catch { return 0 }
 }
 
-export function startMcpServer(db: Database): void {
+export function startMcpServer(db: Database, opts?: { automationEngine?: { executeManual(id: string): Promise<unknown> } }): void {
   const port = getPreferredPort(db)
   const app = express()
   app.use(express.json())
@@ -391,6 +391,20 @@ export function startMcpServer(db: Database): void {
   app.post('/api/notify', (_req, res) => {
     notifyRenderer()
     res.json({ ok: true })
+  })
+
+  // Automation manual execution for CLI (`slay automations run`)
+  app.post('/api/automations/:id/run', async (req, res) => {
+    if (!opts?.automationEngine) {
+      res.status(501).json({ error: 'Automation engine not available' })
+      return
+    }
+    try {
+      const run = await opts.automationEngine.executeManual(req.params.id)
+      res.json(run)
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) })
+    }
   })
 
   app.get(`/api/processes/:id/follow`, (req, res) => {
