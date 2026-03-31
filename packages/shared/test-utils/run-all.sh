@@ -23,6 +23,7 @@ run_test packages/domains/tags/src/main/handlers.test.ts
 run_test packages/domains/projects/src/main/handlers.test.ts
 run_test packages/domains/task-terminals/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/handlers.test.ts
+run_test packages/domains/task/src/main/template-handlers.test.ts
 run_test packages/domains/ai-config/src/main/handlers.items.test.ts
 run_test packages/domains/ai-config/src/main/handlers.selections.test.ts
 run_test packages/domains/ai-config/src/main/handlers.context.test.ts
