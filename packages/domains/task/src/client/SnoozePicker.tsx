@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react'
 import { AlarmClock, Clock, Clock3, Sun, Moon, Calendar as CalendarIcon } from 'lucide-react'
 import {
   Calendar, Button, Label,
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@slayzone/ui'
 
 export interface SnoozePreset {

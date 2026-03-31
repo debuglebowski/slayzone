@@ -111,7 +111,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
 
   const handleSave = () => {
     if (!name.trim()) return
-    const validActions = actions.filter(a => (a.params.command as string)?.trim())
+    const validActions = actions.filter((a: ActionConfig) => (a.params.command as string)?.trim())
     if (validActions.length === 0) return
 
     if (automation) {
@@ -137,19 +137,19 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
   }
 
   const updateTriggerParam = (key: string, value: string) => {
-    setTrigger(prev => ({ ...prev, params: { ...prev.params, [key]: value === '_any' ? undefined : value || undefined } }))
+    setTrigger((prev: TriggerConfig) => ({ ...prev, params: { ...prev.params, [key]: value === '_any' ? undefined : value || undefined } }))
   }
 
   const addCondition = () => {
-    setConditions(prev => [...prev, presetToCondition('status_is_some')])
+    setConditions((prev: ConditionConfig[]) => [...prev, presetToCondition('status_is_some')])
   }
 
   const updateConditionPreset = (index: number, presetKey: ConditionPresetType) => {
-    setConditions(prev => prev.map((c, i) => i === index ? presetToCondition(presetKey) : c))
+    setConditions((prev: ConditionConfig[]) => prev.map((c: ConditionConfig, i: number) => i === index ? presetToCondition(presetKey) : c))
   }
 
   const toggleConditionValue = (index: number, val: string) => {
-    setConditions(prev => prev.map((c, i) => {
+    setConditions((prev: ConditionConfig[]) => prev.map((c: ConditionConfig, i: number) => {
       if (i !== index) return c
       const current = (c.params.value as string[]) ?? []
       return { ...c, params: { ...c.params, value: toggleValue(current, val) } }
@@ -157,7 +157,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
   }
 
   const removeCondition = (index: number) => {
-    setConditions(prev => prev.filter((_, i) => i !== index))
+    setConditions((prev: ConditionConfig[]) => prev.filter((_: ConditionConfig, i: number) => i !== index))
   }
 
   return (
@@ -305,7 +305,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
           <div className="rounded-lg border border-border/40 bg-muted/50 p-3 space-y-4">
             <div className="flex items-center justify-between">
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">Then</Label>
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setActions(prev => [...prev, { type: 'run_command', params: { command: '' } }])}>
+              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setActions((prev: ActionConfig[]) => [...prev, { type: 'run_command' as const, params: { command: '' } }])}>
                 <Plus className="w-3 h-3 mr-1" /> Add
               </Button>
             </div>
@@ -314,12 +314,12 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
               <div key={i} className="flex items-center gap-2">
                 <Textarea
                   value={(action.params.command as string) ?? ''}
-                  onChange={(e) => setActions(prev => prev.map((a, j) => j === i ? { ...a, params: { ...a.params, command: e.target.value } } : a))}
+                  onChange={(e) => setActions((prev: ActionConfig[]) => prev.map((a: ActionConfig, j: number) => j === i ? { ...a, params: { ...a.params, command: e.target.value } } : a))}
                   placeholder="echo {{task.name}}"
                   className="font-mono text-xs flex-1 min-h-[60px] resize-y"
                 />
                 {actions.length > 1 && (
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 shrink-0" onClick={() => setActions(prev => prev.filter((_, j) => j !== i))}>
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 shrink-0" onClick={() => setActions((prev: ActionConfig[]) => prev.filter((_: ActionConfig, j: number) => j !== i))}>
                     <Trash2 className="w-3 h-3" />
                   </Button>
                 )}
@@ -358,7 +358,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSave} disabled={!name.trim() || actions.every(a => !(a.params.command as string)?.trim())}>
+          <Button onClick={handleSave} disabled={!name.trim() || actions.every((a: ActionConfig) => !(a.params.command as string)?.trim())}>
             {automation ? 'Save' : 'Create'}
           </Button>
         </DialogFooter>

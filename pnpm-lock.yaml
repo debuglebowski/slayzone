@@ -341,6 +341,9 @@ importers:
       electron:
         specifier: ^41.0.0
         version: 41.0.3
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
       react:
         specifier: ^19.0.0
         version: 19.2.3
@@ -348,6 +351,9 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

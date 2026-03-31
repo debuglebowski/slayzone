@@ -135,7 +135,7 @@ export function AutomationCard({ automation, onToggle, onEdit, onDelete, onDupli
           {runs.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">No runs yet</p>
           ) : (
-            runs.slice(0, 10).map(run => (
+            runs.slice(0, 10).map((run: AutomationRun) => (
               <div key={run.id} className="flex items-center gap-2 text-[11px]">
                 {run.status === 'success' && <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />}
                 {run.status === 'error' && <XCircle className="w-3 h-3 text-red-500 shrink-0" />}

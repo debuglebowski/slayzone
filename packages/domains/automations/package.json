@@ -17,7 +17,8 @@
   "dependencies": {
     "@slayzone/tags": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
-    "@slayzone/ui": "workspace:*"
+    "@slayzone/ui": "workspace:*",
+    "lucide-react": "^0.562.0"
   },
   "peerDependencies": {
     "electron": "^41.0.0",
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/react": "^19.2.7",
     "typescript": "^5.9.3"
   }
 }

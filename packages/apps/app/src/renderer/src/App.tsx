@@ -791,7 +791,7 @@ function App(): React.JSX.Element {
                   inert={!explodeMode && !isViewActive ? true : undefined}
                 >
                     {tab.type === 'home' ? (
-                    <div className="flex flex-col flex-1 p-6 pt-4 h-full bg-surface-0" style={colorTintsEnabled && projectColorBg(selectedProject?.color) ? { backgroundImage: `linear-gradient(${projectColorBg(selectedProject.color)}, ${projectColorBg(selectedProject.color)})` } : undefined}>
+                    <div className="flex flex-col flex-1 p-6 pt-4 h-full bg-surface-0" style={colorTintsEnabled && selectedProject && projectColorBg(selectedProject.color) ? { backgroundImage: `linear-gradient(${projectColorBg(selectedProject.color)}, ${projectColorBg(selectedProject.color)})` } : undefined}>
                       <header className="mb-4 window-no-drag space-y-2">
                         <div className="flex items-center gap-4">
                           <div className="flex-shrink-0">
