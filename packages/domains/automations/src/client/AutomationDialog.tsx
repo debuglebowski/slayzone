@@ -230,14 +230,45 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
             )}
 
             {trigger.type === 'cron' && (
-              <div className="space-y-1">
-                <Label className="text-xs">Cron expression</Label>
-                <Input
-                  value={(trigger.params.expression as string) ?? ''}
-                  onChange={(e) => updateTriggerParam('expression', e.target.value)}
-                  placeholder="*/30 * * * * (every 30 min)"
-                  className="font-mono text-xs"
-                />
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Schedule</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={(trigger.params.expression as string) ?? ''}
+                      onChange={(e) => updateTriggerParam('expression', e.target.value)}
+                      placeholder="*/30 * * * *"
+                      className="font-mono text-xs shrink-0 w-40"
+                    />
+                    <code className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                      <span className="text-foreground/70">min</span> <span className="text-foreground/70">hour</span> <span className="text-foreground/70">day</span> <span className="text-foreground/70">month</span> <span className="text-foreground/70">weekday</span>
+                      &nbsp;&nbsp;—&nbsp;&nbsp;
+                      <span className="text-foreground/50">*</span> = every &nbsp; <span className="text-foreground/50">*/N</span> = every Nth
+                    </code>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1" style={{ marginTop: 12 }}>
+                  {([
+                    ['*/15 * * * *', 'Every 15 min'],
+                    ['0 * * * *', 'Every hour'],
+                    ['0 9 * * *', 'Daily at 9am'],
+                    ['0 9 * * 1-5', 'Weekdays at 9am'],
+                    ['0 0 * * 0', 'Weekly (Sun midnight)'],
+                  ] as const).map(([expr, label]) => (
+                    <button
+                      key={expr}
+                      type="button"
+                      onClick={() => updateTriggerParam('expression', expr)}
+                      className={`px-1.5 py-0 rounded text-[11px] border transition-colors ${
+                        (trigger.params.expression as string) === expr
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-muted-foreground border-border hover:border-foreground/30'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
