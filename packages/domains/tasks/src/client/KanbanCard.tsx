@@ -11,7 +11,7 @@ import { Card, CardContent, Tooltip, TooltipContent, TooltipTrigger, Popover, Po
 import { useAppearance } from '@slayzone/settings/client'
 import { todayISO } from './kanban'
 import { priorityOptions } from '@slayzone/task/shared'
-import { AlertCircle, AlarmClockOff, GitMerge, Link2 } from 'lucide-react'
+import { AlarmClockOff, GitMerge, Link2 } from 'lucide-react'
 import { usePty } from '@slayzone/terminal'
 import type { CardProperties } from './FilterState'
 
