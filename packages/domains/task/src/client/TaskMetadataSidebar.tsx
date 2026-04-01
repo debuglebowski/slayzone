@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
-import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, Loader2, X, AlarmClock } from 'lucide-react'
+import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, Loader2, X, AlarmClock, SearchIcon } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import { priorityOptions } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -21,6 +21,8 @@ import { Button } from '@slayzone/ui'
 import {
   buildStatusOptions,
   cn,
+  getColumnStatusStyle,
+  Input,
   PriorityIcon
 } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'
@@ -38,6 +40,35 @@ interface TaskMetadataSidebarProps {
   onTagCreated?: (tag: Tag) => void
 }
 
+function matchesTaskSearch(task: Task, query: string): boolean {
+  const normalizedQuery = query.trim().toLowerCase()
+  if (!normalizedQuery) return true
+  return task.title.toLowerCase().includes(normalizedQuery)
+}
+
+function BlockerStatusIcon({
+  task,
+  columns
+}: {
+  task: Task
+  columns?: Project['columns_config']
+}): React.JSX.Element | null {
+  const statusStyle = getColumnStatusStyle(task.status, columns)
+  const StatusIcon = statusStyle?.icon
+
+  if (!StatusIcon) return null
+
+  return (
+    <span className="shrink-0" title={statusStyle.label}>
+      <StatusIcon
+        aria-hidden="true"
+        className={cn('size-3.5', statusStyle.iconClass)}
+        strokeWidth={2.5}
+      />
+    </span>
+  )
+}
+
 export function TaskMetadataSidebar({
   task,
   tags,
@@ -49,6 +80,8 @@ export function TaskMetadataSidebar({
   const [allTasks, setAllTasks] = useState<Task[]>([])
   const [blockers, setBlockers] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
+  const [blockerSearch, setBlockerSearch] = useState('')
+  const [addBlockerSearch, setAddBlockerSearch] = useState('')
 
   // Load all tasks and current blockers
   useEffect(() => {
@@ -61,6 +94,8 @@ export function TaskMetadataSidebar({
       setAllTasks(tasks.filter((t) => t.id !== task.id))
       setBlockers(currentBlockers)
       setProjects(allProjects)
+      setBlockerSearch('')
+      setAddBlockerSearch('')
     }
     loadData()
   }, [task.id])
@@ -71,6 +106,7 @@ export function TaskMetadataSidebar({
     if (blockerTask) {
       setBlockers([...blockers, blockerTask])
     }
+    setAddBlockerSearch('')
   }
 
   const handleRemoveBlocker = async (blockerTaskId: string): Promise<void> => {
@@ -82,6 +118,8 @@ export function TaskMetadataSidebar({
   const availableBlockers = allTasks.filter((t) => (
     !blockers.some((b) => b.id === t.id) && !isTerminalStatus(t.status, columnsByProject.get(t.project_id))
   ))
+  const filteredBlockers = blockers.filter((blocker) => matchesTaskSearch(blocker, blockerSearch))
+  const filteredAvailableBlockers = availableBlockers.filter((blocker) => matchesTaskSearch(blocker, addBlockerSearch))
   const selectedProject = projects.find((project) => project.id === task.project_id)
   const statusOptions = buildStatusOptions(selectedProject?.columns_config)
 
@@ -327,22 +365,39 @@ export function TaskMetadataSidebar({
       <div>
         <label className="mb-1 block text-sm text-muted-foreground">Blocked By</label>
         {blockers.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {blockers.map((blocker) => (
-              <div
-                key={blocker.id}
-                className="flex items-center gap-2 rounded bg-muted/50 px-2 py-1 text-sm"
-              >
-                <span className="flex-1 truncate">{blocker.title}</span>
-                <button
-                  onClick={() => handleRemoveBlocker(blocker.id)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+          <>
+            <div className="relative mb-2">
+              <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={blockerSearch}
+                onChange={(e) => setBlockerSearch(e.target.value)}
+                aria-label="Search blockers"
+                placeholder="Search blockers..."
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+            {filteredBlockers.length === 0 ? (
+              <p className="mb-2 text-sm text-muted-foreground">No blockers match your search</p>
+            ) : (
+              <div className="mb-2 space-y-1">
+                {filteredBlockers.map((blocker) => (
+                  <div
+                    key={blocker.id}
+                    className="flex items-center gap-2 rounded bg-muted/50 px-2 py-1 text-sm"
+                  >
+                    <BlockerStatusIcon task={blocker} columns={columnsByProject.get(blocker.project_id)} />
+                    <span className="flex-1 truncate">{blocker.title}</span>
+                    <button
+                      onClick={() => handleRemoveBlocker(blocker.id)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
         <Popover>
           <PopoverTrigger asChild>
@@ -354,16 +409,33 @@ export function TaskMetadataSidebar({
             {availableBlockers.length === 0 ? (
               <p className="text-sm text-muted-foreground">No tasks available</p>
             ) : (
-              <div className="max-h-[200px] space-y-1 overflow-y-auto">
-                {availableBlockers.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => handleAddBlocker(t.id)}
-                    className="w-full rounded px-2 py-1 text-left text-sm hover:bg-muted"
-                  >
-                    <span className="line-clamp-1">{t.title}</span>
-                  </button>
-                ))}
+              <div className="space-y-2">
+                <div className="relative">
+                  <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={addBlockerSearch}
+                    onChange={(e) => setAddBlockerSearch(e.target.value)}
+                    aria-label="Search available blockers"
+                    placeholder="Search tasks..."
+                    className="h-8 pl-8 text-sm"
+                  />
+                </div>
+                {filteredAvailableBlockers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No tasks match your search</p>
+                ) : (
+                  <div className="max-h-[200px] space-y-1 overflow-y-auto">
+                    {filteredAvailableBlockers.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => handleAddBlocker(t.id)}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
+                      >
+                        <BlockerStatusIcon task={t} columns={columnsByProject.get(t.project_id)} />
+                        <span className="line-clamp-1 flex-1">{t.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </PopoverContent>
