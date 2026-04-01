@@ -80,6 +80,7 @@ import { useTaskTagIds } from './useTaskTagIds'
 import { WebPanelView } from './WebPanelView'
 import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
+import { TaskSettingsPanel } from './TaskSettingsPanel'
 
 function SortableSubTask({ sub, columns, statusOptions, onNavigate, onUpdate, onDelete }: {
   sub: Task
@@ -2037,9 +2038,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         {/* Settings Panel */}
         {!compact && panelVisibility.settings && (
         <div data-panel-id="settings" data-testid="task-settings-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border p-3 flex flex-col gap-4 overflow-y-auto transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'settings' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.settings }}>
-          <div className="shrink-0 h-10 px-2 -mx-3 -mt-3 border-b border-border bg-surface-1 flex items-center">
-            <span className="text-sm font-medium">Settings</span>
-          </div>
+          <TaskSettingsPanel
+            taskId={task.id}
+            renderDefaultContent={() => (
+              <>
 
           {/* External sync links */}
           <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
@@ -2241,6 +2243,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           </div>
 
           </div>
+              </>
+            )}
+          />
 
         </div>
         )}
