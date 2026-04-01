@@ -1,5 +1,62 @@
 [
   {
+    "version": "0.13.0",
+    "date": "2026-04-01",
+    "tagline": "History & CLI power",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Activity history",
+        "description": "See a timeline of changes to your tasks, tags, and automations."
+      },
+      {
+        "category": "feature",
+        "title": "CLI install onboarding",
+        "description": "Install the slay CLI directly from the onboarding flow."
+      },
+      {
+        "category": "feature",
+        "title": "Extended CLI commands",
+        "description": "Manage tags, templates, automations, due dates, and web panels from the CLI."
+      },
+      {
+        "category": "feature",
+        "title": "Terminal copy history",
+        "description": "Access previously copied text from the terminal context menu."
+      },
+      {
+        "category": "improvement",
+        "title": "Collapsible notification groups",
+        "description": "Collapse and expand notification sections to focus on what matters."
+      },
+      {
+        "category": "improvement",
+        "title": "Cron schedule presets",
+        "description": "Pick common schedules from a dropdown when setting up automations."
+      },
+      {
+        "category": "improvement",
+        "title": "Collapsible task details",
+        "description": "Task metadata now lives in a collapsible Details section."
+      },
+      {
+        "category": "fix",
+        "title": "Default terminal flags",
+        "description": "Terminal now correctly falls back to default flags when none are set per-task."
+      },
+      {
+        "category": "fix",
+        "title": "Markdown checkboxes",
+        "description": "Task list checkboxes now render and toggle properly in the editor."
+      },
+      {
+        "category": "fix",
+        "title": "Editor height",
+        "description": "Description editor now fills the available card space correctly."
+      }
+    ]
+  },
+  {
     "version": "0.12.0",
     "date": "2026-03-31",
     "tagline": "Organize & automate",

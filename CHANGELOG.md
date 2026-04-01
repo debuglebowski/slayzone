@@ -1,6 +1,67 @@
 # Changelog
 
 
+## v0.13.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.12.0...v0.13.0)
+
+### 🚀 Enhancements
+
+- **notifications:** Add collapsible sections to notification panel ([bc120db8](https://github.com/debuglebowski/slayzone/commit/bc120db8))
+- **automations:** Add Pencil icon to Edit menu item ([efb9761f](https://github.com/debuglebowski/slayzone/commit/efb9761f))
+- **cli:** Add --external-id dedup to tasks create/subtask-add ([ceb92063](https://github.com/debuglebowski/slayzone/commit/ceb92063))
+- **automations:** Improve cron schedule UX with syntax hint and presets ([ba566a64](https://github.com/debuglebowski/slayzone/commit/ba566a64))
+- **terminal:** Add copy history to terminal menu ([9ec831d7](https://github.com/debuglebowski/slayzone/commit/9ec831d7))
+- **cli:** Add tags, templates, automations, due dates, project update commands ([671a6743](https://github.com/debuglebowski/slayzone/commit/671a6743))
+- **history:** Add activity_events domain and schema ([cd605d91](https://github.com/debuglebowski/slayzone/commit/cd605d91))
+- **history:** Record activity events for tasks, tags, automations ([34f163ec](https://github.com/debuglebowski/slayzone/commit/34f163ec))
+- **task:** Add history and settings panels ([7ec9b85e](https://github.com/debuglebowski/slayzone/commit/7ec9b85e))
+- **automations:** Wire up Cmd+Y shortcut for automations panel ([e6cc1bdd](https://github.com/debuglebowski/slayzone/commit/e6cc1bdd))
+- **cli:** Add `slay panels` command for creating web panel definitions ([4af2913a](https://github.com/debuglebowski/slayzone/commit/4af2913a))
+- **onboarding:** Add CLI install step ([13e45247](https://github.com/debuglebowski/slayzone/commit/13e45247))
+- **cli:** Add post-onboarding CLI install dialog ([1f53a455](https://github.com/debuglebowski/slayzone/commit/1f53a455))
+
+### 🩹 Fixes
+
+- **terminal:** Fall back to default flags when task has no per-task flags ([c7066034](https://github.com/debuglebowski/slayzone/commit/c7066034))
+- **task:** Sync local state when applying template to temporary task ([aa8b8126](https://github.com/debuglebowski/slayzone/commit/aa8b8126))
+- **task:** Allow resetting due date via X button ([7eb41eb5](https://github.com/debuglebowski/slayzone/commit/7eb41eb5))
+- **notifications:** Add aria-expanded to collapsible group headers ([622245ef](https://github.com/debuglebowski/slayzone/commit/622245ef))
+- **task:** Hide sibling sections when description is expanded to full height ([#53](https://github.com/debuglebowski/slayzone/pull/53))
+- **task:** Preserve sub-tasks accordion state across description expand toggle ([13e37e55](https://github.com/debuglebowski/slayzone/commit/13e37e55))
+- **automations:** Add missing deps that broke CI typecheck ([492fc168](https://github.com/debuglebowski/slayzone/commit/492fc168))
+- **notifications:** Group tasks by label instead of status ID ([38b726a4](https://github.com/debuglebowski/slayzone/commit/38b726a4))
+- **task:** Prevent "Task not found" flash for subtasks during race window ([9e7331e5](https://github.com/debuglebowski/slayzone/commit/9e7331e5))
+- **editor:** Add checkbox rendering for Milkdown GFM task lists ([#58](https://github.com/debuglebowski/slayzone/pull/58))
+- **terminal:** Skip usage fetch for disabled built-in providers ([#55](https://github.com/debuglebowski/slayzone/pull/55))
+- **editor:** Improve task list checkbox plugin and heading margins ([0332fc5c](https://github.com/debuglebowski/slayzone/commit/0332fc5c))
+- **editor:** Fill description card with editor and set milkdown height ([93fadc0b](https://github.com/debuglebowski/slayzone/commit/93fadc0b))
+
+### 💅 Refactors
+
+- **task:** Template button → icon after Turn into task ([32e6db06](https://github.com/debuglebowski/slayzone/commit/32e6db06))
+- **task:** Remove automations panel from task view ([703010b1](https://github.com/debuglebowski/slayzone/commit/703010b1))
+- **tasks:** Move due date to bottom-right of kanban card with ring ([61f42f19](https://github.com/debuglebowski/slayzone/commit/61f42f19))
+- **automations:** Simplify automation card to single-row layout with timeline ([a519e64a](https://github.com/debuglebowski/slayzone/commit/a519e64a))
+- **task:** Wrap metadata in collapsible Details section ([e5810027](https://github.com/debuglebowski/slayzone/commit/e5810027))
+- **task:** Restyle Details header as card with gap ([700347f0](https://github.com/debuglebowski/slayzone/commit/700347f0))
+- **task:** Only show Details card in full-height description mode ([c289abbe](https://github.com/debuglebowski/slayzone/commit/c289abbe))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.12.0 ([72d87e67](https://github.com/debuglebowski/slayzone/commit/72d87e67))
+- Update skill definitions ([cc6cde54](https://github.com/debuglebowski/slayzone/commit/cc6cde54))
+
+### ✅ Tests
+
+- **task:** Add template handler contract tests ([eb8e3031](https://github.com/debuglebowski/slayzone/commit/eb8e3031))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Stefan Farestam
+- Sfarestam
+
 ## v0.12.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.11.0...v0.12.0)
