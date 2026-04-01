@@ -102,6 +102,8 @@ export function NotificationPanel({
             <div key={status} className="mb-3">
               <button
                 type="button"
+                aria-expanded={!collapsed}
+                aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${label} group`}
                 onClick={() => toggleGroup(status)}
                 className="flex w-full items-center gap-1 px-2 py-1 rounded hover:bg-muted/50 transition-colors"
               >
