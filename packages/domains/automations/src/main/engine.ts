@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { Automation, AutomationEvent, AutomationRow, AutomationRun } from '@slayzone/automations/shared'
+import { finishAutomationActionRun, recordActivityEvent, startAutomationActionRun, trimOutputTail } from '@slayzone/history/main'
 import { parseAutomationRow } from '@slayzone/automations/shared'
 import { resolveTemplate, type TemplateContext } from '@slayzone/automations/shared'
 import { exec } from 'child_process'
@@ -8,6 +9,16 @@ import { exec } from 'child_process'
 const MAX_DEPTH = 5
 const ACTION_TIMEOUT_MS = 30_000
 const MAX_RUNS_PER_AUTOMATION = 100
+
+class AutomationCommandError extends Error {
+  outputTail: string | null
+
+  constructor(message: string, outputTail: string | null) {
+    super(message)
+    this.name = 'AutomationCommandError'
+    this.outputTail = outputTail
+  }
+}
 
 /** Minimal cron parser — supports: "* * * * *" (min hour dom month dow) */
 export function cronMatches(expression: string, date: Date): boolean {
@@ -199,47 +210,120 @@ export class AutomationEngine {
 
     const ctx = this.buildTemplateContext(event)
     const prevDepth = this.currentDepth
+    let runStatus: 'success' | 'error' = 'success'
+    let runError: string | null = null
 
     try {
       this.currentDepth = depth + 1
-      for (const action of automation.actions) {
-        await this.executeAction(action.params, ctx)
-      }
+      for (let i = 0; i < automation.actions.length; i++) {
+        const action = automation.actions[i]
+        const { command } = this.resolveActionExecution(action.params, ctx)
+        const actionRunId = startAutomationActionRun(this.db, {
+          runId,
+          automationId: automation.id,
+          taskId: event.taskId ?? null,
+          projectId: event.projectId ?? null,
+          actionIndex: i,
+          actionType: action.type,
+          command,
+        })
+        const actionStart = Date.now()
 
-      const durationMs = Date.now() - startTime
-      this.db.prepare(
-        `UPDATE automation_runs SET status = 'success', duration_ms = ?, completed_at = datetime('now') WHERE id = ?`
-      ).run(durationMs, runId)
+        try {
+          const result = await this.executeAction(action.params, ctx)
+          finishAutomationActionRun(this.db, actionRunId, {
+            status: 'success',
+            outputTail: result.outputTail,
+            durationMs: Date.now() - actionStart,
+          })
+        } catch (err) {
+          finishAutomationActionRun(this.db, actionRunId, {
+            status: 'error',
+            outputTail: err instanceof AutomationCommandError ? err.outputTail : null,
+            error: err instanceof Error ? err.message : String(err),
+            durationMs: Date.now() - actionStart,
+          })
+          throw err
+        }
+      }
     } catch (err) {
-      const durationMs = Date.now() - startTime
-      this.db.prepare(
-        `UPDATE automation_runs SET status = 'error', error = ?, duration_ms = ?, completed_at = datetime('now') WHERE id = ?`
-      ).run(err instanceof Error ? err.message : String(err), durationMs, runId)
+      runStatus = 'error'
+      runError = err instanceof Error ? err.message : String(err)
     } finally {
       this.currentDepth = prevDepth
     }
 
-    this.db.prepare(
-      `UPDATE automations SET run_count = run_count + 1, last_run_at = datetime('now') WHERE id = ?`
-    ).run(automation.id)
+    const durationMs = Date.now() - startTime
+    this.db.transaction(() => {
+      if (runStatus === 'success') {
+        this.db.prepare(
+          `UPDATE automation_runs SET status = 'success', error = NULL, duration_ms = ?, completed_at = datetime('now') WHERE id = ?`
+        ).run(durationMs, runId)
+      } else {
+        this.db.prepare(
+          `UPDATE automation_runs SET status = 'error', error = ?, duration_ms = ?, completed_at = datetime('now') WHERE id = ?`
+        ).run(runError, durationMs, runId)
+      }
+
+      this.db.prepare(
+        `UPDATE automations SET run_count = run_count + 1, last_run_at = datetime('now') WHERE id = ?`
+      ).run(automation.id)
+
+      this.recordAutomationTimelineEvent(automation, event, runId, runStatus, runError)
+    })()
 
     this.pruneOldRuns(automation.id)
     this.notifyRenderer()
   }
 
-  private async executeAction(params: Record<string, unknown>, ctx: TemplateContext): Promise<void> {
-    const command = resolveTemplate(params.command as string, ctx)
-    const cwd = params.cwd ? resolveTemplate(params.cwd as string, ctx) : ctx.project?.path
-    await this.runCommand(command, cwd)
+  private resolveActionExecution(params: Record<string, unknown>, ctx: TemplateContext): { command: string; cwd?: string } {
+    return {
+      command: resolveTemplate(params.command as string, ctx),
+      cwd: params.cwd ? resolveTemplate(params.cwd as string, ctx) : ctx.project?.path,
+    }
   }
 
-  private runCommand(command: string, cwd?: string): Promise<string> {
+  private async executeAction(params: Record<string, unknown>, ctx: TemplateContext): Promise<{ outputTail: string | null }> {
+    const { command, cwd } = this.resolveActionExecution(params, ctx)
+    const result = await this.runCommand(command, cwd)
+    return { outputTail: trimOutputTail(`${result.stdout}${result.stderr}`) }
+  }
+
+  private runCommand(command: string, cwd?: string): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const child = exec(command, { cwd, timeout: ACTION_TIMEOUT_MS }, (err, stdout, stderr) => {
-        if (err) reject(new Error(`Command failed: ${err.message}\n${stderr}`))
-        else resolve(stdout)
+        const outputTail = trimOutputTail(`${stdout}${stderr}`)
+        if (err) reject(new AutomationCommandError(`Command failed: ${err.message}\n${stderr}`, outputTail))
+        else resolve({ stdout, stderr })
       })
       setTimeout(() => child.kill(), ACTION_TIMEOUT_MS + 1000)
+    })
+  }
+
+  private recordAutomationTimelineEvent(
+    automation: Automation,
+    event: AutomationEvent,
+    runId: string,
+    status: 'success' | 'error',
+    error: string | null
+  ): void {
+    if (!event.taskId) return
+
+    recordActivityEvent(this.db, {
+      entityType: 'automation_run',
+      entityId: runId,
+      projectId: event.projectId ?? automation.project_id,
+      taskId: event.taskId,
+      kind: status === 'success' ? 'automation.run_succeeded' : 'automation.run_failed',
+      actorType: 'automation',
+      source: 'automations',
+      summary: `Automation "${automation.name}" ${status === 'success' ? 'succeeded' : 'failed'}`,
+      payload: {
+        automationId: automation.id,
+        automationName: automation.name,
+        status,
+        error,
+      },
     })
   }
 
@@ -310,43 +394,7 @@ export class AutomationEngine {
       depth: 0,
     }
 
-    const runId = crypto.randomUUID()
-    const startTime = Date.now()
-
-    this.db.prepare(
-      `INSERT INTO automation_runs (id, automation_id, trigger_event, status, started_at)
-       VALUES (?, ?, ?, 'running', datetime('now'))`
-    ).run(runId, automation.id, JSON.stringify(event))
-
-    const ctx = this.buildTemplateContext(event)
-    const prevDepth = this.currentDepth
-
-    try {
-      this.currentDepth = 1
-      for (const action of automation.actions) {
-        await this.executeAction(action.params, ctx)
-      }
-
-      const durationMs = Date.now() - startTime
-      this.db.prepare(
-        `UPDATE automation_runs SET status = 'success', duration_ms = ?, completed_at = datetime('now') WHERE id = ?`
-      ).run(durationMs, runId)
-    } catch (err) {
-      const durationMs = Date.now() - startTime
-      this.db.prepare(
-        `UPDATE automation_runs SET status = 'error', error = ?, duration_ms = ?, completed_at = datetime('now') WHERE id = ?`
-      ).run(err instanceof Error ? err.message : String(err), durationMs, runId)
-    } finally {
-      this.currentDepth = prevDepth
-    }
-
-    this.db.prepare(
-      `UPDATE automations SET run_count = run_count + 1, last_run_at = datetime('now') WHERE id = ?`
-    ).run(automation.id)
-
-    this.pruneOldRuns(automation.id)
-    this.notifyRenderer()
-
-    return this.db.prepare('SELECT * FROM automation_runs WHERE id = ?').get(runId) as AutomationRun
+    await this.executeAutomation(automation, event, 0)
+    return this.db.prepare('SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT 1').get(automation.id) as AutomationRun
   }
 }

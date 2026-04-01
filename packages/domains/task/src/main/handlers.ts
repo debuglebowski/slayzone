@@ -6,6 +6,15 @@ import { getDefaultStatus, isKnownStatus, isTerminalStatus, parseColumnsConfig }
 import { parseProject } from '@slayzone/projects/main'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import { getTemplateForTask } from './template-handlers'
+import { recordActivityEvents } from '@slayzone/history/main'
+import {
+  buildTaskArchivedEvents,
+  buildTaskCreatedEvents,
+  buildTaskDeletedEvents,
+  buildTaskRestoredEvents,
+  buildTaskUnarchivedEvents,
+  buildTaskUpdatedEvents,
+} from './history'
 import path from 'path'
 import { existsSync } from 'fs'
 import { removeWorktree, createWorktree, runWorktreeSetupScript, getCurrentBranch, isGitRepo, copyIgnoredFiles, resolveCopyBehavior } from '@slayzone/worktrees/main'
@@ -575,21 +584,33 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
         dangerously_skip_permissions, panel_visibility, browser_tabs, web_panel_urls
       ) VALUES (?, ?, ?, ?, ?, 'markdown', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    stmt.run(
-      id, data.projectId, data.parentId ?? null,
-      data.title, data.description ?? null, data.assignee ?? null,
-      initialStatus, priority, data.dueDate ?? null,
-      terminalMode, JSON.stringify(providerConfig),
-      providerConfig['claude-code']?.flags ?? '',
-      providerConfig['codex']?.flags ?? '',
-      providerConfig['cursor-agent']?.flags ?? '',
-      providerConfig['gemini']?.flags ?? '',
-      providerConfig['opencode']?.flags ?? '',
-      data.isTemporary ? 1 : 0,
-      ccsDefaultProfile,
-      data.repoName ?? null,
-      dangerouslySkipPerms, panelVisibility, browserTabs, webPanelUrls
-    )
+    const initialTask = db.transaction(() => {
+      stmt.run(
+        id, data.projectId, data.parentId ?? null,
+        data.title, data.description ?? null, data.assignee ?? null,
+        initialStatus, priority, data.dueDate ?? null,
+        terminalMode, JSON.stringify(providerConfig),
+        providerConfig['claude-code']?.flags ?? '',
+        providerConfig['codex']?.flags ?? '',
+        providerConfig['cursor-agent']?.flags ?? '',
+        providerConfig['gemini']?.flags ?? '',
+        providerConfig['opencode']?.flags ?? '',
+        data.isTemporary ? 1 : 0,
+        ccsDefaultProfile,
+        data.repoName ?? null,
+        dangerouslySkipPerms, panelVisibility, browserTabs, webPanelUrls
+      )
+
+      const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
+      const task = parseTask(row)
+      if (!task) return null
+
+      recordActivityEvents(db, buildTaskCreatedEvents(task))
+      return task
+    })()
+
+    if (!initialTask) return null
+
     await maybeAutoCreateWorktree(db, id, data.projectId, data.title, data.repoName)
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
     const task = parseTask(row)
@@ -614,18 +635,33 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
   })
 
   ipcMain.handle('db:tasks:update', (_, data: UpdateTaskInput) => {
-    const oldRow = db.prepare('SELECT status FROM tasks WHERE id = ?').get(data.id) as { status: string } | undefined
-    const result = updateTask(db, data)
-    if (result) {
-      ipcMain.emit('db:tasks:update:done', null, data.id, { oldStatus: oldRow?.status })
+    const result = db.transaction(() => {
+      const previousRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as Record<string, unknown> | undefined
+      const previousTask = parseTask(previousRow)
+      const nextTask = updateTask(db, data)
+
+      if (previousTask && nextTask) {
+        recordActivityEvents(db, buildTaskUpdatedEvents(previousTask, nextTask))
+      }
+
+      return {
+        previousTask,
+        nextTask,
+      }
+    })()
+
+    if (result.nextTask) {
+      ipcMain.emit('db:tasks:update:done', null, data.id, { oldStatus: result.previousTask?.status })
       onMutation?.()
     }
-    return result
+    return result.nextTask
   })
 
   // Soft-delete: kill PTY but preserve worktree for undo
   // Block deletion of tasks linked to external providers — archive instead
   ipcMain.handle('db:tasks:delete', (_, id: string) => {
+    const previousRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    const previousTask = parseTask(previousRow)
     const linkCount = (db.prepare(
       'SELECT COUNT(*) as count FROM external_links WHERE task_id = ?'
     ).get(id) as { count: number }).count
@@ -634,41 +670,65 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     }
 
     cleanupTaskImmediate(id)
-    const result = db.prepare(`
-      UPDATE tasks SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
-    `).run(id)
-    if (result.changes > 0) onMutation?.()
+    const result = db.transaction(() => {
+      const updateResult = db.prepare(`
+        UPDATE tasks SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
+      `).run(id)
+      if (updateResult.changes > 0 && previousTask) {
+        recordActivityEvents(db, buildTaskDeletedEvents(previousTask))
+      }
+      return updateResult
+    })()
+    if (result.changes > 0) {
+      onMutation?.()
+    }
     return result.changes > 0
   })
 
   // Restore a soft-deleted task
   ipcMain.handle('db:tasks:restore', (_, id: string) => {
-    db.prepare(`
-      UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?
-    `).run(id)
+    const task = db.transaction(() => {
+      db.prepare(`
+        UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?
+      `).run(id)
+      const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
+      const nextTask = parseTask(row)
+      if (nextTask) {
+        recordActivityEvents(db, buildTaskRestoredEvents(nextTask))
+      }
+      return nextTask
+    })()
     onMutation?.()
-    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    return parseTask(row)
+    return task
   })
 
   // Archive operations
   ipcMain.handle('db:tasks:archive', async (_, id: string) => {
+    const toArchiveRows = db.prepare('SELECT * FROM tasks WHERE id = ? OR parent_id = ?').all(id, id) as Record<string, unknown>[]
+    const toArchiveTasks = parseTasks(toArchiveRows)
     await cleanupTaskFull(db, id)
     // Also archive sub-tasks
     const childIds = (db.prepare('SELECT id FROM tasks WHERE parent_id = ? AND archived_at IS NULL').all(id) as { id: string }[]).map(r => r.id)
     for (const childId of childIds) { await cleanupTaskFull(db, childId) }
-    db.prepare(`
-      UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, base_dir = NULL, updated_at = datetime('now')
-      WHERE id = ? OR parent_id = ?
-    `).run(id, id)
+    const archivedTask = db.transaction(() => {
+      db.prepare(`
+        UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, base_dir = NULL, updated_at = datetime('now')
+        WHERE id = ? OR parent_id = ?
+      `).run(id, id)
+      recordActivityEvents(db, buildTaskArchivedEvents(toArchiveTasks))
+      const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
+      return parseTask(row)
+    })()
     ipcMain.emit('db:tasks:archive:done', null, id)
     onMutation?.()
-    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    return parseTask(row)
+    return archivedTask
   })
 
   ipcMain.handle('db:tasks:archiveMany', async (_, ids: string[]) => {
     if (ids.length === 0) return
+    const placeholdersForExisting = ids.map(() => '?').join(',')
+    const existingRows = db.prepare(`SELECT * FROM tasks WHERE id IN (${placeholdersForExisting}) OR parent_id IN (${placeholdersForExisting})`).all(...ids, ...ids) as Record<string, unknown>[]
+    const existingTasks = parseTasks(existingRows)
     for (const id of ids) {
       await cleanupTaskFull(db, id)
     }
@@ -678,10 +738,13 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     for (const childId of childIds) { await cleanupTaskFull(db, childId) }
     const allIds = [...ids, ...childIds]
     const placeholders = allIds.map(() => '?').join(',')
-    db.prepare(`
-      UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, base_dir = NULL, updated_at = datetime('now')
-      WHERE id IN (${placeholders})
-    `).run(...allIds)
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, base_dir = NULL, updated_at = datetime('now')
+        WHERE id IN (${placeholders})
+      `).run(...allIds)
+      recordActivityEvents(db, buildTaskArchivedEvents(existingTasks.filter((task) => allIds.includes(task.id))))
+    })()
     for (const id of allIds) {
       ipcMain.emit('db:tasks:archive:done', null, id)
     }
@@ -689,14 +752,21 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
   })
 
   ipcMain.handle('db:tasks:unarchive', (_, id: string) => {
-    db.prepare(`
-      UPDATE tasks SET archived_at = NULL, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(id)
+    const task = db.transaction(() => {
+      db.prepare(`
+        UPDATE tasks SET archived_at = NULL, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(id)
+      const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
+      const nextTask = parseTask(row)
+      if (nextTask) {
+        recordActivityEvents(db, buildTaskUnarchivedEvents(nextTask))
+      }
+      return nextTask
+    })()
     ipcMain.emit('db:tasks:unarchive:done', null, id)
     onMutation?.()
-    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    return parseTask(row)
+    return task
   })
 
   ipcMain.handle('db:tasks:getArchived', () => {

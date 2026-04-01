@@ -1,6 +1,34 @@
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
+import { recordActivityEvents } from '@slayzone/history/main'
+
+function buildTaskTagsChangedEvents(
+  task: { id: string; project_id: string },
+  previousTagIds: string[],
+  nextTagIds: string[]
+) {
+  const previousSet = new Set(previousTagIds)
+  const nextSet = new Set(nextTagIds)
+  const addedTagIds = nextTagIds.filter((tagId) => !previousSet.has(tagId))
+  const removedTagIds = previousTagIds.filter((tagId) => !nextSet.has(tagId))
+
+  if (addedTagIds.length === 0 && removedTagIds.length === 0) {
+    return []
+  }
+
+  return [{
+    entityType: 'task' as const,
+    entityId: task.id,
+    projectId: task.project_id,
+    taskId: task.id,
+    kind: 'task.tags_changed' as const,
+    actorType: 'user' as const,
+    source: 'task' as const,
+    summary: 'Tags updated',
+    payload: { addedTagIds, removedTagIds },
+  }]
+}
 
 export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
 
@@ -91,11 +119,17 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
   ipcMain.handle('db:taskTags:setForTask', (_, taskId: string, tagIds: string[]) => {
     const deleteStmt = db.prepare('DELETE FROM task_tags WHERE task_id = ?')
     const insertStmt = db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)')
-
     db.transaction(() => {
+      const previousRows = db.prepare('SELECT tag_id FROM task_tags WHERE task_id = ? ORDER BY tag_id ASC').all(taskId) as Array<{ tag_id: string }>
+      const previousTagIds = previousRows.map((row) => row.tag_id)
       deleteStmt.run(taskId)
       for (const tagId of tagIds) {
         insertStmt.run(taskId, tagId)
+      }
+
+      const taskRow = db.prepare('SELECT id, project_id FROM tasks WHERE id = ?').get(taskId) as { id: string; project_id: string } | undefined
+      if (taskRow) {
+        recordActivityEvents(db, buildTaskTagsChangedEvents(taskRow, previousTagIds, tagIds))
       }
     })()
 
