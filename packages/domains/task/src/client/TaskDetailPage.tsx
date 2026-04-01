@@ -2161,14 +2161,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           {!(descriptionExpanded && descriptionOpen) && <div className="flex-1" />}
 
           {/* Details */}
-          <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen} className="-mb-3">
-            <div className="-mx-3 flex items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground border-t border-border" style={{ width: 'calc(100% + 1.5rem)', borderBottom: detailsOpen ? '1px solid var(--border)' : 'none' }}>
-              <CollapsibleTrigger className="flex items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
-                <ChevronRight className="size-3 transition-transform" />
-                Details
-              </CollapsibleTrigger>
-            </div>
-            <CollapsibleContent className="pt-1">
+          <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
+            <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
+              <ChevronRight className="size-3 transition-transform" />
+              Details
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-4">
               <TaskMetadataSidebar
                 task={task}
                 tags={tags}
