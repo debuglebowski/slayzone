@@ -2093,7 +2093,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           </Collapsible>
 
           {/* Sub-tasks (only for top-level tasks) */}
-          {!parentTask && <Collapsible defaultOpen className="group/sub rounded-md border border-border overflow-hidden">
+          {!(descriptionExpanded && descriptionOpen) && !parentTask && <Collapsible defaultOpen className="group/sub rounded-md border border-border overflow-hidden">
             <div className="flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground group-data-[state=open]/sub:border-b border-border">
               <CollapsibleTrigger className="flex items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
                 <ChevronRight className="size-3 transition-transform" />
@@ -2155,6 +2155,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           {!(descriptionExpanded && descriptionOpen) && <div className="flex-1" />}
 
           {/* Details */}
+          {!(descriptionExpanded && descriptionOpen) && <>
           <TaskMetadataSidebar
             task={task}
             tags={tags}
@@ -2241,6 +2242,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             </Button>
             </div>
           </div>
+          </>}
 
           </div>
               </>
