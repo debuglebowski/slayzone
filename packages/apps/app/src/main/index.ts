@@ -98,6 +98,7 @@ import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { registerAiConfigHandlers } from '@slayzone/ai-config/main'
 import { registerIntegrationHandlers, ensureIntegrationSchema, startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags } from '@slayzone/integrations/main'
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/main'
+import { registerHistoryHandlers } from '@slayzone/history/main'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/main'
 import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/main'
 import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/main'
@@ -946,6 +947,7 @@ app.whenReady().then(async () => {
   registerTaskHandlers(ipcMain, db, notifyTasksChanged)
   registerTaskTemplateHandlers(ipcMain, db)
   registerTagHandlers(ipcMain, db)
+  registerHistoryHandlers(ipcMain, db)
   registerSettingsHandlers(ipcMain, db)
 
   // Feedback handlers (lightweight, no domain package)

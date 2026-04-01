@@ -70,6 +70,10 @@ const api: ElectronAPI = {
     setBlockers: (taskId, blockerTaskIds) =>
       ipcRenderer.invoke('db:taskDependencies:setBlockers', taskId, blockerTaskIds)
   },
+  history: {
+    listForTask: (taskId, options) => ipcRenderer.invoke('history:listForTask', taskId, options),
+    getAutomationActionRuns: (runId) => ipcRenderer.invoke('history:getAutomationActionRuns', runId),
+  },
   feedback: {
     listThreads: () => ipcRenderer.invoke('db:feedback:listThreads'),
     createThread: (input) => ipcRenderer.invoke('db:feedback:createThread', input),

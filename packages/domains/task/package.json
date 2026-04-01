@@ -29,6 +29,7 @@
     "@milkdown/core": "^7.19.2",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
+    "@slayzone/history": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/terminal": "workspace:*",

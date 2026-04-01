@@ -45,6 +45,7 @@ import type {
 import type { DirEntry, ReadFileResult, FileSearchResult, SearchFilesOptions, GitStatusMap } from '@slayzone/file-editor/shared'
 import type { TestCategory, CreateTestCategoryInput, UpdateTestCategoryInput, TestProfile, ScanResult, TestLabel, CreateTestLabelInput, UpdateTestLabelInput, TestFileLabel, TestFileNote } from '@slayzone/test-panel/shared'
 import type { Automation, AutomationRun, CreateAutomationInput, UpdateAutomationInput } from '@slayzone/automations/shared'
+import type { AutomationActionRun, ListTaskHistoryOptions, ListTaskHistoryResult } from '@slayzone/history/shared'
 import type {
   ConnectGithubInput,
   ConnectLinearInput,
@@ -271,6 +272,10 @@ export interface ElectronAPI {
     addBlocker: (taskId: string, blockerTaskId: string) => Promise<void>
     removeBlocker: (taskId: string, blockerTaskId: string) => Promise<void>
     setBlockers: (taskId: string, blockerTaskIds: string[]) => Promise<void>
+  }
+  history: {
+    listForTask: (taskId: string, options?: ListTaskHistoryOptions) => Promise<ListTaskHistoryResult>
+    getAutomationActionRuns: (runId: string) => Promise<AutomationActionRun[]>
   }
   feedback: {
     listThreads: () => Promise<Array<{ id: string; title: string; discord_thread_id: string | null; created_at: string }>>

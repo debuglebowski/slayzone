@@ -1,5 +1,5 @@
 {
-  "name": "@slayzone/tags",
+  "name": "@slayzone/history",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,25 +8,16 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./main": "./src/main/index.ts",
-    "./client": "./src/client/index.ts"
+    "./main": "./src/main/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
-  "dependencies": {
-    "@slayzone/history": "workspace:*",
-    "@slayzone/telemetry": "workspace:*",
-    "@slayzone/ui": "workspace:*",
-    "lucide-react": "^0.562.0"
-  },
   "peerDependencies": {
-    "electron": "^41.0.0",
-    "react": "^19.0.0"
+    "electron": "^41.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/react": "^19.2.7",
     "typescript": "^5.9.3"
   }
 }

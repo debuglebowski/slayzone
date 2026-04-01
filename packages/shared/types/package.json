@@ -16,6 +16,7 @@
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
+    "@slayzone/history": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",

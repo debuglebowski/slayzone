@@ -35,6 +35,7 @@
     "@slayzone/automations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
+    "@slayzone/history": "workspace:*",
     "@slayzone/icons": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/onboarding": "workspace:*",

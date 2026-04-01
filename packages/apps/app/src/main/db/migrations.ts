@@ -1649,6 +1649,62 @@ const migrations: Migration[] = [
           WHERE external_id IS NOT NULL;
       `)
     }
+  },
+  {
+    version: 92,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS activity_events (
+          id TEXT PRIMARY KEY,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          actor_type TEXT NOT NULL,
+          source TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          payload_json TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_activity_events_task_created
+          ON activity_events(task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_activity_events_entity
+          ON activity_events(entity_type, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_activity_events_project_created
+          ON activity_events(project_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS automation_action_runs (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES automation_runs(id) ON DELETE CASCADE,
+          automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+          project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+          action_index INTEGER NOT NULL,
+          action_type TEXT NOT NULL,
+          command TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'running',
+          output_tail TEXT,
+          error TEXT,
+          started_at TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at TEXT,
+          duration_ms INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_automation_action_runs_run
+          ON automation_action_runs(run_id, action_index);
+      `)
+    }
+  },
+  {
+    version: 93,
+    up: (db) => {
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_activity_events_task_created_id
+          ON activity_events(task_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_activity_events_project_created_id
+          ON activity_events(project_id, created_at DESC, id DESC);
+      `)
+    }
   }
 ]
 
