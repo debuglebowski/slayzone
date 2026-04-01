@@ -224,8 +224,11 @@
   height: 100%;
 }
 
+.milkdown {
+  height: 100%;
+}
+
 .ProseMirror {
-  min-height: inherit;
   height: 100%;
   outline: none;
 }
