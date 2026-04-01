@@ -96,15 +96,15 @@ export function NotificationPanel({
         {attentionTasks.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">No tasks need attention</p>
         ) : (
-          groupedTasks.map(({ status, label, tasks }) => {
-            const collapsed = collapsedGroups.has(status)
+          groupedTasks.map(({ label, tasks }) => {
+            const collapsed = collapsedGroups.has(label)
             return (
-            <div key={status} className="mb-3">
+            <div key={label} className="mb-3">
               <button
                 type="button"
                 aria-expanded={!collapsed}
                 aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${label} group`}
-                onClick={() => toggleGroup(status)}
+                onClick={() => toggleGroup(label)}
                 className="flex w-full items-center gap-1 px-2 py-1 rounded hover:bg-muted/50 transition-colors"
               >
                 <ChevronRight className={cn('size-3 text-muted-foreground transition-transform', !collapsed && 'rotate-90')} />

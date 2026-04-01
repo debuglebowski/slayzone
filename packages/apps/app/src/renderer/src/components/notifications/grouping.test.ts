@@ -85,11 +85,51 @@ runTest('uses project-aware labels in all-project mode', () => {
     projectA.id
   )
 
-  const queued = groups.find((group) => group.status === 'queued')
-  const finished = groups.find((group) => group.status === 'finished')
+  // Projects A and B both have column id 'queued' but with different labels
+  // ('Queue' vs 'Inbox'). Grouping by label splits them into separate groups.
+  const queue = groups.find((group) => group.label === 'Queue')
+  const inbox = groups.find((group) => group.label === 'Inbox')
+  const done = groups.find((group) => group.label === 'Done')
 
-  assert.equal(queued?.label, 'Inbox')
-  assert.equal(finished?.label, 'Done')
+  assert.equal(queue?.tasks.length, 1)
+  assert.equal(inbox?.tasks.length, 2)
+  assert.equal(done?.tasks.length, 1)
+})
+
+runTest('merges custom columns with same label across projects', () => {
+  const projX: Project = {
+    ...projectA,
+    id: 'project-x',
+    columns_config: [
+      { id: 'status-4', label: 'Stashed', color: 'yellow', position: 0, category: 'backlog' },
+      { id: 'done-x', label: 'Done', color: 'green', position: 1, category: 'completed' }
+    ]
+  }
+  const projY: Project = {
+    ...projectB,
+    id: 'project-y',
+    columns_config: [
+      { id: 'status-3', label: 'Stashed', color: 'yellow', position: 0, category: 'backlog' },
+      { id: 'done-y', label: 'Done', color: 'green', position: 1, category: 'completed' }
+    ]
+  }
+
+  const groups = groupAttentionTasksByStatus(
+    [
+      makeAttention(projX.id, 'status-4'),
+      makeAttention(projY.id, 'status-3'),
+      makeAttention(projX.id, 'done-x')
+    ],
+    [projX, projY],
+    false,
+    projX.id
+  )
+
+  const stashed = groups.find((g) => g.label === 'Stashed')
+  const done = groups.find((g) => g.label === 'Done')
+
+  assert.equal(stashed?.tasks.length, 2, 'same-label columns should merge')
+  assert.equal(done?.tasks.length, 1)
 })
 
 runTest('uses selected project labels in current-project mode', () => {
