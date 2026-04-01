@@ -108,7 +108,7 @@ export function TaskMetadataSidebar({
 
   const handleDueDateChange = async (date: Date | undefined): Promise<void> => {
     track('due_date_set')
-    const dueDate = date ? format(date, 'yyyy-MM-dd') : undefined
+    const dueDate = date ? format(date, 'yyyy-MM-dd') : null
     const updated = await window.api.db.updateTask({ id: task.id, dueDate })
     onUpdate(updated)
   }
@@ -221,7 +221,15 @@ export function TaskMetadataSidebar({
                 )}
               >
                 <CalendarIcon className="mr-2 size-4" />
-                {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No date'}
+                <span className="flex-1">{task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No date'}</span>
+                {task.due_date && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDueDateChange(undefined) }}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
