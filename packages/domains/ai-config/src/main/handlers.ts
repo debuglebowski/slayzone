@@ -241,7 +241,7 @@ function normalizeSkillForPersistence(
 }
 
 function getSyncedItemContent(
-  provider: CliProvider,
+  _provider: CliProvider,
   itemType: string,
   _itemSlug: string,
   targetPath: string,
@@ -254,7 +254,7 @@ function getSyncedItemContent(
   const parsedFrontmatter = parseSkillFrontmatter(normalizedContent)
   const body = (parsedFrontmatter?.body ?? normalizedContent).replace(/^\n+/, '')
 
-  if (provider !== 'claude' || !targetPath.endsWith('/SKILL.md')) return body
+  if (!targetPath.endsWith('/SKILL.md')) return body
   return normalizedContent
 }
 

@@ -404,7 +404,9 @@ describe('ai-config:load-global-item', () => {
       projectId, projectPath: root, itemId: item.id,
       providers: ['codex']
     })
-    expect(fs.readFileSync(path.join(root, '.agents/skills/codex-skill/SKILL.md'), 'utf-8').trim()).toBe('# Codex skill')
+    const codexContent = fs.readFileSync(path.join(root, '.agents/skills/codex-skill/SKILL.md'), 'utf-8')
+    expect(codexContent.includes('name: codex-skill')).toBe(true)
+    expect(codexContent.includes('# Codex skill')).toBe(true)
   })
 
   test('uses selected provider semantics for manual path links', () => {
@@ -640,7 +642,33 @@ describe('ai-config:sync-linked-file', () => {
 
     expect(fs.readFileSync(claudePath, 'utf-8').includes('name: sync-all-providers')).toBe(true)
     expect(fs.readFileSync(claudePath, 'utf-8').includes('# v2')).toBe(true)
-    expect(fs.readFileSync(codexPath, 'utf-8')).toBe('# v2\n')
+    const codexContent = fs.readFileSync(codexPath, 'utf-8')
+    expect(codexContent.includes('name: sync-all-providers')).toBe(true)
+    expect(codexContent.includes('# v2')).toBe(true)
+  })
+
+  test('non-claude providers keep frontmatter in synced SKILL.md files', () => {
+    const fixture = createProjectFixture('sync-codex-frontmatter')
+    h.invoke('ai-config:set-project-providers', fixture.projectId, ['claude', 'codex'])
+    const item = h.invoke('ai-config:create-item', {
+      type: 'skill',
+      scope: 'global',
+      slug: 'codex-fm',
+      content: skillDoc('codex-fm', '# body\n')
+    }) as { id: string }
+
+    h.invoke('ai-config:load-global-item', {
+      projectId: fixture.projectId,
+      projectPath: fixture.projectPath,
+      itemId: item.id,
+      providers: ['claude', 'codex']
+    })
+
+    const codexPath = path.join(fixture.projectPath, '.agents/skills/codex-fm/SKILL.md')
+    const codexContent = fs.readFileSync(codexPath, 'utf-8')
+    expect(codexContent.includes('---')).toBe(true)
+    expect(codexContent.includes('name: codex-fm')).toBe(true)
+    expect(codexContent.includes('# body')).toBe(true)
   })
 
   test('syncs project-local items without provider selections', () => {
@@ -660,7 +688,9 @@ describe('ai-config:sync-linked-file', () => {
     const codexPath = path.join(fixture.projectPath, '.agents/skills/local-item-sync/SKILL.md')
     expect(fs.readFileSync(claudePath, 'utf-8').includes('name: local-item-sync')).toBe(true)
     expect(fs.readFileSync(claudePath, 'utf-8').includes('# local item')).toBe(true)
-    expect(fs.readFileSync(codexPath, 'utf-8').trim()).toBe('# local item')
+    const codexContent = fs.readFileSync(codexPath, 'utf-8')
+    expect(codexContent.includes('name: local-item-sync')).toBe(true)
+    expect(codexContent.includes('# local item')).toBe(true)
   })
 
   test('migrates legacy claude selection paths to SKILL.md', () => {
@@ -1043,7 +1073,7 @@ describe('ai-config:get-project-skills-status', () => {
     expect(found!.providers.codex.syncHealth).toBe('stale')
   })
 
-  test('frontmatter-only metadata changes affect claude skill files while codex body stays synced', () => {
+  test('frontmatter-only metadata changes mark all providers stale', () => {
     const fixture = createProjectFixture('skills-status-frontmatter-edit')
     h.invoke('ai-config:set-project-providers', fixture.projectId, ['claude', 'codex'])
 
@@ -1073,7 +1103,7 @@ describe('ai-config:get-project-skills-status', () => {
     const found = results.find((entry) => entry.item.id === item.id)
     expect(found).toBeTruthy()
     expect(found!.providers.claude.syncHealth).toBe('stale')
-    expect(found!.providers.codex.syncHealth).toBe('synced')
+    expect(found!.providers.codex.syncHealth).toBe('stale')
   })
 
   test('marks historically valid skills invalid when current edited content drops frontmatter', () => {
@@ -1196,8 +1226,9 @@ describe('ai-config:sync-all', () => {
 
     expect(fs.readFileSync(path.join(fixture.projectPath, '.claude/skills/local-project-skill/SKILL.md'), 'utf-8').includes('# local project skill'))
       .toBe(true)
-    expect(fs.readFileSync(path.join(fixture.projectPath, '.cursor/skills/local-project-skill/SKILL.md'), 'utf-8').trim())
-      .toBe('# local project skill')
+    const cursorContent = fs.readFileSync(path.join(fixture.projectPath, '.cursor/skills/local-project-skill/SKILL.md'), 'utf-8')
+    expect(cursorContent.includes('name: local-project-skill')).toBe(true)
+    expect(cursorContent.includes('# local project skill')).toBe(true)
     expect(fs.existsSync(legacyLocalPath)).toBe(false)
 
     expect(result.written.some((entry) =>
@@ -1307,7 +1338,7 @@ describe('ai-config:sync-all', () => {
     expect(result.conflicts.length).toBe(0)
     expect(result.written.some((entry) => entry.provider === 'claude' && entry.path === '.claude/skills/sync-after-pull/SKILL.md')).toBe(true)
     expect(result.written.some((entry) => entry.provider === 'codex' && entry.path === '.agents/skills/sync-after-pull/SKILL.md')).toBe(true)
-    expect(fs.readFileSync(codexPath, 'utf-8')).toBe('# pulled body\n')
+    expect(fs.readFileSync(codexPath, 'utf-8')).toBe('---\nname: modified-on-disk\n---\n# pulled body\n')
   })
 
   test('prunes unmanaged skills and disabled-provider MCP configs when enabled', () => {
