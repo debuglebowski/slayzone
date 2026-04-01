@@ -348,6 +348,7 @@ function App(): React.JSX.Element {
   const panelEditorShortcut = useShortcutDisplay('panel-editor')
   const panelProcessesShortcut = useShortcutDisplay('panel-processes')
   const panelTestsShortcut = useShortcutDisplay('panel-tests')
+  const panelAutomationsShortcut = useShortcutDisplay('panel-automations')
   const attentionPanelShortcut = useShortcutDisplay('attention-panel')
 
   // Keyboard shortcuts
@@ -528,6 +529,9 @@ function App(): React.JSX.Element {
       } else if (matchesShortcut(e, getKeys('panel-tests')) && testsPanelEnabled && isHomePanelEnabled('tests', 'home')) {
         e.preventDefault()
         homePanel.setHomePanelVisibility(prev => ({ ...prev, tests: !prev.tests }))
+      } else if (matchesShortcut(e, getKeys('panel-automations')) && automationsPanelEnabled && isHomePanelEnabled('automations', 'home')) {
+        e.preventDefault()
+        homePanel.setHomePanelVisibility(prev => ({ ...prev, automations: !prev.automations }))
       }
     })
     window.addEventListener('keydown', handleKeyDown)
@@ -812,7 +816,7 @@ function App(): React.JSX.Element {
                                 { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut, active: homePanel.homePanelVisibility.editor, disabled: !selectedProjectId },
                                 { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut, active: homePanel.homePanelVisibility.processes, disabled: !selectedProjectId },
                                 ...(testsPanelEnabled ? [{ id: 'tests', icon: FlaskConical, label: 'Tests', shortcut: panelTestsShortcut, active: homePanel.homePanelVisibility.tests, disabled: !selectedProjectId }] : []),
-                                ...(automationsPanelEnabled ? [{ id: 'automations', icon: Zap, label: 'Automations', active: homePanel.homePanelVisibility.automations, disabled: !selectedProjectId }] : []),
+                                ...(automationsPanelEnabled ? [{ id: 'automations', icon: Zap, label: 'Automations', shortcut: panelAutomationsShortcut, active: homePanel.homePanelVisibility.automations, disabled: !selectedProjectId }] : []),
                               ].filter(p => p.id === 'kanban' || isHomePanelEnabled(p.id, 'home'))}
                               onChange={(id, active) => homePanel.setHomePanelVisibility(prev => ({ ...prev, [id]: active }))}
                             />
