@@ -1,3 +1,9 @@
+---
+name: competitor-research
+description: "Create or refresh one competitor record in the comparison canon."
+trigger: auto
+---
+
 Create or refresh one competitor record in the comparison canon.
 
 Use this skill when the task is to research, validate, migrate, or update a specific competitor.

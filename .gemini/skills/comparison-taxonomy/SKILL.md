@@ -1,3 +1,9 @@
+---
+name: comparison-taxonomy
+description: "Maintain the comparison schema across the canon."
+trigger: auto
+---
+
 Maintain the comparison schema across the canon.
 
 Use this skill when the task is to define or refine axes, tags, categories, relevance tiers, or normalization rules.

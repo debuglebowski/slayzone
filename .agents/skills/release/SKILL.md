@@ -1,3 +1,9 @@
+---
+name: release
+description: "Create a new release for SlayZone"
+trigger: none
+---
+
 Create a new release for SlayZone. The version argument is: $ARGUMENTS
 
 ## Steps
@@ -14,7 +20,9 @@ Interpret `$ARGUMENTS`:
 
 ### 2. Bump version
 
-Update `"version"` in `packages/apps/app/package.json` to the new version.
+Update `"version"` in both:
+- `packages/apps/app/package.json`
+- `packages/apps/cli/package.json`
 
 ### 3. Generate changelog
 
@@ -43,7 +51,7 @@ Categories:
 ### 5. Commit and confirm
 
 ```
-git add CHANGELOG.md packages/apps/app/package.json packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
+git add CHANGELOG.md packages/apps/app/package.json packages/apps/cli/package.json packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
 git commit -m "release: v<new-version>"
 ```
 

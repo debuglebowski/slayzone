@@ -1,3 +1,9 @@
+---
+name: competitor-discovery
+description: "Find new competitors worth adding to the comparison program."
+trigger: auto
+---
+
 Find new competitors worth adding to the comparison program.
 
 Use this skill when the task is to discover, shortlist, or prioritize emerging products, not to fully research one specific competitor.
