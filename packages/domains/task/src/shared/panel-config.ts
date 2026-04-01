@@ -1,4 +1,4 @@
-import type { PanelConfig } from './types'
+import type { PanelConfig, WebPanelDefinition } from './types'
 import { PREDEFINED_WEB_PANELS } from './types'
 import { inferHostScopeFromUrl, inferProtocolFromUrl } from './handoff'
 
@@ -39,4 +39,21 @@ export function mergePredefinedWebPanels(config: PanelConfig): PanelConfig {
   if (!changed) return config
 
   return { ...config, webPanels: [...synced, ...missing] }
+}
+
+const RESERVED_PANEL_SHORTCUTS = new Set(['t', 'b', 'e', 'g', 's'])
+
+/** Validate a panel keyboard shortcut. Returns null if valid, or an error message if invalid. */
+export function validatePanelShortcut(
+  letter: string,
+  existingPanels: WebPanelDefinition[],
+  excludeId?: string
+): string | null {
+  if (!letter) return null
+  const l = letter.toLowerCase()
+  if (l.length !== 1 || !/^[a-z]$/.test(l)) return 'Must be a single letter'
+  if (RESERVED_PANEL_SHORTCUTS.has(l)) return `Cmd+${l.toUpperCase()} is reserved for a built-in panel`
+  const existing = existingPanels.find(wp => wp.shortcut === l && wp.id !== excludeId)
+  if (existing) return `Cmd+${l.toUpperCase()} is already used by ${existing.name}`
+  return null
 }

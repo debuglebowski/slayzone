@@ -3,7 +3,7 @@ import { ChevronRight, Cpu, FileCode, GitCompare, Globe, Plus, Settings2, Square
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSeparator, Switch, Tooltip, TooltipContent, TooltipTrigger, IconButton } from '@slayzone/ui'
 import type { PanelConfig, PanelView, WebPanelDefinition } from '@slayzone/task/shared'
 import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal/shared'
-import { DEFAULT_PANEL_CONFIG, isPanelEnabled, inferHostScopeFromUrl, inferProtocolFromUrl, mergePredefinedWebPanels, normalizeDesktopProtocol } from '@slayzone/task/shared'
+import { DEFAULT_PANEL_CONFIG, isPanelEnabled, inferHostScopeFromUrl, inferProtocolFromUrl, mergePredefinedWebPanels, normalizeDesktopProtocol, validatePanelShortcut } from '@slayzone/task/shared'
 import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { PanelBreadcrumb } from './PanelBreadcrumb'
@@ -153,15 +153,8 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes }: PanelsSettin
     })
   }
 
-  const validateShortcut = (letter: string, excludeId?: string): string | null => {
-    if (!letter) return null
-    const l = letter.toLowerCase()
-    if (l.length !== 1 || !/[a-z]/.test(l)) return 'Must be a single letter'
-    if (new Set(['t', 'b', 'e', 'g', 's']).has(l)) return `⌘${l.toUpperCase()} is reserved for a built-in panel`
-    const existing = panelConfig.webPanels.find(wp => wp.shortcut === l && wp.id !== excludeId)
-    if (existing) return `⌘${l.toUpperCase()} is already used by ${existing.name}`
-    return null
-  }
+  const validateShortcut = (letter: string, excludeId?: string): string | null =>
+    validatePanelShortcut(letter, panelConfig.webPanels, excludeId)
 
   const handleAddCustomPanel = async () => {
     if (!newPanelName.trim() || !newPanelUrl.trim()) return
