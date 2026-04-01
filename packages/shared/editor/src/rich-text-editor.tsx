@@ -12,6 +12,7 @@ import type { EditorThemeColors } from './editor-themes'
 import { createPlaceholderPlugin } from './milkdown-placeholder'
 import { listItemMovePlugin } from './milkdown-list-move'
 import { escapeBlurPlugin } from './milkdown-escape-blur'
+import { taskListPlugin } from './milkdown-task-list'
 
 export type { Editor }
 
@@ -185,6 +186,7 @@ export function RichTextEditor({
       .use(placeholderPlugin)
       .use(listItemMovePlugin)
       .use(escapeBlurPlugin)
+      .use(taskListPlugin)
       .use(toggleTaskListCommand)
       .use(formatStatePlugin)
       .use(blurHandlerPlugin)

@@ -310,8 +310,10 @@
   padding-top: 0.3em;
 }
 
-.ProseMirror li[data-item-type="task"] input[type="checkbox"] {
+.ProseMirror li[data-item-type="task"] > input[type="checkbox"] {
+  flex-shrink: 0;
   cursor: pointer;
+  margin-top: 0.3em;
   accent-color: var(--color-primary);
 }
 
@@ -320,6 +322,11 @@
 .ProseMirror li[data-item-type="task"] > p {
   flex: 1;
   line-height: 1.25;
+}
+
+.ProseMirror li[data-item-type="task"] > span > p {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 /* Compact line spacing for notes editor */
