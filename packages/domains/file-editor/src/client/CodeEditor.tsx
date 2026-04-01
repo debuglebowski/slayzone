@@ -51,9 +51,12 @@ interface CodeEditorProps {
   onSave: () => void
   /** Bump to replace editor content from external source (e.g. disk reload) */
   version?: number
+  /** Navigate to line/col and focus editor */
+  goToPosition?: { line: number; col: number } | null
+  onGoToPositionApplied?: () => void
 }
 
-export function CodeEditor({ filePath, content, onChange, onSave, version }: CodeEditorProps) {
+export function CodeEditor({ filePath, content, onChange, onSave, version, goToPosition, onGoToPositionApplied }: CodeEditorProps) {
   const { editorThemeId, contentVariant } = useTheme()
   const {
     editorFontSize, editorWordWrap, editorTabSize, editorIndentTabs, editorRenderWhitespace,
@@ -138,6 +141,24 @@ export function CodeEditor({ filePath, content, onChange, onSave, version }: Cod
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, sizeTheme])
+
+  // Navigate to line/col and focus
+  const onGoToRef = useRef(onGoToPositionApplied)
+  onGoToRef.current = onGoToPositionApplied
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !goToPosition) return
+    const line = Math.max(1, Math.min(goToPosition.line, view.state.doc.lines))
+    const lineObj = view.state.doc.line(line)
+    const col = Math.min(goToPosition.col, lineObj.length)
+    const pos = lineObj.from + col
+    view.dispatch({
+      selection: { anchor: pos },
+      scrollIntoView: true,
+    })
+    view.focus()
+    onGoToRef.current?.()
+  }, [goToPosition])
 
   // Reconfigure theme at runtime
   useEffect(() => {

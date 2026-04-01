@@ -32,6 +32,18 @@ export interface SearchFilesOptions {
   maxResults?: number
 }
 
+export interface OpenFilePosition {
+  /** 1-based line number */
+  line: number
+  /** 0-based column offset (default 0) */
+  col?: number
+}
+
+export interface OpenFileOptions {
+  position?: OpenFilePosition
+  from?: 'sidebar' | 'keybind' | 'link' | 'terminal' | 'search'
+}
+
 export type GitFileStatus = 'modified' | 'staged' | 'untracked' | 'added' | 'deleted' | 'renamed' | 'conflicted'
 
 export interface GitStatusMap {

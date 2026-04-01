@@ -18,7 +18,7 @@ import {
   getChromeStyleOverrides,
 } from '@slayzone/ui'
 import { useTheme } from '@slayzone/settings/client'
-import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
+import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 import { useFileEditor } from './useFileEditor'
 import { EditorFileTree, type EditorFileTreeHandle } from './EditorFileTree'
 import { EditorTabBar } from './EditorTabBar'
@@ -27,7 +27,7 @@ import { MarkdownFileEditor } from './MarkdownFileEditor'
 import { SearchPanel } from './SearchPanel'
 
 export interface FileEditorViewHandle {
-  openFile: (filePath: string) => void
+  openFile: (filePath: string, options?: OpenFileOptions) => void
   closeActiveFile: () => boolean
   toggleSearch: () => void
 }
@@ -60,7 +60,9 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
     isRestoring,
     refreshTree,
     treeRefreshKey,
-    fileVersions
+    fileVersions,
+    goToPosition,
+    clearGoToPosition
   } = useFileEditor(projectPath, initialEditorState)
 
   const { editorOverrideThemeId, contentVariant } = useTheme()
@@ -383,6 +385,8 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
                   onChange={(content) => updateContent(activeFile.path, content)}
                   onSave={() => saveFile(activeFile.path)}
                   version={fileVersions.get(activeFile.path)}
+                  goToPosition={goToPosition?.filePath === activeFile.path ? goToPosition : null}
+                  onGoToPositionApplied={clearGoToPosition}
                 />
               )}
             </div>

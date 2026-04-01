@@ -35,7 +35,7 @@ interface TerminalContainerProps {
   onFocusRequestHandled?: (requestId: number) => void
   onMainTabActiveChange?: (isMainActive: boolean) => void
   onOpenUrl?: (url: string) => void
-  onOpenFile?: (filePath: string) => void
+  onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onMainReset?: () => void
   rightContent?: React.ReactNode
   overlay?: React.ReactNode

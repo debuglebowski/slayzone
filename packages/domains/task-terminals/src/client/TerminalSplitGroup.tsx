@@ -39,7 +39,7 @@ interface TerminalSplitGroupProps {
   isActive?: boolean
   onAttached?: (api: { focus: () => void }) => void
   onOpenUrl?: (url: string) => void
-  onOpenFile?: (filePath: string) => void
+  onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
 }
 
 export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalSplitGroupProps>(function TerminalSplitGroup({ panes, isActive, onAttached, onOpenUrl, onOpenFile }, ref) {

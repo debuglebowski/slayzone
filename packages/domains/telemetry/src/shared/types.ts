@@ -197,7 +197,7 @@ export interface TelemetryEventProps {
   worktree_created: { auto_vs_manual: 'auto' | 'manual' }
   worktree_files_copied: Record<string, never>
   // Editor
-  editor_file_opened: { from: 'sidebar' | 'keybind' | 'link' | 'terminal' }
+  editor_file_opened: { from: 'sidebar' | 'keybind' | 'link' | 'terminal' | 'search' }
   file_created: Record<string, never>
   file_renamed: Record<string, never>
   file_deleted: Record<string, never>

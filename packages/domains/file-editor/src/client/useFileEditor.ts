@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { track } from '@slayzone/telemetry/client'
-import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
+import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 
 export interface OpenFile {
   path: string
@@ -31,6 +31,7 @@ export function useFileEditor(
   const treeRefreshTimer = useRef<NodeJS.Timeout | null>(null)
   // Track version per file for CodeMirror external content reload
   const [fileVersions, setFileVersions] = useState<Map<string, number>>(new Map())
+  const [goToPosition, setGoToPosition] = useState<{ filePath: string; line: number; col: number } | null>(null)
 
   // --- Restore persisted state on mount ---
   const [isRestoring, setIsRestoring] = useState(!!(initialEditorState?.files?.length))
@@ -150,7 +151,11 @@ export function useFileEditor(
   }, [reloadFile])
 
   // --- Open / close / save ---
-  const openFile = useCallback(async (filePath: string, from: 'sidebar' | 'keybind' | 'link' | 'terminal' = 'sidebar') => {
+  const openFile = useCallback(async (filePath: string, options?: OpenFileOptions) => {
+    const from = options?.from ?? 'sidebar'
+    if (options?.position) {
+      setGoToPosition({ filePath, line: options.position.line, col: options.position.col ?? 0 })
+    }
     // Already open — just focus
     const existing = openFiles.find((f) => f.path === filePath)
     if (existing) {
@@ -317,6 +322,8 @@ export function useFileEditor(
     refreshTree,
     isRestoring,
     treeRefreshKey,
-    fileVersions
+    fileVersions,
+    goToPosition,
+    clearGoToPosition: useCallback(() => setGoToPosition(null), [])
   }
 }

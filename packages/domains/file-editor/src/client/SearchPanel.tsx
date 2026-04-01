@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { track } from '@slayzone/telemetry/client'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
-import type { FileSearchResult } from '../shared'
+import type { FileSearchResult, OpenFileOptions } from '../shared'
 import { FileIcon } from './FileIcon'
 
 interface SearchPanelProps {
   projectPath: string
-  onOpenFile: (path: string) => void
+  onOpenFile: (path: string, options?: OpenFileOptions) => void
 }
 
 export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
@@ -124,7 +124,7 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
                 <button
                   key={i}
                   className="flex items-center gap-2 w-full pl-8 pr-2 py-0.5 hover:bg-muted/50 text-left"
-                  onClick={() => onOpenFile(file.path)}
+                  onClick={() => onOpenFile(file.path, { position: { line: match.line, col: match.col }, from: 'search' })}
                 >
                   <span className="text-xs text-muted-foreground tabular-nums shrink-0 w-8 text-right">{match.line}</span>
                   <HighlightedLine text={match.lineText} query={query} matchCase={matchCase} useRegex={useRegex} />

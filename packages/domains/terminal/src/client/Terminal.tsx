@@ -104,7 +104,7 @@ interface TerminalProps {
   onFirstInput?: () => void
   onRetry?: () => void
   onOpenUrl?: (url: string) => void
-  onOpenFile?: (filePath: string) => void
+  onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
 }
 
 function stripAnsi(str: string): string {
@@ -453,7 +453,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       // Clickable file paths — Cmd+Click → editor (in-project) or Finder (external).
       // Shift+Click is consumed by xterm for text selection, so no Shift variant.
-      terminal.registerLinkProvider(new FileLinkProvider(terminal, (event, filePath, _line, _col) => {
+      terminal.registerLinkProvider(new FileLinkProvider(terminal, (event, filePath, line, col) => {
         if (!event.metaKey) return
         // Resolve relative paths against terminal cwd
         const resolved = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
@@ -463,7 +463,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         } else if (onOpenFileRef.current) {
           // Pass relative path to editor panel
           const relative = resolved.startsWith(cwd + '/') ? resolved.slice(cwd.length + 1) : filePath
-          onOpenFileRef.current(relative)
+          // Terminal file links use 1-based col; normalize to 0-based
+          onOpenFileRef.current(relative, line != null ? { position: { line, col: col != null ? col - 1 : undefined } } : undefined)
         } else {
           void window.api.git.revealInFinder(resolved)
         }

@@ -71,7 +71,7 @@ import { buildStatusOptions, cn, getColumnStatusStyle, projectColorBg, useAppear
 import { BrowserPanel, type BrowserPanelHandle } from '@slayzone/task-browser'
 import { FileEditorView, type FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { QuickOpenDialog } from '@slayzone/file-editor/client/QuickOpenDialog'
-import type { EditorOpenFilesState } from '@slayzone/file-editor/shared'
+import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 import { track } from '@slayzone/telemetry/client'
 import { usePanelSizes, resolveWidths } from './usePanelSizes'
 import { usePanelConfig } from './usePanelConfig'
@@ -927,11 +927,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     [task, panelVisibility, onTaskUpdated, resetPanelSize]
   )
 
-  const handleQuickOpenFile = useCallback((filePath: string) => {
+  const handleQuickOpenFile = useCallback((filePath: string, options?: OpenFileOptions) => {
     if (fileEditorRef.current) {
-      fileEditorRef.current.openFile(filePath)
+      fileEditorRef.current.openFile(filePath, options)
     } else {
-      // Editor not mounted yet — queue file and enable panel
+      // Editor not mounted yet — queue file and enable panel (position lost)
       pendingEditorFileRef.current = filePath
       handlePanelToggle('editor', true)
     }
