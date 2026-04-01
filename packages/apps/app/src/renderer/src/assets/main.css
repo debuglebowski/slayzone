@@ -257,11 +257,25 @@
   margin: 0;
 }
 
-.ProseMirror.prose h1,
-.ProseMirror.prose h2,
-.ProseMirror.prose h3 {
-  margin-top: 0.75em;
-  margin-bottom: 0.25em;
+.ProseMirror h1 {
+  margin-top: 0;
+  margin-block-start: 0;
+  margin-bottom: 12px;
+  margin-block-end: 12px;
+}
+
+.ProseMirror h2 {
+  margin-top: 0;
+  margin-block-start: 0;
+  margin-bottom: 8px;
+  margin-block-end: 8px;
+}
+
+.ProseMirror h3 {
+  margin-top: 0;
+  margin-block-start: 0;
+  margin-bottom: 4px;
+  margin-block-end: 4px;
 }
 
 /* Task list checkbox styling (TipTap legacy) */
@@ -295,6 +309,11 @@
 }
 
 /* Task list checkbox styling (Milkdown GFM) */
+.ProseMirror ul:has(> li[data-item-type="task"]) {
+  padding-inline-start: 0;
+  padding-left: 0;
+}
+
 .ProseMirror li[data-item-type="task"] {
   display: flex;
   align-items: flex-start;
@@ -302,12 +321,6 @@
   list-style: none;
   margin-top: 0;
   margin-bottom: 0;
-}
-
-.ProseMirror li[data-item-type="task"] > label {
-  flex-shrink: 0;
-  user-select: none;
-  padding-top: 0.3em;
 }
 
 .ProseMirror li[data-item-type="task"] > input[type="checkbox"] {

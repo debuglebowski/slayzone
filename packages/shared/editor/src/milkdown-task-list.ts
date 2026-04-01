@@ -21,19 +21,18 @@ function createTaskListItemView(node: Node, view: EditorView, getPos: () => numb
   checkbox.type = 'checkbox'
   checkbox.checked = node.attrs.checked === true
   checkbox.contentEditable = 'false'
-  checkbox.addEventListener('click', (e) => {
-    // Use click instead of mousedown so the native checkbox toggles visually first
+  const handleClick = (e: Event) => {
+    // preventDefault reverts native toggle; we set checked state manually via ProseMirror
     const pos = getPos()
     if (pos == null) return
     e.preventDefault()
     const checked = !currentNode.attrs.checked
-    // Immediately update visual state
     checkbox.checked = checked
     dom.dataset.checked = String(checked)
-    // Dispatch to ProseMirror
     const { tr } = view.state
     view.dispatch(tr.setNodeMarkup(pos, undefined, { ...currentNode.attrs, checked }))
-  })
+  }
+  checkbox.addEventListener('click', handleClick)
 
   const contentDOM = document.createElement('span')
 
@@ -50,6 +49,9 @@ function createTaskListItemView(node: Node, view: EditorView, getPos: () => numb
       checkbox.checked = updatedNode.attrs.checked === true
       dom.dataset.checked = String(updatedNode.attrs.checked)
       return true
+    },
+    destroy() {
+      checkbox.removeEventListener('click', handleClick)
     }
   }
 }
@@ -62,8 +64,7 @@ export const taskListPlugin = $prose(() => new Plugin({
         if (node.attrs.checked != null) {
           return createTaskListItemView(node, view, getPos as () => number | undefined)
         }
-        // Return null to use default rendering for non-task list items
-        return null as never
+        return undefined as unknown as never
       }
     }
   }
