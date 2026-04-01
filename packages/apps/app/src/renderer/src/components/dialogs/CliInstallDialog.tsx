@@ -4,7 +4,7 @@ import { Terminal } from 'lucide-react'
 import { Button, Checkbox, Dialog, DialogContent } from '@slayzone/ui'
 
 export function CliInstallDialog() {
-  const [open, setOpen] = useState(true) // TEMP: force open for preview
+  const [open, setOpen] = useState(false)
   const [dontAsk, setDontAsk] = useState(false)
   const [installing, setInstalling] = useState(false)
   const [message, setMessage] = useState('')
