@@ -44,21 +44,60 @@ export function getMcpPort(): number | null {
   }
 }
 
-export function notifyApp(): Promise<void> {
-  const port = getMcpPort()
-  if (!port) return Promise.resolve()
-  return new Promise<void>((resolve) => {
+function getAlternateMcpPort(): number | null {
+  if (process.env.SLAYZONE_DB_PATH || process.env.SLAYZONE_MCP_PORT) return null
+  const dev = process.env.SLAYZONE_DEV === '1'
+  const altPath = getDbPath(!dev)
+  if (!fs.existsSync(altPath)) return null
+  try {
+    const altDb = new DatabaseSync(altPath)
+    const row = altDb.prepare(`SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1`).get() as { value: string } | undefined
+    altDb.close()
+    const port = parseInt(row?.value ?? '', 10)
+    return (port > 0 && port <= 65535) ? port : null
+  } catch {
+    return null
+  }
+}
+
+function probePort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
     const req = http.request(
       { hostname: '127.0.0.1', port, path: '/api/notify', method: 'POST' },
-      (res) => {
-        res.resume() // drain response so socket closes cleanly
-        res.on('end', resolve)
-      },
+      (res) => { res.resume(); res.on('end', () => resolve(true)) },
     )
-    req.on('error', () => resolve()) // app not running — silent fail
-    req.setTimeout(3000, () => { req.destroy(); resolve() })
+    req.on('error', () => resolve(false))
+    req.setTimeout(1000, () => { req.destroy(); resolve(false) })
     req.end()
   })
+}
+
+export async function notifyApp(): Promise<void> {
+  const port = getMcpPort()
+  if (port) {
+    await new Promise<void>((resolve) => {
+      const req = http.request(
+        { hostname: '127.0.0.1', port, path: '/api/notify', method: 'POST' },
+        (res) => {
+          res.resume()
+          res.on('end', resolve)
+        },
+      )
+      req.on('error', () => resolve())
+      req.setTimeout(3000, () => { req.destroy(); resolve() })
+      req.end()
+    })
+    return
+  }
+
+  // No MCP port in current DB — check if app is running on the other DB
+  const altPort = getAlternateMcpPort()
+  if (altPort && await probePort(altPort)) {
+    const dev = process.env.SLAYZONE_DEV === '1'
+    const hint = dev ? 'without --dev' : 'with --dev'
+    console.error(`Warning: SlayZone app is running ${hint}. Changes were saved but the app was not notified.`)
+    console.error(`  Re-run ${dev ? 'without --dev' : 'with --dev'} to target the same database.`)
+  }
 }
 
 export function openDb(): SlayDb {
