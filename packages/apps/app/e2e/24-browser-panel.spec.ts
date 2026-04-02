@@ -1,20 +1,42 @@
-import { test, expect, seed, goHome, resetApp, TEST_PROJECT_PATH } from './fixtures/electron'
+import { test, expect, seed, goHome, clickProject, resetApp, TEST_PROJECT_PATH } from './fixtures/electron'
 import {
-  testInvoke, urlInput, tabBar, tabEntries, newTabBtn,
+  testInvoke, urlInput, tabEntries, newTabBtn,
   focusForAppShortcut, ensureBrowserPanelVisible, ensureBrowserPanelHidden,
   openTaskViaSearch, getActiveViewId,
 } from './fixtures/browser-view'
 
+function buildFullPageLinkDataUrl(linkText: string, href: string): string {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html>
+  <body style="margin:0;background:#101010;">
+    <a
+      id="task-link"
+      href="${href}"
+      style="display:flex;align-items:center;justify-content:center;width:100vw;height:100vh;color:white;font:24px sans-serif;text-decoration:none;"
+    >
+      ${linkText}
+    </a>
+  </body>
+</html>`)}`
+}
+
 test.describe('Browser panel', () => {
   let taskId: string
+  let taskProjectName: string
+  let otherProjectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Browser Test', color: '#0ea5e9', path: TEST_PROJECT_PATH })
+    const otherProject = await s.createProject({ name: 'Other Project', color: '#22c55e', path: TEST_PROJECT_PATH })
     const t = await s.createTask({ projectId: p.id, title: 'Browser task', status: 'todo' })
     taskId = t.id
+    taskProjectName = p.name
+    otherProjectAbbrev = otherProject.name.slice(0, 2).toUpperCase()
     await s.refreshData()
+    await goHome(mainWindow)
+    await clickProject(mainWindow, otherProjectAbbrev)
     await openTaskViaSearch(mainWindow, 'Browser task')
   })
 
@@ -54,6 +76,129 @@ test.describe('Browser panel', () => {
 
     await testInvoke(mainWindow, 'browser:close-devtools', viewId)
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
+  })
+
+  test('browser link task intent opens a prefilled draft for the source task project', async ({ mainWindow }) => {
+    await ensureBrowserPanelVisible(mainWindow)
+    const viewId = await getActiveViewId(mainWindow, taskId)
+
+    await testInvoke(mainWindow, 'browser:test-dispatch-create-task-from-link', viewId, {
+      url: 'https://example.com/docs',
+      linkText: ' Example   docs ',
+    })
+
+    const dialog = mainWindow.getByRole('dialog').last()
+    await expect(dialog.getByRole('heading', { name: 'Create Task' })).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.locator('input[name="title"]')).toHaveValue('Link: Example docs')
+    await expect(dialog.locator('textarea[name="description"]')).toHaveValue('https://example.com/docs')
+    await expect(dialog.locator('form').getByRole('combobox').last()).toContainText(taskProjectName)
+
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+  })
+
+  test('link context menu action can open a prefilled task draft', async ({ mainWindow }) => {
+    await ensureBrowserPanelVisible(mainWindow)
+    const viewId = await getActiveViewId(mainWindow, taskId)
+
+    const handled = await testInvoke(
+      mainWindow,
+      'browser:test-run-link-context-menu-action',
+      viewId,
+      {
+        linkURL: 'https://example.com/context-menu',
+        linkText: 'Context menu docs',
+      },
+      'create-task-from-link'
+    )
+    expect(handled).toBe(true)
+
+    const dialog = mainWindow.getByRole('dialog').last()
+    await expect(dialog.getByRole('heading', { name: 'Create Task' })).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.locator('input[name="title"]')).toHaveValue('Link: Context menu docs')
+    await expect(dialog.locator('textarea[name="description"]')).toHaveValue('https://example.com/context-menu')
+    await expect(dialog.locator('form').getByRole('combobox').last()).toContainText(taskProjectName)
+
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+  })
+
+  test('link context menu action can open the link in a new tab', async ({ mainWindow }) => {
+    await ensureBrowserPanelVisible(mainWindow)
+    const viewId = await getActiveViewId(mainWindow, taskId)
+    const tabCountBefore = await tabEntries(mainWindow).count()
+
+    const handled = await testInvoke(
+      mainWindow,
+      'browser:test-run-link-context-menu-action',
+      viewId,
+      {
+        linkURL: 'https://example.com/context-tab',
+        linkText: 'Context tab docs',
+      },
+      'open-link-in-new-tab'
+    )
+    expect(handled).toBe(true)
+    await expect(tabEntries(mainWindow)).toHaveCount(tabCountBefore + 1)
+  })
+
+  test('Alt+Shift+Click on a browser link opens a prefilled task draft', async ({ mainWindow }) => {
+    await ensureBrowserPanelVisible(mainWindow)
+    const viewId = await getActiveViewId(mainWindow, taskId)
+
+    await testInvoke(
+      mainWindow,
+      'browser:navigate',
+      viewId,
+      buildFullPageLinkDataUrl(' Example   docs ', 'https://example.com/docs')
+    )
+
+    await expect.poll(async () => {
+      return await testInvoke(
+        mainWindow,
+        'browser:execute-js',
+        viewId,
+        'document.readyState === "complete" && !!document.getElementById("task-link")'
+      ) as boolean
+    }, { timeout: 10_000 }).toBe(true)
+
+    const clickPoint = await testInvoke(
+      mainWindow,
+      'browser:execute-js',
+      viewId,
+      `(() => {
+        const link = document.getElementById('task-link')
+        if (!(link instanceof HTMLElement)) return null
+        const rect = link.getBoundingClientRect()
+        return {
+          x: Math.floor(rect.left + rect.width / 2),
+          y: Math.floor(rect.top + rect.height / 2),
+        }
+      })()`
+    ) as { x: number; y: number } | null
+    expect(clickPoint).toBeTruthy()
+    if (!clickPoint) throw new Error('Link click point should be available')
+
+    const tabCountBefore = await tabEntries(mainWindow).count()
+    const dispatched = await testInvoke(
+      mainWindow,
+      'browser:test-dispatch-mouse-click',
+      viewId,
+      clickPoint,
+      ['alt', 'shift']
+    )
+    expect(dispatched).toBe(true)
+    await expect.poll(async () => await tabEntries(mainWindow).count(), { timeout: 3_000 }).toBe(tabCountBefore)
+
+    const dialog = mainWindow.getByRole('dialog').last()
+    await expect(dialog.getByRole('heading', { name: 'Create Task' })).toBeVisible({ timeout: 10_000 })
+    await expect(dialog.locator('input[name="title"]')).toHaveValue('Link: Example docs')
+    await expect(dialog.locator('textarea[name="description"]')).toHaveValue('https://example.com/docs')
+    await expect(dialog.locator('form').getByRole('combobox').last()).toContainText(taskProjectName)
+    await expect(tabEntries(mainWindow)).toHaveCount(tabCountBefore)
+
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 })
   })
 
   test('create new tab via plus button', async ({ mainWindow }) => {

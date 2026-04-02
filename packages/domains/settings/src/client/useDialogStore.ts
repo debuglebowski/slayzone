@@ -1,18 +1,13 @@
 import { create } from 'zustand'
+import type { CreateTaskDraft } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
-
-export interface CreateTaskDefaults {
-  status?: Task['status']
-  priority?: number
-  dueDate?: string | null
-}
 
 interface DialogState {
   // Create task
   createTaskOpen: boolean
-  createTaskDefaults: CreateTaskDefaults
-  openCreateTask: (defaults?: CreateTaskDefaults) => void
+  createTaskDraft: CreateTaskDraft
+  openCreateTask: (draft?: CreateTaskDraft) => void
   closeCreateTask: () => void
 
   // Edit task
@@ -59,9 +54,9 @@ interface DialogState {
 
 export const useDialogStore = create<DialogState>()((set) => ({
   createTaskOpen: false,
-  createTaskDefaults: {},
-  openCreateTask: (defaults) => set({ createTaskOpen: true, createTaskDefaults: defaults ?? {} }),
-  closeCreateTask: () => set({ createTaskOpen: false, createTaskDefaults: {} }),
+  createTaskDraft: {},
+  openCreateTask: (draft) => set({ createTaskOpen: true, createTaskDraft: draft ?? {} }),
+  closeCreateTask: () => set({ createTaskOpen: false, createTaskDraft: {} }),
 
   editingTask: null,
   openEditTask: (task) => set({ editingTask: task }),

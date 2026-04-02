@@ -1,10 +1,30 @@
-import { WebContentsView, session, type BrowserWindow } from 'electron'
+import { clipboard, Menu, shell, WebContentsView, session, type BrowserWindow } from 'electron'
 import { join } from 'path'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
+import type { BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
+import {
+  buildBrowserLinkContextMenuItems,
+  normalizeBrowserLinkContextMenuInput,
+  type BrowserLinkContextMenuAction,
+} from './browser-link-context-menu'
+import {
+  BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY,
+  BROWSER_CREATE_TASK_FROM_LINK_INSTALLED_KEY,
+  buildBrowserCreateTaskFromLinkCaptureScript,
+} from '../shared/browser-link-task-capture-script'
 
-/** Cmd+key combos that should pass through to the webpage (clipboard, undo, select-all). */
-const NATIVE_EDIT_KEYS = new Set(['c', 'v', 'x', 'a', 'z'])
+/** Cmd+key combos that always pass through to the webpage (clipboard, undo, scroll). */
+const BROWSER_DEFAULT_PASSTHROUGH = new Set([
+  'c', 'v', 'x', 'a', 'z',    // clipboard + undo
+  'arrowup', 'arrowdown',       // scroll to top/bottom
+])
+
+// Ensure the modified-link capture listener exists on every document swap.
+const MODIFIED_LINK_CAPTURE_SCRIPT = buildBrowserCreateTaskFromLinkCaptureScript(
+  BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY,
+  BROWSER_CREATE_TASK_FROM_LINK_INSTALLED_KEY
+)
 
 export interface CreateViewOpts {
   taskId: string
@@ -40,6 +60,36 @@ interface BrowserViewEvent {
   [key: string]: unknown
 }
 
+interface BrowserCreateTaskFromLinkPayload {
+  url: string
+  linkText?: string
+  source: BrowserCreateTaskFromLinkIntent['source']
+}
+
+interface MouseDownInputLike {
+  type: 'mouseDown'
+  button?: string
+  x?: number
+  y?: number
+  alt?: boolean
+  shift?: boolean
+  meta?: boolean
+  control?: boolean
+}
+
+function getModifiedClickPoint(input: Electron.Input): { x: number; y: number } | null {
+  if (input.type !== 'mouseDown') return null
+  const mouseInput = input as Electron.Input & MouseDownInputLike
+  if (mouseInput.button !== 'left') return null
+  if (!mouseInput.alt || !mouseInput.shift || mouseInput.meta || mouseInput.control) return null
+
+  const x = typeof mouseInput.x === 'number' ? mouseInput.x : NaN
+  const y = typeof mouseInput.y === 'number' ? mouseInput.y : NaN
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+
+  return { x, y }
+}
+
 const MAX_SINGLE_DEVICE_VIEWS_PER_TASK = 6
 
 let viewCounter = 0
@@ -49,6 +99,8 @@ export class BrowserViewManager {
   private mainWindow: BrowserWindow | null = null
   private allHidden = false
   private chromeExtensions: ElectronChromeExtensions | null = null
+  private lastCreateTaskFromLinkSignature = ''
+  private lastCreateTaskFromLinkAt = 0
 
   setMainWindow(win: BrowserWindow) {
     this.mainWindow = win
@@ -414,6 +466,174 @@ export class BrowserViewManager {
     return wc?.zoomFactor ?? null
   }
 
+  async dispatchMouseClick(
+    viewId: string,
+    point: { x: number; y: number },
+    modifiers: Array<'shift' | 'control' | 'alt' | 'meta'> = []
+  ): Promise<boolean> {
+    const wc = this.getWebContents(viewId)
+    if (!wc) return false
+
+    wc.focus()
+    const modifierMask = modifiers.reduce((mask, modifier) => {
+      switch (modifier) {
+        case 'alt':
+          return mask | 1
+        case 'control':
+          return mask | 2
+        case 'meta':
+          return mask | 4
+        case 'shift':
+          return mask | 8
+      }
+    }, 0)
+
+    const attachedHere = !wc.debugger.isAttached()
+    try {
+      if (attachedHere) wc.debugger.attach('1.3')
+      await wc.debugger.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: point.x,
+        y: point.y,
+        modifiers: modifierMask,
+      })
+      await wc.debugger.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: point.x,
+        y: point.y,
+        button: 'left',
+        clickCount: 1,
+        modifiers: modifierMask,
+      })
+      await wc.debugger.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: point.x,
+        y: point.y,
+        button: 'left',
+        clickCount: 1,
+        modifiers: modifierMask,
+      })
+      return true
+    } finally {
+      if (attachedHere && wc.debugger.isAttached()) wc.debugger.detach()
+    }
+  }
+
+  emitCreateTaskFromLinkForWebContents(webContentsId: number, payload: BrowserCreateTaskFromLinkPayload): boolean {
+    for (const [viewId, entry] of this.views) {
+      if (entry.view.webContents.id !== webContentsId) continue
+      return this.emitCreateTaskFromLinkForView(viewId, payload)
+    }
+
+    return false
+  }
+
+  emitCreateTaskFromLinkForView(viewId: string, payload: BrowserCreateTaskFromLinkPayload): boolean {
+    const entry = this.views.get(viewId)
+    if (!entry || !this.mainWindow || this.mainWindow.isDestroyed()) return false
+
+    const signature = `${viewId}::${payload.url}::${payload.linkText ?? ''}`
+    const now = Date.now()
+    if (signature === this.lastCreateTaskFromLinkSignature && now - this.lastCreateTaskFromLinkAt < 300) {
+      return false
+    }
+    this.lastCreateTaskFromLinkSignature = signature
+    this.lastCreateTaskFromLinkAt = now
+
+    const intent: BrowserCreateTaskFromLinkIntent = {
+      viewId,
+      taskId: entry.taskId,
+      url: payload.url,
+      linkText: payload.linkText,
+      source: payload.source,
+    }
+
+    this.mainWindow.webContents.send('browser:create-task-from-link', intent)
+    return true
+  }
+
+  runLinkContextMenuAction(
+    viewId: string,
+    input: { linkURL: string; linkText: string },
+    action: BrowserLinkContextMenuAction
+  ): boolean {
+    const entry = this.views.get(viewId)
+    if (!entry) return false
+
+    const normalizedInput = normalizeBrowserLinkContextMenuInput(input)
+    const items = buildBrowserLinkContextMenuItems(normalizedInput)
+    if (!items.some((item) => item.action === action)) return false
+
+    switch (action) {
+      case 'create-task-from-link':
+        return this.emitCreateTaskFromLinkForView(viewId, {
+          url: normalizedInput.linkURL,
+          linkText: normalizedInput.linkText || undefined,
+          source: 'link-context-menu',
+        })
+      case 'open-link-in-new-tab':
+        if (!this.mainWindow || this.mainWindow.isDestroyed()) return false
+        this.mainWindow.webContents.send('browser:event', {
+          viewId,
+          type: 'new-tab-request',
+          url: normalizedInput.linkURL,
+          background: false,
+          taskId: entry.taskId,
+        })
+        return true
+      case 'copy-link':
+        clipboard.writeText(normalizedInput.linkURL)
+        return true
+      case 'open-link-externally':
+        void shell.openExternal(normalizedInput.linkURL)
+        return true
+    }
+  }
+
+  private async emitCreateTaskFromLinkAtPoint(
+    viewId: string,
+    point: { x: number; y: number }
+  ): Promise<void> {
+    const wc = this.getWebContents(viewId)
+    if (!wc || !wc.mainFrame) return
+
+    const payload = await wc.mainFrame.executeJavaScript(`
+      (() => {
+        const element = document.elementFromPoint(${point.x}, ${point.y})
+        if (!element || typeof element.closest !== 'function') return null
+        const anchor = element.closest('a[href]')
+        if (!anchor) return null
+
+        const href = (typeof anchor.href === 'string' ? anchor.href : anchor.getAttribute('href') || '').trim()
+        if (!/^https?:\\/\\//i.test(href)) return null
+
+        const linkTextRaw =
+          typeof anchor.innerText === 'string' && anchor.innerText.trim()
+            ? anchor.innerText
+            : anchor.textContent || anchor.getAttribute('aria-label') || ''
+        const linkText = linkTextRaw.replace(/\\s+/g, ' ').trim()
+
+        return {
+          url: href,
+          linkText: linkText || undefined,
+        }
+      })()
+    `, true).catch(() => null)
+
+    if (!payload || typeof payload !== 'object') return
+    const url = 'url' in payload && typeof payload.url === 'string' ? payload.url : ''
+    if (!/^https?:\/\//i.test(url)) return
+    const linkText = 'linkText' in payload && typeof payload.linkText === 'string'
+      ? payload.linkText
+      : undefined
+
+    this.emitCreateTaskFromLinkForView(viewId, {
+      url,
+      linkText,
+      source: 'modified-link-click',
+    })
+  }
+
   // --- Internal ---
 
   private applySpoofing(wc: Electron.WebContents): void {
@@ -528,8 +748,10 @@ export class BrowserViewManager {
         }
         return { action: 'deny' }
       }
-      // OAuth popups (window.open w/ features) → real BrowserWindow
-      if (details.disposition === 'new-window' && /^https?:\/\//i.test(details.url)) {
+      // Allow real popup windows only when the page explicitly requested window features.
+      // Modifier-based link opens can also surface as `new-window`, and those should stay denied
+      // so preload click capture can repurpose the gesture without spawning a BrowserWindow.
+      if (details.disposition === 'new-window' && details.features && /^https?:\/\//i.test(details.url)) {
         return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } }
       }
       return { action: 'deny' }
@@ -554,7 +776,18 @@ export class BrowserViewManager {
     // the main renderer as synthetic KeyboardEvents so app shortcuts (Cmd+B, etc.) work.
     // Keys that the main process handles directly (Cmd+R, Cmd+,, etc.) are sent as
     // the same IPC the main process handler would emit.
+    // Modified-link task creation intentionally has two paths:
+    // 1. page-side capture via injected script/bridge for real browser behavior
+    // 2. main-process fallback here for Electron input cases where page capture is flaky
+    // Keep both unless the e2e coverage proves one path is redundant across platforms.
     wc.on('before-input-event', (e, input) => {
+      const modifiedClickPoint = getModifiedClickPoint(input)
+      if (modifiedClickPoint) {
+        e.preventDefault()
+        void this.emitCreateTaskFromLinkAtPoint(viewId, modifiedClickPoint)
+        return
+      }
+
       if (entry.keyboardPassthrough) return
       if (input.type !== 'keyDown') return
       if (!(input.control || input.meta)) return
@@ -647,6 +880,9 @@ export class BrowserViewManager {
 
     wc.on('dom-ready', () => {
       send({ viewId, type: 'dom-ready' })
+      // Reinstall the page-side capture listener on each new document. This stays
+      // separate from the before-input-event fallback above on purpose.
+      wc.mainFrame.executeJavaScript(MODIFIED_LINK_CAPTURE_SCRIPT).catch(() => {})
     })
 
     wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
@@ -673,6 +909,24 @@ export class BrowserViewManager {
         matches: result.matches,
         finalUpdate: result.finalUpdate,
       })
+    })
+
+    wc.on('context-menu', (event, params) => {
+      const input = {
+        linkURL: params.linkURL,
+        linkText: params.linkText,
+      }
+      const items = buildBrowserLinkContextMenuItems(input)
+      if (items.length === 0) return
+
+      event.preventDefault()
+
+      const menu = Menu.buildFromTemplate(items.map((item) => ({
+        label: item.label,
+        click: () => { this.runLinkContextMenuAction(viewId, input, item.action) },
+      })))
+
+      menu.popup({ window: this.mainWindow ?? undefined })
     })
 
     wc.on('destroyed', () => {

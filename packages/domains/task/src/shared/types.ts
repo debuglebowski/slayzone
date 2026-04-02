@@ -200,6 +200,15 @@ export interface TaskDependency {
   blocks_task_id: string
 }
 
+export interface CreateTaskDraft {
+  projectId?: string
+  title?: string
+  description?: string
+  status?: TaskStatus
+  priority?: number
+  dueDate?: string | null
+}
+
 export interface CreateTaskInput {
   projectId: string
   title: string

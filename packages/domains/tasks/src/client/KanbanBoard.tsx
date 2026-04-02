@@ -18,7 +18,7 @@ import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import { groupTasksBy, columnToCreateTaskDefaults, type Column } from './kanban'
+import { groupTasksBy, columnToCreateTaskDraft, type Column } from './kanban'
 import type { ViewConfig, CardProperties } from './FilterState'
 import { KanbanColumn } from './KanbanColumn'
 import { KanbanCard } from './KanbanCard'
@@ -75,7 +75,7 @@ export function KanbanBoard({
   const disableDrag = groupBy === 'due_date'
 
   const handleCreateTask = useMemo(() => {
-    return (column: Column) => useDialogStore.getState().openCreateTask(columnToCreateTaskDefaults(column, groupBy))
+    return (column: Column) => useDialogStore.getState().openCreateTask(columnToCreateTaskDraft(column, groupBy))
   }, [groupBy])
   const { reduceMotion } = useAppearance()
   const [activeId, setActiveId] = useState<string | null>(null)

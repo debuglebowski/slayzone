@@ -41,23 +41,32 @@ test('openCreateTask with no defaults', () => {
   store.getState().openCreateTask()
   const s = store.getState()
   assert(s.createTaskOpen, 'open')
-  assert(Object.keys(s.createTaskDefaults).length === 0, 'defaults empty')
+  assert(Object.keys(s.createTaskDraft).length === 0, 'draft empty')
 })
 
-test('openCreateTask with defaults', () => {
-  store.getState().openCreateTask({ status: 'todo' as never, priority: 2 })
+test('openCreateTask with draft', () => {
+  store.getState().openCreateTask({
+    projectId: 'project-1',
+    title: 'Link: Docs',
+    description: 'https://example.com/docs',
+    status: 'todo' as never,
+    priority: 2
+  })
   const s = store.getState()
   assert(s.createTaskOpen, 'open')
-  assert(s.createTaskDefaults.status === 'todo', 'status')
-  assert(s.createTaskDefaults.priority === 2, 'priority')
+  assert(s.createTaskDraft.projectId === 'project-1', 'projectId')
+  assert(s.createTaskDraft.title === 'Link: Docs', 'title')
+  assert(s.createTaskDraft.description === 'https://example.com/docs', 'description')
+  assert(s.createTaskDraft.status === 'todo', 'status')
+  assert(s.createTaskDraft.priority === 2, 'priority')
 })
 
-test('closeCreateTask resets defaults', () => {
+test('closeCreateTask resets draft', () => {
   store.getState().openCreateTask({ priority: 3 })
   store.getState().closeCreateTask()
   const s = store.getState()
   assert(!s.createTaskOpen, 'closed')
-  assert(Object.keys(s.createTaskDefaults).length === 0, 'defaults reset')
+  assert(Object.keys(s.createTaskDraft).length === 0, 'draft reset')
 })
 
 test('openEditTask sets task payload', () => {

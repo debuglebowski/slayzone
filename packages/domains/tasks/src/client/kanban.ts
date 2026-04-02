@@ -1,5 +1,5 @@
 import type { Task } from '@slayzone/task/shared'
-import type { CreateTaskDefaults } from '@slayzone/settings/client'
+import type { CreateTaskDraft } from '@slayzone/task/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isTerminalStatus, resolveColumns } from '@slayzone/projects/shared'
 import { type FilterState, type ViewConfig, type DueDateRange, type SortKey, type GroupKey, getViewConfig } from './FilterState'
@@ -24,17 +24,17 @@ export function todayISO(): string {
   return new Date().toISOString().split('T')[0]
 }
 
-export function columnToCreateTaskDefaults(column: Column, groupBy: string): CreateTaskDefaults {
-  const defaults: CreateTaskDefaults = {}
-  if (groupBy === 'status') { if (!column.id.startsWith('__')) defaults.status = column.id as Task['status'] }
-  else if (groupBy === 'priority') { const p = parseInt(column.id.slice(1), 10); if (!isNaN(p)) defaults.priority = p }
+export function columnToCreateTaskDraft(column: Column, groupBy: string): CreateTaskDraft {
+  const draft: CreateTaskDraft = {}
+  if (groupBy === 'status') { if (!column.id.startsWith('__')) draft.status = column.id as Task['status'] }
+  else if (groupBy === 'priority') { const p = parseInt(column.id.slice(1), 10); if (!isNaN(p)) draft.priority = p }
   else if (groupBy === 'due_date') {
     const today = todayISO()
-    if (column.id === 'today') defaults.dueDate = today
-    else if (column.id === 'this_week') { const d = new Date(today); d.setDate(d.getDate() + 7); defaults.dueDate = d.toISOString().split('T')[0] }
-    else if (column.id === 'overdue') { const d = new Date(today); d.setDate(d.getDate() - 1); defaults.dueDate = d.toISOString().split('T')[0] }
+    if (column.id === 'today') draft.dueDate = today
+    else if (column.id === 'this_week') { const d = new Date(today); d.setDate(d.getDate() + 7); draft.dueDate = d.toISOString().split('T')[0] }
+    else if (column.id === 'overdue') { const d = new Date(today); d.setDate(d.getDate() - 1); draft.dueDate = d.toISOString().split('T')[0] }
   }
-  return defaults
+  return draft
 }
 
 export function addDaysISO(date: string, days: number): string {

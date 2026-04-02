@@ -8,7 +8,17 @@
  * Creating a stub chrome.runtime here would shadow the real one and
  * break extension content script messaging (sendMessage/connect).
  */
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
+import {
+  BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY,
+  type BrowserCreateTaskFromLinkCapturePayload,
+} from './browser-link-task-capture'
+
+function sendTaskLinkPayload(payload: BrowserCreateTaskFromLinkCapturePayload): void {
+  ipcRenderer.send('browser:request-create-task-from-link', payload)
+}
+
+contextBridge.exposeInMainWorld(BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY, sendTaskLinkPayload)
 
 if ('executeInMainWorld' in contextBridge) {
   contextBridge.executeInMainWorld({

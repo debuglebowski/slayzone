@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
 import { CalendarIcon, Plus } from 'lucide-react'
 import type { Task, TaskTemplate } from '@slayzone/task/shared'
+import type { CreateTaskDraft } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
 import type { Project } from '@slayzone/projects/shared'
@@ -15,6 +16,7 @@ import {
   type CreateTaskFormData,
   priorityOptions
 } from '@slayzone/task/shared'
+import { buildCreateTaskFormDefaults } from './createTaskFormDefaults'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import {
   Form,
@@ -45,10 +47,7 @@ interface CreateTaskDialogProps {
   onOpenChange: (open: boolean) => void
   onCreated: (task: Task) => void
   onCreatedAndOpen?: (task: Task) => void
-  defaultProjectId?: string
-  defaultStatus?: Task['status']
-  defaultPriority?: number
-  defaultDueDate?: string | null
+  draft?: CreateTaskDraft
   tags: Tag[]
   onTagCreated?: (tag: Tag) => void
 }
@@ -58,10 +57,7 @@ export function CreateTaskDialog({
   onOpenChange,
   onCreated,
   onCreatedAndOpen,
-  defaultProjectId,
-  defaultStatus,
-  defaultPriority,
-  defaultDueDate,
+  draft,
   tags,
   onTagCreated
 }: CreateTaskDialogProps): React.JSX.Element {
@@ -72,31 +68,15 @@ export function CreateTaskDialog({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('__none__')
   const form = useForm<CreateTaskFormData>({
     resolver: zodResolver(createTaskSchema),
-    defaultValues: {
-      projectId: defaultProjectId ?? '',
-      title: '',
-      description: '',
-      status: defaultStatus ?? 'inbox',
-      priority: defaultPriority ?? 3,
-      dueDate: defaultDueDate ?? null,
-      tagIds: []
-    }
+    defaultValues: buildCreateTaskFormDefaults(draft)
   })
 
   // Reset form when dialog opens with new defaults
   useEffect(() => {
     if (open) {
-      form.reset({
-        projectId: defaultProjectId ?? '',
-        title: '',
-        description: '',
-        status: defaultStatus ?? 'inbox',
-        priority: defaultPriority ?? 3,
-        dueDate: defaultDueDate ?? null,
-        tagIds: []
-      })
+      form.reset(buildCreateTaskFormDefaults(draft))
     }
-  }, [open, defaultProjectId, defaultStatus, defaultPriority, defaultDueDate, form])
+  }, [open, draft, form])
 
   useEffect(() => {
     if (!open) return

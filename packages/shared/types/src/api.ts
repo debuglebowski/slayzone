@@ -100,6 +100,16 @@ import type {
 
 export type { ExecutionContext } from '@slayzone/projects/shared'
 
+export type BrowserCreateTaskFromLinkSource = 'modified-link-click' | 'link-context-menu'
+
+export interface BrowserCreateTaskFromLinkIntent {
+  viewId: string
+  taskId: string
+  url: string
+  linkText?: string
+  source: BrowserCreateTaskFromLinkSource
+}
+
 export interface BackupInfo {
   filename: string
   name: string
@@ -677,6 +687,7 @@ export interface ElectronAPI {
     }[]>
     importExtension: (path: string) => Promise<{ id: string; name: string } | { error: string }>
     activateExtension: (extensionId: string) => Promise<boolean>
+    onCreateTaskFromLink: (cb: (intent: BrowserCreateTaskFromLinkIntent) => void) => () => void
 
     // Events (M→R)
     onEvent: (cb: (event: {

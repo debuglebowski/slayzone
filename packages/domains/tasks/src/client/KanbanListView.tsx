@@ -19,7 +19,7 @@ import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import { groupTasksBy, columnToCreateTaskDefaults, PRIORITY_LABELS, todayISO, type Column } from './kanban'
+import { groupTasksBy, columnToCreateTaskDraft, PRIORITY_LABELS, todayISO, type Column } from './kanban'
 import type { ViewConfig, CardProperties } from './FilterState'
 import { TaskContextMenu } from './TaskContextMenu'
 import { cn, getColumnStatusStyle, getTerminalStateStyle, Tooltip, TooltipContent, TooltipTrigger, PriorityIcon } from '@slayzone/ui'
@@ -410,7 +410,7 @@ export function KanbanListView({
   const { groupBy, sortBy, showEmptyColumns } = viewConfig
 
   const handleCreateTask = useMemo(() => {
-    return (column: Column) => useDialogStore.getState().openCreateTask(columnToCreateTaskDefaults(column, groupBy))
+    return (column: Column) => useDialogStore.getState().openCreateTask(columnToCreateTaskDraft(column, groupBy))
   }, [groupBy])
   const disableDrag = groupBy === 'due_date'
   const [activeId, setActiveId] = useState<string | null>(null)

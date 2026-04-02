@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
 import { AlertTriangle, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap } from 'lucide-react'
+import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { getDefaultStatus, getDoneStatus, getStatusByCategory, resolveRepoPath } from '@slayzone/projects/shared'
@@ -146,7 +147,7 @@ function App(): React.JSX.Element {
 
   // Dialog state (from zustand store — see useDialogStore)
   const createTaskOpen = useDialogStore((s) => s.createTaskOpen)
-  const createTaskDefaults = useDialogStore((s) => s.createTaskDefaults)
+  const createTaskDraft = useDialogStore((s) => s.createTaskDraft)
   const editingTask = useDialogStore((s) => s.editingTask)
   const deletingTask = useDialogStore((s) => s.deletingTask)
   const createProjectOpen = useDialogStore((s) => s.createProjectOpen)
@@ -319,6 +320,10 @@ function App(): React.JSX.Element {
   const projectTags = selectedProjectId ? tags.filter((t) => t.project_id === selectedProjectId) : tags
   const displayTasks = applyFilters(projectTasks, filter, taskTags, selectedProject?.columns_config)
   const projectsMap = new Map(projects.map((p) => [p.id, p]))
+  const createTaskDialogDraft = useMemo(
+    () => ({ projectId: selectedProjectId || projects[0]?.id, ...createTaskDraft }),
+    [selectedProjectId, projects, createTaskDraft]
+  )
 
   const handleTaskTagsChange = async (taskId: string, tagIds: string[]) => {
     await window.api.taskTags.setTagsForTask(taskId, tagIds)
@@ -602,6 +607,17 @@ function App(): React.JSX.Element {
       }))
     })
   }, [])
+
+  useEffect(() => {
+    return window.api.browser.onCreateTaskFromLink((intent) => {
+      const sourceTask = tasksMap.get(intent.taskId)
+      const fallbackProjectId = sourceTask?.project_id ?? selectedProjectId ?? projects[0]?.id
+      useDialogStore.getState().openCreateTask({
+        ...buildCreateTaskDraftFromBrowserLink(intent.url, intent.linkText),
+        projectId: fallbackProjectId,
+      })
+    })
+  }, [tasksMap, selectedProjectId, projects])
 
   // Tab management
   const closeTab = useCallback((index: number): void => {
@@ -956,8 +972,7 @@ function App(): React.JSX.Element {
             } else { homePanel.pendingHomeEditorFileRef.current = filePath; homePanel.setHomePanelVisibility(prev => ({ ...prev, editor: true })) }
           }} /></Suspense>}
         {shouldMount('createTask', createTaskOpen) && <Suspense fallback={null}><CreateTaskDialog open={createTaskOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeCreateTask() }} onCreated={handleTaskCreated} onCreatedAndOpen={handleTaskCreatedAndOpen}
-          defaultProjectId={selectedProjectId || projects[0]?.id} defaultStatus={createTaskDefaults.status}
-          defaultPriority={createTaskDefaults.priority} defaultDueDate={createTaskDefaults.dueDate}
+          draft={createTaskDialogDraft}
           tags={projectTags} onTagCreated={(tag: Tag) => setTags((prev) => [...prev, tag])} /></Suspense>}
         {shouldMount('editTask', !!editingTask) && <Suspense fallback={null}><EditTaskDialog task={editingTask} open={!!editingTask} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeEditTask() }} onUpdated={handleTaskUpdated} /></Suspense>}
         {shouldMount('deleteTask', !!deletingTask) && <Suspense fallback={null}><DeleteTaskDialog task={deletingTask} open={!!deletingTask} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeDeleteTask() }} onDeleted={handleTaskDeleted} /></Suspense>}

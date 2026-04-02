@@ -1747,6 +1747,12 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
   ipcMain.handle('browser:find-in-page', (_, viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => browserViewManager.findInPage(viewId, text, options))
   ipcMain.handle('browser:stop-find-in-page', (_, viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection') => browserViewManager.stopFindInPage(viewId, action))
   ipcMain.handle('browser:set-keyboard-passthrough', (_, viewId: string, enabled: boolean) => browserViewManager.setKeyboardPassthrough(viewId, enabled))
+  ipcMain.on('browser:request-create-task-from-link', (event, payload: { url?: unknown; linkText?: unknown }) => {
+    const url = typeof payload?.url === 'string' ? payload.url : ''
+    if (!/^https?:\/\//i.test(url)) return
+    const linkText = typeof payload?.linkText === 'string' ? payload.linkText : undefined
+    browserViewManager.emitCreateTaskFromLinkForWebContents(event.sender.id, { url, linkText, source: 'modified-link-click' })
+  })
 
   // DevTools
   ipcMain.handle('browser:open-devtools', (_, viewId: string, mode: 'bottom' | 'right' | 'undocked' | 'detach') => browserViewManager.openDevTools(viewId, mode))
@@ -1889,6 +1895,43 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     ipcMain.handle('browser:get-url', (_, viewId: string) => browserViewManager.getUrl(viewId))
     ipcMain.handle('browser:get-bounds', (_, viewId: string) => browserViewManager.getBounds(viewId))
     ipcMain.handle('browser:get-zoom-factor', (_, viewId: string) => browserViewManager.getZoomFactor(viewId))
+    ipcMain.handle(
+      'browser:test-dispatch-mouse-click',
+      (_event, viewId: string, point: { x?: unknown; y?: unknown }, modifiers?: unknown) => {
+        const x = typeof point?.x === 'number' ? point.x : NaN
+        const y = typeof point?.y === 'number' ? point.y : NaN
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return false
+
+        const normalizedModifiers = Array.isArray(modifiers)
+          ? modifiers.filter((modifier): modifier is 'shift' | 'control' | 'alt' | 'meta' =>
+            modifier === 'shift' || modifier === 'control' || modifier === 'alt' || modifier === 'meta')
+          : []
+
+        return browserViewManager.dispatchMouseClick(viewId, { x, y }, normalizedModifiers)
+      }
+    )
+    ipcMain.handle('browser:test-dispatch-create-task-from-link', (_event, viewId: string, payload: { url?: unknown; linkText?: unknown }) => {
+      const url = typeof payload?.url === 'string' ? payload.url : ''
+      if (!/^https?:\/\//i.test(url)) return false
+      const linkText = typeof payload?.linkText === 'string' ? payload.linkText : undefined
+      return browserViewManager.emitCreateTaskFromLinkForView(viewId, { url, linkText, source: 'modified-link-click' })
+    })
+    ipcMain.handle(
+      'browser:test-run-link-context-menu-action',
+      (_event, viewId: string, payload: { linkURL?: unknown; linkText?: unknown }, action: unknown) => {
+        const linkURL = typeof payload?.linkURL === 'string' ? payload.linkURL : ''
+        const linkText = typeof payload?.linkText === 'string' ? payload.linkText : ''
+        if (
+          action !== 'create-task-from-link' &&
+          action !== 'open-link-in-new-tab' &&
+          action !== 'copy-link' &&
+          action !== 'open-link-externally'
+        ) {
+          return false
+        }
+        return browserViewManager.runLinkContextMenuAction(viewId, { linkURL, linkText }, action)
+      }
+    )
     ipcMain.handle('browser:get-all-view-ids', () => browserViewManager.getAllViewIds())
     ipcMain.handle('browser:get-views-for-task', (_, taskId: string) => browserViewManager.getViewsForTask(taskId))
     ipcMain.handle('browser:is-focused', (_, viewId: string) => browserViewManager.isFocused(viewId))

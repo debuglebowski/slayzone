@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ElectronAPI } from '@slayzone/types'
+import type { BrowserCreateTaskFromLinkIntent, ElectronAPI } from '@slayzone/types'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
 
 // Prevent Electron's default file drop behavior (navigates to the file).
@@ -594,6 +594,11 @@ const api: ElectronAPI = {
     discoverBrowserExtensions: () => ipcRenderer.invoke('browser:discover-browser-extensions'),
     importExtension: (path) => ipcRenderer.invoke('browser:import-extension', path),
     activateExtension: (extensionId) => ipcRenderer.invoke('browser:activate-extension', extensionId),
+    onCreateTaskFromLink: (cb) => {
+      const handler = (_event: unknown, intent: BrowserCreateTaskFromLinkIntent) => cb(intent)
+      ipcRenderer.on('browser:create-task-from-link', handler)
+      return () => ipcRenderer.removeListener('browser:create-task-from-link', handler)
+    },
     onEvent: (cb) => {
       const handler = (_event: unknown, data: { viewId: string; type: string; [key: string]: unknown }) => cb(data)
       ipcRenderer.on('browser:event', handler)
