@@ -858,6 +858,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (history) void navigator.clipboard.writeText(history)
   }, [getMainHistory])
 
+  const handleCopyConversationId = useCallback(() => {
+    if (!task) return
+    const id = getConversationIdForMode(task)
+    if (id) void navigator.clipboard.writeText(id)
+  }, [task, getConversationIdForMode])
+
   const getProviderFlagsForMode = useCallback((currentTask: Task): string => {
     return getProviderFlags(currentTask.provider_config, currentTask.terminal_mode)
   }, [])
@@ -1864,6 +1870,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               <DropdownMenuItem onClick={handleCopyHistory}>
                                 Copy history
                               </DropdownMenuItem>
+                              {task.terminal_mode !== 'terminal' && (
+                                <DropdownMenuItem
+                                  disabled={!getConversationIdForMode(task)}
+                                  onClick={handleCopyConversationId}
+                                >
+                                  Copy conversation ID
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={handleReattachTerminal}>
                                 Re-attach terminal
