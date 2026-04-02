@@ -1,12 +1,16 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { execSync } from 'child_process'
+import { execSync, execFile } from 'child_process'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
 
 export interface CliInstallResult {
   ok: boolean
   path?: string
   permissionDenied?: boolean
+  elevationCancelled?: boolean
   error?: string
   pathNotInPATH?: boolean
 }
@@ -33,7 +37,7 @@ export function checkCliInstalled(): { installed: boolean; path?: string } {
   return { installed: false }
 }
 
-export function installCli(cliSrcPath: string): CliInstallResult {
+export function installCliSync(cliSrcPath: string): CliInstallResult {
   const binDir = getCliBinDir()
   const target = getCliBinTarget()
 
@@ -52,6 +56,60 @@ export function installCli(cliSrcPath: string): CliInstallResult {
     }
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+export async function installCli(cliSrcPath: string): Promise<CliInstallResult> {
+  const syncResult = installCliSync(cliSrcPath)
+  if (syncResult.ok || !syncResult.permissionDenied) return syncResult
+  if (process.platform === 'win32') return syncResult
+  return attemptElevatedInstall(cliSrcPath)
+}
+
+function shellEscape(s: string): string {
+  return s.replace(/'/g, "'\\''" )
+}
+
+async function attemptElevatedInstall(cliSrcPath: string): Promise<CliInstallResult> {
+  const binDir = getCliBinDir()
+  const target = getCliBinTarget()
+  const shellCmd = `mkdir -p '${shellEscape(binDir)}' && ln -sf '${shellEscape(cliSrcPath)}' '${shellEscape(target)}'`
+
+  try {
+    if (process.platform === 'darwin') {
+      return await elevatedInstallMacOS(shellCmd, target, binDir)
+    } else {
+      return await elevatedInstallLinux(shellCmd, target, binDir)
+    }
+  } catch (err: unknown) {
+    if (isElevationCancelled(err)) {
+      return { ok: false, elevationCancelled: true }
+    }
+    return { ok: false, permissionDenied: true, error: getManualInstallHint(cliSrcPath) }
+  }
+}
+
+async function elevatedInstallMacOS(shellCmd: string, target: string, binDir: string): Promise<CliInstallResult> {
+  const escapedCmd = shellCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  const script = `do shell script "${escapedCmd}" with administrator privileges`
+  await execFileAsync('/usr/bin/osascript', ['-e', script])
+  const notInPath = !isBinDirInPath(binDir)
+  return { ok: true, path: target, pathNotInPATH: notInPath || undefined }
+}
+
+async function elevatedInstallLinux(shellCmd: string, target: string, binDir: string): Promise<CliInstallResult> {
+  await execFileAsync('pkexec', ['sh', '-c', shellCmd])
+  const notInPath = !isBinDirInPath(binDir)
+  return { ok: true, path: target, pathNotInPATH: notInPath || undefined }
+}
+
+function isElevationCancelled(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const execErr = err as Error & { code?: number; stderr?: string }
+  if (process.platform === 'darwin') {
+    return execErr.stderr?.includes('User canceled') === true
+      || execErr.message?.includes('User canceled') === true
+  }
+  return execErr.code === 126
 }
 
 function installUnix(cliSrcPath: string, target: string, binDir: string): CliInstallResult {

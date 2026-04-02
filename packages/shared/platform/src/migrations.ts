@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { getStateDir } from './dirs'
-import { installCli } from './cli-install'
+import { installCliSync } from './cli-install'
 
 export interface MigrationResult {
   migrated: boolean
@@ -114,7 +114,7 @@ export function migrateCliBinIfNeeded(cliSrcPath: string): CliMigrationResult {
   }
 
   // Install at new location first
-  const result = installCli(cliSrcPath)
+  const result = installCliSync(cliSrcPath)
   if (!result.ok) {
     console.error(`[slayzone] CLI bin migration: failed to install at new location: ${result.error}`)
     return { status: 'failed' }

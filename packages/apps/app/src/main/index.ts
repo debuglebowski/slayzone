@@ -508,12 +508,14 @@ function getCliSrc(): string {
     : join(process.resourcesPath, 'bin', 'slay')
 }
 
-function installSlayCli(): void {
-  const result = installCli(getCliSrc())
+async function installSlayCli(): Promise<void> {
+  const result = await installCli(getCliSrc())
   if (result.ok) {
     let msg = `'slay' installed to ${result.path}`
     if (result.pathNotInPATH) msg += `\n\nNote: ${getCliBinTarget()} dir is not in your PATH. Add it to use 'slay' from any terminal.`
     dialog.showMessageBox({ message: msg })
+  } else if (result.elevationCancelled) {
+    // User dismissed OS password dialog — no additional dialog needed
   } else if (result.permissionDenied) {
     dialog.showMessageBox({
       type: 'warning',

@@ -365,7 +365,7 @@ export interface ElectronAPI {
     restartForUpdate: () => Promise<void>
     checkForUpdates: () => Promise<void>
     cliStatus: () => Promise<{ installed: boolean; path?: string }>
-    installCli: () => Promise<{ ok: boolean; path?: string; permissionDenied?: boolean; error?: string; pathNotInPATH?: boolean }>
+    installCli: () => Promise<{ ok: boolean; path?: string; permissionDenied?: boolean; elevationCancelled?: boolean; error?: string; pathNotInPATH?: boolean }>
   }
   window: {
     close: () => Promise<void>

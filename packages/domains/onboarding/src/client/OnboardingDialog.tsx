@@ -60,6 +60,8 @@ function CliInstallStep({ onNext }: { onNext: () => void }): React.JSX.Element {
         let msg = 'Installed successfully.'
         if (result.pathNotInPATH) msg += " Note: the install directory is not in your PATH. Add it to use 'slay' from any terminal."
         setMessage(msg)
+      } else if (result.elevationCancelled) {
+        setMessage('Install cancelled. You can try again later from Settings.')
       } else if (result.permissionDenied) {
         setMessage(`Permission denied. Run in Terminal:\n${result.error}`)
       } else {
