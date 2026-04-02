@@ -858,10 +858,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (history) void navigator.clipboard.writeText(history)
   }, [getMainHistory])
 
-  const handleCopySessionId = useCallback(() => {
-    if (task) void navigator.clipboard.writeText(mainSessionId)
-  }, [task, mainSessionId])
-
   const getProviderFlagsForMode = useCallback((currentTask: Task): string => {
     return getProviderFlags(currentTask.provider_config, currentTask.terminal_mode)
   }, [])
@@ -1867,9 +1863,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={handleCopyHistory}>
                                 Copy history
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={handleCopySessionId}>
-                                Copy session ID
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={handleReattachTerminal}>
