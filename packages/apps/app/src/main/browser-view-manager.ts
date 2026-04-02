@@ -290,6 +290,18 @@ export class BrowserViewManager {
     wc.focus()
   }
 
+  findInPage(viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }): number | null {
+    const wc = this.getWebContents(viewId)
+    if (!wc) return null
+    return wc.findInPage(text, options)
+  }
+
+  stopFindInPage(viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection'): void {
+    const wc = this.getWebContents(viewId)
+    if (!wc) return
+    wc.stopFindInPage(action)
+  }
+
   setKeyboardPassthrough(viewId: string, enabled: boolean): void {
     const entry = this.views.get(viewId)
     if (entry) entry.keyboardPassthrough = enabled
@@ -651,6 +663,16 @@ export class BrowserViewManager {
 
     wc.on('render-process-gone', () => {
       send({ viewId, type: 'crashed' })
+    })
+
+    wc.on('found-in-page', (_e, result) => {
+      send({
+        viewId,
+        type: 'found-in-page',
+        activeMatchOrdinal: result.activeMatchOrdinal,
+        matches: result.matches,
+        finalUpdate: result.finalUpdate,
+      })
     })
 
     wc.on('destroyed', () => {

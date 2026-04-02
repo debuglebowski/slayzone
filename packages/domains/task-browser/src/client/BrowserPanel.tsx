@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, createRef } from 'react'
 import { track } from '@slayzone/telemetry/client'
-import { ArrowLeft, ArrowRight, RotateCw, X, Plus, Import, Smartphone, Monitor, Tablet, LayoutGrid, ChevronDown, Crosshair, Camera, Bug, Sun, Moon, PaintbrushVertical, Keyboard, Puzzle, Trash2, Download, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, ArrowRight, RotateCw, X, Plus, Import, Smartphone, Monitor, Tablet, LayoutGrid, ChevronDown, ChevronUp, Crosshair, Camera, Bug, Sun, Moon, PaintbrushVertical, Keyboard, Puzzle, Trash2, Download, TriangleAlert } from 'lucide-react'
 import type { BrowserTabTheme } from '../shared'
 import { BrowserTabPlaceholder, type BrowserTabPlaceholderHandle } from './BrowserTabPlaceholder'
 import { BrowserLoadingAnimation } from './BrowserLoadingAnimation'
@@ -377,6 +377,10 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   const [browserExtensions, setBrowserExtensions] = useState<BrowserExtensionSource[]>([])
   const [extensionsLoading, setExtensionsLoading] = useState(false)
   const [extensionsError, setExtensionsError] = useState<string | null>(null)
+  const [findMode, setFindMode] = useState(false)
+  const [findText, setFindText] = useState('')
+  const [findResult, setFindResult] = useState<{ active: number; total: number } | null>(null)
+  const findInputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const darkModeCSSKeyRef = useRef<string | null>(null)
 
@@ -895,6 +899,87 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   // Shortcuts from WebContentsView are forwarded via before-input-event → browser-view:shortcut IPC → synthetic KeyboardEvent
 
+  // --- Find-in-page ---
+  const closeFindMode = useCallback(() => {
+    setFindMode(false)
+    setFindText('')
+    setFindResult(null)
+    if (activeViewId) {
+      void window.api.browser.stopFindInPage(activeViewId, 'clearSelection')
+    }
+  }, [activeViewId])
+
+  const openFindMode = useCallback(() => {
+    if (multiDeviceMode || extensionsManagerOpen) return
+    setFindMode(true)
+    setFindText('')
+    setFindResult(null)
+    requestAnimationFrame(() => findInputRef.current?.focus())
+  }, [multiDeviceMode, extensionsManagerOpen])
+
+  const findNext = useCallback((forward: boolean) => {
+    if (!activeViewId || !findText) return
+    void window.api.browser.findInPage(activeViewId, findText, { forward, findNext: true })
+  }, [activeViewId, findText])
+
+  const handleFindTextChange = useCallback((text: string) => {
+    setFindText(text)
+    if (!activeViewId) return
+    if (text) {
+      void window.api.browser.findInPage(activeViewId, text, { forward: true })
+    } else {
+      void window.api.browser.stopFindInPage(activeViewId, 'clearSelection')
+      setFindResult(null)
+    }
+  }, [activeViewId])
+
+  // Subscribe to found-in-page results
+  useEffect(() => {
+    if (!findMode) return
+    return window.api.browser.onEvent((event) => {
+      if (event.type !== 'found-in-page') return
+      if (event.viewId !== activeViewId) return
+      if (event.finalUpdate) {
+        setFindResult({
+          active: event.activeMatchOrdinal as number,
+          total: event.matches as number,
+        })
+      }
+    })
+  }, [findMode, activeViewId])
+
+  // Close find when switching tabs
+  useEffect(() => {
+    if (findMode) closeFindMode()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs.activeTabId])
+
+  // Cmd+F / Cmd+G keyboard handler (not gated by captureShortcuts)
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleFindKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        e.stopPropagation()
+        if (findMode) {
+          findInputRef.current?.focus()
+          findInputRef.current?.select()
+        } else {
+          openFindMode()
+        }
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'g' && findMode) {
+        e.preventDefault()
+        findNext(!e.shiftKey)
+      }
+    }
+
+    container.addEventListener('keydown', handleFindKeyDown)
+    return () => container.removeEventListener('keydown', handleFindKeyDown)
+  }, [findMode, openFindMode, findNext])
+
   useImperativeHandle(ref, () => ({
     pickElement: () => {
       handlePickElement()
@@ -903,11 +988,12 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       activeActions?.reload()
     },
     focusUrlBar: () => {
+      if (findMode) closeFindMode()
       urlInputRef.current?.focus()
       urlInputRef.current?.select()
     },
     getActiveViewId: () => activeViewId
-  }), [handlePickElement, activeActions])
+  }), [handlePickElement, activeActions, findMode, closeFindMode])
 
   useEffect(() => {
     return () => {
@@ -975,8 +1061,64 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
         </button>
       </div>
 
-      {/* URL Bar */}
+      {/* URL Bar / Find Bar */}
       <div className="shrink-0 p-2 border-b flex items-center gap-1">
+        {findMode ? (<>
+          <Input
+            ref={findInputRef}
+            value={findText}
+            onChange={(e) => handleFindTextChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                findNext(!e.shiftKey)
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                closeFindMode()
+              }
+            }}
+            placeholder="Find in page..."
+            className="flex-1 h-7 text-sm"
+          />
+          {findResult && (
+            <span className="text-xs text-muted-foreground whitespace-nowrap px-1">
+              {findResult.total > 0
+                ? `${findResult.active} of ${findResult.total}`
+                : 'No matches'}
+            </span>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <IconButton aria-label="Previous match" variant="ghost" size="icon-sm" disabled={!findText} onClick={() => findNext(false)}>
+                  <ChevronUp className="size-4" />
+                </IconButton>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Previous match (⇧Enter)</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <IconButton aria-label="Next match" variant="ghost" size="icon-sm" disabled={!findText} onClick={() => findNext(true)}>
+                  <ChevronDown className="size-4" />
+                </IconButton>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Next match (Enter)</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <IconButton aria-label="Close find" variant="ghost" size="icon-sm" onClick={closeFindMode}>
+                  <X className="size-4" />
+                </IconButton>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Close (Esc)</TooltipContent>
+          </Tooltip>
+        </>) : (<>
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
@@ -1255,6 +1397,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
             <TooltipContent>{extensionsManagerOpen ? 'Close extensions manager' : 'Extensions'}</TooltipContent>
           </Tooltip>
         )}
+        </>)}
       </div>
 
       {pickError && !multiDeviceMode && !extensionsManagerOpen && (
