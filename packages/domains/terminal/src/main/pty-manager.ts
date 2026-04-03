@@ -1344,7 +1344,12 @@ export function killPty(sessionId: string): boolean {
   sessions.delete(sessionId)
   notifySessionChange()
   // Use SIGKILL (9) to forcefully terminate - SIGTERM may not kill child processes
-  session.pty.kill('SIGKILL')
+  // Wrap in try/catch: on Windows, killing an already-dead process throws
+  try {
+    session.pty.kill('SIGKILL')
+  } catch {
+    // Process already exited — not an error
+  }
   return true
 }
 
