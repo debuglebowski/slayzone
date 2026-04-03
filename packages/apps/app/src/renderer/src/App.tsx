@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
-import { AlertTriangle, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap } from 'lucide-react'
+import { initShortcuts } from './shortcut-init'
+import { AlertTriangle, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -44,7 +45,7 @@ import {
   toast,
   UpdateToast
 } from '@slayzone/ui'
-import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withModalGuard } from '@slayzone/ui'
+import { SidebarProvider, cn, PanelToggle, projectColorBg, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withModalGuard, scopeTracker } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { TabBar } from '@/components/tabs/TabBar'
@@ -79,6 +80,7 @@ const AutomationsPanel = lazy(() => import('@slayzone/automations').then(m => ({
 // Overlay pages
 const LeaderboardPage = lazy(() => import('@/components/leaderboard/LeaderboardPage').then(m => ({ default: m.LeaderboardPage })))
 const UsageAnalyticsPage = lazy(() => import('@slayzone/usage-analytics/client').then(m => ({ default: m.UsageAnalyticsPage })))
+const ContextManagerPage = lazy(() => import('@slayzone/ai-config/client').then(m => ({ default: m.ContextManagerPage })))
 // Dialogs
 const CreateTaskDialog = lazy(() => import('@slayzone/task').then(m => ({ default: m.CreateTaskDialog })))
 const EditTaskDialog = lazy(() => import('@slayzone/task').then(m => ({ default: m.EditTaskDialog })))
@@ -160,6 +162,7 @@ function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsRevision, setSettingsRevision] = useState(0)
   const [colorTintsEnabled, setColorTintsEnabled] = useState(true)
+  const [contextManagerEnabled, setContextManagerEnabled] = useState(false)
   const [testsPanelEnabled, setTestsPanelEnabled] = useState(false)
   const [automationsPanelEnabled, setAutomationsPanelEnabled] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<string>('general')
@@ -242,6 +245,7 @@ function App(): React.JSX.Element {
   })
 
   useEffect(() => { performance.mark('sz:app:mounted') }, [])
+  useEffect(() => { return initShortcuts() }, [])
 
   useEffect(() => {
     Promise.all([
@@ -294,9 +298,15 @@ function App(): React.JSX.Element {
   // Read settings on mount and whenever settings change
   useEffect(() => {
     window.api.settings.get('project_color_tints_enabled').then((v) => setColorTintsEnabled(v !== '0'))
+    window.api.app.isContextManagerEnabled().then(setContextManagerEnabled)
     window.api.app.isTestsPanelEnabled().then(setTestsPanelEnabled)
     window.api.app.isAutomationsEnabled().then(setAutomationsPanelEnabled)
   }, [settingsRevision])
+
+  // Close context manager when lab is disabled
+  useEffect(() => {
+    if (!contextManagerEnabled && useTabStore.getState().activeView === 'context') useTabStore.getState().setActiveView('tabs')
+  }, [contextManagerEnabled])
 
   useEffect(() => {
     if (selectedProjectId) {
@@ -597,14 +607,35 @@ function App(): React.JSX.Element {
   // Forward keyboard shortcuts from WebContentsView back into the DOM
   useEffect(() => {
     return window.api.browser.onBrowserViewShortcut((payload) => {
-      window.dispatchEvent(new KeyboardEvent('keydown', {
-        key: payload.key,
-        shiftKey: payload.shift,
-        metaKey: payload.meta,
-        ctrlKey: payload.control,
-        altKey: payload.alt,
-        bubbles: true,
-      }))
+      // WebContentsView is a separate web contents — focusin never fires in
+      // renderer when it has focus. Set browser scope before dispatching so
+      // the shortcut registry sees the correct active scopes.
+      scopeTracker.setComponentScope('browser', payload.viewId)
+      // Dispatch on document (not window) so react-hotkeys-hook sees it —
+      // it listens on document. Events on document also bubble to window,
+      // so raw window.addEventListener handlers still work.
+      // react-hotkeys-hook tracks pressed keys by e.code via keydown events.
+      // Emit modifier keydowns first so the pressed-key set is correct, then
+      // emit the actual key. Include code on all events.
+      const key = payload.key
+      const code = key.length === 1 ? `Key${key.toUpperCase()}` : key
+      const mods = { shiftKey: payload.shift, metaKey: payload.meta, ctrlKey: payload.control, altKey: payload.alt }
+      if (payload.control) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', code: 'ControlLeft', ...mods, bubbles: true }))
+      if (payload.meta) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', code: 'MetaLeft', ...mods, bubbles: true }))
+      if (payload.shift) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', ...mods, bubbles: true }))
+      if (payload.alt) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', code: 'AltLeft', ...mods, bubbles: true }))
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, code, ...mods, bubbles: true }))
+    })
+  }, [])
+
+  // When a WebContentsView gains focus, dispatch a synthetic focusin on the
+  // browser panel element so TaskDetailPage's glow tracking picks it up.
+  useEffect(() => {
+    return window.api.browser.onBrowserViewFocused(() => {
+      const browserPanel = document.querySelector('[data-panel-id="browser"]')
+      if (browserPanel) {
+        browserPanel.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+      }
     })
   }, [])
 
@@ -791,9 +822,21 @@ function App(): React.JSX.Element {
         <div id="right-column" className={`flex-1 flex flex-col min-w-0 bg-surface-1 pb-2 pr-2 ${zenMode ? 'pl-2' : ''}`}>
           <div className={zenMode ? "pl-16" : ""}>
             <TabBar
-              tabs={tabs} activeIndex={activeTabIndex} terminalStates={terminalStates}
+              tabs={tabs} activeIndex={activeTabIndex} activeView={activeView} terminalStates={terminalStates}
               projectColors={taskProjectColors} worktreeColors={taskWorktreeColors}
               onTabClick={(i) => setActiveTabIndex(i)} onTabClose={closeTab} onTabReorder={reorderTabs}
+              leftContent={contextManagerEnabled ? (
+                <div className={cn(
+                  "ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0",
+                  "hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50",
+                  "border",
+                  activeView === 'context'
+                    ? "bg-neutral-200 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600"
+                    : "border-transparent text-neutral-500 dark:text-neutral-400"
+                )} onClick={() => useTabStore.getState().setActiveView(activeView === 'context' ? 'tabs' : 'context')}>
+                  <BookOpen className="h-4 w-4" />
+                </div>
+              ) : undefined}
               rightContent={
                 <div className="flex items-center gap-1">
                   <BoostPill />
@@ -855,6 +898,7 @@ function App(): React.JSX.Element {
                             <div>
                             <PanelToggle
                               panels={[
+                                ...(contextManagerEnabled ? [{ id: 'context', icon: BookOpen, label: 'Context', active: homePanel.homePanelVisibility.context, disabled: !selectedProjectId }] : []),
                                 { id: 'kanban', icon: Kanban, label: 'Kanban', active: homePanel.homePanelVisibility.kanban, disabled: !selectedProjectId },
                                 { id: 'git', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut, active: homePanel.homePanelVisibility.git, disabled: !selectedProjectId },
                                 { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut, active: homePanel.homePanelVisibility.editor, disabled: !selectedProjectId },
@@ -888,7 +932,18 @@ function App(): React.JSX.Element {
                             return (
                               <React.Fragment key={id}>
                                 {i > 0 && <ResizeHandle width={w} minWidth={id === 'kanban' ? 400 : 200} onWidthChange={w => updatePanelSizes({ [HOME_PANEL_SIZE_KEY[id]]: w })} onReset={() => resetPanelSize(HOME_PANEL_SIZE_KEY[id])} />}
-                                <div className={cn('shrink-0 min-h-0 overflow-hidden rounded-lg border border-border', id === 'kanban' && Object.values(homePanel.homePanelVisibility).filter(Boolean).length <= 1 ? 'border-transparent' : cn('bg-background', id === 'kanban' ? 'p-3' : ''))} style={{ width: w }}>
+                                <div className={cn('shrink-0 min-h-0 overflow-hidden', id === 'context' ? '' : cn('rounded-lg border border-border', id === 'kanban' && Object.values(homePanel.homePanelVisibility).filter(Boolean).length <= 1 ? 'border-transparent' : cn('bg-background', id === 'kanban' ? 'p-3' : '')))} style={{ width: w }}>
+                                  {id === 'context' && (
+                                    <Suspense fallback={<div className="h-full animate-pulse bg-muted/30 rounded" />}>
+                                      <ContextManagerPage
+                                        variant="panel"
+                                        selectedProjectId={selectedProjectId}
+                                        projectPath={projects.find(p => p.id === selectedProjectId)?.path}
+                                        projectName={projects.find(p => p.id === selectedProjectId)?.name}
+                                        onBack={() => homePanel.setHomePanelVisibility(prev => ({ ...prev, context: false }))}
+                                      />
+                                    </Suspense>
+                                  )}
                                   {id === 'kanban' && filter.viewMode !== 'list' && (
                                     <KanbanBoard tasks={displayTasks} columns={selectedProject?.columns_config} viewConfig={getViewConfig(filter)} isActive={tabs[activeTabIndex]?.type === 'home'}
                                       onTaskMove={handleTaskMove} onTaskReorder={reorderTasks} onTaskClick={handleTaskClick}
@@ -948,6 +1003,18 @@ function App(): React.JSX.Element {
               {activeView === 'usage-analytics' && (
                 <div className="absolute inset-0 z-20">
                   <Suspense fallback={null}><UsageAnalyticsPage onTaskClick={openTask} /></Suspense>
+                </div>
+              )}
+              {activeView === 'context' && (
+                <div className="absolute inset-0 z-20">
+                  <Suspense fallback={null}>
+                    <ContextManagerPage
+                      selectedProjectId={selectedProjectId}
+                      projectPath={projects.find(p => p.id === selectedProjectId)?.path}
+                      projectName={projects.find(p => p.id === selectedProjectId)?.name}
+                      onBack={() => useTabStore.getState().setActiveView('tabs')}
+                    />
+                  </Suspense>
                 </div>
               )}
             </div>
