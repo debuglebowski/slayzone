@@ -101,42 +101,77 @@ export class CodexAdapter implements TerminalAdapter {
    * We find the file created after our spawn time whose cwd matches the task's
    * working directory, then extract the UUID from its name.
    */
+  /**
+   * Detect session ID from Codex's local session files.
+   * Codex stores sessions at ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<UUID>.jsonl.
+   * We find the file created after our spawn time whose cwd matches the task's
+   * working directory, then extract the UUID from its name.
+   */
   async detectSessionFromDisk(spawnedAt: number, cwd: string): Promise<string | null> {
     const now = new Date()
-    const dir = join(
-      homedir(), '.codex', 'sessions',
-      String(now.getFullYear()),
-      String(now.getMonth() + 1).padStart(2, '0'),
-      String(now.getDate()).padStart(2, '0')
-    )
-
-    try {
-      const files = (await readdir(dir)).filter(f => f.endsWith('.jsonl')).sort().reverse()
-      for (const file of files) {
-        const info = await stat(join(dir, file))
-        // 5s grace window for clock skew between spawn timestamp and file creation
-        if (info.birthtimeMs < spawnedAt - 5000) break // files are sorted newest-first
-        const match = file.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i)
-        if (!match) continue
-        // Verify cwd matches to disambiguate concurrent sessions.
-        // Read only the first line (session_meta) — files can be multi-MB.
-        let firstLine: string
-        const fh = await open(join(dir, file), 'r')
-        try {
-          firstLine = (await fh.read({ buffer: Buffer.alloc(4096), length: 4096 })).buffer.toString('utf-8').split('\n', 1)[0]
-        } finally {
-          await fh.close()
-        }
-        try {
-          const meta = JSON.parse(firstLine)
-          if (meta?.payload?.cwd && meta.payload.cwd !== cwd) continue
-        } catch {
-          // Malformed first line — skip cwd check, still usable
-        }
-        return match[1]
+    // Try both UTC and local date (Codex may use either)
+    const datePaths = [
+      {
+        y: now.getUTCFullYear(),
+        m: now.getUTCMonth() + 1,
+        d: now.getUTCDate()
+      },
+      {
+        y: now.getFullYear(),
+        m: now.getMonth() + 1,
+        d: now.getDate()
       }
-    } catch {
-      // Directory doesn't exist or not readable
+    ]
+
+    for (const dp of datePaths) {
+      const dir = join(
+        homedir(), '.codex', 'sessions',
+        String(dp.y),
+        String(dp.m).padStart(2, '0'),
+        String(dp.d).padStart(2, '0')
+      )
+
+      try {
+        const files = (await readdir(dir)).filter(f => f.endsWith('.jsonl')).sort().reverse()
+        for (const file of files) {
+          const info = await stat(join(dir, file))
+          // 5s grace window for clock skew between spawn timestamp and file creation
+          if (info.birthtimeMs < spawnedAt - 5000) break // files are sorted newest-first
+          const match = file.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i)
+          if (!match) continue
+
+          // Verify cwd matches to disambiguate concurrent sessions.
+          // Read only the first line (session_meta) — files can be multi-MB.
+          let firstLine: string
+          const fh = await open(join(dir, file), 'r')
+          try {
+            const buf = Buffer.alloc(4096)
+            const { bytesRead } = await fh.read({ buffer: buf, length: 4096 })
+            firstLine = buf.toString('utf-8', 0, bytesRead).split('\n', 1)[0]
+          } finally {
+            await fh.close()
+          }
+
+          try {
+            const meta = JSON.parse(firstLine)
+            // If we have CWD in metadata, it MUST match.
+            // If metadata is missing CWD (unlikely for modern Codex), we allow it as a fallback.
+            if (meta?.payload?.cwd) {
+              if (meta.payload.cwd === cwd) return match[1]
+              // CWD present but mismatch — skip this file
+              continue
+            }
+          } catch {
+            // Malformed first line — skip this file to be safe
+            continue
+          }
+
+          // Fallback if metadata parse succeeded but cwd was missing
+          return match[1]
+        }
+      } catch {
+        // Directory doesn't exist or not readable
+      }
     }
     return null
   }
@@ -144,5 +179,24 @@ export class CodexAdapter implements TerminalAdapter {
   detectPrompt(_data: string): PromptInfo | null {
     // TODO: Implement when Codex output format is known
     return null
+  }
+
+  detectConversationId(data: string): string | null {
+    const stripped = CodexAdapter.stripAnsi(data)
+    // Try labeled match first (most specific)
+    const labeled = stripped.match(
+      /session:\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/im
+    )
+    if (labeled) return labeled[1]
+    // Rollout filename format
+    const rollout = stripped.match(
+      /rollout-[0-9]+-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+    )
+    if (rollout) return rollout[1]
+    // Last resort: any UUID in the output (handles box-drawing chars, cursor artifacts)
+    const bare = stripped.match(
+      /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+    )
+    return bare ? bare[1] : null
   }
 }

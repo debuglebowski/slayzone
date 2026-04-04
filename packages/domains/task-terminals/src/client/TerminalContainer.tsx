@@ -17,6 +17,7 @@ interface TerminalContainerProps {
   defaultMode: TerminalMode
   conversationId?: string | null
   existingConversationId?: string | null
+  supportsSessionId?: boolean
   initialPrompt?: string | null
   providerFlags?: string
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
@@ -47,6 +48,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   defaultMode,
   conversationId,
   existingConversationId,
+  supportsSessionId,
   initialPrompt,
   providerFlags,
   executionContext,
@@ -297,6 +299,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
         cwd,
         conversationId: tab.isMain ? conversationId : undefined,
         existingConversationId: tab.isMain ? existingConversationId : undefined,
+        supportsSessionId: tab.isMain ? supportsSessionId : undefined,
         initialPrompt: tab.isMain ? initialPrompt : undefined,
         providerFlags: tab.isMain ? providerFlags : undefined,
         executionContext,

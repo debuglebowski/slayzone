@@ -88,6 +88,7 @@ interface TerminalProps {
   mode?: TerminalMode
   conversationId?: string | null
   existingConversationId?: string | null
+  supportsSessionId?: boolean
   initialPrompt?: string | null
   providerFlags?: string | null
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
@@ -130,6 +131,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   mode = 'claude-code',
   conversationId,
   existingConversationId,
+  supportsSessionId = true,
   initialPrompt,
   providerFlags,
   executionContext,
@@ -152,6 +154,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const clearedSeqRef = useRef<number | null>(null)
   const initializedRef = useRef(false)
   const lastRenderedSeqRef = useRef<number>(-1)
+  const resizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [isInitializing, setIsInitializing] = useState(true)
@@ -409,6 +412,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         fontSize: terminalFontSize,
         fontFamily: terminalFontFamily,
         scrollback: terminalScrollback,
+        scrollOnEraseInDisplay: true,
         theme: resolvedTerminalTheme,
         minimumContrastRatio: resolvedTerminalVariant === 'light' ? 4.5 : 1,
         // OSC 8 hyperlinks — explicit links from CLI tools (gh, cargo, ls --hyperlink).
@@ -531,9 +535,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         }
       } else {
 
-        // Generate conversation ID for AI modes (used as {id} in templates)
+        // Generate conversation ID for AI modes whose initialCommand uses {id}.
+        // Providers without {id} (e.g. codex, gemini) generate their own session
+        // IDs internally — storing a client UUID would be bogus.
         let newConversationId = conversationIdRef.current
-        if (mode !== 'terminal' && !newConversationId && !existingConversationIdRef.current) {
+        if (mode !== 'terminal' && supportsSessionId && !newConversationId && !existingConversationIdRef.current) {
           newConversationId = crypto.randomUUID()
           onConversationCreatedRef.current?.(newConversationId)
         }
@@ -579,7 +585,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       // Handle resize
       terminal.onResize(({ cols, rows }) => {
-        window.api.pty.resize(sessionId, cols, rows)
+        if (resizeDebounceRef.current) clearTimeout(resizeDebounceRef.current)
+        resizeDebounceRef.current = setTimeout(() => {
+          resizeDebounceRef.current = null
+          // Save viewport to scrollback before Codex clears on SIGWINCH,
+          // but only if there's substantial content (not just the prompt).
+          // Codex idle prompt = ~5 lines; chat history = many more.
+          if (mode === 'codex') {
+            const buf = terminal.buffer.active
+            let nonEmpty = 0
+            for (let i = 0; i < terminal.rows; i++) {
+              const line = buf.getLine(buf.viewportY + i)
+              if (line && line.translateToString(true).trim()) nonEmpty++
+            }
+            if (nonEmpty > 10) terminal.write('\x1b[2J')
+          }
+          window.api.pty.resize(sessionId, cols, rows)
+        }, 150)
       })
 
       // Sync PTY dimensions. For new PTYs (created with correct dims above),
@@ -639,6 +661,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     return () => {
       controller.abort()
+      if (resizeDebounceRef.current) {
+        clearTimeout(resizeDebounceRef.current)
+        resizeDebounceRef.current = null
+      }
       unregisterActiveAddon(sessionId)
       // Serialize state before caching
       let serializedState: string | undefined

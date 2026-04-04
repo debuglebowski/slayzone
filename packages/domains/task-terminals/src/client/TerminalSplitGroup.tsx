@@ -9,6 +9,7 @@ interface PaneProps {
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
+  supportsSessionId?: boolean
   initialPrompt?: string | null
   providerFlags?: string
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
@@ -130,6 +131,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
         mode={pane.tab.mode}
         conversationId={pane.conversationId}
         existingConversationId={pane.existingConversationId}
+        supportsSessionId={pane.supportsSessionId}
         initialPrompt={pane.initialPrompt}
         providerFlags={pane.providerFlags}
         executionContext={pane.executionContext}

@@ -98,6 +98,12 @@ export interface TerminalAdapter {
   detectPrompt(data: string): PromptInfo | null
 
   /**
+   * Detect the session/conversation ID from terminal output.
+   * Useful for discovery commands like /status.
+   */
+  detectConversationId?(data: string): string | null
+
+  /**
    * Detect the session/conversation ID from the CLI's local files on disk.
    * Called after first output so the ID can be persisted without injecting
    * commands into the terminal. Returns null if not found.

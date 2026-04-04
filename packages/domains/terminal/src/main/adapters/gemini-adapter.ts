@@ -80,4 +80,18 @@ export class GeminiAdapter implements TerminalAdapter {
 
     return null
   }
+
+  detectConversationId(data: string): string | null {
+    const stripped = GeminiAdapter.stripAnsi(data)
+    // Try labeled match first
+    const labeled = stripped.match(
+      /session\s*id:\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/im
+    )
+    if (labeled) return labeled[1]
+    // Last resort: any UUID in the output
+    const bare = stripped.match(
+      /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+    )
+    return bare ? bare[1] : null
+  }
 }

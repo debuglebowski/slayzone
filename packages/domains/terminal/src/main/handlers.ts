@@ -318,7 +318,17 @@ ipcMain.handle('pty:resize', (_, sessionId: string, cols: number, rows: number) 
   })
 
   ipcMain.handle('pty:validate', async (_, mode: TerminalMode) => {
-    const adapter = getAdapter({ mode })
+    const modeRow = db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(mode)
+    const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
+    const adapter = getAdapter({
+      mode,
+      type: modeInfo?.type,
+      patterns: {
+        attention: modeInfo?.patternAttention,
+        working: modeInfo?.patternWorking,
+        error: modeInfo?.patternError,
+      },
+    })
     return adapter.validate ? adapter.validate() : []
   })
 

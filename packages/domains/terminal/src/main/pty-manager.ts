@@ -680,7 +680,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       // Dev server URL dedup
       detectedDevUrls: new Set(),
       syncQueryPending: '',
-      lastEmittedTitle: ''
+      lastEmittedTitle: '',
     })
     notifySessionChange()
     stateMachine.register(sessionId, 'starting')
@@ -825,16 +825,23 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
           })
 
           // Auto-detect session ID from disk for providers that support it.
-          // Avoids injecting commands into the terminal — reads session files
-          // that the CLI creates on startup (e.g. ~/.codex/sessions/).
+          // Polls periodically — the CLI may not write the session file until
+          // the first API handshake completes, which can take several seconds.
           if (adapter.detectSessionFromDisk && !resuming) {
-            const timer = setTimeout(async () => {
+            let attempts = 0
+            const maxAttempts = 10
+            const timer = setInterval(async () => {
+              attempts++
               const sess = sessions.get(sessionId)
-              if (!sess || sess.pty !== target) return
+              if (!sess || sess.pty !== target) { clearInterval(timer); return }
 
               try {
                 const detected = await adapter.detectSessionFromDisk!(createStartedAt, cwd)
-                if (!detected) return
+                if (!detected) {
+                  if (attempts >= maxAttempts) clearInterval(timer)
+                  return
+                }
+                clearInterval(timer)
                 const liveSess = sessions.get(sessionId)
                 if (!liveSess || liveSess.pty !== target) return
 
@@ -854,12 +861,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
                   }
                 }
               } catch {
-                // Filesystem detection failed — banner fallback still available
+                if (attempts >= maxAttempts) clearInterval(timer)
               }
             }, SESSION_ID_AUTO_DETECT_DELAY_MS)
 
             const sess = sessions.get(sessionId)
-            if (sess) sess.sessionIdAutoDetectTimer = timer
+            if (sess) sess.sessionIdAutoDetectTimer = timer as unknown as NodeJS.Timeout
           }
         }
         // Only process if session still exists (prevents data leaking after kill)
@@ -994,16 +1001,24 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       // Parse conversation ID from /status output
       if (session.watchingForSessionId) {
         session.statusOutputBuffer += data
+        let detectedConversationId: string | null = null
+        if (session.adapter.detectConversationId) {
+          detectedConversationId = session.adapter.detectConversationId(session.statusOutputBuffer)
+        } else {
+          const normalizedStatusOutput = stripAnsiForSessionParse(session.statusOutputBuffer)
+          const labeledSessionMatch = normalizedStatusOutput.match(
+            /\bsession(?:\s*id)?:\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/im
+          )
+          const uuidMatch = labeledSessionMatch ?? normalizedStatusOutput.match(
+            /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+          )
+          if (uuidMatch) {
+            detectedConversationId = uuidMatch[1] ?? uuidMatch[0]
+          }
+        }
 
-        const normalizedStatusOutput = stripAnsiForSessionParse(session.statusOutputBuffer)
-        const labeledSessionMatch = normalizedStatusOutput.match(
-          /(?:^|\n)\s*session:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/im
-        )
-        const uuidMatch = labeledSessionMatch ?? normalizedStatusOutput.match(
-          /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
-        )
-        if (uuidMatch) {
-          const detectedConversationId = uuidMatch[1] ?? uuidMatch[0]
+        if (detectedConversationId) {
+
           recordDiagnosticEvent({
             level: 'info',
             source: 'pty',

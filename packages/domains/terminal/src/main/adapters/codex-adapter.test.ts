@@ -78,4 +78,43 @@ test('detects generic codex error line', () => {
   expect(result?.message).toBe('Something went wrong')
 })
 
+console.log('\nCodexAdapter.detectConversationId\n')
+
+test('extracts UUID from real /status box-drawing output', () => {
+  const data = `╭────────────────────────────────────────────────────────────────────────────────╮
+│  >_ OpenAI Codex (v0.118.0)                                                    │
+│                                                                                │
+│  Model:                gpt-5.4 (reasoning high, summaries auto)                │
+│  Directory:            ~/dev/projects/slayzone                                 │
+│  Permissions:          Custom (workspace-write, on-request)                    │
+│  Session:              019d5014-bedf-7363-a87f-f476d22053d4                    │
+│                                                                                │
+│  5h limit:             [█████████████████░░░] 84% left (resets 01:23 on 3 Apr) │
+╰────────────────────────────────────────────────────────────────────────────────╯`
+  expect(adapter.detectConversationId(data)).toBe('019d5014-bedf-7363-a87f-f476d22053d4')
+})
+
+test('extracts UUID from plain Session: line', () => {
+  expect(adapter.detectConversationId('Session: aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+})
+
+test('extracts UUID from rollout filename format', () => {
+  expect(adapter.detectConversationId('rollout-1234567890-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl')).toBe('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
+})
+
+test('falls back to bare UUID when label is mangled by TUI artifacts', () => {
+  // Real TUI output may have cursor positioning between label and UUID
+  const data = '\rSession:\r\n019d5014-bedf-7363-a87f-f476d22053d4\r\n'
+  expect(adapter.detectConversationId(data)).toBe('019d5014-bedf-7363-a87f-f476d22053d4')
+})
+
+test('returns null when no session ID present', () => {
+  expect(adapter.detectConversationId('Model: gpt-5.4\nDirectory: ~/dev\n')).toBe(null)
+})
+
+test('handles ANSI codes in session line', () => {
+  const data = '\x1b[1mSession:\x1b[0m  019d5014-bedf-7363-a87f-f476d22053d4'
+  expect(adapter.detectConversationId(data)).toBe('019d5014-bedf-7363-a87f-f476d22053d4')
+})
+
 console.log('\nDone\n')
