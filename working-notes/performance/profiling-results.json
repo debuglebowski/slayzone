@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-04-04T15:24:52.939Z",
+  "timestamp": "2026-04-04T22:06:26.015Z",
   "memory": {
-    "usedMB": 82,
-    "totalMB": 202,
+    "usedMB": 54,
+    "totalMB": 133,
     "limitMB": 3586
   },
   "dom": {
@@ -15,44 +15,44 @@
     "styleElements": 2
   },
   "paint": {
-    "firstPaint": 68,
-    "firstContentfulPaint": 108
+    "firstPaint": 56,
+    "firstContentfulPaint": 104
   },
   "resources": {
     "count": 4,
     "slowest": [
       {
-        "name": "?v=2&config=true&ip=0&_=1775316293080&ver=1.347.2&compressio",
+        "name": "config?ip=0&_=1775340386169&ver=1.347.2",
+        "durationMs": 65
+      },
+      {
+        "name": "?ip=0&_=1775340389170&ver=1.347.2&compression=gzip-js",
+        "durationMs": 60
+      },
+      {
+        "name": "?v=2&config=true&ip=0&_=1775340386169&ver=1.347.2&compressio",
         "durationMs": 58
       },
       {
-        "name": "?ip=0&_=1775316296081&ver=1.347.2&compression=gzip-js",
-        "durationMs": 53
-      },
-      {
-        "name": "config?ip=0&_=1775316293080&ver=1.347.2",
-        "durationMs": 52
-      },
-      {
-        "name": "?ip=0&_=1775316296084&ver=1.347.2&compression=gzip-js",
-        "durationMs": 51
+        "name": "?ip=0&_=1775340389172&ver=1.347.2&compression=gzip-js",
+        "durationMs": 55
       }
     ]
   },
   "ipc": {
     "loadBoardDataMs": 1,
-    "createTaskMs": 2,
-    "getProjectsMs": 1
+    "createTaskMs": 3,
+    "getProjectsMs": 2
   },
   "interaction": {
-    "tabSwitchMs": 77,
+    "tabSwitchMs": 797,
     "taskOpenMs": 0,
     "refreshDataMs": 0
   },
   "scaling": {
     "taskCount": 100,
-    "domNodesAtScale": 2050,
-    "memoryAtScaleMB": 82,
-    "loadBoardDataAtScaleMs": 4
+    "domNodesAtScale": 2047,
+    "memoryAtScaleMB": 54,
+    "loadBoardDataAtScaleMs": 7
   }
 }
