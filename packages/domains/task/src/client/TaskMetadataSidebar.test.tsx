@@ -80,7 +80,6 @@ function makeTask(overrides: Record<string, unknown> = {}) {
     terminal_mode: 'terminal',
     provider_config: {},
     terminal_shell: null,
-    claude_session_id: null,
     claude_conversation_id: null,
     codex_conversation_id: null,
     cursor_conversation_id: null,

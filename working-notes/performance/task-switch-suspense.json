@@ -1,18 +1,18 @@
 {
-  "timestamp": "2026-03-16T22:17:06.471Z",
-  "taskId": "a01a9c1d-1e38-45a3-aea1-16c5ca808c6f",
+  "timestamp": "2026-04-04T13:07:09.302Z",
+  "taskId": "e32e8d2e-63c5-46e7-82b7-368351c406be",
   "marks": [
     {
       "name": "sz:taskSwitch:start",
-      "startTime": 3551.9
-    },
-    {
-      "name": "sz:app:render",
       "startTime": 3552
     },
     {
+      "name": "sz:app:render",
+      "startTime": 3552.1
+    },
+    {
       "name": "sz:taskSwitch:end",
-      "startTime": 5571.7
+      "startTime": 5574.7
     }
   ],
   "fallbackDurationMs": 0,

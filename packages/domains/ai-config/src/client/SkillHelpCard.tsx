@@ -3,7 +3,7 @@ import { ChevronDown, Sparkles } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 
 export function SkillHelpCard({ testId, className }: { testId?: string; className?: string }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
 
   return (
     <div

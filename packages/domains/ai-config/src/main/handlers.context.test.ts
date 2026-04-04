@@ -116,7 +116,7 @@ describe('ai-config:write-context-file', () => {
 
 describe('ai-config:create-global-file', () => {
   test('creates a normalized global skill file', () => {
-    const expectedPath = path.join(mockHome, '.gemini', 'skills', 'my-global-skill.md')
+    const expectedPath = path.join(mockHome, '.agents', 'skills', 'my-global-skill.md')
     if (fs.existsSync(expectedPath)) fs.unlinkSync(expectedPath)
 
     const created = h.invoke('ai-config:create-global-file', 'gemini', 'skill', ' My Global Skill! ') as {

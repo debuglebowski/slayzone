@@ -130,7 +130,7 @@ export function GlobalContextFiles() {
   }
 
   return (
-    <div ref={containerRef} className="flex h-[calc(88vh-180px)] overflow-hidden rounded-lg border">
+    <div ref={containerRef} className="flex h-full w-full overflow-hidden rounded-lg border">
       {/* Left: file list */}
       <div className="flex flex-col overflow-y-auto p-3" style={{ width: splitWidth }}>
         <div className="flex-1 space-y-5">

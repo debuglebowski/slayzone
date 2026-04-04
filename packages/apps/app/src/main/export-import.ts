@@ -250,7 +250,6 @@ function importBundle(db: Database, bundle: SlayExportBundle): ImportResult {
     // Clear legacy conversation ID columns too
     if ('claude_conversation_id' in t) t.claude_conversation_id = null
     if ('codex_conversation_id' in t) t.codex_conversation_id = null
-    if ('claude_session_id' in t) t.claude_session_id = null
     if ('cursor_conversation_id' in t) t.cursor_conversation_id = null
     if ('gemini_conversation_id' in t) t.gemini_conversation_id = null
     if ('opencode_conversation_id' in t) t.opencode_conversation_id = null

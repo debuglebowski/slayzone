@@ -366,7 +366,6 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
       if (data.baseDir === undefined) { fields.push('base_dir = ?'); values.push(null) }
     }
   }
-  if (data.claudeSessionId !== undefined) { fields.push('claude_session_id = ?'); values.push(data.claudeSessionId) }
   if (data.terminalMode !== undefined) { fields.push('terminal_mode = ?'); values.push(data.terminalMode) }
   if (data.terminalShell !== undefined) { fields.push('terminal_shell = ?'); values.push(data.terminalShell) }
 

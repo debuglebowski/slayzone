@@ -203,7 +203,7 @@ beforeEach(() => {
   ;(window as any).api = {
     db: { updateTask: vi.fn().mockResolvedValue(null), getTask: vi.fn().mockResolvedValue(null) },
     settings: { get: vi.fn().mockResolvedValue(null) },
-    app: { isLoopModeEnabled: vi.fn().mockResolvedValue(false), onTasksChanged: vi.fn(() => vi.fn()) },
+    app: { isLoopModeEnabled: vi.fn().mockResolvedValue(false), onTasksChanged: vi.fn(() => vi.fn()), onSettingsChanged: vi.fn(() => vi.fn()) },
     taskTags: { getTagsForTask: vi.fn().mockResolvedValue([]) },
     taskTemplates: { getByProject: vi.fn().mockResolvedValue([]) },
     ccs: { getProfiles: vi.fn().mockResolvedValue([]) },

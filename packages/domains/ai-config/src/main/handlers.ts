@@ -997,6 +997,12 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
   ipcMain.handle('ai-config:delete-context-file', (_event, filePath: string, projectPath: string, projectId: string) => {
     if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+    // Remove empty parent dir (e.g. skills/slug/ after deleting SKILL.md)
+    const parentDir = path.dirname(filePath)
+    try {
+      const remaining = fs.readdirSync(parentDir)
+      if (remaining.length === 0) fs.rmdirSync(parentDir)
+    } catch { /* ignore — dir may not exist or not be empty */ }
     // Remove any project selections pointing to this file
     const resolvedProject = path.resolve(projectPath)
     const rel = path.relative(resolvedProject, filePath)
@@ -1813,7 +1819,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
   const MCP_CONFIG_SPECS: Partial<Record<McpTarget, McpConfigSpec>> = {
     claude:   jsonSpec('.mcp.json', 'mcpServers'),
     cursor:   jsonSpec('.cursor/mcp.json', 'mcpServers'),
-    gemini:   jsonSpec('.gemini/settings.json', 'mcpServers', { writable: false }),
+    gemini:   jsonSpec('.agents/settings.json', 'mcpServers', { writable: false }),
     opencode: opencodeSpec,
     copilot:  jsonSpec('.copilot/mcp-config.json', 'mcpServers', { writable: false }),
   }

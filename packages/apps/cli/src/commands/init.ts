@@ -81,7 +81,7 @@ export function initCommand(): Command {
 
   cmd
     .command('instructions')
-    .description('Print CLAUDE.md / AGENTS.md / GEMINI.md template')
+    .description('Print CLAUDE.md / AGENTS.md template')
     .action(() => {
       process.stdout.write(INSTRUCTIONS)
     })

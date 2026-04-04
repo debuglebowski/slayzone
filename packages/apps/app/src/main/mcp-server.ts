@@ -26,6 +26,7 @@ const IDLE_CHECK_INTERVAL = 5 * 60 * 1000 // 5 min
 function notifyRenderer(): void {
   BrowserWindow.getAllWindows().forEach((win) => {
     win.webContents.send('tasks:changed')
+    win.webContents.send('settings:changed')
   })
 }
 

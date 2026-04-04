@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
-import React from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 
 vi.mock('@slayzone/ui', () => {
-  const Passthrough = ({ children }: any) => <>{children}</>
   return {
     Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
     Checkbox: (props: any) => <input type="checkbox" {...props} />,
@@ -27,7 +25,7 @@ vi.mock('lucide-react', () => ({
 
 import { CliInstallDialog } from './CliInstallDialog'
 
-function mockApi(overrides: { onboarded?: string; dismissed?: string; installed?: boolean } = {}) {
+function mockApi(overrides: { onboarded?: string | null; dismissed?: string | null; installed?: boolean } = {}) {
   const { onboarded = 'true', dismissed = null, installed = true } = overrides
   ;(window as any).api = {
     settings: {

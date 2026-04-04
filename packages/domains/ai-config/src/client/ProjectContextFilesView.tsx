@@ -158,7 +158,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
   }
 
   return (
-    <div className="grid h-[calc(88vh-180px)] grid-cols-[minmax(280px,360px)_minmax(0,1fr)] overflow-hidden rounded-lg border">
+    <div className="grid h-full grid-cols-[minmax(280px,360px)_minmax(0,1fr)] overflow-hidden rounded-lg border">
       <div className="flex min-h-0 flex-col border-r p-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">Project context files</p>

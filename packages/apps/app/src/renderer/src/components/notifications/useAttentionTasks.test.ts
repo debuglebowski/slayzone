@@ -53,7 +53,6 @@ function makeTask(id: string, projectId: string, title: string): Task {
     terminal_mode: 'claude-code',
     provider_config: {},
     terminal_shell: null,
-    claude_session_id: null,
     claude_conversation_id: null,
     codex_conversation_id: null,
     cursor_conversation_id: null,

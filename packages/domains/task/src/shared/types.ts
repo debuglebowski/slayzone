@@ -144,8 +144,6 @@ export interface Task {
   terminal_mode: TerminalMode
   provider_config: ProviderConfig
   terminal_shell: string | null
-  // Legacy (kept for backwards compat, use claude_conversation_id instead)
-  claude_session_id: string | null
   // @deprecated — use provider_config[mode].conversationId
   claude_conversation_id: string | null
   codex_conversation_id: string | null
@@ -280,6 +278,4 @@ export interface UpdateTaskInput {
   isTemporary?: boolean
   // Multi-repo
   repoName?: string | null
-  // Legacy
-  claudeSessionId?: string | null
 }

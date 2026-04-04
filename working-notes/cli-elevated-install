@@ -1,0 +1,62 @@
+# Auto-elevate CLI install with OS-native auth prompts
+
+## Problem
+
+When `slay` CLI install hits EACCES (mainly macOS `/usr/local/bin`), we show a manual `sudo ln -sf ...` hint. Bad UX. Instead, show the OS-native password dialog automatically — like VS Code's "Install 'code' in PATH".
+
+## Approach
+
+On EACCES, attempt elevated install via OS-native tools before falling back to manual hint:
+- **macOS**: `osascript -e 'do shell script "..." with administrator privileges'` → native password dialog
+- **Linux**: `pkexec sh -c "..."` → polkit auth dialog (falls back to manual hint if pkexec missing)
+- **Windows**: No change needed (installs to `%LOCALAPPDATA%`, no elevation required)
+
+Note: On Apple Silicon Macs, `/usr/local/bin` almost always needs sudo (Homebrew moved to `/opt/homebrew`), so the elevation path is the common path, not an edge case. The native password dialog is familiar and expected.
+
+## Changes
+
+### 1. `packages/shared/platform/src/cli-install.ts` — core logic
+
+- Rename current `installCli` → `installCliSync` (keep exported for migrations)
+- New async `installCli`: tries sync first, on EACCES attempts elevated install
+- Add `attemptElevatedInstall()` with platform-specific `elevatedInstallMacOS` / `elevatedInstallLinux`
+- Add `isElevationCancelled()` — detects user dismissing the auth dialog:
+  - macOS: exit 1 + stderr contains "User canceled"
+  - Linux: exit code 126
+- Add `elevationCancelled?: boolean` to `CliInstallResult`
+- Use `execFile` (not `exec`) with `promisify` — paths are all app-derived, single-quote them inside shell command for safety
+
+### 2. `packages/shared/platform/src/index.ts` — exports
+
+Add `installCliSync` to exports.
+
+### 3. `packages/shared/platform/src/migrations.ts:117` — use sync version
+
+Change `installCli(cliSrcPath)` → `installCliSync(cliSrcPath)`. Migration runs at startup before window, must stay sync and must NOT show auth dialogs.
+
+### 4. `packages/shared/types/src/api.ts` — type
+
+Add `elevationCancelled?: boolean` to `installCli` return type.
+
+### 5. `packages/apps/app/src/main/index.ts:511` — `installSlayCli`
+
+Make async. Add `elevationCancelled` branch showing softer "Install cancelled" native dialog with manual hint.
+
+### 6. Three renderer consumers — handle cancellation
+
+Add `elevationCancelled` check before `permissionDenied` in each:
+- `CliInstallDialog.tsx:38`
+- `OnboardingDialog.tsx:63`
+- `AboutSettingsTab.tsx:31`
+
+Message: "Install cancelled. You can try again later from Settings."
+
+### 7. Unit tests — `packages/shared/platform/src/cli-install.test.ts`
+
+- Non-elevated success → no elevation attempted
+- EACCES → macOS elevation via osascript
+- EACCES → Linux elevation via pkexec
+- User cancels macOS dialog → `elevationCancelled: true`
+- User cancels Linux dialog (exit 126) → `elevationCancelled: true`
+- pkexec not found (ENOENT) → falls back to `permissionDenied` + manual hint
+- Windows EACCES → no elevation, straight to manual hint

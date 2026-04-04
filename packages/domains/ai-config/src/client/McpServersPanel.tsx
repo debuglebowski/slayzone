@@ -435,7 +435,7 @@ function GlobalMcpPanel() {
       {filteredCustom.length > 0 && (
         <div className="space-y-2">
           <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Custom</p>
-          <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-4">
             {filteredCustom.map((s) => (
               <CustomServerCard
                 key={s.id}
@@ -461,7 +461,7 @@ function GlobalMcpPanel() {
           {filteredCustom.length > 0 && (
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Curated</p>
           )}
-          <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-4">
             {filteredCurated.map((s) => (
               <ServerCard
                 key={s.id}
@@ -728,7 +728,7 @@ function ProjectMcpPanel({ projectPath }: ProjectMcpPanelProps) {
       {enabledServers.length > 0 && (
         <div className="space-y-2">
           <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Enabled</p>
-          <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-4">
             {enabledServers.map((s) => renderServerCard(s, enabledFooter))}
           </div>
         </div>
@@ -738,7 +738,7 @@ function ProjectMcpPanel({ projectPath }: ProjectMcpPanelProps) {
       {availableServers.length > 0 && (
         <div className="space-y-2">
           <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Available</p>
-          <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-4">
             {[...availableServers].sort((a, b) => {
               const af = isFavorite(a.key) ? 0 : 1
               const bf = isFavorite(b.key) ? 0 : 1

@@ -10,7 +10,7 @@ import { hasPendingProviderSync } from './sync-view-model'
 const MCP_CONFIG_PATHS: Partial<Record<McpTarget, string>> = {
   claude: '.mcp.json',
   cursor: '.cursor/mcp.json',
-  gemini: '.gemini/settings.json',
+  gemini: '.agents/settings.json',
   opencode: 'opencode.json',
   copilot: '.copilot/mcp-config.json',
 }

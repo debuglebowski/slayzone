@@ -79,6 +79,13 @@ if (process.platform === 'linux') {
   }
 }
 
+if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
+  // Playwright runs alongside the user's dev app, so isolate the entire
+  // Electron profile instead of only redirecting the SQLite DB path.
+  mkdirSync(process.env.SLAYZONE_USER_DATA_DIR, { recursive: true })
+  app.setPath('userData', process.env.SLAYZONE_USER_DATA_DIR)
+}
+
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
 import { getDatabase, closeDatabase, getDiagnosticsDatabase, closeDiagnosticsDatabase } from './db'
@@ -602,7 +609,6 @@ function createMainWindow(): void {
   })
 
   browserViewManager.setMainWindow(mainWindow)
-
   mainWindow.on('ready-to-show', () => {
     if (mainWindow) startIdleChecker(mainWindow)
     mainWindowReady = true
@@ -1044,6 +1050,7 @@ app.whenReady().then(async () => {
         'pty:dismissAllNotifications',
         'pty:set-theme',
         'pty:validate',
+        'pty:setShellOverride',
       ]) {
         ipcMain.removeHandler(ch)
       }
@@ -1747,6 +1754,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
   ipcMain.handle('browser:find-in-page', (_, viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => browserViewManager.findInPage(viewId, text, options))
   ipcMain.handle('browser:stop-find-in-page', (_, viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection') => browserViewManager.stopFindInPage(viewId, action))
   ipcMain.handle('browser:set-keyboard-passthrough', (_, viewId: string, enabled: boolean) => browserViewManager.setKeyboardPassthrough(viewId, enabled))
+  ipcMain.handle('browser:send-input-event', (_, viewId: string, input: Electron.KeyboardInputEvent) => browserViewManager.sendInputEvent(viewId, input))
   ipcMain.on('browser:request-create-task-from-link', (event, payload: { url?: unknown; linkText?: unknown }) => {
     const url = typeof payload?.url === 'string' ? payload.url : ''
     if (!/^https?:\/\//i.test(url)) return
