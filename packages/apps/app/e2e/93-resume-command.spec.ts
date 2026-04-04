@@ -61,6 +61,13 @@ test.describe('Resume command opts', () => {
     await s.refreshData()
   })
 
+  test.afterAll(async ({ electronApp }) => {
+    await electronApp.evaluate(() => {
+      const restore = (globalThis as unknown as { __restorePtyHandlers?: () => void }).__restorePtyHandlers
+      restore?.()
+    })
+  })
+
   // --- Fresh start: no stored conversationId ---
 
   test('claude-code fresh start: conversationId is UUID, no existingConversationId', async ({ electronApp, mainWindow }) => {

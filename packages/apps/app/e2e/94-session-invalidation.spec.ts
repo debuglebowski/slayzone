@@ -111,6 +111,13 @@ test.describe('Session invalidation', () => {
     await s.refreshData()
   })
 
+  test.afterAll(async ({ electronApp }) => {
+    await electronApp.evaluate(() => {
+      const restore = (globalThis as unknown as { __restorePtyHandlers?: () => void }).__restorePtyHandlers
+      restore?.()
+    })
+  })
+
   // --- pty:session-not-found ---
 
   test('session-not-found clears conversationId in DB', async ({ electronApp, mainWindow }) => {

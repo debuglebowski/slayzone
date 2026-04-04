@@ -4,6 +4,7 @@ import {
   openTaskTerminal,
   getMainSessionId,
   waitForPtySession,
+  waitForPtyState,
   readFullBuffer,
   binaryOnPath,
 } from './fixtures/terminal'
@@ -22,6 +23,9 @@ function stripAnsi(data: string): string {
 /**
  * Integration tests with real CLI binaries.
  * Verifies session ID consistency between the app and the CLI.
+ *
+ * Requires specs 93/94 to restore PTY handlers in their afterAll
+ * so that real CLI spawning works here.
  */
 test.describe('Session ID consistency (real CLIs)', () => {
   let projectAbbrev: string
@@ -36,21 +40,54 @@ test.describe('Session ID consistency (real CLIs)', () => {
     await s.refreshData()
   })
 
-  // --- Core tests: verify no bogus UUID is saved ---
+  // --- No bogus UUID for providers without {id} in initialCommand ---
 
-  // Note: "codex fresh start: no bogus UUID" is tested by spec 93 (mock-based) which
-  // is fast and reliable. A real-CLI version is redundant and flaky due to Codex boot
-  // latency when run after many other tests.
+  test('codex fresh start: no conversationId in DB', async ({ mainWindow }) => {
+    test.skip(!hasCodex, 'codex not on PATH')
+    test.setTimeout(90_000)
 
-  // Note: "gemini fresh start: no bogus UUID" is tested by spec 93 (mock-based).
-  // Real-CLI version is redundant and flaky due to CLI boot latency after many tests.
+    const s = seed(mainWindow)
+    const t = await s.createTask({ projectId, title: 'SIC codex fresh', status: 'in_progress', terminalMode: 'codex' })
+    await mainWindow.evaluate(({ id }) => window.api.db.updateTask({
+      id, providerConfig: { codex: { flags: '--full-auto --search --disable apps' } }
+    }), { id: t.id })
+    await s.refreshData()
 
-  // Note: Codex disk-based session file detection is tested implicitly via the
-  // retry polling in pty-manager.ts. An explicit test that waits for the file is
-  // unreliable because the Codex API handshake may not complete in the test
-  // environment (the test-project cwd doesn't always trigger a session file).
+    await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC codex fresh' })
+    const sessionId = getMainSessionId(t.id)
+    await waitForPtySession(mainWindow, sessionId, 60_000)
 
-  // --- Gemini: /stats detection works end-to-end ---
+    await expect.poll(async () => {
+      const buf = await readFullBuffer(mainWindow, sessionId)
+      return buf.length > 0
+    }, { timeout: 60_000 }).toBe(true)
+
+    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+    expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
+  })
+
+  test('gemini fresh start: no conversationId in DB', async ({ mainWindow }) => {
+    test.skip(!hasGemini, 'gemini not on PATH')
+    test.setTimeout(90_000)
+
+    const s = seed(mainWindow)
+    const t = await s.createTask({ projectId, title: 'SIC gemini fresh', status: 'in_progress', terminalMode: 'gemini' })
+    await s.refreshData()
+
+    await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC gemini fresh' })
+    const sessionId = getMainSessionId(t.id)
+    await waitForPtySession(mainWindow, sessionId, 60_000)
+
+    await expect.poll(async () => {
+      const buf = await readFullBuffer(mainWindow, sessionId)
+      return buf.length > 0
+    }, { timeout: 60_000 }).toBe(true)
+
+    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+    expect(task?.provider_config?.gemini?.conversationId ?? null).toBeNull()
+  })
+
+  // --- Gemini: /stats detection end-to-end ---
 
   test('gemini: /stats detection saves a valid session ID', async ({ mainWindow }) => {
     test.skip(!hasGemini, 'gemini not on PATH')
@@ -63,18 +100,14 @@ test.describe('Session ID consistency (real CLIs)', () => {
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC gemini detect' })
     const sessionId = getMainSessionId(t.id)
     await waitForPtySession(mainWindow, sessionId, 60_000)
-
-    // Wait for Gemini to fully boot (attention = idle, ready for input)
-    const { waitForPtyState } = await import('./fixtures/terminal')
-    await waitForPtyState(mainWindow, sessionId, 'attention', 90_000)
+    await waitForPtyState(mainWindow, sessionId, 'attention', 60_000)
     await mainWindow.waitForTimeout(2000)
 
-    // Send /stats (text and \r must be separate writes — Ink TUI drops \r when concatenated)
+    // Text and \r must be separate writes (Ink TUI drops \r when concatenated with text)
     await mainWindow.evaluate(({ id }) => window.api.pty.write(id, '/stats'), { id: sessionId })
     await mainWindow.waitForTimeout(200)
     await mainWindow.evaluate(({ id }) => window.api.pty.write(id, '\r'), { id: sessionId })
 
-    // Wait for detection
     await expect.poll(async () => {
       const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
       return task?.provider_config?.gemini?.conversationId ?? null
@@ -93,22 +126,20 @@ test.describe('Session ID consistency (real CLIs)', () => {
     }
   })
 
-  // --- Codex resume: DB session ID persists across kill + reopen ---
+  // --- Codex: stored session ID not overwritten ---
 
   test('codex: stored session ID not overwritten on fresh open', async ({ mainWindow }) => {
     test.skip(!hasCodex, 'codex not on PATH')
-    test.setTimeout(120_000)
+    test.setTimeout(90_000)
 
     const storedId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SIC codex persist', status: 'in_progress', terminalMode: 'codex' })
-    // Pre-set a conversation ID (simulating previous detection)
     await mainWindow.evaluate(({ id, cid }) => window.api.db.updateTask({
       id, providerConfig: { codex: { conversationId: cid, flags: '--full-auto --search --disable apps' } }
     }), { id: t.id, cid: storedId })
     await s.refreshData()
 
-    // Open task — with supportsSessionId=false, no new UUID should be generated
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC codex persist' })
     const sessionId = getMainSessionId(t.id)
     await waitForPtySession(mainWindow, sessionId, 60_000)
@@ -118,10 +149,9 @@ test.describe('Session ID consistency (real CLIs)', () => {
       return buf.length > 0
     }, { timeout: 60_000 }).toBe(true)
 
-    // Wait a bit for any async detection to potentially overwrite
+    // Wait for any async detection to potentially overwrite
     await mainWindow.waitForTimeout(5000)
 
-    // DB should still have the original stored ID
     const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
     expect(task?.provider_config?.codex?.conversationId).toBe(storedId)
   })
