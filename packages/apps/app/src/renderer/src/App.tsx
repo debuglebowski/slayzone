@@ -930,7 +930,6 @@ function App(): React.JSX.Element {
                             <div>
                             <PanelToggle
                               panels={[
-                                ...(contextManagerEnabled ? [{ id: 'context', icon: BookOpen, label: 'Context', active: homePanel.homePanelVisibility.context, disabled: !selectedProjectId }] : []),
                                 { id: 'kanban', icon: Kanban, label: 'Kanban', active: homePanel.homePanelVisibility.kanban, disabled: !selectedProjectId },
                                 { id: 'git', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut, active: homePanel.homePanelVisibility.git, disabled: !selectedProjectId },
                                 { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut, active: homePanel.homePanelVisibility.editor, disabled: !selectedProjectId },
@@ -964,18 +963,7 @@ function App(): React.JSX.Element {
                             return (
                               <React.Fragment key={id}>
                                 {i > 0 && <ResizeHandle width={w} minWidth={id === 'kanban' ? 400 : 200} onWidthChange={w => updatePanelSizes({ [HOME_PANEL_SIZE_KEY[id]]: w })} onReset={() => resetPanelSize(HOME_PANEL_SIZE_KEY[id])} />}
-                                <div className={cn('shrink-0 min-h-0 overflow-hidden', id === 'context' ? '' : cn('rounded-lg border border-border', id === 'kanban' && Object.values(homePanel.homePanelVisibility).filter(Boolean).length <= 1 ? 'border-transparent' : cn('bg-background', id === 'kanban' ? 'p-3' : '')))} style={{ width: w }}>
-                                  {id === 'context' && (
-                                    <Suspense fallback={<div className="h-full animate-pulse bg-muted/30 rounded" />}>
-                                      <ContextManagerPage
-                                        variant="panel"
-                                        selectedProjectId={selectedProjectId}
-                                        projectPath={projects.find(p => p.id === selectedProjectId)?.path}
-                                        projectName={projects.find(p => p.id === selectedProjectId)?.name}
-                                        onBack={() => homePanel.setHomePanelVisibility(prev => ({ ...prev, context: false }))}
-                                      />
-                                    </Suspense>
-                                  )}
+                                <div className={cn('shrink-0 min-h-0 overflow-hidden', cn('rounded-lg border border-border', id === 'kanban' && Object.values(homePanel.homePanelVisibility).filter(Boolean).length <= 1 ? 'border-transparent' : cn('bg-background', id === 'kanban' ? 'p-3' : '')))} style={{ width: w }}>
                                   {id === 'kanban' && filter.viewMode !== 'list' && (
                                     <KanbanBoard tasks={displayTasks} columns={selectedProject?.columns_config} viewConfig={getViewConfig(filter)} isActive={tabs[activeTabIndex]?.type === 'home'}
                                       onTaskMove={handleTaskMove} onTaskReorder={reorderTasks} onTaskClick={handleTaskClick}

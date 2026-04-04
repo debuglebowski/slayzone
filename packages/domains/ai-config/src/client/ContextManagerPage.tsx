@@ -5,7 +5,6 @@ interface ContextManagerPageProps {
   projectPath?: string | null
   projectName?: string
   onBack: () => void
-  variant?: 'standalone' | 'panel'
 }
 
 export function ContextManagerPage({
@@ -13,7 +12,6 @@ export function ContextManagerPage({
   projectPath,
   projectName,
   onBack,
-  variant = 'standalone',
 }: ContextManagerPageProps) {
   return (
     <ContextManagerShell
@@ -21,7 +19,6 @@ export function ContextManagerPage({
       projectPath={projectPath}
       projectName={projectName}
       onBack={onBack}
-      variant={variant}
     />
   )
 }

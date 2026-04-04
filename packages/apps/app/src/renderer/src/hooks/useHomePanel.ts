@@ -4,9 +4,9 @@ import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { track } from '@slayzone/telemetry/client'
 import { useHomePanelState } from '@/hooks/useHomePanelVisibility'
 
-export type HomePanel = 'context' | 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
-const HOME_PANEL_ORDER: HomePanel[] = ['context', 'kanban', 'git', 'editor', 'processes', 'tests', 'automations']
-const HOME_PANEL_SIZE_KEY: Record<HomePanel, string> = { context: 'context', kanban: 'kanban', git: 'diff', editor: 'editor', processes: 'processes', tests: 'tests', automations: 'automations' }
+export type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
+const HOME_PANEL_ORDER: HomePanel[] = ['kanban', 'git', 'editor', 'processes', 'tests', 'automations']
+const HOME_PANEL_SIZE_KEY: Record<HomePanel, string> = { kanban: 'kanban', git: 'diff', editor: 'editor', processes: 'processes', tests: 'tests', automations: 'automations' }
 const HANDLE_WIDTH = 16
 
 export { HOME_PANEL_ORDER, HOME_PANEL_SIZE_KEY }
