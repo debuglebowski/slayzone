@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
 import { initShortcuts } from './shortcut-init'
-import { AlertTriangle, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen } from 'lucide-react'
+import { AlertTriangle, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -788,9 +788,6 @@ function App(): React.JSX.Element {
 
   const closeProjectSettings = useCallback((): void => { setEditingProject(null); setProjectSettingsInitialTab('general'); setProjectSettingsOnboardingProvider(null) }, [])
 
-  const openGlobalAiConfigFromProject = useCallback((section: GlobalAiConfigSection): void => {
-    setSettingsInitialTab('ai-config'); setSettingsInitialAiConfigSection(section); setSettingsOpen(true)
-  }, [])
 
   const handleProjectCreated = (project: Project, context: ProjectCreationContext): void => {
     setProjects((prev) => [...prev, project]); setSelectedProjectId(project.id); useDialogStore.getState().closeCreateProject()
@@ -860,18 +857,7 @@ function App(): React.JSX.Element {
               tabs={tabs} activeIndex={activeTabIndex} activeView={activeView} terminalStates={terminalStates}
               projectColors={taskProjectColors} worktreeColors={taskWorktreeColors}
               onTabClick={(i) => setActiveTabIndex(i)} onTabClose={closeTab} onTabReorder={reorderTabs}
-              leftContent={contextManagerEnabled ? (
-                <div className={cn(
-                  "ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0",
-                  "hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50",
-                  "border",
-                  activeView === 'context'
-                    ? "bg-neutral-200 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600"
-                    : "border-transparent text-neutral-500 dark:text-neutral-400"
-                )} onClick={() => useTabStore.getState().setActiveView(activeView === 'context' ? 'tabs' : 'context')}>
-                  <BookOpen className="h-4 w-4" />
-                </div>
-              ) : undefined}
+              leftContent={undefined}
               rightContent={
                 <div className="flex items-center gap-1">
                   <BoostPill />
@@ -933,8 +919,7 @@ function App(): React.JSX.Element {
                             <div>
                             <PanelToggle
                               panels={[
-                                ...(contextManagerEnabled ? [{ id: 'context', icon: BookOpen, label: 'Context', active: homePanel.homePanelVisibility.context, disabled: !selectedProjectId }] : []),
-                                { id: 'kanban', icon: Kanban, label: 'Kanban', active: homePanel.homePanelVisibility.kanban, disabled: !selectedProjectId },
+                                                { id: 'kanban', icon: Kanban, label: 'Kanban', active: homePanel.homePanelVisibility.kanban, disabled: !selectedProjectId },
                                 { id: 'git', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut, active: homePanel.homePanelVisibility.git, disabled: !selectedProjectId },
                                 { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut, active: homePanel.homePanelVisibility.editor, disabled: !selectedProjectId },
                                 { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut, active: homePanel.homePanelVisibility.processes, disabled: !selectedProjectId },
@@ -1082,7 +1067,7 @@ function App(): React.JSX.Element {
         {shouldMount('projectSettings', !!editingProject) && <Suspense fallback={null}><ProjectSettingsDialog project={editingProject} open={!!editingProject} onOpenChange={(open) => !open && closeProjectSettings()}
           initialTab={projectSettingsInitialTab} groupBy={testGroupBy} onGroupByChange={setTestGroupBy}
           integrationOnboardingProvider={projectSettingsOnboardingProvider} onIntegrationOnboardingHandled={() => setProjectSettingsOnboardingProvider(null)}
-          onOpenGlobalAiConfig={openGlobalAiConfigFromProject} onUpdated={handleProjectUpdated}
+          onUpdated={handleProjectUpdated}
           renderTemplatesTab={(projectId) => <TemplatesSettingsTab projectId={projectId} />} /></Suspense>}
         {shouldMount('deleteProject', !!deletingProject) && <Suspense fallback={null}><DeleteProjectDialog project={deletingProject} open={!!deletingProject} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeDeleteProject() }} onDeleted={handleProjectDeleted} /></Suspense>}
         {shouldMount('settings', settingsOpen) && <Suspense fallback={null}><UserSettingsDialog open={settingsOpen} onOpenChange={(open) => { setSettingsOpen(open); if (!open) { setSettingsRevision((r) => r + 1); setSettingsInitialAiConfigSection(null) } }}

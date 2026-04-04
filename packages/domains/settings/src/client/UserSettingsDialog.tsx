@@ -3,10 +3,7 @@ import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
 import { useTelemetry, TelemetrySettings } from '@slayzone/telemetry/client'
-import {
-  ContextManagerSettings,
-  type GlobalContextManagerSection
-} from '../../../ai-config/src/client/ContextManagerSettings'
+import type { GlobalContextManagerSection } from '../../../ai-config/src/client/ContextManagerSettings'
 
 // Import autonomous tabs
 import { GeneralSettingsTab } from './tabs/GeneralSettingsTab'
@@ -43,7 +40,7 @@ export function UserSettingsDialog({
   open,
   onOpenChange,
   initialTab = 'general',
-  initialAiConfigSection = null,
+  initialAiConfigSection: _initialAiConfigSection = null,
   onTabChange
 }: UserSettingsDialogProps) {
   // Modes list is SHARED because multiple tabs (AI Providers, Panels) need it
@@ -83,7 +80,6 @@ export function UserSettingsDialog({
         { key: 'panels/git', label: 'Git' },
       ]
     },
-    ...(contextManagerEnabled ? [{ key: 'ai-config', label: 'Context Manager' }] : []),
     { key: 'data', label: 'Import & Export' },
     { key: 'backup', label: 'Backup' },
     { key: 'labs', label: 'Labs' },
@@ -134,17 +130,6 @@ export function UserSettingsDialog({
                 navigateTo={navigateTo}
                 modes={modes}
               />
-            )}
-
-            {contextManagerEnabled && activeTab === 'ai-config' && (
-              <div className="flex h-full min-h-0 flex-col gap-6">
-                <div className="shrink-0">
-                  <SettingsTabIntro title="Context Manager" description="Manage global instructions, skills, and provider behavior." />
-                </div>
-                <div className="min-h-0 flex-1">
-                  <ContextManagerSettings scope="global" projectId={null} initialGlobalSection={initialAiConfigSection} />
-                </div>
-              </div>
             )}
 
             {activeTab === 'data' && <DataSettingsTab />}

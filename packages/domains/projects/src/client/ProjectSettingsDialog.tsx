@@ -3,13 +3,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
 import type { IntegrationProvider } from '@slayzone/integrations/shared'
-import type { GlobalContextManagerSection } from '../../../ai-config/src/client/ContextManagerSettings'
 import { track } from '@slayzone/telemetry/client'
 import { GeneralTab } from './GeneralTab'
 import { EnvironmentTab } from './EnvironmentTab'
 import { ColumnsTab } from './ColumnsTab'
 import { IntegrationsTab } from './IntegrationsTab'
-import { AiConfigTab } from './AiConfigTab'
 import { TestsTab } from '@slayzone/test-panel/client'
 import { WorktreesTab } from './WorktreesTab'
 import { ReposTab } from './ReposTab'
@@ -25,7 +23,6 @@ interface ProjectSettingsDialogProps {
   onGroupByChange?: (value: 'none' | 'path' | 'label') => void
   integrationOnboardingProvider?: IntegrationProvider | null
   onIntegrationOnboardingHandled?: () => void
-  onOpenGlobalAiConfig?: (section: GlobalContextManagerSection) => void
   onUpdated: (project: Project) => void
   renderTemplatesTab?: (projectId: string) => React.ReactNode
 }
@@ -39,19 +36,12 @@ export function ProjectSettingsDialog({
   onGroupByChange,
   integrationOnboardingProvider = null,
   onIntegrationOnboardingHandled,
-  onOpenGlobalAiConfig,
   onUpdated,
   renderTemplatesTab
 }: ProjectSettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'columns' | 'worktrees' | 'repos' | 'tags' | 'templates' | 'integrations' | 'ai-config' | 'tests'>('general')
   const detectedRepos = useDetectedRepos(open ? project?.path ?? null : null)
-  const [contextManagerEnabled, setContextManagerEnabled] = useState(window.api.app.isContextManagerEnabledSync)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    window.api.app.isContextManagerEnabled().then(setContextManagerEnabled)
-  }, [open])
 
   const checkIntegrationLock = useCallback(async () => {
     if (!project || window.api.app.isPlaywright) {
@@ -99,10 +89,6 @@ export function ProjectSettingsDialog({
     { key: 'tests', label: 'Tests' },
     { key: 'integrations' as const, label: 'Integrations' },
   ]
-  if (contextManagerEnabled) {
-    navItems.push({ key: 'ai-config', label: 'Context Manager' })
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="project-settings" className="overflow-hidden p-0">
@@ -182,12 +168,6 @@ export function ProjectSettingsDialog({
             />
           )}
 
-          {contextManagerEnabled && activeTab === 'ai-config' && project && (
-            <AiConfigTab
-              project={project}
-              onOpenGlobalAiConfig={onOpenGlobalAiConfig}
-            />
-          )}
         </SettingsLayout>
       </DialogContent>
     </Dialog>
