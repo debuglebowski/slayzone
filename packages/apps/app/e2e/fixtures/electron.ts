@@ -17,6 +17,22 @@ const LAUNCH_BACKOFF_MS = [300, 1000]
 // Runtime path set in worker fixture before tests execute.
 export let TEST_PROJECT_PATH = path.join(RUNTIME_ROOT_DIR, 'default-test-project')
 
+// Worker root set during fixture init — used by createIsolatedGitRepo.
+let workerRootDir: string | undefined
+
+/**
+ * Create an isolated git repo for specs that run git commands during tests.
+ * Prevents index.lock races between test git commands and the app's
+ * background git IPC handlers operating on TEST_PROJECT_PATH.
+ */
+export function createIsolatedGitRepo(name: string): string {
+  const base = workerRootDir ?? RUNTIME_ROOT_DIR
+  const dir = path.join(base, `git-${name}`)
+  fs.mkdirSync(dir, { recursive: true })
+  ensureGitRepo(dir)
+  return dir
+}
+
 // Shared state across all tests in the worker
 let sharedApp: ElectronApplication | undefined
 let sharedPage: Page | undefined
@@ -135,6 +151,9 @@ function closeSessionLogCapture(): void {
  * Reset the app to a clean state: kill all processes/PTYs, drop all tables,
  * re-migrate, reload the renderer. Call in `test.beforeAll` for test isolation.
  * Onboarding is pre-seeded as completed by the reset handler.
+ *
+ * IMPORTANT: Every .spec.ts file MUST call resetApp(mainWindow) inside
+ * test.beforeAll to ensure parallel worker isolation.
  */
 export async function resetApp(page: Page): Promise<void> {
   await page.evaluate(() => (window as any).__testInvoke('app:reset-for-test'))
@@ -283,6 +302,7 @@ export const test = base.extend<ElectronFixtures>({
         const userDataDir = path.join(workerRoot, 'userdata')
         const workerArtifactsDir = path.join(workerRoot, 'artifacts')
 
+        workerRootDir = workerRoot
         TEST_PROJECT_PATH = path.join(workerRoot, 'test-project')
         ensureDir(userDataDir)
         ensureDir(TEST_PROJECT_PATH)

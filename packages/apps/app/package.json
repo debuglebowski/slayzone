@@ -20,7 +20,8 @@
     "test:e2e": "npx playwright test --config playwright.config.ts",
     "test:e2e:headed": "npx playwright test --config playwright.config.ts --headed",
     "test:e2e:loop": "bash e2e-loop.sh",
-    "test:e2e:loop:stop": "bash e2e-loop.sh --stop-on-fail"
+    "test:e2e:loop:stop": "bash e2e-loop.sh --stop-on-fail",
+    "test:e2e:parallel": "bash e2e-parallel.sh"
   },
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",

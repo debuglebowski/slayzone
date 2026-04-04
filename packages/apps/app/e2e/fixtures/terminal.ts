@@ -192,6 +192,23 @@ export async function waitForBufferContains(
     .toBe(true)
 }
 
+/** Read only the visible viewport rows (not full scrollback) */
+export async function getViewportLines(page: Page, sessionId: string): Promise<string[] | null> {
+  return page.evaluate(({ sid }) => {
+    const links = (window as any).__slayzone_terminalLinks as
+      Record<string, { _terminal: any }> | undefined
+    const terminal = links?.[sid]?._terminal
+    if (!terminal) return null
+    const buf = terminal.buffer.active
+    const lines: string[] = []
+    for (let i = 0; i < terminal.rows; i++) {
+      const line = buf.getLine(buf.viewportY + i)
+      if (line) lines.push(line.translateToString(true))
+    }
+    return lines
+  }, { sid: sessionId })
+}
+
 /** Read xterm cursor position and visible buffer lines via the terminal links hook */
 export async function getTerminalState(page: Page, sessionId: string): Promise<{
   cursorY: number

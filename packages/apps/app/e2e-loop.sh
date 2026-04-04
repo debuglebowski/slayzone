@@ -9,6 +9,7 @@
 
 set -uo pipefail
 cd "$(dirname "$0")"
+shopt -s globstar
 
 stop_on_fail=false
 pattern="*.spec.ts"
@@ -21,7 +22,7 @@ for arg in "$@"; do
   fi
 done
 
-files=(e2e/$pattern)
+files=(e2e/**/$pattern)
 total=${#files[@]}
 passed=0
 failed=0
