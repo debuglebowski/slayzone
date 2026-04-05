@@ -9,6 +9,8 @@ export class GeminiAdapter implements TerminalAdapter {
   readonly mode = 'gemini' as const
   // Ink TUI redraws in bursts; short idle timeout to detect when response is done
   readonly idleTimeoutMs = 2500
+  // Gemini's Ink TUI + Node.js bundle takes 7+ seconds to produce first output
+  readonly startupTimeoutMs = 20_000
   readonly sessionIdCommand = '/stats'
 
   private static stripAnsi(data: string): string {

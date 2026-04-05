@@ -69,6 +69,9 @@ export interface TerminalAdapter {
   /** Idle timeout in ms (null = use default 60s) */
   readonly idleTimeoutMs: number | null
 
+  /** Startup timeout in ms before PTY is killed (null/undefined = use default 10s) */
+  readonly startupTimeoutMs?: number | null
+
   /**
    * If true, pty-manager transitions to 'working' when user presses Enter.
    * Useful for full-screen TUIs that constantly redraw (making output-based

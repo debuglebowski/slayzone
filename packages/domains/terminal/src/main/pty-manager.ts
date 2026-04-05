@@ -746,6 +746,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
 
     const armStartupTimeout = (target: pty.IPty): void => {
       clearStartupTimeout()
+      const effectiveStartupTimeout = adapter.startupTimeoutMs ?? STARTUP_TIMEOUT_MS
       startupTimeout = setTimeout(() => {
         const live = sessions.get(sessionId)
         if (!live || live.pty !== target || firstOutputTs !== null) return
@@ -756,7 +757,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
           sessionId,
           taskId: taskIdFromSessionId(sessionId),
           payload: {
-            timeoutMs: STARTUP_TIMEOUT_MS,
+            timeoutMs: effectiveStartupTimeout,
             shell: spawnConfig.shell,
             shellArgs: usedArgs,
             launchStrategy: spawnConfig.postSpawnCommand ? 'shell_exec' : 'direct_shell'
@@ -778,11 +779,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
             event: 'pty.startup_timeout_missed_exit',
             sessionId,
             taskId: taskIdFromSessionId(sessionId),
-            payload: { timeoutMs: STARTUP_TIMEOUT_MS }
+            payload: { timeoutMs: effectiveStartupTimeout }
           })
           finalizeSessionExit(-1)
         }, 2000)
-      }, STARTUP_TIMEOUT_MS)
+      }, effectiveStartupTimeout)
     }
 
     const schedulePostSpawnCommand = (target: pty.IPty): void => {
