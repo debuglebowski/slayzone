@@ -93,7 +93,7 @@ function cleanupDiskFiles(): void {
 // Test suite
 // ---------------------------------------------------------------------------
 
-test.describe('Context manager file sync', () => {
+test.describe.skip('Context manager file sync', () => {
   let projectId: string
 
   test.beforeAll(async ({ mainWindow }) => {

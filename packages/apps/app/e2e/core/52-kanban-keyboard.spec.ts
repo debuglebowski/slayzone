@@ -42,10 +42,12 @@ test.describe('Kanban keyboard shortcuts', () => {
     })
   }
 
-  /** Press a key and wait a tick for React to update */
+  /** Press a key and wait for React to process the state change */
   async function press(page: import('@playwright/test').Page, key: string) {
     await page.keyboard.press(key)
-    await page.waitForTimeout(100)
+    // Give React time to process the keypress and re-render.
+    // 100ms is too tight under parallel load — use rAF + microtask flush instead.
+    await page.evaluate(() => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0))))
   }
 
   test('J/K navigates within column', async ({ mainWindow }) => {

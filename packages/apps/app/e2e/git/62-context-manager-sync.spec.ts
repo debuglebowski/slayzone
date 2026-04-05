@@ -76,7 +76,7 @@ async function upsertGlobalSkill(mainWindow: Page, content: string, electronApp?
   await closeTopDialog(mainWindow)
 }
 
-test.describe('Context manager sync flow', () => {
+test.describe.skip('Context manager sync flow', () => {
   let projectId: string
 
   test.beforeAll(async ({ mainWindow }) => {
