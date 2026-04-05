@@ -256,11 +256,8 @@ export function TabBar({
   return (
     /* window-drag-region: all interactive children MUST have window-no-drag */
     <div className="flex items-center h-11 pr-2 gap-1 bg-sidebar window-drag-region">
-      {/* Fixed static tabs (Context Manager + Home) — not affected by scroll */}
+      {/* Fixed static tabs (Home + Context Manager) — not affected by scroll */}
       <div className="flex items-center flex-shrink-0">
-        {leftContent && (
-          <div className="flex items-center self-center window-no-drag">{leftContent}</div>
-        )}
         <div
           className={cn(
             'ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
@@ -274,6 +271,9 @@ export function TabBar({
         >
           <Home className="h-4 w-4" />
         </div>
+        {leftContent && (
+          <div className="flex items-center self-center window-no-drag">{leftContent}</div>
+        )}
       </div>
 
       {/* Scrollable task tabs area */}
