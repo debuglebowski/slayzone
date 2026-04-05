@@ -17,7 +17,7 @@ const DEFAULTS: Required<LayoutOptions> = {
 }
 
 export function computeGraphLayout(
-  nodes: Array<{ id: string }>,
+  nodes: Array<{ id: string; width?: number }>,
   edges: Array<{ source: string; target: string }>,
   options?: LayoutOptions
 ): Map<string, { x: number; y: number }> {
@@ -27,7 +27,8 @@ export function computeGraphLayout(
   g.setDefaultEdgeLabel(() => ({}))
 
   for (const node of nodes) {
-    g.setNode(node.id, { width: opts.nodeWidth, height: opts.nodeHeight })
+    const w = node.width ?? opts.nodeWidth
+    g.setNode(node.id, { width: w, height: opts.nodeHeight })
   }
   for (const edge of edges) {
     g.setEdge(edge.source, edge.target)
@@ -38,7 +39,7 @@ export function computeGraphLayout(
   const positions = new Map<string, { x: number; y: number }>()
   for (const node of nodes) {
     const n = g.node(node.id)
-    if (n) positions.set(node.id, { x: n.x - opts.nodeWidth / 2, y: n.y - opts.nodeHeight / 2 })
+    if (n) positions.set(node.id, { x: n.x - n.width / 2, y: n.y - opts.nodeHeight / 2 })
   }
   return positions
 }

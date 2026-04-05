@@ -36,15 +36,19 @@ export interface GlobalProviderPaths {
   baseDir: string        // relative to $HOME
   instructions?: string  // relative to baseDir
   skillsDir?: string     // relative to baseDir
+  mcpConfig?: string     // relative to baseDir
+  hint?: string          // tooltip explaining what reads from this dir
 }
 
 export const GLOBAL_PROVIDER_PATHS: Record<string, GlobalProviderPaths> = {
-  claude:   { label: 'Claude Code', baseDir: '.claude', instructions: 'CLAUDE.md', skillsDir: 'skills' },
-  codex:    { label: 'Codex',       baseDir: '.codex',  instructions: 'AGENTS.md' },
-  gemini:   { label: 'Gemini',      baseDir: '.agents', instructions: 'AGENTS.md', skillsDir: 'skills' },
-  opencode: { label: 'OpenCode',    baseDir: '.config/opencode', instructions: 'AGENTS.md', skillsDir: 'skills' },
-  qwen:     { label: 'Qwen Code',   baseDir: '.qwen',   instructions: 'QWEN.md',   skillsDir: 'skills' },
-  copilot: { label: 'Copilot',    baseDir: '.copilot', instructions: 'AGENTS.md', skillsDir: 'skills' },
+  claude:   { label: 'Claude Code', baseDir: '.claude', instructions: 'CLAUDE.md', skillsDir: 'skills', mcpConfig: '.mcp.json', hint: 'Used by Claude Code CLI' },
+  codex:    { label: 'Codex',       baseDir: '.codex',  instructions: 'AGENTS.md', hint: 'Used by Codex CLI' },
+  cursor:   { label: 'Cursor',      baseDir: '.cursor', mcpConfig: 'mcp.json', hint: 'Used by Cursor Agent' },
+  agents:   { label: 'Agents (shared)', baseDir: '.agents', skillsDir: 'skills', mcpConfig: 'settings.json', hint: 'Shared skills directory read by Codex and Gemini' },
+  gemini:   { label: 'Gemini',      baseDir: '.gemini', instructions: 'GEMINI.md', hint: 'Used by Gemini CLI' },
+  opencode: { label: 'OpenCode',    baseDir: '.config/opencode', instructions: 'AGENTS.md', skillsDir: 'skills', mcpConfig: 'opencode.json', hint: 'Used by OpenCode CLI' },
+  qwen:     { label: 'Qwen Code',   baseDir: '.qwen',   instructions: 'QWEN.md',   skillsDir: 'skills', hint: 'Used by Qwen Code CLI' },
+  copilot:  { label: 'Copilot',     baseDir: '.copilot', instructions: 'AGENTS.md', skillsDir: 'skills', mcpConfig: 'mcp-config.json', hint: 'Used by GitHub Copilot CLI' },
 }
 
 export const PROVIDER_LABELS: Record<CliProvider, string> = {

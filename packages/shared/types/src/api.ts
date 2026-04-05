@@ -553,7 +553,7 @@ export interface ElectronAPI {
     renameContextFile: (oldPath: string, newPath: string, projectPath: string) => Promise<void>
     deleteContextFile: (filePath: string, projectPath: string, projectId: string) => Promise<void>
     deleteGlobalFile: (filePath: string) => Promise<void>
-    createGlobalFile: (provider: CliProvider, category: 'skill', slug: string) => Promise<GlobalFileEntry>
+    createGlobalFile: (provider: string, category: 'skill', slug: string) => Promise<GlobalFileEntry>
     writeGlobalSkill: (provider: CliProvider, slug: string, content: string) => Promise<void>
     discoverMcpConfigs: (projectPath: string) => Promise<McpConfigFileResult[]>
     writeMcpServer: (input: WriteMcpServerInput) => Promise<void>
@@ -572,7 +572,7 @@ export interface ElectronAPI {
     saveGlobalInstructions: (content: string, variantId?: string) => Promise<void>
     listInstructionVariants: () => Promise<AiConfigItem[]>
     getProjectInstructionVariant: (projectId: string) => Promise<AiConfigItem | null>
-    setProjectInstructionVariant: (projectId: string, variantItemId: string | null) => Promise<void>
+    setProjectInstructionVariant: (projectId: string, variantItemId: string | null, projectPath?: string) => Promise<void>
     getRootInstructions: (projectId: string, projectPath: string) => Promise<RootInstructionsResult>
     saveInstructionsContent: (projectId: string, projectPath: string, content: string) => Promise<RootInstructionsResult>
     saveRootInstructions: (projectId: string, projectPath: string, content: string) => Promise<RootInstructionsResult>

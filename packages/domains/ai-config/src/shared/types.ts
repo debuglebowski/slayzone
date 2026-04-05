@@ -142,7 +142,7 @@ export interface SyncConflict {
 
 export interface RootInstructionsResult {
   content: string
-  providerHealth: Partial<Record<CliProvider, { health: SyncHealth; reason: SyncReason | null }>>
+  providerHealth: Partial<Record<CliProvider, { health: SyncHealth; reason: SyncReason | null; contentHash?: string | null; lineCount?: number | null }>>
 }
 
 export interface ProviderFileContent {
@@ -165,8 +165,10 @@ export interface GlobalFileEntry {
   path: string
   name: string
   provider: string
-  category: 'instructions' | 'skill'
+  category: 'instructions' | 'skill' | 'mcp'
   exists: boolean
+  contentHash?: string
+  lineCount?: number
 }
 
 // MCP server management
