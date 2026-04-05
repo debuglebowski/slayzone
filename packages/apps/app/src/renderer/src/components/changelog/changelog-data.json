@@ -53,7 +53,7 @@
         "category": "fix",
         "title": "Browser URL on navigation",
         "description": "URL input now updates correctly during history navigation."
-      },
+      }
     ]
   },
   {
