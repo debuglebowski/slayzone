@@ -1945,6 +1945,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               tabs={browserTabs}
               onTabsChange={handleBrowserTabsChange}
               taskId={task.id}
+              projectId={task.project_id}
               isResizing={isResizing}
               isActive={isActive}
               onElementSnippet={handleInsertElementSnippet}

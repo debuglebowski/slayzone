@@ -91,6 +91,7 @@ interface BrowserPanelProps {
   tabs: BrowserTabsState
   onTabsChange: (tabs: BrowserTabsState) => void
   taskId?: string
+  projectId?: string
   isResizing?: boolean
   isActive?: boolean
   onElementSnippet?: (snippet: string) => void
@@ -355,6 +356,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   tabs,
   onTabsChange,
   taskId,
+  projectId,
   isResizing,
   isActive,
   onElementSnippet,
@@ -453,10 +455,13 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     void window.api.browser.setKeyboardPassthrough(activeViewId, captureShortcuts)
   }, [activeViewId, captureShortcuts])
 
-  // Fetch URLs from other tasks when dropdown opens
+  // Fetch URLs from other tasks in the same project when dropdown opens
   useEffect(() => {
     if (!importDropdownOpen || !taskId) return
-    window.api.db.getTasks().then(tasks => {
+    const promise = projectId
+      ? window.api.db.getTasksByProject(projectId)
+      : window.api.db.getTasks()
+    promise.then(tasks => {
       const entries: TaskUrlEntry[] = []
       for (const t of tasks) {
         if (t.id === taskId) continue
@@ -469,7 +474,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       }
       setOtherTaskUrls(entries)
     })
-  }, [importDropdownOpen, taskId])
+  }, [importDropdownOpen, taskId, projectId])
 
   const activeTab = tabs.tabs.find(t => t.id === tabs.activeTabId) || null
   // Multi-device state (derived from active tab)
@@ -1231,7 +1236,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
             <DropdownMenuContent align="end" className="max-h-64 w-auto max-w-[50vw] overflow-y-auto">
               {otherTaskUrls.length === 0 ? (
                 <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                  No URLs from other tasks
+                  No URLs from other project tasks
                 </div>
               ) : (
                 otherTaskUrls.map((entry, idx) => (
