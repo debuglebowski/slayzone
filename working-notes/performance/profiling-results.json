@@ -1,58 +1,58 @@
 {
-  "timestamp": "2026-04-04T22:06:26.015Z",
+  "timestamp": "2026-04-05T14:30:22.243Z",
   "memory": {
-    "usedMB": 54,
-    "totalMB": 133,
+    "usedMB": 48,
+    "totalMB": 117,
     "limitMB": 3586
   },
   "dom": {
-    "totalNodes": 477,
+    "totalNodes": 474,
     "divs": 169,
-    "svgs": 49,
-    "svgChildren": 158,
+    "svgs": 48,
+    "svgChildren": 156,
     "svgPctOfDOM": 33,
     "canvases": 0,
     "styleElements": 2
   },
   "paint": {
-    "firstPaint": 56,
-    "firstContentfulPaint": 104
+    "firstPaint": 44,
+    "firstContentfulPaint": 84
   },
   "resources": {
     "count": 4,
     "slowest": [
       {
-        "name": "config?ip=0&_=1775340386169&ver=1.347.2",
-        "durationMs": 65
+        "name": "?v=2&config=true&ip=0&_=1775399422363&ver=1.347.2&compressio",
+        "durationMs": 56
       },
       {
-        "name": "?ip=0&_=1775340389170&ver=1.347.2&compression=gzip-js",
-        "durationMs": 60
+        "name": "?ip=0&_=1775399425366&ver=1.347.2&compression=gzip-js",
+        "durationMs": 52
       },
       {
-        "name": "?v=2&config=true&ip=0&_=1775340386169&ver=1.347.2&compressio",
-        "durationMs": 58
+        "name": "?ip=0&_=1775399425364&ver=1.347.2&compression=gzip-js",
+        "durationMs": 51
       },
       {
-        "name": "?ip=0&_=1775340389172&ver=1.347.2&compression=gzip-js",
-        "durationMs": 55
+        "name": "config?ip=0&_=1775399422362&ver=1.347.2",
+        "durationMs": 48
       }
     ]
   },
   "ipc": {
     "loadBoardDataMs": 1,
-    "createTaskMs": 3,
-    "getProjectsMs": 2
+    "createTaskMs": 2,
+    "getProjectsMs": 1
   },
   "interaction": {
-    "tabSwitchMs": 797,
+    "tabSwitchMs": 111,
     "taskOpenMs": 0,
     "refreshDataMs": 0
   },
   "scaling": {
     "taskCount": 100,
-    "domNodesAtScale": 2047,
-    "memoryAtScaleMB": 54,
-    "loadBoardDataAtScaleMs": 7
+    "domNodesAtScale": 2048,
+    "memoryAtScaleMB": 48,
+    "loadBoardDataAtScaleMs": 4
   }
 }

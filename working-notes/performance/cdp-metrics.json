@@ -1,14 +1,14 @@
 {
-  "jsHeapUsedBefore": 80,
-  "jsHeapUsedAfter": 74,
-  "domNodes": 2991,
-  "jsEventListenersBefore": 21898,
-  "jsEventListeners": 22721,
-  "jsEventListenersDelta": 823,
+  "jsHeapUsedBefore": 73,
+  "jsHeapUsedAfter": 81,
+  "domNodes": 5069,
+  "jsEventListenersBefore": 58349,
+  "jsEventListeners": 59165,
+  "jsEventListenersDelta": 816,
   "layoutCount": 0,
   "recalcStyleCount": 1,
   "layoutDuration": 0,
   "recalcStyleDuration": 0,
-  "scriptDuration": 80,
-  "taskDuration": 100
+  "scriptDuration": 54,
+  "taskDuration": 57
 }
