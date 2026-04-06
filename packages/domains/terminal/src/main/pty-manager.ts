@@ -126,6 +126,7 @@ export type { PtyInfo }
 const sessions = new Map<string, PtySession>()
 const sessionChangeListeners = new Set<() => void>()
 const dataListeners = new Map<string, Set<(data: string) => void>>()
+const stateChangeListeners = new Map<string, Set<(newState: TerminalState, oldState: TerminalState) => void>>()
 
 /** Subscribe to live PTY output. Returns unsubscribe function. */
 export function subscribeToPtyData(sessionId: string, cb: (data: string) => void): () => void {
@@ -138,6 +139,13 @@ export function subscribeToPtyData(sessionId: string, cb: (data: string) => void
 export function onSessionChange(cb: () => void): () => void {
   sessionChangeListeners.add(cb)
   return () => sessionChangeListeners.delete(cb)
+}
+
+/** Subscribe to state changes for a specific session. Returns unsubscribe function. */
+export function subscribeToStateChange(sessionId: string, cb: (newState: TerminalState, oldState: TerminalState) => void): () => void {
+  if (!stateChangeListeners.has(sessionId)) stateChangeListeners.set(sessionId, new Set())
+  stateChangeListeners.get(sessionId)!.add(cb)
+  return () => { stateChangeListeners.get(sessionId)?.delete(cb) }
 }
 
 function notifySessionChange(): void {
@@ -304,6 +312,11 @@ function emitStateChange(session: PtySession, sessionId: string, newState: Termi
     } catch { /* Window destroyed */ }
   }
 
+  // Notify REST API subscribers
+  const listeners = stateChangeListeners.get(sessionId)
+  if (listeners) {
+    for (const cb of listeners) cb(newState, oldState)
+  }
 }
 
 // Delegate state transitions to the extracted state machine

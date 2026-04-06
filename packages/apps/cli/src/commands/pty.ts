@@ -39,6 +39,22 @@ function formatAge(ms: number): string {
   return `${hr}h${min % 60}m`
 }
 
+async function waitForState(sessionId: string, state: string, timeout: number): Promise<void> {
+  const res = await apiFetch(`/api/pty/${encodedId(sessionId)}/wait?state=${state}&timeout=${timeout}`)
+  if (res.ok) return
+  const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string; state?: string }
+  if (res.status === 408) {
+    console.error(`Timeout: session still "${body.state}" after ${timeout}ms`)
+    process.exit(2)
+  }
+  if (res.status === 410) {
+    console.error('Session died while waiting')
+    process.exit(1)
+  }
+  console.error(body.error ?? `Failed to wait: HTTP ${res.status}`)
+  process.exit(1)
+}
+
 export function ptyCommand(): Command {
   const cmd = new Command('pty').description('List and interact with PTY sessions')
 
@@ -140,15 +156,25 @@ export function ptyCommand(): Command {
   cmd
     .command('submit <id> [text]')
     .description('Submit text to PTY — handles newlines for AI modes (id prefix supported)')
-    .action(async (idPrefix, text?: string) => {
+    .option('--wait', 'Wait for attention state before sending (default for AI modes)')
+    .option('--no-wait', 'Send immediately without waiting')
+    .option('--timeout <ms>', 'Timeout for --wait in milliseconds', '60000')
+    .action(async (idPrefix, text: string | undefined, opts: { wait?: boolean; timeout: string }) => {
       const sessions = await apiGet<PtyInfo[]>('/api/pty')
       const session = resolveSession(sessions, idPrefix)
+
+      // Default: wait for AI modes, send immediately for plain terminals
+      const shouldWait = opts.wait ?? KITTY_MODES.has(session.mode)
 
       // Read from stdin if no text argument
       if (!text) {
         const chunks: Buffer[] = []
         for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
         text = Buffer.concat(chunks).toString('utf-8')
+      }
+
+      if (shouldWait) {
+        await waitForState(session.sessionId, 'attention', parseInt(opts.timeout, 10))
       }
 
       // For AI modes that support Kitty protocol, encode internal newlines
@@ -160,6 +186,39 @@ export function ptyCommand(): Command {
       }
 
       await apiPost<{ ok: boolean }>(`/api/pty/${encodedId(session.sessionId)}/write`, { data })
+    })
+
+  // slay pty wait <id>
+  cmd
+    .command('wait <id>')
+    .description('Wait for a PTY session to reach a specific state (id prefix supported)')
+    .option('--state <state>', 'Target state to wait for', 'attention')
+    .option('--timeout <ms>', 'Timeout in milliseconds', '60000')
+    .option('--json', 'Output as JSON')
+    .action(async (idPrefix, opts: { state: string; timeout: string; json?: boolean }) => {
+      const sessions = await apiGet<PtyInfo[]>('/api/pty')
+      const session = resolveSession(sessions, idPrefix)
+      const res = await apiFetch(`/api/pty/${encodedId(session.sessionId)}/wait?state=${opts.state}&timeout=${opts.timeout}`)
+      const body = await res.json().catch(() => ({})) as { state?: string; waited?: boolean; error?: string }
+
+      if (opts.json) {
+        console.log(JSON.stringify({ ok: res.ok, ...body }, null, 2))
+        if (!res.ok) process.exit(res.status === 408 ? 2 : 1)
+        return
+      }
+
+      if (res.ok) {
+        console.log(body.waited ? `Reached "${body.state}"` : `Already "${body.state}"`)
+      } else if (res.status === 408) {
+        console.error(`Timeout: still "${body.state}" after ${opts.timeout}ms`)
+        process.exit(2)
+      } else if (res.status === 410) {
+        console.error('Session died while waiting')
+        process.exit(1)
+      } else {
+        console.error(body.error ?? `HTTP ${res.status}`)
+        process.exit(1)
+      }
     })
 
   // slay pty kill <id>
