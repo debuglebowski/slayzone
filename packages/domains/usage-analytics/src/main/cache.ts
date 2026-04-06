@@ -137,10 +137,10 @@ function dateRangeToSql(range: DateRange): string {
 export function queryDailyTotals(db: Database.Database): Array<{ date: string; totalTokens: number }> {
   return db
     .prepare(
-      `SELECT date(timestamp) as date,
+      `SELECT date(timestamp, 'localtime') as date,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
       FROM usage_records
-      GROUP BY date(timestamp)
+      GROUP BY date(timestamp, 'localtime')
       ORDER BY date ASC`
     )
     .all() as Array<{ date: string; totalTokens: number }>
@@ -196,10 +196,10 @@ export function queryAnalytics(db: Database.Database, range: DateRange): Analyti
 
   const byDay = db
     .prepare(
-      `SELECT date(timestamp) as date, provider,
+      `SELECT date(timestamp, 'localtime') as date, provider,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
       FROM usage_records WHERE timestamp >= ${since}
-      GROUP BY date(timestamp), provider ORDER BY date ASC`
+      GROUP BY date(timestamp, 'localtime'), provider ORDER BY date ASC`
     )
     .all() as Array<{ date: string; provider: string; totalTokens: number }>
 
