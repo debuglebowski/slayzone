@@ -13,7 +13,7 @@ import { WorktreesTab } from './WorktreesTab'
 import { ReposTab } from './ReposTab'
 import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 import { useDetectedRepos } from './useDetectedRepos'
-import { SettingsTabIntro } from './project-settings-shared'
+import { TasksGeneralTab } from './TasksGeneralTab'
 
 interface ProjectSettingsDialogProps {
   project: Project | null
@@ -145,7 +145,7 @@ export function ProjectSettingsDialog({
           )}
 
           {activeTab === 'tasks/general' && project && (
-            <SettingsTabIntro title="General" description="General task settings for this project." />
+            <TasksGeneralTab project={project} onUpdated={onUpdated} />
           )}
 
           {activeTab === 'tasks/statuses' && project && (

@@ -1,5 +1,5 @@
 export { registerPtyHandlers } from './handlers'
 export { registerUsageHandlers } from './usage'
-export { killAllPtys, killPty, killPtysByTaskId, startIdleChecker, stopIdleChecker, dismissAllNotifications, getPtyPids, onSessionChange, listPtys, getBuffer, writePty, getState, hasPty, subscribeToPtyData, subscribeToStateChange } from './pty-manager'
+export { killAllPtys, killPty, killPtysByTaskId, startIdleChecker, stopIdleChecker, dismissAllNotifications, getPtyPids, onSessionChange, onGlobalStateChange, listPtys, getBuffer, writePty, getState, hasPty, subscribeToPtyData, subscribeToStateChange } from './pty-manager'
 export { resolveUserShell, getShellStartupArgs, whichBinary } from './shell-env'
 export { syncTerminalModes } from './startup-sync'

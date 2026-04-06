@@ -14,6 +14,11 @@ export {
 
 export type WorktreeCopyBehavior = 'ask' | 'none' | 'all' | 'custom'
 
+export interface TaskAutomationConfig {
+  on_terminal_active: string | null
+  on_terminal_idle: string | null
+}
+
 export interface Project {
   id: string
   name: string
@@ -28,6 +33,7 @@ export interface Project {
   execution_context: ExecutionContext | null
   /** Folder name of the default child repo (for multi-repo projects) */
   selected_repo: string | null
+  task_automation_config: TaskAutomationConfig | null
   sort_order: number
   created_at: string
   updated_at: string
@@ -57,4 +63,5 @@ export interface UpdateProjectInput {
   columnsConfig?: ColumnConfig[] | null
   executionContext?: ExecutionContext | null
   selectedRepo?: string | null
+  taskAutomationConfig?: TaskAutomationConfig | null
 }

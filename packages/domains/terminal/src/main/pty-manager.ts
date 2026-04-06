@@ -148,6 +148,14 @@ export function subscribeToStateChange(sessionId: string, cb: (newState: Termina
   return () => { stateChangeListeners.get(sessionId)?.delete(cb) }
 }
 
+const globalStateChangeListeners = new Set<(sessionId: string, newState: TerminalState, oldState: TerminalState) => void>()
+
+/** Subscribe to state changes for ALL sessions. Returns unsubscribe function. */
+export function onGlobalStateChange(cb: (sessionId: string, newState: TerminalState, oldState: TerminalState) => void): () => void {
+  globalStateChangeListeners.add(cb)
+  return () => { globalStateChangeListeners.delete(cb) }
+}
+
 function notifySessionChange(): void {
   for (const cb of sessionChangeListeners) cb()
 }
@@ -317,6 +325,9 @@ function emitStateChange(session: PtySession, sessionId: string, newState: Termi
   if (listeners) {
     for (const cb of listeners) cb(newState, oldState)
   }
+
+  // Notify global subscribers
+  for (const cb of globalStateChangeListeners) cb(sessionId, newState, oldState)
 }
 
 // Delegate state transitions to the extracted state machine

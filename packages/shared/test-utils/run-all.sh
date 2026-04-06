@@ -21,6 +21,7 @@ run_test() {
 run_test packages/domains/settings/src/main/handlers.test.ts
 run_test packages/domains/tags/src/main/handlers.test.ts
 run_test packages/domains/projects/src/main/handlers.test.ts
+run_test packages/domains/projects/src/main/task-automation.test.ts
 run_test packages/domains/task-terminals/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/template-handlers.test.ts

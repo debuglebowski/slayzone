@@ -19,7 +19,8 @@ export function parseProject(row: Record<string, unknown> | undefined): Record<s
   return {
     ...row,
     columns_config: parseColumnsConfig(row.columns_config),
-    execution_context: row.execution_context ? (() => { try { return JSON.parse(row.execution_context as string) } catch { return null } })() : null
+    execution_context: row.execution_context ? (() => { try { return JSON.parse(row.execution_context as string) } catch { return null } })() : null,
+    task_automation_config: row.task_automation_config ? (() => { try { return JSON.parse(row.task_automation_config as string) } catch { return null } })() : null
   }
 }
 
@@ -211,6 +212,10 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
       fields.push('selected_repo = ?')
       values.push(data.selectedRepo)
     }
+    if (data.taskAutomationConfig !== undefined) {
+      fields.push('task_automation_config = ?')
+      values.push(data.taskAutomationConfig ? JSON.stringify(data.taskAutomationConfig) : null)
+    }
     if (data.columnsConfig !== undefined) {
       fields.push('columns_config = ?')
       if (data.columnsConfig === null) {
@@ -235,6 +240,21 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
       if (normalizedColumns !== undefined) {
         remapUnknownTaskStatuses(db, data.id, normalizedColumns)
         reconcileLinearStateMappingsForProject(db, data.id, normalizedColumns)
+        // Clear stale automation config references
+        const cols = normalizedColumns
+        if (cols) {
+          const projRow = db.prepare('SELECT task_automation_config FROM projects WHERE id = ?').get(data.id) as Record<string, unknown> | undefined
+          if (projRow?.task_automation_config) {
+            try {
+              const cfg = JSON.parse(projRow.task_automation_config as string) as { on_terminal_active: string | null; on_terminal_idle: string | null }
+              const validIds = new Set(cols.map(c => c.id))
+              let changed = false
+              if (cfg.on_terminal_active && !validIds.has(cfg.on_terminal_active)) { cfg.on_terminal_active = null; changed = true }
+              if (cfg.on_terminal_idle && !validIds.has(cfg.on_terminal_idle)) { cfg.on_terminal_idle = null; changed = true }
+              if (changed) db.prepare('UPDATE projects SET task_automation_config = ? WHERE id = ?').run(JSON.stringify(cfg), data.id)
+            } catch { /* ignore parse errors */ }
+          }
+        }
       }
     })()
     const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(data.id) as Record<string, unknown> | undefined

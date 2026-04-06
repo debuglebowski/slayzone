@@ -1705,6 +1705,117 @@ const migrations: Migration[] = [
           ON activity_events(project_id, created_at DESC, id DESC);
       `)
     }
+  },
+  {
+    version: 94,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE skill_registries (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          source_type TEXT NOT NULL,
+          github_owner TEXT,
+          github_repo TEXT,
+          github_branch TEXT DEFAULT 'main',
+          github_path TEXT DEFAULT 'skills',
+          icon_url TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_synced_at TEXT,
+          etag TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(github_owner, github_repo)
+        );
+
+        CREATE TABLE skill_registry_entries (
+          id TEXT PRIMARY KEY,
+          registry_id TEXT NOT NULL REFERENCES skill_registries(id) ON DELETE CASCADE,
+          slug TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          content TEXT NOT NULL,
+          version TEXT,
+          category TEXT,
+          author TEXT,
+          tags TEXT DEFAULT '[]',
+          content_hash TEXT NOT NULL,
+          fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(registry_id, slug)
+        );
+        CREATE INDEX idx_skill_registry_entries_registry
+          ON skill_registry_entries(registry_id);
+
+        INSERT INTO skill_registries (id, name, description, source_type)
+          VALUES ('builtin-slayzone', 'SlayZone', 'Built-in skills curated by SlayZone', 'builtin');
+      `)
+    }
+  },
+  {
+    version: 95,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS task_assets (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'markdown',
+          language TEXT,
+          "order" INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_assets_task ON task_assets(task_id);
+      `)
+    }
+  },
+  {
+    version: 96,
+    up: (db) => {
+      db.exec(`ALTER TABLE projects ADD COLUMN task_automation_config TEXT DEFAULT NULL`)
+    }
+  },
+  {
+    version: 97,
+    up: (db) => {
+      // Add render_mode column (NULL = infer from file extension in title)
+      db.exec(`ALTER TABLE task_assets ADD COLUMN render_mode TEXT DEFAULT NULL`)
+
+      // Backfill: append extension to title if missing, set render_mode override if needed
+      const typeToExt: Record<string, string> = {
+        markdown: '.md', code: '.txt', html: '.html', svg: '.svg', mermaid: '.mmd'
+      }
+      const typeToRenderMode: Record<string, string> = {
+        markdown: 'markdown', code: 'code', html: 'html-preview', svg: 'svg-preview', mermaid: 'mermaid-preview'
+      }
+      // Extension → inferred render mode (mirrors EXTENSION_RENDER_MODES in types.ts)
+      const extToRenderMode: Record<string, string> = {
+        '.md': 'markdown', '.mdx': 'markdown',
+        '.html': 'html-preview', '.htm': 'html-preview',
+        '.svg': 'svg-preview',
+        '.mmd': 'mermaid-preview', '.mermaid': 'mermaid-preview',
+        '.txt': 'code',
+      }
+
+      const assets = db.prepare('SELECT id, title, type FROM task_assets').all() as
+        { id: string; title: string; type: string }[]
+      const updateStmt = db.prepare('UPDATE task_assets SET title = ?, render_mode = ? WHERE id = ?')
+
+      for (const asset of assets) {
+        const ext = typeToExt[asset.type] ?? '.txt'
+        let newTitle = asset.title
+        const dotIdx = asset.title.lastIndexOf('.')
+        const currentExt = dotIdx > 0 ? asset.title.slice(dotIdx).toLowerCase() : ''
+        if (!currentExt) newTitle = `${asset.title}${ext}`
+
+        const finalExt = newTitle.slice(newTitle.lastIndexOf('.')).toLowerCase()
+        const inferred = extToRenderMode[finalExt] ?? 'code'
+        const oldMode = typeToRenderMode[asset.type] ?? 'code'
+        const renderMode = inferred === oldMode ? null : oldMode
+
+        updateStmt.run(newTitle, renderMode, asset.id)
+      }
+    }
   }
 ]
 

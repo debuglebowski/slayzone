@@ -93,11 +93,11 @@ import { runMigrations, LATEST_MIGRATION_VERSION } from './db/migrations'
 import { normalizeProjectStatusData } from './db/status-normalization'
 import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
 // Domain handlers
-import { registerProjectHandlers } from '@slayzone/projects/main'
+import { registerProjectHandlers, handleTerminalStateChange } from '@slayzone/projects/main'
 import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers } from '@slayzone/task/main'
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/main'
-import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, startIdleChecker, stopIdleChecker, dismissAllNotifications, syncTerminalModes, getPtyPids, onSessionChange } from '@slayzone/terminal/main'
+import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, startIdleChecker, stopIdleChecker, dismissAllNotifications, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange } from '@slayzone/terminal/main'
 import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/main'
 import { registerWorktreeHandlers } from '@slayzone/worktrees/main'
 import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics, setIpcSuccessHook } from '@slayzone/diagnostics/main'
@@ -1020,6 +1020,11 @@ app.whenReady().then(async () => {
   registerThemeHandlers(ipcMain, db)
   registerUsageHandlers(ipcMain, db)
   registerPtyHandlers(ipcMain, db)
+
+  // Task automation: auto-move tasks on terminal state change
+  onGlobalStateChange((sessionId, newState, oldState) => {
+    handleTerminalStateChange(db, sessionId, newState, oldState, notifyTasksChanged)
+  })
 
   // Expose test helpers for e2e
   if (isPlaywright) {

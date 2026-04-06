@@ -249,5 +249,205 @@ describe('db:projects:create sort_order edge cases', () => {
   })
 })
 
+describe('task_automation_config CRUD', () => {
+  test('task_automation_config is null by default', () => {
+    const p = h.invoke('db:projects:create', { name: 'AutoDefault', color: '#000000' }) as { task_automation_config: null }
+    expect(p.task_automation_config).toBeNull()
+  })
+
+  test('sets task_automation_config via update', () => {
+    const p = h.invoke('db:projects:create', { name: 'AutoSet', color: '#111111' }) as { id: string }
+    const updated = h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'in_progress', on_terminal_idle: null }
+    }) as { task_automation_config: { on_terminal_active: string | null; on_terminal_idle: string | null } }
+    expect(updated.task_automation_config).toEqual({ on_terminal_active: 'in_progress', on_terminal_idle: null })
+  })
+
+  test('sets both fields in task_automation_config', () => {
+    const p = h.invoke('db:projects:create', { name: 'AutoBoth', color: '#222222' }) as { id: string }
+    const updated = h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'in_progress', on_terminal_idle: 'review' }
+    }) as { task_automation_config: { on_terminal_active: string; on_terminal_idle: string } }
+    expect(updated.task_automation_config.on_terminal_active).toBe('in_progress')
+    expect(updated.task_automation_config.on_terminal_idle).toBe('review')
+  })
+
+  test('clears task_automation_config when set to null', () => {
+    const p = h.invoke('db:projects:create', { name: 'AutoClear', color: '#333333' }) as { id: string }
+    h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'todo', on_terminal_idle: null }
+    })
+    const cleared = h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: null
+    }) as { task_automation_config: null }
+    expect(cleared.task_automation_config).toBeNull()
+  })
+
+  test('round-trip: set config, getAll, values match', () => {
+    const p = h.invoke('db:projects:create', { name: 'AutoRoundTrip', color: '#444444' }) as { id: string }
+    h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'doing', on_terminal_idle: 'review' }
+    })
+    const all = h.invoke('db:projects:getAll') as { id: string; task_automation_config: { on_terminal_active: string; on_terminal_idle: string } | null }[]
+    const found = all.find(proj => proj.id === p.id)!
+    expect(found.task_automation_config).toEqual({ on_terminal_active: 'doing', on_terminal_idle: 'review' })
+  })
+
+  test('no-op update preserves existing task_automation_config', () => {
+    const p = h.invoke('db:projects:create', { name: 'AutoPreserve', color: '#555555' }) as { id: string }
+    h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'todo', on_terminal_idle: null }
+    })
+    const noop = h.invoke('db:projects:update', { id: p.id }) as { task_automation_config: { on_terminal_active: string; on_terminal_idle: null } }
+    expect(noop.task_automation_config).toEqual({ on_terminal_active: 'todo', on_terminal_idle: null })
+  })
+})
+
+describe('task_automation_config stale reference cleanup', () => {
+  test('clears on_terminal_active when referenced status removed from columns', () => {
+    const p = h.invoke('db:projects:create', {
+      name: 'StaleActive', color: '#660000',
+      columnsConfig: [
+        { id: 'doing', label: 'Doing', color: 'blue', position: 0, category: 'started' },
+        { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' },
+      ]
+    }) as { id: string }
+    h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'doing', on_terminal_idle: null }
+    })
+    const updated = h.invoke('db:projects:update', {
+      id: p.id,
+      columnsConfig: [
+        { id: 'todo', label: 'Todo', color: 'blue', position: 0, category: 'unstarted' },
+        { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' },
+      ]
+    }) as { task_automation_config: { on_terminal_active: string | null; on_terminal_idle: string | null } }
+    expect(updated.task_automation_config.on_terminal_active).toBeNull()
+  })
+
+  test('clears on_terminal_idle when referenced status removed from columns', () => {
+    const p = h.invoke('db:projects:create', {
+      name: 'StaleIdle', color: '#770000',
+      columnsConfig: [
+        { id: 'doing', label: 'Doing', color: 'blue', position: 0, category: 'started' },
+        { id: 'review', label: 'Review', color: 'purple', position: 1, category: 'started' },
+        { id: 'done', label: 'Done', color: 'green', position: 2, category: 'completed' },
+      ]
+    }) as { id: string }
+    h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: null, on_terminal_idle: 'review' }
+    })
+    const updated = h.invoke('db:projects:update', {
+      id: p.id,
+      columnsConfig: [
+        { id: 'doing', label: 'Doing', color: 'blue', position: 0, category: 'started' },
+        { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' },
+      ]
+    }) as { task_automation_config: { on_terminal_active: string | null; on_terminal_idle: string | null } }
+    expect(updated.task_automation_config.on_terminal_idle).toBeNull()
+  })
+
+  test('clears both fields when both reference removed statuses', () => {
+    const p = h.invoke('db:projects:create', {
+      name: 'StaleBoth', color: '#880000',
+      columnsConfig: [
+        { id: 'doing', label: 'Doing', color: 'blue', position: 0, category: 'started' },
+        { id: 'review', label: 'Review', color: 'purple', position: 1, category: 'started' },
+        { id: 'done', label: 'Done', color: 'green', position: 2, category: 'completed' },
+      ]
+    }) as { id: string }
+    h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'doing', on_terminal_idle: 'review' }
+    })
+    const updated = h.invoke('db:projects:update', {
+      id: p.id,
+      columnsConfig: [
+        { id: 'todo', label: 'Todo', color: 'blue', position: 0, category: 'unstarted' },
+        { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' },
+      ]
+    }) as { task_automation_config: { on_terminal_active: string | null; on_terminal_idle: string | null } }
+    expect(updated.task_automation_config.on_terminal_active).toBeNull()
+    expect(updated.task_automation_config.on_terminal_idle).toBeNull()
+  })
+
+  test('keeps valid references when only some statuses removed', () => {
+    const p = h.invoke('db:projects:create', {
+      name: 'StalePartial', color: '#990000',
+      columnsConfig: [
+        { id: 'todo', label: 'Todo', color: 'blue', position: 0, category: 'unstarted' },
+        { id: 'doing', label: 'Doing', color: 'yellow', position: 1, category: 'started' },
+        { id: 'done', label: 'Done', color: 'green', position: 2, category: 'completed' },
+      ]
+    }) as { id: string }
+    h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'todo', on_terminal_idle: 'doing' }
+    })
+    const updated = h.invoke('db:projects:update', {
+      id: p.id,
+      columnsConfig: [
+        { id: 'todo', label: 'Todo', color: 'blue', position: 0, category: 'unstarted' },
+        { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' },
+      ]
+    }) as { task_automation_config: { on_terminal_active: string; on_terminal_idle: string | null } }
+    expect(updated.task_automation_config.on_terminal_active).toBe('todo')
+    expect(updated.task_automation_config.on_terminal_idle).toBeNull()
+  })
+
+  test('no cleanup when automation config is null', () => {
+    const p = h.invoke('db:projects:create', {
+      name: 'StaleNull', color: '#aa0000',
+      columnsConfig: [
+        { id: 'todo', label: 'Todo', color: 'blue', position: 0, category: 'unstarted' },
+        { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' },
+      ]
+    }) as { id: string }
+    // no automation config set — should not error
+    const updated = h.invoke('db:projects:update', {
+      id: p.id,
+      columnsConfig: [
+        { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
+        { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' },
+      ]
+    }) as { task_automation_config: null }
+    expect(updated.task_automation_config).toBeNull()
+  })
+
+  test('no cleanup when columns update keeps referenced statuses', () => {
+    const p = h.invoke('db:projects:create', {
+      name: 'StaleKeep', color: '#bb0000',
+      columnsConfig: [
+        { id: 'todo', label: 'Todo', color: 'blue', position: 0, category: 'unstarted' },
+        { id: 'doing', label: 'Doing', color: 'yellow', position: 1, category: 'started' },
+        { id: 'done', label: 'Done', color: 'green', position: 2, category: 'completed' },
+      ]
+    }) as { id: string }
+    h.invoke('db:projects:update', {
+      id: p.id,
+      taskAutomationConfig: { on_terminal_active: 'doing', on_terminal_idle: 'todo' }
+    })
+    // Rename 'done' label but keep all IDs
+    const updated = h.invoke('db:projects:update', {
+      id: p.id,
+      columnsConfig: [
+        { id: 'todo', label: 'Todo', color: 'blue', position: 0, category: 'unstarted' },
+        { id: 'doing', label: 'Doing', color: 'yellow', position: 1, category: 'started' },
+        { id: 'done', label: 'Shipped', color: 'green', position: 2, category: 'completed' },
+      ]
+    }) as { task_automation_config: { on_terminal_active: string; on_terminal_idle: string } }
+    expect(updated.task_automation_config.on_terminal_active).toBe('doing')
+    expect(updated.task_automation_config.on_terminal_idle).toBe('todo')
+  })
+})
+
 h.cleanup()
 console.log('\nDone')
