@@ -95,7 +95,7 @@ const CliInstallDialog = lazy(() => import('@/components/dialogs/CliInstallDialo
 const QuickOpenDialog = lazy(() => import('@slayzone/file-editor/client/QuickOpenDialog').then(m => ({ default: m.QuickOpenDialog })))
 const ChangelogDialog = lazy(() => import('@/components/changelog/ChangelogDialog').then(m => ({ default: m.ChangelogDialog })))
 
-type ProjectSettingsTab = 'general' | 'environment' | 'columns' | 'integrations' | 'ai-config' | 'tests'
+type ProjectSettingsTab = 'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'integrations' | 'ai-config' | 'tests'
 type ProjectIntegrationOnboardingProvider = Exclude<ProjectStartMode, 'scratch'>
 type GlobalAiConfigSection = 'providers' | 'instructions' | 'skill' | 'mcp' | 'files' | 'provider-sync' | 'skills' | 'mcps'
 const COMMUNITY_DISCORD_URL = 'https://discord.gg/g7xPHXaU98'

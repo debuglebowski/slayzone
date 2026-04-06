@@ -13,12 +13,13 @@ import { WorktreesTab } from './WorktreesTab'
 import { ReposTab } from './ReposTab'
 import { TagsSettingsTab } from '@slayzone/settings/client/tabs/TagsSettingsTab'
 import { useDetectedRepos } from './useDetectedRepos'
+import { SettingsTabIntro } from './project-settings-shared'
 
 interface ProjectSettingsDialogProps {
   project: Project | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  initialTab?: 'general' | 'environment' | 'columns' | 'worktrees' | 'repos' | 'integrations' | 'ai-config' | 'tests' | 'tags' | 'templates'
+  initialTab?: 'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'worktrees' | 'repos' | 'integrations' | 'ai-config' | 'tests' | 'tags' | 'templates'
   groupBy?: 'none' | 'path' | 'label'
   onGroupByChange?: (value: 'none' | 'path' | 'label') => void
   integrationOnboardingProvider?: IntegrationProvider | null
@@ -39,7 +40,7 @@ export function ProjectSettingsDialog({
   onUpdated,
   renderTemplatesTab
 }: ProjectSettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'columns' | 'worktrees' | 'repos' | 'tags' | 'templates' | 'integrations' | 'ai-config' | 'tests'>('general')
+  const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'worktrees' | 'repos' | 'tags' | 'templates' | 'integrations' | 'ai-config' | 'tests'>('general')
   const detectedRepos = useDetectedRepos(open ? project?.path ?? null : null)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
@@ -78,10 +79,17 @@ export function ProjectSettingsDialog({
   }, [open, integrationOnboardingProvider])
 
 
-  const navItems: Array<{ key: typeof activeTab; label: string }> = [
+  const navItems = [
     { key: 'general', label: 'General' },
     { key: 'environment', label: 'Environment' },
-    { key: 'columns', label: 'Task statuses' },
+    {
+      key: 'tasks',
+      label: 'Tasks',
+      children: [
+        { key: 'tasks/general', label: 'General' },
+        { key: 'tasks/statuses', label: 'Statuses' },
+      ]
+    },
     { key: 'worktrees', label: 'Worktrees' },
     ...(detectedRepos.length > 0 ? [{ key: 'repos' as const, label: 'Repositories' }] : []),
     { key: 'tags', label: 'Tags' },
@@ -99,7 +107,7 @@ export function ProjectSettingsDialog({
           items={navItems}
           activeKey={activeTab}
           onSelect={(key) => {
-            const tab = key as typeof activeTab
+            const tab = (key === 'tasks' ? 'tasks/general' : key) as typeof activeTab
             track('project_settings_tab_viewed', { tab })
             setActiveTab(tab)
           }}
@@ -136,7 +144,11 @@ export function ProjectSettingsDialog({
             />
           )}
 
-          {activeTab === 'columns' && project && (
+          {activeTab === 'tasks/general' && project && (
+            <SettingsTabIntro title="General" description="General task settings for this project." />
+          )}
+
+          {activeTab === 'tasks/statuses' && project && (
             <ColumnsTab
               project={project}
               onUpdated={onUpdated}
