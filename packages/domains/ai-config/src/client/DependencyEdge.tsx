@@ -23,6 +23,7 @@ export const DependencyEdge = memo(function DependencyEdge({
   targetPosition,
   data,
   style,
+  markerEnd,
 }: EdgeProps) {
   const { depType, onDelete } = (data ?? {}) as DependencyEdgeData
   const isImplicit = depType === 'implicit'
@@ -48,7 +49,7 @@ export const DependencyEdge = memo(function DependencyEdge({
           strokeWidth: isImplicit ? 1 : 1.5,
           opacity: isImplicit ? 0.5 : 0.8,
         }}
-        markerEnd={isImplicit ? undefined : 'url(#arrow)'}
+        markerEnd={markerEnd}
       />
       {!isImplicit && onDelete && (
         <EdgeLabelRenderer>

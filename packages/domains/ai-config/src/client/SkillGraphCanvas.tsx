@@ -108,7 +108,12 @@ function SkillGraphCanvasInner({
             depType: d.type,
             onDelete: d.type === 'explicit' ? handleDeleteEdge : undefined,
           } satisfies DependencyEdgeData,
-          markerEnd: d.type === 'explicit' ? { type: MarkerType.ArrowClosed, width: 16, height: 16 } : undefined,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 28,
+            height: 28,
+            color: d.type === 'explicit' ? 'var(--color-primary)' : 'var(--color-muted-foreground)',
+          },
         }
       })
 

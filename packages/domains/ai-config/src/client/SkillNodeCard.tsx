@@ -36,7 +36,7 @@ export const SkillNodeCard = memo(function SkillNodeCard({ data }: NodeProps) {
         selected ? 'ring-2 ring-primary border-primary shadow-md' : 'hover:shadow-md'
       )}
     >
-      <Handle type="target" position={Position.Top} className="!w-2 !h-2 !bg-muted-foreground/50 !border-none" />
+      <Handle type="target" position={Position.Top} className="!w-2 !h-2 !bg-transparent !border-none !opacity-0" />
 
       <div className="flex items-start gap-1.5">
         <p className="truncate font-mono text-sm font-medium leading-tight">{item.slug}</p>
@@ -70,7 +70,7 @@ export const SkillNodeCard = memo(function SkillNodeCard({ data }: NodeProps) {
         )}
       </div>
 
-      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !bg-muted-foreground/50 !border-none" />
+      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !bg-transparent !border-none !opacity-0" />
     </div>
   )
 })
