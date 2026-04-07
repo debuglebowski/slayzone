@@ -1143,8 +1143,9 @@ app.whenReady().then(async () => {
   // Serve local files via slz-file:// (Chromium blocks file:// in webviews and cross-origin renderers)
   const userHome = homedir()
   const slzFileHandler = async (request: Request) => {
-    // slz-file:///path/to/file → /path/to/file
-    const filePath = normalize(decodeURIComponent(request.url.replace(/^slz-file:\/\//, '')))
+    // slz-file:///path/to/file → /path/to/file (strip query string used for cache busting)
+    const rawPath = decodeURIComponent(request.url.replace(/^slz-file:\/\//, ''))
+    const filePath = normalize(rawPath.split('?')[0])
 
     // Block path traversal outside user home directory
     if (!filePath.startsWith(userHome + sep)) {
@@ -1168,7 +1169,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     try {
       const data = await fsp.readFile(filePath)
       return new Response(data, {
-        headers: { 'content-type': mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream' }
+        headers: { 'content-type': mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream', 'cache-control': 'no-cache' }
       })
     } catch {
       const escaped = filePath.replaceAll('&', '&amp;').replaceAll('<', '&lt;')

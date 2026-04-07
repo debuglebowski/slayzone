@@ -53,14 +53,14 @@ function hasZoom(mode: RenderMode): boolean {
 
 // --- Image viewer ---
 
-function ImageViewer({ assetId, zoomLevel, onZoom, getFilePath }: { assetId: string; zoomLevel: number; onZoom: (fn: (z: number) => number) => void; getFilePath: (id: string) => Promise<string | null> }) {
+function ImageViewer({ assetId, updatedAt, zoomLevel, onZoom, getFilePath }: { assetId: string; updatedAt: string; zoomLevel: number; onZoom: (fn: (z: number) => number) => void; getFilePath: (id: string) => Promise<string | null> }) {
   const [src, setSrc] = useState<string | null>(null)
 
   useEffect(() => {
     getFilePath(assetId).then((p) => {
-      if (p) setSrc(`slz-file://${p}`)
+      if (p) setSrc(`slz-file://${p}?v=${encodeURIComponent(updatedAt)}`)
     })
-  }, [assetId, getFilePath])
+  }, [assetId, updatedAt, getFilePath])
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (!e.metaKey && !e.ctrlKey) return
@@ -79,14 +79,14 @@ function ImageViewer({ assetId, zoomLevel, onZoom, getFilePath }: { assetId: str
 
 // --- PDF viewer ---
 
-function PdfViewer({ assetId, getFilePath }: { assetId: string; getFilePath: (id: string) => Promise<string | null> }) {
+function PdfViewer({ assetId, updatedAt, getFilePath }: { assetId: string; updatedAt: string; getFilePath: (id: string) => Promise<string | null> }) {
   const [src, setSrc] = useState<string | null>(null)
 
   useEffect(() => {
     getFilePath(assetId).then((p) => {
-      if (p) setSrc(`slz-file://${p}`)
+      if (p) setSrc(`slz-file://${p}?v=${encodeURIComponent(updatedAt)}`)
     })
-  }, [assetId, getFilePath])
+  }, [assetId, updatedAt, getFilePath])
 
   if (!src) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
 
@@ -175,6 +175,15 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
     }
   }, [asset.id, isBinary, readContent, saveContent])
 
+  // Re-read content when asset is updated externally (e.g. CLI write/append)
+  const prevUpdatedAtRef = useRef(asset.updated_at)
+  useEffect(() => {
+    if (prevUpdatedAtRef.current === asset.updated_at) return
+    prevUpdatedAtRef.current = asset.updated_at
+    if (isBinary || saveTimerRef.current) return
+    readContent(asset.id).then((c) => setContent(c ?? ''))
+  }, [asset.updated_at, asset.id, isBinary, readContent])
+
   // Notify parent of content changes for find bar
   useEffect(() => {
     if (content != null) onContentReady?.(content)
@@ -201,8 +210,8 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   }, [asset.id, saveContent])
 
   if (loading) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
-  if (renderMode === 'image') return <ImageViewer assetId={asset.id} zoomLevel={zoomLevel} onZoom={onZoom} getFilePath={getFilePath} />
-  if (renderMode === 'pdf') return <PdfViewer assetId={asset.id} getFilePath={getFilePath} />
+  if (renderMode === 'image') return <ImageViewer assetId={asset.id} updatedAt={asset.updated_at} zoomLevel={zoomLevel} onZoom={onZoom} getFilePath={getFilePath} />
+  if (renderMode === 'pdf') return <PdfViewer assetId={asset.id} updatedAt={asset.updated_at} getFilePath={getFilePath} />
 
   const hasPreview = renderMode === 'markdown' || renderMode === 'html-preview' || renderMode === 'svg-preview' || renderMode === 'mermaid-preview'
 
