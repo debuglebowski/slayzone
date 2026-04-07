@@ -1364,6 +1364,49 @@ function assetsSubcommand(): Command {
       }
     })
 
+  // slay tasks assets mvdir <folderId>
+  cmd
+    .command('mvdir <folderId>')
+    .description('Move a folder to another parent (or root)')
+    .requiredOption('--parent <id>', 'Target parent folder ID, or "root" for top level')
+    .option('--json', 'Output as JSON')
+    .action(async (folderId: string, opts) => {
+      const db = openDb()
+      const folder = resolveFolder(db, folderId)
+      let targetParentId: string | null = null
+      let targetName = 'root'
+      if (opts.parent !== 'root') {
+        const parent = resolveFolder(db, opts.parent)
+        targetParentId = parent.id
+        targetName = parent.name
+        // cycle check: walk ancestors of target — reject if source appears
+        let cur: string | null = targetParentId
+        while (cur) {
+          if (cur === folder.id) {
+            console.error('Cannot move folder into its own descendant')
+            process.exit(1)
+          }
+          const row = db.query<{ parent_id: string | null }>(
+            `SELECT parent_id FROM asset_folders WHERE id = :id`,
+            { ':id': cur }
+          )[0]
+          cur = row?.parent_id ?? null
+        }
+      }
+      db.run(
+        `UPDATE asset_folders SET parent_id = :parentId WHERE id = :id`,
+        { ':parentId': targetParentId, ':id': folder.id }
+      )
+      db.close()
+      await notifyApp()
+
+      if (opts.json) {
+        console.log(JSON.stringify({ id: folder.id, parent_id: targetParentId }))
+      } else {
+        console.log(`Moved folder: ${folder.id.slice(0, 8)} -> ${targetName}`)
+      }
+    })
+
   // slay tasks assets mv <assetId>
   cmd
     .command('mv <assetId>')
