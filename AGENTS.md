@@ -1,6 +1,10 @@
 # SlayZone
 
-Desktop task management app with integrated AI coding assistants (Claude Code, Codex).
+Desktop task management app with integrated AI coding assistants (Claude Code, Codex, Gemini, and more).
+
+## SlayZone Environment
+
+You are running inside a SlayZone task terminal — the same application you are developing. Your terminal session, browser panel, and task metadata are all managed by the app. Use the `slay` CLI to read and update your task, manage subtasks, control the browser panel, and more — see the `slay` skill for the full command reference.
 
 ## Quick Start
 
@@ -12,11 +16,13 @@ pnpm install
 
 ## Stack
 
-- **Runtime**: Electron 39
+- **Runtime**: Electron 41
 - **Frontend**: React 19, TailwindCSS 4, Radix UI
 - **Database**: SQLite (better-sqlite3)
+- **Backend**: Convex (cloud), Express (local API)
 - **Terminal**: node-pty, xterm.js
-- **AI**: Claude Code CLI, OpenAI Codex CLI
+- **AI**: Claude Code, Codex, Gemini, Cursor, OpenCode, Copilot, Qwen + custom modes
+- **Protocols**: MCP (Model Context Protocol)
 
 ## Architecture
 
@@ -27,20 +33,38 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 ```
 packages/
 ├── apps/
-│   └── app/             # @slayzone/app - Electron shell
-└── domains/
-│   ├── terminal/        # @slayzone/terminal
-│   ├── task/            # @slayzone/task
-│   ├── tasks/           # @slayzone/tasks
-│   ├── projects/        # @slayzone/projects
-│   ├── tags/            # @slayzone/tags
-│   ├── settings/        # @slayzone/settings
+│   ├── app/             # @slayzone/app - Electron shell
+│   └── cli/             # @slayzone/cli - CLI tool
+├── domains/
+│   ├── ai-config/       # @slayzone/ai-config
+│   ├── automations/     # @slayzone/automations
+│   ├── diagnostics/     # @slayzone/diagnostics
+│   ├── file-editor/     # @slayzone/file-editor
+│   ├── history/         # @slayzone/history
+│   ├── integrations/    # @slayzone/integrations
 │   ├── onboarding/      # @slayzone/onboarding
+│   ├── projects/        # @slayzone/projects
+│   ├── settings/        # @slayzone/settings
+│   ├── tags/            # @slayzone/tags
+│   ├── task/            # @slayzone/task
+│   ├── task-browser/    # @slayzone/task-browser
+│   ├── task-terminals/  # @slayzone/task-terminals
+│   ├── tasks/           # @slayzone/tasks
+│   ├── telemetry/       # @slayzone/telemetry
+│   ├── terminal/        # @slayzone/terminal
+│   ├── test-panel/      # @slayzone/test-panel
+│   ├── usage-analytics/ # @slayzone/usage-analytics
 │   └── worktrees/       # @slayzone/worktrees
 └── shared/
+    ├── editor/          # @slayzone/editor - Milkdown
+    ├── icons/           # @slayzone/icons
+    ├── platform/        # @slayzone/platform
+    ├── shortcuts/       # @slayzone/shortcuts
+    ├── suspense/        # @slayzone/suspense
+    ├── test-utils/      # @slayzone/test-utils
     ├── types/           # @slayzone/types - ElectronAPI
     ├── ui/              # @slayzone/ui - Components
-    └── editor/          # @slayzone/editor - Milkdown
+    └── workflow/        # @slayzone/workflow
 ```
 
 ## Domain Structure
@@ -59,13 +83,24 @@ domain/
 
 | Package | /shared | /main | /client |
 |---------|---------|-------|---------|
-| @slayzone/terminal | TerminalMode, PtyInfo | PTY handlers | Terminal, PtyProvider |
-| @slayzone/task | Task, schemas | Task CRUD, AI | TaskDetailPage, dialogs |
-| @slayzone/tasks | (empty) | (empty) | KanbanBoard, useTasksData |
+| @slayzone/ai-config | ProviderConfig, SkillFrontmatter | AI config handlers | ContextManager, Settings |
+| @slayzone/automations | Automation types, templates | AutomationEngine, handlers | AutomationsPanel |
+| @slayzone/diagnostics | Diagnostic types | diagnostics handlers, processService | — |
+| @slayzone/file-editor | FileEditor types | file watcher handlers | FileEditorView |
+| @slayzone/history | History types | history recorder, handlers | — |
+| @slayzone/integrations | Integration types | adapter registry, sync utils | — |
+| @slayzone/onboarding | — | — | OnboardingDialog |
 | @slayzone/projects | Project | Project CRUD | ProjectSelect, dialogs |
-| @slayzone/tags | Tag | Tag CRUD | - |
 | @slayzone/settings | Theme | Settings, theme | ThemeProvider |
-| @slayzone/onboarding | (empty) | (empty) | OnboardingDialog |
+| @slayzone/tags | Tag | Tag CRUD | — |
+| @slayzone/task | Task, schemas | Task CRUD, AI | TaskDetailPage, dialogs |
+| @slayzone/task-browser | BrowserPanel types | — | BrowserPanel, device presets |
+| @slayzone/task-terminals | TerminalTab types | terminal tabs handlers | TerminalContainer, useTaskTerminals |
+| @slayzone/tasks | — | — | KanbanBoard, useTasksData |
+| @slayzone/telemetry | Telemetry types | — | TelemetryProvider, track utils |
+| @slayzone/terminal | TerminalMode, PtyInfo | PTY handlers | Terminal, PtyProvider |
+| @slayzone/test-panel | TestProfile, TestCategory | test panel handlers | TestPanel, TestsTab |
+| @slayzone/usage-analytics | UsageRecord, AnalyticsSummary | usage data handlers | UsageAnalyticsPage |
 | @slayzone/worktrees | Worktree, DetectedWorktree | Git ops, worktree CRUD | GitPanel |
 
 ## Commands
@@ -76,6 +111,8 @@ domain/
 | `pnpm build` | Build for production |
 | `pnpm build:mac` | Build macOS .app |
 | `pnpm typecheck` | Typecheck all packages |
+| `pnpm test:e2e` | Run E2E tests (requires build) |
+| `pnpm lint` | Lint all packages |
 
 ## Commit Messages
 
@@ -104,9 +141,16 @@ Scope optional: `feat(terminal): ...`
 
 ## Terminal Modes
 
+Builtin:
 - `claude-code` - Claude Code CLI
 - `codex` - OpenAI Codex CLI
-- `terminal` - Plain shell
+- `gemini` - Google Gemini CLI
+- `cursor-agent` - Cursor Agent
+- `opencode` - OpenCode CLI
+- `qwen-code` - Qwen Code
+- `copilot` - GitHub Copilot
+
+`terminal` - plain shell. Custom modes configurable via settings.
 
 ## Database
 
