@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type DragEvent } from 'react'
-import { Paperclip, Plus, Upload, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy } from 'lucide-react'
+import { Plus, Upload, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft } from 'lucide-react'
 import {
   cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, PanelToggle, Button, Input,
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent,
+  Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from '@slayzone/ui'
 import { RichTextEditor } from '@slayzone/editor'
 import type { RenderMode, TaskAsset, AssetFolder } from '@slayzone/task/shared'
@@ -10,10 +11,13 @@ import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBina
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAssets } from './useAssets'
+import { AssetFindBar } from './AssetFindBar'
+import { AssetSearchPanel } from './AssetSearchPanel'
 
 export interface AssetsPanelHandle {
   selectAsset: (id: string) => void
   createAsset: () => void
+  toggleSearch: () => void
 }
 
 interface AssetsPanelProps {
@@ -103,7 +107,7 @@ export interface AssetStats {
   lines: number
 }
 
-function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, saveContent, getFilePath, onStats }: {
+function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, saveContent, getFilePath, onStats, onContentReady, scrollToLineRef }: {
   asset: TaskAsset
   viewMode: 'preview' | 'split' | 'raw'
   zoomLevel: number
@@ -112,12 +116,15 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   saveContent: (id: string, content: string) => Promise<void>
   getFilePath: (id: string) => Promise<string | null>
   onStats?: (stats: AssetStats) => void
+  onContentReady?: (content: string) => void
+  scrollToLineRef?: React.MutableRefObject<((line: number) => void) | null>
 }) {
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const contentRef = useRef(content)
   const onStatsRef = useRef(onStats)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   contentRef.current = content
   onStatsRef.current = onStats
 
@@ -154,6 +161,23 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
     }
   }, [asset.id, isBinary, readContent, saveContent])
 
+  // Notify parent of content changes for find bar
+  useEffect(() => {
+    if (content != null) onContentReady?.(content)
+  }, [content, onContentReady])
+
+  // Register scroll-to-line for find bar
+  useEffect(() => {
+    if (!scrollToLineRef) return
+    scrollToLineRef.current = (line: number) => {
+      const ta = textareaRef.current
+      if (!ta) return
+      const lineHeight = ta.scrollHeight / Math.max(1, (content ?? '').split('\n').length)
+      ta.scrollTop = Math.max(0, (line - 3) * lineHeight)
+    }
+    return () => { scrollToLineRef.current = null }
+  }, [scrollToLineRef, content])
+
   const handleChange = useCallback((value: string) => {
     setContent(value)
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -179,7 +203,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   if (renderMode === 'markdown' && viewMode === 'split') {
     return (
       <div className="flex-1 flex flex-row overflow-hidden">
-        <textarea value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder="Write markdown..." spellCheck={false} />
+        <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder="Write markdown..." spellCheck={false} />
         <div className="flex-1 border-l border-border overflow-y-auto min-w-0">
           <div className="prose prose-sm dark:prose-invert max-w-none p-3">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ''}</ReactMarkdown>
@@ -196,7 +220,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   if (hasPreview && viewMode === 'split') {
     return (
       <div className="flex-1 flex flex-row overflow-hidden">
-        <textarea value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder={`Write ${getExtensionFromTitle(asset.title) || 'content'}...`} spellCheck={false} />
+        <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder={`Write ${getExtensionFromTitle(asset.title) || 'content'}...`} spellCheck={false} />
         <div className="flex-1 flex flex-col border-l border-border overflow-hidden min-w-0">
           <AssetPreview renderMode={renderMode} content={content ?? ''} zoomLevel={zoomLevel} onZoom={onZoom} />
         </div>
@@ -206,7 +230,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <textarea value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none" placeholder={`Write ${getExtensionFromTitle(asset.title) || 'content'}...`} spellCheck={false} />
+      <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none" placeholder={`Write ${getExtensionFromTitle(asset.title) || 'content'}...`} spellCheck={false} />
     </div>
   )
 }
@@ -253,7 +277,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     createAsset, updateAsset, deleteAsset, renameAsset, moveAssetToFolder,
     readContent, saveContent, uploadAsset, uploadDir, getFilePath,
     createFolder, deleteFolder, renameFolder,
-    folderPathMap,
+    getAssetPath, folderPathMap,
   } = useAssets(taskId)
 
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
@@ -262,6 +286,13 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
   const [dragOver, setDragOver] = useState(false)
   const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null)
   const dragAssetIdRef = useRef<string | null>(null)
+
+  // Search state
+  const [sidebarMode, setSidebarMode] = useState<'tree' | 'search'>('tree')
+  const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const contentForFindRef = useRef<string>('')
 
   // Inline creation/rename state
   const [creating, setCreating] = useState<{ parentFolderId: string | null; type: 'file' | 'folder' } | null>(null)
@@ -291,11 +322,12 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
   const selectedAsset = assets.find(a => a.id === selectedId) ?? null
   const selectedRenderMode = selectedAsset ? getEffectiveRenderMode(selectedAsset.title, selectedAsset.render_mode) : null
 
-  useEffect(() => { setViewMode('preview'); setZoomLevel(1) }, [selectedId])
+  useEffect(() => { setViewMode('preview'); setZoomLevel(1); setFindOpen(false); setFindQuery('') }, [selectedId])
 
   useImperativeHandle(ref, () => ({
     selectAsset: (id: string) => setSelectedId(id),
     createAsset: () => setCreating({ parentFolderId: null, type: 'file' }),
+    toggleSearch: () => setSidebarMode(m => m === 'search' ? 'tree' : 'search'),
   }), [setSelectedId])
 
   // --- Inline create/rename handlers ---
@@ -421,6 +453,28 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     dragAssetIdRef.current = null
     setDropTargetFolder(null)
   }, [])
+
+  // --- Search handlers ---
+
+  const handlePanelKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+      e.preventDefault()
+      e.stopPropagation()
+      const rm = selectedAsset ? getEffectiveRenderMode(selectedAsset.title, selectedAsset.render_mode) : null
+      if (selectedAsset && rm && !isBinaryRenderMode(rm)) {
+        setFindOpen(true)
+      }
+    }
+  }, [selectedAsset])
+
+  const handleSearchResult = useCallback((assetId: string, query: string, _line: number) => {
+    setSelectedId(assetId)
+    setFindQuery(query)
+    // Defer opening find bar so the new asset content loads first
+    setTimeout(() => setFindOpen(true), 50)
+  }, [setSelectedId])
+
+  const scrollToLineRef = useRef<((line: number) => void) | null>(null)
 
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolders(prev => {
@@ -677,74 +731,130 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
       onDragLeave={() => setDragOver(false)}
       onDrop={handleFileDrop}
       onDragEnd={handleDragEnd}
+      onKeyDown={handlePanelKeyDown}
     >
       {/* Panel header */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border shrink-0">
-        <Paperclip className="size-3.5 text-muted-foreground" />
-        <span className="text-xs font-medium">Assets</span>
-        <span className="text-[10px] text-muted-foreground">{assets.length}</span>
-        <div className="ml-auto flex items-center gap-1.5">
-          <Button data-testid="assets-upload-btn" variant="outline" size="sm" className="!h-6 text-[10px] px-2" onClick={handleUpload}>
-            <Upload className="size-3 mr-1" />
-            Upload
-          </Button>
-          <Button data-testid="assets-folder-btn" variant="outline" size="sm" className="!h-6 text-[10px] px-2" onClick={() => setCreating({ parentFolderId: null, type: 'folder' })}>
-            <FolderPlus className="size-3 mr-1" />
-            Folder
-          </Button>
-          <Button data-testid="assets-new-btn" variant="outline" size="sm" className="!h-6 text-[10px] px-2" onClick={() => setCreating({ parentFolderId: null, type: 'file' })}>
-            <Plus className="size-3 mr-1" />
-            New
-          </Button>
+      <TooltipProvider delayDuration={400}>
+        <div className={cn("flex items-center border-b border-border shrink-0", sidebarVisible && "grid grid-cols-[auto_1fr]")}>
+          {/* Top-left: label + mode toggles */}
+          {sidebarVisible && (
+            <div className="flex items-center gap-1 px-2 h-10 border-r border-border bg-surface-1" style={{ width: sidebarWidth }}>
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mr-auto">Assets</span>
+              <div className="ml-auto flex items-center gap-0.5">
+                {([
+                  { mode: 'tree' as const, icon: Files, label: 'Explorer' },
+                  { mode: 'search' as const, icon: Search, label: 'Search' },
+                ]).map(({ mode, icon: Icon, label }) => (
+                  <Tooltip key={mode}>
+                    <TooltipTrigger asChild>
+                      <button
+                        className={`size-7 flex items-center justify-center rounded transition-colors ${sidebarMode === mode ? 'text-foreground bg-muted' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`}
+                        onClick={() => setSidebarMode(mode)}
+                      >
+                        <Icon className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{label}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Top-right: action buttons */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 flex-1">
+            <button
+              className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+              onClick={() => setSidebarVisible(v => !v)}
+              title={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+            >
+              {sidebarVisible ? <PanelLeftClose className="size-4" /> : <PanelLeft className="size-4" />}
+            </button>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button data-testid="assets-upload-btn" variant="outline" size="sm" className="!h-6 text-[10px] px-2" onClick={handleUpload}>
+                <Upload className="size-3 mr-1" />
+                Upload
+              </Button>
+              <Button data-testid="assets-folder-btn" variant="outline" size="sm" className="!h-6 text-[10px] px-2" onClick={() => setCreating({ parentFolderId: null, type: 'folder' })}>
+                <FolderPlus className="size-3 mr-1" />
+                Folder
+              </Button>
+              <Button data-testid="assets-new-btn" variant="outline" size="sm" className="!h-6 text-[10px] px-2" onClick={() => setCreating({ parentFolderId: null, type: 'file' })}>
+                <Plus className="size-3 mr-1" />
+                New
+              </Button>
+            </div>
+          </div>
         </div>
-      </div>
+      </TooltipProvider>
 
       <div className="flex flex-1 min-h-0">
-        {/* Left sidebar — asset tree */}
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <div
-              data-testid="assets-sidebar"
-              className={cn("shrink-0 overflow-y-auto p-1.5 select-none text-sm", dropTargetFolder === '__root__' && 'bg-primary/10')}
-              style={{ width: sidebarWidth }}
-              onDragOver={handleRootDragOver}
-              onDragLeave={handleFolderDragLeave}
-              onDrop={handleRootDrop}
-            >
-              {assets.length > 0 || folders.length > 0 ? (
-                <>
-                  {renderTree(null, 0)}
-                  {renderInlineInput(null, 0)}
-                </>
-              ) : creating ? (
-                renderInlineInput(null, 0)
-              ) : (
-                <div className="text-[10px] text-muted-foreground/60 text-center py-4">
-                  No assets yet
-                </div>
-              )}
-            </div>
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onSelect={() => setCreating({ parentFolderId: null, type: 'file' })}>
-              <FilePlus className="size-3 mr-2" /> New Asset
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => setCreating({ parentFolderId: null, type: 'folder' })}>
-              <FolderPlus className="size-3 mr-2" /> New Folder
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-
-        {/* Resize handle */}
-        <div
-          className="w-1 shrink-0 cursor-col-resize bg-border hover:bg-primary/40 transition-colors"
-          onMouseDown={handleSidebarMouseDown}
-          onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
-        />
+        {/* Left sidebar */}
+        {sidebarVisible && (
+          <div className="shrink-0 flex flex-col border-r border-border" style={{ width: sidebarWidth }}>
+            {sidebarMode === 'search' ? (
+              <AssetSearchPanel
+                assets={assets}
+                readContent={readContent}
+                getAssetPath={getAssetPath}
+                onSelectResult={handleSearchResult}
+              />
+            ) : (
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <div
+                    data-testid="assets-sidebar"
+                    className={cn("flex-1 overflow-y-auto p-1.5 select-none text-sm", dropTargetFolder === '__root__' && 'bg-primary/10')}
+                    onDragOver={handleRootDragOver}
+                    onDragLeave={handleFolderDragLeave}
+                    onDrop={handleRootDrop}
+                  >
+                    {assets.length > 0 || folders.length > 0 ? (
+                      <>
+                        {renderTree(null, 0)}
+                        {renderInlineInput(null, 0)}
+                      </>
+                    ) : creating ? (
+                      renderInlineInput(null, 0)
+                    ) : (
+                      <div className="text-[10px] text-muted-foreground/60 text-center py-4">
+                        No assets yet
+                      </div>
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem onSelect={() => setCreating({ parentFolderId: null, type: 'file' })}>
+                    <FilePlus className="size-3 mr-2" /> New Asset
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => setCreating({ parentFolderId: null, type: 'folder' })}>
+                    <FolderPlus className="size-3 mr-2" /> New Folder
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            )}
+          </div>
+        )}
 
         {/* Right content area */}
-        <div className="flex-1 flex flex-col min-w-0 relative">
+        <div className="relative flex-1 flex flex-col min-w-0">
+          {/* Resize handle (overlay) */}
+          {sidebarVisible && (
+            <div
+              className="absolute left-0 inset-y-0 w-2 -translate-x-1/2 z-10 cursor-col-resize hover:bg-primary/20 active:bg-primary/30 transition-colors"
+              onMouseDown={handleSidebarMouseDown}
+              onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+            />
+          )}
           {(isResizing || sidebarDragging) && <div className="absolute inset-0 z-10" />}
+          {findOpen && selectedAsset && selectedRenderMode && !isBinaryRenderMode(selectedRenderMode) && (
+            <AssetFindBar
+              query={findQuery}
+              onQueryChange={setFindQuery}
+              onClose={() => { setFindOpen(false); setFindQuery('') }}
+              content={contentForFindRef.current}
+              onScrollToLine={scrollToLineRef.current ?? undefined}
+            />
+          )}
           {selectedAsset ? (
             <>
               <AssetContentEditor
@@ -757,6 +867,8 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                 saveContent={saveContent}
                 getFilePath={getFilePath}
                 onStats={setAssetStats}
+                onContentReady={(c) => { contentForFindRef.current = c }}
+                scrollToLineRef={scrollToLineRef}
               />
               {/* Content footer */}
               <div className="flex items-center gap-2 px-3 py-2 border-t border-border shrink-0">
