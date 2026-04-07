@@ -582,11 +582,11 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
               onDragLeave={handleFolderDragLeave}
               onDrop={handleFolderDrop(folder.id)}
             >
+              <div style={{ marginLeft: depth * INDENT_PX + BASE_PAD, marginRight: 4 }} className="mb-1">
               <ContextMenu>
                 <ContextMenuTrigger asChild>
                   <button
-                    className="group/folder flex w-full select-none items-center gap-1.5 rounded px-1 py-1.5 text-xs hover:bg-muted/50"
-                    style={{ paddingLeft: depth * INDENT_PX + BASE_PAD }}
+                    className="group/folder flex w-full select-none items-center gap-1.5 rounded-md border border-border/60 bg-card/50 px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 hover:border-border transition-colors"
                     onClick={() => toggleFolder(folder.id)}
                   >
                     {expanded
@@ -629,6 +629,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                   </ContextMenuItem>
                 </ContextMenuContent>
               </ContextMenu>
+              </div>
 
               {expanded && (
                 <>
