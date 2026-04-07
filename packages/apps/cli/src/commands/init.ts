@@ -43,7 +43,7 @@ Use the \`slay\` CLI to interact with the SlayZone task management system. \`$SL
 - \`slay tasks delete <id>\` — permanently delete task
 
 ### Tags
-- \`slay tasks tag [id]\` — show current tags
+- \`slay tasks tag [id] [--json]\` — show current tags
 - \`slay tasks tag [id] --set <name1> [name2...]\` — replace all tags
 - \`slay tasks tag [id] --add <name>\` — add tag
 - \`slay tasks tag [id] --remove <name>\` — remove tag
@@ -69,15 +69,19 @@ Use the \`slay\` CLI to interact with the SlayZone task management system. \`$SL
 - \`slay tasks browser eval <code> [--panel <state>]\` — execute JS in browser
 
 ### Assets
-- \`slay tasks assets list <taskId> [--json]\` — list assets
+- \`slay tasks assets list <taskId> [--json] [--tree]\` — list assets
 - \`slay tasks assets read <assetId>\` — output asset content to stdout
-- \`slay tasks assets create <title> [--task <id>] [--copy-from <path>] [--render-mode <mode>] [--json]\` — create asset (stdin or --copy-from)
+- \`slay tasks assets create <title> [--task <id>] [--copy-from <path>] [--render-mode <mode>] [--folder <id>] [--json]\` — create asset (stdin or --copy-from)
 - \`slay tasks assets upload <sourcePath> [--task <id>] [--title <name>] [--json]\` — upload file as asset
 - \`slay tasks assets update <assetId> [--title <name>] [--render-mode <mode>] [--json]\` — update asset metadata
 - \`slay tasks assets write <assetId>\` — replace asset content (stdin)
 - \`slay tasks assets append <assetId>\` — append to asset content (stdin)
 - \`slay tasks assets delete <assetId>\` — delete asset
 - \`slay tasks assets path <assetId>\` — print asset file path
+- \`slay tasks assets mkdir <name> [--task <id>] [--parent <id>] [--json]\` — create folder (nested via --parent)
+- \`slay tasks assets rmdir <folderId> [--json]\` — delete folder (assets move to root)
+- \`slay tasks assets mvdir <folderId> --parent <id|"root"> [--json]\` — move folder to another parent
+- \`slay tasks assets mv <assetId> --folder <id|"root"> [--json]\` — move asset to folder (or root)
 
 ### Projects
 - \`slay projects list [--json]\` — list projects

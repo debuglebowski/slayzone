@@ -46,7 +46,7 @@ Use the `slay` CLI to interact with SlayZone. Your terminal has `$SLAYZONE_TASK_
 - `slay tasks delete <id>` — permanently delete task
 
 ### Tags
-- `slay tasks tag [id]` — show current tags
+- `slay tasks tag [id] [--json]` — show current tags
 - `slay tasks tag [id] --set <name1> [name2...]` — replace all tags
 - `slay tasks tag [id] --add <name>` — add tag
 - `slay tasks tag [id] --remove <name>` — remove tag
@@ -72,7 +72,7 @@ Use the `slay` CLI to interact with SlayZone. Your terminal has `$SLAYZONE_TASK_
 - `slay tasks browser eval <code> [--panel <state>]` — execute JS in browser
 
 ### Assets
-- `slay tasks assets list <taskId> [--json]` — list assets
+- `slay tasks assets list <taskId> [--json] [--tree]` — list assets
 - `slay tasks assets read <assetId>` — output asset content to stdout
 - `slay tasks assets create <title> [--task <id>] [--copy-from <path>] [--render-mode <mode>] [--folder <id>] [--json]` — create asset (stdin or --copy-from)
 - `slay tasks assets upload <sourcePath> [--task <id>] [--title <name>] [--json]` — upload file as asset
