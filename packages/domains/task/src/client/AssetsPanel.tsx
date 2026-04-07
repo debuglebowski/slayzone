@@ -101,6 +101,20 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function formatRelativeDate(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  if (diffMins < 1) return 'just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7) return `${diffDays}d ago`
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 export interface AssetStats {
   fileSize: number | null
   words: number
@@ -562,7 +576,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
               <ContextMenu>
                 <ContextMenuTrigger asChild>
                   <button
-                    className="group/folder flex w-full select-none items-center gap-1.5 rounded px-1 py-1 text-xs hover:bg-muted/50"
+                    className="group/folder flex w-full select-none items-center gap-1.5 rounded px-1 py-1.5 text-xs hover:bg-muted/50"
                     style={{ paddingLeft: depth * INDENT_PX + BASE_PAD }}
                     onClick={() => toggleFolder(folder.id)}
                   >
@@ -617,84 +631,103 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
           )
         })}
 
-        {subAssets.map(asset => {
-          const TypeIcon = getAssetIcon(asset)
-          const isRenaming = renaming?.id === asset.id && renaming.type === 'asset'
+        {subAssets.length > 0 && (
+          <div className="flex flex-col gap-1 py-0.5">
+            {subAssets.map(asset => {
+              const TypeIcon = getAssetIcon(asset)
+              const isRenaming = renaming?.id === asset.id && renaming.type === 'asset'
+              const ext = getExtensionFromTitle(asset.title).replace('.', '').toUpperCase()
+              const modeLabel = RENDER_MODE_INFO[getEffectiveRenderMode(asset.title, asset.render_mode)].label
 
-          return (
-            <div key={`f:${asset.id}`} data-testid={`asset-row-${asset.id}`}>
-              <ContextMenu>
-                <ContextMenuTrigger asChild>
-                  <button
-                    className={cn(
-                      'flex w-full items-center gap-1 py-1 rounded text-xs cursor-pointer',
-                      asset.id === selectedId ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                    )}
-                    style={{ paddingLeft: depth * INDENT_PX + BASE_PAD, paddingRight: 6 }}
-                    onClick={() => setSelectedId(asset.id)}
-                    draggable={!isRenaming}
-                    onDragStart={handleAssetDragStart(asset.id)}
-                  >
-                    <TypeIcon className="size-3 shrink-0" />
-                    {isRenaming ? (
-                      <Input
-                        ref={renameInputRef}
-                        data-testid="assets-rename-input"
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          e.stopPropagation()
-                          if (e.key === 'Enter') handleInlineRename(renameValue)
-                          if (e.key === 'Escape') setRenaming(null)
-                        }}
-                        onBlur={() => handleInlineRename(renameValue)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="h-5 text-xs font-mono py-0 px-1 flex-1"
-                      />
-                    ) : (
-                      <span className="truncate flex-1 text-left">{asset.title}</span>
-                    )}
-                  </button>
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  <ContextMenuItem onSelect={() => startRenameAsset(asset)}>
-                    <Pencil className="size-3 mr-2" /> Rename
-                  </ContextMenuItem>
-                  {moveToFolders.length > 0 && (
-                    <ContextMenuSub>
-                      <ContextMenuSubTrigger>
-                        <ArrowRight className="size-3 mr-2" /> Move to
-                      </ContextMenuSubTrigger>
-                      <ContextMenuSubContent>
-                        {asset.folder_id && (
-                          <ContextMenuItem onSelect={() => moveAssetToFolder(asset.id, null)}>
-                            Root
-                          </ContextMenuItem>
+              return (
+                <div key={`f:${asset.id}`} data-testid={`asset-row-${asset.id}`} style={{ marginLeft: depth * INDENT_PX + BASE_PAD, marginRight: 4 }}>
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <button
+                        className={cn(
+                          'group/asset flex w-full flex-col gap-0.5 rounded-md border px-2.5 py-2 text-left text-xs cursor-pointer transition-colors',
+                          asset.id === selectedId
+                            ? 'border-primary/40 bg-primary/[0.08] text-foreground'
+                            : 'border-border/60 bg-card/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 hover:border-border',
                         )}
-                        {moveToFolders
-                          .filter(f => f.id !== asset.folder_id)
-                          .map(f => (
-                            <ContextMenuItem key={f.id} onSelect={() => moveAssetToFolder(asset.id, f.id)}>
-                              {f.path}
-                            </ContextMenuItem>
-                          ))
-                        }
-                      </ContextMenuSubContent>
-                    </ContextMenuSub>
-                  )}
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onSelect={() => handleCopyPath(asset.id)}>
-                    <Copy className="size-3 mr-2" /> Copy Path
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem variant="destructive" onSelect={() => deleteAsset(asset.id)}>
-                    <Trash2 className="size-3 mr-2" /> Delete
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            </div>
-          )
-        })}
+                        onClick={() => setSelectedId(asset.id)}
+                        draggable={!isRenaming}
+                        onDragStart={handleAssetDragStart(asset.id)}
+                      >
+                        <div className="flex w-full items-center gap-1.5 min-w-0">
+                          <TypeIcon className="size-4 shrink-0" />
+                          {isRenaming ? (
+                            <Input
+                              ref={renameInputRef}
+                              data-testid="assets-rename-input"
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                e.stopPropagation()
+                                if (e.key === 'Enter') handleInlineRename(renameValue)
+                                if (e.key === 'Escape') setRenaming(null)
+                              }}
+                              onBlur={() => handleInlineRename(renameValue)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="h-5 text-xs font-mono py-0 px-1 flex-1"
+                            />
+                          ) : (
+                            <span className="truncate flex-1 font-medium">{asset.title}</span>
+                          )}
+                          {ext && !isRenaming && (
+                            <span className="shrink-0 rounded bg-muted px-1 py-px text-[10px] font-mono text-muted-foreground">{ext}</span>
+                          )}
+                        </div>
+                        {!isRenaming && (
+                          <div className="flex items-center gap-1.5 pl-[22px] text-[10px] text-muted-foreground/70">
+                            <span>{modeLabel}</span>
+                            <span className="text-muted-foreground/40">&middot;</span>
+                            <span>{formatRelativeDate(asset.updated_at)}</span>
+                          </div>
+                        )}
+                      </button>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem onSelect={() => startRenameAsset(asset)}>
+                        <Pencil className="size-3 mr-2" /> Rename
+                      </ContextMenuItem>
+                      {moveToFolders.length > 0 && (
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger>
+                            <ArrowRight className="size-3 mr-2" /> Move to
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent>
+                            {asset.folder_id && (
+                              <ContextMenuItem onSelect={() => moveAssetToFolder(asset.id, null)}>
+                                Root
+                              </ContextMenuItem>
+                            )}
+                            {moveToFolders
+                              .filter(f => f.id !== asset.folder_id)
+                              .map(f => (
+                                <ContextMenuItem key={f.id} onSelect={() => moveAssetToFolder(asset.id, f.id)}>
+                                  {f.path}
+                                </ContextMenuItem>
+                              ))
+                            }
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                      )}
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onSelect={() => handleCopyPath(asset.id)}>
+                        <Copy className="size-3 mr-2" /> Copy Path
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem variant="destructive" onSelect={() => deleteAsset(asset.id)}>
+                        <Trash2 className="size-3 mr-2" /> Delete
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </>
     )
   }
