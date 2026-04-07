@@ -6,6 +6,8 @@ trigger: auto
 
 Use the `slay` CLI to interact with SlayZone. Your terminal has `$SLAYZONE_TASK_ID` set — every command that accepts `[id]` defaults to it, so you can omit the task ID entirely.
 
+**Always pass `--dev`** to all `slay` commands (e.g. `slay --dev tasks view`) — this targets the development database.
+
 <!-- Canonical CLI reference. The end-user template lives in
      packages/apps/cli/src/commands/init.ts (SKILL constant) — keep in sync. -->
 
