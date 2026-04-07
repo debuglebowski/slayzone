@@ -1386,7 +1386,7 @@ function assetsSubcommand(): Command {
             console.error('Cannot move folder into its own descendant')
             process.exit(1)
           }
-          const row = db.query<{ parent_id: string | null }>(
+          const row: { parent_id: string | null } | undefined = db.query<{ parent_id: string | null }>(
             `SELECT parent_id FROM asset_folders WHERE id = :id`,
             { ':id': cur }
           )[0]
