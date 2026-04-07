@@ -292,8 +292,8 @@
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
-  margin-top: 0;
-  margin-bottom: 0;
+  margin-top: 0.125em;
+  margin-bottom: 0.125em;
 }
 
 .ProseMirror ul[data-type="taskList"] li > label {
@@ -309,7 +309,6 @@
 
 .ProseMirror ul[data-type="taskList"] li > div {
   flex: 1;
-  line-height: 1.25;
 }
 
 /* Task list checkbox styling (Milkdown GFM) */
@@ -323,8 +322,8 @@
   align-items: flex-start;
   gap: 0.5rem;
   list-style: none;
-  margin-top: 0;
-  margin-bottom: 0;
+  margin-top: 0.125em;
+  margin-bottom: 0.125em;
 }
 
 .ProseMirror li[data-item-type="task"] > input[type="checkbox"] {
@@ -338,7 +337,6 @@
 .ProseMirror li[data-item-type="task"] > div,
 .ProseMirror li[data-item-type="task"] > p {
   flex: 1;
-  line-height: 1.25;
 }
 
 .ProseMirror li[data-item-type="task"] > span > p {
