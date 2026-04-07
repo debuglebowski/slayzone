@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
@@ -71,11 +71,13 @@ export function CreateTaskDialog({
     defaultValues: buildCreateTaskFormDefaults(draft)
   })
 
-  // Reset form when dialog opens with new defaults
+  // Reset form only when dialog transitions from closed → open
+  const prevOpenRef = useRef(false)
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpenRef.current) {
       form.reset(buildCreateTaskFormDefaults(draft))
     }
+    prevOpenRef.current = open
   }, [open, draft, form])
 
   useEffect(() => {
