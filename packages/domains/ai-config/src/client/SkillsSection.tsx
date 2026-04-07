@@ -12,6 +12,7 @@ import { getSkillValidation } from './skill-validation'
 import { buildDefaultSkillContent } from '../shared'
 import type { AiConfigItem, AiConfigScope, CliProvider, ConfigLevel, SkillUpdateInfo, UpdateAiConfigItemInput } from '../shared'
 import { useContextManagerStore } from './useContextManagerStore'
+import { computeUnmanagedSkillRows, type UnmanagedSkillRow } from './unmanaged-skills'
 
 interface SkillsSectionProps {
   level: ConfigLevel
@@ -31,6 +32,10 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   const isProject = level === 'project' && !!projectId && !!projectPath
 
   const [items, setItems] = useState<AiConfigItem[]>([])
+  const [linkedIds, setLinkedIds] = useState<string[]>([])
+  const [unmanagedItems, setUnmanagedItems] = useState<UnmanagedSkillRow[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [version, setVersion] = useState(0)
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
   const [showAddPicker, setShowAddPicker] = useState(false)
   const [enabledProviders, setEnabledProviders] = useState<CliProvider[]>([])
@@ -38,28 +43,44 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   const setSkillViewMode = useContextManagerStore((s) => s.setSkillViewMode)
   const [updateMap, setUpdateMap] = useState<Map<string, SkillUpdateInfo>>(new Map())
 
-  const loadItems = useCallback(async () => {
-    const rows = await window.api.aiConfig.listItems({
-      scope,
-      projectId: isProject ? projectId : undefined,
-      type: 'skill',
-    })
-    // Merge linked global items at project level
-    if (isProject && projectId && projectPath) {
-      const linked = await window.api.aiConfig.getProjectSkillsStatus(projectId, projectPath)
-      const ids = new Set(rows.map(r => r.id))
-      for (const s of linked) {
-        if (!ids.has(s.item.id)) rows.push(s.item)
-      }
-    }
-    setItems(rows)
-  }, [scope, isProject, projectId, projectPath])
+  const bumpVersion = useCallback(() => setVersion(v => v + 1), [])
 
   useEffect(() => {
     let stale = false
-    void loadItems().then(() => { if (stale) return })
+    void (async () => {
+      try {
+        const rows = await window.api.aiConfig.listItems({
+          scope,
+          projectId: isProject ? projectId : undefined,
+          type: 'skill',
+        })
+        const newLinkedIds: string[] = []
+        let newUnmanaged: UnmanagedSkillRow[] = []
+        if (isProject && projectId && projectPath) {
+          const [linked, contextTree] = await Promise.all([
+            window.api.aiConfig.getProjectSkillsStatus(projectId, projectPath),
+            window.api.aiConfig.getContextTree(projectPath, projectId),
+          ])
+          const ids = new Set(rows.map(r => r.id))
+          for (const s of linked) {
+            newLinkedIds.push(s.item.id)
+            if (!ids.has(s.item.id)) rows.push(s.item)
+          }
+          const allSlugs = new Set(rows.map(r => r.slug))
+          newUnmanaged = computeUnmanagedSkillRows(contextTree).filter(u => !allSlugs.has(u.slug))
+        }
+        if (stale) return
+        setItems(rows)
+        setLinkedIds(newLinkedIds)
+        setUnmanagedItems(newUnmanaged)
+        setLoadError(null)
+      } catch {
+        if (stale) return
+        setLoadError('Failed to load skills')
+      }
+    })()
     return () => { stale = true }
-  }, [loadItems])
+  }, [scope, isProject, projectId, projectPath, version])
 
   useEffect(() => {
     if (!isProject || !projectId) return
@@ -193,6 +214,9 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
         />,
         editorTarget
       )}
+      {loadError && (
+        <p className="mb-2 text-sm text-destructive">{loadError}</p>
+      )}
       <div className="flex h-full min-h-0">
         {viewMode === 'graph' ? (
           <div className="flex-1 min-h-0">
@@ -209,6 +233,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
           <div className="flex-1 overflow-y-auto px-1">
             <SkillListView
               items={items}
+              unmanagedItems={isProject ? unmanagedItems : undefined}
               selectedSkillId={selectedSkillId}
               onSelectSkill={setSelectedSkillId}
               onDeleteItem={handleDeleteItem}
@@ -226,8 +251,8 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
           projectId={projectId}
           projectPath={projectPath}
           enabledProviders={enabledProviders}
-          existingLinks={[]}
-          onAdded={() => { setShowAddPicker(false); void loadItems() }}
+          existingLinks={linkedIds}
+          onAdded={() => { setShowAddPicker(false); bumpVersion() }}
         />
       )}
     </>

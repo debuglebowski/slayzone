@@ -19,6 +19,7 @@ import { SkillHelpCard } from './SkillHelpCard'
 import { StatusBadge, ProviderFileCard } from './SyncComponents'
 import { aggregateProviderSyncHealth, hasPendingProviderSync } from './sync-view-model'
 import { getSkillFrontmatterActionLabel, getSkillValidation } from './skill-validation'
+import type { UnmanagedSkillRow } from './unmanaged-skills'
 
 // ============================================================
 // Types & Helpers
@@ -40,15 +41,6 @@ interface ProviderRow {
   provider: CliProvider
   path: string
   syncHealth: SyncHealth
-}
-
-export interface UnmanagedSkillRow {
-  slug: string
-  locations: Array<{
-    path: string
-    relativePath: string
-    provider?: CliProvider
-  }>
 }
 
 function providerSupportsType(provider: CliProvider): boolean {

@@ -15,7 +15,8 @@ import type {
   SyncReason
 } from '../shared'
 import type { GlobalContextManagerSection } from './ContextManagerSettings'
-import { ItemSection, type UnmanagedSkillRow } from './ItemSection'
+import { ItemSection } from './ItemSection'
+import { computeUnmanagedSkillRows } from './unmanaged-skills'
 import { McpFlatSection } from './McpFlatSection'
 import { ProjectInstructions } from './ProjectInstructions'
 import { ProviderChips } from './ProviderChips'
@@ -58,58 +59,7 @@ function computeSkillCounts(tree: ContextTreeEntry[]): SectionCounts {
   }
 }
 
-function skillSlugFromContextPath(relativePath: string): string | null {
-  const normalized = relativePath.split('\\').join('/')
-  const parts = normalized.split('/').filter(Boolean)
-  if (parts.length === 0) return null
-
-  const fileName = parts[parts.length - 1]
-  if (fileName === 'SKILL.md') {
-    if (parts.length < 2) return null
-    return parts[parts.length - 2]
-  }
-
-  if (fileName.toLowerCase().endsWith('.md')) {
-    return fileName.slice(0, -3)
-  }
-
-  return null
-}
-
-function computeUnmanagedSkillRows(tree: ContextTreeEntry[]): UnmanagedSkillRow[] {
-  const bySlug = new Map<string, UnmanagedSkillRow>()
-
-  for (const entry of tree) {
-    if (entry.category !== 'skill') continue
-    if (!entry.exists) continue
-    if (entry.linkedItemId !== null) continue
-    if (contextEntryToSyncHealth(entry) !== 'unmanaged') continue
-
-    const slug = skillSlugFromContextPath(entry.relativePath)
-    if (!slug) continue
-
-    const current = bySlug.get(slug) ?? {
-      slug,
-      locations: []
-    }
-
-    if (!current.locations.some((location) => location.path === entry.path)) {
-      current.locations.push({
-        path: entry.path,
-        relativePath: entry.relativePath,
-        provider: entry.provider
-      })
-    }
-    bySlug.set(slug, current)
-  }
-
-  return [...bySlug.values()]
-    .map((item) => ({
-      ...item,
-      locations: [...item.locations].sort((a, b) => a.relativePath.localeCompare(b.relativePath))
-    }))
-    .sort((a, b) => a.slug.localeCompare(b.slug))
-}
+// computeUnmanagedSkillRows and skillSlugFromContextPath extracted to ./unmanaged-skills.ts
 
 function computeInstructionCounts(instructions: ContextData['instructions']): SectionCounts {
   const providerHealth = instructions.providerHealth ?? {}

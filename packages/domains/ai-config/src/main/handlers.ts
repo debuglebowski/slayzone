@@ -1304,14 +1304,16 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
     const selections = (db.prepare(`
       SELECT ps.*, i.content as item_content, i.type as item_type, i.slug as item_slug,
-             i.name as item_name, i.scope as item_scope, i.metadata_json as item_metadata,
+             i.name as item_name, i.scope as item_scope, i.project_id as item_project_id,
+             i.metadata_json as item_metadata,
              i.created_at as item_created, i.updated_at as item_updated
       FROM ai_config_project_selections ps
       JOIN ai_config_items i ON i.id = ps.item_id
       WHERE ps.project_id = ? AND i.type = 'skill'
     `).all(projectId) as Array<AiConfigProjectSelection & {
       item_content: string; item_type: string; item_slug: string
-      item_name: string; item_scope: string; item_metadata: string
+      item_name: string; item_scope: string; item_project_id: string | null
+      item_metadata: string
       item_created: string; item_updated: string
     }>).filter((sel) => isConfigurableCliProvider(sel.provider))
 
@@ -1330,7 +1332,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         id: first.item_id,
         type: first.item_type as AiConfigItem['type'],
         scope: first.item_scope as AiConfigItem['scope'],
-        project_id: first.project_id,
+        project_id: first.item_project_id ?? null,
         name: first.item_name,
         slug: first.item_slug,
         content: first.item_content,
