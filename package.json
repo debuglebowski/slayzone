@@ -18,7 +18,7 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
     "dev": "pnpm --filter @slayzone/app dev",
-    "dev:oauth": "pnpm --filter @slayzone/app dev:oauth",
+    "dev:protocol": "pnpm --filter @slayzone/app dev:protocol",
     "generate-icons": "node scripts/generate-icons.js",
     "patch-electron-name": "node scripts/patch-electron-name.js",
     "reset-mac-icon-cache": "bash scripts/reset-mac-icon-cache.sh",

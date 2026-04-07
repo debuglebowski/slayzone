@@ -7,7 +7,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "dev:oauth": "SLAYZONE_REGISTER_DEV_PROTOCOL=1 electron-vite dev",
+    "dev:protocol": "SLAYZONE_REGISTER_DEV_PROTOCOL=1 electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "build:mac": "pnpm --filter @slayzone/cli build && npm run build && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
