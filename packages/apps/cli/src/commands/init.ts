@@ -27,7 +27,7 @@ Use the \`slay\` CLI to interact with the SlayZone task management system. \`$SL
 
 ### Task lifecycle
 - \`slay tasks view [id]\` — show task details (defaults to current task)
-- \`slay tasks update [id] --title <title> --description <text> --append-description <text> --status <status> --priority <1-5> --due <date> --no-due\` — update task
+- \`slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due]\` — update task
 - \`slay tasks done [id]\` — mark task complete
 - \`slay tasks create <title> --project <name> [--description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--template <name|id>] [--external-id <id>] [--external-provider <provider>]\` — create task
 
@@ -109,7 +109,7 @@ Use the \`slay\` CLI to interact with the SlayZone task management system. \`$SL
 - \`slay pty buffer <id>\` — dump terminal buffer
 - \`slay pty follow <id> [--full]\` — stream PTY output (--full replays buffer first)
 - \`slay pty write <id> <data>\` — send raw data to PTY stdin
-- \`slay pty submit <id> [text]\` — submit text to PTY (smart newline handling for AI modes; reads stdin if no text; auto-waits for AI modes)
+- \`slay pty submit <id> [text] [--wait] [--no-wait] [--timeout <ms>]\` — submit text to PTY (smart newline handling for AI modes; reads stdin if no text; auto-waits for AI modes)
 - \`slay pty wait <id> [--state <state>] [--timeout <ms>] [--json]\` — wait for session state (default: attention, timeout: 60s)
 - \`slay pty kill <id>\` — kill PTY session
 
@@ -125,6 +125,7 @@ Use the \`slay\` CLI to interact with the SlayZone task management system. \`$SL
 - All ID arguments support prefix matching (e.g. \`a1b2\` matches \`a1b2c3d4-...\`).
 - Commands accepting \`[id]\` default to \`$SLAYZONE_TASK_ID\`.
 - Automation trigger types: \`task_status_change\`, \`task_created\`, \`task_archived\`, \`task_tag_changed\`, \`cron\`, \`manual\`.
+- \`--external-id\` on \`create\`/\`subtask-add\` enables idempotent creation — if a task with the same \`(project, external_provider, external_id)\` exists, the command returns the existing task instead of creating a duplicate.
 - \`slay pty submit\` auto-waits for \`attention\` state on AI modes and encodes newlines via Kitty protocol.
 - Asset content via stdin for \`create\` (without \`--copy-from\`), \`write\`, and \`append\`.
 - Reference assets in task descriptions: \`[title](asset:<asset-id>)\`.
