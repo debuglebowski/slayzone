@@ -15,12 +15,27 @@ interface PanelToggleItem {
 interface PanelToggleProps {
   panels: PanelToggleItem[]
   onChange: (id: string, active: boolean) => void
+  variant?: 'raised' | 'flat'
   className?: string
 }
 
-export function PanelToggle({ panels, onChange, className }: PanelToggleProps) {
+const variantStyles = {
+  raised: {
+    container: 'bg-muted',
+    active: 'bg-muted-foreground/20 text-foreground shadow-sm',
+    activeDisabled: 'bg-muted-foreground/20 text-foreground/40 shadow-sm cursor-not-allowed',
+  },
+  flat: {
+    container: 'bg-muted/50',
+    active: 'bg-muted text-foreground shadow-sm',
+    activeDisabled: 'bg-muted text-foreground/40 shadow-sm cursor-not-allowed',
+  },
+}
+
+export function PanelToggle({ panels, onChange, variant = 'flat', className }: PanelToggleProps) {
+  const styles = variantStyles[variant]
   return (
-    <div className={cn('flex items-center bg-surface-2 rounded-lg p-1 gap-1', className)}>
+    <div className={cn('flex items-center rounded-lg p-1 gap-1', styles.container, className)}>
       {panels.map((panel) => (
         <Tooltip key={panel.id}>
           <TooltipTrigger asChild>
@@ -31,10 +46,10 @@ export function PanelToggle({ panels, onChange, className }: PanelToggleProps) {
                 'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
                 panel.disabled
                   ? panel.active
-                    ? 'bg-muted text-foreground/40 shadow-sm cursor-not-allowed'
+                    ? styles.activeDisabled
                     : 'text-muted-foreground/40 cursor-not-allowed'
                   : panel.active
-                    ? 'bg-muted text-foreground shadow-sm'
+                    ? styles.active
                     : 'text-muted-foreground hover:text-foreground'
               )}
             >

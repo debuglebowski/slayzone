@@ -836,14 +836,15 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
             {selectedAsset && selectedRenderMode && (
               <div className="flex items-center gap-1.5">
                 {hasZoom(selectedRenderMode) && (
-                  <div className="flex items-center gap-1">
-                    <button type="button" className="size-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setZoomLevel(z => Math.max(0.25, z - 0.25))}><ZoomOut className="size-3.5" /></button>
+                  <div className="flex items-center gap-1 bg-surface-2 rounded-lg p-1">
+                    <button type="button" className="size-6 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setZoomLevel(z => Math.max(0.25, z - 0.25))}><ZoomOut className="size-3.5" /></button>
                     <button type="button" className="text-[10px] text-muted-foreground hover:text-foreground min-w-[3ch] text-center" onClick={() => setZoomLevel(1)}>{Math.round(zoomLevel * 100)}%</button>
-                    <button type="button" className="size-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setZoomLevel(z => Math.min(4, z + 0.25))}><ZoomIn className="size-3.5" /></button>
+                    <button type="button" className="size-6 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setZoomLevel(z => Math.min(4, z + 0.25))}><ZoomIn className="size-3.5" /></button>
                   </div>
                 )}
                 {hasPreviewToggle(selectedRenderMode) && (
                   <PanelToggle
+                    variant="raised"
                     panels={[
                       { id: 'preview', icon: Eye, label: 'Preview', active: viewMode === 'preview' },
                       { id: 'split', icon: Columns2, label: 'Split', active: viewMode === 'split' },
@@ -852,18 +853,20 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                     onChange={(id) => setViewMode(id as 'preview' | 'split' | 'raw')}
                   />
                 )}
-                <Select
-                  value={selectedAsset.render_mode ?? '__auto__'}
-                  onValueChange={(v) => updateAsset({ id: selectedAsset.id, renderMode: v === '__auto__' ? null : v as RenderMode })}
-                >
-                  <SelectTrigger size="sm" className="!h-8 text-xs w-auto min-w-0 gap-1.5 px-2.5 border-border"><SelectValue /></SelectTrigger>
-                  <SelectContent position="popper" side="bottom" className="max-h-none overflow-y-visible">
-                    <SelectItem value="__auto__">Auto ({RENDER_MODE_INFO[getEffectiveRenderMode(selectedAsset.title, null)].label})</SelectItem>
-                    {(Object.keys(RENDER_MODE_INFO) as RenderMode[]).map((mode) => (
-                      <SelectItem key={mode} value={mode}>{RENDER_MODE_INFO[mode].label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="bg-surface-2 rounded-lg p-1">
+                  <Select
+                    value={selectedAsset.render_mode ?? '__auto__'}
+                    onValueChange={(v) => updateAsset({ id: selectedAsset.id, renderMode: v === '__auto__' ? null : v as RenderMode })}
+                  >
+                    <SelectTrigger size="sm" className="!h-7 text-xs w-auto min-w-0 gap-1.5 px-2.5 border-0 bg-transparent"><SelectValue /></SelectTrigger>
+                    <SelectContent position="popper" side="bottom" className="max-h-none overflow-y-visible">
+                      <SelectItem value="__auto__">Auto ({RENDER_MODE_INFO[getEffectiveRenderMode(selectedAsset.title, null)].label})</SelectItem>
+                      {(Object.keys(RENDER_MODE_INFO) as RenderMode[]).map((mode) => (
+                        <SelectItem key={mode} value={mode}>{RENDER_MODE_INFO[mode].label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
             {selectedAsset && (
