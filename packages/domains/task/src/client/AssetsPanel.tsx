@@ -524,6 +524,8 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
       arr.push(a)
       ab.set(a.folder_id, arr)
     }
+    for (const arr of cf.values()) arr.sort((a, b) => a.name.localeCompare(b.name))
+    for (const arr of ab.values()) arr.sort((a, b) => a.title.localeCompare(b.title))
     return { childFolders: cf, assetsByFolder: ab }
   }, [folders, assets])
 
