@@ -258,6 +258,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     if (e.ctrlKey && e.shiftKey && (e.code === 'KeyC' || e.code === 'KeyV') && e.type === 'keydown') {
       return false
     }
+    // macOS: Option+Arrow word navigation.
+    // xterm.js sends \x1b[1;3D (CSI modifier form) but macOS shells
+    // bind \x1bb/\x1bf (Meta-b/f) for word nav. Match iTerm2 behavior.
+    if (navigator.platform.startsWith('Mac') && e.altKey && !e.metaKey && !e.ctrlKey && e.type === 'keydown') {
+      if (e.key === 'ArrowLeft') {
+        window.api.pty.write(sessionId, '\x1bb')
+        return false
+      }
+      if (e.key === 'ArrowRight') {
+        window.api.pty.write(sessionId, '\x1bf')
+        return false
+      }
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'ArrowUp' && e.type === 'keydown') {
       terminalRef.current?.scrollToTop()
       return false
