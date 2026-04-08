@@ -13,9 +13,9 @@ const createInput = (page: Page) => sidebar(page).locator('[data-testid="assets-
 const renameInput = (page: Page) => sidebar(page).locator('[data-testid="assets-rename-input"]')
 
 async function openAssetsPanel(page: Page) {
-  // Cmd+Shift+P toggles assets panel
+  // Cmd+Shift+A toggles assets panel
   if (await assetsPanel(page).isVisible().catch(() => false)) return
-  await page.keyboard.press('Meta+Shift+p')
+  await page.keyboard.press('Meta+Shift+A')
   await expect(assetsPanel(page)).toBeVisible({ timeout: 5_000 })
 }
 
@@ -47,19 +47,19 @@ test.describe('Assets panel', () => {
 
   // --- Group 1: Panel basics ---
 
-  test('assets panel toggles with Cmd+Shift+P', async ({ mainWindow }) => {
+  test('assets panel toggles with Cmd+Shift+A', async ({ mainWindow }) => {
     // Make sure panel is off first
     if (await assetsPanel(mainWindow).isVisible().catch(() => false)) {
-      await mainWindow.keyboard.press('Meta+Shift+p')
+      await mainWindow.keyboard.press('Meta+Shift+A')
       await expect(assetsPanel(mainWindow)).not.toBeVisible({ timeout: 3_000 })
     }
 
     // Toggle on
-    await mainWindow.keyboard.press('Meta+Shift+p')
+    await mainWindow.keyboard.press('Meta+Shift+A')
     await expect(assetsPanel(mainWindow)).toBeVisible({ timeout: 5_000 })
 
     // Toggle off
-    await mainWindow.keyboard.press('Meta+Shift+p')
+    await mainWindow.keyboard.press('Meta+Shift+A')
     await expect(assetsPanel(mainWindow)).not.toBeVisible({ timeout: 3_000 })
   })
 

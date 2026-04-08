@@ -388,6 +388,8 @@ export interface ElectronAPI {
     adjustZoom: (command: 'in' | 'out' | 'reset') => Promise<number>
     isPlaywright: boolean
     onGoHome: (callback: () => void) => () => void
+    onToggleAttentionPanel: (callback: () => void) => () => void
+    onToggleAgentPanel: (callback: () => void) => () => void
     onOpenSettings: (callback: () => void) => () => void
     onOpenProjectSettings: (callback: () => void) => () => void
     onNewTemporaryTask: (callback: () => void) => () => void

@@ -39,7 +39,15 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
     const raw = await api().settings.get(SETTINGS_KEY)
     if (raw) {
       try {
-        set({ overrides: JSON.parse(raw), loaded: true })
+        const parsed = JSON.parse(raw)
+        // Migrate: attention-panel was changed from mod+shift+a to ctrl+.
+        // Remove stale override so users get the new default
+        if (parsed['attention-panel'] === 'mod+shift+a') {
+          delete parsed['attention-panel']
+          await api().settings.set(SETTINGS_KEY, JSON.stringify(parsed))
+          api().shortcuts.changed()
+        }
+        set({ overrides: parsed, loaded: true })
       } catch {
         set({ loaded: true })
       }

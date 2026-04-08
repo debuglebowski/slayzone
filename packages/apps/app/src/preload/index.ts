@@ -161,6 +161,16 @@ const api: ElectronAPI = {
       ipcRenderer.on('app:go-home', handler)
       return () => ipcRenderer.removeListener('app:go-home', handler)
     },
+    onToggleAttentionPanel: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('app:toggle-attention-panel', handler)
+      return () => ipcRenderer.removeListener('app:toggle-attention-panel', handler)
+    },
+    onToggleAgentPanel: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('app:toggle-agent-panel', handler)
+      return () => ipcRenderer.removeListener('app:toggle-agent-panel', handler)
+    },
     onOpenSettings: (callback: () => void) => {
       const handler = () => callback()
       ipcRenderer.on('app:open-settings', handler)

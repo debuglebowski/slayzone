@@ -699,6 +699,16 @@ function createMainWindow(): void {
       event.preventDefault()
       mainWindow?.webContents.send('app:reload-app')
     }
+
+    if (matchesElectronInput(ei, getEffectiveKeys('attention-panel', currentOverrides))) {
+      event.preventDefault()
+      mainWindow?.webContents.send('app:toggle-attention-panel')
+    }
+
+    if (matchesElectronInput(ei, getEffectiveKeys('agent-panel', currentOverrides))) {
+      event.preventDefault()
+      mainWindow?.webContents.send('app:toggle-agent-panel')
+    }
   })
 
   // HMR for renderer base on electron-vite cli.
