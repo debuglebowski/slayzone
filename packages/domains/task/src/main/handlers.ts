@@ -85,7 +85,8 @@ function parseTask(row: Record<string, unknown> | undefined): Task | null {
     editor_open_files: safeJsonParse(row.editor_open_files),
     merge_context: safeJsonParse(row.merge_context),
     loop_config: safeJsonParse(row.loop_config),
-    is_temporary: Boolean(row.is_temporary)
+    is_temporary: Boolean(row.is_temporary),
+    is_blocked: Boolean(row.is_blocked)
   } as Task
 }
 
@@ -454,6 +455,8 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.loopConfig !== undefined) { fields.push('loop_config = ?'); values.push(data.loopConfig ? JSON.stringify(data.loopConfig) : null) }
   if (data.snoozedUntil !== undefined) { fields.push('snoozed_until = ?'); values.push(data.snoozedUntil) }
   if (data.isTemporary !== undefined) { fields.push('is_temporary = ?'); values.push(data.isTemporary ? 1 : 0) }
+  if (data.isBlocked !== undefined) { fields.push('is_blocked = ?'); values.push(data.isBlocked ? 1 : 0) }
+  if (data.blockedComment !== undefined) { fields.push('blocked_comment = ?'); values.push(data.blockedComment) }
   if (data.repoName !== undefined) { fields.push('repo_name = ?'); values.push(data.repoName) }
 
   if (fields.length === 0) {
@@ -805,9 +808,11 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
 
   ipcMain.handle('db:taskDependencies:getAllBlockedTaskIds', () => {
     const rows = db
-      .prepare('SELECT DISTINCT blocks_task_id FROM task_dependencies')
-      .all() as { blocks_task_id: string }[]
-    return rows.map((r) => r.blocks_task_id)
+      .prepare(`SELECT DISTINCT blocks_task_id AS id FROM task_dependencies
+        UNION
+        SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL`)
+      .all() as { id: string }[]
+    return rows.map((r) => r.id)
   })
 
   ipcMain.handle('db:taskDependencies:getBlocking', (_, taskId: string) => {
@@ -878,15 +883,17 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     }
 
     const blockedRows = db
-      .prepare('SELECT DISTINCT blocks_task_id FROM task_dependencies')
-      .all() as { blocks_task_id: string }[]
+      .prepare(`SELECT DISTINCT blocks_task_id AS id FROM task_dependencies
+        UNION
+        SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL`)
+      .all() as { id: string }[]
 
     return {
       tasks: parseTasks(taskRows),
       projects: projectRows.map((row) => parseProject(row)!),
       tags: tagRows,
       taskTags: taskTagMap,
-      blockedTaskIds: blockedRows.map((r) => r.blocks_task_id)
+      blockedTaskIds: blockedRows.map((r) => r.id)
     }
   })
 

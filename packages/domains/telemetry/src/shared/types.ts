@@ -34,6 +34,8 @@ export type TelemetryEventName =
   | 'task_moved_to_project'
   | 'task_snoozed'
   | 'task_unsnoozed'
+  | 'task_blocked'
+  | 'task_unblocked'
   | 'due_date_set'
   | 'copy_title'
   | 'copy_link'
@@ -161,6 +163,8 @@ export interface TelemetryEventProps {
   task_moved_to_project: Record<string, never>
   task_snoozed: Record<string, never>
   task_unsnoozed: Record<string, never>
+  task_blocked: { hasComment?: string }
+  task_unblocked: Record<string, never>
   due_date_set: Record<string, never>
   copy_title: Record<string, never>
   copy_link: Record<string, never>

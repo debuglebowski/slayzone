@@ -278,6 +278,9 @@ export interface Task {
   snoozed_until: string | null
   // Temporary task (ephemeral terminal tab, deleted on close)
   is_temporary: boolean
+  // Standalone blocked flag (independent of task_dependencies)
+  is_blocked: boolean
+  blocked_comment: string | null
   // Pull request
   pr_url: string | null
   // Multi-repo: folder name of the child repo this task is scoped to
@@ -371,6 +374,9 @@ export interface UpdateTaskInput {
   prUrl?: string | null
   // Temporary task
   isTemporary?: boolean
+  // Blocked
+  isBlocked?: boolean
+  blockedComment?: string | null
   // Multi-repo
   repoName?: string | null
 }

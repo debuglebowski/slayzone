@@ -1863,6 +1863,15 @@ const migrations: Migration[] = [
         ALTER TABLE task_assets ADD COLUMN folder_id TEXT DEFAULT NULL REFERENCES asset_folders(id) ON DELETE SET NULL;
       `)
     }
+  },
+  {
+    version: 100,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE tasks ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN blocked_comment TEXT DEFAULT NULL;
+      `)
+    }
   }
 ]
 

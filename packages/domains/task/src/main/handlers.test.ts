@@ -425,6 +425,29 @@ describe('db:tasks:update', () => {
     }) as Task
     expect(moved.provider_config['claude-code']?.conversationId).toBe('new-conv')
   })
+
+  test('sets is_blocked and blocked_comment', () => {
+    const t = createTask('BlockMe')
+    const updated = h.invoke('db:tasks:update', {
+      id: t.id,
+      isBlocked: true,
+      blockedComment: 'waiting on deploy'
+    }) as Task
+    expect(updated.is_blocked).toBe(true)
+    expect(updated.blocked_comment).toBe('waiting on deploy')
+  })
+
+  test('clears blocked state', () => {
+    const t = createTask('UnblockMe')
+    h.invoke('db:tasks:update', { id: t.id, isBlocked: true, blockedComment: 'reason' })
+    const updated = h.invoke('db:tasks:update', {
+      id: t.id,
+      isBlocked: false,
+      blockedComment: null
+    }) as Task
+    expect(updated.is_blocked).toBe(false)
+    expect(updated.blocked_comment).toBeNull()
+  })
 })
 
 // --- Archive ---
@@ -568,6 +591,31 @@ describe('db:taskDependencies', () => {
     h.invoke('db:taskDependencies:addBlocker', t1.id, t2.id) // no-op
     const blockers = h.invoke('db:taskDependencies:getBlockers', t1.id) as Task[]
     expect(blockers).toHaveLength(1)
+  })
+
+  test('getAllBlockedTaskIds includes dependency-blocked tasks', () => {
+    const t1 = createTask('DepBlocked')
+    const t2 = createTask('DepBlocker')
+    h.invoke('db:taskDependencies:addBlocker', t1.id, t2.id)
+    const ids = h.invoke('db:taskDependencies:getAllBlockedTaskIds') as string[]
+    expect(ids).toContain(t1.id)
+  })
+
+  test('getAllBlockedTaskIds includes is_blocked=1 tasks', () => {
+    const t = createTask('FlagBlocked')
+    h.invoke('db:tasks:update', { id: t.id, isBlocked: true })
+    const ids = h.invoke('db:taskDependencies:getAllBlockedTaskIds') as string[]
+    expect(ids).toContain(t.id)
+  })
+
+  test('getAllBlockedTaskIds unions both sources without duplicates', () => {
+    const t1 = createTask('BothBlocked')
+    const t2 = createTask('BothBlocker')
+    h.invoke('db:taskDependencies:addBlocker', t1.id, t2.id)
+    h.invoke('db:tasks:update', { id: t1.id, isBlocked: true })
+    const ids = h.invoke('db:taskDependencies:getAllBlockedTaskIds') as string[]
+    const matches = ids.filter(id => id === t1.id)
+    expect(matches).toHaveLength(1)
   })
 })
 

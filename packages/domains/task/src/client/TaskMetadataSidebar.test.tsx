@@ -9,6 +9,15 @@ vi.mock('@slayzone/ui', () => {
   const Button = ({ children, variant: _variant, size: _size, ...props }: any) => <button {...props}>{children}</button>
   const Input = (props: any) => <input {...props} />
 
+  const SplitButton = ({ children, onClick, menu }: any) => (
+    <div>
+      <button onClick={onClick}>{children}</button>
+      {menu(() => {})}
+    </div>
+  )
+  const SplitButtonItem = ({ children, onClick }: any) => <button onClick={onClick}>{children}</button>
+  const Textarea = (props: any) => <textarea {...props} />
+
   return {
     Select: Passthrough,
     SelectContent: Passthrough,
@@ -18,9 +27,16 @@ vi.mock('@slayzone/ui', () => {
     Popover: Passthrough,
     PopoverContent: ({ children }: any) => <div>{children}</div>,
     PopoverTrigger: ({ children }: any) => <>{children}</>,
+    Dialog: Passthrough,
+    DialogContent: Passthrough,
+    DialogHeader: Passthrough,
+    DialogTitle: ({ children }: any) => <div>{children}</div>,
     Calendar: () => null,
     Button,
     Input,
+    Textarea,
+    SplitButton,
+    SplitButtonItem,
     Tooltip: Passthrough,
     TooltipTrigger: ({ children }: any) => <>{children}</>,
     TooltipContent: ({ children }: any) => <div>{children}</div>,
@@ -105,6 +121,8 @@ function makeTask(overrides: Record<string, unknown> = {}) {
     loop_config: null,
     snoozed_until: null,
     is_temporary: false,
+    is_blocked: false,
+    blocked_comment: null,
     pr_url: null,
     repo_name: null,
     linear_url: null,
@@ -141,10 +159,10 @@ const extraBlockerTask = makeTask({ id: 'blocker-2', title: 'Refactor auth', sta
 const availableTask = makeTask({ id: 'candidate-1', title: 'Ship docs', status: 'waiting', project_id: 'project-2' })
 const doneTask = makeTask({ id: 'candidate-2', title: 'Already done', status: 'done', project_id: 'project-1' })
 
-function renderSidebar() {
+function renderSidebar(taskOverrides?: Record<string, unknown>) {
   return render(
     <TaskMetadataSidebar
-      task={makeTask()}
+      task={makeTask(taskOverrides)}
       tags={[]}
       taskTagIds={[]}
       onUpdate={vi.fn()}
@@ -158,7 +176,7 @@ beforeEach(() => {
     db: {
       getTasks: vi.fn().mockResolvedValue([blockerTask, extraBlockerTask, availableTask, doneTask]),
       getProjects: vi.fn().mockResolvedValue(projects),
-      updateTask: vi.fn()
+      updateTask: vi.fn().mockResolvedValue(makeTask())
     },
     taskDependencies: {
       getBlockers: vi.fn().mockResolvedValue([blockerTask, extraBlockerTask]),
@@ -223,5 +241,51 @@ describe('TaskMetadataSidebar', () => {
     })
 
     expect(within(blockerResults).queryByText('Fix API')).toBeNull()
+  })
+
+  it('shows "Set blocked" when task is not blocked', async () => {
+    renderSidebar({ is_blocked: false })
+    await screen.findByText('Fix API')
+    expect(screen.getAllByRole('button', { name: 'Set blocked' }).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows "Unblock" when task is blocked', async () => {
+    renderSidebar({ is_blocked: true })
+    await screen.findByText('Fix API')
+    expect(screen.getByRole('button', { name: 'Unblock' })).toBeDefined()
+  })
+
+  it('clicking "Set blocked" calls updateTask with isBlocked: true', async () => {
+    renderSidebar({ is_blocked: false })
+    await screen.findByText('Fix API')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Set blocked' })[0])
+    await waitFor(() => {
+      expect(window.api.db.updateTask).toHaveBeenCalledWith({ id: 'task-1', isBlocked: true })
+    })
+  })
+
+  it('clicking "Unblock" calls updateTask with isBlocked: false', async () => {
+    renderSidebar({ is_blocked: true })
+    await screen.findByText('Fix API')
+    fireEvent.click(screen.getByRole('button', { name: 'Unblock' }))
+    await waitFor(() => {
+      expect(window.api.db.updateTask).toHaveBeenCalledWith({ id: 'task-1', isBlocked: false, blockedComment: null })
+    })
+  })
+
+  it('displays blocked_comment when present', async () => {
+    renderSidebar({ is_blocked: true, blocked_comment: 'waiting on API' })
+    await screen.findByText('Fix API')
+    expect(screen.getByText('waiting on API')).toBeDefined()
+  })
+
+  it('clearing blocked_comment calls updateTask', async () => {
+    renderSidebar({ is_blocked: true, blocked_comment: 'waiting on API' })
+    const commentText = await screen.findByText('waiting on API')
+    const removeBtn = commentText.closest('div')!.querySelector('button')!
+    fireEvent.click(removeBtn)
+    await waitFor(() => {
+      expect(window.api.db.updateTask).toHaveBeenCalledWith({ id: 'task-1', blockedComment: null })
+    })
   })
 })

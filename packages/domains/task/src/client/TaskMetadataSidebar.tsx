@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
-import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, Loader2, X, AlarmClock, SearchIcon } from 'lucide-react'
+import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, ListChecks, Loader2, MessageSquare, X, AlarmClock, SearchIcon } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import { priorityOptions } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -16,6 +16,8 @@ import {
   SelectValue
 } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
+import { SplitButton, SplitButtonItem } from '@slayzone/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Calendar } from '@slayzone/ui'
 import { Button } from '@slayzone/ui'
 import {
@@ -23,7 +25,8 @@ import {
   cn,
   getColumnStatusStyle,
   Input,
-  PriorityIcon
+  PriorityIcon,
+  Textarea
 } from '@slayzone/ui'
 import { toast } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
@@ -81,6 +84,9 @@ export function TaskMetadataSidebar({
   const [blockers, setBlockers] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [addBlockerSearch, setAddBlockerSearch] = useState('')
+  const [blockerDialogOpen, setBlockerDialogOpen] = useState(false)
+  const [commentDialogOpen, setCommentDialogOpen] = useState(false)
+  const [blockedComment, setBlockedComment] = useState('')
 
   // Load all tasks and current blockers
   useEffect(() => {
@@ -110,6 +116,30 @@ export function TaskMetadataSidebar({
   const handleRemoveBlocker = async (blockerTaskId: string): Promise<void> => {
     await window.api.taskDependencies.removeBlocker(task.id, blockerTaskId)
     setBlockers(blockers.filter((b) => b.id !== blockerTaskId))
+  }
+
+  const handleSetBlocked = async (): Promise<void> => {
+    track('task_blocked', {})
+    const updated = await window.api.db.updateTask({ id: task.id, isBlocked: true })
+    onUpdate(updated)
+  }
+
+  const handleUnblock = async (): Promise<void> => {
+    track('task_unblocked')
+    const updated = await window.api.db.updateTask({ id: task.id, isBlocked: false, blockedComment: null })
+    onUpdate(updated)
+  }
+
+  const handleSetBlockedWithComment = async (): Promise<void> => {
+    track('task_blocked', { hasComment: 'true' })
+    const updated = await window.api.db.updateTask({
+      id: task.id,
+      isBlocked: true,
+      blockedComment: blockedComment.trim() || null
+    })
+    onUpdate(updated)
+    setCommentDialogOpen(false)
+    setBlockedComment('')
   }
 
   const columnsByProject = new Map(projects.map((project) => [project.id, project.columns_config]))
@@ -361,6 +391,20 @@ export function TaskMetadataSidebar({
       {/* Blocked By */}
       <div>
         <label className="mb-1 block text-sm text-muted-foreground">Blocked By</label>
+        {task.blocked_comment && (
+          <div className="mb-2 flex items-start gap-2 rounded bg-muted/50 px-2 py-1.5 text-sm text-muted-foreground">
+            <span className="flex-1 whitespace-pre-wrap">{task.blocked_comment}</span>
+            <button
+              onClick={async () => {
+                const updated = await window.api.db.updateTask({ id: task.id, blockedComment: null })
+                onUpdate(updated)
+              }}
+              className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
         {blockers.length > 0 && (
           <div className="mb-2 space-y-1">
             {blockers.map((blocker) => (
@@ -380,13 +424,37 @@ export function TaskMetadataSidebar({
             ))}
           </div>
         )}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="w-full">
-              Add blocker
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-[250px] p-2" align="start">
+
+        {/* Split button: Set blocked / Unblock */}
+        <SplitButton
+          onClick={task.is_blocked ? handleUnblock : handleSetBlocked}
+          className="flex-1"
+          menu={(close) => (
+            <>
+              <SplitButtonItem onClick={() => { close(); setBlockerDialogOpen(true) }}>
+                <ListChecks className="h-3 w-3 shrink-0 text-muted-foreground" />
+                Set blocking task
+              </SplitButtonItem>
+              <SplitButtonItem onClick={() => {
+                close()
+                setBlockedComment(task.blocked_comment ?? '')
+                setCommentDialogOpen(true)
+              }}>
+                <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
+                Set blocked with comment
+              </SplitButtonItem>
+            </>
+          )}
+        >
+          {task.is_blocked ? 'Unblock' : 'Set blocked'}
+        </SplitButton>
+
+        {/* Blocking task dialog */}
+        <Dialog open={blockerDialogOpen} onOpenChange={(open) => { setBlockerDialogOpen(open); if (!open) setAddBlockerSearch('') }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Add blocking task</DialogTitle>
+            </DialogHeader>
             {availableBlockers.length === 0 ? (
               <p className="text-sm text-muted-foreground">No tasks available</p>
             ) : (
@@ -408,7 +476,7 @@ export function TaskMetadataSidebar({
                     {filteredAvailableBlockers.map((t) => (
                       <button
                         key={t.id}
-                        onClick={() => handleAddBlocker(t.id)}
+                        onClick={() => { handleAddBlocker(t.id); setBlockerDialogOpen(false) }}
                         className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
                       >
                         <BlockerStatusIcon task={t} columns={columnsByProject.get(t.project_id)} />
@@ -419,8 +487,27 @@ export function TaskMetadataSidebar({
                 )}
               </div>
             )}
-          </PopoverContent>
-        </Popover>
+          </DialogContent>
+        </Dialog>
+
+        {/* Blocked with comment dialog */}
+        <Dialog open={commentDialogOpen} onOpenChange={(open) => { setCommentDialogOpen(open); if (!open) setBlockedComment('') }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Set blocked with comment</DialogTitle>
+            </DialogHeader>
+            <Textarea
+              value={blockedComment}
+              onChange={(e) => setBlockedComment(e.target.value)}
+              placeholder="Why is this task blocked?"
+              rows={3}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCommentDialogOpen(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleSetBlockedWithComment}>Set blocked</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
     </div>
