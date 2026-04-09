@@ -6,14 +6,22 @@ import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
 import { keymap, highlightWhitespace } from '@codemirror/view'
 import { indentMore, indentLess } from '@codemirror/commands'
-import { indentUnit } from '@codemirror/language'
+import { indentUnit, LRLanguage, LanguageSupport } from '@codemirror/language'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
 import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { markdown } from '@codemirror/lang-markdown'
 import { python } from '@codemirror/lang-python'
+import { go } from '@codemirror/lang-go'
+import { yaml } from '@codemirror/lang-yaml'
+import { sql } from '@codemirror/lang-sql'
+import { hcl } from 'codemirror-lang-hcl'
+import { parser as tomlParser } from 'lezer-toml'
 import { buildCodeMirrorTheme } from './codemirror-theme'
+
+const tomlLanguage = LRLanguage.define({ parser: tomlParser })
+function toml() { return new LanguageSupport(tomlLanguage) }
 
 function getLanguage(filePath: string) {
   const ext = filePath.split('.').pop()?.toLowerCase()
@@ -38,6 +46,18 @@ function getLanguage(filePath: string) {
       return markdown()
     case 'py':
       return python()
+    case 'go':
+      return go()
+    case 'yaml':
+    case 'yml':
+      return yaml()
+    case 'sql':
+      return sql()
+    case 'toml':
+      return toml()
+    case 'tf':
+    case 'tfvars':
+      return hcl()
     default:
       return null
   }
