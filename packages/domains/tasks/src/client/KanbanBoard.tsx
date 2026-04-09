@@ -24,6 +24,7 @@ import { KanbanColumn } from './KanbanColumn'
 import { KanbanCard } from './KanbanCard'
 import { KanbanPicker } from './KanbanPicker'
 import { useKanbanKeyboard } from './useKanbanKeyboard'
+import { BlockerDialog } from './BlockerDialog'
 import { useAppearance, useDialogStore } from '@slayzone/settings/client'
 import { track } from '@slayzone/telemetry/client'
 
@@ -111,6 +112,8 @@ export function KanbanBoard({
     setHoveredTaskId,
     pickerState,
     closePickerState,
+    blockerDialogTaskId,
+    closeBlockerDialog,
     cardRefs
   } = useKanbanKeyboard({
     columns: visibleColumns,
@@ -285,6 +288,11 @@ export function KanbanBoard({
           cardRefs={cardRefs}
         />
       )}
+      <BlockerDialog
+        taskId={blockerDialogTaskId}
+        projects={allProjects}
+        onClose={closeBlockerDialog}
+      />
     </DndContext>
   )
 }

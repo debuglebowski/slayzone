@@ -23,6 +23,8 @@ interface UseKanbanKeyboardReturn {
   setHoveredTaskId: (id: string | null) => void
   pickerState: PickerState | null
   closePickerState: () => void
+  blockerDialogTaskId: string | null
+  closeBlockerDialog: () => void
   cardRefs: React.MutableRefObject<Map<string, HTMLDivElement>>
 }
 
@@ -36,6 +38,7 @@ export function useKanbanKeyboard({
   // Keyboard focus only — mouse hover never touches this
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [pickerState, setPickerState] = useState<PickerState | null>(null)
+  const [blockerDialogTaskId, setBlockerDialogTaskId] = useState<string | null>(null)
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   // Tracks mouse hover position to seed keyboard navigation start — ref so it doesn't trigger re-renders
   const hoveredTaskIdRef = useRef<string | null>(null)
@@ -180,6 +183,24 @@ export function useKanbanKeyboard({
     setPickerState({ type: 'priority', taskId: focusedTaskId })
   }, { enabled })
 
+  useGuardedHotkeys('b', (e) => {
+    if (!focusedTaskId || !onUpdateTask) return
+    e.preventDefault()
+    const task = findTask(focusedTaskId)
+    if (task) {
+      onUpdateTask(focusedTaskId, {
+        is_blocked: !task.is_blocked,
+        ...(task.is_blocked ? { blocked_comment: null } : {})
+      } as Partial<Task>)
+    }
+  }, { enabled })
+
+  useGuardedHotkeys('shift+b', (e) => {
+    if (!focusedTaskId) return
+    e.preventDefault()
+    setBlockerDialogTaskId(focusedTaskId)
+  }, { enabled })
+
   useGuardedHotkeys('escape', (e) => {
     if (pickerState) {
       e.preventDefault()
@@ -205,6 +226,8 @@ export function useKanbanKeyboard({
       setPickerState(null)
       requestAnimationFrame(() => { pickerClosingRef.current = false })
     }, []),
+    blockerDialogTaskId,
+    closeBlockerDialog: useCallback(() => setBlockerDialogTaskId(null), []),
     cardRefs
   }
 }

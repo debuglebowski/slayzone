@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState } from 'react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -31,17 +31,17 @@ import {
   DialogHeader,
   DialogTitle
 } from '@slayzone/ui'
-import { Button, Input, Textarea } from '@slayzone/ui'
+import { Button, Textarea } from '@slayzone/ui'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
-import { isTerminalStatus } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
-import { Plus, AlarmClock, X, CircleDot, Signal, Tag as TagIcon, FolderInput, Copy, Archive, Trash2, ShieldAlert, ListChecks, MessageSquare, SearchIcon, Check } from 'lucide-react'
+import { Plus, AlarmClock, X, CircleDot, Signal, Tag as TagIcon, FolderInput, Copy, Archive, Trash2, ShieldAlert, ListChecks, MessageSquare, Check } from 'lucide-react'
 import { track } from '@slayzone/telemetry/client'
 import { format } from 'date-fns'
-import { getSnoozePresets, CustomSnoozeDialog, BlockerStatusIcon } from '@slayzone/task/client'
+import { getSnoozePresets, CustomSnoozeDialog } from '@slayzone/task/client'
+import { BlockerDialog } from './BlockerDialog'
 
 interface TaskContextMenuProps {
   task: Task
@@ -87,15 +87,7 @@ export function TaskContextMenu({
   const [blockerDialogOpen, setBlockerDialogOpen] = useState(false)
   const [commentDialogOpen, setCommentDialogOpen] = useState(false)
   const [blockedComment, setBlockedComment] = useState('')
-  const [allTasks, setAllTasks] = useState<Task[]>([])
-  const [blockers, setBlockers] = useState<Task[]>([])
-  const [addBlockerSearch, setAddBlockerSearch] = useState('')
   const statusOptions = buildStatusOptions(columns)
-
-  const columnsByProject = useMemo(
-    () => new Map(projects.map((p) => [p.id, p.columns_config])),
-    [projects]
-  )
 
   const handleStatusChange = (status: string): void => {
     track('task_status_changed', { from: task.status, to: status })
@@ -165,12 +157,6 @@ export function TaskContextMenu({
     }
   }
 
-  const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
-    await window.api.taskDependencies.addBlocker(task.id, blockerTaskId)
-    setBlockerDialogOpen(false)
-    window.dispatchEvent(new CustomEvent('slayzone:blocked-changed'))
-  }
-
   const handleSetBlockedWithComment = async (): Promise<void> => {
     track('task_blocked', { hasComment: 'true' })
     onUpdateTask(task.id, { is_blocked: true, blocked_comment: blockedComment.trim() || null } as Partial<Task>)
@@ -178,32 +164,11 @@ export function TaskContextMenu({
     setBlockedComment('')
   }
 
-  // Lazy-load data for blocker dialog
-  useEffect(() => {
-    if (!blockerDialogOpen) return
-    Promise.all([
-      window.api.db.getTasks(),
-      window.api.taskDependencies.getBlockers(task.id)
-    ]).then(([tasks, currentBlockers]) => {
-      setAllTasks(tasks.filter((t) => t.id !== task.id))
-      setBlockers(currentBlockers)
-      setAddBlockerSearch('')
-    })
-  }, [blockerDialogOpen, task.id])
-
-  const availableBlockers = allTasks.filter(
-    (t) => !isTerminalStatus(t.status, columnsByProject.get(t.project_id)) && !blockers.some((b) => b.id === t.id)
-  )
-  const filteredAvailableBlockers = availableBlockers.filter((t) => {
-    const q = addBlockerSearch.trim().toLowerCase()
-    return !q || t.title.toLowerCase().includes(q)
-  })
-
   return (
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-        <ContextMenuContent className="w-48">
+        <ContextMenuContent className="w-60">
           {/* Status submenu */}
           <ContextMenuSub>
             <ContextMenuSubTrigger><CircleDot className="mr-2 size-3.5" /><span className="flex-1">Status</span><span className="text-muted-foreground text-xs mr-1.5">S</span></ContextMenuSubTrigger>
@@ -274,12 +239,13 @@ export function TaskContextMenu({
           <ContextMenuItem onSelect={handleToggleBlocked}>
             <ShieldAlert className="size-3.5" />
             <span className="flex-1">Blocked</span>
-            {(isBlocked ?? task.is_blocked) && <Check className="ml-auto size-3.5" />}
+            {(isBlocked ?? task.is_blocked) && <Check className="size-3.5" />}
+            <span className="text-muted-foreground text-xs mr-[22px]">B</span>
           </ContextMenuItem>
 
           {/* Blocked by submenu */}
           <ContextMenuSub>
-            <ContextMenuSubTrigger><ShieldAlert className="mr-2 size-3.5" />Blocked by</ContextMenuSubTrigger>
+            <ContextMenuSubTrigger><ShieldAlert className="mr-2 size-3.5" /><span className="flex-1">Blocked by</span><span className="text-muted-foreground text-xs mr-1.5">&#8679;B</span></ContextMenuSubTrigger>
             <ContextMenuSubContent>
               <ContextMenuItem onSelect={() => setBlockerDialogOpen(true)}>
                 <ListChecks className="mr-2 size-3.5" />
@@ -433,45 +399,11 @@ export function TaskContextMenu({
       )}
 
       {/* Blocking task dialog */}
-      <Dialog open={blockerDialogOpen} onOpenChange={(open) => { setBlockerDialogOpen(open); if (!open) setAddBlockerSearch('') }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Add blocking task</DialogTitle>
-          </DialogHeader>
-          {availableBlockers.length === 0 && !addBlockerSearch ? (
-            <p className="text-sm text-muted-foreground">No tasks available</p>
-          ) : (
-            <div className="space-y-2">
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={addBlockerSearch}
-                  onChange={(e) => setAddBlockerSearch(e.target.value)}
-                  aria-label="Search available blockers"
-                  placeholder="Search tasks..."
-                  className="h-8 pl-8 text-sm"
-                />
-              </div>
-              {filteredAvailableBlockers.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No tasks match your search</p>
-              ) : (
-                <div className="max-h-[200px] space-y-1 overflow-y-auto">
-                  {filteredAvailableBlockers.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => handleAddBlocker(t.id)}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
-                    >
-                      <BlockerStatusIcon task={t} columns={columnsByProject.get(t.project_id)} />
-                      <span className="line-clamp-1 flex-1">{t.title}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <BlockerDialog
+        taskId={blockerDialogOpen ? task.id : null}
+        projects={projects}
+        onClose={() => setBlockerDialogOpen(false)}
+      />
 
       {/* Blocked with comment dialog */}
       <Dialog open={commentDialogOpen} onOpenChange={(open) => { setCommentDialogOpen(open); if (!open) setBlockedComment('') }}>
