@@ -419,18 +419,8 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     e.preventDefault()
     setDragOver(false)
     if (dragAssetIdRef.current) return
-    const paths = (window as unknown as { __slayzone_lastDropPaths?: string[] }).__slayzone_lastDropPaths
-    const filePaths: string[] = []
-    if (paths?.length) {
-      filePaths.push(...paths)
-    } else if (e.dataTransfer.files.length) {
-      for (const file of Array.from(e.dataTransfer.files)) {
-        const fp = (file as unknown as { path?: string }).path
-        if (fp) filePaths.push(fp)
-      }
-    }
+    const filePaths = window.api.files.getDropPaths()
     for (const fp of filePaths) {
-      // Check if it's a directory by trying uploadDir, fall back to uploadAsset
       try {
         await uploadDir(fp)
       } catch {
