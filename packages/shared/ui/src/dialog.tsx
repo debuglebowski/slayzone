@@ -57,7 +57,7 @@ function DialogContent({
     size === 'settings'
       ? 'h-[88vh] !w-[80vw] !max-w-[80vw] p-0'
       : size === 'project-settings'
-      ? 'h-[88vh] !w-[94vw] !max-w-[94vw] xl:!max-w-[1320px] p-0'
+      ? 'h-[88vh] !w-[94vw] !max-w-[94vw] p-0'
       : size === 'xl'
         ? 'w-[min(1200px,92vw)] max-w-[1200px]'
         : ''
@@ -68,7 +68,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          'bg-modal data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border border-[var(--modal-border)] p-6 shadow-lg outline-none sm:max-w-lg',
+          'bg-modal data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border border-[var(--modal-border)] p-6 shadow-lg outline-none',
           // Skip close animation in Playwright to avoid race conditions with dialog re-open
           isPlaywright
             ? 'data-[state=closed]:duration-0 data-[state=open]:duration-200'
@@ -100,7 +100,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn('flex flex-col gap-2 text-center sm:text-left', className)}
+      className={cn('flex flex-col gap-2 text-left', className)}
       {...props}
     />
   )
@@ -110,7 +110,7 @@ function DialogFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="dialog-footer"
-      className={cn('flex flex-col-reverse gap-2 sm:flex-row sm:justify-end', className)}
+      className={cn('flex flex-row justify-end gap-2', className)}
       {...props}
     />
   )

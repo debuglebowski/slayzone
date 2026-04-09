@@ -20,7 +20,7 @@ export function SkillPreviewDialog({ entry, onOpenChange, onAddToLibrary, onAddT
 
   return (
     <Dialog open={!!entry} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col">
+      <DialogContent className="w-[80vw] h-[80vh] max-w-none flex flex-col">
         <DialogHeader>
           <div className="flex items-start justify-between gap-3 pr-6">
             <div className="min-w-0">
