@@ -19,6 +19,57 @@ export interface BuiltinSkillEntry {
 }
 
 export const BUILTIN_SKILLS: BuiltinSkillEntry[] = [
+  // ── Orchestrator ──────────────────────────────────────────────
+
+  {
+    slug: 'slay',
+    name: 'Slay',
+    description: 'Full CLI reference for slay — orchestrates all slay domain skills',
+    category: 'slayzone',
+    author: 'SlayZone',
+    tags: ['slay', 'cli'],
+    content: `---
+name: slay
+description: "Full CLI reference for slay — orchestrates all slay domain skills"
+trigger: auto
+depends_on:
+  - slay-tasks
+  - slay-browser
+  - slay-assets
+  - slay-automations
+  - slay-projects
+  - slay-processes
+  - slay-pty
+  - slay-panels
+---
+
+Use the \`slay\` CLI to interact with the SlayZone task management system. The current task ID is available via \`$SLAYZONE_TASK_ID\` (set automatically in task terminals).
+
+**Global flag:** \`--dev\` — use development database.
+
+All ID arguments support prefix matching (e.g., \`a1b2\` matches the full UUID starting with \`a1b2\`).
+
+## Domains
+
+| Skill | Commands | Purpose |
+|-------|----------|---------|
+| slay-tasks | \`slay tasks\`, \`slay tags\`, \`slay templates\` | Task lifecycle, subtasks, tags, templates |
+| slay-browser | \`slay tasks browser\` | Control the task browser panel |
+| slay-assets | \`slay tasks assets\` | Manage files and folders attached to tasks |
+| slay-automations | \`slay automations\` | Event-driven and cron automations |
+| slay-projects | \`slay projects\` | Project CRUD |
+| slay-processes | \`slay processes\` | Inspect and control running processes |
+| slay-pty | \`slay pty\` | Interact with PTY terminal sessions |
+| slay-panels | \`slay panels\` | Manage custom web panels |
+
+## Other
+
+- \`slay init instructions\` — print SlayZone agent configuration template
+- \`slay init skill\` — print slay skill reference markdown
+- \`slay completions <shell>\` — generate shell completions (fish | zsh | bash)
+\`
+  },
+
   // ── Domain skills ─────────────────────────────────────────────
 
   {
@@ -429,55 +480,3 @@ SlayZone ships with predefined panels for Figma, Notion, GitHub, Excalidraw, and
   Hide the panel from task view without deleting it. The panel config is preserved.
 `
   },
-
-  // ── Orchestrator ──────────────────────────────────────────────
-
-  {
-    slug: 'slay',
-    name: 'Slay CLI',
-    description: 'Full CLI reference for slay — orchestrates all slay domain skills',
-    category: 'slayzone',
-    author: 'SlayZone',
-    tags: ['slay', 'cli'],
-    content: `---
-name: slay
-description: "Full CLI reference for slay — orchestrates all slay domain skills"
-trigger: auto
-depends_on:
-  - slay-tasks
-  - slay-browser
-  - slay-assets
-  - slay-automations
-  - slay-projects
-  - slay-processes
-  - slay-pty
-  - slay-panels
----
-
-Use the \`slay\` CLI to interact with the SlayZone task management system. The current task ID is available via \`$SLAYZONE_TASK_ID\` (set automatically in task terminals).
-
-**Global flag:** \`--dev\` — use development database.
-
-All ID arguments support prefix matching (e.g., \`a1b2\` matches the full UUID starting with \`a1b2\`).
-
-## Domains
-
-| Skill | Commands | Purpose |
-|-------|----------|---------|
-| slay-tasks | \`slay tasks\`, \`slay tags\`, \`slay templates\` | Task lifecycle, subtasks, tags, templates |
-| slay-browser | \`slay tasks browser\` | Control the task browser panel |
-| slay-assets | \`slay tasks assets\` | Manage files and folders attached to tasks |
-| slay-automations | \`slay automations\` | Event-driven and cron automations |
-| slay-projects | \`slay projects\` | Project CRUD |
-| slay-processes | \`slay processes\` | Inspect and control running processes |
-| slay-pty | \`slay pty\` | Interact with PTY terminal sessions |
-| slay-panels | \`slay panels\` | Manage custom web panels |
-
-## Other
-
-- \`slay init instructions\` — print SlayZone agent configuration template
-- \`slay init skill\` — print slay skill reference markdown
-- \`slay completions <shell>\` — generate shell completions (fish | zsh | bash)
-`
-  },
-]
