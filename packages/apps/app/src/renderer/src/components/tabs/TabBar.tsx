@@ -369,7 +369,7 @@ export function TabBar({
                   key={tab.taskId}
                   tab={tab}
                   index={index}
-                  isActive={index === activeIndex}
+                  isActive={index === activeIndex && activeView === 'tabs'}
                   onTabClick={onTabClick}
                   onTabClose={onTabClose}
                   terminalState={terminalStates?.get(tab.taskId)}
