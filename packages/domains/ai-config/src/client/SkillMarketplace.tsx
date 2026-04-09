@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, ExternalLink, Plus, RefreshCw, Search, Settings2 } from 'lucide-react'
 import { Button, Input, cn, toast } from '@slayzone/ui'
 import type { SkillRegistry, SkillRegistryEntry } from '../shared'
 import { SkillEntryCard } from './SkillEntryCard'
+import { SkillPreviewDialog } from './SkillPreviewDialog'
 import { AddRegistryDialog } from './AddRegistryDialog'
 import { RegistryManageSection } from './RegistryManageSection'
 import { useContextManagerStore } from './useContextManagerStore'
@@ -24,12 +25,12 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const [registries, setRegistries] = useState<SkillRegistry[]>([])
   const [search, setSearch] = useState('')
   const [selectedRegistry, setSelectedRegistry] = useState<string | null>(null)
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [installing, setInstalling] = useState<string | null>(null)
   const [refreshingAll, setRefreshingAll] = useState(false)
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
   const [showAddDialog, setShowAddDialog] = useState(false)
+  const [previewEntry, setPreviewEntry] = useState<SkillRegistryEntry | null>(null)
 
   const loadRegistries = useCallback(async () => {
     const regs = await window.api.aiConfig.marketplace.listRegistries()
@@ -44,13 +45,12 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
       const rows = await window.api.aiConfig.marketplace.listEntries({
         registryId: effectiveRegistryId ?? undefined,
         search: search || undefined,
-        category: selectedCategory ?? undefined
       })
       setEntries(rows)
     } finally {
       setLoading(false)
     }
-  }, [effectiveRegistryId, search, selectedCategory])
+  }, [effectiveRegistryId, search])
 
   useEffect(() => {
     loadRegistries()
@@ -73,14 +73,6 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
       useContextManagerStore.setState({ marketplaceDrillRegistryId: null })
     }
   }, [])
-
-  const categories = useMemo(() => {
-    const cats = new Set<string>()
-    for (const e of entries) {
-      if (e.category) cats.add(e.category)
-    }
-    return Array.from(cats).sort()
-  }, [entries])
 
   const handleAddToLibrary = useCallback(async (entryId: string) => {
     setInstalling(entryId)
@@ -170,20 +162,17 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const handleDrillIn = useCallback((registryId: string) => {
     setActiveRegistryId(registryId)
     setSearch('')
-    setSelectedCategory(null)
   }, [])
 
   const handleDrillOut = useCallback(() => {
     setActiveRegistryId(null)
     setSearch('')
-    setSelectedCategory(null)
   }, [])
 
   const handleBrowseModeChange = useCallback((mode: BrowseMode) => {
     setBrowseMode(mode)
     setActiveRegistryId(null)
     setSearch('')
-    setSelectedCategory(null)
     setSelectedRegistry(null)
   }, [])
 
@@ -303,12 +292,12 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
         <>
           {/* Registries grid (default view, no drill-in) */}
           {browseMode === 'registries' && !activeRegistryId && (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 content-start overflow-y-auto flex-1">
+            <div className="grid gap-3 content-start overflow-y-auto flex-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))' }}>
               {registries.filter(r => r.enabled).map((reg) => (
                 <button
                   key={reg.id}
                   onClick={() => handleDrillIn(reg.id)}
-                  className="rounded-lg border border-border/50 bg-surface-1 p-4 flex flex-col gap-2 text-left hover:border-border transition-colors h-fit"
+                  className="rounded-lg border border-border/50 bg-surface-3 p-4 flex flex-col gap-2 text-left hover:border-border transition-colors h-fit"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-sm font-medium truncate">{reg.name}</h3>
@@ -353,7 +342,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
                   </div>
                   {registries.length > 1 && (
                     <select
-                      className="h-8 rounded-md border border-border/50 bg-surface-1 px-2 text-xs text-foreground"
+                      className="h-8 rounded-md border border-border/50 bg-surface-3 px-2 text-xs text-foreground"
                       value={selectedRegistry ?? ''}
                       onChange={(e) => setSelectedRegistry(e.target.value || null)}
                     >
@@ -366,31 +355,6 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
                 </div>
               )}
 
-              {categories.length > 0 && (
-                <div className="flex items-center gap-1 flex-wrap">
-                  <button
-                    className={cn(
-                      'rounded-full px-2.5 py-1 text-[11px] transition-colors',
-                      !selectedCategory ? 'bg-foreground text-background' : 'bg-surface-3 text-muted-foreground hover:text-foreground'
-                    )}
-                    onClick={() => setSelectedCategory(null)}
-                  >
-                    All
-                  </button>
-                  {categories.map((cat) => (
-                    <button
-                      key={cat}
-                      className={cn(
-                        'rounded-full px-2.5 py-1 text-[11px] transition-colors capitalize',
-                        selectedCategory === cat ? 'bg-foreground text-background' : 'bg-surface-3 text-muted-foreground hover:text-foreground'
-                      )}
-                      onClick={() => setSelectedCategory(cat)}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              )}
 
               {loading ? (
                 <div className="flex items-center justify-center py-12 text-xs text-muted-foreground">
@@ -404,7 +368,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 content-start overflow-y-auto flex-1">
+                <div className="grid gap-3 content-start overflow-y-auto flex-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))' }}>
                   {entries.map((entry) => (
                     <SkillEntryCard
                       key={entry.id}
@@ -413,6 +377,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
                       onAddToProject={handleAddToProject}
                       hasProject={hasProject}
                       onUpdate={handleUpdate}
+                      onPreview={setPreviewEntry}
                       installing={installing === entry.id}
                     />
                   ))}
@@ -422,6 +387,16 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
           )}
         </>
       )}
+
+      <SkillPreviewDialog
+        entry={previewEntry}
+        onOpenChange={(open) => !open && setPreviewEntry(null)}
+        onAddToLibrary={handleAddToLibrary}
+        onAddToProject={handleAddToProject}
+        onUpdate={handleUpdate}
+        hasProject={hasProject}
+        installing={previewEntry ? installing === previewEntry.id : false}
+      />
 
       <AddRegistryDialog
         open={showAddDialog}

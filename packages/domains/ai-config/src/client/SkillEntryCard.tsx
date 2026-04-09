@@ -7,16 +7,20 @@ interface SkillEntryCardProps {
   onAddToLibrary: (entryId: string) => void
   onAddToProject: (entryId: string) => void
   onUpdate: (itemId: string, entryId: string) => void
+  onPreview: (entry: SkillRegistryEntry) => void
   hasProject: boolean
   installing?: boolean
 }
 
-export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate, hasProject, installing }: SkillEntryCardProps) {
+export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate, onPreview, hasProject, installing }: SkillEntryCardProps) {
   const isInstalled = !!entry.installed
   const hasUpdate = !!entry.has_update
 
   return (
-    <div className="rounded-lg border border-border/50 bg-surface-1 p-4 flex flex-col gap-3">
+    <div
+      className="rounded-lg border border-border/50 bg-surface-3 p-4 flex flex-col gap-3 cursor-pointer hover:border-border transition-colors"
+      onClick={() => onPreview(entry)}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-medium truncate">{entry.name}</h3>
@@ -33,21 +37,11 @@ export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate
 
       <p className="text-xs text-muted-foreground line-clamp-2 flex-1">{entry.description}</p>
 
-      {entry.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {entry.tags.slice(0, 4).map((tag) => (
-            <span key={tag} className="rounded bg-surface-3/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-
       <div className="flex items-center justify-between pt-1 border-t border-border/30">
         {entry.author && (
           <span className="text-[11px] text-muted-foreground/60">by {entry.author}</span>
         )}
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
           {!isInstalled && (
             <>
               <Button
