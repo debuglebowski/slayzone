@@ -153,7 +153,7 @@ export function AppearanceSettingsTab() {
       {/* Editor */}
       <Card>
         <CardHeader>
-          <CardTitle>Editor</CardTitle>
+          <CardTitle>Editor & Assets</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">

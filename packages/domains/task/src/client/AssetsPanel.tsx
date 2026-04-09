@@ -11,6 +11,8 @@ import type { RenderMode, TaskAsset, AssetFolder } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode, canExportAsPdf, canExportAsPng, canExportAsHtml } from '@slayzone/task/shared'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useAppearance, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
+import { useTheme } from '@slayzone/settings/client'
 import { useAssets } from './useAssets'
 import { AssetFindBar } from './AssetFindBar'
 import { AssetSearchPanel } from './AssetSearchPanel'
@@ -136,6 +138,12 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   onContentReady?: (content: string) => void
   scrollToLineRef?: React.MutableRefObject<((line: number) => void) | null>
 }) {
+  const { notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
+  const { editorThemeId, contentVariant } = useTheme()
+  const themeColors: EditorThemeColors = useMemo(
+    () => getThemeEditorColors(editorThemeId, contentVariant),
+    [editorThemeId, contentVariant]
+  )
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -221,7 +229,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   if (renderMode === 'markdown' && viewMode === 'preview') {
     return (
       <div className="flex-1 overflow-y-auto">
-        <RichTextEditor value={content ?? ''} onChange={handleChange} placeholder="Write markdown..." className="p-3" />
+        <RichTextEditor value={content ?? ''} onChange={handleChange} placeholder="Write markdown..." className="p-3" fontFamily={notesFontFamily} lineSpacing={notesLineSpacing} checkedHighlight={notesCheckedHighlight} showToolbar={notesShowToolbar} spellcheck={notesSpellcheck} themeColors={themeColors} />
       </div>
     )
   }
@@ -231,7 +239,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
       <div className="flex-1 flex flex-row overflow-hidden">
         <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder="Write markdown..." spellCheck={false} />
         <div className="flex-1 border-l border-border overflow-y-auto min-w-0">
-          <div className="prose prose-sm dark:prose-invert max-w-none p-3">
+          <div className={cn('prose prose-sm dark:prose-invert max-w-none p-3', notesLineSpacing === 'compact' && 'prose-tight')}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ''}</ReactMarkdown>
           </div>
         </div>

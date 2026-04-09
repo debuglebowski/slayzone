@@ -420,30 +420,38 @@
   margin-bottom: 0;
 }
 
-/* Compact line spacing for notes editor */
-.prose-tight .ProseMirror > * + * {
+/* Compact line spacing for notes editor and assets */
+.prose-tight .ProseMirror > * + *,
+.prose-tight.prose > * + * {
   margin-top: 0.125em;
 }
 
-.prose-tight .ProseMirror p {
+.prose-tight .ProseMirror p,
+.prose-tight.prose p {
   margin-top: 0.125em;
   margin-bottom: 0.125em;
 }
 
 .prose-tight .ProseMirror ul,
-.prose-tight .ProseMirror ol {
+.prose-tight .ProseMirror ol,
+.prose-tight.prose ul,
+.prose-tight.prose ol {
   margin-top: 0.125em;
   margin-bottom: 0.125em;
 }
 
-.prose-tight .ProseMirror li {
+.prose-tight .ProseMirror li,
+.prose-tight.prose li {
   margin-top: 0;
   margin-bottom: 0;
 }
 
 .prose-tight .ProseMirror h1,
 .prose-tight .ProseMirror h2,
-.prose-tight .ProseMirror h3 {
+.prose-tight .ProseMirror h3,
+.prose-tight.prose h1,
+.prose-tight.prose h2,
+.prose-tight.prose h3 {
   margin-top: 0.375em;
   margin-bottom: 0.125em;
 }
