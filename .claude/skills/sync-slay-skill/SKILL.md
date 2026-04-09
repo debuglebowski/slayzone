@@ -8,10 +8,9 @@ Synchronize the slay CLI reference documentation with the actual CLI source code
 
 ## Targets
 
-The CLI reference lives in two places — both must be updated:
+The CLI reference lives in one place:
 
 1. **`.claude/skills/slay/SKILL.md`** — dev-facing, includes `--dev` reminder and environment variables table
-2. **`packages/apps/cli/src/commands/init.ts`** — the `SKILL` constant output by `slay init skill` (end-user-facing, no dev-specific content)
 
 ## Step 1: Read CLI source files
 
@@ -96,27 +95,7 @@ In `.claude/skills/slay/SKILL.md`, replace ONLY the content between `## Commands
 - `## Environment variables` table
 - `## Notes` section (unless a note references a removed command — update it)
 
-## Step 5: Update init.ts
-
-In `packages/apps/cli/src/commands/init.ts`, replace ONLY the Commands section inside the `SKILL` template literal (between `## Commands\n` and `## Notes\n`).
-
-**Preserve verbatim:**
-- The `INSTRUCTIONS` constant
-- SKILL frontmatter + intro + `## Global flags`
-- `## Notes` section
-- The `initCommand()` function
-
-**Template literal escaping:**
-- Escape all backticks as `` \` ``
-- Escape `${` as `\${` if it appears
-- Follow the existing escaping pattern in the file
-
-**Do NOT add to init.ts:**
-- The `--dev` reminder in intro
-- The HTML comment
-- The `## Environment variables` table
-
-## Step 6: Report changes
+## Step 5: Report changes
 
 After updating, summarize:
 - **Added**: commands in source but not previously documented

@@ -9,7 +9,8 @@
       "@slayzone/terminal/shared": ["../../domains/terminal/src/shared/index.ts"],
       "@slayzone/task/shared/types": ["../../domains/task/src/shared/types.ts"],
       "@slayzone/task/shared/panel-config": ["../../domains/task/src/shared/panel-config.ts"],
-      "@slayzone/task/shared/handoff": ["../../domains/task/src/shared/handoff.ts"]
+      "@slayzone/task/shared/handoff": ["../../domains/task/src/shared/handoff.ts"],
+      "@slayzone/ai-config/shared": ["../../domains/ai-config/src/shared/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,
