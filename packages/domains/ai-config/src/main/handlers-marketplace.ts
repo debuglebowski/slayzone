@@ -408,6 +408,8 @@ function seedBuiltinEntries(db: Database): void {
       fetched_at = excluded.fetched_at
   `)
 
+  const validSlugs = BUILTIN_SKILLS.map(s => s.slug)
+
   db.transaction(() => {
     for (const skill of BUILTIN_SKILLS) {
       const hash = contentHash(skill.content)
@@ -424,5 +426,11 @@ function seedBuiltinEntries(db: Database): void {
         hash
       )
     }
+
+    // Remove stale entries no longer in BUILTIN_SKILLS
+    const placeholders = validSlugs.map(() => '?').join(', ')
+    db.prepare(
+      `DELETE FROM skill_registry_entries WHERE registry_id = ? AND slug NOT IN (${placeholders})`
+    ).run(registryId, ...validSlugs)
   })()
 }
