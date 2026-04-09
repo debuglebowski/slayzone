@@ -125,7 +125,7 @@ function resolveId(explicit?: string): string {
   return id
 }
 
-function printTasks(tasks: TaskRow[]) {
+function printTasks(tasks: TaskRow[], blockedIds?: Set<string>) {
   if (tasks.length === 0) {
     console.log('No tasks found.')
     return
@@ -138,7 +138,8 @@ function printTasks(tasks: TaskRow[]) {
     const id = String(t.id).slice(0, 8).padEnd(idW)
     const status = String(t.status).padEnd(statusW)
     const project = String(t.project_name ?? '').slice(0, 16).padEnd(16)
-    console.log(`${id}  ${status}  ${project}  ${t.title}`)
+    const prefix = blockedIds?.has(t.id) ? '[B] ' : ''
+    console.log(`${id}  ${status}  ${project}  ${prefix}${t.title}`)
   }
 }
 
@@ -206,6 +207,14 @@ export function tasksCommand(): Command {
           }).slice(0, limit)
         : tasks
 
+      // Query blocked task IDs
+      const blockedRows = db.query<{ id: string }>(
+        `SELECT DISTINCT blocks_task_id AS id FROM task_dependencies
+         UNION
+         SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL`
+      )
+      const blockedIds = new Set(blockedRows.map((r) => r.id))
+
       if (opts.json) {
         // Augment with tags and due_date
         const taskIds = filteredTasks.map((t) => t.id)
@@ -225,11 +234,12 @@ export function tasksCommand(): Command {
         }
         const enriched = filteredTasks.map((t) => ({
           ...t,
+          is_blocked: blockedIds.has(t.id),
           tags: tagMap[t.id] ?? [],
         }))
         console.log(JSON.stringify(enriched, null, 2))
       } else {
-        printTasks(filteredTasks)
+        printTasks(filteredTasks, blockedIds)
       }
     })
 
@@ -379,6 +389,17 @@ export function tasksCommand(): Command {
          WHERE tt.task_id = :tid ORDER BY tg.sort_order, tg.name`,
         { ':tid': t.id }
       ).map((r) => r.name)
+
+      const blockers = db.query<{ id: string; title: string }>(
+        `SELECT t.id, t.title FROM tasks t JOIN task_dependencies td ON t.id = td.task_id
+         WHERE td.blocks_task_id = :tid`,
+        { ':tid': t.id }
+      )
+      const blocking = db.query<{ id: string; title: string }>(
+        `SELECT t.id, t.title FROM tasks t JOIN task_dependencies td ON t.id = td.blocks_task_id
+         WHERE td.task_id = :tid`,
+        { ':tid': t.id }
+      )
       db.close()
 
       console.log(`ID:       ${t.id}`)
@@ -388,6 +409,12 @@ export function tasksCommand(): Command {
       console.log(`Project:  ${t.project_name}`)
       if (t.due_date) console.log(`Due:      ${t.due_date}`)
       if (tagNames.length > 0) console.log(`Tags:     ${tagNames.join(', ')}`)
+      if ((t as Record<string, unknown>).is_blocked) {
+        const comment = (t as Record<string, unknown>).blocked_comment
+        console.log(`Blocked:  yes${comment ? ` (${comment})` : ''}`)
+      }
+      if (blockers.length > 0) console.log(`Blockers: ${blockers.map((b) => `${b.id.slice(0, 8)} (${b.title})`).join(', ')}`)
+      if (blocking.length > 0) console.log(`Blocking: ${blocking.map((b) => `${b.id.slice(0, 8)} (${b.title})`).join(', ')}`)
       console.log(`Created:  ${t.created_at}`)
       if (t.description) console.log(`\n${t.description}`)
     })
@@ -858,6 +885,223 @@ export function tasksCommand(): Command {
         console.log(tagNames.join(', '))
       } else {
         console.log('No tags.')
+      }
+    })
+
+  // slay tasks blockers [id]
+  cmd
+    .command('blockers [id]')
+    .description('View or modify tasks that block this task (defaults to $SLAYZONE_TASK_ID)')
+    .option('--add <ids...>', 'Add blocking tasks by ID prefix')
+    .option('--remove <ids...>', 'Remove blocking tasks by ID prefix')
+    .option('--set <ids...>', 'Replace all blockers with these tasks')
+    .option('--clear', 'Remove all blockers')
+    .option('--json', 'Output as JSON')
+    .action(async (taskId, opts) => {
+      taskId = resolveId(taskId)
+      const db = openDb()
+
+      const tasks = db.query<{ id: string }>(
+        `SELECT id FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
+        { ':prefix': taskId }
+      )
+      if (tasks.length === 0) { console.error(`Task not found: ${taskId}`); process.exit(1) }
+      if (tasks.length > 1) {
+        console.error(`Ambiguous id prefix "${taskId}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`)
+        process.exit(1)
+      }
+
+      const task = tasks[0]
+
+      function resolveTaskId(prefix: string): string {
+        if (prefix === task.id || prefix === task.id.slice(0, prefix.length)) {
+          // Check exact self-reference
+          if (prefix === task.id || db.query<{ id: string }>(`SELECT id FROM tasks WHERE id LIKE :p || '%' LIMIT 1`, { ':p': prefix })[0]?.id === task.id) {
+            console.error(`A task cannot block itself.`)
+            process.exit(1)
+          }
+        }
+        const matches = db.query<{ id: string }>(
+          `SELECT id FROM tasks WHERE id LIKE :p || '%' LIMIT 2`,
+          { ':p': prefix }
+        )
+        if (matches.length === 0) { console.error(`Task not found: ${prefix}`); process.exit(1) }
+        if (matches.length > 1) {
+          console.error(`Ambiguous id prefix "${prefix}". Matches: ${matches.map((t) => t.id.slice(0, 8)).join(', ')}`)
+          process.exit(1)
+        }
+        if (matches[0].id === task.id) {
+          console.error(`A task cannot block itself.`)
+          process.exit(1)
+        }
+        return matches[0].id
+      }
+
+      const isWrite = opts.add || opts.remove || opts.set || opts.clear
+
+      if (isWrite) {
+        db.run('BEGIN')
+        try {
+          if (opts.set) {
+            const blockerIds = (opts.set as string[]).map(resolveTaskId)
+            db.run(`DELETE FROM task_dependencies WHERE blocks_task_id = :tid`, { ':tid': task.id })
+            for (const bid of blockerIds) {
+              db.run(`INSERT OR IGNORE INTO task_dependencies (task_id, blocks_task_id) VALUES (:bid, :tid)`, { ':bid': bid, ':tid': task.id })
+            }
+          } else if (opts.add) {
+            for (const prefix of opts.add as string[]) {
+              const bid = resolveTaskId(prefix)
+              db.run(`INSERT OR IGNORE INTO task_dependencies (task_id, blocks_task_id) VALUES (:bid, :tid)`, { ':bid': bid, ':tid': task.id })
+            }
+          } else if (opts.remove) {
+            for (const prefix of opts.remove as string[]) {
+              const bid = resolveTaskId(prefix)
+              db.run(`DELETE FROM task_dependencies WHERE task_id = :bid AND blocks_task_id = :tid`, { ':bid': bid, ':tid': task.id })
+            }
+          } else if (opts.clear) {
+            db.run(`DELETE FROM task_dependencies WHERE blocks_task_id = :tid`, { ':tid': task.id })
+          }
+          db.run('COMMIT')
+        } catch (e) {
+          db.run('ROLLBACK')
+          throw e
+        }
+      }
+
+      // Show current blockers
+      const blockers = db.query<TaskRow>(
+        `SELECT t.id, t.project_id, t.title, t.status, t.priority, p.name AS project_name, t.created_at
+         FROM tasks t JOIN task_dependencies td ON t.id = td.task_id
+         JOIN projects p ON t.project_id = p.id
+         WHERE td.blocks_task_id = :tid`,
+        { ':tid': task.id }
+      )
+      db.close()
+
+      if (isWrite) await notifyApp()
+
+      if (opts.json) {
+        console.log(JSON.stringify(blockers, null, 2))
+      } else if (blockers.length > 0) {
+        printTasks(blockers)
+      } else {
+        console.log('No blockers.')
+      }
+    })
+
+  // slay tasks blocking [id]
+  cmd
+    .command('blocking [id]')
+    .description('List tasks that this task is blocking (defaults to $SLAYZONE_TASK_ID)')
+    .option('--json', 'Output as JSON')
+    .action(async (taskId, opts) => {
+      taskId = resolveId(taskId)
+      const db = openDb()
+
+      const tasks = db.query<{ id: string }>(
+        `SELECT id FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
+        { ':prefix': taskId }
+      )
+      if (tasks.length === 0) { console.error(`Task not found: ${taskId}`); process.exit(1) }
+      if (tasks.length > 1) {
+        console.error(`Ambiguous id prefix "${taskId}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`)
+        process.exit(1)
+      }
+
+      const task = tasks[0]
+
+      const blocking = db.query<TaskRow>(
+        `SELECT t.id, t.project_id, t.title, t.status, t.priority, p.name AS project_name, t.created_at
+         FROM tasks t JOIN task_dependencies td ON t.id = td.blocks_task_id
+         JOIN projects p ON t.project_id = p.id
+         WHERE td.task_id = :tid`,
+        { ':tid': task.id }
+      )
+      db.close()
+
+      if (opts.json) {
+        console.log(JSON.stringify(blocking, null, 2))
+      } else if (blocking.length > 0) {
+        printTasks(blocking)
+      } else {
+        console.log('Not blocking any tasks.')
+      }
+    })
+
+  // slay tasks blocked [id]
+  cmd
+    .command('blocked [id]')
+    .description('View or modify blocked status on a task (defaults to $SLAYZONE_TASK_ID)')
+    .option('--on', 'Mark task as blocked')
+    .option('--off', 'Unblock task (clears comment)')
+    .option('--toggle', 'Toggle blocked state')
+    .option('--comment <text>', 'Set blocked with comment (implies --on)')
+    .option('--no-comment', 'Clear blocked comment only')
+    .option('--json', 'Output as JSON')
+    .action(async (taskId, opts) => {
+      taskId = resolveId(taskId)
+      const db = openDb()
+
+      const tasks = db.query<{ id: string; is_blocked: number; blocked_comment: string | null }>(
+        `SELECT id, is_blocked, blocked_comment FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
+        { ':prefix': taskId }
+      )
+      if (tasks.length === 0) { console.error(`Task not found: ${taskId}`); process.exit(1) }
+      if (tasks.length > 1) {
+        console.error(`Ambiguous id prefix "${taskId}". Matches: ${tasks.map((t) => t.id.slice(0, 8)).join(', ')}`)
+        process.exit(1)
+      }
+
+      const task = tasks[0]
+      const now = new Date().toISOString()
+
+      if (opts.on) {
+        db.run(`UPDATE tasks SET is_blocked = 1, updated_at = :now WHERE id = :id`, { ':now': now, ':id': task.id })
+      } else if (opts.off) {
+        db.run(`UPDATE tasks SET is_blocked = 0, blocked_comment = NULL, updated_at = :now WHERE id = :id`, { ':now': now, ':id': task.id })
+      } else if (opts.toggle) {
+        const newVal = task.is_blocked ? 0 : 1
+        if (newVal === 0) {
+          db.run(`UPDATE tasks SET is_blocked = 0, blocked_comment = NULL, updated_at = :now WHERE id = :id`, { ':now': now, ':id': task.id })
+        } else {
+          db.run(`UPDATE tasks SET is_blocked = 1, updated_at = :now WHERE id = :id`, { ':now': now, ':id': task.id })
+        }
+      } else if (opts.comment !== undefined && opts.comment !== false) {
+        db.run(`UPDATE tasks SET is_blocked = 1, blocked_comment = :comment, updated_at = :now WHERE id = :id`, { ':comment': opts.comment, ':now': now, ':id': task.id })
+      } else if (opts.comment === false) {
+        // --no-comment (commander sets opts.comment = false when --no-comment is used)
+        db.run(`UPDATE tasks SET blocked_comment = NULL, updated_at = :now WHERE id = :id`, { ':now': now, ':id': task.id })
+      }
+
+      const isWrite = opts.on || opts.off || opts.toggle || opts.comment !== undefined
+
+      // Re-read current state
+      const updated = db.query<{ is_blocked: number; blocked_comment: string | null }>(
+        `SELECT is_blocked, blocked_comment FROM tasks WHERE id = :id`,
+        { ':id': task.id }
+      )[0]
+
+      // Also show dependency-based blockers for context
+      const blockers = db.query<{ id: string; title: string }>(
+        `SELECT t.id, t.title FROM tasks t JOIN task_dependencies td ON t.id = td.task_id
+         WHERE td.blocks_task_id = :tid`,
+        { ':tid': task.id }
+      )
+      db.close()
+
+      if (isWrite) await notifyApp()
+
+      if (opts.json) {
+        console.log(JSON.stringify({
+          is_blocked: Boolean(updated.is_blocked),
+          blocked_comment: updated.blocked_comment,
+          blockers: blockers.map((b) => ({ id: b.id, title: b.title })),
+        }, null, 2))
+      } else {
+        console.log(`Blocked: ${updated.is_blocked ? 'yes' : 'no'}${updated.blocked_comment ? ` (${updated.blocked_comment})` : ''}`)
+        if (blockers.length > 0) {
+          console.log(`Blockers: ${blockers.map((b) => `${b.id.slice(0, 8)} (${b.title})`).join(', ')}`)
+        }
       }
     })
 

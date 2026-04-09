@@ -51,6 +51,23 @@ Query, search, and organize tasks across projects.
 - \`slay tasks archive <id>\` — hide from kanban without deleting — task stays in DB for queries
 - \`slay tasks delete <id>\` — permanently delete task from the database
 
+### Blocking
+
+Track task dependencies and blocked status. Two mechanisms: dependency-based blockers (task A blocks task B) and a standalone blocked flag with optional comment. \`tasks list\` shows \`[B]\` for blocked tasks; \`tasks view\` shows blocker/blocking details.
+
+- \`slay tasks blockers [id] [--json]\` — list tasks that block this task
+- \`slay tasks blockers [id] --add <id1> [id2...]\` — add blocking dependencies
+- \`slay tasks blockers [id] --remove <id1> [id2...]\` — remove blocking dependencies
+- \`slay tasks blockers [id] --set <id1> [id2...]\` — replace all blockers
+- \`slay tasks blockers [id] --clear\` — remove all blocking dependencies
+- \`slay tasks blocking [id] [--json]\` — list tasks this task is blocking
+- \`slay tasks blocked [id] [--json]\` — show blocked status and comment
+- \`slay tasks blocked [id] --on\` — mark task as blocked
+- \`slay tasks blocked [id] --off\` — unblock task (clears comment)
+- \`slay tasks blocked [id] --toggle\` — toggle blocked state
+- \`slay tasks blocked [id] --comment <text>\` — set blocked with a comment
+- \`slay tasks blocked [id] --no-comment\` — clear the blocked comment
+
 ### Tags
 
 Categorize tasks with colored labels. Per-task operations under \`tasks tag\`, project-wide management under \`tags\`.
