@@ -421,29 +421,29 @@
 }
 
 /* Compact line spacing for notes editor */
-.prose-tight .ProseMirror.prose > * + * {
+.prose-tight .ProseMirror > * + * {
   margin-top: 0.125em;
 }
 
-.prose-tight .ProseMirror.prose p {
-  margin-top: 0.125em;
-  margin-bottom: 0.125em;
-}
-
-.prose-tight .ProseMirror.prose ul,
-.prose-tight .ProseMirror.prose ol {
+.prose-tight .ProseMirror p {
   margin-top: 0.125em;
   margin-bottom: 0.125em;
 }
 
-.prose-tight .ProseMirror.prose li {
+.prose-tight .ProseMirror ul,
+.prose-tight .ProseMirror ol {
+  margin-top: 0.125em;
+  margin-bottom: 0.125em;
+}
+
+.prose-tight .ProseMirror li {
   margin-top: 0;
   margin-bottom: 0;
 }
 
-.prose-tight .ProseMirror.prose h1,
-.prose-tight .ProseMirror.prose h2,
-.prose-tight .ProseMirror.prose h3 {
+.prose-tight .ProseMirror h1,
+.prose-tight .ProseMirror h2,
+.prose-tight .ProseMirror h3 {
   margin-top: 0.375em;
   margin-bottom: 0.125em;
 }
