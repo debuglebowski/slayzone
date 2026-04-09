@@ -135,10 +135,7 @@ function mapWindow(key: string, label: string, w: { utilization: number; resets_
   return { key, label, utilization: w.utilization, resetsAt: w.resets_at }
 }
 
-async function fetchClaudeUsage(): Promise<ProviderUsage> {
-  const token = await getClaudeToken()
-  if (!token) return usageError(CLAUDE, `Not logged in — run \`${CLAUDE.cli}\` to authenticate`)
-
+async function fetchClaudeUsageWithToken(token: string): Promise<ProviderUsage> {
   const version = await getClaudeVersion()
   const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
     headers: {
@@ -187,10 +184,7 @@ function mapCodexWindow(key: string, label: string, w: { used_percent: number; r
   return { key, label, utilization: w.used_percent, resetsAt: new Date(w.reset_at * 1000).toISOString() }
 }
 
-async function fetchCodexUsage(): Promise<ProviderUsage> {
-  const auth = await getCodexAuth()
-  if (!auth) return usageError(CODEX, `Not logged in — run \`${CODEX.cli}\` to authenticate`)
-
+async function fetchCodexUsageWithToken(auth: CodexAuth): Promise<ProviderUsage> {
   // Electron's net module uses Chromium's HTTP stack (HTTP/2) which bypasses Cloudflare JA3 fingerprint checks
   const res = await net.fetch('https://chatgpt.com/backend-api/wham/usage', {
     headers: {
@@ -368,6 +362,7 @@ interface CacheEntry {
   result: ProviderUsage
   cachedAt: number
   backoffUntil: number
+  tokenHint?: string
 }
 
 const cache = new Map<string, CacheEntry>()
@@ -377,21 +372,36 @@ let lastFetchAt = 0
 // Built-in provider IDs that have hardcoded fetchers
 const BUILTIN_USAGE_IDS = new Set(['claude', 'codex'])
 
-function fetchProvider(p: ProviderMeta, fetcher: () => Promise<ProviderUsage>): Promise<ProviderUsage> {
+function fetchProvider(p: ProviderMeta, fetcher: () => Promise<ProviderUsage>, tokenHint?: string): Promise<ProviderUsage> {
+  let existing = cache.get(p.id)
+
+  // Account changed — discard stale data from different account
+  if (existing && tokenHint && existing.tokenHint !== tokenHint) {
+    cache.delete(p.id)
+    existing = undefined
+  }
+
   // Skip fetch if provider is in backoff — return cached result as-is
-  const existing = cache.get(p.id)
   if (existing && Date.now() < existing.backoffUntil) {
     return Promise.resolve(existing.result)
   }
 
-  return fetcher().catch((e): ProviderUsage => {
+  return fetcher().then((result) => {
+    cache.set(p.id, {
+      result,
+      cachedAt: Date.now(),
+      backoffUntil: existing?.backoffUntil ?? 0,
+      tokenHint,
+    })
+    return result
+  }).catch((e): ProviderUsage => {
     if (e instanceof RateLimitError) {
       const backoff = Math.max(e.retryAfterMs, MIN_BACKOFF_MS)
       const backoffUntil = Math.max(existing?.backoffUntil ?? 0, Date.now() + backoff)
       if (existing) {
         existing.backoffUntil = backoffUntil
       } else {
-        cache.set(p.id, { result: usageError(p, 'Rate limited'), cachedAt: Date.now(), backoffUntil })
+        cache.set(p.id, { result: usageError(p, 'Rate limited'), cachedAt: Date.now(), backoffUntil, tokenHint })
       }
     }
     const errorMsg = e instanceof RateLimitError ? e.message : friendlyError(e)
@@ -435,8 +445,24 @@ export function registerUsageHandlers(ipcMain: IpcMain, db: Database.Database): 
     )
 
     const fetchers: Promise<ProviderUsage>[] = []
-    if (builtinEnabled.get('claude-code') !== false) fetchers.push(fetchProvider(CLAUDE, fetchClaudeUsage))
-    if (builtinEnabled.get('codex') !== false) fetchers.push(fetchProvider(CODEX, fetchCodexUsage))
+
+    if (builtinEnabled.get('claude-code') !== false) {
+      const claudeToken = await getClaudeToken()
+      if (claudeToken) {
+        fetchers.push(fetchProvider(CLAUDE, () => fetchClaudeUsageWithToken(claudeToken), claudeToken))
+      } else {
+        fetchers.push(Promise.resolve(usageError(CLAUDE, `Not logged in — run \`${CLAUDE.cli}\` to authenticate`)))
+      }
+    }
+
+    if (builtinEnabled.get('codex') !== false) {
+      const codexAuth = await getCodexAuth()
+      if (codexAuth) {
+        fetchers.push(fetchProvider(CODEX, () => fetchCodexUsageWithToken(codexAuth), codexAuth.accessToken))
+      } else {
+        fetchers.push(Promise.resolve(usageError(CODEX, `Not logged in — run \`${CODEX.cli}\` to authenticate`)))
+      }
+    }
 
     for (const row of customRows) {
       if (BUILTIN_USAGE_IDS.has(row.id)) continue
@@ -450,14 +476,6 @@ export function registerUsageHandlers(ipcMain: IpcMain, db: Database.Database): 
 
     inflight = Promise.all(fetchers).then((results) => {
       lastFetchAt = Date.now()
-      for (const r of results) {
-        const existing = cache.get(r.provider)
-        cache.set(r.provider, {
-          result: r,
-          cachedAt: Date.now(),
-          backoffUntil: existing?.backoffUntil ?? 0,
-        })
-      }
       inflight = null
       return results
     }).catch((e) => {
