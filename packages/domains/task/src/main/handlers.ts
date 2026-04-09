@@ -86,7 +86,8 @@ function parseTask(row: Record<string, unknown> | undefined): Task | null {
     merge_context: safeJsonParse(row.merge_context),
     loop_config: safeJsonParse(row.loop_config),
     is_temporary: Boolean(row.is_temporary),
-    is_blocked: Boolean(row.is_blocked)
+    is_blocked: Boolean(row.is_blocked),
+    active_asset_id: (row.active_asset_id as string) ?? null
   } as Task
 }
 
@@ -458,6 +459,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.isBlocked !== undefined) { fields.push('is_blocked = ?'); values.push(data.isBlocked ? 1 : 0) }
   if (data.blockedComment !== undefined) { fields.push('blocked_comment = ?'); values.push(data.blockedComment) }
   if (data.repoName !== undefined) { fields.push('repo_name = ?'); values.push(data.repoName) }
+  if (data.activeAssetId !== undefined) { fields.push('active_asset_id = ?'); values.push(data.activeAssetId) }
 
   if (fields.length === 0) {
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as Record<string, unknown> | undefined

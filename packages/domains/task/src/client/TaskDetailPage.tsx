@@ -1223,6 +1223,25 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   }, [])
 
+  // Active asset persistence — debounced, ref-based
+  const activeAssetIdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushPendingActiveAssetSave = useCallback(() => {
+    if (activeAssetIdTimerRef.current) {
+      clearTimeout(activeAssetIdTimerRef.current)
+      activeAssetIdTimerRef.current = null
+    }
+  }, [])
+
+  const handleActiveAssetIdChange = useCallback((id: string | null) => {
+    if (activeAssetIdTimerRef.current) clearTimeout(activeAssetIdTimerRef.current)
+    const taskId = taskIdRef.current
+    activeAssetIdTimerRef.current = setTimeout(async () => {
+      if (!taskId) return
+      await window.api.db.updateTask({ id: taskId, activeAssetId: id })
+    }, 500)
+  }, [])
+
   // Editor open files persistence — debounced, ref-based (same pattern as webPanelUrls)
   const editorStateRef = useRef<EditorOpenFilesState | null>(null)
   const editorStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1244,14 +1263,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   useEffect(() => {
     flushPendingUrlSave()
     flushPendingEditorSave()
+    flushPendingActiveAssetSave()
     taskIdRef.current = task?.id ?? null
     if (task?.web_panel_urls) webPanelUrlsRef.current = { ...task.web_panel_urls }
     else webPanelUrlsRef.current = {}
-  }, [task?.id, flushPendingUrlSave, flushPendingEditorSave])
+  }, [task?.id, flushPendingUrlSave, flushPendingEditorSave, flushPendingActiveAssetSave])
 
   // Flush pending saves on unmount
   useEffect(() => {
-    return () => { flushPendingUrlSave(); flushPendingEditorSave() }
+    return () => { flushPendingUrlSave(); flushPendingEditorSave(); flushPendingActiveAssetSave() }
   }, [flushPendingUrlSave, flushPendingEditorSave])
 
   const handleWebPanelUrlChange = useCallback((panelId: string, url: string) => {
@@ -2011,7 +2031,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         {/* Assets Panel */}
         {!compact && panelVisibility.assets && (
           <div data-panel-id="assets" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'assets' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.assets }}>
-            <AssetsPanel ref={assetsPanelRef} taskId={task.id} isResizing={isResizing} />
+            <AssetsPanel ref={assetsPanelRef} taskId={task.id} isResizing={isResizing} initialActiveAssetId={task.active_asset_id} onActiveAssetIdChange={handleActiveAssetIdChange} />
           </div>
         )}
 

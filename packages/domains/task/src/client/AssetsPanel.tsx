@@ -23,6 +23,8 @@ export interface AssetsPanelHandle {
 interface AssetsPanelProps {
   taskId: string
   isResizing?: boolean
+  initialActiveAssetId?: string | null
+  onActiveAssetIdChange?: (id: string | null) => void
 }
 
 const INDENT_PX = 20
@@ -294,7 +296,7 @@ function AssetPreview({ renderMode, content, zoomLevel = 1, onZoom }: { renderMo
 
 // --- Main panel ---
 
-export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(function AssetsPanel({ taskId, isResizing }, ref) {
+export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(function AssetsPanel({ taskId, isResizing, initialActiveAssetId, onActiveAssetIdChange }, ref) {
   const {
     assets, folders, selectedId, setSelectedId,
     createAsset, updateAsset, deleteAsset, renameAsset, moveAssetToFolder,
@@ -302,7 +304,16 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     downloadFile, downloadFolder,
     createFolder, deleteFolder, renameFolder,
     getAssetPath, folderPathMap,
-  } = useAssets(taskId)
+  } = useAssets(taskId, initialActiveAssetId)
+
+  // Notify parent when selection changes (for persistence)
+  const prevSelectedIdRef = useRef(selectedId)
+  useEffect(() => {
+    if (selectedId !== prevSelectedIdRef.current) {
+      prevSelectedIdRef.current = selectedId
+      onActiveAssetIdChange?.(selectedId)
+    }
+  }, [selectedId, onActiveAssetIdChange])
 
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
   const [zoomLevel, setZoomLevel] = useState(1)

@@ -1872,6 +1872,12 @@ const migrations: Migration[] = [
         ALTER TABLE tasks ADD COLUMN blocked_comment TEXT DEFAULT NULL;
       `)
     }
+  },
+  {
+    version: 101,
+    up: (db) => {
+      db.exec(`ALTER TABLE tasks ADD COLUMN active_asset_id TEXT DEFAULT NULL`)
+    }
   }
 ]
 

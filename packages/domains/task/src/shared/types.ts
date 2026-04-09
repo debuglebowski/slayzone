@@ -283,6 +283,8 @@ export interface Task {
   blocked_comment: string | null
   // Pull request
   pr_url: string | null
+  // Active asset selection (persisted across task switches)
+  active_asset_id: string | null
   // Multi-repo: folder name of the child repo this task is scoped to
   repo_name: string | null
   // External link (populated via JOIN)
@@ -377,6 +379,8 @@ export interface UpdateTaskInput {
   // Blocked
   isBlocked?: boolean
   blockedComment?: string | null
+  // Active asset
+  activeAssetId?: string | null
   // Multi-repo
   repoName?: string | null
 }

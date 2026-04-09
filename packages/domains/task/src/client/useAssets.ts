@@ -31,10 +31,14 @@ export interface UseAssetsReturn {
   folderPathMap: Map<string, string>
 }
 
-export function useAssets(taskId: string | null | undefined): UseAssetsReturn {
+export function useAssets(taskId: string | null | undefined, initialSelectedId?: string | null): UseAssetsReturn {
   const [assets, setAssets] = useState<TaskAsset[]>([])
   const [folders, setFolders] = useState<AssetFolder[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
+
+  // Re-sync selection when switching tasks
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setSelectedId(initialSelectedId ?? null) }, [taskId])
 
   // Fetch assets + folders on mount and external changes
   useEffect(() => {
