@@ -1,8 +1,8 @@
 import type { IpcMain } from 'electron'
-import { app, dialog, BrowserWindow } from 'electron'
+import { app, dialog, BrowserWindow, shell } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { CreateTaskInput, UpdateTaskInput, Task, ProviderConfig, CreateAssetInput, UpdateAssetInput, TaskAsset, RenderMode, AssetFolder, CreateAssetFolderInput, UpdateAssetFolderInput } from '@slayzone/task/shared'
-import { getExtensionFromTitle } from '@slayzone/task/shared'
+import { getExtensionFromTitle, getEffectiveRenderMode, canExportAsPdf } from '@slayzone/task/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { getDefaultStatus, isKnownStatus, isTerminalStatus, parseColumnsConfig } from '@slayzone/projects/shared'
 import { parseProject } from '@slayzone/projects/main'
@@ -21,6 +21,8 @@ import path from 'path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, rmSync, copyFileSync, statSync, readdirSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { removeWorktree, createWorktree, runWorktreeSetupScript, getCurrentBranch, isGitRepo, copyIgnoredFiles, resolveCopyBehavior } from '@slayzone/worktrees/main'
+import { marked } from 'marked'
+import { tmpdir } from 'os'
 
 type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -1219,6 +1221,161 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     }
 
     return true
+  })
+
+  // --- Download as PDF ---
+
+  const PDF_CSS = `
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a1a1a; background: white; line-height: 1.6; padding: 2rem; font-size: 14px; }
+    h1 { font-size: 1.8em; margin: 1em 0 0.5em; font-weight: 700; }
+    h2 { font-size: 1.4em; margin: 1em 0 0.4em; font-weight: 600; }
+    h3 { font-size: 1.2em; margin: 0.8em 0 0.3em; font-weight: 600; }
+    h4, h5, h6 { font-size: 1em; margin: 0.6em 0 0.2em; font-weight: 600; }
+    p { margin: 0.5em 0; }
+    a { color: #2563eb; text-decoration: underline; }
+    ul, ol { margin: 0.5em 0; padding-left: 1.5em; }
+    li { margin: 0.2em 0; }
+    blockquote { border-left: 3px solid #d1d5db; padding-left: 1em; margin: 0.5em 0; color: #4b5563; font-style: italic; }
+    code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; background: #f3f4f6; padding: 0.15em 0.3em; border-radius: 3px; font-size: 0.9em; }
+    pre { background: #f3f4f6; padding: 1em; border-radius: 6px; overflow-x: auto; margin: 0.8em 0; }
+    pre code { background: none; padding: 0; }
+    table { border-collapse: collapse; width: 100%; margin: 0.8em 0; }
+    th, td { border: 1px solid #d1d5db; padding: 0.5em 0.75em; text-align: left; }
+    th { background: #f9fafb; font-weight: 600; }
+    img { max-width: 100%; }
+    hr { border: none; border-top: 1px solid #d1d5db; margin: 1.5em 0; }
+    .line-numbers { color: #9ca3af; text-align: right; padding-right: 1em; user-select: none; border-right: 1px solid #e5e7eb; }
+    .code-table { width: 100%; border: none; }
+    .code-table td { border: none; padding: 0 0.5em; white-space: pre; vertical-align: top; }
+    @page { margin: 1.5cm; }
+  `
+
+  function escapeHtml(str: string): string {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  }
+
+  function buildPdfHtml(content: string, mode: string, title: string): string {
+    let body = ''
+
+    switch (mode) {
+      case 'markdown':
+        body = marked.parse(content, { async: false }) as string
+        break
+
+      case 'html-preview':
+        body = content
+        break
+
+      case 'svg-preview':
+        body = `<div style="display:flex;justify-content:center;padding:2rem">${content}</div>`
+        break
+
+      case 'code': {
+        const lines = content.split('\n')
+        const rows = lines.map((line, i) =>
+          `<tr><td class="line-numbers">${i + 1}</td><td>${escapeHtml(line) || ' '}</td></tr>`
+        ).join('\n')
+        body = `<pre style="background:none;padding:0"><table class="code-table">${rows}</table></pre>`
+        break
+      }
+
+      default:
+        body = `<pre><code>${escapeHtml(content)}</code></pre>`
+    }
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${PDF_CSS}</style></head><body>${body}</body></html>`
+  }
+
+  function buildMermaidPdfHtml(content: string, title: string): string {
+    let mermaidJs = ''
+    try {
+      const mermaidPath = require.resolve('mermaid/dist/mermaid.min.js')
+      mermaidJs = readFileSync(mermaidPath, 'utf-8')
+    } catch {
+      // Fallback: render as code
+      return buildPdfHtml(content, 'code', title)
+    }
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>${PDF_CSS} .mermaid svg { max-width: 100%; }</style>
+</head><body>
+<pre class="mermaid">${escapeHtml(content)}</pre>
+<script>${mermaidJs}</script>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'default' });
+  mermaid.run().then(() => {
+    document.title = 'MERMAID_READY';
+  }).catch(() => {
+    document.title = 'MERMAID_READY';
+  });
+</script>
+</body></html>`
+  }
+
+  ipcMain.handle('db:assets:downloadAsPdf', async (_, id: string) => {
+    const existing = db.prepare('SELECT * FROM task_assets WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    if (!existing) return false
+
+    const title = existing.title as string
+    const mode = getEffectiveRenderMode(title, (existing.render_mode as string | null) as any)
+    if (!canExportAsPdf(mode)) return false
+
+    const srcPath = getAssetFilePath(existing.task_id as string, id, title)
+    if (!existsSync(srcPath)) return false
+    const content = readFileSync(srcPath, 'utf-8')
+
+    // Build HTML
+    const isMermaid = mode === 'mermaid-preview'
+    const html = isMermaid ? buildMermaidPdfHtml(content, title) : buildPdfHtml(content, mode, title)
+
+    // Write to temp file
+    const tempPath = path.join(tmpdir(), `slayzone-pdf-${id}.html`)
+    writeFileSync(tempPath, html, 'utf-8')
+
+    let offscreen: BrowserWindow | null = null
+    try {
+      offscreen = new BrowserWindow({
+        show: false,
+        width: 800,
+        height: 600,
+        webPreferences: { offscreen: true, nodeIntegration: false, contextIsolation: true },
+      })
+
+      await offscreen.loadFile(tempPath)
+
+      // For mermaid, wait for rendering
+      if (isMermaid) {
+        const deadline = Date.now() + 5000
+        while (Date.now() < deadline) {
+          const ready = await offscreen.webContents.executeJavaScript('document.title')
+          if (ready === 'MERMAID_READY') break
+          await new Promise(r => setTimeout(r, 100))
+        }
+      }
+
+      const pdfBuffer = await offscreen.webContents.printToPDF({
+        printBackground: true,
+        pageSize: 'A4',
+        margins: { marginType: 'default' },
+      })
+
+      // Show save dialog
+      const baseName = title.replace(/\.[^.]+$/, '') || title
+      const defaultPath = path.join(app.getPath('downloads'), `${baseName}.pdf`)
+      const win = BrowserWindow.getFocusedWindow()
+      const result = win
+        ? await dialog.showSaveDialog(win, { title: 'Download as PDF', defaultPath, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+        : await dialog.showSaveDialog({ title: 'Download as PDF', defaultPath, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+      if (result.canceled || !result.filePath) return false
+
+      writeFileSync(result.filePath, pdfBuffer)
+      shell.showItemInFolder(result.filePath)
+      return true
+    } finally {
+      offscreen?.destroy()
+      try { unlinkSync(tempPath) } catch {}
+    }
   })
 
   // --- Asset Folders ---

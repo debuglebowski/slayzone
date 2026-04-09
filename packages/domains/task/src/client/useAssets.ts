@@ -20,6 +20,7 @@ export interface UseAssetsReturn {
   getFilePath: (id: string) => Promise<string | null>
   downloadFile: (id: string) => Promise<boolean>
   downloadFolder: (id: string) => Promise<boolean>
+  downloadAsPdf: (id: string) => Promise<boolean>
   // Folder ops
   createFolder: (params: { name: string; parentId?: string | null }) => Promise<AssetFolder | null>
   updateFolder: (data: UpdateAssetFolderInput) => Promise<void>
@@ -154,6 +155,10 @@ export function useAssets(taskId: string | null | undefined, initialSelectedId?:
     return window.api.assets.downloadFolder(id)
   }, [])
 
+  const downloadAsPdf = useCallback(async (id: string): Promise<boolean> => {
+    return window.api.assets.downloadAsPdf(id)
+  }, [])
+
   const uploadDir = useCallback(async (dirPath: string, parentFolderId?: string | null): Promise<void> => {
     if (!taskId) return
     await window.api.assets.uploadDir({ taskId, dirPath, parentFolderId: parentFolderId ?? null })
@@ -202,7 +207,7 @@ export function useAssets(taskId: string | null | undefined, initialSelectedId?:
     assets, folders, selectedId, setSelectedId,
     createAsset, updateAsset, deleteAsset, renameAsset, moveAssetToFolder,
     readContent, saveContent, uploadAsset, uploadDir, getFilePath,
-    downloadFile, downloadFolder,
+    downloadFile, downloadFolder, downloadAsPdf,
     createFolder, updateFolder, deleteFolder, renameFolder,
     getAssetPath, pathToFolderId, folderPathMap,
   }

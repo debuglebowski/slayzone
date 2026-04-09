@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type DragEvent } from 'react'
-import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft } from 'lucide-react'
+import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ChevronDown } from 'lucide-react'
 import {
   cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, PanelToggle, Button, Input,
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from '@slayzone/ui'
 import { RichTextEditor } from '@slayzone/editor'
 import type { RenderMode, TaskAsset, AssetFolder } from '@slayzone/task/shared'
-import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode } from '@slayzone/task/shared'
+import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode, canExportAsPdf } from '@slayzone/task/shared'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAssets } from './useAssets'
@@ -301,7 +302,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     assets, folders, selectedId, setSelectedId,
     createAsset, updateAsset, deleteAsset, renameAsset, moveAssetToFolder,
     readContent, saveContent, uploadAsset, uploadDir, getFilePath,
-    downloadFile, downloadFolder,
+    downloadFile, downloadFolder, downloadAsPdf,
     createFolder, deleteFolder, renameFolder,
     getAssetPath, folderPathMap,
   } = useAssets(taskId, initialActiveAssetId)
@@ -744,8 +745,13 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                       <ContextMenuItem onSelect={() => handleCopyPath(asset.id)}>
                         <Copy className="size-3 mr-2" /> Copy Path
                       </ContextMenuItem>
+                      {canExportAsPdf(getEffectiveRenderMode(asset.title, asset.render_mode)) && (
+                        <ContextMenuItem onSelect={() => downloadAsPdf(asset.id)}>
+                          <FileText className="size-3 mr-2" /> Download as PDF
+                        </ContextMenuItem>
+                      )}
                       <ContextMenuItem onSelect={() => downloadFile(asset.id)}>
-                        <Download className="size-3 mr-2" /> Download
+                        <Download className="size-3 mr-2" /> Download raw
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem variant="destructive" onSelect={() => deleteAsset(asset.id)}>
@@ -882,11 +888,28 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                 </div>
               </div>
             )}
-            {selectedAsset && (
+            {selectedAsset && selectedRenderMode && canExportAsPdf(selectedRenderMode) ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="!h-7 gap-1 px-1.5 shrink-0" title="Download">
+                    <Download className="size-3.5" />
+                    <ChevronDown className="size-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => downloadAsPdf(selectedAsset.id)}>
+                    <FileText className="size-3 mr-2" /> Download as PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => downloadFile(selectedAsset.id)}>
+                    <Download className="size-3 mr-2" /> Download raw
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : selectedAsset ? (
               <Button variant="outline" size="sm" className="!h-7 !w-7 px-0 shrink-0" onClick={() => downloadFile(selectedAsset.id)} title="Download">
                 <Download className="size-3.5" />
               </Button>
-            )}
+            ) : null}
           </div>
         </div>
       </TooltipProvider>
