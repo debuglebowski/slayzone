@@ -28,7 +28,8 @@ export {
   TASK_STATUS_ORDER,
   taskStatusOptions,
   type TaskStatusStyle,
-  type ColumnStatusConfig
+  type ColumnStatusConfig,
+  type StatusOption
 } from './task-status'
 export { UndoProvider, useUndo, type UndoableAction } from './use-undo'
 

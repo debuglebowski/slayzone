@@ -97,9 +97,24 @@ export const taskStatusOptions = TASK_STATUS_ORDER.map((status) => ({
   label: TASK_STATUS_STYLES[status].label
 }))
 
-export function buildStatusOptions(columns?: ColumnStatusConfig[] | null): Array<{ value: string; label: string }> {
-  if (!columns || columns.length === 0) return taskStatusOptions
+export type StatusOption = { value: string; label: string; icon: LucideIcon; iconClass: string }
+
+export function buildStatusOptions(columns?: ColumnStatusConfig[] | null): StatusOption[] {
+  if (!columns || columns.length === 0) {
+    return TASK_STATUS_ORDER.map((status) => {
+      const s = TASK_STATUS_STYLES[status]
+      return { value: status, label: s.label, icon: s.icon, iconClass: s.iconClass }
+    })
+  }
   return [...columns]
     .sort((a, b) => a.position - b.position)
-    .map((column) => ({ value: column.id, label: column.label }))
+    .map((column) => {
+      const color = COLOR_MAP[column.color] ?? COLOR_MAP.gray
+      return {
+        value: column.id,
+        label: column.label,
+        icon: getCategoryIcon(column.category),
+        iconClass: color.iconClass
+      }
+    })
 }

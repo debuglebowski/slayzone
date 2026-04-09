@@ -243,7 +243,10 @@ export function TaskMetadataSidebar({
             <SelectContent>
               {statusOptions.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
+                  <span className="flex items-center gap-1.5">
+                    <opt.icon className={cn('size-3.5', opt.iconClass)} />
+                    {opt.label}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>
