@@ -26,6 +26,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const [search, setSearch] = useState('')
   const [selectedRegistry, setSelectedRegistry] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshKey, setRefreshKey] = useState(0)
   const [installing, setInstalling] = useState<string | null>(null)
   const [refreshingAll, setRefreshingAll] = useState(false)
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
@@ -35,7 +36,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const loadRegistries = useCallback(async () => {
     const regs = await window.api.aiConfig.marketplace.listRegistries()
     setRegistries(regs)
-  }, [])
+  }, [refreshKey])
 
   const effectiveRegistryId = browseMode === 'registries' ? activeRegistryId : selectedRegistry
 
@@ -50,7 +51,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
     } finally {
       setLoading(false)
     }
-  }, [effectiveRegistryId, search])
+  }, [effectiveRegistryId, search, refreshKey])
 
   useEffect(() => {
     loadRegistries()
@@ -59,10 +60,9 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
 
   useEffect(() => {
     window.api.aiConfig.marketplace.ensureFresh().then(() => {
-      loadRegistries()
-      loadEntries()
+      setRefreshKey(k => k + 1)
     }).catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // Handle external navigation (e.g. clicking marketplace badge in skill list)
   useEffect(() => {
@@ -162,6 +162,8 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const handleDrillIn = useCallback((registryId: string) => {
     setActiveRegistryId(registryId)
     setSearch('')
+    setEntries([])
+    setLoading(true)
   }, [])
 
   const handleDrillOut = useCallback(() => {
