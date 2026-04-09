@@ -1,5 +1,5 @@
 import * as pty from 'node-pty'
-import { writeSync } from 'fs'
+import { existsSync, writeSync } from 'fs'
 import { execFile } from 'child_process'
 import { app, BrowserWindow, Notification, nativeTheme } from 'electron'
 import { homedir, platform, userInfo } from 'os'
@@ -628,11 +628,28 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       mcpEnv
     )
 
+    // Validate cwd exists before spawn — posix_spawnp fails with an opaque
+    // error when the directory is missing.  Fall back to homedir so the
+    // terminal still opens.
+    let effectiveCwd = transport ? transport.cwd : (cwd || homedir())
+    if (!transport && effectiveCwd && !existsSync(effectiveCwd)) {
+      const fallback = homedir()
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.cwd_fallback',
+        sessionId,
+        taskId,
+        message: `cwd not found: ${effectiveCwd}, falling back to ${fallback}`
+      })
+      effectiveCwd = fallback
+    }
+
     const spawnOptions = {
       name: 'xterm-256color',
       cols: opts.cols ?? 80,
       rows: opts.rows ?? 24,
-      cwd: transport ? transport.cwd : (cwd || homedir()),
+      cwd: effectiveCwd,
       env: transport ? transport.env : {
         ...baseEnv,
         ...spawnConfig.env,
@@ -1277,10 +1294,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
         stack: err.stack ?? null,
         launchStrategy: spawnAttempt?.hasPostSpawnCommand ? 'shell_exec' : 'direct_shell',
         shell: spawnAttempt?.shell ?? null,
-        shellArgs: spawnAttempt?.shellArgs ?? null
+        shellArgs: spawnAttempt?.shellArgs ?? null,
+        cwd: cwd ?? null
       }
     })
-    return { success: false, error: err.message }
+    return { success: false, error: `${err.message} (shell=${spawnAttempt?.shell ?? '?'}, cwd=${cwd || '?'})` }
   }
 }
 
