@@ -36,9 +36,11 @@ export function SlayNudgeBanner({ projectPath, onDismiss, onSetupComplete }: Sla
     }
   }
 
-  const handleDone = () => {
-    setInfoOpen(false)
-    onSetupComplete()
+  const anyRan = instructionsState === 'done' || skillsState === 'done'
+
+  const handleDialogChange = (open: boolean) => {
+    setInfoOpen(open)
+    if (!open && anyRan) onSetupComplete()
   }
 
   return (
@@ -63,7 +65,7 @@ export function SlayNudgeBanner({ projectPath, onDismiss, onSetupComplete }: Sla
         </button>
       </div>
 
-      <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+      <Dialog open={infoOpen} onOpenChange={handleDialogChange}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Set up slay CLI for AI agents</DialogTitle>
@@ -91,12 +93,6 @@ export function SlayNudgeBanner({ projectPath, onDismiss, onSetupComplete }: Sla
 
           {error && (
             <p className="text-xs text-destructive">{error}</p>
-          )}
-
-          {instructionsState === 'done' && skillsState === 'done' && (
-            <div className="flex justify-end">
-              <Button size="sm" onClick={handleDone}>Done</Button>
-            </div>
           )}
 
           <p className="text-xs text-muted-foreground">
