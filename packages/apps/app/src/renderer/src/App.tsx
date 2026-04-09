@@ -940,8 +940,10 @@ function App(): React.JSX.Element {
             <div id="main-area" className="flex-1 min-w-0 min-h-0 rounded-lg bg-surface-0 flex overflow-hidden p-4">
             <div
               className={cn("flex-1 min-w-0 min-h-0 rounded-lg overflow-hidden", explodeMode ? "grid gap-1 p-1" : "relative")}
-              style={colorTintsEnabled && selectedProject && projectColorBg(selectedProject.color) ? { backgroundImage: `linear-gradient(${projectColorBg(selectedProject.color)}, ${projectColorBg(selectedProject.color)})` } : undefined}
-              style={explodeMode ? (() => { const cols = Math.ceil(Math.sqrt(openTaskIds.length)); const rows = Math.ceil(openTaskIds.length / cols); return { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` } })() : undefined}
+              style={{
+                ...(colorTintsEnabled && selectedProject && projectColorBg(selectedProject.color) ? { backgroundImage: `linear-gradient(${projectColorBg(selectedProject.color)}, ${projectColorBg(selectedProject.color)})` } : undefined),
+                ...(explodeMode ? (() => { const cols = Math.ceil(Math.sqrt(openTaskIds.length)); const rows = Math.ceil(openTaskIds.length / cols); return { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` } })() : undefined),
+              }}
             >
               {tabs.map((tab, i) => {
                 if (explodeMode && tab.type !== 'task') return null
