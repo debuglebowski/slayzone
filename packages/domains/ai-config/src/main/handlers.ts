@@ -1,6 +1,8 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { userInfo } from 'node:os'
 import { app } from 'electron'
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
@@ -57,6 +59,8 @@ import {
   stripCanonicalSkillMetadata,
   writeSkillValidationMetadata
 } from './skill-normalize'
+
+const SLAY_NUDGE_KEYWORD = 'slay'
 
 const KNOWN_CONTEXT_FILES: Array<{ relative: string; name: string; category: ContextFileCategory }> = [
   { relative: 'CLAUDE.md', name: 'CLAUDE.md', category: 'claude' },
@@ -2019,6 +2023,47 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('ai-config:remove-global-mcp-server', (_event, input: RemoveGlobalMcpServerInput) => {
     removeMcpServerFromSpecs(homeDir, GLOBAL_MCP_SPECS, input.provider, input.serverKey)
+  })
+
+  ipcMain.handle('ai-config:check-slay-configured', (_event, projectPath: string): boolean => {
+    const keywordPattern = new RegExp(`\\b${SLAY_NUDGE_KEYWORD}\\b`, 'i')
+    const resolvedProject = path.resolve(projectPath)
+
+    for (const mapping of Object.values(PROVIDER_PATHS)) {
+      if (mapping.rootInstructions) {
+        const filePath = path.join(resolvedProject, mapping.rootInstructions)
+        if (fs.existsSync(filePath) && keywordPattern.test(fs.readFileSync(filePath, 'utf-8'))) {
+          return true
+        }
+      }
+    }
+
+    for (const spec of Object.values(GLOBAL_PROVIDER_PATHS)) {
+      if (spec.instructions) {
+        const filePath = path.join(homeDir, spec.baseDir, spec.instructions)
+        if (fs.existsSync(filePath) && keywordPattern.test(fs.readFileSync(filePath, 'utf-8'))) {
+          return true
+        }
+      }
+    }
+
+    return false
+  })
+
+  ipcMain.handle('ai-config:setup-slay', (_event, projectPath: string, command: 'instructions' | 'skills'): { ok: boolean; error?: string } => {
+    try {
+      const cwd = path.resolve(projectPath)
+      const shell = process.env.SHELL || userInfo().shell || '/bin/zsh'
+      const isFish = shell.endsWith('/fish')
+      const shellArgs = isFish ? ['-i', '-l'] : ['-l']
+      const cmd = command === 'instructions'
+        ? 'slay init instructions >> CLAUDE.md'
+        : 'slay init skills'
+      execFileSync(shell, [...shellArgs, '-c', cmd], { cwd, timeout: 10000 })
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
   })
 
   // Marketplace handlers

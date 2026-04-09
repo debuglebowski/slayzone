@@ -65,7 +65,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   onOpenFile,
   onMainReset,
   rightContent,
-  overlay
+  overlay,
 }: TerminalContainerProps, ref) {
   const {
     tabs,

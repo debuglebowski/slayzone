@@ -65,11 +65,11 @@ import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
 import { RichTextEditor } from '@slayzone/editor'
 import { normalizeDescription, stripMarkdown, getExtensionFromTitle, getEffectiveRenderMode, RENDER_MODE_INFO } from '@slayzone/task/shared'
 import { useTheme } from '@slayzone/settings/client'
-import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog } from '@slayzone/terminal'
+import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog, SlayNudgeBanner, useSlayNudge } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal/shared'
 import { TerminalContainer, type TerminalContainerHandle } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
-import { buildStatusOptions, cn, getColumnStatusStyle, projectColorBg, useAppearance, matchesShortcut, useShortcutStore, useShortcutDisplay, withModalGuard, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
+import { buildStatusOptions, cn, getColumnStatusStyle, useAppearance, matchesShortcut, useShortcutStore, useShortcutDisplay, withModalGuard, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
 import { BrowserPanel, type BrowserPanelHandle } from '@slayzone/task-browser'
 import { FileEditorView, type FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { QuickOpenDialog } from '@slayzone/file-editor/client/QuickOpenDialog'
@@ -204,7 +204,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const { modes } = useTerminalModes()
 
   const { editorThemeId, contentVariant } = useTheme()
-  const { colorTintsEnabled, notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
+  const { notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
   const notesThemeColors: EditorThemeColors = useMemo(
     () => getThemeEditorColors(editorThemeId, contentVariant),
     [editorThemeId, contentVariant]
@@ -401,6 +401,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     sessionId: mainSessionId,
     config: task?.loop_config ?? null,
     onConfigChange: handleLoopConfigChange
+  })
+
+  const { showBanner: showSlayNudge, dismiss: dismissSlayNudge, recheck: recheckSlayNudge } = useSlayNudge({
+    projectId: task?.project_id ?? null,
+    projectPath: effectiveRepoPath ?? project?.path ?? null,
   })
 
   // Dev server URL detection
@@ -1667,6 +1672,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
+          )}
+          {showSlayNudge && (
+            <SlayNudgeBanner projectPath={effectiveRepoPath ?? project?.path ?? ''} onDismiss={dismissSlayNudge} onSetupComplete={recheckSlayNudge} />
           )}
           {/* Terminal + mode bar wrapper */}
           <div className="flex-1 min-h-0 overflow-hidden">

@@ -620,6 +620,8 @@ export interface ElectronAPI {
     getExpectedSkillContent: (projectPath: string, provider: CliProvider, itemId: string) => Promise<string>
     pullProviderSkill: (projectId: string, projectPath: string, provider: CliProvider, itemId: string) => Promise<ProjectSkillStatus>
     getGlobalFiles: () => Promise<GlobalFileEntry[]>
+    checkSlayConfigured: (projectPath: string) => Promise<boolean>
+    setupSlay: (projectPath: string, command: 'instructions' | 'skills') => Promise<{ ok: boolean; error?: string }>
 
     // Marketplace
     marketplace: {

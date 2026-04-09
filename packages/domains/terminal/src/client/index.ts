@@ -7,4 +7,6 @@ export { terminalThemes, darkThemes, lightThemes, getTerminalThemeById, type Ter
 export { useLoopMode, isLoopActive, stripAnsi, type LoopStatus } from './useLoopMode'
 export { LoopModeBanner } from './LoopModeBanner'
 export { LoopModeDialog } from './LoopModeDialog'
+export { SlayNudgeBanner } from './SlayNudgeBanner'
+export { useSlayNudge } from './useSlayNudge'
 export * from './utils'
