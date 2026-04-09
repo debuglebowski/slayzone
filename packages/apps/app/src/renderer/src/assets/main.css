@@ -271,7 +271,34 @@
 
 .ProseMirror.prose ul,
 .ProseMirror.prose ol {
-  padding-left: 1.25em;
+  padding-left: 2.25em;
+}
+
+.milkdown-editor.prose ul {
+  padding-left: 2.25em !important;
+  padding-inline-start: 2.25em !important;
+}
+
+.milkdown-editor.prose ol {
+  list-style: none !important;
+  counter-reset: ol-counter !important;
+  padding-left: 2.25em !important;
+  padding-inline-start: 2.25em !important;
+}
+
+.milkdown-editor.prose ol > li {
+  counter-increment: ol-counter !important;
+  position: relative !important;
+}
+
+.milkdown-editor.prose ol > li::before {
+  content: counter(ol-counter) "." !important;
+  position: absolute !important;
+  left: -2em !important;
+  width: 1.75em !important;
+  text-align: right !important;
+  white-space: nowrap !important;
+  font-variant-numeric: tabular-nums !important;
 }
 
 .ProseMirror.prose li {
@@ -336,30 +363,28 @@
 
 /* Task list checkbox styling (Milkdown GFM) */
 .ProseMirror ul:has(> li[data-item-type="task"]) {
-  padding-inline-start: 0;
-  padding-left: 0;
+  padding-inline-start: 2.25em !important;
+  padding-left: 2.25em !important;
 }
 
 .ProseMirror li[data-item-type="task"] {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
+  position: relative;
   list-style: none;
   margin-top: 0;
   margin-bottom: 0;
 }
 
 .ProseMirror li[data-item-type="task"] > input[type="checkbox"] {
-  flex-shrink: 0;
+  position: absolute;
+  left: -1.75em;
+  top: 0.25em;
   cursor: pointer;
-  margin-top: 0.3em;
   accent-color: var(--color-primary);
 }
 
 .ProseMirror li[data-item-type="task"] > span,
 .ProseMirror li[data-item-type="task"] > div,
 .ProseMirror li[data-item-type="task"] > p {
-  flex: 1;
   line-height: 1.25;
 }
 
