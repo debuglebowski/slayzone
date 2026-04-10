@@ -894,16 +894,18 @@ function App(): React.JSX.Element {
               onTabClick={(i) => setActiveTabIndex(i)} onTabClose={closeTab} onTabReorder={reorderTabs}
               onTabRename={async (taskId, title) => { const t = await window.api.db.updateTask({ id: taskId, title }); updateTask(t) }}
               leftContent={contextManagerEnabled ? (
-                <div className={cn(
-                  "ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0",
-                  "hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50",
-                  "border",
-                  activeView === 'context'
-                    ? "bg-neutral-200 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600"
-                    : "border-transparent text-neutral-500 dark:text-neutral-400"
-                )} onClick={() => useTabStore.getState().setActiveView(activeView === 'context' ? 'tabs' : 'context')}>
-                  <BookOpen className="h-4 w-4" />
-                </div>
+                <Tooltip><TooltipTrigger asChild>
+                  <div className={cn(
+                    "ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0",
+                    "hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50",
+                    "border",
+                    activeView === 'context'
+                      ? "bg-neutral-200 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600"
+                      : "border-transparent text-neutral-500 dark:text-neutral-400"
+                  )} onClick={() => useTabStore.getState().setActiveView(activeView === 'context' ? 'tabs' : 'context')}>
+                    <BookOpen className="h-4 w-4" />
+                  </div>
+                </TooltipTrigger><TooltipContent side="bottom" className="text-xs">Context Manager</TooltipContent></Tooltip>
               ) : undefined}
               rightContent={
                 <div className="flex items-center gap-1">
