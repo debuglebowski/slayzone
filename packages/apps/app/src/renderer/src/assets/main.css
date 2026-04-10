@@ -494,10 +494,15 @@
   background: hsl(var(--muted-foreground) / 0.5);
 }
 
-/* Milkdown editor styling */
+/* Milkdown editor styling — flex chain so ProseMirror fills panel height */
+.milkdown-editor > .milkdown {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
 .milkdown-editor .ProseMirror {
+  flex: 1;
   outline: none;
-  min-height: 100%;
 }
 .milkdown-editor li {
   margin-top: 0.2em;

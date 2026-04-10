@@ -113,7 +113,7 @@ export function MarkdownFileEditor({ filePath, content, onChange, onSave, versio
     <div className="h-full w-full overflow-auto">
       <div
         ref={containerRef}
-        className={`milkdown-editor milkdown-themed prose prose-sm ${resolvedVariant === 'dark' ? 'prose-invert' : ''} max-w-none px-6 py-4 focus-within:outline-none`}
+        className={`milkdown-editor milkdown-themed prose prose-sm ${resolvedVariant === 'dark' ? 'prose-invert' : ''} min-h-full flex flex-col max-w-none px-6 py-4 focus-within:outline-none`}
         style={themeStyle}
       />
     </div>
