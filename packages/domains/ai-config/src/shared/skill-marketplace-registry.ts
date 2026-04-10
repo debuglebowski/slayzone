@@ -570,7 +570,7 @@ Once you have enough context to understand what the task is about, update its ti
 - Good titles start with a verb: "Fix …", "Add …", "Refactor …", "Investigate …"
 - Only update when meaningful context exists — don't rename on trivial exchanges
 - Update again if the scope shifts significantly during the conversation
-- Use: \`slay tasks update --dev --title "<title>"\`
+- Use: \`slay tasks update --permanent --title "<title>"\`
 `
   },
 ]

@@ -471,6 +471,7 @@ export function tasksCommand(): Command {
     .option('--priority <n>', 'New priority 1-5')
     .option('--due <date>', 'Set due date (YYYY-MM-DD or ISO 8601)')
     .option('--no-due', 'Clear due date')
+    .option('--permanent', 'Convert temporary task to a real task')
     .action(async (idPrefix, opts) => {
       idPrefix = resolveId(idPrefix)
       if (opts.description !== undefined && opts.appendDescription !== undefined) {
@@ -478,8 +479,8 @@ export function tasksCommand(): Command {
         process.exit(1)
       }
       if (opts.title === undefined && opts.description === undefined && opts.appendDescription === undefined && opts.status === undefined
-        && opts.priority === undefined && opts.due === undefined) {
-        console.error('Provide at least one of --title, --description, --append-description, --status, --priority, --due, --no-due')
+        && opts.priority === undefined && opts.due === undefined && !opts.permanent) {
+        console.error('Provide at least one of --title, --description, --append-description, --status, --priority, --due, --no-due, --permanent')
         process.exit(1)
       }
 
@@ -521,6 +522,7 @@ export function tasksCommand(): Command {
       if (opts.priority)    { sets.push('priority = :priority');       params[':priority'] = parseInt(opts.priority, 10) }
       if (typeof opts.due === 'string') { sets.push('due_date = :dueDate'); params[':dueDate'] = opts.due }
       else if (opts.due === false)      { sets.push('due_date = NULL') }
+      if (opts.permanent)   { sets.push('is_temporary = 0') }
 
       db.run(`UPDATE tasks SET ${sets.join(', ')} WHERE id = :id`, params)
       db.close()
