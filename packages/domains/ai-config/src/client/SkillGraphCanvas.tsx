@@ -60,6 +60,24 @@ function SkillGraphCanvasInner({
   const { fitView } = useReactFlow()
   const initializedRef = useRef(false)
 
+  const handleDeleteEdge = useCallback(async (edgeId: string) => {
+    const [sourceId, targetId] = edgeId.split('->')
+    if (!sourceId || !targetId) return
+    const sourceItem = idToItem.get(sourceId)
+    const targetItem = idToItem.get(targetId)
+    if (!sourceItem || !targetItem) return
+
+    const parsed = parseSkillFrontmatter(sourceItem.content)
+    if (!parsed) return
+
+    const currentDeps = parseDependsOn(parsed.frontmatter)
+    const newDeps = currentDeps.filter(s => s !== targetItem.slug)
+    const newFrontmatter = setDependsOn(parsed.frontmatter, newDeps)
+    const newContent = renderSkillFrontmatter(newFrontmatter) + '\n' + parsed.body.replace(/^\n+/, '')
+
+    await onUpdateItem(sourceItem.id, { content: newContent })
+  }, [idToItem, onUpdateItem])
+
   const buildGraph = useCallback((autoLayout: boolean) => {
     const deps = buildDependencyGraph(skills)
     const stored = autoLayout ? {} : getStoredPositions(scope)
@@ -150,24 +168,6 @@ function SkillGraphCanvasInner({
     stored[node.id] = node.position
     storePositions(scope, stored)
   }, [scope])
-
-  const handleDeleteEdge = useCallback(async (edgeId: string) => {
-    const [sourceId, targetId] = edgeId.split('->')
-    if (!sourceId || !targetId) return
-    const sourceItem = idToItem.get(sourceId)
-    const targetItem = idToItem.get(targetId)
-    if (!sourceItem || !targetItem) return
-
-    const parsed = parseSkillFrontmatter(sourceItem.content)
-    if (!parsed) return
-
-    const currentDeps = parseDependsOn(parsed.frontmatter)
-    const newDeps = currentDeps.filter(s => s !== targetItem.slug)
-    const newFrontmatter = setDependsOn(parsed.frontmatter, newDeps)
-    const newContent = renderSkillFrontmatter(newFrontmatter) + '\n' + parsed.body.replace(/^\n+/, '')
-
-    await onUpdateItem(sourceItem.id, { content: newContent })
-  }, [idToItem, onUpdateItem])
 
   const handleConnect = useCallback(async (connection: Connection) => {
     if (!connection.source || !connection.target) return
