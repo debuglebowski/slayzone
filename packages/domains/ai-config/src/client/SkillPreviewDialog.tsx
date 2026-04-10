@@ -1,5 +1,5 @@
-import { Check, FolderPlus, Library, RefreshCw } from 'lucide-react'
-import { Button, cn, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@slayzone/ui'
+import { FolderPlus, Library, RefreshCw, X } from 'lucide-react'
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@slayzone/ui'
 import type { SkillRegistryEntry } from '../shared'
 
 interface SkillPreviewDialogProps {
@@ -8,14 +8,16 @@ interface SkillPreviewDialogProps {
   onAddToLibrary: (entryId: string) => void
   onAddToProject: (entryId: string) => void
   onUpdate: (itemId: string, entryId: string) => void
+  onUninstall: (itemId: string) => void
   hasProject: boolean
   installing?: boolean
 }
 
-export function SkillPreviewDialog({ entry, onOpenChange, onAddToLibrary, onAddToProject, onUpdate, hasProject, installing }: SkillPreviewDialogProps) {
+export function SkillPreviewDialog({ entry, onOpenChange, onAddToLibrary, onAddToProject, onUpdate, onUninstall, hasProject, installing }: SkillPreviewDialogProps) {
   if (!entry) return null
 
-  const isInstalled = !!entry.installed
+  const isInLibrary = !!entry.installed_global_item_id
+  const isInProject = !!entry.installed_project_item_id
   const hasUpdate = !!entry.has_update
 
   return (
@@ -49,33 +51,53 @@ export function SkillPreviewDialog({ entry, onOpenChange, onAddToLibrary, onAddT
 
         <DialogFooter>
           <div className="flex items-center gap-1.5">
-            {!isInstalled && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs gap-1.5"
-                  onClick={() => onAddToLibrary(entry.id)}
-                  disabled={installing}
-                >
-                  <Library className="size-3" />
-                  Add to library
-                </Button>
-                {hasProject && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs gap-1.5"
-                    onClick={() => onAddToProject(entry.id)}
-                    disabled={installing}
-                  >
-                    <FolderPlus className="size-3" />
-                    Add to project
-                  </Button>
-                )}
-              </>
+            {isInLibrary ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+                onClick={() => onUninstall(entry.installed_global_item_id!)}
+                disabled={installing}
+              >
+                <X className="size-3" />
+                Remove from library
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5"
+                onClick={() => onAddToLibrary(entry.id)}
+                disabled={installing}
+              >
+                <Library className="size-3" />
+                Add to library
+              </Button>
             )}
-            {isInstalled && hasUpdate && (
+            {isInProject ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+                onClick={() => onUninstall(entry.installed_project_item_id!)}
+                disabled={installing}
+              >
+                <X className="size-3" />
+                Remove from project
+              </Button>
+            ) : hasProject ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5"
+                onClick={() => onAddToProject(entry.id)}
+                disabled={installing}
+              >
+                <FolderPlus className="size-3" />
+                Add to project
+              </Button>
+            ) : null}
+            {(isInLibrary || isInProject) && hasUpdate && (
               <Button
                 size="sm"
                 variant="outline"
@@ -86,12 +108,6 @@ export function SkillPreviewDialog({ entry, onOpenChange, onAddToLibrary, onAddT
                 <RefreshCw className="size-3" />
                 Update
               </Button>
-            )}
-            {isInstalled && !hasUpdate && (
-              <span className={cn('flex items-center gap-1 text-xs text-emerald-500')}>
-                <Check className="size-3" />
-                Installed
-              </span>
             )}
           </div>
         </DialogFooter>

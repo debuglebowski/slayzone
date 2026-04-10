@@ -1,5 +1,5 @@
-import { Check, FolderPlus, Library, RefreshCw } from 'lucide-react'
-import { Button, cn } from '@slayzone/ui'
+import { FolderPlus, Library, RefreshCw, X } from 'lucide-react'
+import { Button } from '@slayzone/ui'
 import type { SkillRegistryEntry } from '../shared'
 
 interface SkillEntryCardProps {
@@ -7,13 +7,15 @@ interface SkillEntryCardProps {
   onAddToLibrary: (entryId: string) => void
   onAddToProject: (entryId: string) => void
   onUpdate: (itemId: string, entryId: string) => void
+  onUninstall: (itemId: string) => void
   onPreview: (entry: SkillRegistryEntry) => void
   hasProject: boolean
   installing?: boolean
 }
 
-export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate, onPreview, hasProject, installing }: SkillEntryCardProps) {
-  const isInstalled = !!entry.installed
+export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate, onUninstall, onPreview, hasProject, installing }: SkillEntryCardProps) {
+  const isInLibrary = !!entry.installed_global_item_id
+  const isInProject = !!entry.installed_project_item_id
   const hasUpdate = !!entry.has_update
 
   return (
@@ -42,33 +44,53 @@ export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate
           <span className="text-[11px] text-muted-foreground/60">by {entry.author}</span>
         )}
         <div className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          {!isInstalled && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs gap-1.5"
-                onClick={() => onAddToLibrary(entry.id)}
-                disabled={installing}
-              >
-                <Library className="size-3" />
-                Add to library
-              </Button>
-              {hasProject && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs gap-1.5"
-                  onClick={() => onAddToProject(entry.id)}
-                  disabled={installing}
-                >
-                  <FolderPlus className="size-3" />
-                  Add to project
-                </Button>
-              )}
-            </>
+          {isInLibrary ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={() => onUninstall(entry.installed_global_item_id!)}
+              disabled={installing}
+            >
+              <X className="size-3" />
+              Remove from library
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5"
+              onClick={() => onAddToLibrary(entry.id)}
+              disabled={installing}
+            >
+              <Library className="size-3" />
+              Add to library
+            </Button>
           )}
-          {isInstalled && hasUpdate && (
+          {isInProject ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={() => onUninstall(entry.installed_project_item_id!)}
+              disabled={installing}
+            >
+              <X className="size-3" />
+              Remove from project
+            </Button>
+          ) : hasProject ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5"
+              onClick={() => onAddToProject(entry.id)}
+              disabled={installing}
+            >
+              <FolderPlus className="size-3" />
+              Add to project
+            </Button>
+          ) : null}
+          {(isInLibrary || isInProject) && hasUpdate && (
             <Button
               size="sm"
               variant="outline"
@@ -79,12 +101,6 @@ export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate
               <RefreshCw className="size-3" />
               Update
             </Button>
-          )}
-          {isInstalled && !hasUpdate && (
-            <span className={cn('flex items-center gap-1 text-xs text-emerald-500')}>
-              <Check className="size-3" />
-              Installed
-            </span>
           )}
         </div>
       </div>

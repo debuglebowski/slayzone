@@ -46,6 +46,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
       const rows = await window.api.aiConfig.marketplace.listEntries({
         registryId: effectiveRegistryId ?? undefined,
         search: search || undefined,
+        projectId: projectId ?? undefined,
       })
       setEntries(rows)
     } finally {
@@ -92,7 +93,6 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
     setInstalling(entryId)
     try {
       const item = await window.api.aiConfig.marketplace.installSkill({ entryId, scope: 'project', projectId })
-      // Best-effort sync — write skill files to disk for all enabled providers
       try { await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id) } catch { /* sync self-heals on next Sync All */ }
       toast.success('Skill added to project')
       await loadEntries()
@@ -113,6 +113,16 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
       toast.error(err instanceof Error ? err.message : 'Update failed')
     } finally {
       setInstalling(null)
+    }
+  }, [loadEntries])
+
+  const handleUninstall = useCallback(async (itemId: string) => {
+    try {
+      await window.api.aiConfig.deleteItem(itemId)
+      toast.success('Skill uninstalled')
+      await loadEntries()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Uninstall failed')
     }
   }, [loadEntries])
 
@@ -396,6 +406,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
                             onAddToProject={handleAddToProject}
                             hasProject={hasProject}
                             onUpdate={handleUpdate}
+                            onUninstall={handleUninstall}
                             onPreview={setPreviewEntry}
                             installing={installing === entry.id}
                           />
@@ -416,6 +427,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
         onAddToLibrary={handleAddToLibrary}
         onAddToProject={handleAddToProject}
         onUpdate={handleUpdate}
+        onUninstall={handleUninstall}
         hasProject={hasProject}
         installing={previewEntry ? installing === previewEntry.id : false}
       />

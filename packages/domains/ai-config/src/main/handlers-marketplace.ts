@@ -49,9 +49,12 @@ function rowToEntry(row: Record<string, unknown>): SkillRegistryEntry {
     author: (row.author as string) ?? null,
     content_hash: row.content_hash as string,
     fetched_at: row.fetched_at as string,
-    installed: row.installed_item_id != null,
-    installed_item_id: (row.installed_item_id as string) ?? null,
-    has_update: row.has_update === 1,
+    installed: row.installed_global_item_id != null || row.installed_project_item_id != null,
+    installed_item_id: (row.installed_global_item_id as string) ?? (row.installed_project_item_id as string) ?? null,
+    installed_scope: row.installed_global_item_id != null ? 'global' : row.installed_project_item_id != null ? 'project' : null,
+    installed_global_item_id: (row.installed_global_item_id as string) ?? null,
+    installed_project_item_id: (row.installed_project_item_id as string) ?? null,
+    has_update: row.has_update_global === 1 || row.has_update_project === 1,
     registry_name: (row.registry_name as string) ?? undefined
   }
 }
@@ -163,6 +166,7 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
   ipcMain.handle('ai-config:marketplace:list-entries', (_event, input?: ListEntriesInput) => {
     const where: string[] = ['1=1']
     const values: unknown[] = []
+    const projectId = input?.projectId ?? null
 
     if (input?.registryId) {
       where.push('e.registry_id = ?')
@@ -180,19 +184,19 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       values.push(q, q, q)
     }
 
-    // Join to detect installed status via metadata_json marketplace provenance
+    // Subqueries for per-scope install detection (avoids duplicate rows)
     const rows = db.prepare(`
       SELECT e.*,
         r.name as registry_name,
-        i.id as installed_item_id,
-        CASE WHEN i.id IS NOT NULL AND e.content_hash != json_extract(i.metadata_json, '$.marketplace.installedVersion')
-          THEN 1 ELSE 0 END as has_update
+        (SELECT id FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = e.id AND scope = 'global' LIMIT 1) as installed_global_item_id,
+        (SELECT id FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = e.id AND scope = 'project' AND project_id = ? LIMIT 1) as installed_project_item_id,
+        (SELECT CASE WHEN e.content_hash != json_extract(metadata_json, '$.marketplace.installedVersion') THEN 1 ELSE 0 END FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = e.id AND scope = 'global' LIMIT 1) as has_update_global,
+        (SELECT CASE WHEN e.content_hash != json_extract(metadata_json, '$.marketplace.installedVersion') THEN 1 ELSE 0 END FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = e.id AND scope = 'project' AND project_id = ? LIMIT 1) as has_update_project
       FROM skill_registry_entries e
       JOIN skill_registries r ON r.id = e.registry_id AND r.enabled = 1
-      LEFT JOIN ai_config_items i ON json_extract(i.metadata_json, '$.marketplace.entryId') = e.id
       WHERE ${where.join(' AND ')}
       ORDER BY e.name ASC
-    `).all(...values) as Record<string, unknown>[]
+    `).all(projectId, projectId, ...values) as Record<string, unknown>[]
 
     return rows.map(rowToEntry)
   })
@@ -201,19 +205,30 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     const entry = db.prepare('SELECT * FROM skill_registry_entries WHERE id = ?').get(input.entryId) as Record<string, unknown> | undefined
     if (!entry) throw new Error('Registry entry not found')
 
-    // Check if already installed
-    const existing = db.prepare(`
-      SELECT id FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = ?
-    `).get(input.entryId) as { id: string } | undefined
-    if (existing) throw new Error('Skill already installed')
+    const scope = input.scope
+    const projectId = scope === 'project' ? (input.projectId ?? null) : null
+
+    // Idempotent per scope: return existing if already installed in this scope
+    const existing = scope === 'project'
+      ? db.prepare(`
+          SELECT id FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = ? AND scope = 'project' AND project_id = ?
+        `).get(input.entryId, projectId) as { id: string } | undefined
+      : db.prepare(`
+          SELECT id FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = ? AND scope = 'global'
+        `).get(input.entryId) as { id: string } | undefined
+    if (existing) return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(existing.id)
 
     const slug = entry.slug as string
     const content = entry.content as string
     const registryId = entry.registry_id as string
 
+    // Slug conflict check: return existing item if same (scope, slug) already exists
+    const slugConflict = scope === 'project'
+      ? db.prepare(`SELECT id FROM ai_config_items WHERE scope = 'project' AND project_id = ? AND type = 'skill' AND slug = ?`).get(projectId, slug) as { id: string } | undefined
+      : db.prepare(`SELECT id FROM ai_config_items WHERE scope = 'global' AND type = 'skill' AND slug = ?`).get(slug) as { id: string } | undefined
+    if (slugConflict) return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(slugConflict.id)
+
     const id = crypto.randomUUID()
-    const scope = input.scope
-    const projectId = scope === 'project' ? (input.projectId ?? null) : null
 
     // Normalize skill content for persistence
     const normalized = normalizeSkillForPersistence(slug, content, '{}')

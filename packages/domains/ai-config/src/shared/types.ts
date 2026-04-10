@@ -256,6 +256,9 @@ export interface SkillRegistryEntry {
   fetched_at: string
   installed?: boolean
   installed_item_id?: string | null
+  installed_scope?: string | null
+  installed_global_item_id?: string | null
+  installed_project_item_id?: string | null
   has_update?: boolean
   registry_name?: string
 }
@@ -292,4 +295,5 @@ export interface ListEntriesInput {
   registryId?: string
   search?: string
   category?: string
+  projectId?: string | null
 }
