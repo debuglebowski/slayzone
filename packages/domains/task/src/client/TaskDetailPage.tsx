@@ -768,6 +768,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [focusedPanel, setFocusedPanel] = useState<string | null>(null)
   const onCloseTabRef = useRef(onCloseTab)
   onCloseTabRef.current = onCloseTab
+  const handlePanelToggleRef = useRef<typeof handlePanelToggle>(null!)
   useEffect(() => {
     const handleFocusIn = (e: FocusEvent): void => {
       const target = e.target as HTMLElement | null
@@ -817,7 +818,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           return
         } else if (bt.tabs.length === 1) {
           setBrowserTabs({ tabs: [], activeTabId: null })
-          setPanelVisibility(prev => ({ ...prev, browser: false }))
+          handlePanelToggleRef.current('browser', false)
           return
         }
       }
@@ -961,6 +962,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     },
     [task, panelVisibility, onTaskUpdated, resetPanelSize]
   )
+  handlePanelToggleRef.current = handlePanelToggle
 
   const handleQuickOpenFile = useCallback((filePath: string, options?: OpenFileOptions) => {
     if (fileEditorRef.current) {
