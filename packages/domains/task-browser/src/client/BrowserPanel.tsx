@@ -806,10 +806,17 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     if (extensionsManagerOpen || !inputUrl.trim()) return
 
     let url = inputUrl.trim()
+    const hasScheme = /^(https?|file|about|data|view-source):/.test(url)
     if (url.startsWith('/')) {
       url = `file://${url}`
-    } else if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('file://')) {
-      url = `https://${url}`
+    } else if (!hasScheme) {
+      const looksLikeUrl =
+        /^localhost(:\d+)?(\/|$)/.test(url) ||
+        /^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/|$)/.test(url) ||
+        (url.includes('.') && !url.includes(' '))
+      url = looksLikeUrl
+        ? `https://${url}`
+        : `https://www.google.com/search?q=${encodeURIComponent(url)}`
     }
 
     if (multiDeviceMode) {
