@@ -50,14 +50,12 @@ function DialogContent({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
-  size?: 'default' | 'settings' | 'project-settings' | 'xl'
+  size?: 'default' | 'project-settings' | 'xl'
   overlayClassName?: string
 }) {
   const sizeClass =
-    size === 'settings'
-      ? 'h-[88vh] !w-[80vw] !max-w-[80vw] p-0'
-      : size === 'project-settings'
-      ? 'h-[88vh] !w-[94vw] !max-w-[94vw] p-0'
+    size === 'project-settings'
+      ? 'h-[88vh] !w-[94vw] !max-w-[1320px] p-0'
       : size === 'xl'
         ? 'w-[min(1200px,92vw)] max-w-[1200px]'
         : ''

@@ -44,7 +44,7 @@ export function LoopModeDialog({ open, onOpenChange, config, onSave }: LoopModeD
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Loop Command</DialogTitle>
         </DialogHeader>

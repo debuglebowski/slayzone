@@ -1222,7 +1222,7 @@ export function CreatePrDialog({ open, onOpenChange, task, projectPath, onCreate
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Create Pull Request</DialogTitle>
           <DialogDescription>
@@ -1302,7 +1302,7 @@ export function LinkPrDialog({ open, onOpenChange, projectPath, onLink, error }:
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Link Pull Request</DialogTitle>
           <DialogDescription>Select an open pull request to link to this task</DialogDescription>

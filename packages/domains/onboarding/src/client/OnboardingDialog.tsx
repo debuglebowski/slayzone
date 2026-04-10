@@ -292,7 +292,7 @@ export function OnboardingDialog({
   return (
     <Dialog open={open || closing} onOpenChange={autoOpen ? () => {} : handleSkip}>
       <DialogContent
-        className={cn('p-0 overflow-hidden border-none shadow-none bg-transparent transition-[max-width] duration-300', step === 4 ? 'sm:max-w-xl' : 'sm:max-w-[460px]')}
+        className={cn('p-0 overflow-hidden border-none shadow-none bg-transparent transition-[max-width] duration-300', step === 4 ? 'max-w-xl' : 'max-w-[460px]')}
         showCloseButton={false}
         onEscapeKeyDown={autoOpen ? (e) => e.preventDefault() : undefined}
         onInteractOutside={autoOpen ? (e) => e.preventDefault() : undefined}

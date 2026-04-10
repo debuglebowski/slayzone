@@ -66,7 +66,7 @@ export function SlayNudgeBanner({ projectPath, onDismiss, onSetupComplete }: Sla
       </div>
 
       <Dialog open={infoOpen} onOpenChange={handleDialogChange}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Set up slay CLI for AI agents</DialogTitle>
             <DialogDescription>

@@ -59,7 +59,7 @@ export function CliInstallDialog() {
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
       <DialogContent
-        className="sm:max-w-xl p-0 overflow-hidden border-none shadow-none bg-transparent"
+        className="max-w-xl p-0 overflow-hidden border-none shadow-none bg-transparent"
         showCloseButton={false}
       >
         <motion.div

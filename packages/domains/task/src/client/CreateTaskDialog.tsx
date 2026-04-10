@@ -184,7 +184,7 @@ export function CreateTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[575px]" onOpenAutoFocus={(e) => {
+      <DialogContent className="max-w-[575px]" onOpenAutoFocus={(e) => {
           e.preventDefault()
           const input = document.querySelector<HTMLInputElement>('[name="title"]')
           input?.focus()
