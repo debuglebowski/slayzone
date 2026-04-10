@@ -1416,7 +1416,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return { ok: false, verifier: start.verifier, error: callback.error }
       }
       if (!callback.code) {
-        return { ok: false, verifier: start.verifier, error: 'OAuth callback missing code' }
+        return { ok: false, verifier: start.verifier, error: 'GitHub sign-in failed — no authorization code returned. Try again or use a different browser.' }
       }
       return { ok: true, verifier: start.verifier, code: callback.code }
     } catch (error) {

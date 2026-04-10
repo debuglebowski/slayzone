@@ -13,6 +13,9 @@
       "zod": "^4",
       "d3-shape>d3-path": "^3.1.0",
       "node-abi": "^4.28.0"
+    },
+    "patchedDependencies": {
+      "@convex-dev/auth@0.0.90": "patches/@convex-dev__auth@0.0.90.patch"
     }
   },
   "scripts": {

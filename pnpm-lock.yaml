@@ -9,6 +9,11 @@ overrides:
   d3-shape>d3-path: ^3.1.0
   node-abi: ^4.28.0
 
+patchedDependencies:
+  '@convex-dev/auth@0.0.90':
+    hash: 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
+    path: patches/@convex-dev__auth@0.0.90.patch
+
 importers:
 
   .:
@@ -22,7 +27,7 @@ importers:
         version: 0.37.4
       '@convex-dev/auth':
         specifier: ^0.0.90
-        version: 0.0.90(@auth/core@0.37.4)(convex@1.32.0(react@19.2.3))(react@19.2.3)
+        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.32.0(react@19.2.3))(react@19.2.3)
       '@types/node':
         specifier: ^22.19.7
         version: 22.19.7
@@ -58,7 +63,7 @@ importers:
     dependencies:
       '@convex-dev/auth':
         specifier: ^0.0.90
-        version: 0.0.90(@auth/core@0.37.4)(convex@1.32.0(react@19.2.3))(react@19.2.3)
+        version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.32.0(react@19.2.3))(react@19.2.3)
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -8914,7 +8919,7 @@ snapshots:
       style-mod: 4.1.3
       w3c-keyname: 2.2.8
 
-  '@convex-dev/auth@0.0.90(@auth/core@0.37.4)(convex@1.32.0(react@19.2.3))(react@19.2.3)':
+  '@convex-dev/auth@0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.32.0(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@auth/core': 0.37.4
       '@oslojs/crypto': 1.0.1

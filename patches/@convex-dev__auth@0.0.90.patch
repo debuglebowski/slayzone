@@ -1,0 +1,40 @@
+diff --git a/dist/server/implementation/index.js b/dist/server/implementation/index.js
+index 107e1b01a99216af4d422d9776e597430aa5ba66..4490bc13cc3ec4e723845f72e8aa5a99cbcbaef6 100644
+--- a/dist/server/implementation/index.js
++++ b/dist/server/implementation/index.js
+@@ -224,7 +224,14 @@ export function convexAuth(config_) {
+                     }
+                     catch (error) {
+                         logError(error);
+-                        return Response.redirect(destinationUrl);
++                        const errorMsg = error instanceof Error ? error.message : "server_error";
++                        return new Response(null, {
++                            status: 302,
++                            headers: {
++                                Location: setURLSearchParam(destinationUrl, "error", errorMsg),
++                                "Cache-Control": "must-revalidate",
++                            },
++                        });
+                     }
+                 });
+                 http.route({
+diff --git a/src/server/implementation/index.ts b/src/server/implementation/index.ts
+index 3cb4bfcb4b6b7c02ced3159e53975df35a001ef6..c0e44c740d5aa15af0df6e59620d0103b06477e2 100644
+--- a/src/server/implementation/index.ts
++++ b/src/server/implementation/index.ts
+@@ -360,7 +360,14 @@ export function convexAuth(config_: ConvexAuthConfig) {
+               });
+             } catch (error) {
+               logError(error);
+-              return Response.redirect(destinationUrl);
++              const errorMsg = error instanceof Error ? error.message : "server_error";
++              return new Response(null, {
++                status: 302,
++                headers: {
++                  Location: setURLSearchParam(destinationUrl, "error", errorMsg),
++                  "Cache-Control": "must-revalidate",
++                },
++              });
+             }
+           },
+         );
