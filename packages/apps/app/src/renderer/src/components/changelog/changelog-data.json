@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.17.1",
+    "date": "2026-04-10",
+    "tagline": "Stability fixes",
+    "items": [
+      {
+        "category": "fix",
+        "title": "AI config graph crash",
+        "description": "Fixed temporal dead zone crash when deleting edges in the AI config graph."
+      },
+      {
+        "category": "fix",
+        "title": "Leaderboard OAuth errors",
+        "description": "OAuth callback errors are now surfaced instead of silently swallowed."
+      },
+      {
+        "category": "improvement",
+        "title": "CLI --permanent flag",
+        "description": "Use --permanent with slay tasks update to persist task changes."
+      }
+    ]
+  },
+  {
     "version": "0.17.0",
     "date": "2026-04-10",
     "tagline": "Skills & polish",

@@ -1,6 +1,28 @@
 # Changelog
 
 
+## v0.17.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.17.0...v0.17.1)
+
+### 🚀 Enhancements
+
+- **cli:** Add --permanent flag to slay tasks update ([65f381f7](https://github.com/debuglebowski/slayzone/commit/65f381f7))
+
+### 🩹 Fixes
+
+- **ai-config:** Move handleDeleteEdge above buildGraph to fix TDZ crash ([dd738aeb](https://github.com/debuglebowski/slayzone/commit/dd738aeb))
+- **leaderboard:** Surface OAuth callback errors instead of swallowing ([14c66c61](https://github.com/debuglebowski/slayzone/commit/14c66c61))
+
+### 🏡 Chore
+
+- Allow tag management in release-monitor-ci skill ([f229c150](https://github.com/debuglebowski/slayzone/commit/f229c150))
+- Add --permanent to slay-auto-title local skill ([1a68ea55](https://github.com/debuglebowski/slayzone/commit/1a68ea55))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.17.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.16.0...v0.17.0)
