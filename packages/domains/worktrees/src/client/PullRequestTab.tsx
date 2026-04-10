@@ -99,17 +99,22 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
     return () => { cancelled = true }
   }, [visible, projectPath, task.pr_url])
 
-  // Poll PR status when linked
+  // Single refresh function — used by poll, refresh button, and post-merge
+  const refreshPr = useCallback(async () => {
+    if (!projectPath || !task.pr_url) return
+    try {
+      const data = await window.api.git.getPrByUrl(projectPath, task.pr_url)
+      if (data) setPr(data)
+    } catch { /* ignore — background refresh */ }
+  }, [projectPath, task.pr_url])
+
+  // Poll PR status when linked (faster when checks are pending)
   useEffect(() => {
     if (!visible || !projectPath || !task.pr_url || !ghInstalled) return
-    pollRef.current = setInterval(async () => {
-      try {
-        const data = await window.api.git.getPrByUrl(projectPath, task.pr_url!)
-        if (data) setPr(data)
-      } catch { /* ignore */ }
-    }, 30000)
-    return () => clearInterval(pollRef.current)
-  }, [visible, projectPath, task.pr_url, ghInstalled])
+    const interval = pr?.statusCheckRollup === 'PENDING' ? 10000 : 30000
+    const id = setInterval(refreshPr, interval)
+    return () => clearInterval(id)
+  }, [visible, projectPath, task.pr_url, ghInstalled, pr?.statusCheckRollup, refreshPr])
 
   const handleUnlink = useCallback(async () => {
     const updated = await onUpdateTask({ id: task.id, prUrl: null })
@@ -173,7 +178,7 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
 
   // PR is linked — show status
   if (task.pr_url && pr) {
-    return <LinkedPrView pr={pr} projectPath={projectPath!} visible={visible} onUnlink={handleUnlink} onPrUpdated={setPr} />
+    return <LinkedPrView pr={pr} projectPath={projectPath!} visible={visible} onUnlink={handleUnlink} onPrUpdated={setPr} onRefreshPr={refreshPr} />
   }
   if (task.pr_url && !pr) {
     return (
@@ -230,12 +235,13 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
 
 // --- Linked PR view ---
 
-function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
+function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated, onRefreshPr }: {
   pr: GhPullRequest
   projectPath: string
   visible: boolean
   onUnlink: () => void
   onPrUpdated: (pr: GhPullRequest) => void
+  onRefreshPr: () => Promise<void>
 }) {
   const [comments, setComments] = useState<GhPrTimelineEvent[]>([])
   const [loadingComments, setLoadingComments] = useState(true)
@@ -272,6 +278,10 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
     } catch { /* ignore */ }
     setLoadingComments(false)
   }, [projectPath, pr.number])
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([onRefreshPr(), fetchComments()])
+  }, [onRefreshPr, fetchComments])
 
   useEffect(() => {
     if (!visible) return
@@ -402,9 +412,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
         auto: mergeAuto
       })
       setMergeOpen(false)
-      // Re-fetch PR to get updated state
-      const updated = await window.api.git.getPrByUrl(projectPath, pr.url)
-      if (updated) onPrUpdated(updated)
+      await onRefreshPr()
     } catch (err) {
       setMergeError(err instanceof Error ? err.message : 'Failed to merge')
     }
@@ -470,7 +478,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated }: {
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <IconButton aria-label="Refresh" variant="ghost" className="h-6 w-6" onClick={fetchComments}>
+                  <IconButton aria-label="Refresh" variant="ghost" className="h-6 w-6" onClick={refreshAll}>
                     <RefreshCw className="h-3 w-3" />
                   </IconButton>
                 </TooltipTrigger>

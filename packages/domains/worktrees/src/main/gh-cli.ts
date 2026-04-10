@@ -48,6 +48,11 @@ function parseGhPr(pr: RawGhPr): GhPullRequest {
     if (states.some(s => s === 'FAILURE' || s === 'ERROR')) checkStatus = 'FAILURE'
     else if (states.some(s => s === 'PENDING' || s === 'EXPECTED')) checkStatus = 'PENDING'
     else if (states.length > 0) checkStatus = 'SUCCESS'
+  } else if (typeof pr.statusCheckRollup === 'string' && pr.statusCheckRollup) {
+    const s = pr.statusCheckRollup.toUpperCase()
+    if (s === 'FAILURE' || s === 'ERROR') checkStatus = 'FAILURE'
+    else if (s === 'PENDING' || s === 'EXPECTED') checkStatus = 'PENDING'
+    else if (s === 'SUCCESS') checkStatus = 'SUCCESS'
   }
 
   return {
