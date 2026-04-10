@@ -6,7 +6,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
+
 } from '@slayzone/ui'
 
 interface SlayNudgeBannerProps {

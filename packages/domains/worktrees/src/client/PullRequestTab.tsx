@@ -76,7 +76,6 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
   const [linkOpen, setLinkOpen] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
   // Check gh + fetch PR if linked
   useEffect(() => {
@@ -178,7 +177,7 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
 
   // PR is linked — show status
   if (task.pr_url && pr) {
-    return <LinkedPrView pr={pr} projectPath={projectPath!} visible={visible} onUnlink={handleUnlink} onPrUpdated={setPr} onRefreshPr={refreshPr} />
+    return <LinkedPrView pr={pr} projectPath={projectPath!} visible={visible} onUnlink={handleUnlink} onRefreshPr={refreshPr} />
   }
   if (task.pr_url && !pr) {
     return (
@@ -235,12 +234,11 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
 
 // --- Linked PR view ---
 
-function LinkedPrView({ pr, projectPath, visible, onUnlink, onPrUpdated, onRefreshPr }: {
+function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
   pr: GhPullRequest
   projectPath: string
   visible: boolean
   onUnlink: () => void
-  onPrUpdated: (pr: GhPullRequest) => void
   onRefreshPr: () => Promise<void>
 }) {
   const [comments, setComments] = useState<GhPrTimelineEvent[]>([])
