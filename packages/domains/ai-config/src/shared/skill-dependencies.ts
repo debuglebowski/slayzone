@@ -52,6 +52,7 @@ export function extractImplicitReferences(
   const found: string[] = []
   for (const slug of allSlugs) {
     if (slug === selfSlug || slug.length < 3) continue
+    if (selfSlug.startsWith(slug + '-')) continue
     const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const regex = new RegExp(`\\b${escaped}\\b`)
     if (regex.test(body)) found.push(slug)

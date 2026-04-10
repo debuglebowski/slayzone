@@ -122,15 +122,16 @@ function SkillGraphCanvasInner({
           source: sourceId,
           target: targetId,
           type: 'dependency' as const,
+          selectable: d.type === 'explicit',
+          deletable: d.type === 'explicit',
           data: {
             depType: d.type,
-            onDelete: d.type === 'explicit' ? handleDeleteEdge : undefined,
           } satisfies DependencyEdgeData,
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 28,
             height: 28,
-            color: d.type === 'explicit' ? 'var(--color-primary)' : 'var(--color-muted-foreground)',
+            color: 'var(--color-muted-foreground)',
           },
         }
       })
@@ -168,6 +169,15 @@ function SkillGraphCanvasInner({
     stored[node.id] = node.position
     storePositions(scope, stored)
   }, [scope])
+
+  const handleEdgesDelete = useCallback(async (deletedEdges: Edge[]) => {
+    for (const edge of deletedEdges) {
+      const data = edge.data as DependencyEdgeData | undefined
+      if (data?.depType === 'explicit') {
+        await handleDeleteEdge(edge.id)
+      }
+    }
+  }, [handleDeleteEdge])
 
   const handleConnect = useCallback(async (connection: Connection) => {
     if (!connection.source || !connection.target) return
@@ -216,6 +226,7 @@ function SkillGraphCanvasInner({
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onEdgesDelete={handleEdgesDelete}
         onConnect={handleConnect}
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
