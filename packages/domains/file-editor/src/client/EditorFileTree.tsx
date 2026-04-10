@@ -44,14 +44,24 @@ const STATUS_PRIORITY: Record<GitFileStatus, number> = {
   conflicted: 6, modified: 5, deleted: 4, staged: 3, added: 2, renamed: 1, untracked: 0
 }
 
+const GIT_STATUS_INFO: Record<GitFileStatus, { letter: string; colorClass: string }> = {
+  modified:  { letter: 'M', colorClass: 'text-amber-400' },
+  deleted:   { letter: 'D', colorClass: 'text-amber-400' },
+  staged:    { letter: 'S', colorClass: 'text-green-400' },
+  added:     { letter: 'A', colorClass: 'text-green-400' },
+  renamed:   { letter: 'R', colorClass: 'text-green-400' },
+  untracked: { letter: 'U', colorClass: 'text-muted-foreground' },
+  conflicted:{ letter: 'C', colorClass: 'text-red-400' },
+}
+
 function gitStatusColor(status: GitFileStatus | undefined): string | undefined {
-  switch (status) {
-    case 'modified': case 'deleted': return 'text-amber-400'
-    case 'staged': case 'added': case 'renamed': return 'text-green-400'
-    case 'untracked': return 'text-muted-foreground/70'
-    case 'conflicted': return 'text-red-400'
-    default: return undefined
-  }
+  return status ? GIT_STATUS_INFO[status]?.colorClass : undefined
+}
+
+function GitStatusBadge({ status }: { status: GitFileStatus | undefined }) {
+  if (!status) return null
+  const info = GIT_STATUS_INFO[status]
+  return <span className={cn('ml-auto text-[10px] font-medium shrink-0', info.colorClass)}>{info.letter}</span>
 }
 
 interface CompactedEntry {
@@ -842,7 +852,8 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
                 {expanded
                   ? <FolderOpen className="size-4 shrink-0 text-amber-400" />
                   : <Folder className="size-4 shrink-0 text-amber-500/80" />}
-                <span className={cn("truncate font-mono", gitStatusColor(dirGitStatus.get(entry.path)))}>{label}</span>
+                <span className={cn("truncate font-mono", gitStatusColor(dirGitStatus.get(entry.path)), entry.ignored && 'italic')}>{label}</span>
+                <GitStatusBadge status={dirGitStatus.get(entry.path)} />
                 {entry.isSymlink && (
                   <span title="Symbolic link"><ArrowUpRight className="size-3 shrink-0 text-muted-foreground/60" /></span>
                 )}
@@ -919,7 +930,8 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
               onClick={(e) => handleEntryClick(e, entry)}
             >
               <FileIcon fileName={entry.name} className="size-4 shrink-0 flex items-center [&>svg]:size-full" />
-              <span className={cn("truncate font-mono", gitStatusColor(gitStatus.get(entry.path)))}>{entry.name}</span>
+              <span className={cn("truncate font-mono", gitStatusColor(gitStatus.get(entry.path)), entry.ignored && 'italic')}>{entry.name}</span>
+              <GitStatusBadge status={gitStatus.get(entry.path)} />
               {entry.isSymlink && (
                 <span title="Symbolic link"><ArrowUpRight className="size-3 shrink-0 text-muted-foreground/60" /></span>
               )}
