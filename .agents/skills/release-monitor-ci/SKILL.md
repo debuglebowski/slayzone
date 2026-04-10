@@ -4,12 +4,12 @@ description: "Monitor CI on main and iterate until it is successful"
 trigger: auto
 ---
 
-Monitor CI on main and iterate until all checks pass. User context: $ARGUMENTS
+Monitor the Release workflow and iterate until it succeeds. User context: $ARGUMENTS
 
 ## Workflow
 
-1. **Find the latest CI run on main.**
-   - Run `gh run list --branch main --limit 1` to find the latest run.
+1. **Find the latest Release run.**
+   - Run `gh run list --workflow=release.yml --limit 1` to find the latest run.
    - If no run exists, tell the user and stop.
 
 2. **Wait for the run to complete.**
@@ -26,9 +26,9 @@ Monitor CI on main and iterate until all checks pass. User context: $ARGUMENTS
    - Push to main.
 
 5. **Loop.**
-   - Wait for the new CI run to appear (`gh run list --branch main --limit 1`).
+   - Wait for the new Release run to appear (`gh run list --workflow=release.yml --limit 1`).
    - Go back to step 2.
-   - Repeat until CI is green or you've attempted 10 iterations.
+   - Repeat until the Release workflow is green or you've attempted 10 iterations.
 
 6. **If stuck after 10 iterations**, report what's failing and ask for guidance.
 
