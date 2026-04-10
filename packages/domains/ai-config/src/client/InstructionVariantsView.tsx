@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Plus, Save, Trash2 } from 'lucide-react'
 import { Button, Input, Label, Textarea, cn } from '@slayzone/ui'
@@ -14,6 +14,7 @@ export function InstructionVariantsView() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
 
+  const sortedVariants = useMemo(() => [...variants].sort((a, b) => a.slug.localeCompare(b.slug)), [variants])
   const selected = variants.find((v) => v.id === selectedId) ?? null
   const dirty = selected ? (editContent !== originalContent || editName !== originalName) : false
 
@@ -119,7 +120,7 @@ export function InstructionVariantsView() {
       {/* Left: variant list */}
       <div className="flex flex-col overflow-y-auto p-3" style={{ width: splitWidth }}>
         <div className="flex-1 space-y-0.5">
-          {variants.map((variant) => {
+          {sortedVariants.map((variant) => {
             const isActive = selectedId === variant.id
             return (
               <button

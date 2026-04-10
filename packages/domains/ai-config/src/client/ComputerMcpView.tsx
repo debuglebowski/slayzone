@@ -59,7 +59,7 @@ export function ComputerMcpView() {
       </div>
 
       {configs.map((config) => {
-        const serverEntries = Object.entries(config.servers)
+        const serverEntries = Object.entries(config.servers).sort(([a], [b]) => a.localeCompare(b))
         const isAdding = addingTo === config.provider
 
         return (

@@ -471,7 +471,7 @@ export function ItemSection({
   const allItems = [
     ...localItems.map(item => ({ item, providers: {} as ProjectSkillStatus['providers'], isLocal: true })),
     ...linkedItems.map(s => ({ item: s.item, providers: s.providers, isLocal: s.item.scope === 'project' }))
-  ]
+  ].sort((a, b) => a.item.slug.localeCompare(b.item.slug))
   const existingLinks = linkedItems.map(s => s.item.id)
 
   const handleRemove = async (itemId: string, isLocal: boolean) => {

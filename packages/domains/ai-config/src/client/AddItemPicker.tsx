@@ -145,7 +145,7 @@ export function AddItemPicker({
           </div>
         ) : (
           <div className="border-t max-h-72 overflow-y-auto">
-            {globalItems.map(item => {
+            {[...globalItems].sort((a, b) => a.slug.localeCompare(b.slug)).map(item => {
               const linked = existingLinks.includes(item.id)
               return (
                 <button

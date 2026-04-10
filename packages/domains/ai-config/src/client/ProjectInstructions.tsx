@@ -56,7 +56,7 @@ export function ProjectInstructions({
   const [autoSync, setAutoSync] = useState(true)
 
   const isProject = !!projectId && !!projectPath
-  const files = dedupeProviderFiles(providerHealth)
+  const files = dedupeProviderFiles(providerHealth).sort((a, b) => a.path.localeCompare(b.path))
   const selectedFile = files.find((f) => f.path === selectedPath)
   const dirty = fileContent !== originalFileContent
 
@@ -336,7 +336,7 @@ export function ProjectInstructions({
             <p className="text-xs text-muted-foreground">Select a variant to sync across all provider instruction files</p>
           </DialogHeader>
           <div className="border-t max-h-72 overflow-y-auto">
-            {variants.map((v) => (
+            {[...variants].sort((a, b) => a.slug.localeCompare(b.slug)).map((v) => (
               <button
                 key={v.id}
                 onClick={() => handleLink(v.id)}

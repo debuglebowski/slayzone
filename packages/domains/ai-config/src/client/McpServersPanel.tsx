@@ -502,13 +502,15 @@ function GlobalMcpPanel() {
       .sort((a, b) => {
         const af = favorites.includes(a.id) ? 0 : 1
         const bf = favorites.includes(b.id) ? 0 : 1
-        return af - bf
+        return af - bf || a.name.localeCompare(b.name)
       }),
     [favorites, search]
   )
 
   const filteredCustom = useMemo(() =>
-    customServers.filter((s) => matchesSearch(search, s.name, s.id)),
+    customServers
+      .filter((s) => matchesSearch(search, s.name, s.id))
+      .sort((a, b) => a.name.localeCompare(b.name)),
     [customServers, search]
   )
 
@@ -764,7 +766,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
 
-  const enabledServers = merged.filter((s) => isEnabled(s) && filterServer(s))
+  const enabledServers = merged.filter((s) => isEnabled(s) && filterServer(s)).sort((a, b) => serverName(a).localeCompare(serverName(b)))
   const availableServers = merged.filter((m) => !isEnabled(m) && (m.curated || m.custom) && filterServer(m))
 
   const warningFooter = (s: MergedServer) => {
@@ -894,7 +896,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
             {[...availableServers].sort((a, b) => {
               const af = isFavorite(a.key) ? 0 : 1
               const bf = isFavorite(b.key) ? 0 : 1
-              return af - bf
+              return af - bf || serverName(a).localeCompare(serverName(b))
             }).map((s) => renderServerCard(s, undefined, availableCardClass))}
           </div>
         </div>

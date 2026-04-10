@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus } from 'lucide-react'
 import { Button } from '@slayzone/ui'
@@ -128,6 +128,8 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
     setSelectedSkillId(created.id)
   }, [items, scope, isProject, projectId])
 
+  const sortedItems = useMemo(() => [...items].sort((a, b) => a.slug.localeCompare(b.slug)), [items])
+
   // Computer level — show global files filtered to skills
   if (level === 'computer') {
     return <GlobalContextFiles filter="skill" />
@@ -216,7 +218,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
         {viewMode === 'graph' ? (
           <div className="flex-1 min-h-0">
             <SkillGraphCanvas
-              items={items}
+              items={sortedItems}
               scope={scope}
               selectedSkillId={selectedSkillId}
               onSelectSkill={setSelectedSkillId}
@@ -227,7 +229,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
         ) : (
           <div className="flex-1 overflow-y-auto px-1">
             <SkillListView
-              items={items}
+              items={sortedItems}
               selectedSkillId={selectedSkillId}
               onSelectSkill={setSelectedSkillId}
               onDeleteItem={handleDeleteItem}
