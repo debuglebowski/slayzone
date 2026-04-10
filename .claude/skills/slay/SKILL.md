@@ -1,7 +1,6 @@
 ---
 name: slay
 description: "Full CLI reference for slay — orchestrates all slay domain skills"
-trigger: auto
 depends_on:
   - slay-context
   - slay-tasks
@@ -13,6 +12,7 @@ depends_on:
   - slay-pty
   - slay-panels
   - slay-auto-title
+trigger: auto
 ---
 
 Use the `slay` CLI to interact with the SlayZone task management system. The current task ID is available via `$SLAYZONE_TASK_ID` (set automatically in task terminals).
