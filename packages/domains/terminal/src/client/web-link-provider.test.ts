@@ -367,6 +367,31 @@ test('matches multiple files', () => {
   assert(files[1], 'src/b.ts')
 })
 
+// Bare filenames in parentheses (CLI tool output)
+test('matches bare filename in Write()', () => {
+  assert(matchFile('Write(test.tf)'), 'test.tf')
+})
+
+test('matches bare filename in Read()', () => {
+  assert(matchFile('Read(config.yaml)'), 'config.yaml')
+})
+
+test('matches bare filename with single-char ext in parens', () => {
+  assert(matchFile('Edit(main.c)'), 'main.c')
+})
+
+test('matches dotted bare filename in parens', () => {
+  assert(matchFile('Write(jquery.min.js)'), 'jquery.min.js')
+})
+
+test('matches bare filename with line:col in parens', () => {
+  assert(matchFile('Edit(test.tf:42:10)'), 'test.tf:42:10')
+})
+
+test('does not match bare filename without parens', () => {
+  assert(matchFile('test.tf is here'), null)
+})
+
 // ─────────────────────────────────────
 // WebLinkProvider.provideLinks (soft-continuation)
 // ─────────────────────────────────────

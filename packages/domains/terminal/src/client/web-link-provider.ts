@@ -68,9 +68,10 @@ export function mapStringIndex(terminal: Terminal, lineIndex: number, startCol: 
 
 // Matches file paths with optional line:col suffix.
 // Patterns: ./relative/path.ts, ../up/path.js, src/foo.tsx:42:10, /absolute/path.rs:10
+// Also matches bare filenames inside parentheses: Write(test.tf), Edit(main.c:42)
 // Requires a file extension to avoid false positives on plain words.
 // The line:col suffix (:digits and optionally :digits) is captured but not part of the "file" match group.
-export const FILE_REGEX = /(?<![:/\w.])(?:\.{1,2}\/[\w./-]+|[a-zA-Z][\w./-]*\/[\w./-]*\.[a-zA-Z]\w*|\/[\w./-]+\.[a-zA-Z]\w*)(?::(\d+)(?::(\d+))?)?/
+export const FILE_REGEX = /(?:(?<![:/\w.])(?:\.{1,2}\/[\w./-]+|[a-zA-Z][\w./-]*\/[\w./-]*\.[a-zA-Z]\w*|\/[\w./-]+\.[a-zA-Z]\w*)|(?<=\()[\w.-]+\.[a-zA-Z]\w*)(?::(\d+)(?::(\d+))?)?/
 
 export class FileLinkProvider implements ILinkProvider {
   constructor(
