@@ -139,7 +139,7 @@ function ProviderSection({
           <span>{usage.error} · {staleAge} old</span>
         </div>
       )}
-      {usage.windows.map((w) => (
+      {[...usage.windows].sort((a, b) => a.label.localeCompare(b.label)).map((w) => (
         <WindowRow
           key={w.key}
           label={w.label}
@@ -225,7 +225,7 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
         return w ? { label: `${p.label} ${w.label}`, pct: w.utilization } : null
       })
       .filter(Boolean) as { label: string; pct: number }[]
-  })
+  }).sort((a, b) => a.label.localeCompare(b.label))
 
   const hasError = data.some((p) => p.error !== null)
 
@@ -263,7 +263,7 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
         onMouseEnter={handleEnter}
         onMouseLeave={handleLeave}
       >
-        {data.map((p) => (
+        {[...data].sort((a, b) => a.label.localeCompare(b.label)).map((p) => (
           <ProviderSection
             key={p.provider}
             usage={p}
