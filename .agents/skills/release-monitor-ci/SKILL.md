@@ -37,4 +37,5 @@ Monitor the Release workflow and iterate until it succeeds. User context: $ARGUM
 - Only fix CI-related failures — don't refactor unrelated code.
 - Each fix should be its own commit.
 - Never force-push or rewrite history.
+- Tags may be freely managed (deleted, recreated, moved) as needed to re-trigger the Release workflow.
 - If a failure looks like a flaky test (passes on retry), re-run with `gh run rerun <run-id> --failed` instead of changing code.
