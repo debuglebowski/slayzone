@@ -1,5 +1,82 @@
 [
   {
+    "version": "0.17.0",
+    "date": "2026-04-10",
+    "tagline": "Skills & polish",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Domain-specific slay skills",
+        "description": "Split monolithic slay skill into 9 focused domain skills with rich documentation."
+      },
+      {
+        "category": "feature",
+        "title": "Skill marketplace sync",
+        "description": "Installed skills now sync to disk automatically, and project-scoped skill init writes files directly."
+      },
+      {
+        "category": "feature",
+        "title": "Blocked task state",
+        "description": "Tasks can be marked as blocked with a split button UI, blocking relationships, and B/Shift+B shortcuts."
+      },
+      {
+        "category": "feature",
+        "title": "Agent side panel",
+        "description": "Persistent full-height agent panel accessible via Ctrl+Tab cycling."
+      },
+      {
+        "category": "feature",
+        "title": "Asset downloads",
+        "description": "Download assets as PDF, PNG, HTML, or ZIP from a restructured download menu."
+      },
+      {
+        "category": "feature",
+        "title": "Inline tab rename",
+        "description": "Double-click a task tab to rename it inline."
+      },
+      {
+        "category": "improvement",
+        "title": "Redesigned surface tokens",
+        "description": "New inset card panels and unified surface token scale across light and dark modes."
+      },
+      {
+        "category": "improvement",
+        "title": "Editor syntax highlighting",
+        "description": "Added Go, YAML, SQL, TOML, and HCL syntax highlighting to the editor."
+      },
+      {
+        "category": "improvement",
+        "title": "Git status in file tree",
+        "description": "File tree shows git status letter badges and italicizes ignored files."
+      },
+      {
+        "category": "improvement",
+        "title": "Browser address bar search",
+        "description": "Non-URL input in the browser address bar now searches Google."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal word navigation",
+        "description": "Option+Arrow keys now correctly move by word on macOS."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal file links",
+        "description": "Cmd+Click file links work on wrapped lines and bare filenames in parentheses."
+      },
+      {
+        "category": "fix",
+        "title": "Usage API reliability",
+        "description": "Fixed first-429 backoff and stale cross-account data in usage tracking."
+      },
+      {
+        "category": "fix",
+        "title": "Editor list indentation",
+        "description": "Unified indentation across bullet, ordered, and task lists."
+      }
+    ]
+  },
+  {
     "version": "0.16.0",
     "date": "2026-04-08",
     "tagline": "Folders & skills",

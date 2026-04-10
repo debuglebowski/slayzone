@@ -1,6 +1,101 @@
 # Changelog
 
 
+## v0.17.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.16.0...v0.17.0)
+
+### 🚀 Enhancements
+
+- **task:** Reorganize assets panel layout + add download ([d808955b](https://github.com/debuglebowski/slayzone/commit/d808955b))
+- Add full bordered rounded tables to markdown preview + editor ([60b92474](https://github.com/debuglebowski/slayzone/commit/60b92474))
+- **task:** Sort assets and folders alphabetically in assets panel ([c4256899](https://github.com/debuglebowski/slayzone/commit/c4256899))
+- Include context manager in Ctrl+Tab cycling ([a3e1dbaf](https://github.com/debuglebowski/slayzone/commit/a3e1dbaf))
+- Add persistent agent side panel with full-height layout ([086dbf49](https://github.com/debuglebowski/slayzone/commit/086dbf49))
+- **task:** Add standalone blocked state with split button UI ([d30df207](https://github.com/debuglebowski/slayzone/commit/d30df207))
+- Remap shortcuts — attention→Ctrl+., assets→Cmd+Shift+A ([3dd23854](https://github.com/debuglebowski/slayzone/commit/3dd23854))
+- **tabs:** Double-click task tab to rename inline ([f532ed12](https://github.com/debuglebowski/slayzone/commit/f532ed12))
+- **themes:** Add surface3 token and shift surface scale ([2c0b1070](https://github.com/debuglebowski/slayzone/commit/2c0b1070))
+- **ui:** Add status icons to metadata sidebar dropdown ([af4fde0b](https://github.com/debuglebowski/slayzone/commit/af4fde0b))
+- **tasks:** Show keyboard shortcut hints in task context menu ([e6353683](https://github.com/debuglebowski/slayzone/commit/e6353683))
+- **tasks:** Add Blocked and Blocked by items to kanban context menu ([74377918](https://github.com/debuglebowski/slayzone/commit/74377918))
+- **cli:** Add blocking commands to slay CLI ([d1fe6515](https://github.com/debuglebowski/slayzone/commit/d1fe6515))
+- **ai-config:** Add skill preview dialog, remove tags and category filter ([b67f075c](https://github.com/debuglebowski/slayzone/commit/b67f075c))
+- **ai-config:** Split builtin slay skill into 9 domain-specific skills with rich docs ([dbb06adf](https://github.com/debuglebowski/slayzone/commit/dbb06adf))
+- **task:** Persist active asset selection across task switches ([db865d56](https://github.com/debuglebowski/slayzone/commit/db865d56))
+- **ai-config:** Replace tags with category grouping, add slay-context skill ([23a3152a](https://github.com/debuglebowski/slayzone/commit/23a3152a))
+- **task:** Add download-as-PDF for text-based assets ([598dec9c](https://github.com/debuglebowski/slayzone/commit/598dec9c))
+- **tasks:** Extract BlockerDialog, add B/Shift+B keyboard shortcuts ([5baf5d20](https://github.com/debuglebowski/slayzone/commit/5baf5d20))
+- **task:** Add PNG, HTML, and ZIP asset downloads ([91d383ba](https://github.com/debuglebowski/slayzone/commit/91d383ba))
+- **ai-config:** Add slay-auto-title skill, auto-update installed builtins ([7aff0d6d](https://github.com/debuglebowski/slayzone/commit/7aff0d6d))
+- **editor:** Add icons, focus, and no-outline to inline create inputs ([5fcd5332](https://github.com/debuglebowski/slayzone/commit/5fcd5332))
+- **settings:** Apply editor appearance settings to markdown assets ([ed1c96d3](https://github.com/debuglebowski/slayzone/commit/ed1c96d3))
+- **terminal:** Add slay CLI nudge banner for unconfigured projects ([948ee61f](https://github.com/debuglebowski/slayzone/commit/948ee61f))
+- **editor:** Add syntax highlighting for Go, YAML, SQL, TOML, HCL ([#64](https://github.com/debuglebowski/slayzone/pull/64))
+- **cli:** Add slay tasks assets download + MCP export endpoints ([38da1e8e](https://github.com/debuglebowski/slayzone/commit/38da1e8e))
+- **ai-config:** Sort all context manager lists alphabetically ([5bc01d63](https://github.com/debuglebowski/slayzone/commit/5bc01d63))
+- **browser:** Search Google for non-URL input in address bar ([e11afe35](https://github.com/debuglebowski/slayzone/commit/e11afe35))
+- **tabs:** Add tooltips to Home and Context Manager tabs ([7dd5062c](https://github.com/debuglebowski/slayzone/commit/7dd5062c))
+- **editor:** Add git status letter badges and italic ignored files in filetree ([740d9196](https://github.com/debuglebowski/slayzone/commit/740d9196))
+- **usage:** Sort usage bars alphabetically in header and popup ([e71ea961](https://github.com/debuglebowski/slayzone/commit/e71ea961))
+- **cli:** Project-scoped skill init with disk file writing ([f417545d](https://github.com/debuglebowski/slayzone/commit/f417545d))
+- **marketplace:** Sync skill files to disk on install ([569cd5e9](https://github.com/debuglebowski/slayzone/commit/569cd5e9))
+- **terminal:** Rewrite slay nudge banner copy and layout ([080b3d7c](https://github.com/debuglebowski/slayzone/commit/080b3d7c))
+
+### 🩹 Fixes
+
+- **terminal:** Focus new pane after split ([190cda17](https://github.com/debuglebowski/slayzone/commit/190cda17))
+- **terminal:** Send Meta-b/f for Option+Arrow word nav on macOS ([7eb44dc4](https://github.com/debuglebowski/slayzone/commit/7eb44dc4))
+- **usage:** Add User-Agent header to OAuth usage fetch + fix first-429 backoff ([8cd90885](https://github.com/debuglebowski/slayzone/commit/8cd90885))
+- **terminal:** Restore spawn-helper execute bit and add cwd validation ([023e3966](https://github.com/debuglebowski/slayzone/commit/023e3966))
+- **tabs:** Deactivate task tab highlight when context manager is open ([6827ca63](https://github.com/debuglebowski/slayzone/commit/6827ca63))
+- **ai-config:** Marketplace drill-in showing all skills due to stale ensureFresh closure ([e4a5e646](https://github.com/debuglebowski/slayzone/commit/e4a5e646))
+- **usage:** Invalidate cache on account switch to prevent stale cross-account data ([f62d4919](https://github.com/debuglebowski/slayzone/commit/f62d4919))
+- **ai-config:** Fix syntax errors in skill-marketplace-registry template literal ([31f7538e](https://github.com/debuglebowski/slayzone/commit/31f7538e))
+- Merge duplicate style attributes on explode-mode container ([612111a8](https://github.com/debuglebowski/slayzone/commit/612111a8))
+- **editor:** Align text indentation across bullet, ordered, and task lists ([#61](https://github.com/debuglebowski/slayzone/pull/61))
+- **task:** Use preload API for asset panel file drop ([beb95e81](https://github.com/debuglebowski/slayzone/commit/beb95e81))
+- **terminal:** Support Cmd+Click file links on wrapped lines ([90a2d609](https://github.com/debuglebowski/slayzone/commit/90a2d609))
+- **editor:** Clean up list CSS after indentation unification ([0ec70bb0](https://github.com/debuglebowski/slayzone/commit/0ec70bb0))
+- **editor:** Fix compact line spacing not working with Milkdown ([#63](https://github.com/debuglebowski/slayzone/pull/63))
+- **editor:** Clean up duplicate ProseMirror task list CSS ([5b688600](https://github.com/debuglebowski/slayzone/commit/5b688600))
+- **terminal:** Recheck slay config on nudge dialog close instead of Done button ([24493aa3](https://github.com/debuglebowski/slayzone/commit/24493aa3))
+- **ui:** Restore dialog max-width cap, remove leftover responsive prefixes ([3a4aff4d](https://github.com/debuglebowski/slayzone/commit/3a4aff4d))
+- **terminal:** Detect bare filenames in parens as clickable links ([852a2f54](https://github.com/debuglebowski/slayzone/commit/852a2f54))
+- **worktrees:** Stale PR check status badge — refresh button, parser, adaptive poll ([4208510e](https://github.com/debuglebowski/slayzone/commit/4208510e))
+- **editor:** Markdown editor fills full panel height with focus support ([99186d4a](https://github.com/debuglebowski/slayzone/commit/99186d4a))
+- **terminal:** Keep focus when dragging image into terminal ([a604e5b1](https://github.com/debuglebowski/slayzone/commit/a604e5b1))
+
+### 💅 Refactors
+
+- **ui:** Add variant prop to PanelToggle for contrast control ([db24a333](https://github.com/debuglebowski/slayzone/commit/db24a333))
+- **ui:** Redesign layout with inset card panels and surface tokens ([8dbcfab0](https://github.com/debuglebowski/slayzone/commit/8dbcfab0))
+- **ui:** Unify side panel resize handles with ResizeHandle component ([c6086569](https://github.com/debuglebowski/slayzone/commit/c6086569))
+- **ui:** Migrate components to new surface token scale ([c44920ce](https://github.com/debuglebowski/slayzone/commit/c44920ce))
+- **ui:** Tune light mode surface scale to 0.92/0.95/0.97/1.0 ([322c89bf](https://github.com/debuglebowski/slayzone/commit/322c89bf))
+- **ui:** Widen skill preview dialog, remove responsive breakpoints from Dialog ([1e210112](https://github.com/debuglebowski/slayzone/commit/1e210112))
+- **ai-config:** Rename Slay CLI to Slay, move to top of marketplace ([57112acb](https://github.com/debuglebowski/slayzone/commit/57112acb))
+- **ai-config:** Use bg-surface-3 for consistent card/panel surfaces ([401d56a0](https://github.com/debuglebowski/slayzone/commit/401d56a0))
+- **task:** Restructure download menu into Download + Download as submenu ([3e335ce9](https://github.com/debuglebowski/slayzone/commit/3e335ce9))
+- Remove project color tint background from main area ([b92334eb](https://github.com/debuglebowski/slayzone/commit/b92334eb))
+- **task:** Extract asset export into shared module ([6dafb49e](https://github.com/debuglebowski/slayzone/commit/6dafb49e))
+- **cli:** Replace slay init skill with slay init skills bulk install ([3209e978](https://github.com/debuglebowski/slayzone/commit/3209e978))
+
+### 📖 Documentation
+
+- **cli:** Sync slay skill reference with source ([65a491bc](https://github.com/debuglebowski/slayzone/commit/65a491bc))
+- **slay:** Expand SKILL.md command reference with descriptions ([daa4189f](https://github.com/debuglebowski/slayzone/commit/daa4189f))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.16.0 ([78d3e009](https://github.com/debuglebowski/slayzone/commit/78d3e009))
+- Add missing slay-projects skill file ([234229d2](https://github.com/debuglebowski/slayzone/commit/234229d2))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Stefan Farestam
+
 ## v0.16.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.15.0...v0.16.0)
