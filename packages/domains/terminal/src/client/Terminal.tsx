@@ -376,10 +376,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Expose API for programmatic input and focus
           onReadyRef.current?.({
             sendInput: async (text) => {
-              for (const char of text) {
-                cached.terminal.input(char)
-                await new Promise(r => setTimeout(r, 1))
-              }
+              cached.terminal.input(text)
             },
             write: (data) => window.api.pty.write(sessionId, data),
             focus: () => cached.terminal.focus(),
@@ -629,12 +626,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         window.api.pty.resize(sessionId, cols, rows)
       }
 
-      // Helper to inject text char-by-char
+      // Inject text into terminal in a single write (avoids char-by-char IPC race)
       const injectText = async (text: string): Promise<void> => {
-        for (const char of text) {
-          terminal.input(char)
-          await new Promise(r => setTimeout(r, 1))
-        }
+        terminal.input(text)
       }
 
       // Expose API for programmatic input and focus
