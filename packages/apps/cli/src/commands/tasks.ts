@@ -1,6 +1,6 @@
 import { Command } from 'commander'
-import { execSync } from 'child_process'
-import { openDb, notifyApp, resolveProject, getAssetsDir, type SlayDb } from '../db'
+import http from 'node:http'
+import { openDb, notifyApp, resolveProject, getAssetsDir, getMcpPort, type SlayDb } from '../db'
 import { browserCommand } from './browser'
 import {
   getDefaultStatus,
@@ -604,20 +604,27 @@ export function tasksCommand(): Command {
       }
 
       const task = tasks[0]
-      const url = `slayzone://task/${task.id}`
+      db.close()
 
-      const opener =
-        process.platform === 'darwin' ? 'open' :
-        process.platform === 'win32'  ? 'start' :
-        'xdg-open'
-
-      try {
-        execSync(`${opener} "${url}"`, { stdio: 'ignore' })
-        console.log(`Opening: ${task.id.slice(0, 8)}  ${task.title}`)
-      } catch {
-        console.error(`Failed to open URL. Try manually: ${url}`)
+      const port = getMcpPort()
+      if (!port) {
+        console.error('No running SlayZone app found. Start the app first.')
         process.exit(1)
       }
+
+      await new Promise<void>((resolve) => {
+        const req = http.request(
+          { hostname: '127.0.0.1', port, path: `/api/open-task/${task.id}`, method: 'POST' },
+          (res) => { res.resume(); res.on('end', resolve) },
+        )
+        req.on('error', () => {
+          console.error('Failed to reach SlayZone app. Is it running?')
+          process.exit(1)
+        })
+        req.setTimeout(3000, () => { req.destroy(); console.error('Timed out reaching SlayZone app'); process.exit(1) })
+        req.end()
+      })
+      console.log(`Opening: ${task.id.slice(0, 8)}  ${task.title}`)
     })
 
   // slay tasks subtasks [id]

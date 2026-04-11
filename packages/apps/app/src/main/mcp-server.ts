@@ -395,6 +395,20 @@ export function startMcpServer(db: Database, opts?: { automationEngine?: { execu
     res.json({ ok: true })
   })
 
+  app.post('/api/open-task/:id', (req, res) => {
+    const taskId = req.params.id
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('app:open-task', taskId)
+    })
+    const mainWin = BrowserWindow.getAllWindows()[0]
+    if (mainWin) {
+      if (mainWin.isMinimized()) mainWin.restore()
+      mainWin.show()
+      mainWin.focus()
+    }
+    res.json({ ok: true })
+  })
+
   // Automation manual execution for CLI (`slay automations run`)
   app.post('/api/automations/:id/run', async (req, res) => {
     if (!opts?.automationEngine) {
