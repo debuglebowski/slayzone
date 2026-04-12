@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Terminal, Globe, FileCode, GitBranch, SlidersHorizontal, RefreshCw, Trash2, Pencil, X } from 'lucide-react'
+import { useShortcutDisplay } from '@slayzone/ui'
 import { SceneShell } from './SceneShell'
 import { AnimatedCursor } from './AnimatedCursor'
 import { TerminalBanner } from './TerminalBanner'
@@ -24,12 +25,24 @@ function Kbd({ children }: { children: string }): React.JSX.Element {
 const SIDEBAR_TABS = ['General', 'Appearance', 'Panels', 'Tags', 'Import & Export', 'Telemetry', 'Labs', 'About']
 
 const NATIVE_PANELS = [
-  { icon: Terminal, label: 'Terminal', shortcut: '⌘K' },
-  { icon: Globe, label: 'Browser', shortcut: '⌘B' },
-  { icon: FileCode, label: 'Editor', shortcut: '⌘E' },
-  { icon: GitBranch, label: 'Diff', shortcut: '⌘G' },
-  { icon: SlidersHorizontal, label: 'Settings', shortcut: '⌘S' },
+  { icon: Terminal, label: 'Terminal', shortcutId: 'panel-terminal' },
+  { icon: Globe, label: 'Browser', shortcutId: 'panel-browser' },
+  { icon: FileCode, label: 'Editor', shortcutId: 'panel-editor' },
+  { icon: GitBranch, label: 'Diff', shortcutId: 'panel-git-diff' },
+  { icon: SlidersHorizontal, label: 'Settings', shortcutId: 'panel-settings' },
 ]
+
+function NativePanelRow({ icon: Icon, label, shortcutId }: { icon: typeof Terminal; label: string; shortcutId: string }): React.JSX.Element {
+  const shortcut = useShortcutDisplay(shortcutId)
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border bg-surface-1">
+      <Icon className="size-4 text-muted-foreground/50 shrink-0" />
+      <span className="text-[13px] font-medium flex-1">{label}</span>
+      <Kbd>{shortcut}</Kbd>
+      <Toggle on />
+    </div>
+  )
+}
 
 const EXTERNAL_PANELS = [
   { label: 'Figma', url: 'https://figma.com', shortcut: '⌘Y' },
@@ -73,13 +86,8 @@ function SettingsView({ figmaOn, excalidrawOn }: { figmaOn: boolean; excalidrawO
           <h3 className="text-[15px] font-semibold">Native</h3>
           <p className="text-[12px] text-muted-foreground/40 mt-0.5">Built-in panels. Disabled panels won't appear in any task.</p>
           <div className="flex flex-col gap-1.5 mt-3">
-            {NATIVE_PANELS.map(({ icon: Icon, label, shortcut }) => (
-              <div key={label} className="flex items-center gap-3 px-4 py-2.5 rounded-lg border bg-surface-1">
-                <Icon className="size-4 text-muted-foreground/50 shrink-0" />
-                <span className="text-[13px] font-medium flex-1">{label}</span>
-                <Kbd>{shortcut}</Kbd>
-                <Toggle on />
-              </div>
+            {NATIVE_PANELS.map((p) => (
+              <NativePanelRow key={p.label} icon={p.icon} label={p.label} shortcutId={p.shortcutId} />
             ))}
           </div>
         </div>

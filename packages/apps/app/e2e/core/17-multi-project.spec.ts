@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject, projectBlob, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 
 test.describe('Multi-project & persistence', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -41,7 +42,7 @@ test.describe('Multi-project & persistence', () => {
   })
 
   test('search finds tasks across projects', async ({ mainWindow }) => {
-    await mainWindow.keyboard.press('Meta+p')
+    await pressShortcut(mainWindow, 'search')
 
     const searchInput = mainWindow.getByPlaceholder('Search files, tasks, projects...')
     await expect(searchInput).toBeVisible({ timeout: 5_000 })
@@ -54,7 +55,7 @@ test.describe('Multi-project & persistence', () => {
   })
 
   test('search with no matching results', async ({ mainWindow }) => {
-    await mainWindow.keyboard.press('Meta+p')
+    await pressShortcut(mainWindow, 'search')
 
     const searchInput = mainWindow.getByPlaceholder('Search files, tasks, projects...')
     await expect(searchInput).toBeVisible({ timeout: 5_000 })

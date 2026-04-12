@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 
 test.describe('Panel resize', () => {
   let projectAbbrev: string
@@ -9,7 +10,7 @@ test.describe('Panel resize', () => {
     page: import('@playwright/test').Page,
     title: string
   ) => {
-    await page.keyboard.press('Meta+p')
+    await pressShortcut(page, 'search')
     const input = page.getByPlaceholder('Search files, tasks, projects...')
     await expect(input).toBeVisible()
     await input.fill(title)

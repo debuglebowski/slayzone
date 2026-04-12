@@ -1,6 +1,7 @@
 import { test, expect, seed, goHome, clickProject, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { focusForAppShortcut } from '../fixtures/browser-view'
+import { shortcutKey } from '../fixtures/shortcuts'
 
 test.describe('Panel toggles', () => {
   let projectAbbrev: string
@@ -56,20 +57,20 @@ test.describe('Panel toggles', () => {
     await expect(panelBtn(mainWindow, 'Git')).not.toHaveClass(/(?:^|\s)bg-surface-3(?:\s|$)/)
   })
 
-  test('Cmd+K toggles terminal off', async ({ mainWindow }) => {
-    await toggleByShortcut(mainWindow, 'Meta+k', 'Terminal', false)
+  test('terminal panel shortcut toggles terminal off', async ({ mainWindow }) => {
+    await toggleByShortcut(mainWindow, shortcutKey('panel-terminal'), 'Terminal', false)
   })
 
-  test('Cmd+B toggles browser on', async ({ mainWindow }) => {
-    await toggleByShortcut(mainWindow, 'Meta+b', 'Browser', true)
+  test('browser panel shortcut toggles browser on', async ({ mainWindow }) => {
+    await toggleByShortcut(mainWindow, shortcutKey('panel-browser'), 'Browser', true)
   })
 
-  test('Cmd+G toggles diff on', async ({ mainWindow }) => {
-    await toggleByShortcut(mainWindow, 'Meta+g', 'Git', true)
+  test('git panel shortcut toggles diff on', async ({ mainWindow }) => {
+    await toggleByShortcut(mainWindow, shortcutKey('panel-git'), 'Git', true)
   })
 
-  test('Cmd+S toggles settings off', async ({ mainWindow }) => {
-    await toggleByShortcut(mainWindow, 'Meta+s', 'Settings', false)
+  test('settings panel shortcut toggles settings off', async ({ mainWindow }) => {
+    await toggleByShortcut(mainWindow, shortcutKey('panel-settings'), 'Settings', false)
   })
 
   test('click PanelToggle button toggles panel', async ({ mainWindow }) => {

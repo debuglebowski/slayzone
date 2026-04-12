@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp, ensureGitRepo} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import { execSync } from 'child_process'
 import { existsSync } from 'fs'
 import path from 'path'
@@ -23,7 +24,7 @@ test.describe('Git worktree operations', () => {
     if (await taskCardTitle.isVisible({ timeout: 1_500 }).catch(() => false)) {
       await taskCardTitle.click()
     } else {
-      await page.keyboard.press('Meta+p')
+      await pressShortcut(page, 'search')
       const input = page.getByPlaceholder('Search files, tasks, projects...')
       await expect(input).toBeVisible()
       await input.fill(title)

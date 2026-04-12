@@ -222,13 +222,14 @@ describe('getBlockedWebPanelKeys', () => {
   it('includes global Cmd+letter shortcuts from definitions', () => {
     const blocked = getBlockedWebPanelKeys()
     expect(blocked.has('n')).toBe(true) // new-task (mod+n)
-    expect(blocked.has('p')).toBe(true) // search (mod+p)
+    expect(blocked.has('k')).toBe(true) // search (mod+k)
     expect(blocked.has('w')).toBe(true) // close-tab (mod+w)
   })
 
   it('includes task-scope Cmd+letter shortcuts from definitions', () => {
     const blocked = getBlockedWebPanelKeys()
-    expect(blocked.has('k')).toBe(true) // panel-terminal (mod+k)
+    expect(blocked.has('o')).toBe(true) // panel-terminal (mod+o)
+    expect(blocked.has('p')).toBe(true) // panel-processes (mod+p)
     expect(blocked.has('b')).toBe(true) // panel-browser (mod+b)
     expect(blocked.has('s')).toBe(true) // panel-settings (mod+s)
   })

@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut, shortcutKey } from '../fixtures/shortcuts'
 
 test.describe.serial('Custom keyboard shortcuts', () => {
   let projectAbbrev: string
@@ -87,7 +88,7 @@ test.describe.serial('Custom keyboard shortcuts', () => {
     await expect(mainWindow.getByPlaceholder('Search files, tasks, projects...')).toBeVisible({ timeout: 3_000 })
     await mainWindow.keyboard.press('Escape')
 
-    await mainWindow.keyboard.press('Meta+p')
+    await pressShortcut(mainWindow, 'search')
     await mainWindow.waitForTimeout(500)
     await expect(mainWindow.getByPlaceholder('Search files, tasks, projects...')).not.toBeVisible()
 
@@ -108,7 +109,7 @@ test.describe.serial('Custom keyboard shortcuts', () => {
     await mainWindow.keyboard.press('Escape')
 
     // Old shortcut should NOT work
-    await mainWindow.keyboard.press('Meta+p')
+    await pressShortcut(mainWindow, 'search')
     await mainWindow.waitForTimeout(500)
     await expect(mainWindow.getByPlaceholder('Search files, tasks, projects...')).not.toBeVisible()
 
@@ -123,7 +124,7 @@ test.describe.serial('Custom keyboard shortcuts', () => {
     await rebindShortcut(mainWindow, 'Search', 'Meta+Shift+p')
     await resetShortcuts(mainWindow)
 
-    await mainWindow.keyboard.press('Meta+p')
+    await pressShortcut(mainWindow, 'search')
     await expect(mainWindow.getByPlaceholder('Search files, tasks, projects...')).toBeVisible({ timeout: 3_000 })
     await mainWindow.keyboard.press('Escape')
   })
@@ -159,7 +160,9 @@ test.describe.serial('Custom keyboard shortcuts', () => {
     const newTaskRow = mainWindow.getByRole('dialog').locator(`span.text-sm:text-is("New Task")`).first()
     await newTaskRow.locator('..').locator('span.cursor-pointer').click()
     await expect(mainWindow.getByText('Press keys...')).toBeVisible({ timeout: 2_000 })
-    await mainWindow.keyboard.press('Meta+p')
+    // Rebind New Task to Search's current default key to trigger the conflict-swap flow.
+    const searchDefaultKey = shortcutKey('search')
+    await mainWindow.keyboard.press(searchDefaultKey)
 
     const conflictNotice = mainWindow.getByText('Already bound to')
     await expect(conflictNotice).toBeVisible({ timeout: 2_000 })
@@ -167,8 +170,8 @@ test.describe.serial('Custom keyboard shortcuts', () => {
     await mainWindow.getByRole('dialog').getByText('Reassign').click()
     await closeDialog(mainWindow)
 
-    // mod+p should now open create task instead of search
-    await mainWindow.keyboard.press('Meta+p')
+    // Search's old default key should now open Create Task instead of Search.
+    await mainWindow.keyboard.press(searchDefaultKey)
     await expect(mainWindow.getByRole('dialog').getByText('Create Task')).toBeVisible({ timeout: 3_000 })
     await mainWindow.keyboard.press('Escape')
 

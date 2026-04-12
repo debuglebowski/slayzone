@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import type { Page } from '@playwright/test'
 import fs from 'fs'
 import path from 'path'
@@ -52,7 +53,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
     if (await taskCardTitle.isVisible({ timeout: 1_500 }).catch(() => false)) {
       await taskCardTitle.click()
     } else {
-      await page.keyboard.press('Meta+p')
+      await pressShortcut(page, 'search')
       const input = page.getByPlaceholder('Search files, tasks, projects...')
       await expect(input).toBeVisible({ timeout: 5_000 })
       await input.fill(title)
@@ -73,7 +74,7 @@ test.describe('Cmd+W / Cmd+Shift+W context-sensitive close', () => {
       return
     }
 
-    await page.keyboard.press('Meta+p')
+    await pressShortcut(page, 'search')
     const quickOpen = page.getByPlaceholder('Open file by name...').last()
     await expect(quickOpen).toBeVisible({ timeout: 5_000 })
     await quickOpen.fill(fileName)

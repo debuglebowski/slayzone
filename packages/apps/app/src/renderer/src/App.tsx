@@ -290,8 +290,13 @@ function App(): React.JSX.Element {
   const [isSidePanelResizing, setIsSidePanelResizing] = useState(false)
   const agentPanelMountedRef = useRef(false)
   if (agentPanelState.isOpen) agentPanelMountedRef.current = true
-  const [agentMode, setAgentMode] = useState<string>('claude-code')
-  useEffect(() => { window.api.settings.get('default_terminal_mode').then(m => { if (m) setAgentMode(m) }) }, [])
+  const agentMode = agentPanelState.mode ?? 'claude-code'
+  useEffect(() => {
+    if (agentPanelState.mode) return
+    window.api.settings.get('default_terminal_mode').then(m => {
+      if (m) setAgentPanelState({ mode: m })
+    })
+  }, [agentPanelState.mode, setAgentPanelState])
   const { attentionTasks: allAttentionTasks, refresh: refreshAttentionTasks } = useAttentionTasks(tasks, null)
   const attentionTasks = useMemo(
     () => notificationState.filterCurrentProject
@@ -397,11 +402,22 @@ function App(): React.JSX.Element {
   const panelAutomationsShortcut = useShortcutDisplay('panel-automations')
   const attentionPanelShortcut = useShortcutDisplay('attention-panel')
   const agentPanelShortcut = useShortcutDisplay('agent-panel')
-  const agentSessionId = selectedProjectId ? `__agent-panel:${selectedProjectId}` : null
+  const agentSessionId = selectedProjectId ? `__agent-panel:${selectedProjectId}:${agentPanelState.sessionIndex}` : null
+
+  const handleAgentNewSession = useCallback(async () => {
+    if (agentSessionId) await window.api.pty.kill(agentSessionId)
+    setAgentPanelState({ sessionIndex: (agentPanelState.sessionIndex ?? 0) + 1 })
+  }, [agentSessionId, agentPanelState.sessionIndex, setAgentPanelState])
+
+  const handleAgentModeChange = useCallback(async (nextMode: string) => {
+    if (nextMode === agentMode) return
+    if (agentSessionId) await window.api.pty.kill(agentSessionId)
+    setAgentPanelState({ mode: nextMode, sessionIndex: (agentPanelState.sessionIndex ?? 0) + 1 })
+  }, [agentMode, agentSessionId, agentPanelState.sessionIndex, setAgentPanelState])
 
   // Keyboard shortcuts
   useGuardedHotkeys(getKeys('new-task'), (e) => {
-    if (projects.length > 0) { e.preventDefault(); trackShortcut('mod+n'); useDialogStore.getState().openCreateTask() }
+    if (projects.length > 0) { e.preventDefault(); trackShortcut(getKeys('new-task')); useDialogStore.getState().openCreateTask() }
   }, { enableOnFormTags: true, enabled: !isRecording })
 
   // Build a snapshot of the home file-open context for the unified palette.
@@ -426,10 +442,10 @@ function App(): React.JSX.Element {
   }, [projects, selectedProjectId, homePanel])
 
   useGuardedHotkeys(getKeys('search'), (e) => {
-    // Only fire on home tab; TaskDetailPage owns Cmd+P when a task tab is active.
+    // Only fire on home tab; TaskDetailPage owns the search shortcut when a task tab is active.
     if (tabs[activeTabIndex]?.type !== 'home') return
     e.preventDefault()
-    trackShortcut('mod+p')
+    trackShortcut(getKeys('search'))
     useDialogStore.getState().openSearch({ fileContext: buildHomeFileContext() })
   }, { enableOnFormTags: true, enabled: !isRecording })
 
@@ -555,17 +571,17 @@ function App(): React.JSX.Element {
     if (tabs[activeTabIndex].type === 'task') useDialogStore.getState().openCompleteTaskDialog()
   }, { enableOnFormTags: true, enabled: !isRecording })
 
-  useGuardedHotkeys(getKeys('zen-mode'), (e) => { e.preventDefault(); track('zen_mode_toggled'); trackShortcut('mod+j'); setZenMode(prev => !prev) }, { enableOnFormTags: true, enabled: !isRecording })
+  useGuardedHotkeys(getKeys('zen-mode'), (e) => { e.preventDefault(); track('zen_mode_toggled'); trackShortcut(getKeys('zen-mode')); setZenMode(prev => !prev) }, { enableOnFormTags: true, enabled: !isRecording })
 
   useGuardedHotkeys(getKeys('explode-mode'), (e) => {
     e.preventDefault()
-    if (openTaskIds.length >= 2) { track('explode_mode_toggled'); trackShortcut('mod+shift+e'); setExplodeMode(prev => !prev) }
+    if (openTaskIds.length >= 2) { track('explode_mode_toggled'); trackShortcut(getKeys('explode-mode')); setExplodeMode(prev => !prev) }
   }, { enableOnFormTags: true, enabled: !isRecording })
 
   useGuardedHotkeys(getKeys('exit-zen-explode'), () => { if (explodeMode) setExplodeMode(false); else if (zenMode) setZenMode(false) }, { enableOnFormTags: true, enabled: !isRecording })
 
-  useGuardedHotkeys(getKeys('attention-panel'), (e) => { e.preventDefault(); trackShortcut('ctrl+.'); setNotificationState({ isLocked: !notificationState.isLocked }) }, { enableOnFormTags: true, enabled: !isRecording })
-  useGuardedHotkeys(getKeys('agent-panel'), (e) => { e.preventDefault(); trackShortcut('mod+.'); if (selectedProjectId) setAgentPanelState({ isOpen: !agentPanelState.isOpen }) }, { enableOnFormTags: true, enabled: !isRecording })
+  useGuardedHotkeys(getKeys('attention-panel'), (e) => { e.preventDefault(); trackShortcut(getKeys('attention-panel')); setNotificationState({ isLocked: !notificationState.isLocked }) }, { enableOnFormTags: true, enabled: !isRecording })
+  useGuardedHotkeys(getKeys('agent-panel'), (e) => { e.preventDefault(); trackShortcut(getKeys('agent-panel')); if (selectedProjectId) setAgentPanelState({ isOpen: !agentPanelState.isOpen }) }, { enableOnFormTags: true, enabled: !isRecording })
 
   // Home tab panel shortcuts
   useEffect(() => {
@@ -1111,7 +1127,8 @@ function App(): React.JSX.Element {
             {agentSessionId && agentPanelMountedRef.current && (
               <div className={agentPanelState.isOpen ? 'min-h-0' : 'w-0 overflow-hidden invisible'} style={agentPanelState.isOpen ? undefined : { position: 'absolute' as const }}>
                 <AgentSidePanel width={agentPanelState.panelWidth}
-                  sessionId={agentSessionId} cwd={projects.find(p => p.id === selectedProjectId)?.path ?? ''} mode={agentMode as import('@slayzone/terminal/shared').TerminalMode} isActive={agentPanelState.isOpen} isResizing={isSidePanelResizing} />
+                  sessionId={agentSessionId} cwd={projects.find(p => p.id === selectedProjectId)?.path ?? ''} mode={agentMode as import('@slayzone/terminal/shared').TerminalMode} isActive={agentPanelState.isOpen} isResizing={isSidePanelResizing}
+                  onNewSession={handleAgentNewSession} onModeChange={handleAgentModeChange} />
               </div>
             )}
             {notificationState.isLocked && (

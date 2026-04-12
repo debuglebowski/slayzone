@@ -1,4 +1,5 @@
 import { test, expect, seed, goHome, clickProject, resetApp, createIsolatedGitRepo } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import { execSync } from 'child_process'
 import { writeFileSync, mkdirSync } from 'fs'
 import path from 'path'
@@ -8,7 +9,7 @@ let WORKTREE_DIR: string
 let WORKTREE_PATH: string
 
 async function openTaskViaSearch(page: import('@playwright/test').Page, title: string) {
-  await page.keyboard.press('Meta+p')
+  await pressShortcut(page, 'search')
   const input = page.getByPlaceholder('Search files, tasks, projects...')
   await expect(input).toBeVisible()
   await input.fill(title)

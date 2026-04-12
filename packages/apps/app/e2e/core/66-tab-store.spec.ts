@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import type { Page } from '@playwright/test'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,7 +38,7 @@ const openTaskViaSearch = async (page: Page, title: string) => {
   if (await card.isVisible({ timeout: 1_500 }).catch(() => false)) {
     await card.click()
   } else {
-    await page.keyboard.press('Meta+p')
+    await pressShortcut(page, 'search')
     const input = page.getByPlaceholder('Search files, tasks, projects...')
     await expect(input).toBeVisible({ timeout: 5_000 })
     await input.fill(title)

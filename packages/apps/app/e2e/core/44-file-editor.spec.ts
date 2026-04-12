@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import fs from 'fs'
 import path from 'path'
 
@@ -228,10 +229,10 @@ test.describe('File editor', () => {
     fs.unlinkSync(path.join(TEST_PROJECT_PATH, 'newfile.ts'))
   })
 
-  // --- Quick open (Cmd+P) ---
+  // --- Quick open ---
 
-  test('Cmd+P opens quick open dialog', async ({ mainWindow }) => {
-    await mainWindow.keyboard.press('Meta+p')
+  test('search shortcut opens quick open dialog', async ({ mainWindow }) => {
+    await pressShortcut(mainWindow, 'search')
 
     // Should see the dialog with search input
     await expect(mainWindow.getByPlaceholder('Open file by name...')).toBeVisible({ timeout: 3_000 })
@@ -244,7 +245,7 @@ test.describe('File editor', () => {
   })
 
   test('quick open filters files by query', async ({ mainWindow }) => {
-    await mainWindow.keyboard.press('Meta+p')
+    await pressShortcut(mainWindow, 'search')
 
     const input = mainWindow.getByPlaceholder('Open file by name...')
     await input.fill('hello')
@@ -257,7 +258,7 @@ test.describe('File editor', () => {
   })
 
   test('quick open does not show gitignored files', async ({ mainWindow }) => {
-    await mainWindow.keyboard.press('Meta+p')
+    await pressShortcut(mainWindow, 'search')
 
     const input = mainWindow.getByPlaceholder('Open file by name...')
     await input.fill('pkg.json')
@@ -269,7 +270,7 @@ test.describe('File editor', () => {
   })
 
   test('selecting a file in quick open opens it', async ({ mainWindow }) => {
-    await mainWindow.keyboard.press('Meta+p')
+    await pressShortcut(mainWindow, 'search')
 
     const input = mainWindow.getByPlaceholder('Open file by name...')
     await input.fill('index.ts')

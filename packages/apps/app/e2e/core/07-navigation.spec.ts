@@ -1,5 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 
 test.describe('Navigation & tabs', () => {
   let projectAbbrev: string
@@ -20,8 +21,8 @@ test.describe('Navigation & tabs', () => {
     await expect(mainWindow.locator('h3').getByText('Inbox', { exact: true })).toBeVisible({ timeout: 5_000 })
   })
 
-  test('Cmd+P opens search dialog', async ({ mainWindow }) => {
-    await mainWindow.keyboard.press('Meta+p')
+  test('search shortcut opens search dialog', async ({ mainWindow }) => {
+    await pressShortcut(mainWindow, 'search')
     await expect(mainWindow.getByPlaceholder('Search files, tasks, projects...')).toBeVisible({
       timeout: 3_000,
     })
@@ -34,8 +35,8 @@ test.describe('Navigation & tabs', () => {
     await mainWindow.keyboard.press('Escape')
   })
 
-  test('Cmd+P search selects result and navigates', async ({ mainWindow }) => {
-    await mainWindow.keyboard.press('Meta+p')
+  test('search shortcut selects result and navigates', async ({ mainWindow }) => {
+    await pressShortcut(mainWindow, 'search')
     const searchInput = mainWindow.getByPlaceholder('Search files, tasks, projects...')
     await searchInput.fill('Nav detail task')
     await expect(mainWindow.locator('[cmdk-item]').getByText('Nav detail task')).toBeVisible({ timeout: 3_000 })

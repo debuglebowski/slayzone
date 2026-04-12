@@ -6,6 +6,7 @@
  */
 import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
+import { pressShortcut } from './shortcuts'
 
 // ── IPC bridge ──────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ export async function ensureBrowserPanelHidden(page: Page): Promise<void> {
 // ── Task navigation ─────────────────────────────────────────────────
 
 export async function openTaskViaSearch(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('Meta+p')
+  await pressShortcut(page, 'search')
   const input = page.getByPlaceholder('Search files, tasks, projects...')
   await expect(input).toBeVisible()
   await input.fill(title)

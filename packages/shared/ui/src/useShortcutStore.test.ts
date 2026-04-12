@@ -46,7 +46,7 @@ describe('load', () => {
 
 describe('getKeys', () => {
   it('returns default keys when no override', () => {
-    expect(useShortcutStore.getState().getKeys('search')).toBe('mod+p')
+    expect(useShortcutStore.getState().getKeys('search')).toBe('mod+k')
   })
 
   it('returns override when set', () => {
@@ -61,24 +61,24 @@ describe('getKeys', () => {
 
 describe('findConflict', () => {
   it('finds same-scope conflict', () => {
-    const conflict = useShortcutStore.getState().findConflict('mod+p', 'global')
+    const conflict = useShortcutStore.getState().findConflict('mod+k', 'global')
     expect(conflict).toBeDefined()
     expect(conflict!.id).toBe('search')
   })
 
   it('ignores cross-scope shortcuts', () => {
-    // mod+k is default for panel-terminal (task scope)
-    const conflict = useShortcutStore.getState().findConflict('mod+k', 'global')
+    // mod+o is default for panel-terminal (task scope)
+    const conflict = useShortcutStore.getState().findConflict('mod+o', 'global')
     expect(conflict).toBeUndefined()
   })
 
   it('checks overrides not just defaults', () => {
-    useShortcutStore.setState({ overrides: { search: 'mod+shift+p' } })
-    // Original mod+p should no longer conflict
-    const conflict = useShortcutStore.getState().findConflict('mod+p', 'global')
+    useShortcutStore.setState({ overrides: { search: 'mod+shift+k' } })
+    // Original mod+k should no longer conflict
+    const conflict = useShortcutStore.getState().findConflict('mod+k', 'global')
     expect(conflict).toBeUndefined()
     // New binding should conflict
-    const conflict2 = useShortcutStore.getState().findConflict('mod+shift+p', 'global')
+    const conflict2 = useShortcutStore.getState().findConflict('mod+shift+k', 'global')
     expect(conflict2).toBeDefined()
     expect(conflict2!.id).toBe('search')
   })
@@ -86,10 +86,10 @@ describe('findConflict', () => {
 
 describe('findShadow', () => {
   it('finds global shortcut that shadows scoped shortcut', () => {
-    // mod+k is default for terminal-new-group (terminal scope)
-    // If we assign mod+k to a global shortcut, it shadows
-    useShortcutStore.setState({ overrides: { 'new-task': 'mod+k' } })
-    const shadow = useShortcutStore.getState().findShadow('mod+k', 'global')
+    // mod+d is default for terminal-split (terminal scope)
+    // If we assign mod+d to a global shortcut, it shadows
+    useShortcutStore.setState({ overrides: { 'new-task': 'mod+d' } })
+    const shadow = useShortcutStore.getState().findShadow('mod+d', 'global')
     expect(shadow).toBeDefined()
     expect(shadow!.scope).not.toBe('global')
   })
@@ -103,7 +103,8 @@ describe('findShadow', () => {
   })
 
   it('ignores same-scope (handled by findConflict)', () => {
-    const shadow = useShortcutStore.getState().findShadow('mod+p', 'global')
+    // mod+j is zen-mode (global only, no cross-scope binding at this key)
+    const shadow = useShortcutStore.getState().findShadow('mod+j', 'global')
     expect(shadow).toBeUndefined()
   })
 

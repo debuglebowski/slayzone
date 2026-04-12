@@ -5,6 +5,7 @@ import fs from 'fs'
 import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
+import { pressShortcut } from './shortcuts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -516,7 +517,7 @@ export async function clickProject(page: Page, abbrev: string) {
     await page.waitForTimeout(100)
   }
   // Fallback: open command palette and select by query when sidebar badges are unavailable.
-  await page.keyboard.press('Meta+p')
+  await pressShortcut(page, 'search')
   const input = page.getByPlaceholder('Search files, tasks, projects...')
   await input.fill(abbrev)
   await page.keyboard.press('Enter')

@@ -1,5 +1,6 @@
 import { test, expect, seed, clickSettings, clickProject, goHome, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 import { spawnSync } from 'child_process'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -57,7 +58,7 @@ test.describe('Web panels', () => {
   }
 
   const openTaskViaSearch = async (page: import('@playwright/test').Page, title: string) => {
-    await page.keyboard.press('Meta+p')
+    await pressShortcut(page, 'search')
     const input = page.getByPlaceholder('Search files, tasks, projects...')
     await expect(input).toBeVisible()
     await input.fill(title)

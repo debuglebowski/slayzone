@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { expect } from './electron'
 import { clickProject, goHome } from './electron'
+import { pressShortcut } from './shortcuts'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
@@ -51,7 +52,7 @@ export async function openTaskTerminal(
   if (await taskCardTitle.isVisible({ timeout: 2_000 }).catch(() => false)) {
     await taskCardTitle.click()
   } else {
-    await page.keyboard.press('Meta+p')
+    await pressShortcut(page, 'search')
     const searchInput = page.getByPlaceholder('Search files, tasks, projects...')
     await expect(searchInput).toBeVisible()
     await searchInput.fill(opts.taskTitle)
