@@ -33,3 +33,7 @@ test-results/
 playwright-report/
 .e2e-userdata/
 .e2e-runtime/
+
+# Performance profiling artifacts
+*.cpuprofile
+working-notes/performance/**/*.json
