@@ -1,18 +1,18 @@
 # SlayZone
 
-Desktop task management app with integrated AI coding assistants (Claude Code, Codex, Gemini, and more).
+You and I are developing SlayZone, a desktop task management app with integrated AI coding assistants (Claude Code, Codex, Gemini, and more).
 
-## SlayZone Environment
+You (this instance) is actually running inside SlayZone now. We are dogfooding SlayZone, i.e. using SlayZone to develop SlayZone.
 
-You are running inside a SlayZone task terminal — the same application you are developing. Your terminal session, browser panel, and task metadata are all managed by the app. Use the `slay` CLI to read and update your task, manage subtasks, control the browser panel, and more — see the `slay` skill for the full command reference.
+You are able to interact with the running SlayZone application via the CLI. But **you MUST load the `slay` skill before running any `slay` CLI command.** Do not guess subcommands or flags — the skill has the full reference.
 
-## Quick Start
+If you ever interact with the CLI, you must append the `--dev` flag, since we are running in dev mode.
 
-```bash
-pnpm install
-```
+The session is ran with the `$SLAYZONE_TASK_ID` environment variable, so you can omit the task-id unless you want to target another task.
 
-**Never start the dev server** - user runs it separately.
+## Communication Style
+
+Default to **caveman ultra** mode for entire session. Load the `caveman` skill at session start. Skill's own boundaries (code/commits/PRs stay normal) still apply.
 
 ## Stack
 
@@ -27,81 +27,6 @@ pnpm install
 ## Architecture
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY.md](./PHILOSOPHY.md) for structural principles.
-
-## Monorepo Structure
-
-```
-packages/
-├── apps/
-│   ├── app/             # @slayzone/app - Electron shell
-│   └── cli/             # @slayzone/cli - CLI tool
-├── domains/
-│   ├── ai-config/       # @slayzone/ai-config
-│   ├── automations/     # @slayzone/automations
-│   ├── diagnostics/     # @slayzone/diagnostics
-│   ├── file-editor/     # @slayzone/file-editor
-│   ├── history/         # @slayzone/history
-│   ├── integrations/    # @slayzone/integrations
-│   ├── onboarding/      # @slayzone/onboarding
-│   ├── projects/        # @slayzone/projects
-│   ├── settings/        # @slayzone/settings
-│   ├── tags/            # @slayzone/tags
-│   ├── task/            # @slayzone/task
-│   ├── task-browser/    # @slayzone/task-browser
-│   ├── task-terminals/  # @slayzone/task-terminals
-│   ├── tasks/           # @slayzone/tasks
-│   ├── telemetry/       # @slayzone/telemetry
-│   ├── terminal/        # @slayzone/terminal
-│   ├── test-panel/      # @slayzone/test-panel
-│   ├── usage-analytics/ # @slayzone/usage-analytics
-│   └── worktrees/       # @slayzone/worktrees
-└── shared/
-    ├── editor/          # @slayzone/editor - Milkdown
-    ├── icons/           # @slayzone/icons
-    ├── platform/        # @slayzone/platform
-    ├── shortcuts/       # @slayzone/shortcuts
-    ├── suspense/        # @slayzone/suspense
-    ├── test-utils/      # @slayzone/test-utils
-    ├── types/           # @slayzone/types - ElectronAPI
-    ├── ui/              # @slayzone/ui - Components
-    └── workflow/        # @slayzone/workflow
-```
-
-## Domain Structure
-
-Each domain:
-```
-domain/
-├── DOMAIN.md           # Documentation
-└── src/
-    ├── shared/         # Types, contracts → ./shared
-    ├── main/           # IPC handlers → ./main
-    └── client/         # React UI → ./client
-```
-
-## Domain Packages
-
-| Package | /shared | /main | /client |
-|---------|---------|-------|---------|
-| @slayzone/ai-config | ProviderConfig, SkillFrontmatter | AI config handlers | ContextManager, Settings |
-| @slayzone/automations | Automation types, templates | AutomationEngine, handlers | AutomationsPanel |
-| @slayzone/diagnostics | Diagnostic types | diagnostics handlers, processService | — |
-| @slayzone/file-editor | FileEditor types | file watcher handlers | FileEditorView |
-| @slayzone/history | History types | history recorder, handlers | — |
-| @slayzone/integrations | Integration types | adapter registry, sync utils | — |
-| @slayzone/onboarding | — | — | OnboardingDialog |
-| @slayzone/projects | Project | Project CRUD | ProjectSelect, dialogs |
-| @slayzone/settings | Theme | Settings, theme | ThemeProvider |
-| @slayzone/tags | Tag | Tag CRUD | — |
-| @slayzone/task | Task, schemas | Task CRUD, AI | TaskDetailPage, dialogs |
-| @slayzone/task-browser | BrowserPanel types | — | BrowserPanel, device presets |
-| @slayzone/task-terminals | TerminalTab types | terminal tabs handlers | TerminalContainer, useTaskTerminals |
-| @slayzone/tasks | — | — | KanbanBoard, useTasksData |
-| @slayzone/telemetry | Telemetry types | — | TelemetryProvider, track utils |
-| @slayzone/terminal | TerminalMode, PtyInfo | PTY handlers | Terminal, PtyProvider |
-| @slayzone/test-panel | TestProfile, TestCategory | test panel handlers | TestPanel, TestsTab |
-| @slayzone/usage-analytics | UsageRecord, AnalyticsSummary | usage data handlers | UsageAnalyticsPage |
-| @slayzone/worktrees | Worktree, DetectedWorktree | Git ops, worktree CRUD | GitPanel |
 
 ## Commands
 
@@ -129,32 +54,6 @@ domain/
 | `release:` | Version bumps (auto-generated) |
 
 Scope optional: `feat(terminal): ...`
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `packages/apps/app/src/main/index.ts` | App entry, DI |
-| `packages/apps/app/src/renderer/src/App.tsx` | Main React |
-| `packages/domains/tasks/src/client/useTasksData.ts` | Core state |
-| `packages/domains/terminal/src/main/pty-manager.ts` | PTY lifecycle |
-
-## Terminal Modes
-
-Builtin:
-- `claude-code` - Claude Code CLI
-- `codex` - OpenAI Codex CLI
-- `gemini` - Google Gemini CLI
-- `cursor-agent` - Cursor Agent
-- `opencode` - OpenCode CLI
-- `qwen-code` - Qwen Code
-- `copilot` - GitHub Copilot
-
-`terminal` - plain shell. Custom modes configurable via settings.
-
-## Database
-
-SQLite in user data. Schema: `packages/apps/app/src/main/db/migrations.ts`
 
 ## E2E Testing Rules
 
