@@ -264,6 +264,7 @@
   height: 0;
 }
 
+
 /* Tighter prose spacing */
 .ProseMirror.prose > * + * {
   margin-top: 0.5em;
@@ -431,8 +432,11 @@
   text-decoration-color: #4ade8080;
 }
 
-/* Editor-themed prose overrides */
-.editor-themed .ProseMirror.prose {
+/* Editor-themed prose overrides — remap Tailwind typography CSS vars to theme
+   colors so bold, links, code etc. all respect the editor theme on dark bg.
+   Selector: .editor-themed (outer wrapper) → .prose (inner milkdown container).
+   Previously used .ProseMirror.prose which never matched (different elements). */
+.editor-themed .prose {
   --tw-prose-body: var(--prose-body);
   --tw-prose-headings: var(--prose-headings);
   --tw-prose-links: var(--prose-links);
@@ -447,9 +451,6 @@
   --tw-prose-hr: var(--prose-muted);
   --tw-prose-th-borders: var(--prose-muted);
   --tw-prose-td-borders: var(--prose-muted);
-}
-.editor-themed .ProseMirror.prose a {
-  color: var(--prose-links);
 }
 .editor-themed .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"],
 .editor-themed .ProseMirror li[data-item-type="task"] input[type="checkbox"] {
