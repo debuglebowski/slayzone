@@ -918,6 +918,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
       folder_id: (row.folder_id as string) ?? null,
       title: row.title as string,
       render_mode: (row.render_mode as RenderMode) ?? null,
+      view_mode: (row.view_mode as string) ?? null,
       language: (row.language as string) ?? null,
       order: row.order as number,
       created_at: row.created_at as string,
@@ -982,6 +983,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     if (data.title !== undefined) { sets.push('title = ?'); values.push(data.title) }
     if (data.folderId !== undefined) { sets.push('folder_id = ?'); values.push(data.folderId) }
     if (data.renderMode !== undefined) { sets.push('render_mode = ?'); values.push(data.renderMode) }
+    if (data.viewMode !== undefined) { sets.push('view_mode = ?'); values.push(data.viewMode) }
     if (data.language !== undefined) { sets.push('language = ?'); values.push(data.language) }
     if (sets.length > 0) {
       sets.push('updated_at = datetime(\'now\')')

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useImperativeHandle, forwardRef } from 'react'
-import { Code, Eye, FileCode, Files, RefreshCw, Search } from 'lucide-react'
+import { Code, Columns2, Eye, FileCode, Files, RefreshCw, Search } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,14 +16,16 @@ import {
   TooltipTrigger,
   getThemeChrome,
   getChromeStyleOverrides,
+  useAppearance,
 } from '@slayzone/ui'
 import { useTheme } from '@slayzone/settings/client'
-import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
+import type { EditorOpenFilesState, MarkdownViewMode, OpenFileOptions } from '@slayzone/file-editor/shared'
 import { useFileEditor } from './useFileEditor'
 import { EditorFileTree, type EditorFileTreeHandle } from './EditorFileTree'
 import { EditorTabBar } from './EditorTabBar'
 import { CodeEditor } from './CodeEditor'
 import { MarkdownFileEditor } from './MarkdownFileEditor'
+import { MarkdownSplitView } from './MarkdownSplitView'
 import { SearchPanel } from './SearchPanel'
 
 export interface FileEditorViewHandle {
@@ -79,7 +81,15 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
   const isDragging = useRef(false)
   const treeRef = useRef<EditorFileTreeHandle>(null)
   const [confirmClose, setConfirmClose] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<'code' | 'rich'>('rich')
+  const [fileViewModes, setFileViewModes] = useState<Record<string, MarkdownViewMode>>(
+    initialEditorState?.fileViewModes ?? {}
+  )
+  const { editorMarkdownViewMode } = useAppearance()
+  const viewMode: MarkdownViewMode = (activeFilePath ? fileViewModes[activeFilePath] : undefined) ?? editorMarkdownViewMode
+  const setViewModeForFile = useCallback((mode: MarkdownViewMode) => {
+    if (!activeFilePath) return
+    setFileViewModes(prev => ({ ...prev, [activeFilePath]: mode }))
+  }, [activeFilePath])
   const [sidebarMode, setSidebarMode] = useState<'tree' | 'search'>('tree')
   const [isFileDragOver, setIsFileDragOver] = useState(false)
   const dragCounter = useRef(0)
@@ -91,16 +101,23 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
   onChangeRef.current = onEditorStateChange
   const filePathsKey = openFiles.map((f) => f.path).join('\0')
 
+  const fileViewModesKey = JSON.stringify(fileViewModes)
   useEffect(() => {
     if (isRestoring) return
+    const openPaths = filePathsKey ? filePathsKey.split('\0') : []
+    const modes: Record<string, MarkdownViewMode> = {}
+    for (const p of openPaths) {
+      if (fileViewModes[p]) modes[p] = fileViewModes[p]
+    }
     onChangeRef.current?.({
-      files: filePathsKey ? filePathsKey.split('\0') : [],
+      files: openPaths,
       activeFile: activeFilePath,
       treeWidth,
       treeVisible,
-      expandedFolders: [...expandedFolders]
+      expandedFolders: [...expandedFolders],
+      fileViewModes: Object.keys(modes).length > 0 ? modes : undefined
     })
-  }, [filePathsKey, activeFilePath, treeWidth, treeVisible, expandedFolders, isRestoring])
+  }, [filePathsKey, activeFilePath, treeWidth, treeVisible, expandedFolders, isRestoring, fileViewModesKey])
 
   // Auto-reveal active file in tree when it changes
   useEffect(() => {
@@ -330,12 +347,13 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
             <div className="flex items-center shrink-0 mr-2 bg-surface-1 rounded-md p-0.5 gap-0.5">
               {([
                 { mode: 'rich' as const, icon: Eye, title: 'Rich text' },
+                { mode: 'split' as const, icon: Columns2, title: 'Split view' },
                 { mode: 'code' as const, icon: Code, title: 'Source code' }
               ]).map(({ mode, icon: Icon, title }) => (
                 <button
                   key={mode}
                   className={`flex items-center justify-center size-6 rounded transition-colors ${viewMode === mode ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  onClick={() => setViewMode(mode)}
+                  onClick={() => setViewModeForFile(mode)}
                   title={title}
                 >
                   <Icon className="size-3.5" />
@@ -376,6 +394,17 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
                   onChange={(content) => updateContent(activeFile.path, content)}
                   onSave={() => saveFile(activeFile.path)}
                   version={fileVersions.get(activeFile.path)}
+                />
+              ) : isMarkdown && viewMode === 'split' ? (
+                <MarkdownSplitView
+                  key={activeFile.path}
+                  filePath={activeFile.path}
+                  content={activeFile.content}
+                  onChange={(content) => updateContent(activeFile.path, content)}
+                  onSave={() => saveFile(activeFile.path)}
+                  version={fileVersions.get(activeFile.path)}
+                  goToPosition={goToPosition?.filePath === activeFile.path ? goToPosition : null}
+                  onGoToPositionApplied={clearGoToPosition}
                 />
               ) : (
                 <CodeEditor

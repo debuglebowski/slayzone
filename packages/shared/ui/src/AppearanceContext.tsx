@@ -34,6 +34,8 @@ export interface AppearanceSettings {
   notesSpellcheck: boolean
   // Sidebar
   sidebarBadgeMode: 'none' | 'blob' | 'count'
+  // Markdown
+  editorMarkdownViewMode: 'rich' | 'split' | 'code'
 }
 
 export const appearanceDefaults: AppearanceSettings = {
@@ -58,6 +60,7 @@ export const appearanceDefaults: AppearanceSettings = {
   notesShowToolbar: false,
   notesSpellcheck: true,
   sidebarBadgeMode: 'blob',
+  editorMarkdownViewMode: 'rich',
 }
 
 export const AppearanceContext = createContext<AppearanceSettings>(appearanceDefaults)

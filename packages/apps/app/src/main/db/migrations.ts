@@ -1899,6 +1899,12 @@ const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    version: 104,
+    up: (db) => {
+      db.exec(`ALTER TABLE task_assets ADD COLUMN view_mode TEXT DEFAULT NULL`)
+    }
   }
 ]
 

@@ -324,6 +324,8 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     }
   }, [selectedId, onActiveAssetIdChange])
 
+  const { editorMarkdownViewMode } = useAppearance()
+  const assetDefaultViewMode = editorMarkdownViewMode === 'code' ? 'raw' : editorMarkdownViewMode === 'split' ? 'split' : 'preview'
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
   const [zoomLevel, setZoomLevel] = useState(1)
   const [assetStats, setAssetStats] = useState<AssetStats>({ fileSize: null, words: 0, lines: 0 })
@@ -371,7 +373,11 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
   const selectedAsset = assets.find(a => a.id === selectedId) ?? null
   const selectedRenderMode = selectedAsset ? getEffectiveRenderMode(selectedAsset.title, selectedAsset.render_mode) : null
 
-  useEffect(() => { setViewMode('preview'); setZoomLevel(1); setFindOpen(false); setFindQuery('') }, [selectedId])
+  useEffect(() => {
+    const asset = assets.find(a => a.id === selectedId)
+    setViewMode((asset?.view_mode as 'preview' | 'split' | 'raw') ?? assetDefaultViewMode)
+    setZoomLevel(1); setFindOpen(false); setFindQuery('')
+  }, [selectedId])
 
   useImperativeHandle(ref, () => ({
     selectAsset: (id: string) => setSelectedId(id),
@@ -896,7 +902,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                       { id: 'split', icon: Columns2, label: 'Split', active: viewMode === 'split' },
                       { id: 'raw', icon: Code2, label: 'Raw', active: viewMode === 'raw' },
                     ]}
-                    onChange={(id) => setViewMode(id as 'preview' | 'split' | 'raw')}
+                    onChange={(id) => { const mode = id as 'preview' | 'split' | 'raw'; setViewMode(mode); if (selectedAsset) updateAsset({ id: selectedAsset.id, viewMode: mode }) }}
                   />
                 )}
                 <div className="bg-surface-3 rounded-lg p-1">

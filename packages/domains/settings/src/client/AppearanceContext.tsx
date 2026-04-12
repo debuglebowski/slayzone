@@ -52,6 +52,7 @@ export function AppearanceProvider({
       window.api.settings.get('notes_checked_highlight'),
       window.api.settings.get('notes_show_toolbar'),
       window.api.settings.get('notes_spellcheck'),
+      window.api.settings.get('editor_markdown_view_mode'),
     ]).then(([
       termSize, editorSize, reduceMotion, colorTints,
       wordWrap, tabSize, indentTabs, renderWs,
@@ -60,6 +61,7 @@ export function AppearanceProvider({
       browserZoom, browserUrl, browserDevices,
       sidebarBadge,
       notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck,
+      mdViewMode,
     ]) => {
       const d = appearanceDefaults
       performance.mark('sz:appearance:end')
@@ -85,6 +87,7 @@ export function AppearanceProvider({
         notesCheckedHighlight: notesCheckedHighlight === '1',
         notesShowToolbar: notesShowToolbar === '1',
         notesSpellcheck: notesSpellcheck !== '0',
+        editorMarkdownViewMode: (mdViewMode === 'split' || mdViewMode === 'code') ? mdViewMode : 'rich',
       })
     })
   }, [settingsRevision, localRevision])

@@ -27,6 +27,7 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes }: PanelsSettin
   const [editorRenderWhitespace, setEditorRenderWhitespace] = useState<'none' | 'all'>('none')
   const [editorTabSize, setEditorTabSize] = useState<'2' | '4'>('2')
   const [editorIndentTabs, setEditorIndentTabs] = useState(false)
+  const [editorMarkdownViewMode, setEditorMarkdownViewMode] = useState<'rich' | 'split' | 'code'>('rich')
   
   // Diff
   const [diffContextLines, setDiffContextLines] = useState<'0' | '3' | '5' | 'all'>('3')
@@ -85,7 +86,8 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes }: PanelsSettin
       window.api.settings.get('browser_default_zoom'),
       window.api.settings.get('browser_default_devices'),
       window.api.settings.get('commit_graph_config'),
-    ]).then(([pc, tm, tff, ts, eww, erw, ets, eit, dcl, diw, dste, dsaob, bdu, bdz, bdd, cgc]) => {
+      window.api.settings.get('editor_markdown_view_mode'),
+    ]).then(([pc, tm, tff, ts, eww, erw, ets, eit, dcl, diw, dste, dsaob, bdu, bdz, bdd, cgc, emvm]) => {
       if (pc) setPanelConfig(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig))
       if (tm) setDefaultTerminalMode(tm as TerminalMode)
       if (tff) setTerminalFontFamily(tff)
@@ -119,6 +121,7 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes }: PanelsSettin
           if (g.breakOnMerges !== undefined) setGraphBreakOnMerges(g.breakOnMerges)
         } catch { /* ignore */ }
       }
+      if (emvm === 'split' || emvm === 'code') setEditorMarkdownViewMode(emvm)
     })
 
     const cleanupIpc = window.api?.app?.onSettingsChanged?.(() => {
@@ -482,6 +485,13 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes }: PanelsSettin
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Indent with tabs</span>
             <Switch checked={editorIndentTabs} onCheckedChange={(c) => { setEditorIndentTabs(c); window.api.settings.set('editor_indent_tabs', c ? '1' : '0') }} />
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Markdown default</span>
+            <Select value={editorMarkdownViewMode} onValueChange={(v) => { setEditorMarkdownViewMode(v as any); window.api.settings.set('editor_markdown_view_mode', v); window.dispatchEvent(new Event('sz:settings-changed')) }}>
+              <SelectTrigger className="max-w-32"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="rich">Rich text</SelectItem><SelectItem value="split">Split</SelectItem><SelectItem value="code">Source code</SelectItem></SelectContent>
+            </Select>
           </div>
         </div>
       )}

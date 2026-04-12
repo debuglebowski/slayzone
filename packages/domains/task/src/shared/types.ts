@@ -192,6 +192,7 @@ export interface TaskAsset {
   folder_id: string | null
   title: string
   render_mode: RenderMode | null
+  view_mode: string | null
   language: string | null
   order: number
   created_at: string
@@ -212,6 +213,7 @@ export interface UpdateAssetInput {
   title?: string
   folderId?: string | null
   renderMode?: RenderMode | null
+  viewMode?: string | null
   content?: string
   language?: string | null
 }
