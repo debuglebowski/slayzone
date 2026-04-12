@@ -1878,6 +1878,27 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(`ALTER TABLE tasks ADD COLUMN active_asset_id TEXT DEFAULT NULL`)
     }
+  },
+  {
+    version: 102,
+    up: (db) => {
+      db.exec(`
+        INSERT OR IGNORE INTO skill_registries (id, name, description, source_type, github_owner, github_repo, github_branch, github_path)
+          VALUES ('github-caveman-skills', 'Caveman', 'Token-optimized output skills by Julius Brussee', 'github', 'JuliusBrussee', 'caveman', 'main', 'skills');
+      `)
+    }
+  },
+  {
+    version: 103,
+    up: (db) => {
+      db.exec(`
+        DELETE FROM skill_registries WHERE id IN (
+          'github-anthropics-skills',
+          'github-huggingface-skills',
+          'github-alirezarezvani-skills'
+        );
+      `)
+    }
   }
 ]
 
