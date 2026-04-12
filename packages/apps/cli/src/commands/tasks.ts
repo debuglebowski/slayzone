@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import http from 'node:http'
-import { openDb, notifyApp, resolveProject, getAssetsDir, getMcpPort, type SlayDb } from '../db'
+import { openDb, notifyApp, postJson, resolveProject, getAssetsDir, getMcpPort, type SlayDb } from '../db'
 import { browserCommand } from './browser'
 import {
   getDefaultStatus,
@@ -465,16 +465,13 @@ export function tasksCommand(): Command {
 
       if (opts.close) {
         const port = getMcpPort()
-        if (port) {
-          await new Promise<void>((resolve) => {
-            const req = http.request(
-              { hostname: '127.0.0.1', port, path: `/api/close-task/${task.id}`, method: 'POST' },
-              (res) => { res.resume(); res.on('end', resolve) },
-            )
-            req.on('error', () => resolve())
-            req.setTimeout(3000, () => { req.destroy(); resolve() })
-            req.end()
-          })
+        if (!port) {
+          console.error('Warning: cannot close tab — no MCP port (is the app running?)')
+        } else {
+          const ok = await postJson(port, `/api/close-task/${task.id}`)
+          if (!ok) {
+            console.error('Warning: tab close failed — main process likely stale (rebuild + restart app)')
+          }
         }
       }
     })

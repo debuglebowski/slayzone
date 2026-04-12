@@ -60,33 +60,35 @@ function getAlternateMcpPort(): number | null {
   }
 }
 
-function probePort(port: number): Promise<boolean> {
+export function postJson(port: number, path: string, timeoutMs = 3000): Promise<boolean> {
   return new Promise((resolve) => {
     const req = http.request(
-      { hostname: '127.0.0.1', port, path: '/api/notify', method: 'POST' },
-      (res) => { res.resume(); res.on('end', () => resolve(true)) },
+      { hostname: '127.0.0.1', port, path, method: 'POST' },
+      (res) => {
+        res.resume()
+        res.on('end', () => {
+          const code = res.statusCode ?? 0
+          resolve(code >= 200 && code < 300)
+        })
+      },
     )
     req.on('error', () => resolve(false))
-    req.setTimeout(1000, () => { req.destroy(); resolve(false) })
+    req.setTimeout(timeoutMs, () => { req.destroy(); resolve(false) })
     req.end()
   })
+}
+
+function probePort(port: number): Promise<boolean> {
+  return postJson(port, '/api/notify', 1000)
 }
 
 export async function notifyApp(): Promise<void> {
   const port = getMcpPort()
   if (port) {
-    await new Promise<void>((resolve) => {
-      const req = http.request(
-        { hostname: '127.0.0.1', port, path: '/api/notify', method: 'POST' },
-        (res) => {
-          res.resume()
-          res.on('end', resolve)
-        },
-      )
-      req.on('error', () => resolve())
-      req.setTimeout(3000, () => { req.destroy(); resolve() })
-      req.end()
-    })
+    const ok = await postJson(port, '/api/notify')
+    if (!ok) {
+      console.error('Warning: app notify failed (POST /api/notify) — app may be stale or unreachable')
+    }
     return
   }
 
