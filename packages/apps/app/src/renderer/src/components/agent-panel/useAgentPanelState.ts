@@ -3,13 +3,16 @@ import { useState, useEffect, useCallback } from 'react'
 export interface AgentPanelState {
   isOpen: boolean
   panelWidth: number
+  sessionIndex: number
+  mode?: string
 }
 
 export const DEFAULT_AGENT_PANEL_WIDTH = 400
 
 const DEFAULT_STATE: AgentPanelState = {
   isOpen: false,
-  panelWidth: DEFAULT_AGENT_PANEL_WIDTH
+  panelWidth: DEFAULT_AGENT_PANEL_WIDTH,
+  sessionIndex: 0
 }
 
 const SETTINGS_KEY = 'agentPanelState'
