@@ -1,5 +1,5 @@
 ---
-name: commit-changes
+name: commit
 description: "Commit the changes that has been worked on in this session"
 trigger: auto
 ---

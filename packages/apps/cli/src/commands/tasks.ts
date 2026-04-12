@@ -149,7 +149,10 @@ function printTasks(tasks: TaskRow[], blockedIds?: Set<string>) {
 }
 
 export function tasksCommand(): Command {
-  const cmd = new Command('tasks').description('Manage tasks')
+  const cmd = new Command('tasks')
+    .description('Manage tasks')
+    .showSuggestionAfterError(true)
+    .showHelpAfterError(true)
 
   // slay tasks list
   cmd
@@ -428,7 +431,8 @@ export function tasksCommand(): Command {
   cmd
     .command('done [id]')
     .description('Mark a task as done (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
-    .action(async (idPrefix) => {
+    .option('--close', 'Also close the task tab in the app')
+    .action(async (idPrefix, opts) => {
       idPrefix = resolveId(idPrefix)
       const db = openDb()
 
@@ -458,6 +462,21 @@ export function tasksCommand(): Command {
       db.close()
       await notifyApp()
       console.log(`Done: ${task.id.slice(0, 8)}  ${task.title}`)
+
+      if (opts.close) {
+        const port = getMcpPort()
+        if (port) {
+          await new Promise<void>((resolve) => {
+            const req = http.request(
+              { hostname: '127.0.0.1', port, path: `/api/close-task/${task.id}`, method: 'POST' },
+              (res) => { res.resume(); res.on('end', resolve) },
+            )
+            req.on('error', () => resolve())
+            req.setTimeout(3000, () => { req.destroy(); resolve() })
+            req.end()
+          })
+        }
+      }
     })
 
   // slay tasks update
@@ -1281,7 +1300,10 @@ async function readStdin(): Promise<Buffer> {
 }
 
 function assetsSubcommand(): Command {
-  const cmd = new Command('assets').description('Manage task assets')
+  const cmd = new Command('assets')
+    .description('Manage task assets')
+    .showSuggestionAfterError(true)
+    .showHelpAfterError(true)
 
   // slay tasks assets list <taskId>
   cmd

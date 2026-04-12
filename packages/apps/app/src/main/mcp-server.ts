@@ -409,6 +409,14 @@ export function startMcpServer(db: Database, opts?: { automationEngine?: { execu
     res.json({ ok: true })
   })
 
+  app.post('/api/close-task/:id', (req, res) => {
+    const taskId = req.params.id
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('app:close-task', taskId)
+    })
+    res.json({ ok: true })
+  })
+
   // Automation manual execution for CLI (`slay automations run`)
   app.post('/api/automations/:id/run', async (req, res) => {
     if (!opts?.automationEngine) {
