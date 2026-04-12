@@ -1022,15 +1022,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         return
       }
 
-      // Cmd+K: unified palette (files + tasks + projects) — task owns this when active
+      // Cmd+P: unified palette (files + tasks + projects) — task owns this when active
       if (matchesShortcut(e, keys('search'))) {
-        e.preventDefault()
-        useDialogStore.getState().openSearch({ fileContext: buildTaskFileContext() })
-        return
-      }
-
-      // Cmd+P: unified palette with file context — works even inside CodeMirror
-      if (matchesShortcut(e, keys('panel-quick-open'))) {
         e.preventDefault()
         useDialogStore.getState().openSearch({ fileContext: buildTaskFileContext() })
         return

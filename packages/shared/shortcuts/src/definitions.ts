@@ -15,7 +15,7 @@ export type { ShortcutScope }
 export const shortcutDefinitions: ShortcutDefinition[] = [
   // General (global scope)
   { id: 'new-task', label: 'New Task', group: 'General', defaultKeys: 'mod+n', scope: 'global' },
-  { id: 'search', label: 'Search', group: 'General', defaultKeys: 'mod+k', scope: 'global' },
+  { id: 'search', label: 'Search', group: 'General', defaultKeys: 'mod+p', scope: 'global' },
   { id: 'complete-close-tab', label: 'Complete & Close Tab', group: 'General', defaultKeys: 'mod+shift+d', scope: 'global' },
   { id: 'zen-mode', label: 'Zen Mode', group: 'General', defaultKeys: 'mod+j', scope: 'global' },
   { id: 'explode-mode', label: 'Explode Mode', group: 'General', defaultKeys: 'mod+shift+e', scope: 'global' },
@@ -45,7 +45,6 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'panel-terminal', label: 'Terminal', group: 'Task Panels', defaultKeys: 'mod+t', scope: 'task' },
   { id: 'panel-browser', label: 'Browser', group: 'Task Panels', defaultKeys: 'mod+b', scope: 'task' },
   { id: 'panel-editor', label: 'Editor', group: 'Task Panels', defaultKeys: 'mod+e', scope: 'task' },
-  { id: 'panel-quick-open', label: 'Quick Open File', group: 'Task Panels', defaultKeys: 'mod+p', scope: 'task' },
   { id: 'panel-git', label: 'Git', group: 'Task Panels', defaultKeys: 'mod+g', scope: 'task' },
   { id: 'panel-git-diff', label: 'Git Diff', group: 'Task Panels', defaultKeys: 'mod+shift+g', scope: 'task' },
   { id: 'panel-settings', label: 'Settings', group: 'Task Panels', defaultKeys: 'mod+s', scope: 'task' },

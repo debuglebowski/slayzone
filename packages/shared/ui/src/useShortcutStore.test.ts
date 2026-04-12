@@ -46,7 +46,7 @@ describe('load', () => {
 
 describe('getKeys', () => {
   it('returns default keys when no override', () => {
-    expect(useShortcutStore.getState().getKeys('search')).toBe('mod+k')
+    expect(useShortcutStore.getState().getKeys('search')).toBe('mod+p')
   })
 
   it('returns override when set', () => {

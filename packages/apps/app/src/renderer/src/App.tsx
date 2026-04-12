@@ -426,10 +426,10 @@ function App(): React.JSX.Element {
   }, [projects, selectedProjectId, homePanel])
 
   useGuardedHotkeys(getKeys('search'), (e) => {
-    // Only fire on home tab; TaskDetailPage owns Cmd+K when a task tab is active.
+    // Only fire on home tab; TaskDetailPage owns Cmd+P when a task tab is active.
     if (tabs[activeTabIndex]?.type !== 'home') return
     e.preventDefault()
-    trackShortcut('mod+k')
+    trackShortcut('mod+p')
     useDialogStore.getState().openSearch({ fileContext: buildHomeFileContext() })
   }, { enableOnFormTags: true, enabled: !isRecording })
 
@@ -598,13 +598,6 @@ function App(): React.JSX.Element {
         } else {
           homePanel.homeGitPanelRef.current?.switchToTab('changes')
         }
-        return
-      }
-
-      // Quick Open (panel-quick-open) — opens the unified palette with home file context
-      if (matchesShortcut(e, getKeys('panel-quick-open'))) {
-        e.preventDefault()
-        useDialogStore.getState().openSearch({ fileContext: buildHomeFileContext() })
         return
       }
 
