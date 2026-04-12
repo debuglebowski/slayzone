@@ -13,13 +13,14 @@ import {
 } from '@xyflow/react'
 import { LayoutGrid, Plus } from 'lucide-react'
 import { Button } from '@slayzone/ui'
-import type { AiConfigItem, AiConfigScope, UpdateAiConfigItemInput } from '../shared'
+import type { AiConfigItem, AiConfigScope, SyncHealth, UpdateAiConfigItemInput } from '../shared'
 import { parseSkillFrontmatter, renderSkillFrontmatter } from '../shared'
 import { buildDependencyGraph, parseDependsOn, setDependsOn } from '../shared/skill-dependencies'
 import { computeGraphLayout } from '../shared/graph-layout'
 import { getSkillValidation } from './skill-validation'
 import { SkillNodeCard, computeSkillNodeWidth, type SkillNodeData } from './SkillNodeCard'
 import { DependencyEdge, type DependencyEdgeData } from './DependencyEdge'
+import { useContextManagerStore } from './useContextManagerStore'
 
 const nodeTypes = { skill: SkillNodeCard }
 const edgeTypes = { dependency: DependencyEdge }
@@ -31,6 +32,7 @@ interface SkillGraphCanvasProps {
   onSelectSkill: (id: string | null) => void
   onUpdateItem: (id: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => Promise<void>
   onCreateSkill?: () => void
+  syncHealthMap?: Map<string, SyncHealth>
 }
 
 const POSITION_KEY_PREFIX = 'slayzone:skill-graph-positions:'
@@ -53,12 +55,14 @@ function SkillGraphCanvasInner({
   onSelectSkill,
   onUpdateItem,
   onCreateSkill,
+  syncHealthMap,
 }: SkillGraphCanvasProps) {
   const skills = useMemo(() => items.filter(i => i.type === 'skill'), [items])
   const slugToId = useMemo(() => new Map(skills.map(s => [s.slug, s.id])), [skills])
   const idToItem = useMemo(() => new Map(skills.map(s => [s.id, s])), [skills])
   const { fitView } = useReactFlow()
   const initializedRef = useRef(false)
+  const showLineCount = useContextManagerStore((s) => s.showLineCount)
 
   const handleDeleteEdge = useCallback(async (edgeId: string) => {
     const [sourceId, targetId] = edgeId.split('->')
@@ -82,7 +86,12 @@ function SkillGraphCanvasInner({
     const deps = buildDependencyGraph(skills)
     const stored = autoLayout ? {} : getStoredPositions(scope)
 
-    const graphNodes = skills.map(item => ({ id: item.id, width: computeSkillNodeWidth(item.slug) }))
+    const widthFor = (item: AiConfigItem) => computeSkillNodeWidth(item.slug, {
+      hasStaleBadge: syncHealthMap?.get(item.id) === 'stale',
+      hasLineCount: showLineCount,
+    })
+
+    const graphNodes = skills.map(item => ({ id: item.id, width: widthFor(item) }))
     const graphEdges = deps
       .map(d => ({
         source: slugToId.get(d.sourceSlug) ?? '',
@@ -107,7 +116,8 @@ function SkillGraphCanvasInner({
           validationStatus: validation?.status ?? null,
           description,
           selected: item.id === selectedSkillId,
-          width: computeSkillNodeWidth(item.slug),
+          width: widthFor(item),
+          syncHealth: syncHealthMap?.get(item.id),
         },
       }
     })
@@ -138,7 +148,7 @@ function SkillGraphCanvasInner({
 
     return { nodes, edges }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skills, slugToId, scope, selectedSkillId])
+  }, [skills, slugToId, scope, selectedSkillId, syncHealthMap, showLineCount])
 
   const initial = useMemo(() => buildGraph(false), [buildGraph])
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes)

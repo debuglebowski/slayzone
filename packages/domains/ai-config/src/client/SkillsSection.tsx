@@ -271,6 +271,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
               onSelectSkill={setSelectedSkillId}
               onUpdateItem={handleUpdateItem}
               onCreateSkill={handleCreateSkill}
+              syncHealthMap={syncHealthMap}
             />
           </div>
         ) : (
