@@ -29,6 +29,41 @@
 
 
 <script is:inline>
+// Erratic "Can't catch me" jellyfish
+(function() {
+  var wrap = document.querySelector('.hero-wrap');
+  if (!wrap) return;
+  var el = document.createElement('span');
+  el.className = 'click-float';
+  el.dataset.clickFloat = '';
+  el.innerHTML = '<span class="cf-icon" style="font-size:36px;cursor:pointer">🪼</span> <span class="cf-text">Can\'t catch me</span>';
+  el.style.left = '50%';
+  el.style.top = '40%';
+  el.style.setProperty('--cf-speed', '0.5s');
+  el.style.opacity = '0';
+  wrap.appendChild(el);
+  var positions = [
+    [8, 10], [85, 12], [5, 70], [88, 72],
+    [10, 40], [85, 38], [50, 5], [45, 78]
+  ];
+  var posIdx = 0;
+  function pickPos() {
+    posIdx = (posIdx + Math.floor(Math.random() * (positions.length - 1)) + 1) % positions.length;
+    var p = positions[posIdx];
+    el.style.left = p[0] + '%';
+    el.style.top = p[1] + '%';
+  }
+  function loop() {
+    pickPos();
+    el.style.opacity = '1';
+    setTimeout(function() {
+      el.style.opacity = '0';
+      setTimeout(loop, 3000 + Math.random() * 3000);
+    }, 3000 + Math.random() * 2000);
+  }
+  setTimeout(loop, 3000);
+})();
+
 // Dancing octopus — canvas chroma key
 (function() {
   var wrap = document.querySelector('.hero-logo-wrap');
