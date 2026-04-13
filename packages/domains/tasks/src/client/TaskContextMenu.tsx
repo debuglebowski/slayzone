@@ -237,10 +237,12 @@ export function TaskContextMenu({
 
           {/* Blocked toggle */}
           <ContextMenuItem onSelect={handleToggleBlocked}>
-            <ShieldAlert className="size-3.5" />
-            <span className="flex-1">Blocked</span>
-            {(isBlocked ?? task.is_blocked) && <Check className="size-3.5" />}
-            <span className="text-muted-foreground text-xs mr-[22px]">B</span>
+            <ShieldAlert className="mr-2 size-3.5" />
+            <span className="flex items-center gap-2">
+              Blocked
+              {(isBlocked ?? task.is_blocked) && <Check className="size-3.5" />}
+            </span>
+            <span className="text-muted-foreground text-xs mr-1.5">B</span>
           </ContextMenuItem>
 
           {/* Blocked by submenu */}
