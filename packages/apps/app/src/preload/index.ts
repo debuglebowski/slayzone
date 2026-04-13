@@ -555,6 +555,8 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('ai-config:set-project-providers', projectId, providers),
     needsSync: (projectId, projectPath) =>
       ipcRenderer.invoke('ai-config:needs-sync', projectId, projectPath),
+    getProjectStaleSkillCount: (projectId, projectPath) =>
+      ipcRenderer.invoke('ai-config:get-project-stale-skill-count', projectId, projectPath),
     syncAll: (input) =>
       ipcRenderer.invoke('ai-config:sync-all', input),
     checkSyncStatus: (projectId, projectPath) =>

@@ -165,6 +165,25 @@ function isLegacySkillTargetPath(provider: CliProvider, targetPath: string, item
   return parent === normalizedSkillsDir || parent.endsWith(`/${normalizedSkillsDir}`)
 }
 
+interface ProjectSkillSelectionRow {
+  provider: string
+  target_path: string
+  content_hash: string | null
+  item_content: string
+  item_type: string
+  item_slug: string
+  item_metadata: string
+}
+
+function queryProjectSkillSelections(db: Database, projectId: string): ProjectSkillSelectionRow[] {
+  return db.prepare(`
+    SELECT ps.provider, ps.target_path, ps.content_hash, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
+    FROM ai_config_project_selections ps
+    JOIN ai_config_items i ON i.id = ps.item_id
+    WHERE ps.project_id = ? AND i.type = 'skill'
+  `).all(projectId) as ProjectSkillSelectionRow[]
+}
+
 function getCanonicalSelectionTargetPath(provider: CliProvider, itemType: string, itemSlug: string, targetPath: string): string {
   if (itemType !== 'skill') return targetPath
 
@@ -1669,20 +1688,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
 
     // Check skills
-    const selections = db.prepare(`
-      SELECT ps.provider, ps.target_path, ps.content_hash, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
-      FROM ai_config_project_selections ps
-      JOIN ai_config_items i ON i.id = ps.item_id
-      WHERE ps.project_id = ? AND i.type = 'skill'
-    `).all(projectId) as Array<{
-      provider: string
-      target_path: string
-      content_hash: string | null
-      item_content: string
-      item_type: string
-      item_slug: string
-      item_metadata: string
-    }>
+    const selections = queryProjectSkillSelections(db, projectId)
 
     for (const sel of selections) {
       if (!isConfigurableCliProvider(sel.provider)) continue
@@ -1700,6 +1706,30 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
 
     return false
+  })
+
+  ipcMain.handle('ai-config:get-project-stale-skill-count', (_event, projectId: string, projectPath: string): number => {
+    const providers = getEnabledProviders(projectId)
+    if (providers.length === 0) return 0
+    const enabledSet = new Set(providers)
+    const resolvedProject = path.resolve(projectPath)
+
+    const selections = queryProjectSkillSelections(db, projectId)
+
+    let stale = 0
+    for (const sel of selections) {
+      if (!isConfigurableCliProvider(sel.provider)) continue
+      if (!enabledSet.has(sel.provider as CliProvider)) continue
+      const provider = sel.provider as CliProvider
+      const effectiveTargetPath = getCanonicalSelectionTargetPath(provider, sel.item_type, sel.item_slug, sel.target_path)
+      const expectedContent = getSyncedItemContent(provider, sel.item_type, sel.item_slug, effectiveTargetPath, sel.item_content, sel.item_metadata)
+      const filePath = path.isAbsolute(effectiveTargetPath)
+        ? effectiveTargetPath
+        : path.join(resolvedProject, effectiveTargetPath)
+      const state = computeLinkedSyncState(filePath, expectedContent)
+      if (state.syncHealth === 'stale') stale += 1
+    }
+    return stale
   })
 
   ipcMain.handle('ai-config:sync-all', (_event, input: SyncAllInput) => {

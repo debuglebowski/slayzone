@@ -48,6 +48,7 @@ import {
 import { SidebarProvider, cn, PanelToggle, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withShortcut, withModalGuard, scopeTracker } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
+import { useStaleSkillCount } from '@/hooks/useStaleSkillCount'
 import { TabBar } from '@/components/tabs/TabBar'
 import {
   DesktopNotificationToggle,
@@ -311,6 +312,20 @@ function App(): React.JSX.Element {
   }, [allAttentionTasks])
 
   const selectedProject = useMemo(() => projects.find((p) => p.id === selectedProjectId) ?? null, [projects, selectedProjectId])
+
+  // Stale-skill dot on Context Manager tab
+  const { count: staleSkillCount, refresh: refreshStaleSkillCount } = useStaleSkillCount(
+    selectedProjectId,
+    selectedProject?.path ?? null
+  )
+  const prevContextViewRef = useRef(activeView === 'context')
+  useEffect(() => {
+    const wasContext = prevContextViewRef.current
+    const isContext = activeView === 'context'
+    // Refresh when leaving context manager view (Sync All may have run)
+    if (wasContext && !isContext) refreshStaleSkillCount()
+    prevContextViewRef.current = isContext
+  }, [activeView, refreshStaleSkillCount])
 
   useEffect(() => {
     if (projects.length === 0) return
@@ -951,7 +966,7 @@ function App(): React.JSX.Element {
               leftContent={contextManagerEnabled ? (
                 <Tooltip><TooltipTrigger asChild>
                   <div className={cn(
-                    "ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0",
+                    "relative ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0",
                     "hover:bg-neutral-200/80 dark:hover:bg-neutral-700/50",
                     "border",
                     activeView === 'context'
@@ -959,8 +974,17 @@ function App(): React.JSX.Element {
                       : "border-transparent text-neutral-500 dark:text-neutral-400"
                   )} onClick={() => useTabStore.getState().setActiveView(activeView === 'context' ? 'tabs' : 'context')}>
                     <BookOpen className="h-4 w-4" />
+                    {staleSkillCount > 0 && (
+                      <span
+                        aria-label={`${staleSkillCount} stale skill${staleSkillCount === 1 ? '' : 's'}`}
+                        data-testid="context-manager-stale-dot"
+                        className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500"
+                      />
+                    )}
                   </div>
-                </TooltipTrigger><TooltipContent side="bottom" className="text-xs">Context Manager</TooltipContent></Tooltip>
+                </TooltipTrigger><TooltipContent side="bottom" className="text-xs">
+                  {staleSkillCount > 0 ? `Context Manager (${staleSkillCount} stale)` : 'Context Manager'}
+                </TooltipContent></Tooltip>
               ) : undefined}
               rightContent={
                 <div className="flex items-center gap-1">
