@@ -46,6 +46,7 @@ It exists because this is a long-term effort. We cannot migrate, normalize, and 
 | Linear | PM | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | Zeroshot | Headless orchestrator | core | legacy-flat | 2026-02-28 in legacy file | Migrate existing detailed profile first-wave. |
 | Polyscope | Agent-first dev environment | core | publish-ready | 2026-03-27 | Done. |
+| Vibeyard | Agent orchestrator IDE | core | missing | none | Create canonical folder. Heavy overlap: multi-PTY, swarm, cost, browser, session sharing. |
 
 ## Wave 2: High-Priority Strategic Adjacents
 
