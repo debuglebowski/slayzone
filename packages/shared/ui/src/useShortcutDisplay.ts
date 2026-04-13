@@ -1,9 +1,11 @@
 import { useShortcutStore } from './useShortcutStore'
 import { shortcutDefinitions, formatKeysForDisplay } from './shortcut-definitions'
 
-/** Returns the formatted display string for a shortcut, reactive to user customization. */
-export function useShortcutDisplay(id: string): string {
-  const override = useShortcutStore(s => s.overrides[id])
+/** Returns the formatted display string for a shortcut, reactive to user customization.
+ *  Returns `null` when the shortcut is unbound (no default + no override, or explicitly cleared). */
+export function useShortcutDisplay(id: string): string | null {
+  const overrides = useShortcutStore(s => s.overrides)
   const def = shortcutDefinitions.find(d => d.id === id)
-  return formatKeysForDisplay(override ?? def?.defaultKeys ?? '')
+  const keys = id in overrides ? overrides[id] : (def?.defaultKeys ?? null)
+  return formatKeysForDisplay(keys)
 }

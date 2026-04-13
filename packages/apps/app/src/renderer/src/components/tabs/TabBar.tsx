@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { Home, X } from 'lucide-react'
-import { cn, Tooltip, TooltipTrigger, TooltipContent, getTerminalStateStyle, projectColorBg, useShortcutDisplay } from '@slayzone/ui'
+import { cn, Tooltip, TooltipTrigger, TooltipContent, getTerminalStateStyle, projectColorBg, useShortcutDisplay, withShortcut } from '@slayzone/ui'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import {
   DndContext,
@@ -349,7 +349,7 @@ export function TabBar({
           >
             <Home className="h-4 w-4" />
           </div>
-        </TooltipTrigger><TooltipContent side="bottom" className="text-xs">Home ({goHomeShortcut})</TooltipContent></Tooltip>
+        </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{withShortcut('Home', goHomeShortcut)}</TooltipContent></Tooltip>
         {leftContent && (
           <div className="flex items-center self-center window-no-drag">{leftContent}</div>
         )}

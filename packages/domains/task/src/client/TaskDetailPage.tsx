@@ -1548,7 +1548,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             <div className="min-w-0">
               <PanelToggle
                 panels={(() => {
-                  const builtins: { id: string; icon: typeof Globe; label: string; shortcut?: string }[] = [
+                  const builtins: { id: string; icon: typeof Globe; label: string; shortcut?: string | null }[] = [
                     { id: 'terminal', icon: TerminalIcon, label: 'Terminal', shortcut: panelTerminalShortcut },
                     { id: 'browser', icon: Globe, label: 'Browser', shortcut: panelBrowserShortcut },
                     { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut },

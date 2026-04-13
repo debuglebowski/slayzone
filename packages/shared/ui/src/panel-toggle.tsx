@@ -2,13 +2,14 @@ import type { LucideIcon } from 'lucide-react'
 
 import { cn } from './utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from './tooltip'
+import { withShortcut } from '@slayzone/shortcuts'
 
 interface PanelToggleItem {
   id: string
   icon: LucideIcon
   label: string
   active: boolean
-  shortcut?: string
+  shortcut?: string | null
   disabled?: boolean
 }
 
@@ -68,7 +69,7 @@ export function PanelToggle({ panels, onChange, variant = 'flat', className }: P
           <TooltipContent side="bottom">
             {panel.disabled
               ? `Select a project to use ${panel.label}`
-              : `${panel.active ? 'Hide' : 'Show'} ${panel.label} panel${panel.shortcut ? ` (${panel.shortcut})` : ''}`}
+              : withShortcut(`${panel.active ? 'Hide' : 'Show'} ${panel.label} panel`, panel.shortcut ?? null)}
           </TooltipContent>
         </Tooltip>
       ))}

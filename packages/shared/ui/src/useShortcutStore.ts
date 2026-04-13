@@ -17,15 +17,17 @@ const api = () => (window as any).api as {
 const SETTINGS_KEY = 'custom_shortcuts'
 
 interface ShortcutState {
-  overrides: Record<string, string>
+  /** User overrides. `null` value means explicitly cleared (unbound). */
+  overrides: Record<string, string | null>
   isRecording: boolean
   loaded: boolean
   load: () => Promise<void>
-  getKeys: (id: string) => string
+  /** Returns the effective key combo for a shortcut. `null` means unbound. */
+  getKeys: (id: string) => string | null
   findConflict: (keys: string, scope: ShortcutScope) => ShortcutDefinition | undefined
   findShadow: (keys: string, scope: ShortcutScope) => ShortcutDefinition | undefined
-  setOverride: (id: string, keys: string) => Promise<void>
-  batchSetOverrides: (entries: Record<string, string>) => Promise<void>
+  setOverride: (id: string, keys: string | null) => Promise<void>
+  batchSetOverrides: (entries: Record<string, string | null>) => Promise<void>
   resetAll: () => Promise<void>
   setRecording: (recording: boolean) => void
 }
@@ -58,17 +60,17 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
 
   getKeys: (id: string) => {
     const { overrides } = get()
-    if (overrides[id]) return overrides[id]
+    if (id in overrides) return overrides[id]
     const def = shortcutDefinitions.find((d) => d.id === id)
-    return def?.defaultKeys ?? ''
+    return def?.defaultKeys ?? null
   },
 
   findConflict: (keys: string, scope: ShortcutScope) => {
     const { overrides } = get()
     return shortcutDefinitions.find((d) => {
       if (d.scope !== scope) return false
-      const effective = overrides[d.id] ?? d.defaultKeys
-      return effective === keys
+      const effective = d.id in overrides ? overrides[d.id] : d.defaultKeys
+      return effective !== null && effective === keys
     })
   },
 
@@ -83,19 +85,19 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
       // Component scopes at same priority don't shadow each other
       if (componentScopes.includes(scope) && componentScopes.includes(d.scope)) return false
       // Only warn when one scope can shadow the other (different priority levels)
-      const effective = overrides[d.id] ?? d.defaultKeys
-      return effective === keys
+      const effective = d.id in overrides ? overrides[d.id] : d.defaultKeys
+      return effective !== null && effective === keys
     })
   },
 
-  setOverride: async (id: string, keys: string) => {
+  setOverride: async (id: string, keys: string | null) => {
     const newOverrides = { ...get().overrides, [id]: keys }
     set({ overrides: newOverrides })
     await api().settings.set(SETTINGS_KEY, JSON.stringify(newOverrides))
     api().shortcuts.changed()
   },
 
-  batchSetOverrides: async (entries: Record<string, string>) => {
+  batchSetOverrides: async (entries: Record<string, string | null>) => {
     const newOverrides = { ...get().overrides, ...entries }
     set({ overrides: newOverrides })
     await api().settings.set(SETTINGS_KEY, JSON.stringify(newOverrides))

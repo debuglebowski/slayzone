@@ -1,11 +1,11 @@
 import { Bot } from 'lucide-react'
-import { cn, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import { cn, Tooltip, TooltipTrigger, TooltipContent, withShortcut } from '@slayzone/ui'
 
 interface AgentPanelButtonProps {
   active: boolean
   disabled?: boolean
   onClick: () => void
-  shortcutHint?: string
+  shortcutHint?: string | null
 }
 
 export function AgentPanelButton({ active, disabled, onClick, shortcutHint }: AgentPanelButtonProps) {
@@ -28,7 +28,7 @@ export function AgentPanelButton({ active, disabled, onClick, shortcutHint }: Ag
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs">
-        {disabled ? 'Select a project first' : active ? 'Hide agent panel' : 'Show agent panel'}{shortcutHint && ` (${shortcutHint})`}
+        {disabled ? 'Select a project first' : withShortcut(active ? 'Hide agent panel' : 'Show agent panel', shortcutHint ?? null)}
       </TooltipContent>
     </Tooltip>
   )

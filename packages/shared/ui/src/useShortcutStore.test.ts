@@ -54,8 +54,13 @@ describe('getKeys', () => {
     expect(useShortcutStore.getState().getKeys('search')).toBe('mod+shift+p')
   })
 
-  it('returns empty string for unknown id', () => {
-    expect(useShortcutStore.getState().getKeys('nonexistent')).toBe('')
+  it('returns null for unknown id', () => {
+    expect(useShortcutStore.getState().getKeys('nonexistent')).toBeNull()
+  })
+
+  it('returns null when override explicitly cleared', () => {
+    useShortcutStore.setState({ overrides: { search: null } })
+    expect(useShortcutStore.getState().getKeys('search')).toBeNull()
   })
 })
 

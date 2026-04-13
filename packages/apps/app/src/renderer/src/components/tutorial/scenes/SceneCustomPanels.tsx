@@ -38,7 +38,7 @@ function NativePanelRow({ icon: Icon, label, shortcutId }: { icon: typeof Termin
     <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border bg-surface-1">
       <Icon className="size-4 text-muted-foreground/50 shrink-0" />
       <span className="text-[13px] font-medium flex-1">{label}</span>
-      <Kbd>{shortcut}</Kbd>
+      {shortcut && <Kbd>{shortcut}</Kbd>}
       <Toggle on />
     </div>
   )

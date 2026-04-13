@@ -4,7 +4,8 @@ export type ShortcutDefinition = {
   id: string
   label: string
   group: string
-  defaultKeys: string
+  /** Default key combo. `null` means no default binding (unbound until user sets one). */
+  defaultKeys: string | null
   scope: ShortcutScope
   platform?: 'mac'
   customizable?: boolean // defaults to true
@@ -61,7 +62,7 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'terminal-screenshot', label: 'Screenshot', group: 'Terminal', defaultKeys: 'mod+shift+s', scope: 'terminal' },
   { id: 'terminal-search', label: 'Search', group: 'Terminal', defaultKeys: 'mod+f', scope: 'terminal' },
   { id: 'terminal-clear', label: 'Clear Buffer', group: 'Terminal', defaultKeys: 'mod+shift+k', scope: 'terminal' },
-  { id: 'terminal-new-group', label: 'New Group', group: 'Terminal', defaultKeys: 'mod+k', scope: 'terminal' },
+  { id: 'terminal-new-group', label: 'New Group', group: 'Terminal', defaultKeys: null, scope: 'terminal' },
   { id: 'terminal-split', label: 'Split', group: 'Terminal', defaultKeys: 'mod+d', scope: 'terminal' },
   { id: 'terminal-restart', label: 'Restart', group: 'Terminal', defaultKeys: 'mod+alt+r', scope: 'terminal' },
 
@@ -86,9 +87,15 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
 /** Shortcut IDs that are driven by Electron native menu accelerators. */
 const MENU_SHORTCUT_IDS = ['global-settings', 'project-settings', 'new-temp-task', 'close-tab', 'close-task', 'sync-session-id'] as const
 
-/** Default keys for menu-driven shortcuts, derived from shortcutDefinitions. */
+/** Default keys for menu-driven shortcuts, derived from shortcutDefinitions.
+ *  Menu shortcuts must always have a default binding — definitions are validated at module load. */
 export const MENU_SHORTCUT_DEFAULTS: Record<string, string> = Object.fromEntries(
   shortcutDefinitions
     .filter(d => (MENU_SHORTCUT_IDS as readonly string[]).includes(d.id))
-    .map(d => [d.id, d.defaultKeys])
+    .map(d => {
+      if (d.defaultKeys === null) {
+        throw new Error(`Menu shortcut "${d.id}" must have a non-null defaultKeys`)
+      }
+      return [d.id, d.defaultKeys]
+    })
 )

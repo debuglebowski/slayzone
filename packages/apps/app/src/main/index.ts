@@ -25,13 +25,13 @@ import { toElectronAccelerator, matchesElectronInput, shortcutDefinitions, MENU_
 
 // Mutable shortcut overrides — updated from DB when shortcuts change.
 // Module-scope so both createMainWindow (before-input-event) and app.whenReady (menu) can access.
-let currentOverrides: Record<string, string> = {}
+let currentOverrides: Record<string, string | null> = {}
 
 /** Resolve effective keys for a shortcut ID, checking overrides then defaults. */
-function getEffectiveKeys(id: string, overrides: Record<string, string>): string {
-  if (overrides[id]) return overrides[id]
+function getEffectiveKeys(id: string, overrides: Record<string, string | null>): string | null {
+  if (id in overrides) return overrides[id]
   const def = shortcutDefinitions.find(d => d.id === id)
-  return def?.defaultKeys ?? ''
+  return def?.defaultKeys ?? null
 }
 
 // Custom protocol for serving local files in browser panel webviews
@@ -829,12 +829,12 @@ app.whenReady().then(async () => {
   const savedTheme = row?.value as 'light' | 'dark' | 'system' | undefined
   nativeTheme.themeSource = savedTheme ?? 'dark'
 
-  function getMenuAccelerator(id: string, overrides: Record<string, string>): string {
-    const keys = overrides[id] ?? MENU_SHORTCUT_DEFAULTS[id] ?? ''
-    return toElectronAccelerator(keys)
+  function getMenuAccelerator(id: string, overrides: Record<string, string | null>): string | undefined {
+    const keys = id in overrides ? overrides[id] : (MENU_SHORTCUT_DEFAULTS[id] ?? null)
+    return toElectronAccelerator(keys) ?? undefined
   }
 
-  function buildAppMenu(overrides: Record<string, string>): void {
+  function buildAppMenu(overrides: Record<string, string | null>): void {
     if (process.platform !== 'darwin') return
 
     // Set custom application menu to show correct app name in menu items
@@ -971,7 +971,7 @@ app.whenReady().then(async () => {
     app.dock?.setIcon(icon)
   }
 
-  function loadShortcutOverrides(): Record<string, string> {
+  function loadShortcutOverrides(): Record<string, string | null> {
     const raw = db.prepare('SELECT value FROM settings WHERE key = ?').get('custom_shortcuts') as { value: string } | undefined
     return raw?.value ? JSON.parse(raw.value) : {}
   }

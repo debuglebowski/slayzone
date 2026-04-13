@@ -1,11 +1,11 @@
 import { Bell } from 'lucide-react'
-import { cn, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import { cn, Tooltip, TooltipTrigger, TooltipContent, withShortcut } from '@slayzone/ui'
 
 interface NotificationButtonProps {
   active: boolean
   count: number
   onClick: () => void
-  shortcutHint?: string
+  shortcutHint?: string | null
 }
 
 export function NotificationButton({ active, count, onClick, shortcutHint }: NotificationButtonProps) {
@@ -30,7 +30,7 @@ export function NotificationButton({ active, count, onClick, shortcutHint }: Not
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs">
-        {active ? 'Hide notifications panel' : 'Show notifications panel'}{shortcutHint && ` (${shortcutHint})`}
+        {withShortcut(active ? 'Hide notifications panel' : 'Show notifications panel', shortcutHint ?? null)}
       </TooltipContent>
     </Tooltip>
   )

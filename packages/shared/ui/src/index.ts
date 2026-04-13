@@ -6,6 +6,7 @@ export { useGuardedHotkeys } from './useGuardedHotkeys'
 export {
   shortcutDefinitions,
   formatKeysForDisplay,
+  withShortcut,
   toElectronAccelerator,
   matchesShortcut,
   SCOPE_PRIORITY,

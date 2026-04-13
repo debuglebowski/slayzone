@@ -30,6 +30,7 @@ import {
   ContextMenuShortcut,
   useShortcutDisplay,
   useShortcutAction,
+  withShortcut,
 } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
 import type { BrowserTab, BrowserTabsState, MultiDeviceConfig, GridLayout, DeviceSlot } from '../shared'
@@ -1308,7 +1309,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               ? 'Open terminal panel to pick element'
                 : isPickingElement
                 ? 'Element picker active (click again to exit)'
-                : `Pick element (${elementPickerShortcut})`}
+                : withShortcut('Pick element', elementPickerShortcut)}
           </TooltipContent>
         </Tooltip>
 

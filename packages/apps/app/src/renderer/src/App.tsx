@@ -45,7 +45,7 @@ import {
   toast,
   UpdateToast
 } from '@slayzone/ui'
-import { SidebarProvider, cn, PanelToggle, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withModalGuard, scopeTracker } from '@slayzone/ui'
+import { SidebarProvider, cn, PanelToggle, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withShortcut, withModalGuard, scopeTracker } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { TabBar } from '@/components/tabs/TabBar'
@@ -962,7 +962,7 @@ function App(): React.JSX.Element {
                       <TerminalSquare className="size-4" />
                     </button>
                   </TooltipTrigger><TooltipContent side="bottom" className="text-xs max-w-64">
-                    {selectedProjectId ? <div className="space-y-1"><p>New temporary task ({newTempTaskShortcut})</p><p className="text-muted-foreground">Temporary tasks auto-delete on close.</p></div> : <p>Select a project first</p>}
+                    {selectedProjectId ? <div className="space-y-1"><p>{withShortcut('New temporary task', newTempTaskShortcut)}</p><p className="text-muted-foreground">Temporary tasks auto-delete on close.</p></div> : <p>Select a project first</p>}
                   </TooltipContent></Tooltip>
                   <DesktopNotificationToggle enabled={notificationState.desktopEnabled} onToggle={() => {
                     if (notificationState.desktopEnabled) window.api.pty.dismissAllNotifications()

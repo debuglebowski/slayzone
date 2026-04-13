@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { Plus, X, Columns2, Terminal as TerminalIcon, Bot, Command, MousePointerClick, Sparkles, Code, Glasses } from 'lucide-react'
-import { cn, useShortcutDisplay } from '@slayzone/ui'
+import { cn, useShortcutDisplay, withShortcut } from '@slayzone/ui'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 
@@ -251,7 +251,7 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
           data-testid="terminal-tab-split"
           className="flex items-center justify-center h-7 w-7 rounded-md text-neutral-500 hover:text-neutral-700 hover:bg-neutral-200/50 dark:text-neutral-400 dark:hover:text-neutral-200 dark:hover:bg-neutral-800/50 shrink-0"
           onClick={() => onGroupSplit(activeGroupId)}
-          title={`Split terminal (${terminalSplitShortcut})`}
+          title={withShortcut('Split terminal', terminalSplitShortcut)}
         >
           <Columns2 className="size-4" />
         </button>

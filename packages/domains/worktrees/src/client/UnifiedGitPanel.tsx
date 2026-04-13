@@ -386,7 +386,7 @@ function TabButton({ active, onClick, children, shortcut, badge }: {
   active: boolean
   onClick: () => void
   children: React.ReactNode
-  shortcut?: string
+  shortcut?: string | null
   badge?: boolean
 }) {
   return (

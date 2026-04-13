@@ -129,12 +129,12 @@ export function TerminalContextMenu({
         <ContextMenuItem onSelect={handleClearBuffer}>
           <Eraser className="size-4" />
           Clear Buffer
-          <ContextMenuShortcut>{clearShortcut}</ContextMenuShortcut>
+          {clearShortcut && <ContextMenuShortcut>{clearShortcut}</ContextMenuShortcut>}
         </ContextMenuItem>
         <ContextMenuItem onSelect={handleSearch}>
           <Search className="size-4" />
           Search
-          <ContextMenuShortcut>{searchShortcut}</ContextMenuShortcut>
+          {searchShortcut && <ContextMenuShortcut>{searchShortcut}</ContextMenuShortcut>}
         </ContextMenuItem>
 
         <ContextMenuSeparator />
@@ -143,12 +143,12 @@ export function TerminalContextMenu({
         <ContextMenuItem onSelect={onSplit}>
           <Columns2 className="size-4" />
           Split Pane
-          <ContextMenuShortcut>{splitShortcut}</ContextMenuShortcut>
+          {splitShortcut && <ContextMenuShortcut>{splitShortcut}</ContextMenuShortcut>}
         </ContextMenuItem>
         <ContextMenuItem onSelect={onNewGroup}>
           <Plus className="size-4" />
           New Group
-          <ContextMenuShortcut>{newGroupShortcut}</ContextMenuShortcut>
+          {newGroupShortcut && <ContextMenuShortcut>{newGroupShortcut}</ContextMenuShortcut>}
         </ContextMenuItem>
         {onClose && (
           <ContextMenuItem onSelect={onClose}>

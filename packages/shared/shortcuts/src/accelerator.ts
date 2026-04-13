@@ -7,7 +7,8 @@ const DISPLAY_MAP_OTHER: Record<string, string> = {
   mod: 'Ctrl', shift: 'Shift', alt: 'Alt', ctrl: 'Ctrl',
 }
 
-export function formatKeysForDisplay(keys: string, platform?: Platform): string {
+export function formatKeysForDisplay(keys: string | null, platform?: Platform): string | null {
+  if (keys === null) return null
   const map = (platform ?? detectPlatform()) === 'mac' ? DISPLAY_MAP_MAC : DISPLAY_MAP_OTHER
   return keys.split('+').map(part => {
     const mapped = map[part]
@@ -16,7 +17,16 @@ export function formatKeysForDisplay(keys: string, platform?: Platform): string 
   }).join('')
 }
 
-export function toElectronAccelerator(keys: string): string {
+/**
+ * Compose a UI label with an optional shortcut hint in parentheses.
+ * Returns the bare label when keys is null — safe replacement for template interpolation.
+ */
+export function withShortcut(label: string, keys: string | null): string {
+  return keys ? `${label} (${keys})` : label
+}
+
+export function toElectronAccelerator(keys: string | null): string | null {
+  if (keys === null) return null
   return keys.split('+').map(part => {
     if (part === 'mod') return 'CmdOrCtrl'
     if (part === 'shift') return 'Shift'
@@ -29,8 +39,10 @@ export function toElectronAccelerator(keys: string): string {
 /**
  * Check if a KeyboardEvent matches a shortcut string like "mod+g" or "mod+shift+g".
  * Used by raw keydown handlers that can't use react-hotkeys-hook.
+ * Returns false when keys is null (unbound shortcut).
  */
-export function matchesShortcut(e: KeyboardEvent, keys: string): boolean {
+export function matchesShortcut(e: KeyboardEvent, keys: string | null): boolean {
+  if (keys === null) return false
   const parts = keys.split('+')
   const key = parts[parts.length - 1]
   const wantMod = parts.includes('mod')
@@ -73,7 +85,8 @@ export interface ElectronInput {
  * Check if an Electron before-input-event Input matches a shortcut string.
  * Same logic as matchesShortcut but for Electron's Input type.
  */
-export function matchesElectronInput(input: ElectronInput, keys: string): boolean {
+export function matchesElectronInput(input: ElectronInput, keys: string | null): boolean {
+  if (keys === null) return false
   if (input.type !== 'keyDown') return false
 
   const parts = keys.split('+')

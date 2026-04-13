@@ -4,6 +4,7 @@ import {
   matchesShortcut,
   matchesElectronInput,
   formatKeysForDisplay,
+  withShortcut,
   shortcutDefinitions,
   MENU_SHORTCUT_DEFAULTS,
   detectPlatform,
@@ -106,9 +107,22 @@ describe('shortcutDefinitions', () => {
       expect(def.id).toBeTruthy()
       expect(def.label).toBeTruthy()
       expect(def.group).toBeTruthy()
-      expect(def.defaultKeys).toBeTruthy()
+      expect(def.defaultKeys === null || typeof def.defaultKeys === 'string').toBe(true)
       expect(def.scope).toBeTruthy()
     }
+  })
+
+  it('matchesShortcut returns false when keys is null', () => {
+    const e = { key: 'k', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false } as KeyboardEvent
+    expect(matchesShortcut(e, null)).toBe(false)
+  })
+
+  it('formatKeysForDisplay returns null when keys is null', () => {
+    expect(formatKeysForDisplay(null)).toBeNull()
+  })
+
+  it('toElectronAccelerator returns null when keys is null', () => {
+    expect(toElectronAccelerator(null)).toBeNull()
   })
 
   it('has no duplicate ids', () => {
@@ -137,6 +151,16 @@ describe('formatKeysForDisplay', () => {
   it('accepts explicit platform override', () => {
     expect(formatKeysForDisplay('mod+n', 'mac')).toBe('⌘N')
     expect(formatKeysForDisplay('mod+n', 'other')).toBe('CtrlN')
+  })
+})
+
+describe('withShortcut', () => {
+  it('appends keys in parentheses when non-null', () => {
+    expect(withShortcut('Home', '⌘§')).toBe('Home (⌘§)')
+  })
+
+  it('returns bare label when keys is null', () => {
+    expect(withShortcut('Home', null)).toBe('Home')
   })
 })
 

@@ -22,6 +22,7 @@ export function getBlockedWebPanelKeys(): Set<string> {
     if (def.scope !== 'global' && def.scope !== 'task') continue
 
     // Match mod+{single letter} only (not mod+shift+letter, mod+alt+letter, etc.)
+    if (def.defaultKeys === null) continue
     const match = def.defaultKeys.match(/^mod\+([a-z])$/)
     if (match) blocked.add(match[1])
   }

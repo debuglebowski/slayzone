@@ -62,6 +62,7 @@ function ShortcutRow({
   isRecordingThis,
   onStartRecording,
   onCancelRecording,
+  onClear,
   conflictAction,
   shadowAction,
   onConfirmReassign,
@@ -69,10 +70,11 @@ function ShortcutRow({
   onDismissShadow,
 }: {
   def: ShortcutDefinition
-  effectiveKeys: string
+  effectiveKeys: string | null
   isRecordingThis: boolean
   onStartRecording: () => void
   onCancelRecording: () => void
+  onClear: () => void
   conflictAction: ShortcutDefinition | null
   shadowAction: ShortcutDefinition | null
   onConfirmReassign: () => void
@@ -80,10 +82,11 @@ function ShortcutRow({
   onDismissShadow: () => void
 }) {
   const customizable = def.customizable !== false
+  const isBound = effectiveKeys !== null
 
   return (
     <div>
-      <div className="flex items-center justify-between px-3 py-2">
+      <div className="flex items-center justify-between px-3 py-2 gap-2">
         <span className="text-sm">{def.label}</span>
         {isRecordingThis ? (
           <div className="flex items-center gap-2">
@@ -99,15 +102,54 @@ function ShortcutRow({
             </button>
           </div>
         ) : (
-          <span
-            className={cn(
-              'text-base text-muted-foreground bg-muted border px-2.5 py-0.5 rounded-md font-[system-ui] shadow-[0_1px_0_0_rgba(0,0,0,0.05)]',
-              customizable && 'cursor-pointer'
+          <div className="flex items-center gap-1.5">
+            {effectiveKeys !== null ? (
+              <span
+                className={cn(
+                  'text-base text-muted-foreground bg-muted border px-2.5 py-0.5 rounded-md font-[system-ui] shadow-[0_1px_0_0_rgba(0,0,0,0.05)]',
+                  customizable && 'cursor-pointer'
+                )}
+                onClick={customizable ? onStartRecording : undefined}
+              >
+                {formatKeysForDisplay(effectiveKeys)}
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  'text-xs italic text-muted-foreground/60 px-2.5 py-0.5 rounded-md border border-dashed',
+                  customizable && 'cursor-pointer hover:text-muted-foreground'
+                )}
+                onClick={customizable ? onStartRecording : undefined}
+              >
+                Unbound
+              </span>
             )}
-            onClick={customizable ? onStartRecording : undefined}
-          >
-            {formatKeysForDisplay(effectiveKeys)}
-          </span>
+            {isBound && (
+              customizable ? (
+                <button
+                  type="button"
+                  onClick={onClear}
+                  aria-label={`Clear shortcut for ${def.label}`}
+                  title="Clear shortcut"
+                  className="text-xs text-muted-foreground/60 hover:text-foreground px-1"
+                >
+                  ✕
+                </button>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      aria-disabled="true"
+                      className="text-xs text-muted-foreground/30 px-1 cursor-not-allowed"
+                    >
+                      ✕
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">This shortcut cannot be removed</TooltipContent>
+                </Tooltip>
+              )
+            )}
+          </div>
         )}
       </div>
       {conflictAction && (
@@ -167,6 +209,7 @@ export function AppSidebar({
   onReorderProjects,
 }: AppSidebarProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [openShortcutGroup, setOpenShortcutGroup] = useState<string | null>(() => shortcutDefinitions[0]?.group ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [recordingId, setRecordingId] = useState<string | null>(null)
   const [pendingKeys, setPendingKeys] = useState<string | null>(null)
@@ -195,9 +238,9 @@ export function AppSidebar({
 
   // Derive effective keys from overrides so React re-renders when they change
   const effectiveKeysMap = useMemo(() => {
-    const map: Record<string, string> = {}
+    const map: Record<string, string | null> = {}
     for (const def of shortcutDefinitions) {
-      map[def.id] = overrides[def.id] ?? def.defaultKeys
+      map[def.id] = def.id in overrides ? overrides[def.id] : def.defaultKeys
     }
     return map
   }, [overrides])
@@ -485,8 +528,12 @@ export function AppSidebar({
                   onCancel={handleCancelRecording}
                 />
                 <div className="space-y-1 overflow-y-auto scrollbar-thin">
-                  {shortcutGroups.map((group, i) => (
-                    <Collapsible.Root key={group.heading} defaultOpen={i === 0}>
+                  {shortcutGroups.map((group) => (
+                    <Collapsible.Root
+                      key={group.heading}
+                      open={openShortcutGroup === group.heading}
+                      onOpenChange={(open) => setOpenShortcutGroup(open ? group.heading : null)}
+                    >
                       <Collapsible.Trigger className="flex w-full items-center justify-between px-3 py-2 rounded-lg bg-muted hover:bg-accent hover:text-accent-foreground transition-colors group/trigger">
                         <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">{group.heading}</p>
                         <ChevronDown className="size-3.5 text-muted-foreground transition-transform duration-200 group-data-[state=open]/trigger:rotate-180" />
@@ -505,6 +552,7 @@ export function AppSidebar({
                                 setRecording(true)
                               }}
                               onCancelRecording={handleCancelRecording}
+                              onClear={() => setOverride(def.id, '')}
                               conflictAction={recordingId === def.id ? pendingConflict : null}
                               shadowAction={shadowWarning?.defId === def.id ? shadowWarning.shadow : null}
                               onConfirmReassign={handleConfirmReassign}
