@@ -95,19 +95,6 @@ export default defineConfig(({ mode }) => {
             : {})
         }
       },
-      // Pre-transform known hot files at dev server start so first interaction
-      // doesn't pay the inline transform cost. Dev-only — ignored by build.
-      server: {
-        warmup: {
-          clientFiles: [
-            './src/renderer/src/main.tsx',
-            './src/renderer/src/App.tsx',
-            '../../domains/tasks/src/client/useTasksData.ts',
-            '../../domains/task/src/client/TaskDetailPage.tsx',
-            '../../domains/settings/src/client/useTabStore.ts'
-          ]
-        }
-      },
       plugins: [
         // React Compiler runs babel AST analysis on every .tsx. Its purpose is
         // prod-runtime memoization injection, so gate it to prod builds only
