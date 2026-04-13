@@ -1,4 +1,7 @@
 import type { IpcMain } from 'electron'
+import { app } from 'electron'
+import { copyFileSync, mkdirSync, readdirSync, unlinkSync, existsSync } from 'fs'
+import path from 'path'
 import type { Database } from 'better-sqlite3'
 import type {
   ColumnConfig,
@@ -13,6 +16,22 @@ import {
   resolveColumns,
   validateColumns
 } from '@slayzone/projects/shared'
+
+const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
+
+function getProjectIconsDir(): string {
+  return path.join(process.env.SLAYZONE_DB_DIR || app.getPath('userData'), 'project-icons')
+}
+
+function unlinkProjectIconFiles(projectId: string): void {
+  const dir = getProjectIconsDir()
+  if (!existsSync(dir)) return
+  for (const entry of readdirSync(dir)) {
+    if (entry.startsWith(`${projectId}.`)) {
+      try { unlinkSync(path.join(dir, entry)) } catch { /* best-effort */ }
+    }
+  }
+}
 
 export function parseProject(row: Record<string, unknown> | undefined): Record<string, unknown> | null {
   if (!row) return null
@@ -216,6 +235,19 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
       fields.push('task_automation_config = ?')
       values.push(data.taskAutomationConfig ? JSON.stringify(data.taskAutomationConfig) : null)
     }
+    if (data.iconLetters !== undefined) {
+      fields.push('icon_letters = ?')
+      const trimmed = data.iconLetters?.trim()
+      values.push(trimmed && trimmed.length > 0 ? trimmed.slice(0, 5) : null)
+    }
+    if (data.iconImagePath !== undefined) {
+      fields.push('icon_image_path = ?')
+      // If clearing, unlink any disk file for this project
+      if (data.iconImagePath === null) {
+        unlinkProjectIconFiles(data.id)
+      }
+      values.push(data.iconImagePath)
+    }
     if (data.columnsConfig !== undefined) {
       fields.push('columns_config = ?')
       if (data.columnsConfig === null) {
@@ -264,7 +296,26 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
   ipcMain.handle('db:projects:delete', (_, id: string) => {
     const result = db.prepare('DELETE FROM projects WHERE id = ?').run(id)
     db.prepare('DELETE FROM settings WHERE key = ?').run(`commit_graph:project:${id}`)
+    unlinkProjectIconFiles(id)
     return result.changes > 0
+  })
+
+  ipcMain.handle('db:projects:uploadIcon', (_, projectId: string, sourcePath: string) => {
+    const ext = path.extname(sourcePath).toLowerCase()
+    if (!ALLOWED_ICON_EXTS.has(ext)) {
+      throw new Error(`Unsupported icon extension: ${ext}`)
+    }
+    const dir = getProjectIconsDir()
+    mkdirSync(dir, { recursive: true })
+    // Remove any prior file for this project (handles ext change png→jpg)
+    unlinkProjectIconFiles(projectId)
+    const destPath = path.join(dir, `${projectId}${ext}`)
+    copyFileSync(sourcePath, destPath)
+
+    db.prepare("UPDATE projects SET icon_image_path = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(destPath, projectId)
+    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Record<string, unknown> | undefined
+    return parseProject(row)
   })
 
   ipcMain.handle('db:projects:reorder', (_, projectIds: string[]) => {

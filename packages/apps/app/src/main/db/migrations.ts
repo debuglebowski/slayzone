@@ -1919,6 +1919,15 @@ const migrations: Migration[] = [
           WHERE scope = 'library';
       `)
     }
+  },
+  {
+    version: 106,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN icon_letters TEXT;
+        ALTER TABLE projects ADD COLUMN icon_image_path TEXT;
+      `)
+    }
   }
 ]
 

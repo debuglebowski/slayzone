@@ -25,6 +25,8 @@ interface ProjectSettingsDialogProps {
   integrationOnboardingProvider?: IntegrationProvider | null
   onIntegrationOnboardingHandled?: () => void
   onUpdated: (project: Project) => void
+  /** In-place update without closing the dialog. Falls back to onUpdated if not provided. */
+  onChanged?: (project: Project) => void
   renderTemplatesTab?: (projectId: string) => React.ReactNode
 }
 
@@ -38,6 +40,7 @@ export function ProjectSettingsDialog({
   integrationOnboardingProvider = null,
   onIntegrationOnboardingHandled,
   onUpdated,
+  onChanged,
   renderTemplatesTab
 }: ProjectSettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'worktrees' | 'repos' | 'tags' | 'templates' | 'integrations' | 'ai-config' | 'tests'>('general')
@@ -116,6 +119,7 @@ export function ProjectSettingsDialog({
             <GeneralTab
               project={project}
               onUpdated={onUpdated}
+              onChanged={onChanged ?? onUpdated}
               onClose={() => onOpenChange(false)}
             />
           )}

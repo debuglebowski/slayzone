@@ -34,6 +34,10 @@ export interface Project {
   /** Folder name of the default child repo (for multi-repo projects) */
   selected_repo: string | null
   task_automation_config: TaskAutomationConfig | null
+  /** Custom 1–5 char override for the avatar. Null = derive from name. */
+  icon_letters: string | null
+  /** Absolute path to icon image on disk. Overrides letters when set. */
+  icon_image_path: string | null
   sort_order: number
   created_at: string
   updated_at: string
@@ -64,4 +68,6 @@ export interface UpdateProjectInput {
   executionContext?: ExecutionContext | null
   selectedRepo?: string | null
   taskAutomationConfig?: TaskAutomationConfig | null
+  iconLetters?: string | null
+  iconImagePath?: string | null
 }

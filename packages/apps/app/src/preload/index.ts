@@ -22,6 +22,7 @@ const api: ElectronAPI = {
     updateProject: (data) => ipcRenderer.invoke('db:projects:update', data),
     deleteProject: (id) => ipcRenderer.invoke('db:projects:delete', id),
     reorderProjects: (projectIds) => ipcRenderer.invoke('db:projects:reorder', projectIds),
+    uploadProjectIcon: (projectId, sourcePath) => ipcRenderer.invoke('db:projects:uploadIcon', projectId, sourcePath),
 
     // Tasks
     getTasks: () => ipcRenderer.invoke('db:tasks:getAll'),

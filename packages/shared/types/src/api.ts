@@ -240,6 +240,7 @@ export interface ElectronAPI {
     updateProject: (data: UpdateProjectInput) => Promise<Project>
     deleteProject: (id: string) => Promise<boolean>
     reorderProjects: (projectIds: string[]) => Promise<void>
+    uploadProjectIcon: (projectId: string, sourcePath: string) => Promise<Project>
 
     // Tasks
     getTasks: () => Promise<Task[]>
@@ -368,6 +369,7 @@ export interface ElectronAPI {
       title?: string
       defaultPath?: string
       properties?: Array<'openFile' | 'openDirectory' | 'multiSelections' | 'showHiddenFiles' | 'createDirectory' | 'promptToCreate' | 'noResolveAliases' | 'treatPackageAsDirectory' | 'dontAddToRecent'>
+      filters?: Array<{ name: string; extensions: string[] }>
     }) => Promise<{ canceled: boolean; filePaths: string[] }>
   }
   app: {

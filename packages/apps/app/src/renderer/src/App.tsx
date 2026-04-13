@@ -899,6 +899,7 @@ function App(): React.JSX.Element {
   }
 
   const handleProjectUpdated = (project: Project): void => { updateProject(project); closeProjectSettings(); validateProjectPath(project) }
+  const handleProjectChanged = (project: Project): void => { updateProject(project); setEditingProject(project); validateProjectPath(project) }
 
   const handleProjectNameSave = async (): Promise<void> => {
     if (!selectedProjectId) return
@@ -1202,6 +1203,7 @@ function App(): React.JSX.Element {
           initialTab={projectSettingsInitialTab} groupBy={testGroupBy} onGroupByChange={setTestGroupBy}
           integrationOnboardingProvider={projectSettingsOnboardingProvider} onIntegrationOnboardingHandled={() => setProjectSettingsOnboardingProvider(null)}
           onUpdated={handleProjectUpdated}
+          onChanged={handleProjectChanged}
           renderTemplatesTab={(projectId) => <TemplatesSettingsTab projectId={projectId} />} /></Suspense>}
         {shouldMount('deleteProject', !!deletingProject) && <Suspense fallback={null}><DeleteProjectDialog project={deletingProject} open={!!deletingProject} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeDeleteProject() }} onDeleted={handleProjectDeleted} /></Suspense>}
         {shouldMount('settings', settingsOpen) && <Suspense fallback={null}><UserSettingsDialog open={settingsOpen} onOpenChange={(open) => { setSettingsOpen(open); if (!open) { setSettingsRevision((r) => r + 1); setSettingsInitialAiConfigSection(null) } }}

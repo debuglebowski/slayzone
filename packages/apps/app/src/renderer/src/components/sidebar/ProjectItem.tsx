@@ -30,7 +30,13 @@ export function ProjectItem({
   attentionCount,
   badgeMode
 }: ProjectItemProps) {
-  const abbrev = project.name.slice(0, 2).toUpperCase()
+  const customLetters = project.icon_letters?.trim().toUpperCase()
+  const fallbackLetters = project.name.slice(0, 2).toUpperCase()
+  const letters = customLetters && customLetters.length > 0 ? customLetters : fallbackLetters
+  const lettersClass = letters.length >= 5 ? 'text-[8px]' : letters.length > 2 ? 'text-[9px]' : 'text-xs'
+  const iconSrc = project.icon_image_path
+    ? `slz-file://${project.icon_image_path}?v=${encodeURIComponent(project.updated_at)}`
+    : null
   const {
     attributes,
     listeners,
@@ -55,15 +61,20 @@ export function ProjectItem({
               <button
                 onClick={onClick}
                 className={cn(
-                  'w-10 h-10 rounded-lg flex items-center justify-center',
-                  'text-xs font-semibold text-white transition-all',
+                  'w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden',
+                  'font-semibold text-white transition-all',
+                  !iconSrc && lettersClass,
                   selected && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
                 )}
                 style={{ backgroundColor: project.color }}
                 {...attributes}
                 {...listeners}
               >
-                {abbrev}
+                {iconSrc ? (
+                  <img src={iconSrc} alt="" className="w-full h-full object-cover" draggable={false} />
+                ) : (
+                  letters
+                )}
               </button>
             </ContextMenuTrigger>
           </TooltipTrigger>
