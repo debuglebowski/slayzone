@@ -16,7 +16,7 @@ import type {
   ContextTreeEntry,
   CreateAiConfigItemInput,
   ListAiConfigItemsInput,
-  LoadGlobalItemInput,
+  LoadLibraryItemInput,
   McpConfigFileResult,
   McpTarget,
   McpServerConfig,
@@ -32,8 +32,8 @@ import type {
   UpdateAiConfigItemInput,
   WriteMcpServerInput,
   RemoveMcpServerInput,
-  WriteGlobalMcpServerInput,
-  RemoveGlobalMcpServerInput,
+  WriteComputerMcpServerInput,
+  RemoveComputerMcpServerInput,
 } from '../shared'
 import {
   parseSkillFrontmatter,
@@ -42,16 +42,16 @@ import {
 import {
   PROVIDER_PATHS,
   PROVIDER_LABELS,
-  GLOBAL_PROVIDER_PATHS,
+  COMPUTER_PROVIDER_PATHS,
   isConfigurableCliProvider,
   filterConfigurableCliProviders,
   isConfigurableMcpTarget,
   getConfigurableMcpTargets,
   PROJECT_MCP_SPECS,
-  GLOBAL_MCP_SPECS,
+  COMPUTER_MCP_SPECS,
 } from '../shared/provider-registry'
 import type { McpConfigSpec } from '../shared/provider-registry'
-import type { GlobalFileEntry } from '../shared'
+import type { ComputerFileEntry } from '../shared'
 import { skillSlugFromContextPath } from '../shared/skill-slug'
 import { registerMarketplaceHandlers } from './handlers-marketplace'
 import {
@@ -77,26 +77,31 @@ function contentHash(content: string): string {
 function computeLinkedSyncState(filePath: string, expectedContent: string): {
   syncHealth: SyncHealth
   syncReason: SyncReason | null
+  diskContent: string | null
 } {
   if (!fs.existsSync(filePath)) {
     return {
       syncHealth: 'stale',
-      syncReason: 'missing_file'
+      syncReason: 'missing_file',
+      diskContent: null
     }
   }
 
-  const diskHash = contentHash(fs.readFileSync(filePath, 'utf-8'))
+  const diskContent = fs.readFileSync(filePath, 'utf-8')
+  const diskHash = contentHash(diskContent)
   const expectedHash = contentHash(expectedContent)
   if (diskHash === expectedHash) {
     return {
       syncHealth: 'synced',
-      syncReason: null
+      syncReason: null,
+      diskContent
     }
   }
 
   return {
     syncHealth: 'stale',
-    syncReason: 'external_edit'
+    syncReason: 'external_edit',
+    diskContent
   }
 }
 
@@ -230,8 +235,8 @@ function withDerivedSkillValidation(item: AiConfigItem): AiConfigItem {
 function isPathAllowed(filePath: string, projectPath: string | null): boolean {
   const resolved = path.resolve(filePath)
   const home = app.getPath('home')
-  // Allow all global provider base dirs
-  for (const [, spec] of Object.entries(GLOBAL_PROVIDER_PATHS)) {
+  // Allow all computer-level provider base dirs
+  for (const [, spec] of Object.entries(COMPUTER_PROVIDER_PATHS)) {
     const dir = path.join(home, spec.baseDir)
     if (resolved.startsWith(dir + path.sep) || resolved === dir) return true
   }
@@ -351,7 +356,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     if (input.scope !== undefined) {
       fields.push('scope = ?')
       values.push(input.scope)
-      if (input.scope === 'global') {
+      if (input.scope === 'library') {
         fields.push('project_id = NULL')
       }
     }
@@ -473,20 +478,20 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       }
     }
 
-    // ~/.claude/CLAUDE.md (always shown — global config)
-    const globalClaude = path.join(app.getPath('home'), '.claude', 'CLAUDE.md')
+    // ~/.claude/CLAUDE.md (always shown — computer-level config)
+    const computerClaude = path.join(app.getPath('home'), '.claude', 'CLAUDE.md')
     results.push({
-      path: globalClaude,
+      path: computerClaude,
       name: '~/.claude/CLAUDE.md',
-      exists: fs.existsSync(globalClaude),
+      exists: fs.existsSync(computerClaude),
       category: 'claude'
     })
 
-    const globalCopilot = path.join(app.getPath('home'), '.copilot', 'AGENTS.md')
+    const computerCopilot = path.join(app.getPath('home'), '.copilot', 'AGENTS.md')
     results.push({
-      path: globalCopilot,
+      path: computerCopilot,
       name: '~/.copilot/AGENTS.md',
-      exists: fs.existsSync(globalCopilot),
+      exists: fs.existsSync(computerCopilot),
       category: 'agents'
     })
 
@@ -503,11 +508,11 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     } catch { return undefined }
   }
 
-  ipcMain.handle('ai-config:get-global-files', () => {
+  ipcMain.handle('ai-config:get-computer-files', () => {
     const home = app.getPath('home')
-    const entries: GlobalFileEntry[] = []
+    const entries: ComputerFileEntry[] = []
 
-    for (const [key, spec] of Object.entries(GLOBAL_PROVIDER_PATHS)) {
+    for (const [key, spec] of Object.entries(COMPUTER_PROVIDER_PATHS)) {
       const baseDir = path.join(home, spec.baseDir)
 
       // Instructions file
@@ -591,7 +596,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     fs.writeFileSync(filePath, content, 'utf-8')
   })
 
-  ipcMain.handle('ai-config:delete-global-file', (_event, filePath: string) => {
+  ipcMain.handle('ai-config:delete-computer-file', (_event, filePath: string) => {
     if (!isPathAllowed(filePath, null)) throw new Error('Path not allowed')
     if (!fs.existsSync(filePath)) return
     const stat = fs.statSync(filePath)
@@ -599,14 +604,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     fs.unlinkSync(filePath)
   })
 
-  ipcMain.handle('ai-config:create-global-file', (
+  ipcMain.handle('ai-config:create-computer-file', (
     _event,
     provider: string,
     category: 'skill',
     slugInput: string
-  ): GlobalFileEntry => {
-    const spec = GLOBAL_PROVIDER_PATHS[provider]
-    if (!spec) throw new Error(`Provider ${provider} does not support global file management`)
+  ): ComputerFileEntry => {
+    const spec = COMPUTER_PROVIDER_PATHS[provider]
+    if (!spec) throw new Error(`Provider ${provider} does not support computer-level file management`)
 
     const dirSegment = spec.skillsDir
     if (!dirSegment) throw new Error(`${spec.label} does not support skills`)
@@ -630,15 +635,15 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
   })
 
-  ipcMain.handle('ai-config:write-global-skill', (
+  ipcMain.handle('ai-config:write-computer-skill', (
     _event,
     provider: CliProvider,
     slug: string,
     content: string,
   ) => {
     if (!isConfigurableCliProvider(provider)) throw new Error(`Provider ${provider} is not configurable`)
-    const spec = GLOBAL_PROVIDER_PATHS[provider]
-    if (!spec?.skillsDir) throw new Error(`${provider} does not support global skills`)
+    const spec = COMPUTER_PROVIDER_PATHS[provider]
+    if (!spec?.skillsDir) throw new Error(`${provider} does not support computer-level skills`)
     const home = app.getPath('home')
     const normalizedSlug = normalizeSlug(slug)
     const filePath = path.join(home, spec.baseDir, spec.skillsDir, normalizedSlug, 'SKILL.md')
@@ -669,16 +674,16 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
 
     // ~/.claude/CLAUDE.md
-    const globalClaude = path.join(app.getPath('home'), '.claude', 'CLAUDE.md')
-    const globalClaudeExists = fs.existsSync(globalClaude)
-    seenPaths.add(globalClaude)
+    const computerClaude = path.join(app.getPath('home'), '.claude', 'CLAUDE.md')
+    const computerClaudeExists = fs.existsSync(computerClaude)
+    seenPaths.add(computerClaude)
     entries.push({
-      path: globalClaude,
+      path: computerClaude,
       relativePath: '~/.claude/CLAUDE.md',
-      exists: globalClaudeExists,
+      exists: computerClaudeExists,
       category: 'claude',
       linkedItemId: null,
-      syncHealth: globalClaudeExists ? 'unmanaged' : 'not_synced',
+      syncHealth: computerClaudeExists ? 'unmanaged' : 'not_synced',
       syncReason: 'not_linked'
     })
 
@@ -716,7 +721,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       }
     }
 
-    // 3. Check project selections for linked global items
+    // 3. Check project selections for linked library items
     const selections = db.prepare(`
       SELECT ps.*, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
       FROM ai_config_project_selections ps
@@ -758,7 +763,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     return entries
   })
 
-  ipcMain.handle('ai-config:load-global-item', (_event, input: LoadGlobalItemInput) => {
+  ipcMain.handle('ai-config:load-library-item', (_event, input: LoadLibraryItemInput) => {
     const item = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(input.itemId) as AiConfigItem | undefined
     if (!item) throw new Error('Item not found')
     if (item.type === 'skill') {
@@ -1044,7 +1049,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     let variant: AiConfigItem | undefined
     if (variantRow) {
       variant = db.prepare(
-        "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'global'"
+        "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
       ).get(variantRow.value) as AiConfigItem | undefined
     }
 
@@ -1083,29 +1088,29 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     return recomputeInstructionsResult(projectId, projectPath)
   })
 
-  ipcMain.handle('ai-config:get-global-instructions', (_event, variantId?: string) => {
+  ipcMain.handle('ai-config:get-library-instructions', (_event, variantId?: string) => {
     if (variantId) {
       const item = db.prepare(
-        "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'global'"
+        "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
       ).get(variantId) as AiConfigItem | undefined
       return item?.content ?? ''
     }
     // Legacy: return first (default) variant
     const item = db.prepare(
-      "SELECT * FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'global' ORDER BY created_at ASC LIMIT 1"
+      "SELECT * FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'library' ORDER BY created_at ASC LIMIT 1"
     ).get() as AiConfigItem | undefined
     return item?.content ?? ''
   })
 
-  ipcMain.handle('ai-config:save-global-instructions', (_event, content: string, variantId?: string) => {
+  ipcMain.handle('ai-config:save-library-instructions', (_event, content: string, variantId?: string) => {
     if (variantId) {
-      db.prepare("UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ? AND type = 'root_instructions' AND scope = 'global'")
+      db.prepare("UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ? AND type = 'root_instructions' AND scope = 'library'")
         .run(content, variantId)
       return
     }
     // Legacy: upsert the default variant
     const existing = db.prepare(
-      "SELECT id FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'global' ORDER BY created_at ASC LIMIT 1"
+      "SELECT id FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'library' ORDER BY created_at ASC LIMIT 1"
     ).get() as { id: string } | undefined
 
     if (existing) {
@@ -1114,7 +1119,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     } else {
       db.prepare(`
         INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
-        VALUES (?, 'root_instructions', 'global', NULL, 'root_instructions', 'root_instructions', ?, '{}', datetime('now'), datetime('now'))
+        VALUES (?, 'root_instructions', 'library', NULL, 'root_instructions', 'root_instructions', ?, '{}', datetime('now'), datetime('now'))
       `).run(crypto.randomUUID(), content)
     }
   })
@@ -1122,7 +1127,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
   // Instruction variants
   ipcMain.handle('ai-config:list-instruction-variants', (): AiConfigItem[] => {
     return db.prepare(
-      "SELECT * FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'global' ORDER BY updated_at DESC"
+      "SELECT * FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'library' ORDER BY updated_at DESC"
     ).all() as AiConfigItem[]
   })
 
@@ -1131,7 +1136,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       .get(`ai_instruction_variant:${projectId}`) as { value: string } | undefined
     if (!row) return null
     const item = db.prepare(
-      "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'global'"
+      "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
     ).get(row.value) as AiConfigItem | undefined
     return item ?? null
   })
@@ -1148,7 +1153,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     // Auto-sync: write variant content to all provider instruction files
     if (projectPath) {
       const variant = db.prepare(
-        "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'global'"
+        "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
       ).get(variantItemId) as AiConfigItem | undefined
       if (variant) {
         const hash = contentHash(variant.content)
@@ -1359,7 +1364,10 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
           providerMap[provider] = {
             path: effectiveTargetPath,
             syncHealth: syncState.syncHealth,
-            syncReason: syncState.syncReason
+            syncReason: syncState.syncReason,
+            ...(syncState.syncHealth === 'stale' && syncState.diskContent !== null
+              ? { diskContent: syncState.diskContent }
+              : {})
           }
         } else {
           const defaultPath = getSkillPath(provider, item.slug) ?? ''
@@ -1408,7 +1416,10 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         providerMap[provider] = {
           path: effectiveTargetPath,
           syncHealth: syncState.syncHealth,
-          syncReason: syncState.syncReason
+          syncReason: syncState.syncReason,
+          ...(syncState.syncHealth === 'stale' && syncState.diskContent !== null
+            ? { diskContent: syncState.diskContent }
+            : {})
         }
       } else {
         const defaultPath = getSkillPath(provider, item.slug) ?? ''
@@ -1548,11 +1559,11 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
     if (discovered.length === 0) return 0
 
-    // 2. Query existing items (project-scoped + global) to avoid duplicates
+    // 2. Query existing items (project-scoped + library) to avoid duplicates
     const existingItems = db.prepare(`
       SELECT id, slug, scope, project_id FROM ai_config_items
       WHERE type = 'skill' AND (
-        (scope = 'project' AND project_id = ?) OR scope = 'global'
+        (scope = 'project' AND project_id = ?) OR scope = 'library'
       )
     `).all(projectId) as Array<{ id: string; slug: string; scope: string; project_id: string | null }>
     const slugToItem = new Map(existingItems.map(i => [i.slug, i]))
@@ -1679,6 +1690,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('ai-config:sync-all', (_event, input: SyncAllInput) => {
     const resolvedProject = path.resolve(input.projectPath)
+    const singleItemId = input.itemId ?? null
 
     // Get enabled providers for this project
     let providers = input.providers
@@ -1709,6 +1721,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       WHERE ps.project_id = ?
     `).all(input.projectId) as Array<AiConfigProjectSelection & { item_content: string; item_type: string; item_slug: string; item_metadata: string }>)
       .filter((sel) => isConfigurableCliProvider(sel.provider))
+      .filter((sel) => singleItemId ? sel.item_id === singleItemId : true)
 
     const enabledSet = new Set(providers)
     const keepPathsByProvider = new Map<CliProvider, Set<string>>()
@@ -1743,8 +1756,9 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         keepPathsByProvider.get(provider)?.add(path.resolve(filePath))
       }
 
-      // Check for external edits via content hash
-      if (fs.existsSync(filePath) && sel.content_hash) {
+      // Check for external edits via content hash.
+      // Skipped for single-item sync: the user explicitly chose to overwrite disk after seeing the diff in the edit panel.
+      if (!singleItemId && fs.existsSync(filePath) && sel.content_hash) {
         const diskHash = contentHash(fs.readFileSync(filePath, 'utf-8'))
         if (diskHash !== sel.content_hash && diskHash !== hash) {
           result.conflicts.push({ path: effectiveTargetPath, provider: sel.provider as CliProvider, itemId: sel.item_id, reason: 'external_edit' })
@@ -1779,11 +1793,12 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
 
     // Sync project-local items to all enabled provider paths that support the item type.
-    const localItems = db.prepare(`
+    const localItems = (db.prepare(`
       SELECT id, slug, content, type, metadata_json
       FROM ai_config_items
       WHERE scope = 'project' AND project_id = ? AND type = 'skill'
-    `).all(input.projectId) as Array<{ id: string; slug: string; content: string; type: 'skill'; metadata_json: string }>
+    `).all(input.projectId) as Array<{ id: string; slug: string; content: string; type: 'skill'; metadata_json: string }>)
+      .filter((item) => singleItemId ? item.id === singleItemId : true)
 
     for (const item of localItems) {
       ensureSkillValidationForSync(item.slug, item.content, item.metadata_json)
@@ -1805,7 +1820,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       }
     }
 
-    if (input.pruneUnmanaged) {
+    if (input.pruneUnmanaged && !singleItemId) {
       // Prune unmanaged root instruction files:
       // keep only enabled-provider root files when a project root_instructions item exists.
       const rootItem = db.prepare(
@@ -1938,7 +1953,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
   })
 
   // MCP config discovery + management
-  // Specs are imported from provider-registry (PROJECT_MCP_SPECS, GLOBAL_MCP_SPECS)
+  // Specs are imported from provider-registry (PROJECT_MCP_SPECS, COMPUTER_MCP_SPECS)
 
   function discoverMcpConfigsFromSpecs(
     baseDir: string,
@@ -2010,19 +2025,19 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     removeMcpServerFromSpecs(path.resolve(input.projectPath), PROJECT_MCP_SPECS, input.provider, input.serverKey)
   })
 
-  // Global (computer-level) MCP handlers
+  // Computer-level MCP handlers
   const homeDir = app.getPath('home')
 
-  ipcMain.handle('ai-config:discover-global-mcp-configs', (): McpConfigFileResult[] => {
-    return discoverMcpConfigsFromSpecs(homeDir, GLOBAL_MCP_SPECS)
+  ipcMain.handle('ai-config:discover-computer-mcp-configs', (): McpConfigFileResult[] => {
+    return discoverMcpConfigsFromSpecs(homeDir, COMPUTER_MCP_SPECS)
   })
 
-  ipcMain.handle('ai-config:write-global-mcp-server', (_event, input: WriteGlobalMcpServerInput) => {
-    writeMcpServerToSpecs(homeDir, GLOBAL_MCP_SPECS, input.provider, input.serverKey, input.config)
+  ipcMain.handle('ai-config:write-computer-mcp-server', (_event, input: WriteComputerMcpServerInput) => {
+    writeMcpServerToSpecs(homeDir, COMPUTER_MCP_SPECS, input.provider, input.serverKey, input.config)
   })
 
-  ipcMain.handle('ai-config:remove-global-mcp-server', (_event, input: RemoveGlobalMcpServerInput) => {
-    removeMcpServerFromSpecs(homeDir, GLOBAL_MCP_SPECS, input.provider, input.serverKey)
+  ipcMain.handle('ai-config:remove-computer-mcp-server', (_event, input: RemoveComputerMcpServerInput) => {
+    removeMcpServerFromSpecs(homeDir, COMPUTER_MCP_SPECS, input.provider, input.serverKey)
   })
 
   ipcMain.handle('ai-config:check-slay-configured', (_event, projectPath: string): boolean => {
@@ -2038,7 +2053,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       }
     }
 
-    for (const spec of Object.values(GLOBAL_PROVIDER_PATHS)) {
+    for (const spec of Object.values(COMPUTER_PROVIDER_PATHS)) {
       if (spec.instructions) {
         const filePath = path.join(homeDir, spec.baseDir, spec.instructions)
         if (fs.existsSync(filePath) && keywordPattern.test(fs.readFileSync(filePath, 'utf-8'))) {

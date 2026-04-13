@@ -1,5 +1,5 @@
 export type AiConfigItemType = 'skill' | 'doc' | 'root_instructions'
-export type AiConfigScope = 'global' | 'project'
+export type AiConfigScope = 'library' | 'project'
 export type ConfigLevel = 'computer' | 'project' | 'library'
 
 export interface AiConfigItem {
@@ -107,7 +107,7 @@ export interface ContextTreeEntry {
   syncReason: SyncReason | null
 }
 
-export interface LoadGlobalItemInput {
+export interface LoadLibraryItemInput {
   projectId: string
   projectPath: string
   itemId: string
@@ -125,6 +125,7 @@ export interface SyncAllInput {
   projectPath: string
   providers?: CliProvider[]
   pruneUnmanaged?: boolean
+  itemId?: string
 }
 
 export interface SyncResult {
@@ -157,11 +158,12 @@ export interface ProjectSkillStatus {
     path: string
     syncHealth: SyncHealth
     syncReason: SyncReason | null
+    diskContent?: string
   }>>
 }
 
-// Global file management
-export interface GlobalFileEntry {
+// Computer-level file management (~/.provider/...)
+export interface ComputerFileEntry {
   path: string
   name: string
   provider: string
@@ -210,14 +212,14 @@ export interface RemoveMcpServerInput {
   serverKey: string
 }
 
-// Global (computer-level) MCP management
-export interface WriteGlobalMcpServerInput {
+// Computer-level MCP management
+export interface WriteComputerMcpServerInput {
   provider: McpTarget
   serverKey: string
   config: McpServerConfig
 }
 
-export interface RemoveGlobalMcpServerInput {
+export interface RemoveComputerMcpServerInput {
   provider: McpTarget
   serverKey: string
 }
@@ -257,7 +259,7 @@ export interface SkillRegistryEntry {
   installed?: boolean
   installed_item_id?: string | null
   installed_scope?: string | null
-  installed_global_item_id?: string | null
+  installed_library_item_id?: string | null
   installed_project_item_id?: string | null
   has_update?: boolean
   registry_name?: string

@@ -15,7 +15,7 @@ export function ComputerMcpView() {
   const loadConfigs = useCallback(async () => {
     setLoading(true)
     try {
-      setConfigs(await window.api.aiConfig.discoverGlobalMcpConfigs())
+      setConfigs(await window.api.aiConfig.discoverComputerMcpConfigs())
     } finally {
       setLoading(false)
     }
@@ -25,7 +25,7 @@ export function ComputerMcpView() {
 
   const handleAddServer = useCallback(async (provider: CliProvider) => {
     if (!newServerKey.trim() || !newServerCommand.trim()) return
-    await window.api.aiConfig.writeGlobalMcpServer({
+    await window.api.aiConfig.writeComputerMcpServer({
       provider,
       serverKey: newServerKey.trim(),
       config: {
@@ -41,12 +41,12 @@ export function ComputerMcpView() {
   }, [newServerKey, newServerCommand, newServerArgs, loadConfigs])
 
   const handleRemoveServer = useCallback(async (provider: CliProvider, serverKey: string) => {
-    await window.api.aiConfig.removeGlobalMcpServer({ provider, serverKey })
+    await window.api.aiConfig.removeComputerMcpServer({ provider, serverKey })
     void loadConfigs()
   }, [loadConfigs])
 
   if (loading) {
-    return <p className="text-xs text-muted-foreground">Loading global MCP configs...</p>
+    return <p className="text-xs text-muted-foreground">Loading computer MCP configs...</p>
   }
 
   return (
@@ -54,7 +54,7 @@ export function ComputerMcpView() {
       <div>
         <h3 className="text-sm font-semibold">Computer MCP Servers</h3>
         <p className="text-xs text-muted-foreground">
-          MCP servers configured in your home directory. These apply globally to all projects.
+          MCP servers configured in your home directory. These apply to every project on this computer.
         </p>
       </div>
 

@@ -14,7 +14,7 @@ import type {
   SyncHealth,
   SyncReason
 } from '../shared'
-import type { GlobalContextManagerSection } from './ContextManagerSettings'
+import type { ContextManagerSection } from './ContextManagerSettings'
 import { ItemSection } from './ItemSection'
 import { McpFlatSection } from './McpFlatSection'
 import { ProjectInstructions } from './ProjectInstructions'
@@ -25,7 +25,7 @@ interface ProjectContextFlatProps {
   projectId: string
   projectPath: string
   projectName?: string
-  onOpenGlobalAiConfig?: (section: GlobalContextManagerSection) => void
+  onOpenContextManager?: (section: ContextManagerSection) => void
 }
 
 type ProjectSection = 'providers' | 'instructions' | 'skill' | 'mcp'
@@ -195,7 +195,7 @@ function ProjectOverviewPanel({
 // Main project layout
 // ---------------------------------------------------------------------------
 
-export function ProjectContextFlat({ projectId, projectPath, onOpenGlobalAiConfig }: ProjectContextFlatProps) {
+export function ProjectContextFlat({ projectId, projectPath, onOpenContextManager }: ProjectContextFlatProps) {
   const [data, setData] = useState<ContextData | null>(null)
   const [version, setVersion] = useState(0)
   const [syncingMode, setSyncingMode] = useState<'sync' | 'reset' | null>(null)
@@ -295,8 +295,8 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenGlobalAiConfi
   }
 
   const sectionDescriptions: Record<ProjectSection, string> = {
-    providers: 'Choose which providers this project syncs to. Defaults inherited from global settings.',
-    instructions: 'Use the “Use global” button in the instructions editor to load shared content.',
+    providers: 'Choose which providers this project syncs to. Defaults inherited from computer settings.',
+    instructions: 'Use the “Use library” button in the instructions editor to load shared content.',
     skill: 'Select, edit, and sync project skills.',
     mcp: 'Manage MCP servers synced for this project.'
   }
@@ -339,7 +339,7 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenGlobalAiConfi
           enabledProviders={data.enabledProviders}
           projectId={projectId}
           projectPath={projectPath}
-          onOpenGlobalAiConfig={onOpenGlobalAiConfig}
+          onOpenContextManager={onOpenContextManager}
           onChanged={bumpVersion}
         />
       )
@@ -348,7 +348,7 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenGlobalAiConfi
       <McpFlatSection
         projectPath={projectPath}
         enabledProviders={data.enabledProviders}
-        onOpenGlobalAiConfig={onOpenGlobalAiConfig}
+        onOpenContextManager={onOpenContextManager}
         onChanged={bumpVersion}
       />
     )

@@ -5,11 +5,11 @@ Centralized management for AI configuration:
 - Skills (reusable AI instructions)
 - Commands (prompt commands / runbooks)
 - Context Files (CLAUDE.md, AGENTS.md, etc.)
-- Project selections copied from global repository items
+- Project selections copied from library repository items
 
 ## Contracts (`shared/`)
 
-- `AiConfigItem` - Config artifact (global or project scoped)
+- `AiConfigItem` - Config artifact (library or project scoped)
 - `AiConfigProjectSelection` - Per-project selected item with target path
 - `ContextFileInfo` - Discovered context file on disk
 

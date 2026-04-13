@@ -26,7 +26,7 @@ export function McpSection({ level, projectId, projectPath }: McpSectionProps) {
   // Library = favorites from curated catalog
   return (
     <McpServersPanel
-      mode="global"
+      mode="computer"
     />
   )
 }

@@ -4,7 +4,7 @@ import { Button, cn, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFoo
 import type { CliProvider, McpConfigFileResult, McpServerConfig, McpTarget, SyncHealth } from '../shared'
 import { CURATED_MCP_SERVERS, type CuratedMcpServer } from '../shared/mcp-registry'
 import { ProviderFileCard, StatusBadge } from './SyncComponents'
-import type { GlobalContextManagerSection } from './ContextManagerSettings'
+import type { ContextManagerSection } from './ContextManagerSettings'
 import { hasPendingProviderSync } from './sync-view-model'
 
 const MCP_CONFIG_PATHS: Partial<Record<McpTarget, string>> = {
@@ -22,14 +22,14 @@ interface MergedServer {
   config: McpServerConfig | null
   providerConfigs: Partial<Record<McpTarget, McpServerConfig>>
   curated: CuratedMcpServer | null
-  linkedToGlobal: boolean
+  linkedToComputer: boolean
   providers: McpTarget[]
 }
 
 interface McpFlatSectionProps {
   projectPath: string
   enabledProviders: CliProvider[]
-  onOpenGlobalAiConfig?: (section: GlobalContextManagerSection) => void
+  onOpenContextManager?: (section: ContextManagerSection) => void
   onChanged: () => void
 }
 
@@ -67,7 +67,7 @@ function buildMcpConfig(command: string, args: string, envRows: Array<{ key: str
   return config
 }
 
-function parseGlobalCustomServerIds(raw: string | null): Set<string> {
+function parseComputerCustomServerIds(raw: string | null): Set<string> {
   if (!raw) return new Set()
   try {
     const parsed = JSON.parse(raw) as unknown
@@ -81,9 +81,9 @@ function parseGlobalCustomServerIds(raw: string | null): Set<string> {
   }
 }
 
-export function McpFlatSection({ projectPath, enabledProviders, onOpenGlobalAiConfig, onChanged }: McpFlatSectionProps) {
+export function McpFlatSection({ projectPath, enabledProviders, onOpenContextManager, onChanged }: McpFlatSectionProps) {
   const [configs, setConfigs] = useState<McpConfigFileResult[]>([])
-  const [globalCustomServerIds, setGlobalCustomServerIds] = useState<Set<string>>(new Set())
+  const [computerCustomServerIds, setComputerCustomServerIds] = useState<Set<string>>(new Set())
   const [draftByServerKey, setDraftByServerKey] = useState<Record<string, McpServerConfig>>({})
   const [expandedProviderRows, setExpandedProviderRows] = useState<Record<string, Partial<Record<McpTarget, boolean>>>>({})
   const [loading, setLoading] = useState(true)
@@ -109,7 +109,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenGlobalAiCo
         window.api.settings.get('mcp_custom_servers')
       ])
       setConfigs(results)
-      setGlobalCustomServerIds(parseGlobalCustomServerIds(customServersRaw))
+      setComputerCustomServerIds(parseComputerCustomServerIds(customServersRaw))
     } finally {
       setLoading(false)
     }
@@ -135,7 +135,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenGlobalAiCo
           config,
           providerConfigs: { [cfg.provider]: config },
           curated,
-          linkedToGlobal: curated !== null || globalCustomServerIds.has(key),
+          linkedToComputer: curated !== null || computerCustomServerIds.has(key),
           providers: [cfg.provider]
         })
         seen.add(key)
@@ -421,15 +421,15 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenGlobalAiCo
                         <div className="space-y-3">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-lg font-semibold leading-tight">Edit</p>
-                            {server.linkedToGlobal && onOpenGlobalAiConfig && (
+                            {server.linkedToComputer && onOpenContextManager && (
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="h-7 px-2 text-[11px]"
-                                data-testid={`mcp-go-to-global-${server.key}`}
-                                onClick={() => onOpenGlobalAiConfig('mcp')}
+                                data-testid={`mcp-go-to-computer-${server.key}`}
+                                onClick={() => onOpenContextManager('mcp')}
                               >
-                                Go to global
+                                Go to computer
                               </Button>
                             )}
                           </div>

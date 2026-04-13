@@ -3,7 +3,7 @@ import { Sparkles } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@slayzone/ui'
 import type { AiConfigItem, CliProvider } from '../shared'
 
-interface GlobalItemPickerProps {
+interface LibraryItemPickerProps {
   projectId: string
   projectPath: string
   existingLinks: string[]
@@ -12,7 +12,7 @@ interface GlobalItemPickerProps {
   onClose: () => void
 }
 
-export function GlobalItemPicker({ projectId, projectPath, existingLinks, onLoaded, onClose }: GlobalItemPickerProps) {
+export function LibraryItemPicker({ projectId, projectPath, existingLinks, onLoaded, onClose }: LibraryItemPickerProps) {
   const [items, setItems] = useState<AiConfigItem[]>([])
   const [enabledProviders, setEnabledProviders] = useState<CliProvider[]>([])
   const [loading, setLoading] = useState(false)
@@ -20,7 +20,7 @@ export function GlobalItemPicker({ projectId, projectPath, existingLinks, onLoad
   useEffect(() => {
     void (async () => {
       const [skills, providers] = await Promise.all([
-        window.api.aiConfig.listItems({ scope: 'global', type: 'skill' }),
+        window.api.aiConfig.listItems({ scope: 'library', type: 'skill' }),
         window.api.aiConfig.getProjectProviders(projectId)
       ])
       setItems(skills)
@@ -34,7 +34,7 @@ export function GlobalItemPicker({ projectId, projectPath, existingLinks, onLoad
     if (alreadyLinked(item.id)) return
     setLoading(true)
     try {
-      await window.api.aiConfig.loadGlobalItem({
+      await window.api.aiConfig.loadLibraryItem({
         projectId,
         projectPath,
         itemId: item.id,
@@ -53,7 +53,7 @@ export function GlobalItemPicker({ projectId, projectPath, existingLinks, onLoad
       <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-5 pt-5 pb-3">
           <DialogTitle className="text-base">Add from Library</DialogTitle>
-          <p className="text-xs text-muted-foreground">Link a global skill into this project</p>
+          <p className="text-xs text-muted-foreground">Link a library skill into this project</p>
         </DialogHeader>
         <div className="border-t max-h-72 overflow-y-auto">
           {items.map((item) => {
@@ -87,7 +87,7 @@ export function GlobalItemPicker({ projectId, projectPath, existingLinks, onLoad
           })}
           {items.length === 0 && (
             <div className="px-5 py-8 text-center">
-              <p className="text-sm text-muted-foreground">No global skills available</p>
+              <p className="text-sm text-muted-foreground">No library skills available</p>
               <p className="mt-1 text-xs text-muted-foreground/60">Create one in the Library section first</p>
             </div>
           )}

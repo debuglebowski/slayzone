@@ -16,7 +16,7 @@ const SOURCE_LABELS: Record<SkillSource, string> = {
 
 function getSkillSource(item: AiConfigItem, isProject: boolean): SkillSource {
   if (getMarketplaceProvenance(item)) return 'marketplace'
-  if (isProject && item.scope === 'global') return 'library'
+  if (isProject && item.scope === 'library') return 'library'
   return 'project'
 }
 
@@ -166,7 +166,7 @@ function SkillRow({
 }) {
   const validation = getSkillValidation(item)
   const provenance = getMarketplaceProvenance(item)
-  const isLibraryLinked = isProject && !provenance && item.scope === 'global'
+  const isLibraryLinked = isProject && !provenance && item.scope === 'library'
   const hasIssues = validation && validation.status !== 'valid'
 
   return (

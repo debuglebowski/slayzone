@@ -42,7 +42,7 @@ export function InstructionVariantsView() {
     const slug = `variant-${Date.now()}`
     const created = await window.api.aiConfig.createItem({
       type: 'root_instructions',
-      scope: 'global',
+      scope: 'library',
       slug,
       content: '',
     })

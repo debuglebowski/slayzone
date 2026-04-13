@@ -1,7 +1,7 @@
 import { test, expect, seed, goHome, projectBlob, TEST_PROJECT_PATH, resetApp} from '../fixtures/electron'
 import {
   closeTopDialog,
-  openGlobalContextManager,
+  openUserContextManager,
   openProjectContextSection,
   openSkillSyncPanel
 } from '../fixtures/context-manager'
@@ -40,17 +40,17 @@ function skillDocument(slug: string, body: string): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function upsertGlobalSkill(mainWindow: Page, content: string, electronApp?: any): Promise<void> {
+async function upsertLibrarySkill(mainWindow: Page, content: string, electronApp?: any): Promise<void> {
   const skillExists = await mainWindow.evaluate(async (slug) => {
-    const skills = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+    const skills = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
     return skills.some((item) => item.slug === slug)
   }, skillSlug)
 
-  const dialog = await openGlobalContextManager(mainWindow, electronApp)
+  const dialog = await openUserContextManager(mainWindow, electronApp)
   await dialog.getByTestId('context-overview-skills').click()
   await expect(dialog.getByTestId('context-new-skill')).toBeVisible({ timeout: 5_000 })
 
-  const existing = dialog.getByTestId(`context-global-item-${skillSlug}`)
+  const existing = dialog.getByTestId(`context-library-item-${skillSlug}`)
   if (skillExists) {
     await expect(existing).toBeVisible({ timeout: 5_000 })
     await existing.click()
@@ -66,7 +66,7 @@ async function upsertGlobalSkill(mainWindow: Page, content: string, electronApp?
 
   await expect.poll(async () => {
     return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-      const skills = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+      const skills = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
       const match = skills.find((item) => item.slug === slug)
       return !!match?.content.includes(`name: ${slug}`) && !!match?.content.includes(expectedBody.trim())
     }, { slug: skillSlug, expectedBody: content })
@@ -94,25 +94,25 @@ test.describe.skip('Context manager sync flow', () => {
     await expect(projectBlob(mainWindow, projectAbbrev)).toBeVisible({ timeout: 5_000 })
   })
 
-  test('creates a global skill file from the Files panel', async ({ mainWindow, electronApp }) => {
-    const slug = `e2e-global-file-${Date.now()}`
-    const dialog = await openGlobalContextManager(mainWindow, electronApp)
+  test('creates a computer skill file from the Files panel', async ({ mainWindow, electronApp }) => {
+    const slug = `e2e-computer-file-${Date.now()}`
+    const dialog = await openUserContextManager(mainWindow, electronApp)
     await dialog.getByTestId('context-overview-files').click()
 
-    const addButton = dialog.locator('[data-testid^="global-files-add-skill-"]').first()
+    const addButton = dialog.locator('[data-testid^="computer-files-add-skill-"]').first()
     await expect(addButton).toBeVisible({ timeout: 5_000 })
     const addButtonTestId = await addButton.getAttribute('data-testid')
-    if (!addButtonTestId) throw new Error('Expected global skill add button to have a data-testid')
-    const provider = addButtonTestId.replace('global-files-add-skill-', '')
+    if (!addButtonTestId) throw new Error('Expected computer skill add button to have a data-testid')
+    const provider = addButtonTestId.replace('computer-files-add-skill-', '')
     await addButton.scrollIntoViewIfNeeded()
     await addButton.click()
-    await dialog.getByTestId('global-files-new-name').fill(slug)
-    await dialog.getByTestId('global-files-create').click()
+    await dialog.getByTestId('computer-files-new-name').fill(slug)
+    await dialog.getByTestId('computer-files-create').click()
 
     await expect(dialog.getByText(`${slug}.md`, { exact: true })).toBeVisible({ timeout: 5_000 })
 
     const createdPath = await mainWindow.evaluate(async ({ candidate }) => {
-      const files = await window.api.aiConfig.getGlobalFiles()
+      const files = await window.api.aiConfig.getComputerFiles()
       const match = files.find((entry) =>
         entry.category === 'skill' &&
         entry.name.endsWith(`/${candidate}.md`)
@@ -122,29 +122,29 @@ test.describe.skip('Context manager sync flow', () => {
 
     if (createdPath) {
       await mainWindow.evaluate(async ({ filePath }) => {
-        await window.api.aiConfig.deleteGlobalFile(filePath)
+        await window.api.aiConfig.deleteComputerFile(filePath)
       }, { filePath: createdPath })
     }
 
     await closeTopDialog(mainWindow)
   })
 
-  test('global body-only skill can be repaired from the UI by adding frontmatter', async ({ mainWindow, electronApp }) => {
+  test('library body-only skill can be repaired from the UI by adding frontmatter', async ({ mainWindow, electronApp }) => {
     const slug = `e2e-body-only-invalid-${Date.now()}`
     await mainWindow.evaluate(async ({ targetSlug, content }) => {
       await window.api.aiConfig.createItem({
         type: 'skill',
-        scope: 'global',
+        scope: 'library',
         slug: targetSlug,
         content
       })
     }, { targetSlug: slug, content: releasePromptBody })
 
-    const dialog = await openGlobalContextManager(mainWindow, electronApp)
+    const dialog = await openUserContextManager(mainWindow, electronApp)
     await dialog.getByTestId('context-overview-skills').click()
     await expect.poll(async () => {
       return await mainWindow.evaluate(async (targetSlug) => {
-        const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+        const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
         const match = items.find((item) => item.slug === targetSlug)
         if (!match) return null
         const metadata = JSON.parse(match.metadata_json) as {
@@ -154,7 +154,7 @@ test.describe.skip('Context manager sync flow', () => {
       }, slug)
     }, { timeout: 5_000 }).toBe('invalid')
 
-    const skillRow = dialog.getByTestId(`context-global-item-${slug}`)
+    const skillRow = dialog.getByTestId(`context-library-item-${slug}`)
     await expect(skillRow).toContainText('Invalid frontmatter')
 
     await skillRow.click()
@@ -168,7 +168,7 @@ test.describe.skip('Context manager sync flow', () => {
     await expect(dialog.getByTestId('context-item-editor-content')).toHaveValue(new RegExp(`^---\\nname: ${slug}\\n`), { timeout: 5_000 })
     await expect.poll(async () => {
       return await mainWindow.evaluate(async (targetSlug) => {
-        const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+        const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
         const match = items.find((item) => item.slug === targetSlug)
         if (!match) return null
         const metadata = JSON.parse(match.metadata_json) as {
@@ -180,7 +180,7 @@ test.describe.skip('Context manager sync flow', () => {
     await expect(dialog.getByText('Frontmatter is invalid')).toHaveCount(0)
 
     await mainWindow.evaluate(async (targetSlug) => {
-      const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+      const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
       const match = items.find((item) => item.slug === targetSlug)
       if (match) await window.api.aiConfig.deleteItem(match.id)
     }, slug)
@@ -189,11 +189,11 @@ test.describe.skip('Context manager sync flow', () => {
   })
 
   test('skills section shows a brief help card', async ({ mainWindow, electronApp }) => {
-    const dialog = await openGlobalContextManager(mainWindow, electronApp)
+    const dialog = await openUserContextManager(mainWindow, electronApp)
     await dialog.getByTestId('context-overview-skills').click()
 
-    const helpCard = mainWindow.getByTestId('global-skill-help-card')
-    const toggle = helpCard.getByTestId('global-skill-help-card-toggle')
+    const helpCard = mainWindow.getByTestId('library-skill-help-card')
+    const toggle = helpCard.getByTestId('library-skill-help-card-toggle')
     await expect(helpCard).toBeVisible({ timeout: 5_000 })
     await expect(helpCard).toContainText('Skill file')
     await expect(helpCard).toContainText('Required structure and field meanings')
@@ -262,8 +262,8 @@ test.describe.skip('Context manager sync flow', () => {
     await closeTopDialog(mainWindow)
   })
 
-  test('global skill can be linked to project and re-synced after global edits', async ({ mainWindow, electronApp }) => {
-    await upsertGlobalSkill(mainWindow, skillContentV1, electronApp)
+  test('library skill can be linked to project and re-synced after library edits', async ({ mainWindow, electronApp }) => {
+    await upsertLibrarySkill(mainWindow, skillContentV1, electronApp)
 
     const projectDialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
 
@@ -293,7 +293,7 @@ test.describe.skip('Context manager sync flow', () => {
     }
 
     await closeTopDialog(mainWindow)
-    await upsertGlobalSkill(mainWindow, skillContentV2, electronApp)
+    await upsertLibrarySkill(mainWindow, skillContentV2, electronApp)
 
     const resyncDialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
     const skillRow = resyncDialog.getByTestId(`project-context-item-skill-${skillSlug}`)

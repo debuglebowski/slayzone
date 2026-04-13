@@ -3,7 +3,7 @@ import { File, FilePlus, Link, Unlink, RefreshCw, Save, Check, AlertCircle, Circ
 import { Button, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Textarea, FileTree, fileTreeIndent, cn } from '@slayzone/ui'
 import type { CliProvider, ContextTreeEntry } from '../shared'
 import { useContextManagerStore } from './useContextManagerStore'
-import { GlobalItemPicker } from './GlobalItemPicker'
+import { LibraryItemPicker } from './LibraryItemPicker'
 import { contextEntryToSyncHealth } from './sync-view-model'
 
 function SyncBadge({ entry }: { entry: ContextTreeEntry }) {
@@ -269,7 +269,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
               <ProviderBadge provider={entry.provider} />
               {entry.linkedItemId && (
                 <>
-                  <span title="Linked to global item" aria-label="Linked to global item">
+                  <span title="Linked to library item" aria-label="Linked to library item">
                     <Link className="size-3 text-muted-foreground" />
                   </span>
                 </>
@@ -279,7 +279,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
                 <button
                   className="rounded p-0.5 text-muted-foreground hover:text-foreground"
                   onClick={(e) => { e.stopPropagation(); handleSync(entry) }}
-                  title="Sync from global"
+                  title="Sync from library"
                 >
                   <RefreshCw className="size-3" />
                 </button>
@@ -293,12 +293,12 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
           </ContextMenuItem>
           {isStaleLinked && (
             <ContextMenuItem onSelect={() => handleSync(entry)}>
-              <RefreshCw className="size-4" /> Sync from global
+              <RefreshCw className="size-4" /> Sync from library
             </ContextMenuItem>
           )}
           {entry.linkedItemId && (
             <ContextMenuItem onSelect={() => handleUnlink(entry)}>
-              <Unlink className="size-4" /> Unlink from global
+              <Unlink className="size-4" /> Unlink from library
             </ContextMenuItem>
           )}
           <ContextMenuSeparator />
@@ -447,7 +447,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
       </div>
 
       {showPicker && (
-        <GlobalItemPicker
+        <LibraryItemPicker
           projectId={projectId}
           projectPath={projectPath}
           existingLinks={entries.filter((e) => e.linkedItemId).map((e) => e.linkedItemId!)}

@@ -139,7 +139,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
         <div className="flex shrink-0 items-center gap-1">
           <ProviderBadge provider={entry.provider} />
           {entry.linkedItemId && (
-            <span title="Linked to global item" aria-label="Linked to global item">
+            <span title="Linked to library item" aria-label="Linked to library item">
               <Link className="size-3 text-muted-foreground" />
             </span>
           )}

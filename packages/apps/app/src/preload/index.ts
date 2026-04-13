@@ -487,7 +487,7 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('ai-config:get-context-tree', projectPath, projectId),
     reconcileProjectSkills: (projectId, projectPath) =>
       ipcRenderer.invoke('ai-config:reconcile-project-skills', projectId, projectPath) as Promise<number>,
-    loadGlobalItem: (input) => ipcRenderer.invoke('ai-config:load-global-item', input),
+    loadLibraryItem: (input) => ipcRenderer.invoke('ai-config:load-library-item', input),
     syncLinkedFile: (projectId, projectPath, itemId, provider?) =>
       ipcRenderer.invoke('ai-config:sync-linked-file', projectId, projectPath, itemId, provider),
     unlinkFile: (projectId, itemId) => ipcRenderer.invoke('ai-config:unlink-file', projectId, itemId),
@@ -495,24 +495,24 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('ai-config:rename-context-file', oldPath, newPath, projectPath),
     deleteContextFile: (filePath, projectPath, projectId) =>
       ipcRenderer.invoke('ai-config:delete-context-file', filePath, projectPath, projectId),
-    deleteGlobalFile: (filePath) =>
-      ipcRenderer.invoke('ai-config:delete-global-file', filePath),
-    createGlobalFile: (provider, category, slug) =>
-      ipcRenderer.invoke('ai-config:create-global-file', provider, category, slug),
-    writeGlobalSkill: (provider, slug, content) =>
-      ipcRenderer.invoke('ai-config:write-global-skill', provider, slug, content),
+    deleteComputerFile: (filePath) =>
+      ipcRenderer.invoke('ai-config:delete-computer-file', filePath),
+    createComputerFile: (provider, category, slug) =>
+      ipcRenderer.invoke('ai-config:create-computer-file', provider, category, slug),
+    writeComputerSkill: (provider, slug, content) =>
+      ipcRenderer.invoke('ai-config:write-computer-skill', provider, slug, content),
     discoverMcpConfigs: (projectPath) =>
       ipcRenderer.invoke('ai-config:discover-mcp-configs', projectPath),
     writeMcpServer: (input) =>
       ipcRenderer.invoke('ai-config:write-mcp-server', input),
     removeMcpServer: (input) =>
       ipcRenderer.invoke('ai-config:remove-mcp-server', input),
-    discoverGlobalMcpConfigs: () =>
-      ipcRenderer.invoke('ai-config:discover-global-mcp-configs'),
-    writeGlobalMcpServer: (input) =>
-      ipcRenderer.invoke('ai-config:write-global-mcp-server', input),
-    removeGlobalMcpServer: (input) =>
-      ipcRenderer.invoke('ai-config:remove-global-mcp-server', input),
+    discoverComputerMcpConfigs: () =>
+      ipcRenderer.invoke('ai-config:discover-computer-mcp-configs'),
+    writeComputerMcpServer: (input) =>
+      ipcRenderer.invoke('ai-config:write-computer-mcp-server', input),
+    removeComputerMcpServer: (input) =>
+      ipcRenderer.invoke('ai-config:remove-computer-mcp-server', input),
     listProviders: () =>
       ipcRenderer.invoke('ai-config:list-providers'),
     toggleProvider: (id, enabled) =>
@@ -527,10 +527,10 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('ai-config:sync-all', input),
     checkSyncStatus: (projectId, projectPath) =>
       ipcRenderer.invoke('ai-config:check-sync-status', projectId, projectPath),
-    getGlobalInstructions: (variantId?) =>
-      ipcRenderer.invoke('ai-config:get-global-instructions', variantId),
-    saveGlobalInstructions: (content, variantId?) =>
-      ipcRenderer.invoke('ai-config:save-global-instructions', content, variantId),
+    getLibraryInstructions: (variantId?) =>
+      ipcRenderer.invoke('ai-config:get-library-instructions', variantId),
+    saveLibraryInstructions: (content, variantId?) =>
+      ipcRenderer.invoke('ai-config:save-library-instructions', content, variantId),
     listInstructionVariants: () =>
       ipcRenderer.invoke('ai-config:list-instruction-variants'),
     getProjectInstructionVariant: (projectId) =>
@@ -557,7 +557,7 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('ai-config:get-expected-skill-content', projectPath, provider, itemId),
     pullProviderSkill: (projectId, projectPath, provider, itemId) =>
       ipcRenderer.invoke('ai-config:pull-provider-skill', projectId, projectPath, provider, itemId),
-    getGlobalFiles: () => ipcRenderer.invoke('ai-config:get-global-files'),
+    getComputerFiles: () => ipcRenderer.invoke('ai-config:get-computer-files'),
     checkSlayConfigured: (projectPath) => ipcRenderer.invoke('ai-config:check-slay-configured', projectPath),
     setupSlay: (projectPath, command) => ipcRenderer.invoke('ai-config:setup-slay', projectPath, command),
 

@@ -5,7 +5,7 @@ import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue }
 import { SkillGraphCanvas } from './SkillGraphCanvas'
 import { SkillListView } from './SkillListView'
 import { ContextItemEditor } from './ContextItemEditor'
-import { GlobalContextFiles } from './GlobalContextFiles'
+import { ComputerContextFiles } from './ComputerContextFiles'
 import { AddItemPicker } from './AddItemPicker'
 import { SkillViewToggle, type SkillViewMode } from './SkillViewToggle'
 import { getSkillValidation } from './skill-validation'
@@ -28,7 +28,7 @@ function nextAvailableSlug(base: string, existingSlugs: Set<string>): string {
 }
 
 export function SkillsSection({ level, projectId, projectPath }: SkillsSectionProps) {
-  const scope: AiConfigScope = level === 'library' ? 'global' : 'project'
+  const scope: AiConfigScope = level === 'library' ? 'library' : 'project'
   const isProject = level === 'project' && !!projectId && !!projectPath
 
   const [items, setItems] = useState<AiConfigItem[]>([])
@@ -140,7 +140,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
       if (updated) setItems(prev => prev.map(i => i.id === updated.id ? (updated as AiConfigItem) : i))
       return
     }
-    if (isProject && projectId && target.scope === 'global') {
+    if (isProject && projectId && target.scope === 'library') {
       await window.api.aiConfig.removeProjectSelection(projectId, target.id)
       setItems(prev => prev.filter(i => i.id !== target.id))
       setLinkedIds(prev => prev.filter(id => id !== target.id))
@@ -164,9 +164,9 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
 
   const sortedItems = useMemo(() => [...items].sort((a, b) => a.slug.localeCompare(b.slug)), [items])
 
-  // Computer level — show global files filtered to skills
+  // Computer level — show computer files filtered to skills
   if (level === 'computer') {
-    return <GlobalContextFiles filter="skill" />
+    return <ComputerContextFiles filter="skill" />
   }
 
   // Project + Library levels — graph or list view with editor panel
@@ -248,7 +248,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
           key={selectedItem.id}
           item={selectedItem}
           validationState={validation}
-          readOnly={isProject && selectedItem.scope === 'global'}
+          readOnly={isProject && selectedItem.scope === 'library'}
           onUpdate={(patch) => handleUpdateItem(selectedItem.id, patch)}
           onDelete={() => handleDeleteItem(selectedItem.id)}
           onClose={() => setSelectedSkillId(null)}

@@ -2,15 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { createPortal } from 'react-dom'
 import { File, FilePlus, Info, Trash2 } from 'lucide-react'
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, FileTree, Input, Switch, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn, fileTreeIndent } from '@slayzone/ui'
-import type { GlobalFileEntry } from '../shared'
-import { GLOBAL_PROVIDER_PATHS } from '../shared/provider-registry'
+import type { ComputerFileEntry } from '../shared'
+import { COMPUTER_PROVIDER_PATHS } from '../shared/provider-registry'
 import { useContextManagerStore } from './useContextManagerStore'
 
-export function GlobalFilesView() {
-  const [entries, setEntries] = useState<GlobalFileEntry[]>([])
+export function ComputerFilesView() {
+  const [entries, setEntries] = useState<ComputerFileEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const selectedPath = useContextManagerStore((s) => s.globalSelectedPath)
-  const setSelectedPath = useContextManagerStore((s) => s.setGlobalSelectedPath)
+  const selectedPath = useContextManagerStore((s) => s.computerSelectedPath)
+  const setSelectedPath = useContextManagerStore((s) => s.setComputerSelectedPath)
   const [content, setContent] = useState('')
   const showBlobs = useContextManagerStore((s) => s.showBlobs)
   const setShowBlobs = useContextManagerStore((s) => s.setShowBlobs)
@@ -23,7 +23,7 @@ export function GlobalFilesView() {
   const loadFiles = useCallback(async () => {
     setLoading(true)
     try {
-      setEntries(await window.api.aiConfig.getGlobalFiles())
+      setEntries(await window.api.aiConfig.getComputerFiles())
     } finally {
       setLoading(false)
     }
@@ -31,7 +31,7 @@ export function GlobalFilesView() {
 
   useEffect(() => { void loadFiles() }, [loadFiles])
 
-  const openFile = async (entry: GlobalFileEntry) => {
+  const openFile = async (entry: ComputerFileEntry) => {
     if (!entry.exists) {
       await window.api.aiConfig.writeContextFile(entry.path, '', '')
       await loadFiles()
@@ -67,9 +67,9 @@ export function GlobalFilesView() {
     if (saveTimer.current) clearTimeout(saveTimer.current)
   }, [])
 
-  const deleteFile = async (entry: GlobalFileEntry) => {
+  const deleteFile = async (entry: ComputerFileEntry) => {
     try {
-      await window.api.aiConfig.deleteGlobalFile(entry.path)
+      await window.api.aiConfig.deleteComputerFile(entry.path)
       if (selectedPath === entry.path) {
         setSelectedPath(null)
         setContent('')
@@ -84,7 +84,7 @@ export function GlobalFilesView() {
     if (!creatingFile || !newFileName.trim()) return
     const slug = newFileName.trim().replace(/\.md$/, '')
     try {
-      const created = await window.api.aiConfig.createGlobalFile(
+      const created = await window.api.aiConfig.createComputerFile(
         creatingFile.provider,
         creatingFile.category,
         slug
@@ -102,8 +102,8 @@ export function GlobalFilesView() {
 
   // Group entries by registry key
   const providerGroups = useMemo(() => {
-    const groups: { key: string; dirLabel: string; hint?: string; hasSkillsDir: boolean; files: GlobalFileEntry[] }[] = []
-    for (const [key, spec] of Object.entries(GLOBAL_PROVIDER_PATHS)) {
+    const groups: { key: string; dirLabel: string; hint?: string; hasSkillsDir: boolean; files: ComputerFileEntry[] }[] = []
+    for (const [key, spec] of Object.entries(COMPUTER_PROVIDER_PATHS)) {
       const files = entries.filter((e) => e.provider === key)
       groups.push({
         key,
@@ -119,7 +119,7 @@ export function GlobalFilesView() {
   const HASH_COLORS = ['#f97316','#8b5cf6','#06b6d4','#ec4899','#84cc16','#eab308','#14b8a6']
 
   const { hashColorMap, hashMembers } = useMemo(() => {
-    const groups = new Map<string, GlobalFileEntry[]>()
+    const groups = new Map<string, ComputerFileEntry[]>()
     for (const e of entries) {
       if (!e.contentHash) continue
       const list = groups.get(e.contentHash) ?? []
@@ -127,7 +127,7 @@ export function GlobalFilesView() {
       groups.set(e.contentHash, list)
     }
     const colorMap = new Map<string, string>()
-    const members = new Map<string, GlobalFileEntry[]>()
+    const members = new Map<string, ComputerFileEntry[]>()
     let colorIdx = 0
     for (const [hash, list] of groups) {
       colorMap.set(hash, HASH_COLORS[colorIdx % HASH_COLORS.length])
@@ -139,13 +139,13 @@ export function GlobalFilesView() {
 
   const getRelativePath = useCallback((baseDir: string) => {
     const prefix = `~/${baseDir}/`
-    return (entry: GlobalFileEntry) => {
+    return (entry: ComputerFileEntry) => {
       const name = entry.name
       return name.startsWith(prefix) ? name.slice(prefix.length) : name
     }
   }, [])
 
-  const renderFile = useCallback((entry: GlobalFileEntry, { name, depth }: { name: string; depth: number }) => {
+  const renderFile = useCallback((entry: ComputerFileEntry, { name, depth }: { name: string; depth: number }) => {
     const selected = selectedPath === entry.path
     return (
       <div
@@ -207,8 +207,8 @@ export function GlobalFilesView() {
   }, [selectedPath, hashColorMap, hashMembers, showBlobs, showLineCount])
 
   // Resizable split
-  const splitWidth = useContextManagerStore((s) => s.globalSplitWidth)
-  const setSplitWidth = useContextManagerStore((s) => s.setGlobalSplitWidth)
+  const splitWidth = useContextManagerStore((s) => s.computerSplitWidth)
+  const setSplitWidth = useContextManagerStore((s) => s.setComputerSplitWidth)
   const containerRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
 
@@ -282,7 +282,7 @@ export function GlobalFilesView() {
                   <div className="ml-auto flex shrink-0 gap-0.5">
                     {hasSkillsDir && (
                       <button
-                        data-testid={`global-files-add-skill-${key}`}
+                        data-testid={`computer-files-add-skill-${key}`}
                         className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/50"
                         onClick={() => { setCreatingFile({ provider: key, category: 'skill' }); setNewFileName('') }}
                       >
@@ -297,7 +297,7 @@ export function GlobalFilesView() {
                   <div className="pl-5">
                     <FileTree
                       items={files}
-                      getPath={getRelativePath(GLOBAL_PROVIDER_PATHS[key].baseDir)}
+                      getPath={getRelativePath(COMPUTER_PROVIDER_PATHS[key].baseDir)}
                       renderFile={renderFile}
                       compress
                       defaultExpanded
@@ -310,7 +310,7 @@ export function GlobalFilesView() {
             ))}
 
             {providerGroups.every((g) => g.files.length === 0) && !loading && (
-              <p className="text-sm text-muted-foreground">No global config files found.</p>
+              <p className="text-sm text-muted-foreground">No computer config files found.</p>
             )}
           </div>
         </div>
@@ -343,7 +343,7 @@ export function GlobalFilesView() {
               <DialogTitle>New skill</DialogTitle>
             </DialogHeader>
             <Input
-              data-testid="global-files-new-name"
+              data-testid="computer-files-new-name"
               className="font-mono text-sm"
               placeholder="my-skill"
               value={newFileName}
@@ -353,7 +353,7 @@ export function GlobalFilesView() {
             />
             <DialogFooter>
               <Button size="sm" variant="ghost" onClick={() => setCreatingFile(null)}>Cancel</Button>
-              <Button data-testid="global-files-create" size="sm" onClick={handleCreateFile}>Create</Button>
+              <Button data-testid="computer-files-create" size="sm" onClick={handleCreateFile}>Create</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

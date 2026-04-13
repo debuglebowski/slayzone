@@ -1,5 +1,5 @@
 import { ProjectInstructions } from './ProjectInstructions'
-import { GlobalContextFiles } from './GlobalContextFiles'
+import { ComputerContextFiles } from './ComputerContextFiles'
 import { InstructionVariantsView } from './InstructionVariantsView'
 import type { ConfigLevel } from '../shared'
 
@@ -11,7 +11,7 @@ interface InstructionsSectionProps {
 
 export function InstructionsSection({ level, projectId, projectPath }: InstructionsSectionProps) {
   if (level === 'computer') {
-    return <GlobalContextFiles filter="instructions" />
+    return <ComputerContextFiles filter="instructions" />
   }
 
   if (level === 'project') {

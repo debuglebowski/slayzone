@@ -3,7 +3,7 @@ import { clickSettings, goHome, openProjectSettings } from './electron'
 
 type ProjectSection = 'providers' | 'instructions' | 'skills' | 'mcp'
 
-function globalSettingsDialog(mainWindow: Page): Locator {
+function userSettingsDialog(mainWindow: Page): Locator {
   return mainWindow.locator('[role="dialog"][aria-label="Settings"]').last()
 }
 
@@ -111,7 +111,7 @@ async function isProjectSectionVisible(dialog: Locator, section: ProjectSection)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function openGlobalContextManager(mainWindow: Page, electronApp?: any): Promise<Locator> {
+export async function openUserContextManager(mainWindow: Page, electronApp?: any): Promise<Locator> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sendOpenSettingsShortcut = async (electronApp: any): Promise<void> => {
     await electronApp.evaluate(
@@ -124,7 +124,7 @@ export async function openGlobalContextManager(mainWindow: Page, electronApp?: a
     )
   }
 
-  const dialog = globalSettingsDialog(mainWindow)
+  const dialog = userSettingsDialog(mainWindow)
 
   for (let reopenAttempt = 0; reopenAttempt < 3; reopenAttempt += 1) {
     await closeTopDialog(mainWindow)

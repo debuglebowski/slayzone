@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { File, FilePlus, Trash2 } from 'lucide-react'
 import { Button, Input, Textarea, cn } from '@slayzone/ui'
-import type { CliProvider, GlobalFileEntry } from '../shared'
-import { GLOBAL_PROVIDER_PATHS, isConfigurableCliProvider } from '../shared/provider-registry'
+import type { CliProvider, ComputerFileEntry } from '../shared'
+import { COMPUTER_PROVIDER_PATHS, isConfigurableCliProvider } from '../shared/provider-registry'
 
-interface GlobalContextFilesProps {
+interface ComputerContextFilesProps {
   filter?: 'instructions' | 'skill'
 }
 
-export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
-  const [entries, setEntries] = useState<GlobalFileEntry[]>([])
+export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {}) {
+  const [entries, setEntries] = useState<ComputerFileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [content, setContent] = useState('')
@@ -20,7 +20,7 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
   const loadFiles = useCallback(async () => {
     setLoading(true)
     try {
-      setEntries(await window.api.aiConfig.getGlobalFiles())
+      setEntries(await window.api.aiConfig.getComputerFiles())
     } finally {
       setLoading(false)
     }
@@ -28,7 +28,7 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
 
   useEffect(() => { void loadFiles() }, [loadFiles])
 
-  const openFile = async (entry: GlobalFileEntry) => {
+  const openFile = async (entry: ComputerFileEntry) => {
     // Create file if it doesn't exist
     if (!entry.exists) {
       await window.api.aiConfig.writeContextFile(entry.path, '', '')
@@ -67,9 +67,9 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
     if (saveTimer.current) clearTimeout(saveTimer.current)
   }, [])
 
-  const deleteFile = async (entry: GlobalFileEntry) => {
+  const deleteFile = async (entry: ComputerFileEntry) => {
     try {
-      await window.api.aiConfig.deleteGlobalFile(entry.path)
+      await window.api.aiConfig.deleteComputerFile(entry.path)
       if (selectedPath === entry.path) {
         setSelectedPath(null)
         setContent('')
@@ -85,7 +85,7 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
     const slug = newFileName.trim().replace(/\.md$/, '')
 
     try {
-      const created = await window.api.aiConfig.createGlobalFile(
+      const created = await window.api.aiConfig.createComputerFile(
         creatingFile.provider,
         creatingFile.category,
         slug
@@ -102,7 +102,7 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
     }
   }
 
-  const providerSections = Object.entries(GLOBAL_PROVIDER_PATHS)
+  const providerSections = Object.entries(COMPUTER_PROVIDER_PATHS)
     .filter(([provider]) => isConfigurableCliProvider(provider))
     .map(([provider, spec]) => ({ provider: provider as CliProvider, spec }))
 
@@ -157,7 +157,7 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
               const skills = files.filter((f) => f.category === 'skill')
 
               return (
-                <div key={provider} data-testid={`global-files-provider-${provider}`}>
+                <div key={provider} data-testid={`computer-files-provider-${provider}`}>
                   <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{spec.label}</p>
                   <div className="space-y-0.5">
                     {instructions.map((entry) => (
@@ -190,7 +190,7 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
                     <div className="flex gap-1 pt-1">
                       {spec.skillsDir && (
                         <Button
-                          data-testid={`global-files-add-skill-${provider}`}
+                          data-testid={`computer-files-add-skill-${provider}`}
                           size="sm"
                           variant="ghost"
                           className="h-6 text-[10px]"
@@ -207,17 +207,17 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
           )}
 
           {!filter && entries.length === 0 && !loading && (
-            <p className="text-sm text-muted-foreground">No global config files found.</p>
+            <p className="text-sm text-muted-foreground">No computer config files found.</p>
           )}
         </div>
 
         {creatingFile && (
           <div className="mt-3 space-y-1.5 rounded-md border bg-muted/20 p-2">
             <p className="text-[10px] text-muted-foreground">
-              New {creatingFile.category} in {GLOBAL_PROVIDER_PATHS[creatingFile.provider]?.label}
+              New {creatingFile.category} in {COMPUTER_PROVIDER_PATHS[creatingFile.provider]?.label}
             </p>
             <Input
-              data-testid="global-files-new-name"
+              data-testid="computer-files-new-name"
               className="font-mono text-xs"
               placeholder="my-file"
               value={newFileName}
@@ -226,7 +226,7 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
               autoFocus
             />
             <div className="flex gap-1">
-              <Button data-testid="global-files-create" size="sm" className="h-6 flex-1 text-[11px]" onClick={handleCreateFile}>Create</Button>
+              <Button data-testid="computer-files-create" size="sm" className="h-6 flex-1 text-[11px]" onClick={handleCreateFile}>Create</Button>
               <Button size="sm" variant="ghost" className="h-6 flex-1 text-[11px]" onClick={() => setCreatingFile(null)}>Cancel</Button>
             </div>
           </div>
@@ -258,13 +258,13 @@ export function GlobalContextFiles({ filter }: GlobalContextFilesProps = {}) {
 }
 
 function InstructionsFileList({ entries, providerSections, selectedPath, onOpen }: {
-  entries: GlobalFileEntry[]
-  providerSections: { provider: CliProvider; spec: (typeof GLOBAL_PROVIDER_PATHS)[string] }[]
+  entries: ComputerFileEntry[]
+  providerSections: { provider: CliProvider; spec: (typeof COMPUTER_PROVIDER_PATHS)[string] }[]
   selectedPath: string | null
-  onOpen: (entry: GlobalFileEntry) => void
+  onOpen: (entry: ComputerFileEntry) => void
 }) {
   const files = useMemo(() => {
-    const result: { entry: GlobalFileEntry; relativePath: string }[] = []
+    const result: { entry: ComputerFileEntry; relativePath: string }[] = []
     for (const { provider, spec } of providerSections) {
       const entry = entries.find((e) => e.provider === provider && e.category === 'instructions')
       if (!entry) continue
@@ -303,7 +303,7 @@ function InstructionsFileList({ entries, providerSections, selectedPath, onOpen 
 }
 
 function FileRow({ entry, selected, onClick, onDelete, indent, providerLabel }: {
-  entry: GlobalFileEntry
+  entry: ComputerFileEntry
   selected: boolean
   onClick: () => void
   onDelete?: () => void

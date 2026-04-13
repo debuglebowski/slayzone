@@ -4,7 +4,7 @@ import { cn } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
 import type { AiConfigItem, AiConfigItemType, CliProvider, ProjectSkillStatus, SyncHealth, UpdateAiConfigItemInput } from '../shared'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
-import { GlobalItemPicker } from './GlobalItemPicker'
+import { LibraryItemPicker } from './LibraryItemPicker'
 import { ContextItemEditor } from './ContextItemEditor'
 import { toSyncBadgeLabel } from './sync-view-model'
 import { getSkillValidation } from './skill-validation'
@@ -130,7 +130,7 @@ export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger,
             No skills yet
           </p>
           <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-            Create a project-specific skill or add one from your global library.
+            Create a project-specific skill or add one from your library.
           </p>
         </div>
       ) : (
@@ -162,7 +162,7 @@ export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger,
             </div>
           ))}
 
-          {/* Linked global items */}
+          {/* Linked library items */}
           {skills.map(({ item, providers }) => (
             <div
               key={item.id}
@@ -191,7 +191,7 @@ export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger,
       )}
 
       {showPicker && (
-        <GlobalItemPicker
+        <LibraryItemPicker
           projectId={projectId}
           projectPath={projectPath}
           existingLinks={skills.map(s => s.item.id)}

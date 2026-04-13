@@ -13,37 +13,37 @@ const projectId = crypto.randomUUID()
 const projectPath = h.tmpDir()
 h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(projectId, 'TestProj', '#000', projectPath)
 
-// Create a global skill and link it to the project
-const globalSkill = h.invoke('ai-config:create-item', {
-  type: 'skill', scope: 'global', slug: 'status-test',
+// Create a library skill and link it to the project
+const librarySkill = h.invoke('ai-config:create-item', {
+  type: 'skill', scope: 'library', slug: 'status-test',
   content: '---\nname: status-test\ndescription: test skill\n---\nbody'
 }) as { id: string; scope: string; project_id: string | null }
 
 // Link via selection
 h.invoke('ai-config:set-project-selection', {
-  projectId, itemId: globalSkill.id, targetPath: '.claude/skills/status-test/SKILL.md'
+  projectId, itemId: librarySkill.id, targetPath: '.claude/skills/status-test/SKILL.md'
 })
 
 describe('ai-config:get-project-skills-status', () => {
-  test('returns linked global skill with correct item fields', () => {
+  test('returns linked library skill with correct item fields', () => {
     const results = h.invoke('ai-config:get-project-skills-status', projectId, projectPath) as Array<{
       item: { id: string; scope: string; project_id: string | null; slug: string }
       providers: Record<string, unknown>
     }>
     expect(results.length).toBeGreaterThan(0)
-    const found = results.find(r => r.item.id === globalSkill.id)
+    const found = results.find(r => r.item.id === librarySkill.id)
     expect(found).toBeTruthy()
-    expect(found!.item.scope).toBe('global')
+    expect(found!.item.scope).toBe('library')
     expect(found!.item.slug).toBe('status-test')
   })
 
-  test('preserves item project_id (null for global items)', () => {
+  test('preserves item project_id (null for library items)', () => {
     const results = h.invoke('ai-config:get-project-skills-status', projectId, projectPath) as Array<{
       item: { id: string; project_id: string | null }
     }>
-    const found = results.find(r => r.item.id === globalSkill.id)
+    const found = results.find(r => r.item.id === librarySkill.id)
     expect(found).toBeTruthy()
-    // Global items have project_id = null in ai_config_items.
+    // Library items have project_id = null in ai_config_items.
     // Bug: ps.project_id was leaking into the reconstructed item.
     expect(found!.item.project_id).toBeNull()
   })
@@ -106,7 +106,7 @@ describe('ai-config:get-context-tree discovers on-disk skills', () => {
     }>
     const linked = entries.find(e => e.relativePath.includes('status-test') && e.category === 'skill')
     expect(linked).toBeTruthy()
-    expect(linked!.linkedItemId).toBe(globalSkill.id)
+    expect(linked!.linkedItemId).toBe(librarySkill.id)
   })
 })
 

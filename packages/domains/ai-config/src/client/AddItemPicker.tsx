@@ -34,7 +34,7 @@ export function AddItemPicker({
   enabledProviders, existingLinks, onAdded
 }: AddItemPickerProps) {
   const [step, setStep] = useState<Step>('choose')
-  const [globalItems, setGlobalItems] = useState<AiConfigItem[]>([])
+  const [libraryItems, setLibraryItems] = useState<AiConfigItem[]>([])
   const [loading, setLoading] = useState(false)
 
   // Reset step when dialog opens
@@ -48,8 +48,8 @@ export function AddItemPicker({
   useEffect(() => {
     if (!open || step !== 'library') return
     void (async () => {
-      const items = await window.api.aiConfig.listItems({ scope: 'global', type })
-      setGlobalItems(items)
+      const items = await window.api.aiConfig.listItems({ scope: 'library', type })
+      setLibraryItems(items)
     })()
   }, [open, step, type])
 
@@ -59,12 +59,12 @@ export function AddItemPicker({
   )
   const canLinkFromLibrary = compatibleProviders.length > 0
 
-  const handleSelectGlobal = async (item: AiConfigItem) => {
+  const handleSelectLibrary = async (item: AiConfigItem) => {
     if (!canLinkFromLibrary) return
     if (existingLinks.includes(item.id)) return
     setLoading(true)
     try {
-      await window.api.aiConfig.loadGlobalItem({
+      await window.api.aiConfig.loadLibraryItem({
         projectId,
         projectPath,
         itemId: item.id,
@@ -109,7 +109,7 @@ export function AddItemPicker({
             {step === 'choose' ? 'Add Skill' : 'Add from Library'}
           </DialogTitle>
           <p className="text-xs text-muted-foreground">
-            {step === 'choose' ? 'Create a new skill or link one from your library' : 'Link a global skill into this project'}
+            {step === 'choose' ? 'Create a new skill or link one from your library' : 'Link a library skill into this project'}
           </p>
         </DialogHeader>
 
@@ -138,20 +138,20 @@ export function AddItemPicker({
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">From library</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {canLinkFromLibrary ? 'Link a global skill' : 'No compatible providers'}
+                  {canLinkFromLibrary ? 'Link a library skill' : 'No compatible providers'}
                 </p>
               </div>
             </button>
           </div>
         ) : (
           <div className="border-t max-h-72 overflow-y-auto">
-            {[...globalItems].sort((a, b) => a.slug.localeCompare(b.slug)).map(item => {
+            {[...libraryItems].sort((a, b) => a.slug.localeCompare(b.slug)).map(item => {
               const linked = existingLinks.includes(item.id)
               return (
                 <button
                   key={item.id}
                   disabled={linked || loading}
-                  onClick={() => handleSelectGlobal(item)}
+                  onClick={() => handleSelectLibrary(item)}
                   data-testid={`add-item-option-${item.slug}`}
                   className={cn(
                     'flex w-full items-start gap-3 border-b border-border/40 last:border-0 px-5 py-3 text-left transition-colors',
@@ -175,7 +175,7 @@ export function AddItemPicker({
                 </button>
               )
             })}
-            {globalItems.length === 0 && (
+            {libraryItems.length === 0 && (
               <div className="px-5 py-8 text-center">
                 <p className="text-sm text-muted-foreground">No library skills available</p>
                 <p className="mt-1 text-xs text-muted-foreground/60">Create one in the Library section first</p>

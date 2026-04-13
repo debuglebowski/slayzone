@@ -79,11 +79,11 @@ export const SkillNodeCard = memo(function SkillNodeCard({ data }: NodeProps) {
       <div className="mt-1.5 flex items-center gap-1 whitespace-nowrap">
         <span className={cn(
           'rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none',
-          scope === 'global'
+          scope === 'library'
             ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
             : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
         )}>
-          {scope === 'global' ? 'Global' : 'Project'}
+          {scope === 'library' ? 'Library' : 'Project'}
         </span>
         {showLineCount && (
           <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground">

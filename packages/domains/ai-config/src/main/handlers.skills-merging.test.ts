@@ -266,12 +266,12 @@ describe('reconcile: dedup + idempotency', () => {
     expect(items).toHaveLength(1)
   })
 
-  test('global item exists (no selection) + disk file → links global, count=0', () => {
-    const globalItem = h4.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'global-link',
-      content: '---\nname: global-link\ndescription: g\n---\nb'
+  test('library item exists (no selection) + disk file → links library, count=0', () => {
+    const libraryItem = h4.invoke('ai-config:create-item', {
+      type: 'skill', scope: 'library', slug: 'library-link',
+      content: '---\nname: library-link\ndescription: g\n---\nb'
     }) as AiConfigItem
-    writeSkill(p4.projectPath, 'claude', 'global-link')
+    writeSkill(p4.projectPath, 'claude', 'library-link')
 
     const count = h4.invoke('ai-config:reconcile-project-skills', p4.projectId, p4.projectPath) as number
     expect(count).toBe(0) // no new ITEM created
@@ -279,29 +279,29 @@ describe('reconcile: dedup + idempotency', () => {
     // But selection was created
     const sels = h4.db.prepare(
       'SELECT * FROM ai_config_project_selections WHERE project_id = ? AND item_id = ?'
-    ).all(p4.projectId, globalItem.id) as unknown[]
+    ).all(p4.projectId, libraryItem.id) as unknown[]
     expect(sels.length).toBeGreaterThan(0)
   })
 
-  test('two projects share same global skill → both get selections', () => {
-    const globalItem = h4.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'shared-global',
-      content: '---\nname: shared-global\ndescription: s\n---\nb'
+  test('two projects share same library skill → both get selections', () => {
+    const libraryItem = h4.invoke('ai-config:create-item', {
+      type: 'skill', scope: 'library', slug: 'shared-library',
+      content: '---\nname: shared-library\ndescription: s\n---\nb'
     }) as AiConfigItem
 
     const p4b = seedProject(h4)
-    writeSkill(p4.projectPath, 'claude', 'shared-global')
-    writeSkill(p4b.projectPath, 'claude', 'shared-global')
+    writeSkill(p4.projectPath, 'claude', 'shared-library')
+    writeSkill(p4b.projectPath, 'claude', 'shared-library')
 
     h4.invoke('ai-config:reconcile-project-skills', p4.projectId, p4.projectPath)
     h4.invoke('ai-config:reconcile-project-skills', p4b.projectId, p4b.projectPath)
 
     // Both projects have selections, only 1 item
-    const items = h4.db.prepare("SELECT * FROM ai_config_items WHERE slug = 'shared-global'").all() as unknown[]
+    const items = h4.db.prepare("SELECT * FROM ai_config_items WHERE slug = 'shared-library'").all() as unknown[]
     expect(items).toHaveLength(1)
 
-    const selsA = h4.db.prepare('SELECT * FROM ai_config_project_selections WHERE project_id = ? AND item_id = ?').all(p4.projectId, globalItem.id) as unknown[]
-    const selsB = h4.db.prepare('SELECT * FROM ai_config_project_selections WHERE project_id = ? AND item_id = ?').all(p4b.projectId, globalItem.id) as unknown[]
+    const selsA = h4.db.prepare('SELECT * FROM ai_config_project_selections WHERE project_id = ? AND item_id = ?').all(p4.projectId, libraryItem.id) as unknown[]
+    const selsB = h4.db.prepare('SELECT * FROM ai_config_project_selections WHERE project_id = ? AND item_id = ?').all(p4b.projectId, libraryItem.id) as unknown[]
     expect(selsA.length).toBeGreaterThan(0)
     expect(selsB.length).toBeGreaterThan(0)
   })

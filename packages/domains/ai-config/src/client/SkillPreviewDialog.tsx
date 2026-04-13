@@ -16,7 +16,7 @@ interface SkillPreviewDialogProps {
 export function SkillPreviewDialog({ entry, onOpenChange, onAddToLibrary, onAddToProject, onUpdate, onUninstall, hasProject, installing }: SkillPreviewDialogProps) {
   if (!entry) return null
 
-  const isInLibrary = !!entry.installed_global_item_id
+  const isInLibrary = !!entry.installed_library_item_id
   const isInProject = !!entry.installed_project_item_id
   const hasUpdate = !!entry.has_update
 
@@ -56,7 +56,7 @@ export function SkillPreviewDialog({ entry, onOpenChange, onAddToLibrary, onAddT
                 size="sm"
                 variant="outline"
                 className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
-                onClick={() => onUninstall(entry.installed_global_item_id!)}
+                onClick={() => onUninstall(entry.installed_library_item_id!)}
                 disabled={installing}
               >
                 <X className="size-3" />

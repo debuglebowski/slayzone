@@ -32,7 +32,7 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
     setCustomPaths(project.worktree_copy_paths || '')
   }, [project])
 
-  const openGlobalSettings = () => {
+  const openComputerSettings = () => {
     onClose()
     window.dispatchEvent(new CustomEvent('open-settings', { detail: 'worktrees' }))
   }
@@ -75,7 +75,7 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="inherit">Use global setting</SelectItem>
+                <SelectItem value="inherit">Use computer setting</SelectItem>
                 <SelectItem value="on">Always on</SelectItem>
                 <SelectItem value="off">Always off</SelectItem>
               </SelectContent>
@@ -84,14 +84,14 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
               <button
                 type="button"
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-                onClick={openGlobalSettings}
+                onClick={openComputerSettings}
               >
-                Go to global setting
+                Go to computer setting
               </button>
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Overrides the global setting for this project only.
+            Overrides the computer setting for this project only.
           </p>
         </div>
 
@@ -125,7 +125,7 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="inherit">Use global setting</SelectItem>
+                <SelectItem value="inherit">Use computer setting</SelectItem>
                 <SelectItem value="ask">Ask every time</SelectItem>
                 <SelectItem value="none">Don't copy</SelectItem>
                 <SelectItem value="all">Copy all ignored files</SelectItem>
@@ -136,9 +136,9 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
               <button
                 type="button"
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-                onClick={openGlobalSettings}
+                onClick={openComputerSettings}
               >
-                Go to global setting
+                Go to computer setting
               </button>
             )}
           </div>

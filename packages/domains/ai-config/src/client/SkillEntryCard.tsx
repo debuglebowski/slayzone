@@ -14,7 +14,7 @@ interface SkillEntryCardProps {
 }
 
 export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate, onUninstall, onPreview, hasProject, installing }: SkillEntryCardProps) {
-  const isInLibrary = !!entry.installed_global_item_id
+  const isInLibrary = !!entry.installed_library_item_id
   const isInProject = !!entry.installed_project_item_id
   const hasUpdate = !!entry.has_update
 
@@ -49,7 +49,7 @@ export function SkillEntryCard({ entry, onAddToLibrary, onAddToProject, onUpdate
               size="sm"
               variant="outline"
               className="h-7 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
-              onClick={() => onUninstall(entry.installed_global_item_id!)}
+              onClick={() => onUninstall(entry.installed_library_item_id!)}
               disabled={installing}
             >
               <X className="size-3" />

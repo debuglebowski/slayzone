@@ -12,21 +12,21 @@ registerAiConfigHandlers(h.ipcMain as never, h.db)
 const projectId = crypto.randomUUID()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId, 'P', '#000')
 
-let globalItemId: string
+let libraryItemId: string
 let projectItemId: string
 
 describe('ai-config:create-item', () => {
-  test('creates global item', () => {
+  test('creates library item', () => {
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'My Skill!', content: '# Skill content'
+      type: 'skill', scope: 'library', slug: 'My Skill!', content: '# Skill content'
     }) as { id: string; type: string; scope: string; slug: string; name: string; content: string; project_id: null }
     expect(item.type).toBe('skill')
-    expect(item.scope).toBe('global')
+    expect(item.scope).toBe('library')
     expect(item.slug).toBe('my-skill')
     expect(item.name).toBe('my-skill')
     expect(item.content).toBe('# Skill content')
     expect(item.project_id).toBeNull()
-    globalItemId = item.id
+    libraryItemId = item.id
   })
 
   test('creates project-scoped item', () => {
@@ -40,22 +40,22 @@ describe('ai-config:create-item', () => {
 
   test('normalizes slug', () => {
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: '  --Hello World!! --', content: ''
+      type: 'skill', scope: 'library', slug: '  --Hello World!! --', content: ''
     }) as { slug: string }
     expect(item.slug).toBe('hello-world')
   })
 
   test('empty slug becomes untitled', () => {
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: '!!!', content: ''
+      type: 'skill', scope: 'library', slug: '!!!', content: ''
     }) as { slug: string }
     expect(item.slug).toBe('untitled')
   })
 
-  test('rejects duplicate global slug for same type', () => {
+  test('rejects duplicate library slug for same type', () => {
     expect(() => h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'my-skill',
       content: ''
     })).toThrow()
@@ -74,8 +74,8 @@ describe('ai-config:create-item', () => {
 
 describe('ai-config:get-item', () => {
   test('returns item by id', () => {
-    const item = h.invoke('ai-config:get-item', globalItemId) as { id: string }
-    expect(item.id).toBe(globalItemId)
+    const item = h.invoke('ai-config:get-item', libraryItemId) as { id: string }
+    expect(item.id).toBe(libraryItemId)
   })
 
   test('returns null for nonexistent', () => {
@@ -85,12 +85,12 @@ describe('ai-config:get-item', () => {
 
 describe('ai-config:list-items', () => {
   test('filters by scope', () => {
-    const items = h.invoke('ai-config:list-items', { scope: 'global' }) as { scope: string }[]
-    for (const item of items) expect(item.scope).toBe('global')
+    const items = h.invoke('ai-config:list-items', { scope: 'library' }) as { scope: string }[]
+    for (const item of items) expect(item.scope).toBe('library')
   })
 
   test('filters by scope + type', () => {
-    const items = h.invoke('ai-config:list-items', { scope: 'global', type: 'skill' }) as { type: string }[]
+    const items = h.invoke('ai-config:list-items', { scope: 'library', type: 'skill' }) as { type: string }[]
     for (const item of items) expect(item.type).toBe('skill')
     expect(items.length).toBeGreaterThan(0)
   })
@@ -104,19 +104,19 @@ describe('ai-config:list-items', () => {
 
 describe('ai-config:update-item', () => {
   test('updates content', () => {
-    const item = h.invoke('ai-config:update-item', { id: globalItemId, content: 'updated content' }) as { content: string }
+    const item = h.invoke('ai-config:update-item', { id: libraryItemId, content: 'updated content' }) as { content: string }
     expect(item.content).toBe('updated content')
   })
 
   test('updates slug (normalized)', () => {
-    const item = h.invoke('ai-config:update-item', { id: globalItemId, slug: 'New Name!!' }) as { slug: string; name: string }
+    const item = h.invoke('ai-config:update-item', { id: libraryItemId, slug: 'New Name!!' }) as { slug: string; name: string }
     expect(item.slug).toBe('new-name')
     expect(item.name).toBe('new-name')
   })
 
-  test('updates scope to global clears project_id', () => {
-    const item = h.invoke('ai-config:update-item', { id: projectItemId, scope: 'global' }) as { scope: string; project_id: null }
-    expect(item.scope).toBe('global')
+  test('updates scope to library clears project_id', () => {
+    const item = h.invoke('ai-config:update-item', { id: projectItemId, scope: 'library' }) as { scope: string; project_id: null }
+    expect(item.scope).toBe('library')
     expect(item.project_id).toBeNull()
   })
 
@@ -127,7 +127,7 @@ describe('ai-config:update-item', () => {
   test('rejects update when slug collides in same scope/type', () => {
     const other = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'another-skill',
       content: ''
     }) as { id: string }
@@ -141,8 +141,8 @@ describe('ai-config:update-item', () => {
 
 describe('ai-config:delete-item', () => {
   test('deletes existing', () => {
-    expect(h.invoke('ai-config:delete-item', globalItemId)).toBe(true)
-    expect(h.invoke('ai-config:get-item', globalItemId)).toBeNull()
+    expect(h.invoke('ai-config:delete-item', libraryItemId)).toBe(true)
+    expect(h.invoke('ai-config:get-item', libraryItemId)).toBeNull()
   })
 
   test('returns false for nonexistent', () => {

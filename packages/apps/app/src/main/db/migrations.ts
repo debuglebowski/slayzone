@@ -1905,6 +1905,20 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(`ALTER TABLE task_assets ADD COLUMN view_mode TEXT DEFAULT NULL`)
     }
+  },
+  {
+    version: 105,
+    up: (db) => {
+      // Rename legacy scope value 'global' → 'library'. "global" historically meant the
+      // shared library store; disambiguate against "computer" (user-level ~/.provider/ files).
+      db.exec(`
+        DROP INDEX IF EXISTS ux_ai_config_items_global_type_slug;
+        UPDATE ai_config_items SET scope = 'library' WHERE scope = 'global';
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_config_items_library_type_slug
+          ON ai_config_items(type, slug)
+          WHERE scope = 'library';
+      `)
+    }
   }
 ]
 

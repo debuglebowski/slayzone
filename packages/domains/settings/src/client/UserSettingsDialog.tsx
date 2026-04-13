@@ -3,7 +3,7 @@ import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
 import { useTelemetry, TelemetrySettings } from '@slayzone/telemetry/client'
-import type { GlobalContextManagerSection } from '../../../ai-config/src/client/ContextManagerSettings'
+import type { ContextManagerSection } from '../../../ai-config/src/client/ContextManagerSettings'
 
 // Import autonomous tabs
 import { GeneralSettingsTab } from './tabs/GeneralSettingsTab'
@@ -32,7 +32,7 @@ interface UserSettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialTab?: string
-  initialAiConfigSection?: GlobalContextManagerSection | null
+  initialAiConfigSection?: ContextManagerSection | null
   onTabChange?: (tab: string) => void
 }
 

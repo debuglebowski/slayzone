@@ -28,7 +28,7 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
     return () => { stale = true }
   }, [projectId])
 
-  const handleToggleGlobal = useCallback(async (id: string, enabled: boolean) => {
+  const handleToggleComputer = useCallback(async (id: string, enabled: boolean) => {
     await window.api.aiConfig.toggleProvider(id, enabled)
     setProviders(prev => prev.map(p => p.id === id ? { ...p, enabled } : p))
   }, [])
@@ -77,13 +77,13 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
                 </div>
               </div>
 
-              {/* Global toggle */}
+              {/* Computer toggle */}
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span>Global</span>
+                <span>Computer</span>
                 <button
                   role="switch"
                   aria-checked={provider.enabled}
-                  onClick={() => handleToggleGlobal(provider.id, !provider.enabled)}
+                  onClick={() => handleToggleComputer(provider.id, !provider.enabled)}
                   className={cn(
                     'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors',
                     provider.enabled ? 'bg-primary' : 'bg-muted'

@@ -122,7 +122,7 @@ const ALL_PROVIDERS: McpTarget[] = getConfigurableMcpTargets({ writableOnly: tru
 
 
 // ---------------------------------------------------------------------------
-// Add/Edit MCP Server dialog — shared between global and project modes
+// Add/Edit MCP Server dialog — shared between computer and project modes
 // ---------------------------------------------------------------------------
 
 function McpServerFormFields({ serverKey, setServerKey, description, setDescription, command, setCommand, args, setArgs, envVars, setEnvVars }: {
@@ -235,17 +235,17 @@ function buildConfig(command: string, args: string, envVars: Array<{ key: string
 }
 
 // ---------------------------------------------------------------------------
-// Global: Add custom server dialog (saves to settings)
+// Computer: Add custom server dialog (saves to settings)
 // ---------------------------------------------------------------------------
 
-interface AddGlobalMcpDialogProps {
+interface AddComputerMcpDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onAdded: () => void
   editTarget?: EditTarget | null
 }
 
-function AddGlobalMcpDialog({ open, onOpenChange, onAdded, editTarget }: AddGlobalMcpDialogProps) {
+function AddComputerMcpDialog({ open, onOpenChange, onAdded, editTarget }: AddComputerMcpDialogProps) {
   const [serverKey, setServerKey] = useState('')
   const [description, setDescription] = useState('')
   const [command, setCommand] = useState('')
@@ -390,7 +390,7 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
         })
       }
 
-      // Persist metadata (description) to global custom servers list
+      // Persist metadata (description) to computer custom servers list
       let existing = await loadCustomServers()
       if (keyChanged && editTarget) {
         existing = existing.filter((s) => s.id !== editTarget.originalKey)
@@ -455,10 +455,10 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
 }
 
 // ---------------------------------------------------------------------------
-// Global mode
+// Computer mode
 // ---------------------------------------------------------------------------
 
-function GlobalMcpPanel() {
+function ComputerMcpPanel() {
   const headerPortal = useHeaderPortal()
   const [favorites, setFavorites] = useState<string[]>([])
   const [customServers, setCustomServers] = useState<CustomMcpServer[]>([])
@@ -528,7 +528,7 @@ function GlobalMcpPanel() {
     <div className="space-y-4">
       {headerPortal ? createPortal(headerActions, headerPortal) : headerActions}
 
-      <AddGlobalMcpDialog
+      <AddComputerMcpDialog
         open={addDialogOpen}
         onOpenChange={(open) => { setAddDialogOpen(open); if (!open) setEditTarget(null) }}
         onAdded={loadCustom}
@@ -674,7 +674,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
 
   const isFavorite = (id: string) => favorites.includes(id)
 
-  // Merge configs into unified server list: curated → custom global → discovered
+  // Merge configs into unified server list: curated → custom computer → discovered
   const merged: MergedServer[] = []
   const seen = new Set<string>()
 
@@ -888,7 +888,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
         </div>
       )}
 
-      {/* Available servers (curated + custom global) */}
+      {/* Available servers (curated + custom computer) */}
       {availableServers.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold">Available <span className="text-muted-foreground">{availableServers.length}</span></h3>
@@ -914,7 +914,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
 // ---------------------------------------------------------------------------
 
 interface McpServersPanelProps {
-  mode: 'global' | 'project'
+  mode: 'computer' | 'project'
   projectPath?: string
   projectId?: string
 }
@@ -923,5 +923,5 @@ export function McpServersPanel({ mode, projectPath, projectId }: McpServersPane
   if (mode === 'project' && projectPath && projectId) {
     return <ProjectMcpPanel projectPath={projectPath} projectId={projectId} />
   }
-  return <GlobalMcpPanel />
+  return <ComputerMcpPanel />
 }

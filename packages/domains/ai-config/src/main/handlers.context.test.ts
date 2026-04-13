@@ -114,12 +114,12 @@ describe('ai-config:write-context-file', () => {
   })
 })
 
-describe('ai-config:create-global-file', () => {
-  test('creates a normalized global skill file', () => {
-    const expectedPath = path.join(mockHome, '.agents', 'skills', 'my-global-skill.md')
+describe('ai-config:create-computer-file', () => {
+  test('creates a normalized computer skill file', () => {
+    const expectedPath = path.join(mockHome, '.agents', 'skills', 'my-computer-skill.md')
     if (fs.existsSync(expectedPath)) fs.unlinkSync(expectedPath)
 
-    const created = h.invoke('ai-config:create-global-file', 'gemini', 'skill', ' My Global Skill! ') as {
+    const created = h.invoke('ai-config:create-computer-file', 'gemini', 'skill', ' My Computer Skill! ') as {
       path: string
       provider: string
       category: string
@@ -134,7 +134,7 @@ describe('ai-config:create-global-file', () => {
   })
 
   test('rejects unsupported categories for provider', () => {
-    expect(() => h.invoke('ai-config:create-global-file', 'codex', 'skill', 'nope')).toThrow()
+    expect(() => h.invoke('ai-config:create-computer-file', 'codex', 'skill', 'nope')).toThrow()
   })
 })
 
@@ -142,7 +142,7 @@ describe('ai-config:list-items', () => {
   test('returns derived validation without mutating stored metadata on read', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'read-does-not-repair-db',
       content: '# body'
     }) as { id: string; metadata_json: string }
@@ -161,7 +161,7 @@ describe('ai-config:list-items', () => {
       )
 
     const listed = h.invoke('ai-config:list-items', {
-      scope: 'global',
+      scope: 'library',
       type: 'skill'
     }) as Array<{ id: string; metadata_json: string }>
     const derived = listed.find((row) => row.id === item.id)
@@ -180,7 +180,7 @@ describe('ai-config:list-items', () => {
   test('recomputes stale invalid metadata to valid from current content', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'stale-invalid-repair',
       content: '# body'
     }) as { id: string; metadata_json: string }
@@ -202,7 +202,7 @@ describe('ai-config:list-items', () => {
       )
 
     const listed = h.invoke('ai-config:list-items', {
-      scope: 'global',
+      scope: 'library',
       type: 'skill'
     }) as Array<{ id: string; content: string; metadata_json: string }>
     const repaired = listed.find((row) => row.id === item.id)
@@ -218,7 +218,7 @@ describe('ai-config:list-items', () => {
   test('recomputes stale valid metadata to invalid from current content', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'stale-valid-repair',
       content: '# body'
     }) as { id: string; metadata_json: string }
@@ -237,7 +237,7 @@ describe('ai-config:list-items', () => {
       )
 
     const listed = h.invoke('ai-config:list-items', {
-      scope: 'global',
+      scope: 'library',
       type: 'skill'
     }) as Array<{ id: string; metadata_json: string }>
     const repaired = listed.find((row) => row.id === item.id)
@@ -252,7 +252,7 @@ describe('ai-config:list-items', () => {
   test('drops legacy canonical metadata and marks body-only legacy content invalid at runtime', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'stale-missing-frontmatter',
       content: skillDoc('stale-missing-frontmatter', '# body')
     }) as { id: string; metadata_json: string }
@@ -271,7 +271,7 @@ describe('ai-config:list-items', () => {
       )
 
     const listed = h.invoke('ai-config:list-items', {
-      scope: 'global',
+      scope: 'library',
       type: 'skill'
     }) as Array<{ id: string; content: string; metadata_json: string }>
     const repaired = listed.find((row) => row.id === item.id)
@@ -288,7 +288,7 @@ describe('ai-config:list-items', () => {
   test('marks new body-only skills invalid when no canonical frontmatter exists', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'new-missing-frontmatter',
       content: 'Create a new release for SlayZone.\nThe version argument is: patch\n'
     }) as { metadata_json: string }
@@ -305,7 +305,7 @@ describe('ai-config:get-item', () => {
   test('returns raw skill documents from storage', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'get-item-managed-frontmatter',
       content: skillDoc('get-item-managed-frontmatter', '# managed')
     }) as { id: string }
@@ -332,7 +332,7 @@ describe('ai-config:update-item', () => {
   test('marks managed skills invalid when they are updated without frontmatter', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'update-missing-frontmatter',
       content: skillDoc('update-missing-frontmatter', '# initial')
     }) as { id: string; content: string; metadata_json: string }
@@ -353,14 +353,14 @@ describe('ai-config:update-item', () => {
   test('treats new and previously explicit body-only content the same', () => {
     const created = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'update-state-parity-created',
       content: 'Create a new release for SlayZone.\n'
     }) as { id: string }
 
     const previouslyExplicit = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'update-state-parity-updated',
       content: skillDoc('update-state-parity-updated', '# valid first')
     }) as { id: string }
@@ -378,15 +378,15 @@ describe('ai-config:update-item', () => {
   })
 })
 
-// --- Load global item ---
+// --- Load library item ---
 
-describe('ai-config:load-global-item', () => {
+describe('ai-config:load-library-item', () => {
   test('writes skill to provider dir with manual path', () => {
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'deploy', content: skillDoc('deploy', '# Deploy skill')
+      type: 'skill', scope: 'library', slug: 'deploy', content: skillDoc('deploy', '# Deploy skill')
     }) as { id: string }
 
-    const result = h.invoke('ai-config:load-global-item', {
+    const result = h.invoke('ai-config:load-library-item', {
       projectId, projectPath: root, itemId: item.id,
       providers: ['claude'], manualPath: '.claude/skills/manual/deploy.md'
     }) as { relativePath: string; syncHealth: string }
@@ -397,10 +397,10 @@ describe('ai-config:load-global-item', () => {
 
   test('writes skill to codex provider path', () => {
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'codex-skill', content: skillDoc('codex-skill', '# Codex skill')
+      type: 'skill', scope: 'library', slug: 'codex-skill', content: skillDoc('codex-skill', '# Codex skill')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId, projectPath: root, itemId: item.id,
       providers: ['codex']
     })
@@ -413,12 +413,12 @@ describe('ai-config:load-global-item', () => {
     const fixture = createProjectFixture('manual-path-codex-provider')
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'manual-codex',
       content: skillDoc('manual-codex', '# Manual codex skill')
     }) as { id: string }
 
-    const result = h.invoke('ai-config:load-global-item', {
+    const result = h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -442,7 +442,7 @@ describe('ai-config:load-global-item', () => {
   test('rejects loading a skill with invalid frontmatter', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'invalid-frontmatter-load',
       content: '---\nname invalid\n---\n# bad frontmatter'
     }) as { id: string; metadata_json: string }
@@ -453,7 +453,7 @@ describe('ai-config:load-global-item', () => {
     expect(metadata.skillValidation?.status).toBe('invalid')
     expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_invalid_line')).toBe(true)
 
-    expect(() => h.invoke('ai-config:load-global-item', {
+    expect(() => h.invoke('ai-config:load-library-item', {
       projectId,
       projectPath: root,
       itemId: item.id,
@@ -464,7 +464,7 @@ describe('ai-config:load-global-item', () => {
   test('accepts multiline/list YAML frontmatter as valid', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'valid-yaml-frontmatter',
       content: [
         '---',
@@ -485,7 +485,7 @@ describe('ai-config:load-global-item', () => {
     }
     expect(metadata.skillValidation?.status).toBe('valid')
 
-    const result = h.invoke('ai-config:load-global-item', {
+    const result = h.invoke('ai-config:load-library-item', {
       projectId,
       projectPath: root,
       itemId: item.id,
@@ -497,7 +497,7 @@ describe('ai-config:load-global-item', () => {
   test('rejects malformed YAML frontmatter structures', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'malformed-yaml-frontmatter',
       content: '---\nname: malformed-yaml-frontmatter\ntags: [one, two\n---\n# bad frontmatter'
     }) as { id: string; metadata_json: string }
@@ -508,7 +508,7 @@ describe('ai-config:load-global-item', () => {
     expect(metadata.skillValidation?.status).toBe('invalid')
     expect(metadata.skillValidation?.issues?.some((issue) => issue.code === 'frontmatter_invalid_line')).toBe(true)
 
-    expect(() => h.invoke('ai-config:load-global-item', {
+    expect(() => h.invoke('ai-config:load-library-item', {
       projectId,
       projectPath: root,
       itemId: item.id,
@@ -519,7 +519,7 @@ describe('ai-config:load-global-item', () => {
   test('recomputes stale persisted invalid status from current valid content', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'status-invalid-authoritative',
       content: skillDoc('status-invalid-authoritative', '# body')
     }) as { id: string; metadata_json: string }
@@ -529,7 +529,7 @@ describe('ai-config:load-global-item', () => {
     h.db.prepare("UPDATE ai_config_items SET metadata_json = ? WHERE id = ?")
       .run(JSON.stringify(metadata), item.id)
 
-    const result = h.invoke('ai-config:load-global-item', {
+    const result = h.invoke('ai-config:load-library-item', {
       projectId,
       projectPath: root,
       itemId: item.id,
@@ -541,7 +541,7 @@ describe('ai-config:load-global-item', () => {
   test('treats persisted valid status as authoritative when stale issues are present', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'status-valid-authoritative',
       content: skillDoc('status-valid-authoritative', '# body')
     }) as { id: string; metadata_json: string }
@@ -559,7 +559,7 @@ describe('ai-config:load-global-item', () => {
     h.db.prepare("UPDATE ai_config_items SET metadata_json = ? WHERE id = ?")
       .run(JSON.stringify(metadata), item.id)
 
-    const result = h.invoke('ai-config:load-global-item', {
+    const result = h.invoke('ai-config:load-library-item', {
       projectId,
       projectPath: root,
       itemId: item.id,
@@ -572,7 +572,7 @@ describe('ai-config:load-global-item', () => {
   test('rejects loading when explicit frontmatter is missing even if status was tampered to valid', () => {
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'status-valid-but-missing-frontmatter',
       content: '# no frontmatter'
     }) as { id: string; metadata_json: string }
@@ -582,7 +582,7 @@ describe('ai-config:load-global-item', () => {
     h.db.prepare("UPDATE ai_config_items SET metadata_json = ? WHERE id = ?")
       .run(JSON.stringify(metadata), item.id)
 
-    expect(() => h.invoke('ai-config:load-global-item', {
+    expect(() => h.invoke('ai-config:load-library-item', {
       projectId,
       projectPath: root,
       itemId: item.id,
@@ -597,9 +597,9 @@ describe('ai-config:sync-linked-file', () => {
   test('re-syncs item content to disk', () => {
     // Create item + selection
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'sync-test', content: skillDoc('sync-test', 'original')
+      type: 'skill', scope: 'library', slug: 'sync-test', content: skillDoc('sync-test', 'original')
     }) as { id: string }
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId, projectPath: root, itemId: item.id,
       providers: ['claude'], manualPath: '.claude/skills/manual/sync-test.md'
     })
@@ -620,12 +620,12 @@ describe('ai-config:sync-linked-file', () => {
     h.invoke('ai-config:set-project-providers', fixture.projectId, ['claude', 'codex'])
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'sync-all-providers',
       content: skillDoc('sync-all-providers', '# v1')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -652,12 +652,12 @@ describe('ai-config:sync-linked-file', () => {
     h.invoke('ai-config:set-project-providers', fixture.projectId, ['claude', 'codex'])
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'codex-fm',
       content: skillDoc('codex-fm', '# body\n')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -699,9 +699,9 @@ describe('ai-config:sync-linked-file', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'legacy-selection-skill',
-      content: skillDoc('legacy-selection-skill', '# from global')
+      content: skillDoc('legacy-selection-skill', '# from library')
     }) as { id: string }
 
     h.invoke('ai-config:set-project-selection', {
@@ -723,7 +723,7 @@ describe('ai-config:sync-linked-file', () => {
     expect(result.relativePath).toBe('.claude/skills/legacy-selection-skill/SKILL.md')
     expect(fs.existsSync(legacyPath)).toBe(false)
     expect(fs.readFileSync(canonicalPath, 'utf-8').includes('name: legacy-selection-skill')).toBe(true)
-    expect(fs.readFileSync(canonicalPath, 'utf-8').includes('# from global')).toBe(true)
+    expect(fs.readFileSync(canonicalPath, 'utf-8').includes('# from library')).toBe(true)
   })
 
   test('rejects syncing a local skill with invalid frontmatter', () => {
@@ -745,12 +745,12 @@ describe('ai-config:sync-linked-file', () => {
     h.invoke('ai-config:set-project-providers', fixture.projectId, ['claude'])
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'missing-frontmatter-after-valid',
       content: skillDoc('missing-frontmatter-after-valid', '# initial')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -771,9 +771,9 @@ describe('ai-config:sync-linked-file', () => {
 describe('ai-config:unlink-file', () => {
   test('removes selection from DB', () => {
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'unlink-me', content: skillDoc('unlink-me', 'x')
+      type: 'skill', scope: 'library', slug: 'unlink-me', content: skillDoc('unlink-me', 'x')
     }) as { id: string }
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId, projectPath: root, itemId: item.id,
       providers: ['claude'], manualPath: '.claude/skills/manual/unlink-me.md'
     })
@@ -791,9 +791,9 @@ describe('ai-config:unlink-file', () => {
 describe('ai-config:rename-context-file', () => {
   test('renames file and updates selection target_path', () => {
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'renameme', content: skillDoc('renameme', 'rename content')
+      type: 'skill', scope: 'library', slug: 'renameme', content: skillDoc('renameme', 'rename content')
     }) as { id: string }
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId, projectPath: root, itemId: item.id,
       providers: ['claude'], manualPath: '.claude/skills/manual/renameme.md'
     })
@@ -810,9 +810,9 @@ describe('ai-config:rename-context-file', () => {
 describe('ai-config:delete-context-file', () => {
   test('deletes file and removes selection', () => {
     const item = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'deleteme', content: skillDoc('deleteme', 'delete content')
+      type: 'skill', scope: 'library', slug: 'deleteme', content: skillDoc('deleteme', 'delete content')
     }) as { id: string }
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId, projectPath: root, itemId: item.id,
       providers: ['claude'], manualPath: '.claude/skills/manual/deleteme.md'
     })
@@ -822,21 +822,21 @@ describe('ai-config:delete-context-file', () => {
   })
 })
 
-// --- Global instructions ---
+// --- Library instructions ---
 
-describe('ai-config:get-global-instructions', () => {
+describe('ai-config:get-library-instructions', () => {
   test('returns empty string when none exist', () => {
-    const content = h.invoke('ai-config:get-global-instructions')
+    const content = h.invoke('ai-config:get-library-instructions')
     expect(content).toBe('')
   })
 })
 
-describe('ai-config:save-global-instructions', () => {
+describe('ai-config:save-library-instructions', () => {
   test('creates then upserts', () => {
-    h.invoke('ai-config:save-global-instructions', '# Global rules v1')
-    expect(h.invoke('ai-config:get-global-instructions')).toBe('# Global rules v1')
-    h.invoke('ai-config:save-global-instructions', '# Global rules v2')
-    expect(h.invoke('ai-config:get-global-instructions')).toBe('# Global rules v2')
+    h.invoke('ai-config:save-library-instructions', '# Library rules v1')
+    expect(h.invoke('ai-config:get-library-instructions')).toBe('# Library rules v1')
+    h.invoke('ai-config:save-library-instructions', '# Library rules v2')
+    expect(h.invoke('ai-config:get-library-instructions')).toBe('# Library rules v2')
   })
 })
 
@@ -888,12 +888,12 @@ describe('ai-config:needs-sync', () => {
     h.invoke('ai-config:set-project-providers', fixture.projectId, ['claude', 'codex'])
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'disabled-provider-skill',
       content: skillDoc('disabled-provider-skill', '# baseline')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -1008,9 +1008,9 @@ describe('ai-config:get-project-skills-status', () => {
     h.invoke('ai-config:save-root-instructions', projectId, root, '# Project rules')
     // Create and load a skill
     const skill = h.invoke('ai-config:create-item', {
-      type: 'skill', scope: 'global', slug: 'status-skill', content: skillDoc('status-skill', '# Status skill content')
+      type: 'skill', scope: 'library', slug: 'status-skill', content: skillDoc('status-skill', '# Status skill content')
     }) as { id: string }
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId, projectPath: root, itemId: skill.id,
       providers: ['claude'], manualPath: '.claude/skills/manual/status-skill.md'
     })
@@ -1046,12 +1046,12 @@ describe('ai-config:get-project-skills-status', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'status-body-edit',
       content: skillDoc('status-body-edit', '# Body v1\n\nOriginal body\n')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -1079,12 +1079,12 @@ describe('ai-config:get-project-skills-status', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'status-frontmatter-edit',
       content: skillDoc('status-frontmatter-edit', '# Shared body\n\nSame body\n')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -1112,12 +1112,12 @@ describe('ai-config:get-project-skills-status', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'status-missing-frontmatter-after-valid',
       content: skillDoc('status-missing-frontmatter-after-valid', '# baseline')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -1179,12 +1179,12 @@ describe('ai-config:sync-all', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'sync-all-missing-frontmatter-after-valid',
       content: skillDoc('sync-all-missing-frontmatter-after-valid', '# initial')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -1243,12 +1243,12 @@ describe('ai-config:sync-all', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'sync-all-provider-unlink',
       content: skillDoc('sync-all-provider-unlink', '# initial')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -1284,11 +1284,11 @@ describe('ai-config:sync-all', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'sync-all-fallback-provider',
       content: skillDoc('sync-all-fallback-provider', '# fallback')
     }) as { id: string }
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -1309,12 +1309,12 @@ describe('ai-config:sync-all', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'sync-after-pull',
       content: skillDoc('sync-after-pull', '# baseline\n')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,
@@ -1348,12 +1348,12 @@ describe('ai-config:sync-all', () => {
 
     const item = h.invoke('ai-config:create-item', {
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug: 'keep-managed-skill',
       content: skillDoc('keep-managed-skill', '# keep')
     }) as { id: string }
 
-    h.invoke('ai-config:load-global-item', {
+    h.invoke('ai-config:load-library-item', {
       projectId: fixture.projectId,
       projectPath: fixture.projectPath,
       itemId: item.id,

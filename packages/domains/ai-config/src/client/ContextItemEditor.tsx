@@ -21,7 +21,7 @@ interface ContextItemEditorProps {
 export function ContextItemEditor({ item, validationState, onUpdate, onDelete, onClose, readOnly, updateInfo, onMarketplaceUpdate, onUnlink }: ContextItemEditorProps) {
   const provenance = getMarketplaceProvenance(item)
   const isMarketplaceBound = !!provenance
-  const isLibraryLinked = !isMarketplaceBound && !!readOnly && item.scope === 'global'
+  const isLibraryLinked = !isMarketplaceBound && !!readOnly && item.scope === 'library'
   const effectiveReadOnly = readOnly || isMarketplaceBound
   const navigateToMarketplaceEntry = useContextManagerStore((s) => s.navigateToMarketplaceEntry)
   const navigateToLibrarySkill = useContextManagerStore((s) => s.navigateToLibrarySkill)

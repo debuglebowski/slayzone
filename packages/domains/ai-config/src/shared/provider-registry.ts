@@ -31,7 +31,7 @@ export const PROVIDER_PATHS: Record<CliProvider, ProviderPathMapping> = {
   },
 }
 
-export interface GlobalProviderPaths {
+export interface ComputerProviderPaths {
   label: string
   baseDir: string        // relative to $HOME
   instructions?: string  // relative to baseDir
@@ -40,7 +40,7 @@ export interface GlobalProviderPaths {
   hint?: string          // tooltip explaining what reads from this dir
 }
 
-export const GLOBAL_PROVIDER_PATHS: Record<string, GlobalProviderPaths> = {
+export const COMPUTER_PROVIDER_PATHS: Record<string, ComputerProviderPaths> = {
   claude:   { label: 'Claude Code', baseDir: '.claude', instructions: 'CLAUDE.md', skillsDir: 'skills', mcpConfig: '.mcp.json', hint: 'Used by Claude Code CLI' },
   codex:    { label: 'Codex',       baseDir: '.codex',  instructions: 'AGENTS.md', hint: 'Used by Codex CLI' },
   cursor:   { label: 'Cursor',      baseDir: '.cursor', mcpConfig: 'mcp.json', hint: 'Used by Cursor Agent' },
@@ -186,8 +186,8 @@ export const PROJECT_MCP_SPECS: Partial<Record<McpTarget, McpConfigSpec>> = {
   copilot:  jsonMcpSpec('.copilot/mcp-config.json', 'mcpServers', { writable: false }),
 }
 
-// Global (computer-level) MCP config specs (relative to $HOME)
-export const GLOBAL_MCP_SPECS: Partial<Record<McpTarget, McpConfigSpec>> = {
+// Computer-level MCP config specs (relative to $HOME)
+export const COMPUTER_MCP_SPECS: Partial<Record<McpTarget, McpConfigSpec>> = {
   claude:   jsonMcpSpec('.claude/.mcp.json', 'mcpServers'),
   cursor:   jsonMcpSpec('.cursor/mcp.json', 'mcpServers'),
   gemini:   jsonMcpSpec('.agents/settings.json', 'mcpServers', { writable: false }),

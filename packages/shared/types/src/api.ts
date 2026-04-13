@@ -28,7 +28,7 @@ import type {
   ContextTreeEntry,
   CreateAiConfigItemInput,
   ListAiConfigItemsInput,
-  LoadGlobalItemInput,
+  LoadLibraryItemInput,
   McpConfigFileResult,
   ProjectSkillStatus,
   ProviderFileContent,
@@ -40,9 +40,9 @@ import type {
   UpdateAiConfigItemInput,
   WriteMcpServerInput,
   RemoveMcpServerInput,
-  WriteGlobalMcpServerInput,
-  RemoveGlobalMcpServerInput,
-  GlobalFileEntry,
+  WriteComputerMcpServerInput,
+  RemoveComputerMcpServerInput,
+  ComputerFileEntry,
   SkillRegistry,
   SkillRegistryEntry,
   AddRegistryInput,
@@ -584,20 +584,20 @@ export interface ElectronAPI {
     writeContextFile: (filePath: string, content: string, projectPath: string) => Promise<void>
     getContextTree: (projectPath: string, projectId: string) => Promise<ContextTreeEntry[]>
     reconcileProjectSkills: (projectId: string, projectPath: string) => Promise<number>
-    loadGlobalItem: (input: LoadGlobalItemInput) => Promise<ContextTreeEntry>
+    loadLibraryItem: (input: LoadLibraryItemInput) => Promise<ContextTreeEntry>
     syncLinkedFile: (projectId: string, projectPath: string, itemId: string, provider?: CliProvider) => Promise<ContextTreeEntry>
     unlinkFile: (projectId: string, itemId: string) => Promise<boolean>
     renameContextFile: (oldPath: string, newPath: string, projectPath: string) => Promise<void>
     deleteContextFile: (filePath: string, projectPath: string, projectId: string) => Promise<void>
-    deleteGlobalFile: (filePath: string) => Promise<void>
-    createGlobalFile: (provider: string, category: 'skill', slug: string) => Promise<GlobalFileEntry>
-    writeGlobalSkill: (provider: CliProvider, slug: string, content: string) => Promise<void>
+    deleteComputerFile: (filePath: string) => Promise<void>
+    createComputerFile: (provider: string, category: 'skill', slug: string) => Promise<ComputerFileEntry>
+    writeComputerSkill: (provider: CliProvider, slug: string, content: string) => Promise<void>
     discoverMcpConfigs: (projectPath: string) => Promise<McpConfigFileResult[]>
     writeMcpServer: (input: WriteMcpServerInput) => Promise<void>
     removeMcpServer: (input: RemoveMcpServerInput) => Promise<void>
-    discoverGlobalMcpConfigs: () => Promise<McpConfigFileResult[]>
-    writeGlobalMcpServer: (input: WriteGlobalMcpServerInput) => Promise<void>
-    removeGlobalMcpServer: (input: RemoveGlobalMcpServerInput) => Promise<void>
+    discoverComputerMcpConfigs: () => Promise<McpConfigFileResult[]>
+    writeComputerMcpServer: (input: WriteComputerMcpServerInput) => Promise<void>
+    removeComputerMcpServer: (input: RemoveComputerMcpServerInput) => Promise<void>
     listProviders: () => Promise<CliProviderInfo[]>
     toggleProvider: (id: string, enabled: boolean) => Promise<void>
     getProjectProviders: (projectId: string) => Promise<CliProvider[]>
@@ -605,8 +605,8 @@ export interface ElectronAPI {
     needsSync: (projectId: string, projectPath: string) => Promise<boolean>
     syncAll: (input: SyncAllInput) => Promise<SyncResult>
     checkSyncStatus: (projectId: string, projectPath: string) => Promise<SyncConflict[]>
-    getGlobalInstructions: (variantId?: string) => Promise<string>
-    saveGlobalInstructions: (content: string, variantId?: string) => Promise<void>
+    getLibraryInstructions: (variantId?: string) => Promise<string>
+    saveLibraryInstructions: (content: string, variantId?: string) => Promise<void>
     listInstructionVariants: () => Promise<AiConfigItem[]>
     getProjectInstructionVariant: (projectId: string) => Promise<AiConfigItem | null>
     setProjectInstructionVariant: (projectId: string, variantItemId: string | null, projectPath?: string) => Promise<void>
@@ -620,7 +620,7 @@ export interface ElectronAPI {
     readProviderSkill: (projectPath: string, provider: CliProvider, itemId: string) => Promise<ProviderFileContent>
     getExpectedSkillContent: (projectPath: string, provider: CliProvider, itemId: string) => Promise<string>
     pullProviderSkill: (projectId: string, projectPath: string, provider: CliProvider, itemId: string) => Promise<ProjectSkillStatus>
-    getGlobalFiles: () => Promise<GlobalFileEntry[]>
+    getComputerFiles: () => Promise<ComputerFileEntry[]>
     checkSlayConfigured: (projectPath: string) => Promise<boolean>
     setupSlay: (projectPath: string, command: 'instructions' | 'skills') => Promise<{ ok: boolean; error?: string }>
 

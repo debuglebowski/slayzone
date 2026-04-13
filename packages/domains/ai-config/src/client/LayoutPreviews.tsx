@@ -352,7 +352,7 @@ function OverviewPanel({ isProject }: { isProject: boolean }) {
 // LAYOUT A: Refined Tabs
 // ============================================================================
 
-export function LayoutPreviewA({ scope }: { scope: 'global' | 'project' }) {
+export function LayoutPreviewA({ scope }: { scope: 'library' | 'project' }) {
   const isProject = scope === 'project'
   const [tab, setTab] = useState<string>('overview')
 
@@ -375,7 +375,7 @@ export function LayoutPreviewA({ scope }: { scope: 'global' | 'project' }) {
         {(tab === 'skills' || tab === 'commands') && (
           <div className="flex items-center gap-2">
             <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-            {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Global</Button>}
+            {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Library</Button>}
           </div>
         )}
       </div>
@@ -439,7 +439,7 @@ export function LayoutPreviewA({ scope }: { scope: 'global' | 'project' }) {
 // LAYOUT B: Secondary Sidebar
 // ============================================================================
 
-export function LayoutPreviewB({ scope }: { scope: 'global' | 'project' }) {
+export function LayoutPreviewB({ scope }: { scope: 'library' | 'project' }) {
   const isProject = scope === 'project'
   const items = isProject
     ? [
@@ -497,7 +497,7 @@ export function LayoutPreviewB({ scope }: { scope: 'global' | 'project' }) {
           {(tab === 'skills' || tab === 'commands') && (
             <div className="flex items-center gap-2">
               <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-              {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Global</Button>}
+              {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Library</Button>}
             </div>
           )}
         </div>
@@ -552,7 +552,7 @@ export function LayoutPreviewB({ scope }: { scope: 'global' | 'project' }) {
 // LAYOUT C: Two-Panel Master-Detail
 // ============================================================================
 
-export function LayoutPreviewC({ scope }: { scope: 'global' | 'project' }) {
+export function LayoutPreviewC({ scope }: { scope: 'library' | 'project' }) {
   const isProject = scope === 'project'
   const [tab, setTab] = useState<string>('overview')
   const [selected, setSelected] = useState<string | null>('code-review')
@@ -576,7 +576,7 @@ export function LayoutPreviewC({ scope }: { scope: 'global' | 'project' }) {
         {tab === 'content' && (
           <div className="flex items-center gap-2">
             <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-            {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Global</Button>}
+            {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Library</Button>}
           </div>
         )}
       </div>
@@ -649,7 +649,7 @@ export function LayoutPreviewC({ scope }: { scope: 'global' | 'project' }) {
 // LAYOUT D: Dashboard Cards
 // ============================================================================
 
-export function LayoutPreviewD({ scope }: { scope: 'global' | 'project' }) {
+export function LayoutPreviewD({ scope }: { scope: 'library' | 'project' }) {
   const isProject = scope === 'project'
   const [drill, setDrill] = useState<string | null>(null)
 
@@ -663,7 +663,7 @@ export function LayoutPreviewD({ scope }: { scope: 'global' | 'project' }) {
           {(drill === 'skills' || drill === 'commands') && (
             <div className="flex items-center gap-2">
               <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-              {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Global</Button>}
+              {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Library</Button>}
             </div>
           )}
         </div>
@@ -803,7 +803,7 @@ export function LayoutPreviewD({ scope }: { scope: 'global' | 'project' }) {
 // LAYOUT E: Stacked Accordion
 // ============================================================================
 
-export function LayoutPreviewE({ scope }: { scope: 'global' | 'project' }) {
+export function LayoutPreviewE({ scope }: { scope: 'library' | 'project' }) {
   const isProject = scope === 'project'
   const [open, setOpen] = useState<Record<string, boolean>>({ instructions: true, skills: true })
   const toggle = (key: string) => setOpen(prev => ({ ...prev, [key]: !prev[key] }))
@@ -857,7 +857,7 @@ export function LayoutPreviewE({ scope }: { scope: 'global' | 'project' }) {
             actions={
               <div className="flex items-center gap-2">
                 <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-                {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Global</Button>}
+                {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Library</Button>}
               </div>
             }
           />
@@ -880,7 +880,7 @@ export function LayoutPreviewE({ scope }: { scope: 'global' | 'project' }) {
             actions={
               <div className="flex items-center gap-2">
                 <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-                {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Global</Button>}
+                {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Library</Button>}
               </div>
             }
           />
@@ -930,7 +930,7 @@ export function LayoutPreviewE({ scope }: { scope: 'global' | 'project' }) {
 // LAYOUT F: Hybrid (2 tabs)
 // ============================================================================
 
-export function LayoutPreviewF({ scope }: { scope: 'global' | 'project' }) {
+export function LayoutPreviewF({ scope }: { scope: 'library' | 'project' }) {
   const isProject = scope === 'project'
   const [tab, setTab] = useState<string>('overview')
 
@@ -976,7 +976,7 @@ export function LayoutPreviewF({ scope }: { scope: 'global' | 'project' }) {
                 <SectionLabel>Skills</SectionLabel>
                 <div className="flex items-center gap-2">
                   <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-                  {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Global</Button>}
+                  {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Library</Button>}
                 </div>
               </div>
               <div className="space-y-2">
@@ -993,7 +993,7 @@ export function LayoutPreviewF({ scope }: { scope: 'global' | 'project' }) {
                 <SectionLabel>Commands</SectionLabel>
                 <div className="flex items-center gap-2">
                   <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-                  {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Global</Button>}
+                  {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Library</Button>}
                 </div>
               </div>
               <div className="space-y-2">
@@ -1022,7 +1022,7 @@ export function LayoutPreviewF({ scope }: { scope: 'global' | 'project' }) {
 // LAYOUT G: Minimal Tabs (3 tabs)
 // ============================================================================
 
-export function LayoutPreviewG({ scope }: { scope: 'global' | 'project' }) {
+export function LayoutPreviewG({ scope }: { scope: 'library' | 'project' }) {
   const isProject = scope === 'project'
   const [tab, setTab] = useState<string>('overview')
 
@@ -1064,7 +1064,7 @@ export function LayoutPreviewG({ scope }: { scope: 'global' | 'project' }) {
                 <span className="text-sm font-medium">Skills</span>
                 <div className="flex items-center gap-2">
                   <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-                  {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Global</Button>}
+                  {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Library</Button>}
                 </div>
               </div>
               <div className="space-y-2 pt-3">
@@ -1081,7 +1081,7 @@ export function LayoutPreviewG({ scope }: { scope: 'global' | 'project' }) {
                 <span className="text-sm font-medium">Commands</span>
                 <div className="flex items-center gap-2">
                   <Button size="sm"><Plus className="mr-1 size-3.5" />New</Button>
-                  {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Global</Button>}
+                  {isProject && <Button size="sm" variant="outline"><Plus className="mr-1 size-3.5" />Add from Library</Button>}
                 </div>
               </div>
               <div className="space-y-2 pt-3">

@@ -5,7 +5,7 @@ import { ProviderSyncSection } from './ProviderSyncSection'
 import { InstructionsSection } from './InstructionsSection'
 import { SkillsSection } from './SkillsSection'
 import { McpSection } from './McpSection'
-import { GlobalFilesView } from './GlobalFilesView'
+import { ComputerFilesView } from './ComputerFilesView'
 import { SkillMarketplace } from './SkillMarketplace'
 import { useContextManagerStore } from './useContextManagerStore'
 import type { ConfigLevel } from '../shared'
@@ -36,7 +36,7 @@ const EXTERNAL_SECTIONS: { id: Section; label: string; icon: typeof Sparkles }[]
 ]
 
 const LEVELS: { id: ConfigLevel; label: string }[] = [
-  { id: 'computer', label: 'Global' },
+  { id: 'computer', label: 'Computer' },
   { id: 'project', label: 'Project' },
   { id: 'library', label: 'Library' },
 ]
@@ -74,7 +74,7 @@ export function ContextManagerShell({
     const section = activeSection
 
     if (section === 'files') {
-      return <GlobalFilesView />
+      return <ComputerFilesView />
     }
 
     if (section === 'instructions') {

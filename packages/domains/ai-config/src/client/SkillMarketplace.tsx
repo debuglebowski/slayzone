@@ -90,7 +90,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const handleAddToLibrary = useCallback(async (entryId: string) => {
     setInstalling(entryId)
     try {
-      await window.api.aiConfig.marketplace.installSkill({ entryId, scope: 'global' })
+      await window.api.aiConfig.marketplace.installSkill({ entryId, scope: 'library' })
       toast.success('Skill added to library')
       await loadEntries()
     } catch (err) {

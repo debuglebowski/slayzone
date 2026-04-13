@@ -12,7 +12,7 @@ import type {
 } from '../shared'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 import { ContextItemEditor } from './ContextItemEditor'
-import { GlobalContextFiles } from './GlobalContextFiles'
+import { ComputerContextFiles } from './ComputerContextFiles'
 import { McpServersPanel } from './McpServersPanel'
 import { ProjectContextFlat } from './ProjectContextFlat'
 import { ProjectContextFilesView } from './ProjectContextFilesView'
@@ -20,8 +20,8 @@ import { ProjectInstructions } from './ProjectInstructions'
 import { SkillHelpCard } from './SkillHelpCard'
 import { getSkillValidation } from './skill-validation'
 
-export type GlobalContextManagerSection = 'providers' | 'instructions' | 'skill' | 'mcp' | 'files' | 'provider-sync' | 'skills' | 'mcps'
-type Section = GlobalContextManagerSection
+export type ContextManagerSection = 'providers' | 'instructions' | 'skill' | 'mcp' | 'files' | 'provider-sync' | 'skills' | 'mcps'
+type Section = ContextManagerSection
 
 interface ContextManagerSettingsProps {
   scope: AiConfigScope
@@ -29,8 +29,8 @@ interface ContextManagerSettingsProps {
   projectPath?: string | null
   projectName?: string
   projectTab?: ProjectContextManagerTab
-  onOpenGlobalAiConfig?: (section: GlobalContextManagerSection) => void
-  initialGlobalSection?: GlobalContextManagerSection | null
+  onOpenContextManager?: (section: ContextManagerSection) => void
+  initialSection?: ContextManagerSection | null
 }
 
 export type ProjectContextManagerTab = 'config' | 'files'
@@ -93,7 +93,7 @@ function SkillValidationBadge({ status }: { status: 'invalid' | 'warning' }) {
 }
 
 // ---------------------------------------------------------------------------
-// Overview panel — global scope only
+// Overview panel — library scope only
 // ---------------------------------------------------------------------------
 
 interface OverviewData {
@@ -116,8 +116,8 @@ function OverviewPanel({
     void (async () => {
       try {
         const [instrContent, skills, providers] = await Promise.all([
-          window.api.aiConfig.getGlobalInstructions(),
-          window.api.aiConfig.listItems({ scope: 'global', type: 'skill' }),
+          window.api.aiConfig.getLibraryInstructions(),
+          window.api.aiConfig.listItems({ scope: 'library', type: 'skill' }),
           window.api.aiConfig.listProviders()
         ])
         if (stale) return
@@ -159,7 +159,7 @@ function OverviewPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Providers panel (global)
+// Providers panel
 // ---------------------------------------------------------------------------
 
 function ProvidersPanel() {
@@ -230,8 +230,8 @@ export function ContextManagerSettings({
   projectPath,
   projectName,
   projectTab,
-  onOpenGlobalAiConfig,
-  initialGlobalSection
+  onOpenContextManager,
+  initialSection
 }: ContextManagerSettingsProps) {
   const isProject = scope === 'project' && !!projectId && !!projectPath
   const activeProjectTab = projectTab ?? 'config'
@@ -251,19 +251,19 @@ export function ContextManagerSettings({
         projectId={projectId!}
         projectPath={projectPath!}
         projectName={projectName}
-        onOpenGlobalAiConfig={onOpenGlobalAiConfig}
+        onOpenContextManager={onOpenContextManager}
       />
     )
   }
 
-  return <GlobalContextManager initialSection={initialGlobalSection ?? null} />
+  return <LegacyContextManager initialSection={initialSection ?? null} />
 }
 
 // ---------------------------------------------------------------------------
-// Global context manager — own component so hooks are unconditional
+// Legacy (pre-shell) context manager — own component so hooks are unconditional
 // ---------------------------------------------------------------------------
 
-function GlobalContextManager({ initialSection }: { initialSection: GlobalContextManagerSection | null }) {
+function LegacyContextManager({ initialSection }: { initialSection: ContextManagerSection | null }) {
   const [section, setSection] = useState<Section | null>(initialSection)
   const [items, setItems] = useState<AiConfigItem[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -278,7 +278,7 @@ function GlobalContextManager({ initialSection }: { initialSection: GlobalContex
     setLoading(true)
     try {
       const rows = await window.api.aiConfig.listItems({
-        scope: 'global',
+        scope: 'library',
         type: 'skill'
       })
       setItems(rows)
@@ -302,7 +302,7 @@ function GlobalContextManager({ initialSection }: { initialSection: GlobalContex
     const slug = nextAvailableSlug('new-skill', existingSlugs)
     const created = await window.api.aiConfig.createItem({
       type: 'skill',
-      scope: 'global',
+      scope: 'library',
       slug,
       content: buildDefaultSkillContent(slug)
     })
@@ -322,7 +322,7 @@ function GlobalContextManager({ initialSection }: { initialSection: GlobalContex
     setEditingId(null)
   }
 
-  const globalSkillContent = (() => {
+  const librarySkillContent = (() => {
     if (loading) {
       return <p className="text-sm text-muted-foreground">Loading...</p>
     }
@@ -362,7 +362,7 @@ function GlobalContextManager({ initialSection }: { initialSection: GlobalContex
           ) : (
             <button
               onClick={() => setEditingId(item.id)}
-              data-testid={`context-global-item-${item.slug}`}
+              data-testid={`context-library-item-${item.slug}`}
               className="flex w-full items-center justify-between gap-3 rounded-md border bg-surface-3 px-3 py-2.5 text-left transition-colors"
             >
               <div className="min-w-0">
@@ -396,10 +396,10 @@ function GlobalContextManager({ initialSection }: { initialSection: GlobalContex
 
           <span className="flex-1 text-right text-xs text-muted-foreground">
             {section === 'providers' && 'Choose which AI coding tools to sync content to.'}
-            {section === 'instructions' && 'Global instructions stored in the database. Not synced to any file.'}
-            {section === 'skill' && 'Global skills shared across all projects. Synced to enabled providers.'}
+            {section === 'instructions' && 'Library instructions stored in the database. Not synced to any file.'}
+            {section === 'skill' && 'Library skills shared across all projects. Synced to enabled providers.'}
             {section === 'mcp' && 'Browse and favorite MCP servers from the curated catalog.'}
-            {section === 'files' && 'Global config files across all provider directories.'}
+            {section === 'files' && 'Computer-level config files across all provider directories.'}
           </span>
 
           <div className="flex items-center gap-2">
@@ -430,15 +430,15 @@ function GlobalContextManager({ initialSection }: { initialSection: GlobalContex
         ) : section === 'instructions' ? (
           <ProjectInstructions />
         ) : section === 'mcp' ? (
-          <McpServersPanel mode="global" />
+          <McpServersPanel mode="computer" />
         ) : section === 'files' ? (
-          <GlobalContextFiles />
+          <ComputerContextFiles />
         ) : isItemSection ? (
           <div className="flex h-full min-h-0 flex-col">
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-              {globalSkillContent}
+              {librarySkillContent}
             </div>
-            <SkillHelpCard testId="global-skill-help-card" className="mt-3 shrink-0" />
+            <SkillHelpCard testId="library-skill-help-card" className="mt-3 shrink-0" />
           </div>
         ) : null}
       </div>

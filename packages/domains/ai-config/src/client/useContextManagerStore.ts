@@ -13,9 +13,9 @@ interface ContextManagerViewState {
   // Skills
   skillViewMode: Record<string, 'list' | 'graph'>
 
-  // Global files
-  globalSelectedPath: string | null
-  globalSplitWidth: number
+  // Computer files
+  computerSelectedPath: string | null
+  computerSplitWidth: number
 
   // Project context tree
   projectSelectedPath: string | null
@@ -49,8 +49,8 @@ interface ContextManagerViewState {
   navigateToLibrarySkill: (itemId: string) => void
   consumePendingLibrarySkillId: () => string | null
   setSkillViewMode: (scope: string, mode: 'list' | 'graph') => void
-  setGlobalSelectedPath: (path: string | null) => void
-  setGlobalSplitWidth: (width: number) => void
+  setComputerSelectedPath: (path: string | null) => void
+  setComputerSplitWidth: (width: number) => void
   setProjectSelectedPath: (path: string | null) => void
   setProjectExpandedFolders: (folders: string[]) => void
   setProjectSplitWidth: (width: number) => void
@@ -66,8 +66,8 @@ interface PersistedState {
   activeLevel: ConfigLevel
   activeSection: string
   skillViewMode: Record<string, 'list' | 'graph'>
-  globalSelectedPath: string | null
-  globalSplitWidth: number
+  computerSelectedPath: string | null
+  computerSplitWidth: number
   projectSelectedPath: string | null
   projectExpandedFolders: string[]
   projectSplitWidth: number
@@ -81,8 +81,8 @@ const DEFAULTS: PersistedState = {
   activeLevel: 'computer',
   activeSection: 'files',
   skillViewMode: {},
-  globalSelectedPath: null,
-  globalSplitWidth: 350,
+  computerSelectedPath: null,
+  computerSplitWidth: 350,
   projectSelectedPath: null,
   projectExpandedFolders: [],
   projectSplitWidth: 350,
@@ -114,8 +114,8 @@ export const useContextManagerStore = create<ContextManagerViewState>()(
     },
     setSkillViewMode: (scope, mode) =>
       set((s) => ({ skillViewMode: { ...s.skillViewMode, [scope]: mode } })),
-    setGlobalSelectedPath: (path) => set({ globalSelectedPath: path }),
-    setGlobalSplitWidth: (width) => set({ globalSplitWidth: width }),
+    setComputerSelectedPath: (path) => set({ computerSelectedPath: path }),
+    setComputerSplitWidth: (width) => set({ computerSplitWidth: width }),
     setProjectSelectedPath: (path) => set({ projectSelectedPath: path }),
     setProjectExpandedFolders: (folders) => set({ projectExpandedFolders: folders }),
     setProjectSplitWidth: (width) => set({ projectSplitWidth: width }),
@@ -168,8 +168,8 @@ function pickPersisted(state: ContextManagerViewState): PersistedState {
     activeLevel: state.activeLevel,
     activeSection: state.activeSection,
     skillViewMode: state.skillViewMode,
-    globalSelectedPath: state.globalSelectedPath,
-    globalSplitWidth: state.globalSplitWidth,
+    computerSelectedPath: state.computerSelectedPath,
+    computerSplitWidth: state.computerSplitWidth,
     projectSelectedPath: state.projectSelectedPath,
     projectExpandedFolders: state.projectExpandedFolders,
     projectSplitWidth: state.projectSplitWidth,

@@ -3,17 +3,17 @@ import { Tabs, TabsList, TabsTrigger } from '@slayzone/ui'
 import {
   ContextManagerSettings,
   type ProjectContextManagerTab,
-  type GlobalContextManagerSection
+  type ContextManagerSection
 } from '../../../ai-config/src/client/ContextManagerSettings'
 import type { Project } from '@slayzone/projects/shared'
 import { SettingsTabIntro } from './project-settings-shared'
 
 interface AiConfigTabProps {
   project: Project
-  onOpenGlobalAiConfig?: (section: GlobalContextManagerSection) => void
+  onOpenContextManager?: (section: ContextManagerSection) => void
 }
 
-export function AiConfigTab({ project, onOpenGlobalAiConfig }: AiConfigTabProps) {
+export function AiConfigTab({ project, onOpenContextManager }: AiConfigTabProps) {
   const [contextManagerTab, setContextManagerTab] = useState<ProjectContextManagerTab>('config')
 
   return (
@@ -22,7 +22,7 @@ export function AiConfigTab({ project, onOpenGlobalAiConfig }: AiConfigTabProps)
         <div className="min-w-0 flex-1">
           <SettingsTabIntro
             title="Context Manager"
-            description="Manage project-specific AI instructions, skills, and provider sync behavior. Use this to adapt global context to this project's workflow."
+            description="Manage project-specific AI instructions, skills, and provider sync behavior. Use this to adapt library context to this project's workflow."
           />
         </div>
         <Tabs
@@ -43,7 +43,7 @@ export function AiConfigTab({ project, onOpenGlobalAiConfig }: AiConfigTabProps)
           projectPath={project.path}
           projectName={project.name}
           projectTab={contextManagerTab}
-          onOpenGlobalAiConfig={onOpenGlobalAiConfig}
+          onOpenContextManager={onOpenContextManager}
         />
       </div>
     </div>

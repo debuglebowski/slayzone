@@ -114,23 +114,23 @@ test.describe.skip('Context manager file sync', () => {
       return window.api.aiConfig.saveInstructionsContent(id, projectPath, content)
     }, { id: project.id, projectPath: TEST_PROJECT_PATH, content: instructionsV1 })
 
-    // Create and link a global skill
+    // Create and link a library skill
     await mainWindow.evaluate(async ({ slug, content }) => {
-      const existing = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+      const existing = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
       const match = existing.find((item) => item.slug === slug)
       if (match) {
         await window.api.aiConfig.updateItem({ id: match.id, content })
       } else {
-        await window.api.aiConfig.createItem({ type: 'skill', scope: 'global', slug, content })
+        await window.api.aiConfig.createItem({ type: 'skill', scope: 'library', slug, content })
       }
     }, { slug: skillSlug, content: skillDocument(skillSlug, skillContentV1) })
 
-    // Link global skill to project
+    // Link library skill to project
     await mainWindow.evaluate(async ({ projectId: pid, projectPath, slug }) => {
-      const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+      const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
       const item = items.find((i) => i.slug === slug)
       if (!item) throw new Error('Skill not found')
-      await window.api.aiConfig.loadGlobalItem({
+      await window.api.aiConfig.loadLibraryItem({
         projectId: pid, projectPath, itemId: item.id, providers: ['claude', 'codex']
       })
     }, { projectId: project.id, projectPath: TEST_PROJECT_PATH, slug: skillSlug })
@@ -339,7 +339,7 @@ test.describe.skip('Context manager file sync', () => {
 
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
           const match = items.find((i) => i.slug === slug)
           return !!match?.content.includes(`name: ${slug}`) && !!match?.content.includes(expectedBody.trim())
         }, { slug: skillSlug, expectedBody: skillContentV2 })
@@ -358,7 +358,7 @@ test.describe.skip('Context manager file sync', () => {
       await content.fill(pendingContent)
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
           const match = items.find((i) => i.slug === slug)
           return !!match?.content.includes(`name: ${slug}`) && !!match?.content.includes(expectedBody.trim())
         }, { slug: skillSlug, expectedBody: pendingBody })
@@ -392,7 +392,7 @@ test.describe.skip('Context manager file sync', () => {
       await content.fill(pendingContent)
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
           const match = items.find((i) => i.slug === slug)
           return !!match?.content.includes(`name: ${slug}`) && !!match?.content.includes(expectedBody.trim())
         }, { slug: skillSlug, expectedBody: pendingBody })
@@ -471,7 +471,7 @@ test.describe.skip('Context manager file sync', () => {
       // Verify DB content updated with the raw skill document
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
           const match = items.find((i) => i.slug === slug)
           return !!match?.content.includes('name: modified') && !!match?.content.includes(expectedBody.trim())
         }, { slug: skillSlug, expectedBody: '# Modified externally\n' })
@@ -498,7 +498,7 @@ test.describe.skip('Context manager file sync', () => {
       // Verify slug updated in DB
       await expect.poll(async () => {
         return await mainWindow.evaluate(async (slug) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
           return items.some((i) => i.slug === slug)
         }, newSlug)
       }, { timeout: 5_000 }).toBe(true)
@@ -530,7 +530,7 @@ test.describe.skip('Context manager file sync', () => {
 
       await expect.poll(async () => {
         return await mainWindow.evaluate(async (slug) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
           const match = items.find((item) => item.slug === slug)
           if (!match) return null
           const metadata = JSON.parse(match.metadata_json) as {
@@ -558,7 +558,7 @@ test.describe.skip('Context manager file sync', () => {
       const resyncedBody = '# Re-synced after pull\n'
       const resyncedContent = skillDocument(skillSlug, resyncedBody)
       await mainWindow.evaluate(async ({ slug, content }) => {
-        const items = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+        const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
         const item = items.find((entry) => entry.slug === slug)
         if (!item) throw new Error('Skill not found for resync test')
         await window.api.aiConfig.updateItem({ id: item.id, content })
@@ -708,15 +708,15 @@ test.describe.skip('Context manager file sync', () => {
 
     test('frontmatter-only DB metadata changes mark both linked providers stale', async ({ mainWindow }) => {
       await mainWindow.evaluate(async ({ id, projectPath, slug, initialContent, updatedContent }) => {
-        const existing = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+        const existing = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
         const match = existing.find((item) => item.slug === slug)
         const item = match
           ? await window.api.aiConfig.updateItem({ id: match.id, content: initialContent })
-          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'global', slug, content: initialContent })
+          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'library', slug, content: initialContent })
         if (!item) throw new Error('Could not create frontmatter mismatch skill')
 
         await window.api.aiConfig.removeProjectSelection(id, item.id)
-        await window.api.aiConfig.loadGlobalItem({
+        await window.api.aiConfig.loadLibraryItem({
           projectId: id,
           projectPath,
           itemId: item.id,
@@ -760,15 +760,15 @@ test.describe.skip('Context manager file sync', () => {
 
     test('row status uses linked providers only', async ({ mainWindow }) => {
       await mainWindow.evaluate(async ({ id, projectPath, slug, content }) => {
-        const existing = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+        const existing = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
         const match = existing.find((item) => item.slug === slug)
         const item = match
           ? await window.api.aiConfig.updateItem({ id: match.id, content })
-          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'global', slug, content })
+          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'library', slug, content })
         if (!item) throw new Error('Could not create codex-only skill')
 
         await window.api.aiConfig.removeProjectSelection(id, item.id)
-        await window.api.aiConfig.loadGlobalItem({
+        await window.api.aiConfig.loadLibraryItem({
           projectId: id,
           projectPath,
           itemId: item.id,
@@ -799,15 +799,15 @@ test.describe.skip('Context manager file sync', () => {
 
     test('row status reflects unmanaged file on unlinked provider', async ({ mainWindow }) => {
       await mainWindow.evaluate(async ({ id, projectPath, slug, content }) => {
-        const existing = await window.api.aiConfig.listItems({ scope: 'global', type: 'skill' })
+        const existing = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
         const match = existing.find((item) => item.slug === slug)
         const item = match
           ? await window.api.aiConfig.updateItem({ id: match.id, content })
-          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'global', slug, content })
+          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'library', slug, content })
         if (!item) throw new Error('Could not create codex-only skill with unmanaged claude')
 
         await window.api.aiConfig.removeProjectSelection(id, item.id)
-        await window.api.aiConfig.loadGlobalItem({
+        await window.api.aiConfig.loadLibraryItem({
           projectId: id,
           projectPath,
           itemId: item.id,

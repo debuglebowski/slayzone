@@ -11,8 +11,8 @@ registerAiConfigHandlers(h.ipcMain as never, h.db)
 // Seed project + item
 const projectId = crypto.randomUUID()
 h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(projectId, 'P', '#000', '/tmp/test-proj')
-const item = h.invoke('ai-config:create-item', { type: 'skill', scope: 'global', slug: 'sel-test', content: 'x' }) as { id: string }
-const item2 = h.invoke('ai-config:create-item', { type: 'skill', scope: 'global', slug: 'sel-test-2', content: 'y' }) as { id: string }
+const item = h.invoke('ai-config:create-item', { type: 'skill', scope: 'library', slug: 'sel-test', content: 'x' }) as { id: string }
+const item2 = h.invoke('ai-config:create-item', { type: 'skill', scope: 'library', slug: 'sel-test-2', content: 'y' }) as { id: string }
 
 // --- Selections ---
 
@@ -111,13 +111,13 @@ describe('ai-config:toggle-provider', () => {
 })
 
 describe('ai-config:get-project-providers', () => {
-  test('returns default providers (falls back to global)', () => {
+  test('returns default providers (falls back to computer)', () => {
     const providers = h.invoke('ai-config:get-project-providers', projectId) as string[]
-    // Should include enabled global providers
+    // Should include enabled computer-level providers
     expect(providers).toContain('claude')
   })
 
-  test('falls back to global providers when project provider settings JSON is malformed', () => {
+  test('falls back to computer providers when project provider settings JSON is malformed', () => {
     h.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run(`ai_providers:${projectId}`, '{"broken":')
     const providers = h.invoke('ai-config:get-project-providers', projectId) as string[]

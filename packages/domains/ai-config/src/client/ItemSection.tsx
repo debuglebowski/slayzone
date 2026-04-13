@@ -12,7 +12,7 @@ import type {
   AiConfigItem, AiConfigItemType, CliProvider,
   ProjectSkillStatus, SyncHealth
 } from '../shared'
-import type { GlobalContextManagerSection } from './ContextManagerSettings'
+import type { ContextManagerSection } from './ContextManagerSettings'
 import { PROVIDER_PATHS } from '../shared/provider-registry'
 import { AddItemPicker } from './AddItemPicker'
 import { SkillHelpCard } from './SkillHelpCard'
@@ -30,7 +30,7 @@ interface ItemSectionProps {
   enabledProviders: CliProvider[]
   projectId: string
   projectPath: string
-  onOpenGlobalAiConfig?: (section: GlobalContextManagerSection) => void
+  onOpenContextManager?: (section: ContextManagerSection) => void
   onChanged: () => void
 }
 
@@ -135,7 +135,7 @@ function useSkillItem({
   const handleRevert = async () => {
     try {
       await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id)
-      toast.success(`Reverted ${item.slug} to global`)
+      toast.success(`Reverted ${item.slug} to library`)
       onChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Revert failed')
@@ -233,11 +233,11 @@ function useSkillItem({
 // Skill item detail
 // ============================================================
 
-function SkillItemDetail({ item, providers, enabledProviders, isLocal, projectId, projectPath, onChanged, onRemove, onGoToGlobal }: {
+function SkillItemDetail({ item, providers, enabledProviders, isLocal, projectId, projectPath, onChanged, onRemove, onGoToLibrary }: {
   item: AiConfigItem; providers: ProjectSkillStatus['providers']; enabledProviders: CliProvider[]
   isLocal: boolean; projectId: string; projectPath: string; onChanged: () => void
   onRemove: () => void
-  onGoToGlobal?: () => void
+  onGoToLibrary?: () => void
 }) {
   const sk = useSkillItem({ item, providers, enabledProviders, isLocal, projectId, projectPath, onChanged })
   const [expanded, setExpanded] = useState(false)
@@ -309,15 +309,15 @@ function SkillItemDetail({ item, providers, enabledProviders, isLocal, projectId
               <p className="text-lg font-semibold leading-tight">Edit</p>
               {!sk.isLocal && (
                 <div className="flex items-center gap-2">
-                  {onGoToGlobal && (
+                  {onGoToLibrary && (
                     <Button
-                      data-testid={`skill-go-to-global-${item.slug}`}
+                      data-testid={`skill-go-to-library-${item.slug}`}
                       size="sm"
                       variant="outline"
                       className="h-7 px-2 text-[11px]"
-                      onClick={onGoToGlobal}
+                      onClick={onGoToLibrary}
                     >
-                      Go to global
+                      Go to library
                     </Button>
                   )}
                   <Button
@@ -327,7 +327,7 @@ function SkillItemDetail({ item, providers, enabledProviders, isLocal, projectId
                     className="h-7 px-2 text-[11px]"
                     onClick={sk.handleRevert}
                   >
-                    Revert to global
+                    Revert to library
                   </Button>
                 </div>
               )}
@@ -464,7 +464,7 @@ function SkillItemDetail({ item, providers, enabledProviders, isLocal, projectId
 
 export function ItemSection({
   type, linkedItems, localItems, enabledProviders,
-  projectId, projectPath, onOpenGlobalAiConfig, onChanged
+  projectId, projectPath, onOpenContextManager, onChanged
 }: ItemSectionProps) {
   const [showPicker, setShowPicker] = useState(false)
 
@@ -491,7 +491,7 @@ export function ItemSection({
             key={item.id}
             item={item} providers={providers} enabledProviders={enabledProviders}
             isLocal={isLocal} projectId={projectId} projectPath={projectPath}
-            onGoToGlobal={!isLocal && onOpenGlobalAiConfig ? () => onOpenGlobalAiConfig('skill') : undefined}
+            onGoToLibrary={!isLocal && onOpenContextManager ? () => onOpenContextManager('skill') : undefined}
             onChanged={onChanged} onRemove={() => handleRemove(item.id, isLocal)}
           />
         ))}

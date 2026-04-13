@@ -100,7 +100,7 @@ const ChangelogDialog = lazy(() => import('@/components/changelog/ChangelogDialo
 
 type ProjectSettingsTab = 'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'integrations' | 'ai-config' | 'tests'
 type ProjectIntegrationOnboardingProvider = Exclude<ProjectStartMode, 'scratch'>
-type GlobalAiConfigSection = 'providers' | 'instructions' | 'skill' | 'mcp' | 'files' | 'provider-sync' | 'skills' | 'mcps'
+type ContextManagerSection = 'providers' | 'instructions' | 'skill' | 'mcp' | 'files' | 'provider-sync' | 'skills' | 'mcps'
 const COMMUNITY_DISCORD_URL = 'https://discord.gg/g7xPHXaU98'
 const COMMUNITY_X_URL = 'https://x.com/debuglebowski'
 
@@ -170,7 +170,7 @@ function App(): React.JSX.Element {
   const [testsPanelEnabled, setTestsPanelEnabled] = useState(false)
   const [automationsPanelEnabled, setAutomationsPanelEnabled] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<string>('general')
-  const [settingsInitialAiConfigSection, setSettingsInitialAiConfigSection] = useState<GlobalAiConfigSection | null>(null)
+  const [settingsInitialAiConfigSection, setSettingsInitialAiConfigSection] = useState<ContextManagerSection | null>(null)
   const onboardingOpen = useDialogStore((s) => s.onboardingOpen)
   const [shouldMountOnboarding, setShouldMountOnboarding] = useState(onboardingOpen)
   const changelogOpen = useDialogStore((s) => s.changelogOpen)
