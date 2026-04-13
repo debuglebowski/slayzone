@@ -7,9 +7,12 @@ import { TelemetryProvider } from '@slayzone/telemetry/client'
 import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
+import { FloatingAgentPanel } from './components/agent-panel/FloatingAgentPanel'
 import { getDiagnosticsContext } from './lib/diagnosticsClient'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
 import { MaybeProfiler } from './lib/perfProfiler'
+
+const isFloatingAgent = new URLSearchParams(window.location.search).get('floating') === 'agent'
 
 window.addEventListener('error', (event) => {
   window.api.diagnostics.recordClientError({
@@ -35,6 +38,18 @@ window.addEventListener('unhandledrejection', (event) => {
   })
 })
 
+// Floating agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
+if (isFloatingAgent) {
+  createRoot(document.getElementById('root')!).render(
+    <PtyProvider>
+      <ThemeProvider>
+        <FloatingAgentPanel />
+      </ThemeProvider>
+    </PtyProvider>
+  )
+}
+
+if (!isFloatingAgent)
 // Wait for tab store to hydrate from SQLite before rendering —
 // prevents race conditions where effects wipe persisted tabs.
 tabStoreReady.then(() => {

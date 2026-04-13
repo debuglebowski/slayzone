@@ -819,6 +819,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     return subscribeState(sessionId, (newState) => setPtyState(newState))
   }, [sessionId, getState, subscribeState])
 
+  // Re-fit terminal when PTY dimensions need resync (e.g., after floating agent reattach)
+  useEffect(() => {
+    return window.api.pty.onResizeNeeded((sid) => {
+      if (sid !== sessionId || !fitAddonRef.current || !terminalRef.current) return
+      fitAddonRef.current.fit()
+      window.api.pty.resize(sessionId, terminalRef.current.cols, terminalRef.current.rows)
+    })
+  }, [sessionId])
+
   // Safety net: prevent permanent 'starting' state after init completes.
   // If the backend dies or IPC events are lost, this watchdog transitions
   // to 'dead' so the user sees the retry overlay instead of infinite loading.

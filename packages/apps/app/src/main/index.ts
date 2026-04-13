@@ -98,6 +98,7 @@ import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplat
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/main'
 import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, startIdleChecker, stopIdleChecker, dismissAllNotifications, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange } from '@slayzone/terminal/main'
+import { attachFloatingAgentBlurHandlers, setupFloatingAgent } from './floating-agent'
 import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/main'
 import { registerWorktreeHandlers } from '@slayzone/worktrees/main'
 import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics, setIpcSuccessHook } from '@slayzone/diagnostics/main'
@@ -623,6 +624,9 @@ function createMainWindow(): void {
     return { action: 'deny' }
   })
 
+  // Floating agent panel: blur/focus handlers for detach/reattach
+  attachFloatingAgentBlurHandlers(mainWindow)
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -1035,6 +1039,7 @@ app.whenReady().then(async () => {
   registerThemeHandlers(ipcMain, db)
   registerUsageHandlers(ipcMain, db)
   registerPtyHandlers(ipcMain, db)
+  setupFloatingAgent(() => currentOverrides)
 
   // Task automation: auto-move tasks on terminal state change
   onGlobalStateChange((sessionId, newState, oldState) => {

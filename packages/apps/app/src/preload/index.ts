@@ -261,6 +261,33 @@ const api: ElectronAPI = {
     cliStatus: () => ipcRenderer.invoke('app:cli-status'),
     installCli: () => ipcRenderer.invoke('app:install-cli')
   },
+  floatingAgent: {
+    detach: (sessionId: string, panelWidth: number) => ipcRenderer.invoke('floating-agent:detach', sessionId, panelWidth),
+    reattach: (sessionId: string) => ipcRenderer.invoke('floating-agent:reattach', sessionId),
+    getSession: () => ipcRenderer.invoke('floating-agent:get-session'),
+    getConfig: () => ipcRenderer.invoke('floating-agent:get-config'),
+    toggleCollapse: () => ipcRenderer.invoke('floating-agent:toggle-collapse'),
+    onWindowBlur: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('app:window-blur', handler)
+      return () => ipcRenderer.removeListener('app:window-blur', handler)
+    },
+    onWindowFocus: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('app:window-focus', handler)
+      return () => ipcRenderer.removeListener('app:window-focus', handler)
+    },
+    onSessionChanged: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('floating-agent:session-changed', handler)
+      return () => ipcRenderer.removeListener('floating-agent:session-changed', handler)
+    },
+    onCollapseChanged: (callback: (collapsed: boolean) => void) => {
+      const handler = (_: unknown, collapsed: boolean) => callback(collapsed)
+      ipcRenderer.on('floating-agent:collapse-changed', handler)
+      return () => ipcRenderer.removeListener('floating-agent:collapse-changed', handler)
+    },
+  },
   window: {
     close: () => ipcRenderer.invoke('window:close')
   },
@@ -344,6 +371,11 @@ const api: ElectronAPI = {
         callback(sessionId, title)
       ipcRenderer.on('pty:title-change', handler)
       return () => ipcRenderer.removeListener('pty:title-change', handler)
+    },
+    onResizeNeeded: (callback: (sessionId: string) => void) => {
+      const handler = (_event: unknown, sessionId: string) => callback(sessionId)
+      ipcRenderer.on('pty:resize-needed', handler)
+      return () => ipcRenderer.removeListener('pty:resize-needed', handler)
     },
     onStats: (cb) => {
       const handler = (_event: unknown, stats: Record<string, import('@slayzone/types').ProcessStats>) => cb(stats)

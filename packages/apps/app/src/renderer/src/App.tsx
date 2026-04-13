@@ -415,6 +415,24 @@ function App(): React.JSX.Element {
     setAgentPanelState({ mode: nextMode, sessionIndex: (agentPanelState.sessionIndex ?? 0) + 1 })
   }, [agentMode, agentSessionId, agentPanelState.sessionIndex, setAgentPanelState])
 
+  // Floating agent panel: detach on blur, reattach on focus
+  const floatingDetachedRef = useRef(false)
+  useEffect(() => {
+    const unsubBlur = window.api.floatingAgent.onWindowBlur(() => {
+      if (agentPanelState.isOpen && agentSessionId) {
+        window.api.floatingAgent.detach(agentSessionId, agentPanelState.panelWidth)
+        floatingDetachedRef.current = true
+      }
+    })
+    const unsubFocus = window.api.floatingAgent.onWindowFocus(() => {
+      if (floatingDetachedRef.current && agentSessionId) {
+        window.api.floatingAgent.reattach(agentSessionId)
+        floatingDetachedRef.current = false
+      }
+    })
+    return () => { unsubBlur(); unsubFocus() }
+  }, [agentPanelState.isOpen, agentPanelState.panelWidth, agentSessionId])
+
   // Keyboard shortcuts
   useGuardedHotkeys(getKeys('new-task'), (e) => {
     if (projects.length > 0) { e.preventDefault(); trackShortcut(getKeys('new-task')); useDialogStore.getState().openCreateTask() }

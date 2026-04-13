@@ -517,7 +517,9 @@ export interface CreatePtyOptions {
 }
 
 export async function createPty(opts: CreatePtyOptions): Promise<{ success: boolean; error?: string }> {
-  const { win, sessionId, cwd, conversationId, existingConversationId, mode, initialPrompt, providerArgs, executionContext, type, initialCommand, resumeCommand, defaultFlags, patternAttention, patternWorking, patternError } = opts
+  const { win: originalWin, sessionId, cwd, conversationId, existingConversationId, mode, initialPrompt, providerArgs, executionContext, type, initialCommand, resumeCommand, defaultFlags, patternAttention, patternWorking, patternError } = opts
+  // Dynamic window lookup: allows redirectSessionWindow() to reroute events at runtime.
+  const getWin = (): BrowserWindow => sessions.get(sessionId)?.win ?? originalWin
   const taskId = taskIdFromSessionId(sessionId)
   const createStartedAt = Date.now()
   let spawnAttempt: { shell: string; shellArgs: string[]; hasPostSpawnCommand: boolean } | null = null
@@ -699,7 +701,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
     const shellSpawnMs = Date.now() - spawnStartTs
 
     sessions.set(sessionId, {
-      win,
+      win: originalWin,
       pty: ptyProcess,
       sessionId,
       taskId,
@@ -773,12 +775,13 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
         sessions.delete(sessionId)
         notifySessionChange()
       }, 100)
-      if (!win.isDestroyed()) {
+      const exitWin = getWin()
+      if (!exitWin.isDestroyed()) {
         try {
-          win.webContents.send('pty:title-change', sessionId, '')
+          exitWin.webContents.send('pty:title-change', sessionId, '')
         } catch { /* Window destroyed */ }
         try {
-          win.webContents.send('pty:exit', sessionId, exitCode)
+          exitWin.webContents.send('pty:exit', sessionId, exitCode)
         } catch {
           // Window destroyed, ignore
         }
@@ -847,6 +850,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
     const attachPtyHandlers = (target: pty.IPty): void => {
       // Forward data to renderer
       target.onData((data0) => {
+        const win = getWin() // Dynamic lookup for redirectSessionWindow()
         if (firstOutputTs === null) {
           firstOutputTs = Date.now()
           clearStartupTimeout()
@@ -1101,6 +1105,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       })
 
       target.onExit(({ exitCode }) => {
+        const win = getWin() // Dynamic lookup for redirectSessionWindow()
         clearStartupTimeout()
         clearEarlyExitWatchdog()
 
@@ -1467,6 +1472,14 @@ export function getPtyPids(): Map<string, number> {
 export function getState(sessionId: string): TerminalState | null {
   const session = sessions.get(sessionId)
   return session?.state ?? null
+}
+
+/** Redirect a PTY session's event output to a different BrowserWindow. */
+export function redirectSessionWindow(sessionId: string, newWin: BrowserWindow): boolean {
+  const session = sessions.get(sessionId)
+  if (!session) return false
+  session.win = newWin
+  return true
 }
 
 export function killAllPtys(): void {

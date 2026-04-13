@@ -416,6 +416,17 @@ export interface ElectronAPI {
     cliStatus: () => Promise<{ installed: boolean; path?: string }>
     installCli: () => Promise<{ ok: boolean; path?: string; permissionDenied?: boolean; elevationCancelled?: boolean; error?: string; pathNotInPATH?: boolean }>
   }
+  floatingAgent: {
+    detach: (sessionId: string, panelWidth: number) => Promise<void>
+    reattach: (sessionId: string) => Promise<void>
+    getSession: () => Promise<{ sessionId: string; cwd: string; mode: string } | null>
+    getConfig: () => Promise<{ style: string; position: string }>
+    toggleCollapse: () => Promise<void>
+    onWindowBlur: (callback: () => void) => () => void
+    onWindowFocus: (callback: () => void) => () => void
+    onSessionChanged: (callback: () => void) => () => void
+    onCollapseChanged: (callback: (collapsed: boolean) => void) => () => void
+  }
   window: {
     close: () => Promise<void>
   }
@@ -453,6 +464,7 @@ export interface ElectronAPI {
     onSessionDetected: (callback: (sessionId: string, conversationId: string) => void) => () => void
     onDevServerDetected: (callback: (sessionId: string, url: string) => void) => () => void
     onTitleChange: (callback: (sessionId: string, title: string) => void) => () => void
+    onResizeNeeded: (callback: (sessionId: string) => void) => () => void
     onStats: (cb: (stats: Record<string, ProcessStats>) => void) => () => void
     getState: (sessionId: string) => Promise<TerminalState | null>
     validate: (mode: TerminalMode) => Promise<ValidationResult[]>
