@@ -6,10 +6,10 @@ import { history } from '@milkdown/plugin-history'
 import { indent } from '@milkdown/plugin-indent'
 import { listener, listenerCtx } from '@milkdown/plugin-listener'
 import { replaceAll } from '@milkdown/utils'
-import { taskListPlugin } from '@slayzone/editor'
+import { noteVariant, taskListPlugin } from '@slayzone/editor'
 import { remarkFrontmatterPlugin, frontmatterSchema, frontmatterView } from './milkdown-frontmatter'
 import { useTheme } from '@slayzone/settings/client'
-import { getThemeEditorColors } from '@slayzone/ui'
+import { getThemeEditorColors, useAppearance } from '@slayzone/ui'
 
 // --- Component ---
 
@@ -25,7 +25,8 @@ interface MarkdownFileEditorProps {
 export function MarkdownFileEditor({ filePath, content, onChange, onSave, version }: MarkdownFileEditorProps) {
   const { editorThemeId, contentVariant } = useTheme()
   const themeColors = useMemo(() => getThemeEditorColors(editorThemeId, contentVariant), [editorThemeId, contentVariant])
-  const resolvedVariant = contentVariant
+  const { notesLineSpacing } = useAppearance()
+  const variant = noteVariant(notesLineSpacing)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
@@ -100,22 +101,15 @@ export function MarkdownFileEditor({ filePath, content, onChange, onSave, versio
     '--mk-fg': themeColors.foreground,
     '--mk-heading': themeColors.heading,
     '--mk-link': themeColors.link,
-    '--mk-code': themeColors.keyword,
+    '--mk-code-fg': themeColors.keyword,
     '--mk-code-bg': themeColors.selection,
-    '--mk-comment': themeColors.comment,
-    '--mk-string': themeColors.string,
-    backgroundColor: themeColors.background,
-    color: themeColors.foreground,
-    fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    '--mk-quote-border': themeColors.comment,
+    '--mk-hr-color': themeColors.comment,
   } as CSSProperties
 
   return (
-    <div className="h-full w-full overflow-auto">
-      <div
-        ref={containerRef}
-        className={`milkdown-editor milkdown-themed prose prose-sm ${resolvedVariant === 'dark' ? 'prose-invert' : ''} min-h-full flex flex-col max-w-none px-6 py-4 focus-within:outline-none`}
-        style={themeStyle}
-      />
+    <div className="mk-doc" data-variant={variant} data-themed="true" style={themeStyle}>
+      <div ref={containerRef} className="mk-doc-scroll" />
     </div>
   )
 }

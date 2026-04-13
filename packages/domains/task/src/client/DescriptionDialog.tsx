@@ -10,7 +10,7 @@ interface DescriptionDialogProps {
   onChange: (markdown: string) => void
   onSave: () => void
   fontFamily?: 'sans' | 'mono'
-  lineSpacing?: 'compact' | 'normal'
+  variant?: 'page' | 'compact' | 'inline'
   checkedHighlight?: boolean
   showToolbar?: boolean
   spellcheck?: boolean
@@ -28,7 +28,7 @@ function getWordCount(editor: Editor | null): number {
   } catch { return 0 }
 }
 
-export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave, fontFamily, lineSpacing, checkedHighlight, showToolbar, spellcheck, themeColors, assets, onAssetClick }: DescriptionDialogProps) {
+export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave, fontFamily, variant, checkedHighlight, showToolbar, spellcheck, themeColors, assets, onAssetClick }: DescriptionDialogProps) {
   const editorRef = useRef<Editor | null>(null)
   const [wordCount, setWordCount] = useState(0)
 
@@ -62,13 +62,13 @@ export function DescriptionDialog({ open, onOpenChange, value, onChange, onSave,
           value={value}
           onChange={handleChange}
           placeholder="Write your description..."
-          className="flex-1 min-h-0 px-5 py-4"
+          className="flex-1 min-h-0"
           testId="task-description-editor-fullscreen"
           autoFocus
           editorRef={editorRef}
           onReady={handleEditorReady}
           fontFamily={fontFamily}
-          lineSpacing={lineSpacing}
+          variant={variant}
           checkedHighlight={checkedHighlight}
           showToolbar={showToolbar}
           spellcheck={spellcheck}

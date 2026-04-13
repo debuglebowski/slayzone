@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type DragEvent } from 'react'
+import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type CSSProperties, type DragEvent } from 'react'
 import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ChevronDown, ImageDown, FileCode, Archive } from 'lucide-react'
 import {
   cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, PanelToggle, Button, Input,
@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from '@slayzone/ui'
-import { RichTextEditor } from '@slayzone/editor'
+import { RichTextEditor, noteVariant } from '@slayzone/editor'
 import type { RenderMode, TaskAsset, AssetFolder } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode, canExportAsPdf, canExportAsPng, canExportAsHtml } from '@slayzone/task/shared'
 import ReactMarkdown from 'react-markdown'
@@ -139,11 +139,22 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   scrollToLineRef?: React.MutableRefObject<((line: number) => void) | null>
 }) {
   const { notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
+  const variant = noteVariant(notesLineSpacing)
   const { editorThemeId, contentVariant } = useTheme()
   const themeColors: EditorThemeColors = useMemo(
     () => getThemeEditorColors(editorThemeId, contentVariant),
     [editorThemeId, contentVariant]
   )
+  const themeStyle = useMemo(() => ({
+    '--mk-bg': themeColors.background,
+    '--mk-fg': themeColors.foreground,
+    '--mk-heading': themeColors.heading,
+    '--mk-link': themeColors.link,
+    '--mk-code-fg': themeColors.keyword,
+    '--mk-code-bg': themeColors.selection,
+    '--mk-quote-border': themeColors.comment,
+    '--mk-hr-color': themeColors.comment,
+  } as CSSProperties), [themeColors])
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -229,7 +240,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   if (renderMode === 'markdown' && viewMode === 'preview') {
     return (
       <div className="flex-1 overflow-y-auto">
-        <RichTextEditor value={content ?? ''} onChange={handleChange} placeholder="Write markdown..." className="p-3" fontFamily={notesFontFamily} lineSpacing={notesLineSpacing} checkedHighlight={notesCheckedHighlight} showToolbar={notesShowToolbar} spellcheck={notesSpellcheck} themeColors={themeColors} />
+        <RichTextEditor value={content ?? ''} onChange={handleChange} placeholder="Write markdown..." variant={variant} fontFamily={notesFontFamily} checkedHighlight={notesCheckedHighlight} showToolbar={notesShowToolbar} spellcheck={notesSpellcheck} themeColors={themeColors} />
       </div>
     )
   }
@@ -238,9 +249,13 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
     return (
       <div className="flex-1 flex flex-row overflow-hidden">
         <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder="Write markdown..." spellCheck={false} />
-        <div className="flex-1 border-l border-border overflow-y-auto min-w-0">
-          <div className={cn('prose prose-sm dark:prose-invert max-w-none p-3', notesLineSpacing === 'compact' && 'prose-tight')}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ''}</ReactMarkdown>
+        <div className="flex-1 border-l border-border min-w-0 min-h-0">
+          <div className="mk-doc" data-variant={variant} style={themeStyle}>
+            <div className="mk-doc-scroll">
+              <div className="mk-doc-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ''}</ReactMarkdown>
+              </div>
+            </div>
           </div>
         </div>
       </div>

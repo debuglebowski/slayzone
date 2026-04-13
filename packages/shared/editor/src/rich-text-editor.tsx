@@ -94,8 +94,9 @@ interface RichTextEditorProps {
   autoFocus?: boolean
   editorRef?: MutableRefObject<Editor | null>
   onReady?: (editor: Editor) => void
+  /** Visual density / page-feel variant. Defaults to 'page'. */
+  variant?: 'page' | 'compact' | 'inline'
   fontFamily?: 'sans' | 'mono'
-  lineSpacing?: 'compact' | 'normal'
   checkedHighlight?: boolean
   showToolbar?: boolean
   spellcheck?: boolean
@@ -116,8 +117,8 @@ export function RichTextEditor({
   autoFocus,
   editorRef: externalEditorRef,
   onReady,
+  variant = 'page',
   fontFamily,
-  lineSpacing,
   checkedHighlight,
   showToolbar,
   spellcheck,
@@ -259,17 +260,10 @@ export function RichTextEditor({
     '--mk-fg': themeColors.foreground,
     '--mk-heading': themeColors.heading,
     '--mk-link': themeColors.link,
-    '--mk-code': themeColors.keyword,
+    '--mk-code-fg': themeColors.keyword,
     '--mk-code-bg': themeColors.selection,
-    '--mk-comment': themeColors.comment,
-    '--prose-body': themeColors.foreground,
-    '--prose-headings': themeColors.heading,
-    '--prose-links': themeColors.link,
-    '--prose-code': themeColors.keyword,
-    '--prose-selection': themeColors.selection,
-    '--prose-muted': themeColors.comment,
-    backgroundColor: themeColors.background,
-    color: themeColors.foreground,
+    '--mk-quote-border': themeColors.comment,
+    '--mk-hr-color': themeColors.comment,
     minHeight,
     maxHeight,
   } as CSSProperties : { minHeight, maxHeight }
@@ -277,14 +271,11 @@ export function RichTextEditor({
   return (
     <div
       data-testid={testId}
-      className={cn(
-        'w-full h-full flex flex-col',
-        fontFamily === 'mono' && 'font-mono',
-        lineSpacing === 'compact' && 'prose-tight',
-        checkedHighlight && 'checked-highlight',
-        themeColors && 'editor-themed rounded',
-        className
-      )}
+      className={cn('mk-doc', className)}
+      data-variant={variant}
+      data-font={fontFamily === 'mono' ? 'mono' : undefined}
+      data-checked-highlight={checkedHighlight ? 'true' : undefined}
+      data-themed={themeColors ? 'true' : undefined}
       style={themeStyle}
       spellCheck={spellcheck !== false}
     >
@@ -294,13 +285,7 @@ export function RichTextEditor({
           onCommand={handleCommand}
         />
       )}
-      <div
-        ref={containerRef}
-        className={cn(
-          'milkdown-editor prose prose-sm max-w-none flex-1 overflow-y-auto focus-within:outline-none',
-          themeColors ? 'milkdown-themed' : 'dark:prose-invert',
-        )}
-      />
+      <div ref={containerRef} className="mk-doc-scroll" />
       {mentionState?.active && mentionState.coords && assetsRef.current && assetsRef.current.length > 0 && (
         <AssetPicker
           items={assetsRef.current}

@@ -62,7 +62,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
-import { RichTextEditor } from '@slayzone/editor'
+import { RichTextEditor, noteVariant } from '@slayzone/editor'
 import { normalizeDescription, stripMarkdown, getExtensionFromTitle, getEffectiveRenderMode, RENDER_MODE_INFO } from '@slayzone/task/shared'
 import { useTheme, useDialogStore, type SearchFileContext } from '@slayzone/settings/client'
 import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog, SlayNudgeBanner, useSlayNudge } from '@slayzone/terminal'
@@ -2187,10 +2187,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onChange={(md) => { descriptionDirty.current = true; setDescriptionValue(md) }}
                   onBlur={handleDescriptionSave}
                   placeholder="Add description..."
-                  className="p-3"
                   testId="task-description-editor"
+                  variant={noteVariant(notesLineSpacing, 'inline')}
                   fontFamily={notesFontFamily}
-                  lineSpacing={notesLineSpacing}
                   checkedHighlight={notesCheckedHighlight}
                   showToolbar={notesShowToolbar}
                   spellcheck={notesSpellcheck}
@@ -2527,7 +2526,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         onChange={setDescriptionValue}
         onSave={handleDescriptionSave}
         fontFamily={notesFontFamily}
-        lineSpacing={notesLineSpacing}
+        variant={noteVariant(notesLineSpacing)}
         checkedHighlight={notesCheckedHighlight}
         showToolbar={notesShowToolbar}
         spellcheck={notesSpellcheck}

@@ -1,7 +1,9 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import type { CSSProperties } from 'react'
 import { useTheme } from '@slayzone/settings/client'
-import { getThemeEditorColors } from '@slayzone/ui'
+import { getThemeEditorColors, useAppearance } from '@slayzone/ui'
+import { noteVariant } from '@slayzone/editor'
 import { CodeEditor } from './CodeEditor'
 
 interface MarkdownSplitViewProps {
@@ -17,6 +19,19 @@ interface MarkdownSplitViewProps {
 export function MarkdownSplitView({ filePath, content, onChange, onSave, version, goToPosition, onGoToPositionApplied }: MarkdownSplitViewProps) {
   const { editorThemeId, contentVariant } = useTheme()
   const colors = getThemeEditorColors(editorThemeId, contentVariant)
+  const { notesLineSpacing } = useAppearance()
+  const variant = noteVariant(notesLineSpacing)
+
+  const themeStyle = {
+    '--mk-bg': colors.background,
+    '--mk-fg': colors.foreground,
+    '--mk-heading': colors.heading,
+    '--mk-link': colors.link,
+    '--mk-code-fg': colors.keyword,
+    '--mk-code-bg': colors.selection,
+    '--mk-quote-border': colors.comment,
+    '--mk-hr-color': colors.comment,
+  } as CSSProperties
 
   return (
     <div className="flex-1 flex flex-row overflow-hidden h-full">
@@ -31,9 +46,13 @@ export function MarkdownSplitView({ filePath, content, onChange, onSave, version
           onGoToPositionApplied={onGoToPositionApplied}
         />
       </div>
-      <div className="flex-1 border-l border-border overflow-y-auto min-w-0" style={{ background: colors.background, color: colors.foreground }}>
-        <div className="prose prose-sm dark:prose-invert max-w-none p-4">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <div className="flex-1 border-l border-border min-w-0 min-h-0">
+        <div className="mk-doc" data-variant={variant} style={themeStyle}>
+          <div className="mk-doc-scroll">
+            <div className="mk-doc-body">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            </div>
+          </div>
         </div>
       </div>
     </div>
