@@ -1,9 +1,11 @@
-import { useEffect, useState, type ChangeEvent } from 'react'
-import { ArrowUpCircle, Library, Link2Off, Lock, Store, Trash2 } from 'lucide-react'
-import { Button, Input, Label, Textarea, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { ArrowUpCircle, Library, Link2Off, Lock, RefreshCw, Store, Trash2 } from 'lucide-react'
+import { Button, cn, DiffView, Input, Label, Textarea, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import { repairSkillFrontmatter } from '../shared'
-import type { AiConfigItem, SkillUpdateInfo, SkillValidationState, UpdateAiConfigItemInput } from '../shared'
+import type { AiConfigItem, CliProvider, ProjectSkillStatus, SkillUpdateInfo, SkillValidationState, SyncHealth, UpdateAiConfigItemInput } from '../shared'
+import { PROVIDER_LABELS } from '../shared/provider-registry'
 import { getMarketplaceProvenance, getSkillFrontmatterActionLabel, getSkillValidation } from './skill-validation'
+import { aggregateProviderSyncHealth } from './sync-view-model'
 import { useContextManagerStore } from './useContextManagerStore'
 
 interface ContextItemEditorProps {
@@ -16,9 +18,20 @@ interface ContextItemEditorProps {
   updateInfo?: SkillUpdateInfo | null
   onMarketplaceUpdate?: () => void
   onUnlink?: () => void
+  syncStatus?: ProjectSkillStatus | null
+  onSyncToDisk?: () => Promise<void>
+  onSyncProviderToDisk?: (provider: CliProvider) => Promise<void>
 }
 
-export function ContextItemEditor({ item, validationState, onUpdate, onDelete, onClose, readOnly, updateInfo, onMarketplaceUpdate, onUnlink }: ContextItemEditorProps) {
+const PROVIDER_ROW_ORDER: CliProvider[] = ['claude', 'codex', 'cursor', 'gemini', 'opencode', 'qwen', 'copilot']
+
+interface ProviderRow {
+  provider: CliProvider
+  syncHealth: SyncHealth
+  diskContent: string | null
+}
+
+export function ContextItemEditor({ item, validationState, onUpdate, onDelete, onClose, readOnly, updateInfo, onMarketplaceUpdate, onUnlink, syncStatus, onSyncToDisk, onSyncProviderToDisk }: ContextItemEditorProps) {
   const provenance = getMarketplaceProvenance(item)
   const isMarketplaceBound = !!provenance
   const isLibraryLinked = !isMarketplaceBound && !!readOnly && item.scope === 'library'
@@ -29,6 +42,73 @@ export function ContextItemEditor({ item, validationState, onUpdate, onDelete, o
   const [content, setContent] = useState(item.content)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [syncingAll, setSyncingAll] = useState(false)
+  const [syncingProvider, setSyncingProvider] = useState<CliProvider | null>(null)
+  const [activeDiffProvider, setActiveDiffProvider] = useState<CliProvider | null>(null)
+
+  const { aggregatedHealth, providerRows, staleProviders } = useMemo(() => {
+    if (!syncStatus) {
+      return { aggregatedHealth: null, providerRows: [] as ProviderRow[], staleProviders: [] as CliProvider[] }
+    }
+    const health = aggregateProviderSyncHealth(syncStatus.providers)
+    const rows: ProviderRow[] = []
+    const stales: CliProvider[] = []
+    for (const provider of PROVIDER_ROW_ORDER) {
+      const entry = syncStatus.providers[provider]
+      if (!entry) continue
+      if (entry.syncReason === 'not_linked' && entry.syncHealth !== 'unmanaged') continue
+      rows.push({
+        provider,
+        syncHealth: entry.syncHealth,
+        diskContent: entry.diskContent ?? null
+      })
+      if (entry.syncHealth === 'stale') stales.push(provider)
+    }
+    return { aggregatedHealth: health, providerRows: rows, staleProviders: stales }
+  }, [syncStatus])
+
+  const isStale = aggregatedHealth === 'stale' && staleProviders.length > 0
+
+  useEffect(() => {
+    if (activeDiffProvider && !staleProviders.includes(activeDiffProvider)) {
+      setActiveDiffProvider(null)
+    }
+  }, [activeDiffProvider, staleProviders])
+
+  const autoSelectedItemRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (autoSelectedItemRef.current === item.id) return
+    autoSelectedItemRef.current = item.id
+    setActiveDiffProvider(staleProviders[0] ?? null)
+  }, [item.id, staleProviders])
+
+  const activeDiffDisk = activeDiffProvider ? (syncStatus?.providers[activeDiffProvider]?.diskContent ?? null) : null
+
+  const handleSyncAllToDisk = async () => {
+    if (!onSyncToDisk) return
+    setSyncingAll(true)
+    setError(null)
+    try {
+      await onSyncToDisk()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to sync')
+    } finally {
+      setSyncingAll(false)
+    }
+  }
+
+  const handleSyncProvider = async (provider: CliProvider) => {
+    if (!onSyncProviderToDisk) return
+    setSyncingProvider(provider)
+    setError(null)
+    try {
+      await onSyncProviderToDisk(provider)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to sync')
+    } finally {
+      setSyncingProvider(null)
+    }
+  }
   const effectiveValidation = validationState ?? getSkillValidation({
     type: item.type,
     slug: item.slug,
@@ -66,7 +146,85 @@ export function ContextItemEditor({ item, validationState, onUpdate, onDelete, o
   }
 
   return (
-    <div className="flex-1 flex flex-col space-y-3">
+    <div className="flex-1 flex flex-col space-y-3 min-h-0 overflow-y-auto">
+      {isStale && (
+        <div
+          className="rounded border border-amber-500/30 bg-amber-500/5"
+          data-testid="context-item-editor-stale-banner"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-amber-500/20 px-2.5 py-1.5">
+            <div className="flex items-center gap-2 text-xs">
+              <RefreshCw className="size-3.5 text-amber-500" />
+              <span className="font-medium text-amber-500">Skill is out of sync</span>
+            </div>
+            {onSyncToDisk && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-[11px] gap-1 border-amber-500/30"
+                onClick={() => void handleSyncAllToDisk()}
+                disabled={syncingAll || syncingProvider !== null}
+                data-testid="context-item-editor-sync-all-to-disk"
+              >
+                <ArrowUpCircle className="size-3" />
+                {syncingAll ? 'Syncing...' : 'Sync all'}
+              </Button>
+            )}
+          </div>
+          <div className="divide-y divide-amber-500/10">
+            {providerRows.map((row) => {
+              const stale = row.syncHealth === 'stale'
+              const active = activeDiffProvider === row.provider
+              const thisSyncing = syncingProvider === row.provider
+              return (
+                <div
+                  key={row.provider}
+                  className="flex items-center justify-between gap-3 px-2.5 py-1.5"
+                  data-testid={`context-item-editor-provider-row-${row.provider}`}
+                >
+                  <div className="flex items-center gap-2 text-xs">
+                    <span
+                      className={cn(
+                        'size-1.5 rounded-full',
+                        stale ? 'bg-amber-500' : row.syncHealth === 'synced' ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                      )}
+                    />
+                    <span className="font-medium">{PROVIDER_LABELS[row.provider]}</span>
+                    <span className="text-[11px] text-muted-foreground">{row.syncHealth}</span>
+                  </div>
+                  {stale && (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant={active ? 'default' : 'outline'}
+                        className="h-6 px-2 text-[11px]"
+                        onClick={() => setActiveDiffProvider(active ? null : row.provider)}
+                        data-testid={`context-item-editor-view-diff-${row.provider}`}
+                      >
+                        {active ? 'Hide diff' : 'View diff'}
+                      </Button>
+                      {onSyncProviderToDisk && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 px-2 text-[11px] gap-1"
+                          onClick={() => void handleSyncProvider(row.provider)}
+                          disabled={syncingAll || syncingProvider !== null}
+                          data-testid={`context-item-editor-sync-provider-${row.provider}`}
+                        >
+                          <ArrowUpCircle className="size-3" />
+                          {thisSyncing ? 'Syncing...' : 'Sync'}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="space-y-1">
         <Label className="text-xs">Filename</Label>
         <Input
@@ -236,33 +394,54 @@ export function ContextItemEditor({ item, validationState, onUpdate, onDelete, o
         </div>
       )}
 
-      <div className="flex-1 flex flex-col space-y-1">
+      <div className="flex-1 flex flex-col space-y-1 min-h-0">
         <div className="flex items-center justify-between gap-2">
-          <Label className="text-xs">Content</Label>
-          {isLibraryLinked && (
+          <Label className="text-xs">
+            {activeDiffProvider ? `Diff — ${PROVIDER_LABELS[activeDiffProvider]}` : 'Content'}
+          </Label>
+          {isLibraryLinked && !activeDiffProvider && (
             <div className="flex items-center gap-1.5 text-[11px] text-amber-500">
               <Lock className="size-3" />
               <span>Open this skill in the library to edit it.</span>
             </div>
           )}
         </div>
-        <Textarea
-          data-testid="context-item-editor-content"
-          className={`flex-1 min-h-48 max-h-none field-sizing-fixed font-mono text-sm resize-none ${effectiveReadOnly ? 'opacity-50 cursor-not-allowed focus-visible:ring-0 focus-visible:border-input' : ''}`}
-          placeholder="Write your content here..."
-          value={content}
-          readOnly={effectiveReadOnly}
-          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => {
-            setContent(e.target.value)
-            setError(null)
-          }}
-          onBlur={(e: ChangeEvent<HTMLTextAreaElement>) => {
-            if (effectiveReadOnly) return
-            const nextContent = e.currentTarget.value
-            setContent(nextContent)
-            void save({ content: nextContent })
-          }}
-        />
+        {activeDiffProvider ? (
+          activeDiffDisk !== null ? (
+            <DiffView
+              left={activeDiffDisk}
+              right={item.content}
+              leftLabel="On disk"
+              rightLabel="In app"
+              className="flex-1 min-h-0"
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center rounded border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+              File missing on disk. Click Sync to write it.
+            </div>
+          )
+        ) : (
+          <Textarea
+            data-testid="context-item-editor-content"
+            className={cn(
+              'flex-1 min-h-48 max-h-none field-sizing-fixed font-mono text-sm resize-none',
+              effectiveReadOnly && 'opacity-50 cursor-not-allowed focus-visible:ring-0 focus-visible:border-input'
+            )}
+            placeholder="Write your content here..."
+            value={content}
+            readOnly={effectiveReadOnly}
+            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => {
+              setContent(e.target.value)
+              setError(null)
+            }}
+            onBlur={(e: ChangeEvent<HTMLTextAreaElement>) => {
+              if (effectiveReadOnly) return
+              const nextContent = e.currentTarget.value
+              setContent(nextContent)
+              void save({ content: nextContent })
+            }}
+          />
+        )}
       </div>
 
       {error && (

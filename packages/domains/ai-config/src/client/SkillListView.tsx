@@ -200,9 +200,6 @@ function SkillRow({
               Library
             </span>
           )}
-          {syncHealth === 'stale' && (
-            <StatusBadge syncHealth={syncHealth} />
-          )}
           {hasUpdate && (
             <button
               onClick={(e) => { e.stopPropagation(); onMarketplaceUpdate?.(item.id) }}
@@ -214,6 +211,9 @@ function SkillRow({
           )}
         </div>
       </div>
+      {syncHealth === 'stale' && (
+        <StatusBadge syncHealth={syncHealth} />
+      )}
       {showLineCount && (
         <span className="shrink-0 text-[10px] text-muted-foreground/60">{item.content.split('\n').length}L</span>
       )}

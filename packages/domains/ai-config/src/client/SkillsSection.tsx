@@ -10,7 +10,7 @@ import { AddItemPicker } from './AddItemPicker'
 import { SkillViewToggle, type SkillViewMode } from './SkillViewToggle'
 import { getSkillValidation } from './skill-validation'
 import { buildDefaultSkillContent } from '../shared'
-import type { AiConfigItem, AiConfigScope, CliProvider, ConfigLevel, SyncHealth, SkillUpdateInfo, UpdateAiConfigItemInput } from '../shared'
+import type { AiConfigItem, AiConfigScope, CliProvider, ConfigLevel, ProjectSkillStatus, SyncHealth, SkillUpdateInfo, UpdateAiConfigItemInput } from '../shared'
 import { aggregateProviderSyncHealth } from './sync-view-model'
 import { useContextManagerStore } from './useContextManagerStore'
 
@@ -34,6 +34,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   const [items, setItems] = useState<AiConfigItem[]>([])
   const [linkedIds, setLinkedIds] = useState<string[]>([])
   const [syncHealthMap, setSyncHealthMap] = useState<Map<string, SyncHealth>>(new Map())
+  const [statusMap, setStatusMap] = useState<Map<string, ProjectSkillStatus>>(new Map())
   const [loadError, setLoadError] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
@@ -46,6 +47,19 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   const [updateMap, setUpdateMap] = useState<Map<string, SkillUpdateInfo>>(new Map())
 
   const bumpVersion = useCallback(() => setVersion(v => v + 1), [])
+
+  const refreshSyncStatus = useCallback(async () => {
+    if (!isProject || !projectId || !projectPath) return
+    const linked = await window.api.aiConfig.getProjectSkillsStatus(projectId, projectPath)
+    const healthMap = new Map<string, SyncHealth>()
+    const newStatusMap = new Map<string, ProjectSkillStatus>()
+    for (const s of linked) {
+      healthMap.set(s.item.id, aggregateProviderSyncHealth(s.providers))
+      newStatusMap.set(s.item.id, s)
+    }
+    setSyncHealthMap(healthMap)
+    setStatusMap(newStatusMap)
+  }, [isProject, projectId, projectPath])
 
   useEffect(() => {
     let stale = false
@@ -62,6 +76,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
         })
         const newLinkedIds: string[] = []
         const healthMap = new Map<string, SyncHealth>()
+        const newStatusMap = new Map<string, ProjectSkillStatus>()
         if (isProject && projectId && projectPath) {
           const linked = await window.api.aiConfig.getProjectSkillsStatus(projectId, projectPath)
           const ids = new Set(rows.map(r => r.id))
@@ -69,12 +84,14 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
             newLinkedIds.push(s.item.id)
             if (!ids.has(s.item.id)) rows.push(s.item)
             healthMap.set(s.item.id, aggregateProviderSyncHealth(s.providers))
+            newStatusMap.set(s.item.id, s)
           }
         }
         if (stale) return
         setItems(rows)
         setLinkedIds(newLinkedIds)
         setSyncHealthMap(healthMap)
+        setStatusMap(newStatusMap)
         setLoadError(null)
       } catch {
         if (stale) return
@@ -114,8 +131,11 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
 
   const handleUpdateItem = useCallback(async (id: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
     const updated = await window.api.aiConfig.updateItem({ id, ...patch })
-    if (updated) setItems(prev => prev.map(i => i.id === updated.id ? updated : i))
-  }, [])
+    if (updated) {
+      setItems(prev => prev.map(i => i.id === updated.id ? updated : i))
+      void refreshSyncStatus()
+    }
+  }, [refreshSyncStatus])
 
   const handleDeleteItem = useCallback(async (id: string) => {
     await window.api.aiConfig.deleteItem(id)
@@ -130,6 +150,18 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
     if (updated) setItems(prev => prev.map(i => i.id === updated.id ? (updated as AiConfigItem) : i))
     setUpdateMap(prev => { const next = new Map(prev); next.delete(itemId); return next })
   }, [updateMap])
+
+  const handleSyncSkillToDisk = useCallback(async (itemId: string) => {
+    if (!isProject || !projectId || !projectPath) return
+    await window.api.aiConfig.syncAll({ projectId, projectPath, itemId })
+    await refreshSyncStatus()
+  }, [isProject, projectId, projectPath, refreshSyncStatus])
+
+  const handleSyncSkillProviderToDisk = useCallback(async (itemId: string, provider: CliProvider) => {
+    if (!isProject || !projectId || !projectPath) return
+    await window.api.aiConfig.syncAll({ projectId, projectPath, itemId, providers: [provider] })
+    await refreshSyncStatus()
+  }, [isProject, projectId, projectPath, refreshSyncStatus])
 
   const handleUnlink = useCallback(async (target: AiConfigItem) => {
     const hasMarketplace = (() => {
@@ -255,6 +287,9 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
           updateInfo={updateMap.get(selectedItem.id) ?? null}
           onMarketplaceUpdate={() => handleMarketplaceUpdate(selectedItem.id)}
           onUnlink={() => handleUnlink(selectedItem)}
+          syncStatus={statusMap.get(selectedItem.id) ?? null}
+          onSyncToDisk={() => handleSyncSkillToDisk(selectedItem.id)}
+          onSyncProviderToDisk={(provider) => handleSyncSkillProviderToDisk(selectedItem.id, provider)}
         />,
         editorTarget
       )}
