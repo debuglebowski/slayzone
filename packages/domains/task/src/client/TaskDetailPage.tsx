@@ -954,12 +954,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setPanelVisibility(newVisibility)
       // Auto-focus panel content so scope tracker detects the right scope
       if (panelId === 'browser' && active) {
-        // Create a fresh tab when reopening with no tabs
-        if (browserTabs.tabs.length === 0) {
-          const newTab = { id: `tab-${crypto.randomUUID().slice(0, 8)}`, url: 'about:blank', title: 'New Tab' }
-          setBrowserTabs({ tabs: [newTab], activeTabId: newTab.id })
-        }
-        requestAnimationFrame(() => browserPanelRef.current?.focus())
+        requestAnimationFrame(() => {
+          // Create a fresh tab when reopening with no tabs (honors browserDefaultUrl)
+          if (browserTabsRef.current.tabs.length === 0) {
+            browserPanelRef.current?.newTab()
+          }
+          browserPanelRef.current?.focus()
+        })
       }
       // Persist to DB
       const updated = await window.api.db.updateTask({
@@ -1060,19 +1061,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         }
         return
       }
-      if (matchesShortcut(e, keys('panel-terminal'))) {
-        // Cmd+T opens a new browser tab when browser panel is focused
-        if (lastFocusedPanelRef.current === 'browser' && panelVisibility.browser && isBuiltinEnabled('browser', 'task')) {
-          e.preventDefault()
-          const newTab = { id: `tab-${crypto.randomUUID().slice(0, 8)}`, url: 'about:blank', title: 'New Tab' }
-          setBrowserTabs(prev => ({ tabs: [...prev.tabs, newTab], activeTabId: newTab.id }))
-          requestAnimationFrame(() => browserPanelRef.current?.focusUrlBar())
-          return
-        }
-        if (isBuiltinEnabled('terminal', 'task')) {
-          e.preventDefault()
-          handlePanelToggle('terminal', !panelVisibility.terminal)
-        }
+      // Cmd+T: new browser tab when browser panel is open
+      if (matchesShortcut(e, keys('browser-new-tab')) && panelVisibility.browser && isBuiltinEnabled('browser', 'task')) {
+        e.preventDefault()
+        browserPanelRef.current?.newTab()
+        requestAnimationFrame(() => browserPanelRef.current?.focusUrlBar())
+        return
+      }
+      if (matchesShortcut(e, keys('panel-terminal')) && isBuiltinEnabled('terminal', 'task')) {
+        e.preventDefault()
+        handlePanelToggle('terminal', !panelVisibility.terminal)
         return
       }
       if (matchesShortcut(e, keys('panel-processes')) && isBuiltinEnabled('processes', 'task')) {

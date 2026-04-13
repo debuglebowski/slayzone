@@ -146,10 +146,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
 
     const handleKeyDown = withModalGuard((e: KeyboardEvent) => {
       if (useShortcutStore.getState().isRecording) return
-      // New group (skip when browser panel is focused — Cmd+T creates a browser tab instead)
+      // New group
       if (matchesShortcut(e, useShortcutStore.getState().getKeys('terminal-new-group'))) {
-        const target = document.activeElement as HTMLElement | null
-        if (target?.closest('[data-browser-panel]')) return
         e.preventDefault()
         pendingFocusRef.current = true
         createTab()

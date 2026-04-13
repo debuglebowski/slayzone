@@ -284,36 +284,34 @@ test.describe('Browser panel', () => {
     await expect(btn).not.toHaveClass(/text-green/)
   })
 
-  test('Cmd+T passes through by default, captured when active', async ({ mainWindow }) => {
+  test('Cmd+T creates new browser tab when panel is open', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const btn = keyboardPassthroughBtn(mainWindow)
     await expect(btn).toBeEnabled({ timeout: 10000 })
 
-    // Ensure capture is off
+    // Ensure capture is off (app handles Cmd+T)
     if (await btn.evaluate(el => el.className.includes('text-green'))) {
       await btn.click()
     }
 
-    // Focus browser panel, press Cmd+T — should NOT create a tab (intercepted by app)
-    await mainWindow.locator('[data-browser-panel]').first().click()
+    // Cmd+T from anywhere → new tab + URL bar focused
+    await focusForAppShortcut(mainWindow)
     const countBefore = await tabEntries(mainWindow).count()
     await mainWindow.keyboard.press('Meta+t')
-    expect(await tabEntries(mainWindow).count()).toBe(countBefore)
+    await expect(tabEntries(mainWindow)).toHaveCount(countBefore + 1)
+    await expect(urlInput(mainWindow)).toBeFocused()
 
-    // Enable capture, press Cmd+T — should create a tab (browser interprets Cmd+T as new tab)
-    await btn.click()
-    await expect(btn).toHaveClass(/text-green/)
-    await mainWindow.locator('[data-browser-panel]').first().click()
-    const countWithCapture = await tabEntries(mainWindow).count()
+    // Clean up created tab
+    await tabEntries(mainWindow).nth(countBefore).locator('.lucide-x').click({ force: true })
+    await expect(tabEntries(mainWindow)).toHaveCount(countBefore)
+  })
+
+  test('Cmd+T does nothing when browser panel is closed', async ({ mainWindow }) => {
+    await ensureBrowserPanelHidden(mainWindow)
+    await focusForAppShortcut(mainWindow)
     await mainWindow.keyboard.press('Meta+t')
-    await expect(tabEntries(mainWindow)).toHaveCount(countWithCapture + 1)
-
-    // Clean up
-    const count = await tabEntries(mainWindow).count()
-    await tabEntries(mainWindow).nth(count - 1).locator('.lucide-x').click({ force: true })
-    await expect(tabEntries(mainWindow)).toHaveCount(count - 1)
-
-    await btn.click()
+    // Panel still hidden, no tab UI visible
+    await expect(urlInput(mainWindow)).not.toBeVisible()
   })
 
   test('keyboard passthrough IPC syncs to main process', async ({ mainWindow }) => {

@@ -255,7 +255,7 @@ describe('getBlockedWebPanelKeys', () => {
     expect(blocked.has('o')).toBe(true) // panel-terminal (mod+o)
     expect(blocked.has('p')).toBe(true) // panel-processes (mod+p)
     expect(blocked.has('b')).toBe(true) // panel-browser (mod+b)
-    expect(blocked.has('s')).toBe(true) // panel-settings (mod+s)
+    expect(blocked.has('t')).toBe(true) // browser-new-tab (mod+t)
   })
 
   it('does NOT include terminal/editor/browser scope shortcuts', () => {

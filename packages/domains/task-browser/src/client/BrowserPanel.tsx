@@ -107,6 +107,7 @@ export interface BrowserPanelHandle {
   reload: () => void
   focusUrlBar: () => void
   getActiveViewId: () => string | null
+  newTab: (url?: string) => void
 }
 
 function generateTabId(): string {
@@ -1023,8 +1024,9 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       urlInputRef.current?.focus()
       urlInputRef.current?.select()
     },
-    getActiveViewId: () => activeViewId
-  }), [handlePickElement, activeActions, findMode, closeFindMode])
+    getActiveViewId: () => activeViewId,
+    newTab: (url?: string) => createNewTab(url)
+  }), [handlePickElement, activeActions, findMode, closeFindMode, createNewTab])
 
   useEffect(() => {
     return () => {
