@@ -38,7 +38,7 @@ const MARGIN = 0
 // --- State machine wiring ---
 
 let state: State = { kind: 'attached' }
-let ctx: Context = { enabled: true, panelOpen: false, sessionId: null, collapsed: true }
+let ctx: Context = { enabled: false, panelOpen: false, sessionId: null, collapsed: true }
 
 let mainWindow: BrowserWindow | null = null
 let floatingAgentWindow: BrowserWindow | null = null
@@ -346,7 +346,6 @@ function createFloatingAgentWindow(): BrowserWindow {
     width: COLLAPSED_WIDTH,
     height: COLLAPSED_HEIGHT,
     show: false,
-    alwaysOnTop: true,
     frame: false,
     skipTaskbar: true,
     hasShadow: true,
@@ -355,7 +354,6 @@ function createFloatingAgentWindow(): BrowserWindow {
     resizable: false,
     maximizable: false,
     fullscreenable: false,
-    ...(process.platform === 'darwin' ? { visibleOnAllWorkspaces: true } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -367,6 +365,7 @@ function createFloatingAgentWindow(): BrowserWindow {
   const url = is.dev && process.env['ELECTRON_RENDERER_URL']
     ? `${process.env['ELECTRON_RENDERER_URL']}?floating=agent`
     : `file://${join(__dirname, '../renderer/index.html')}?floating=agent`
+  win.setAlwaysOnTop(true, 'pop-up-menu')
   win.loadURL(url)
 
   win.on('focus', () => dispatch({ kind: 'floating-focus' }))

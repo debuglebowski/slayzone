@@ -14,7 +14,7 @@ const DEFAULT_STATE: AgentPanelState = {
   isOpen: false,
   panelWidth: DEFAULT_AGENT_PANEL_WIDTH,
   sessionIndex: 0,
-  floatingEnabled: true
+  floatingEnabled: false
 }
 
 const SETTINGS_KEY = 'agentPanelState'

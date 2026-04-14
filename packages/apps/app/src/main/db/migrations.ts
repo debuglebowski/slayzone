@@ -1928,6 +1928,23 @@ const migrations: Migration[] = [
         ALTER TABLE projects ADD COLUMN icon_image_path TEXT;
       `)
     }
+  },
+  {
+    version: 107,
+    up: (db) => {
+      // Disable floating agent panel by default — alwaysOnTop + visibleOnAllWorkspaces
+      // broke macOS tiling window managers (Magnet, Rectangle). Reset existing users
+      // who had the old default (true) so they don't stay broken.
+      const row = db.prepare("SELECT value FROM settings WHERE key = 'agentPanelState'").get() as { value: string } | undefined
+      if (!row) return
+      try {
+        const state = JSON.parse(row.value)
+        if (state.floatingEnabled === true) {
+          state.floatingEnabled = false
+          db.prepare("UPDATE settings SET value = ? WHERE key = 'agentPanelState'").run(JSON.stringify(state))
+        }
+      } catch { /* malformed JSON, skip */ }
+    }
   }
 ]
 
