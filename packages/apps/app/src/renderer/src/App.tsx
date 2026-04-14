@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
 import { initShortcuts } from './shortcut-init'
-import { AlertTriangle, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen } from 'lucide-react'
+import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -72,6 +72,7 @@ import { useHomePanel, HOME_PANEL_ORDER, HOME_PANEL_SIZE_KEY } from '@/hooks/use
 import { useTerminalStateTracking } from '@/hooks/useTerminalStateTracking'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
 import { useTabColors } from '@/hooks/useTabColors'
+import { useVisibleTabs } from '@/hooks/useVisibleTabs'
 import { useDiagnosticsSync } from '@/hooks/useDiagnosticsSync'
 // Lazy-loaded: heavy components not needed for first paint
 const TaskDetailDataLoader = lazy(() => import('@slayzone/task/client/TaskDetailDataLoader').then(m => ({ default: m.TaskDetailDataLoader })))
@@ -357,6 +358,9 @@ function App(): React.JSX.Element {
   // Task lookup map (used for tab props and active-tab project switching)
   const tasksMap = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
 
+  // Visible tabs (project-scoped filtering — purely visual, full tabs stay mounted)
+  const { visibleTabs, visibleActiveIndex, toFullIndex, toVisibleIndex } = useVisibleTabs(tabs, tasksMap)
+
   // Auto-switch project when activating a task tab
   const activeTab = tabs[activeTabIndex]
   const activeTaskProjectId = activeTab?.type === 'task' ? tasksMap.get(activeTab.taskId)?.project_id : undefined
@@ -430,7 +434,9 @@ function App(): React.JSX.Element {
   }, [])
 
   // Shortcut display strings (reactive to user customization)
+  const projectScopedTabs = useTabStore((s) => s.projectScopedTabs)
   const explodeModeShortcut = useShortcutDisplay('explode-mode')
+  const projectTabsShortcut = useShortcutDisplay('toggle-project-tabs')
   const newTempTaskShortcut = useShortcutDisplay('new-temp-task')
   const panelGitShortcut = useShortcutDisplay('panel-git')
   const panelEditorShortcut = useShortcutDisplay('panel-editor')
@@ -591,7 +597,7 @@ function App(): React.JSX.Element {
   useGuardedHotkeys('mod+1,mod+2,mod+3,mod+4,mod+5,mod+6,mod+7,mod+8,mod+9', (e) => {
     e.preventDefault()
     const num = parseInt(e.key, 10)
-    if (num < tabs.length) setActiveTabIndex(num)
+    if (num < visibleTabs.length) setActiveTabIndex(toFullIndex(num))
   }, { enableOnFormTags: true, enabled: !isRecording })
 
   useGuardedHotkeys('mod+shift+1,mod+shift+2,mod+shift+3,mod+shift+4,mod+shift+5,mod+shift+6,mod+shift+7,mod+shift+8,mod+shift+9', (e) => {
@@ -601,7 +607,8 @@ function App(): React.JSX.Element {
   }, { enableOnFormTags: true, enabled: !isRecording })
 
   const navigateCycle = useCallback((direction: 1 | -1) => {
-    const cycle: ('context' | number)[] = [...tabCycleOrder]
+    const filtered = tabCycleOrder.filter((i) => toVisibleIndex(i) >= 0)
+    const cycle: ('context' | number)[] = [...filtered]
     if (contextManagerEnabled && cycle.length > 0) cycle.splice(1, 0, 'context')
     if (cycle.length === 0) return
     const { activeTabIndex: idx, activeView: view } = useTabStore.getState()
@@ -614,7 +621,7 @@ function App(): React.JSX.Element {
       useTabStore.getState().setActiveView('tabs')
       setActiveTabIndex(target)
     }
-  }, [tabCycleOrder, contextManagerEnabled, setActiveTabIndex])
+  }, [tabCycleOrder, toVisibleIndex, contextManagerEnabled, setActiveTabIndex])
 
   useGuardedHotkeys(getKeys('next-tab'), (e) => {
     e.preventDefault()
@@ -627,6 +634,8 @@ function App(): React.JSX.Element {
   }, { enableOnFormTags: true, enabled: !isRecording })
 
   useGuardedHotkeys(getKeys('reopen-closed-tab'), (e) => { e.preventDefault(); track('tab_reopened'); reopenClosedTab() }, { enableOnFormTags: true, enabled: !isRecording })
+
+  useGuardedHotkeys(getKeys('toggle-project-tabs'), (e) => { e.preventDefault(); trackShortcut(getKeys('toggle-project-tabs')); useTabStore.getState().toggleProjectScopedTabs() }, { enableOnFormTags: true, enabled: !isRecording })
 
   useGuardedHotkeys(getKeys('complete-close-tab'), (e) => {
     e.preventDefault()
@@ -989,9 +998,9 @@ function App(): React.JSX.Element {
           <div id="right-main" className="flex-1 flex flex-col min-w-0 min-h-0">
           <div className={zenMode ? "pl-16" : ""}>
             <TabBar
-              tabs={tabs} activeIndex={activeTabIndex} activeView={activeView} terminalStates={terminalStates}
+              tabs={visibleTabs} activeIndex={visibleActiveIndex} activeView={activeView} terminalStates={terminalStates}
               projectColors={taskProjectColors} worktreeColors={taskWorktreeColors}
-              onTabClick={(i) => setActiveTabIndex(i)} onTabClose={closeTab} onTabReorder={reorderTabs}
+              onTabClick={(i) => setActiveTabIndex(toFullIndex(i))} onTabClose={(i) => closeTab(toFullIndex(i))} onTabReorder={(from, to) => reorderTabs(toFullIndex(from), toFullIndex(to))}
               onTabRename={async (taskId, title) => { const t = await window.api.db.updateTask({ id: taskId, title }); updateTask(t) }}
               leftContent={contextManagerEnabled ? (
                 <Tooltip><TooltipTrigger asChild>
@@ -1023,6 +1032,12 @@ function App(): React.JSX.Element {
                   <UsagePopover data={usageData} onRefresh={refreshUsage} />
                   <div className="w-4" />
                   <Tooltip><TooltipTrigger asChild>
+                    <button onClick={() => useTabStore.getState().toggleProjectScopedTabs()}
+                      className={cn("h-7 w-7 flex items-center justify-center transition-colors border-b-2", projectScopedTabs ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground")}>
+                      <FolderClosed className="size-4" />
+                    </button>
+                  </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{projectScopedTabs ? 'Show all tabs' : 'Show project tabs only'} ({projectTabsShortcut})</TooltipContent></Tooltip>
+                  <Tooltip><TooltipTrigger asChild>
                     <button disabled={openTaskIds.length < 2} onClick={() => setExplodeMode((prev) => !prev)}
                       className={cn("h-7 w-7 flex items-center justify-center transition-colors border-b-2", explodeMode ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground", openTaskIds.length < 2 && "opacity-30 pointer-events-none")}>
                       <LayoutGrid className="size-4" />
@@ -1052,11 +1067,12 @@ function App(): React.JSX.Element {
             <div
               className={cn("flex-1 min-w-0 min-h-0 rounded-lg overflow-hidden", explodeMode ? "grid gap-1 p-1" : "relative")}
               style={{
-                ...(explodeMode ? (() => { const cols = Math.ceil(Math.sqrt(openTaskIds.length)); const rows = Math.ceil(openTaskIds.length / cols); return { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` } })() : undefined),
+                ...(explodeMode ? (() => { const visibleTaskCount = visibleTabs.filter(t => t.type === 'task').length; const cols = Math.ceil(Math.sqrt(visibleTaskCount)); const rows = Math.ceil(visibleTaskCount / cols); return { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` } })() : undefined),
               }}
             >
               {tabs.map((tab, i) => {
-                if (explodeMode && tab.type !== 'task') return null
+                const isVisible = toVisibleIndex(i) >= 0
+                if (explodeMode && (tab.type !== 'task' || !isVisible)) return null
                 const isViewActive = activeView === 'tabs' && i === activeTabIndex
                 return (
                 <div

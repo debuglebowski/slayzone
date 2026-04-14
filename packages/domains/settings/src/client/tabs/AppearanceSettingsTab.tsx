@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Info } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Switch, Tooltip, TooltipTrigger, TooltipContent, unifiedThemes, getThemeVariant } from '@slayzone/ui'
 import { useTheme } from '../ThemeContext'
+import { useTabStore } from '../useTabStore'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 function SettingLabel({ children, tip }: { children: React.ReactNode; tip: string }) {
@@ -39,6 +40,7 @@ function ThemeSelect({ value, onChange }: { value: string; onChange: (id: string
 }
 
 export function AppearanceSettingsTab() {
+  const projectScopedTabs = useTabStore((s) => s.projectScopedTabs)
   const {
     preference, setPreference,
     themeId, setThemeId,
@@ -267,6 +269,13 @@ export function AppearanceSettingsTab() {
                 setReduceMotion(checked)
                 window.api.settings.set('reduce_motion', checked ? '1' : '0')
               }}
+            />
+          </div>
+          <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+            <SettingLabel tip="Only show tabs from the active project in the tab bar">Project-scoped tabs</SettingLabel>
+            <Switch
+              checked={projectScopedTabs}
+              onCheckedChange={(checked) => useTabStore.getState().setProjectScopedTabs(checked)}
             />
           </div>
         </CardContent>

@@ -41,6 +41,7 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'new-temp-task', label: 'New Temporary Task', group: 'Tabs', defaultKeys: 'mod+shift+n', scope: 'global' },
   { id: 'sync-session-id', label: 'Sync Detected Session ID', group: 'General', defaultKeys: 'mod+shift+u', scope: 'global' },
   { id: 'switch-project-1-9', label: 'Switch Project 1–9', group: 'Tabs', defaultKeys: 'mod+shift+1-9', scope: 'global', customizable: false },
+  { id: 'toggle-project-tabs', label: 'Project-Scoped Tabs', group: 'Tabs', defaultKeys: 'mod+shift+h', scope: 'global' },
 
   // Task Panels (task scope)
   { id: 'panel-terminal', label: 'Terminal', group: 'Task Panels', defaultKeys: 'mod+o', scope: 'task' },

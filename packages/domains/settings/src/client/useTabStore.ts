@@ -41,6 +41,7 @@ interface TabState {
   activeView: ActiveView
   selectedProjectId: string
   closedTabs: TaskTab[]
+  projectScopedTabs: boolean
   isLoaded: boolean
 
   // Internal — synced by App.tsx, not subscribed to by components
@@ -50,6 +51,8 @@ interface TabState {
   setActiveTabIndex: (index: number) => void
   setActiveView: (view: ActiveView) => void
   setSelectedProjectId: (id: string) => void
+  setProjectScopedTabs: (enabled: boolean) => void
+  toggleProjectScopedTabs: () => void
   setTabs: (tabs: Tab[]) => void
   reorderTabs: (from: number, to: number) => void
   openTask: (taskId: string) => void
@@ -60,7 +63,7 @@ interface TabState {
   reopenClosedTab: () => void
 
   // Internal
-  _loadState: (state: { tabs: Tab[]; activeTabIndex: number; activeView?: ActiveView; selectedProjectId: string }) => void
+  _loadState: (state: { tabs: Tab[]; activeTabIndex: number; activeView?: ActiveView; selectedProjectId: string; projectScopedTabs?: boolean }) => void
 }
 
 function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup): number {
@@ -92,6 +95,7 @@ export const useTabStore = create<TabState>()(
     activeView: 'tabs' as ActiveView,
     selectedProjectId: '',
     closedTabs: [],
+    projectScopedTabs: false,
     isLoaded: false,
     _taskLookup: { tasks: [], projects: [] },
 
@@ -100,6 +104,10 @@ export const useTabStore = create<TabState>()(
     setActiveView: (view) => set({ activeView: view }),
 
     setSelectedProjectId: (id) => set({ selectedProjectId: id }),
+
+    setProjectScopedTabs: (enabled) => set({ projectScopedTabs: enabled }),
+
+    toggleProjectScopedTabs: () => set((s) => ({ projectScopedTabs: !s.projectScopedTabs })),
 
     setTabs: (tabs) => set({ tabs }),
 
@@ -217,6 +225,7 @@ export const useTabStore = create<TabState>()(
         activeTabIndex: clampedIndex,
         activeView,
         selectedProjectId: typeof state.selectedProjectId === 'string' ? state.selectedProjectId : '',
+        projectScopedTabs: !!state.projectScopedTabs,
         isLoaded: true
       })
     }
@@ -253,7 +262,7 @@ export const tabStoreReady: Promise<void> = (typeof window !== 'undefined' && wi
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 useTabStore.subscribe(
-  (state) => ({ tabs: state.tabs, activeTabIndex: state.activeTabIndex, activeView: state.activeView, selectedProjectId: state.selectedProjectId }),
+  (state) => ({ tabs: state.tabs, activeTabIndex: state.activeTabIndex, activeView: state.activeView, selectedProjectId: state.selectedProjectId, projectScopedTabs: state.projectScopedTabs }),
   (slice) => {
     if (!useTabStore.getState().isLoaded) return
     if (_debounceTimer) clearTimeout(_debounceTimer)
