@@ -1,6 +1,42 @@
 # Changelog
 
 
+## v0.19.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.18.0...v0.19.0)
+
+### 🚀 Enhancements
+
+- **tabs:** Add project-scoped tabs setting & Cmd+Shift+H shortcut ([ff77d342](https://github.com/debuglebowski/slayzone/commit/ff77d342))
+- **ai-config:** Force-enable default terminal mode provider ([63bdd09d](https://github.com/debuglebowski/slayzone/commit/63bdd09d))
+- **settings:** Add default provider select to Providers tab ([04e550d4](https://github.com/debuglebowski/slayzone/commit/04e550d4))
+- **projects:** Project lock — duration, rate limit, schedule ([d9f6071c](https://github.com/debuglebowski/slayzone/commit/d9f6071c))
+- **cli:** Add $SLAYZONE_PROJECT_ID env fallback for --project ([3c9cf0be](https://github.com/debuglebowski/slayzone/commit/3c9cf0be))
+- **ai-config:** Show stale skill dot in context manager nav ([5bb86899](https://github.com/debuglebowski/slayzone/commit/5bb86899))
+- **settings:** Graduate Context Manager + Automations from Labs ([a311950c](https://github.com/debuglebowski/slayzone/commit/a311950c))
+
+### 🩹 Fixes
+
+- **floating-agent:** Disable by default, fix macOS tiling manager compat ([290cfe9b](https://github.com/debuglebowski/slayzone/commit/290cfe9b))
+- **cli:** Add WAL pragma to CLI DB connection ([3b2217f2](https://github.com/debuglebowski/slayzone/commit/3b2217f2))
+- **projects:** Stretch lock popover inputs to fill width ([ef3bd778](https://github.com/debuglebowski/slayzone/commit/ef3bd778))
+
+### 💅 Refactors
+
+- **settings:** Remove General tab, extract MCP to own tab ([7f48e154](https://github.com/debuglebowski/slayzone/commit/7f48e154))
+
+### 📖 Documentation
+
+- **skills:** Drop --dev flag from marketplace slay skill ([5e0ab24e](https://github.com/debuglebowski/slayzone/commit/5e0ab24e))
+
+### 🏡 Chore
+
+- Ignore .claude/scheduled_tasks.lock ([ce94ae44](https://github.com/debuglebowski/slayzone/commit/ce94ae44))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.18.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.17.3...v0.18.0)

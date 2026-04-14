@@ -1,5 +1,47 @@
 [
   {
+    "version": "0.19.0",
+    "date": "2026-04-14",
+    "tagline": "Locks, tabs & providers",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Project locks",
+        "description": "Lock a project with a duration, rate limit, and schedule to prevent accidental edits."
+      },
+      {
+        "category": "feature",
+        "title": "Project-scoped tabs",
+        "description": "Per-project tab persistence with a Cmd+Shift+H shortcut to jump home."
+      },
+      {
+        "category": "feature",
+        "title": "Default provider select",
+        "description": "Pick a default terminal-mode provider from the Providers settings tab."
+      },
+      {
+        "category": "improvement",
+        "title": "Context Manager & Automations graduated",
+        "description": "Both features moved out of Labs into the main settings."
+      },
+      {
+        "category": "improvement",
+        "title": "Slimmer Settings layout",
+        "description": "General tab removed and MCP extracted into its own tab."
+      },
+      {
+        "category": "fix",
+        "title": "Floating agent on tiling managers",
+        "description": "Disabled by default and fixed compatibility with macOS tiling window managers."
+      },
+      {
+        "category": "fix",
+        "title": "Lock popover input width",
+        "description": "Lock popover inputs now stretch to fill the full popover width."
+      }
+    ]
+  },
+  {
     "version": "0.18.0",
     "date": "2026-04-13",
     "tagline": "Palette, panels & polish",
