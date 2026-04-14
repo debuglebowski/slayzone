@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import { openDb, notifyApp, resolveProject } from '../db'
+import { openDb, notifyApp, resolveProject, resolveProjectArg } from '../db'
 
 interface TagRow extends Record<string, unknown> {
   id: string
@@ -20,11 +20,11 @@ export function tagsCommand(): Command {
   cmd
     .command('list')
     .description('List tags for a project')
-    .requiredOption('--project <name|id>', 'Project name or ID')
+    .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .option('--json', 'Output as JSON')
     .action(async (opts) => {
       const db = openDb()
-      const project = resolveProject(db, opts.project)
+      const project = resolveProject(db, resolveProjectArg(opts.project))
 
       const tags = db.query<TagRow>(
         `SELECT * FROM tags WHERE project_id = :pid ORDER BY sort_order, name`,
@@ -57,12 +57,12 @@ export function tagsCommand(): Command {
   cmd
     .command('create <name>')
     .description('Create a tag')
-    .requiredOption('--project <name|id>', 'Project name or ID')
+    .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .option('--color <hex>', 'Tag color (#RRGGBB)', '#6366f1')
     .option('--text-color <hex>', 'Text color (#RRGGBB)', '#ffffff')
     .action(async (name: string, opts) => {
       const db = openDb()
-      const project = resolveProject(db, opts.project)
+      const project = resolveProject(db, resolveProjectArg(opts.project))
 
       const id = crypto.randomUUID()
       const { sort_order: nextOrder } = db.query<{ sort_order: number }>(

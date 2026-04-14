@@ -4,7 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { getStateDir, DB_PRAGMAS } from '@slayzone/platform'
-export { resolveProject, resolveProjectByPath } from './db-helpers.mjs'
+export { resolveProject, resolveProjectArg, resolveProjectByPath } from './db-helpers.mjs'
 export type { SlayDb } from './db-helpers.mjs'
 import type { SlayDb } from './db-helpers.mjs'
 

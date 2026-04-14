@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import http from 'node:http'
-import { openDb, notifyApp, postJson, resolveProject, getAssetsDir, getMcpPort, type SlayDb } from '../db'
+import { openDb, notifyApp, postJson, resolveProject, resolveProjectArg, getAssetsDir, getMcpPort, type SlayDb } from '../db'
 import { browserCommand } from './browser'
 import {
   getDefaultStatus,
@@ -255,7 +255,7 @@ export function tasksCommand(): Command {
   cmd
     .command('create <title>')
     .description('Create a new task')
-    .requiredOption('--project <name|id>', 'Project name (partial, case-insensitive) or ID')
+    .option('--project <name|id>', 'Project name (partial, case-insensitive) or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .option('--description <text>', 'Task description (reference task specific assets via `[title](asset:<asset-id>)`)')
     .option('--status <status>', 'Initial status key')
     .option('--priority <n>', 'Priority 1-5 (1=highest)')
@@ -265,7 +265,7 @@ export function tasksCommand(): Command {
     .option('--external-provider <provider>', 'External provider namespace', 'cli')
     .action(async (title, opts) => {
       const db = openDb()
-      const project = resolveProject(db, opts.project)
+      const project = resolveProject(db, resolveProjectArg(opts.project))
 
       if (opts.externalId) {
         const existing = db.query<{ id: string; title: string; status: string }>(

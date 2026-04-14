@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import { openDb, notifyApp, resolveProject } from '../db'
+import { openDb, notifyApp, resolveProject, resolveProjectArg } from '../db'
 
 interface TemplateRow extends Record<string, unknown> {
   id: string
@@ -49,11 +49,11 @@ export function templatesCommand(): Command {
   cmd
     .command('list')
     .description('List templates for a project')
-    .requiredOption('--project <name|id>', 'Project name or ID')
+    .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .option('--json', 'Output as JSON')
     .action(async (opts) => {
       const db = openDb()
-      const project = resolveProject(db, opts.project)
+      const project = resolveProject(db, resolveProjectArg(opts.project))
 
       const templates = db.query<TemplateRow>(
         `SELECT * FROM task_templates WHERE project_id = :pid ORDER BY sort_order ASC, created_at ASC`,
@@ -131,7 +131,7 @@ export function templatesCommand(): Command {
   cmd
     .command('create <name>')
     .description('Create a task template')
-    .requiredOption('--project <name|id>', 'Project name or ID')
+    .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .option('--terminal-mode <mode>', 'Default terminal mode')
     .option('--priority <n>', 'Default priority 1-5')
     .option('--status <status>', 'Default status')
@@ -139,7 +139,7 @@ export function templatesCommand(): Command {
     .option('--description <text>', 'Template description')
     .action(async (name: string, opts) => {
       const db = openDb()
-      const project = resolveProject(db, opts.project)
+      const project = resolveProject(db, resolveProjectArg(opts.project))
 
       if (opts.priority) {
         const p = parseInt(opts.priority, 10)

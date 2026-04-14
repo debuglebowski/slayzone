@@ -4,7 +4,7 @@
  */
 import { createTestHarness, test, expect, describe } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAll } from './test-harness.js'
-import { resolveProject } from '../src/db-helpers.mjs'
+import { resolveProject, resolveProjectArg } from '../src/db-helpers.mjs'
 
 const h = await createTestHarness()
 const db = createSlayDbAdapter(h.db)
@@ -36,6 +36,52 @@ describe('resolveProject', () => {
     const { exitCode, stderr } = captureAll(() => resolveProject(db, 'Alpha'))
     expect(exitCode).toBe(1)
     expect(stderr.some((s: string) => s.includes('Ambiguous'))).toBe(true)
+  })
+})
+
+describe('resolveProjectArg', () => {
+  test('returns explicit opt when provided', () => {
+    const prev = process.env.SLAYZONE_PROJECT_ID
+    delete process.env.SLAYZONE_PROJECT_ID
+    try {
+      expect(resolveProjectArg('my-project')).toBe('my-project')
+    } finally {
+      if (prev !== undefined) process.env.SLAYZONE_PROJECT_ID = prev
+    }
+  })
+
+  test('falls back to $SLAYZONE_PROJECT_ID when opt missing', () => {
+    const prev = process.env.SLAYZONE_PROJECT_ID
+    process.env.SLAYZONE_PROJECT_ID = 'env-project'
+    try {
+      expect(resolveProjectArg(undefined)).toBe('env-project')
+    } finally {
+      if (prev === undefined) delete process.env.SLAYZONE_PROJECT_ID
+      else process.env.SLAYZONE_PROJECT_ID = prev
+    }
+  })
+
+  test('explicit opt overrides env var', () => {
+    const prev = process.env.SLAYZONE_PROJECT_ID
+    process.env.SLAYZONE_PROJECT_ID = 'env-project'
+    try {
+      expect(resolveProjectArg('flag-project')).toBe('flag-project')
+    } finally {
+      if (prev === undefined) delete process.env.SLAYZONE_PROJECT_ID
+      else process.env.SLAYZONE_PROJECT_ID = prev
+    }
+  })
+
+  test('exits 1 when neither opt nor env is set', () => {
+    const prev = process.env.SLAYZONE_PROJECT_ID
+    delete process.env.SLAYZONE_PROJECT_ID
+    try {
+      const { exitCode, stderr } = captureAll(() => resolveProjectArg(undefined))
+      expect(exitCode).toBe(1)
+      expect(stderr.some((s: string) => s.includes('SLAYZONE_PROJECT_ID'))).toBe(true)
+    } finally {
+      if (prev !== undefined) process.env.SLAYZONE_PROJECT_ID = prev
+    }
   })
 })
 

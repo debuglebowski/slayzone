@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import fs from 'node:fs'
-import { openDb, notifyApp, resolveProject } from '../db'
+import { openDb, notifyApp, resolveProject, resolveProjectArg } from '../db'
 import { apiPost } from '../api'
 
 interface AutomationRow extends Record<string, unknown> {
@@ -69,11 +69,11 @@ export function automationsCommand(): Command {
   cmd
     .command('list')
     .description('List automations for a project')
-    .requiredOption('--project <name|id>', 'Project name or ID')
+    .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .option('--json', 'Output as JSON')
     .action(async (opts) => {
       const db = openDb()
-      const project = resolveProject(db, opts.project)
+      const project = resolveProject(db, resolveProjectArg(opts.project))
 
       const rows = db.query<AutomationRow>(
         `SELECT * FROM automations WHERE project_id = :pid ORDER BY sort_order, created_at`,
@@ -141,7 +141,7 @@ export function automationsCommand(): Command {
   cmd
     .command('create <name>')
     .description('Create an automation')
-    .requiredOption('--project <name|id>', 'Project name or ID')
+    .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
     .requiredOption('--trigger <type>', `Trigger type: ${TRIGGER_TYPES.join(', ')}`)
     .option('--action-command <cmd>', 'Shell command to run')
     .option('--trigger-from-status <status>', 'From status (for task_status_change)')
@@ -151,7 +151,7 @@ export function automationsCommand(): Command {
     .option('--config <file>', 'JSON config file (overrides flags)')
     .action(async (name: string, opts) => {
       const db = openDb()
-      const project = resolveProject(db, opts.project)
+      const project = resolveProject(db, resolveProjectArg(opts.project))
 
       let triggerConfig: unknown
       let conditions: unknown[] = []

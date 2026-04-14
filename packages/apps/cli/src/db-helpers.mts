@@ -38,6 +38,15 @@ export function resolveProjectByPath(db: SlayDb, dirPath: string): { id: string;
   return best
 }
 
+export function resolveProjectArg(opt?: string): string {
+  const val = opt ?? process.env.SLAYZONE_PROJECT_ID
+  if (!val) {
+    console.error('No --project provided and $SLAYZONE_PROJECT_ID is not set.')
+    process.exit(1)
+  }
+  return val
+}
+
 export function resolveProject(db: SlayDb, proj: string): { id: string; name: string } {
   const projects = db.query<{ id: string; name: string }>(
     `SELECT id, name FROM projects WHERE id = :proj OR LOWER(name) LIKE :projLike LIMIT 10`,
