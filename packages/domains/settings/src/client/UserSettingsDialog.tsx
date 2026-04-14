@@ -6,7 +6,7 @@ import { useTelemetry, TelemetrySettings } from '@slayzone/telemetry/client'
 import type { ContextManagerSection } from '../../../ai-config/src/client/ContextManagerSettings'
 
 // Import autonomous tabs
-import { GeneralSettingsTab } from './tabs/GeneralSettingsTab'
+import { McpSettingsTab } from './tabs/McpSettingsTab'
 import { AppearanceSettingsTab } from './tabs/AppearanceSettingsTab'
 import { PanelsSettingsTab } from './tabs/PanelsSettingsTab'
 import { AiProvidersSettingsTab } from './tabs/AiProvidersSettingsTab'
@@ -39,7 +39,7 @@ interface UserSettingsDialogProps {
 export function UserSettingsDialog({
   open,
   onOpenChange,
-  initialTab = 'general',
+  initialTab = 'appearance',
   initialAiConfigSection: _initialAiConfigSection = null,
   onTabChange
 }: UserSettingsDialogProps) {
@@ -51,7 +51,7 @@ export function UserSettingsDialog({
 
   useEffect(() => {
     if (open) {
-      const resolvedInitialTab = !contextManagerEnabled && initialTab === 'ai-config' ? 'general' : initialTab
+      const resolvedInitialTab = !contextManagerEnabled && initialTab === 'ai-config' ? 'appearance' : initialTab
       setActiveTab(resolvedInitialTab)
     }
   }, [open, initialTab, contextManagerEnabled])
@@ -66,7 +66,6 @@ export function UserSettingsDialog({
   }
 
   const navItems = [
-    { key: 'general', label: 'General' },
     { key: 'appearance', label: 'Appearance' },
     { key: 'worktrees', label: 'Worktrees' },
     { key: 'ai-providers', label: 'Providers' },
@@ -83,6 +82,7 @@ export function UserSettingsDialog({
     { key: 'data', label: 'Import & Export' },
     { key: 'backup', label: 'Backup' },
     { key: 'labs', label: 'Labs' },
+    { key: 'mcp', label: 'MCP' },
     { key: 'diagnostics', label: 'Diagnostics' },
     { key: 'telemetry', label: 'Telemetry' },
     { key: 'about', label: 'About' }
@@ -102,8 +102,6 @@ export function UserSettingsDialog({
 
         <SettingsLayout items={navItems} activeKey={activeTab} onSelect={navigateTo}>
           <div className="mx-auto w-full max-w-4xl space-y-8">
-            {activeTab === 'general' && <GeneralSettingsTab />}
-
             {activeTab === 'worktrees' && <WorktreesSettingsTab />}
 
             {activeTab === 'appearance' && (
@@ -137,6 +135,8 @@ export function UserSettingsDialog({
             {activeTab === 'backup' && <BackupSettingsTab />}
 
             {activeTab === 'labs' && <LabsSettingsTab />}
+
+            {activeTab === 'mcp' && <McpSettingsTab />}
 
             {activeTab === 'diagnostics' && <DiagnosticsSettingsTab />}
 

@@ -24,6 +24,7 @@ import { usePanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { useDetectedRepos } from '@slayzone/projects/client/useDetectedRepos'
 import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/projects'
+import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectDurationLocked } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider, type SearchFileContext } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import { usePty } from '@slayzone/terminal/client'
@@ -141,9 +142,6 @@ function App(): React.JSX.Element {
   const selectedProjectId = useTabStore((s) => s.selectedProjectId)
   const { setActiveTabIndex, setSelectedProjectId, openTask: rawOpenTask, openTaskInBackground, reorderTabs, reopenClosedTab } = useTabStore.getState()
   const [, startTransition] = useTransition()
-  const openTask = useCallback((taskId: string) => {
-    startTransition(() => rawOpenTask(taskId))
-  }, [rawOpenTask, startTransition])
 
   // Expose tab store for e2e tests
   if (!(window as any).__slayzone_tabStore) (window as any).__slayzone_tabStore = useTabStore
@@ -170,7 +168,7 @@ function App(): React.JSX.Element {
   const [contextManagerEnabled, setContextManagerEnabled] = useState(false)
   const [testsPanelEnabled, setTestsPanelEnabled] = useState(false)
   const [automationsPanelEnabled, setAutomationsPanelEnabled] = useState(false)
-  const [settingsInitialTab, setSettingsInitialTab] = useState<string>('general')
+  const [settingsInitialTab, setSettingsInitialTab] = useState<string>('appearance')
   const [settingsInitialAiConfigSection, setSettingsInitialAiConfigSection] = useState<ContextManagerSection | null>(null)
   const onboardingOpen = useDialogStore((s) => s.onboardingOpen)
   const [shouldMountOnboarding, setShouldMountOnboarding] = useState(onboardingOpen)
@@ -312,6 +310,30 @@ function App(): React.JSX.Element {
   }, [allAttentionTasks])
 
   const selectedProject = useMemo(() => projects.find((p) => p.id === selectedProjectId) ?? null, [projects, selectedProjectId])
+
+  // Project lock guard — wraps all task-open paths
+  const durationLocked = isProjectDurationLocked(selectedProject)
+  const guardTaskOpen = useCallback((taskId: string, fn: (id: string) => void) => {
+    if (durationLocked) return
+    const existing = useTabStore.getState().tabs.some(t => t.type === 'task' && t.taskId === taskId)
+    if (!existing && selectedProject && isRateLimited(selectedProject)) {
+      toast('Task limit reached — try again later')
+      return
+    }
+    if (!existing && selectedProject) recordTaskOpen(selectedProject.id)
+    fn(taskId)
+  }, [durationLocked, selectedProject])
+
+  const openTask = useCallback((taskId: string) => {
+    guardTaskOpen(taskId, (id) => startTransition(() => rawOpenTask(id)))
+  }, [guardTaskOpen, rawOpenTask, startTransition])
+
+  const guardedOpenTaskInBackground = useCallback((taskId: string) => {
+    guardTaskOpen(taskId, openTaskInBackground)
+  }, [guardTaskOpen, openTaskInBackground])
+
+  const openTaskRef = useRef(openTask)
+  openTaskRef.current = openTask
 
   // Stale-skill dot on Context Manager tab
   const { count: staleSkillCount, refresh: refreshStaleSkillCount } = useStaleSkillCount(
@@ -523,7 +545,7 @@ function App(): React.JSX.Element {
   useEffect(() => { return window.api.app.onCloseActiveTask(() => closeActiveTaskRef.current()) }, [])
   useEffect(() => { return window.api.app.onCloseCurrent(() => closeCurrentHomeRef.current()) }, [])
   useEffect(() => { return window.api.app.onCloseTask((taskId) => { useTabStore.getState().closeTabByTaskId(taskId) }) }, [])
-  useEffect(() => { return window.api.app.onOpenTask((taskId) => { useTabStore.getState().openTask(taskId) }) }, [])
+  useEffect(() => { return window.api.app.onOpenTask((taskId) => { openTaskRef.current(taskId) }) }, [])
   useEffect(() => {
     return window.api.app.onGoHome(() => {
       const homeIndex = useTabStore.getState().tabs.findIndex((tab) => tab.type === 'home')
@@ -542,7 +564,7 @@ function App(): React.JSX.Element {
   }, [selectedProjectId, agentPanelState.isOpen])
   useEffect(() => {
     return window.api.app.onOpenSettings(() => {
-      setSettingsInitialTab('general'); setSettingsInitialAiConfigSection(null); setSettingsOpen(true)
+      setSettingsInitialTab('appearance'); setSettingsInitialAiConfigSection(null); setSettingsOpen(true)
     })
   }, [])
   useEffect(() => {
@@ -880,7 +902,7 @@ function App(): React.JSX.Element {
   }, [updateTask])
 
   const handleTaskDeleted = (): void => { if (deletingTask) { deleteTask(deletingTask.id); useDialogStore.getState().closeDeleteTask() } }
-  const handleTaskClick = (task: Task, e: { metaKey: boolean }): void => { if (e.metaKey) openTaskInBackground(task.id); else openTask(task.id) }
+  const handleTaskClick = (task: Task, e: { metaKey: boolean }): void => { if (e.metaKey) guardedOpenTaskInBackground(task.id); else openTask(task.id) }
   const handleTaskMove = (taskId: string, newColumnId: string, targetIndex: number): void => { moveTask(taskId, newColumnId, targetIndex, getViewConfig(filter).groupBy) }
 
   useEffect(() => {
@@ -935,11 +957,11 @@ function App(): React.JSX.Element {
 
   const handleProjectDeleted = (): void => { if (deletingProject) { deleteProject(deletingProject.id, selectedProjectId, setSelectedProjectId); useDialogStore.getState().closeDeleteProject() } }
   const handleSidebarSelectProject = (projectId: string): void => { track('project_switched'); setSelectedProjectId(projectId); setActiveTabIndex(0) }
-  const handleOpenSettings = (): void => { setSettingsInitialTab('general'); setSettingsInitialAiConfigSection(null); setSettingsOpen(true) }
+  const handleOpenSettings = (): void => { setSettingsInitialTab('appearance'); setSettingsInitialAiConfigSection(null); setSettingsOpen(true) }
 
   // Custom event listeners for settings
   useEffect(() => {
-    const handleGlobal = (e: Event) => { const tab = (e as CustomEvent<string>).detail || 'general'; setSettingsInitialTab(tab); setSettingsInitialAiConfigSection(null); setSettingsOpen(true) }
+    const handleGlobal = (e: Event) => { const tab = (e as CustomEvent<string>).detail || 'appearance'; setSettingsInitialTab(tab); setSettingsInitialAiConfigSection(null); setSettingsOpen(true) }
     const handleProject = (e: Event) => {
       const { projectId, tab } = (e as CustomEvent<{ projectId: string; tab?: string }>).detail
       const project = projects.find(p => p.id === projectId)
@@ -1054,7 +1076,22 @@ function App(): React.JSX.Element {
                               className={cn('text-2xl font-bold bg-transparent border-none outline-none resize-none p-0', selectedProject ? 'cursor-text' : 'cursor-default select-none')}
                               style={{ caretColor: 'currentColor', fieldSizing: 'content' } as React.CSSProperties} rows={1} />
                           </div>
-                          {projects.length > 0 && !(projectPathMissing && selectedProjectId) && <FilterBar filter={filter} onChange={setFilter} tags={projectTags} columns={selectedProject?.columns_config} />}
+                          {projects.length > 0 && !(projectPathMissing && selectedProjectId) && (
+                            <div className="ml-auto flex items-center gap-1">
+                              {selectedProject && <ProjectLockPopover project={selectedProject} onUpdated={updateProject} onCloseProjectTabs={(pid) => {
+                                const { tabs } = useTabStore.getState()
+                                for (let i = tabs.length - 1; i >= 0; i--) {
+                                  const t = tabs[i]
+                                  if (t.type === 'task') {
+                                    const task = tasks.find(tk => tk.id === t.taskId)
+                                    if (task?.project_id === pid) useTabStore.getState().closeTabByTaskId(t.taskId)
+                                  }
+                                }
+                              }} />}
+                              <div className="h-4 w-px bg-border" />
+                              <FilterBar filter={filter} onChange={setFilter} tags={projectTags} columns={selectedProject?.columns_config} />
+                            </div>
+                          )}
                           {projects.length > 0 && (
                             <div className="min-w-0">
                             <PanelToggle
@@ -1084,6 +1121,8 @@ function App(): React.JSX.Element {
                             <Button onClick={handleFixProjectPath}>Update path</Button>
                           </div>
                         </div>
+                      ) : durationLocked && selectedProject?.lock_config?.locked_until ? (
+                        <ProjectLockScreen project={selectedProject} lockedUntil={selectedProject.lock_config.locked_until} onUnlocked={updateProject} />
                       ) : (
                         <div ref={homePanel.homeContainerRef} className="flex-1 min-h-0 flex">
                           {HOME_PANEL_ORDER.filter(id => homePanel.homePanelVisibility[id]).map((id, i) => {
