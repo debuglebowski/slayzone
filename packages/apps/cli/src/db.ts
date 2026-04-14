@@ -3,7 +3,7 @@ import http from 'node:http'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { getStateDir } from '@slayzone/platform'
+import { getStateDir, DB_PRAGMAS } from '@slayzone/platform'
 export { resolveProject, resolveProjectByPath } from './db-helpers.mjs'
 export type { SlayDb } from './db-helpers.mjs'
 import type { SlayDb } from './db-helpers.mjs'
@@ -118,7 +118,9 @@ export function openDb(): SlayDb {
   }
 
   const db = new DatabaseSync(dbPath)
-  db.exec('PRAGMA foreign_keys = ON')
+  for (const pragma of DB_PRAGMAS) {
+    db.exec(`PRAGMA ${pragma}`)
+  }
 
   return {
     query<T extends object>(sql: string, params: SqlParams = {}): T[] {

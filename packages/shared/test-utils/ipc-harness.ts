@@ -8,6 +8,7 @@
  *   const result = h.invoke('channel:name', arg1, arg2)
  */
 import Database from 'better-sqlite3'
+import { DB_PRAGMAS } from '@slayzone/platform'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -33,8 +34,9 @@ const fakeEvent = { sender: { send: () => {} } }
 
 export async function createTestHarness(): Promise<TestHarness> {
   const db = new Database(':memory:')
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
+  for (const pragma of DB_PRAGMAS) {
+    db.pragma(pragma)
+  }
 
   // Dynamic import to avoid Node 24 native TS static analysis issues
   const migrationsPath = path.resolve(

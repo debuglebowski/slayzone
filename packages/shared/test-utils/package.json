@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@slayzone/platform": "workspace:*",
     "better-sqlite3": "^12.8.0"
   },
   "devDependencies": {

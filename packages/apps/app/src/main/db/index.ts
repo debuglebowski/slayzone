@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import Database from 'better-sqlite3'
+import { DB_PRAGMAS } from '@slayzone/platform'
 import fs from 'fs'
 import path from 'path'
 
@@ -106,11 +107,9 @@ export function getDatabase(): Database.Database {
     migrateLegacyDatabaseIfNeeded()
     const dbPath = getDatabasePath()
     db = new Database(dbPath)
-    db.pragma('journal_mode = WAL')
-    db.pragma('foreign_keys = ON')
-    db.pragma('synchronous = NORMAL')
-    db.pragma('cache_size = -8000')
-    db.pragma('busy_timeout = 5000')
+    for (const pragma of DB_PRAGMAS) {
+      db.pragma(pragma)
+    }
     // Migrations moved to index.ts for pre-migration backup orchestration
   }
   return db
