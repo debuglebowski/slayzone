@@ -153,10 +153,10 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                     min={1}
                     value={durationValue}
                     onChange={(e) => setDurationValue(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="h-8 w-16 text-xs"
+                    className="h-8 flex-1 min-w-0 text-xs"
                   />
                   <Select value={durationUnit} onValueChange={(v) => setDurationUnit(v as 'minutes' | 'hours')}>
-                    <SelectTrigger size="sm" className="w-24 text-xs">
+                    <SelectTrigger size="sm" className="flex-1 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -165,7 +165,7 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button size="sm" className="h-8 text-xs ml-auto" onClick={handleLockNow}>
+                  <Button size="sm" className="h-8 text-xs" onClick={handleLockNow}>
                     Lock
                   </Button>
                 </div>
@@ -199,7 +199,7 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                       const v = Math.max(1, parseInt(e.target.value, 10) || 1)
                       handleRateLimitChange(true, v)
                     }}
-                    className="h-8 w-16 text-xs"
+                    className="h-8 flex-1 min-w-0 text-xs"
                   />
                   <span className="text-muted-foreground whitespace-nowrap">tasks per</span>
                   <Select value={perMinutes} onValueChange={(v) => handleRateLimitChange(true, undefined, v)}>
@@ -239,14 +239,14 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                     type="time"
                     value={scheduleFrom}
                     onChange={(e) => handleScheduleChange(true, e.target.value)}
-                    className="h-8 w-[5.5rem] text-xs"
+                    className="h-8 flex-1 min-w-0 text-xs"
                   />
                   <span className="text-muted-foreground">to</span>
                   <Input
                     type="time"
                     value={scheduleTo}
                     onChange={(e) => handleScheduleChange(true, undefined, e.target.value)}
-                    className="h-8 w-[5.5rem] text-xs"
+                    className="h-8 flex-1 min-w-0 text-xs"
                   />
                 </div>
               </>
