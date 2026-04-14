@@ -24,7 +24,7 @@ import { usePanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { useDetectedRepos } from '@slayzone/projects/client/useDetectedRepos'
 import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/projects'
-import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectDurationLocked } from '@slayzone/projects'
+import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectDurationLocked, isScheduleLocked } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider, type SearchFileContext } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import { usePty } from '@slayzone/terminal/client'
@@ -169,6 +169,7 @@ function App(): React.JSX.Element {
   const [contextManagerEnabled, setContextManagerEnabled] = useState(false)
   const [testsPanelEnabled, setTestsPanelEnabled] = useState(false)
   const [automationsPanelEnabled, setAutomationsPanelEnabled] = useState(false)
+  const [projectLockEnabled, setProjectLockEnabled] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<string>('appearance')
   const [settingsInitialAiConfigSection, setSettingsInitialAiConfigSection] = useState<ContextManagerSection | null>(null)
   const onboardingOpen = useDialogStore((s) => s.onboardingOpen)
@@ -313,17 +314,19 @@ function App(): React.JSX.Element {
   const selectedProject = useMemo(() => projects.find((p) => p.id === selectedProjectId) ?? null, [projects, selectedProjectId])
 
   // Project lock guard — wraps all task-open paths
-  const durationLocked = isProjectDurationLocked(selectedProject)
+  const durationLocked = projectLockEnabled && (isProjectDurationLocked(selectedProject) || isScheduleLocked(selectedProject))
   const guardTaskOpen = useCallback((taskId: string, fn: (id: string) => void) => {
     if (durationLocked) return
-    const existing = useTabStore.getState().tabs.some(t => t.type === 'task' && t.taskId === taskId)
-    if (!existing && selectedProject && isRateLimited(selectedProject)) {
-      toast('Task limit reached — try again later')
-      return
+    if (projectLockEnabled) {
+      const existing = useTabStore.getState().tabs.some(t => t.type === 'task' && t.taskId === taskId)
+      if (!existing && selectedProject && isRateLimited(selectedProject)) {
+        toast('Task limit reached — try again later')
+        return
+      }
+      if (!existing && selectedProject) recordTaskOpen(selectedProject.id)
     }
-    if (!existing && selectedProject) recordTaskOpen(selectedProject.id)
     fn(taskId)
-  }, [durationLocked, selectedProject])
+  }, [durationLocked, projectLockEnabled, selectedProject])
 
   const openTask = useCallback((taskId: string) => {
     guardTaskOpen(taskId, (id) => startTransition(() => rawOpenTask(id)))
@@ -377,6 +380,7 @@ function App(): React.JSX.Element {
     window.api.app.isContextManagerEnabled().then(setContextManagerEnabled)
     window.api.app.isTestsPanelEnabled().then(setTestsPanelEnabled)
     window.api.app.isAutomationsEnabled().then(setAutomationsPanelEnabled)
+    window.api.app.isProjectLockEnabled().then(setProjectLockEnabled)
   }, [settingsRevision])
 
   // Close context manager when lab is disabled
@@ -1094,7 +1098,7 @@ function App(): React.JSX.Element {
                           </div>
                           {projects.length > 0 && !(projectPathMissing && selectedProjectId) && (
                             <div className="ml-auto flex items-center gap-1">
-                              {selectedProject && <ProjectLockPopover project={selectedProject} onUpdated={updateProject} onCloseProjectTabs={(pid) => {
+                              {selectedProject && projectLockEnabled && <ProjectLockPopover project={selectedProject} onUpdated={updateProject} onCloseProjectTabs={(pid) => {
                                 const { tabs } = useTabStore.getState()
                                 for (let i = tabs.length - 1; i >= 0; i--) {
                                   const t = tabs[i]
@@ -1137,8 +1141,8 @@ function App(): React.JSX.Element {
                             <Button onClick={handleFixProjectPath}>Update path</Button>
                           </div>
                         </div>
-                      ) : durationLocked && selectedProject?.lock_config?.locked_until ? (
-                        <ProjectLockScreen project={selectedProject} lockedUntil={selectedProject.lock_config.locked_until} onUnlocked={updateProject} />
+                      ) : durationLocked && selectedProject?.lock_config ? (
+                        <ProjectLockScreen project={selectedProject} lockedUntil={selectedProject.lock_config?.locked_until} schedule={selectedProject.lock_config?.schedule} onUnlocked={updateProject} />
                       ) : (
                         <div ref={homePanel.homeContainerRef} className="flex-1 min-h-0 flex">
                           {HOME_PANEL_ORDER.filter(id => homePanel.homePanelVisibility[id]).map((id, i) => {

@@ -8,6 +8,7 @@ const LABS_FEATURES = [
   { key: 'labs_jira_integration', label: 'Jira Integration', description: 'Sync tasks with Jira Cloud issues', loader: () => window.api.app.isJiraIntegrationEnabled() },
   { key: 'labs_loop_mode', label: 'Loop Command', description: 'Repeat a prompt until acceptance criteria are met', loader: () => window.api.app.isLoopModeEnabled() },
   { key: 'labs_automations', label: 'Automations', description: 'Trigger → condition → action rules that run automatically per project', loader: () => window.api.app.isAutomationsEnabled() },
+  { key: 'labs_project_lock', label: 'Project Lock', description: 'Lock projects by duration, rate limit, or daily schedule', loader: () => window.api.app.isProjectLockEnabled() },
 ] as const
 
 export function LabsSettingsTab() {

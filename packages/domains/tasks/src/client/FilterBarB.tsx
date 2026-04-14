@@ -69,7 +69,7 @@ export function FilterBarB({ filter, onChange, tags, columns }: FilterBarBProps)
   }
 
   return (
-    <div className="ml-auto flex items-center gap-1">
+    <div className="flex items-center gap-1">
         {/* ──────── Filter Popover ──────── */}
         <Popover>
           <PopoverTrigger asChild>

@@ -19,6 +19,21 @@ export interface TaskAutomationConfig {
   on_terminal_idle: string | null
 }
 
+export interface ProjectLockConfig {
+  /** ISO timestamp — project locked until this time. null = no duration lock */
+  locked_until: string | null
+  /** Rate limit config. null = no rate limit */
+  rate_limit: {
+    max_tasks: number
+    per_minutes: number
+  } | null
+  /** Schedule lock — locked daily between these times. "HH:MM" 24h format. null = disabled */
+  schedule: {
+    from: string
+    to: string
+  } | null
+}
+
 export interface Project {
   id: string
   name: string
@@ -34,6 +49,7 @@ export interface Project {
   /** Folder name of the default child repo (for multi-repo projects) */
   selected_repo: string | null
   task_automation_config: TaskAutomationConfig | null
+  lock_config: ProjectLockConfig | null
   /** Custom 1–5 char override for the avatar. Null = derive from name. */
   icon_letters: string | null
   /** Absolute path to icon image on disk. Overrides letters when set. */
@@ -70,4 +86,5 @@ export interface UpdateProjectInput {
   taskAutomationConfig?: TaskAutomationConfig | null
   iconLetters?: string | null
   iconImagePath?: string | null
+  lockConfig?: ProjectLockConfig | null
 }

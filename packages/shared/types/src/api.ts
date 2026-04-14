@@ -390,6 +390,8 @@ export interface ElectronAPI {
     isLoopModeEnabledSync: boolean
     isAutomationsEnabled: () => Promise<boolean>
     isAutomationsEnabledSync: boolean
+    isProjectLockEnabled: () => Promise<boolean>
+    isProjectLockEnabledSync: boolean
     getZoomFactor: () => Promise<number>
     adjustZoom: (command: 'in' | 'out' | 'reset') => Promise<number>
     isPlaywright: boolean

@@ -158,6 +158,8 @@ const api: ElectronAPI = {
     isLoopModeEnabledSync: ipcRenderer.sendSync('app:is-loop-mode-enabled-sync') as boolean,
     isAutomationsEnabled: () => ipcRenderer.invoke('app:is-automations-enabled'),
     isAutomationsEnabledSync: ipcRenderer.sendSync('app:is-automations-enabled-sync') as boolean,
+    isProjectLockEnabled: () => ipcRenderer.invoke('app:is-project-lock-enabled'),
+    isProjectLockEnabledSync: ipcRenderer.sendSync('app:is-project-lock-enabled-sync') as boolean,
     getZoomFactor: () => ipcRenderer.invoke('app:get-zoom-factor'),
     adjustZoom: (command: 'in' | 'out' | 'reset') => ipcRenderer.invoke('app:adjust-zoom', command) as Promise<number>,
     isPlaywright: process.env.PLAYWRIGHT === '1',

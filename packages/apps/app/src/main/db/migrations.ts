@@ -1945,6 +1945,12 @@ const migrations: Migration[] = [
         }
       } catch { /* malformed JSON, skip */ }
     }
+  },
+  {
+    version: 108,
+    up: (db) => {
+      db.exec(`ALTER TABLE projects ADD COLUMN lock_config TEXT;`)
+    }
   }
 ]
 

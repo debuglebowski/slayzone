@@ -1454,6 +1454,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
   ipcMain.on('app:is-loop-mode-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_loop_mode') })
   ipcMain.handle('app:is-automations-enabled', () => isLabEnabled('labs_automations'))
   ipcMain.on('app:is-automations-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_automations') })
+  ipcMain.handle('app:is-project-lock-enabled', () => isLabEnabled('labs_project_lock'))
+  ipcMain.on('app:is-project-lock-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_project_lock') })
   ipcMain.handle('app:get-protocol-client-status', () => protocolClientStatus)
   ipcMain.handle('app:get-zoom-factor', () => mainWindow?.webContents.zoomFactor ?? 1)
   ipcMain.handle('app:adjust-zoom', (_event, command: AppZoomCommand) => applyAppZoom(command))

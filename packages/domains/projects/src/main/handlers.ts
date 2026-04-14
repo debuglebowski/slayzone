@@ -39,7 +39,8 @@ export function parseProject(row: Record<string, unknown> | undefined): Record<s
     ...row,
     columns_config: parseColumnsConfig(row.columns_config),
     execution_context: row.execution_context ? (() => { try { return JSON.parse(row.execution_context as string) } catch { return null } })() : null,
-    task_automation_config: row.task_automation_config ? (() => { try { return JSON.parse(row.task_automation_config as string) } catch { return null } })() : null
+    task_automation_config: row.task_automation_config ? (() => { try { return JSON.parse(row.task_automation_config as string) } catch { return null } })() : null,
+    lock_config: row.lock_config ? (() => { try { return JSON.parse(row.lock_config as string) } catch { return null } })() : null
   }
 }
 
@@ -247,6 +248,10 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
         unlinkProjectIconFiles(data.id)
       }
       values.push(data.iconImagePath)
+    }
+    if (data.lockConfig !== undefined) {
+      fields.push('lock_config = ?')
+      values.push(data.lockConfig ? JSON.stringify(data.lockConfig) : null)
     }
     if (data.columnsConfig !== undefined) {
       fields.push('columns_config = ?')
