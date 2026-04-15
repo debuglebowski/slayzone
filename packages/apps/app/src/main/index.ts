@@ -94,7 +94,7 @@ import { normalizeProjectStatusData } from './db/status-normalization'
 import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
 // Domain handlers
 import { registerProjectHandlers, handleTerminalStateChange } from '@slayzone/projects/main'
-import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers } from '@slayzone/task/main'
+import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeAssetWatcher } from '@slayzone/task/main'
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/main'
 import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, startIdleChecker, stopIdleChecker, dismissAllNotifications, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange } from '@slayzone/terminal/main'
@@ -2000,6 +2000,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
       // 4. Close file watchers
       closeAllWatchers()
+      closeAssetWatcher()
 
       // 5. Clear registries + flags + browser view manager
       clearBrowserRegistry()
@@ -2282,6 +2283,7 @@ app.on('will-quit', () => {
   stopDiagnostics()
   stopIdleChecker()
   stopAutoBackup()
+  closeAssetWatcher()
   killAllPtys()
   killAllProcesses()
   closeDatabase()

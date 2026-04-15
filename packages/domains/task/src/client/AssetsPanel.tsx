@@ -58,14 +58,14 @@ function hasZoom(mode: RenderMode): boolean {
 
 // --- Image viewer ---
 
-function ImageViewer({ assetId, updatedAt, zoomLevel, onZoom, getFilePath }: { assetId: string; updatedAt: string; zoomLevel: number; onZoom: (fn: (z: number) => number) => void; getFilePath: (id: string) => Promise<string | null> }) {
+function ImageViewer({ assetId, contentVersion, zoomLevel, onZoom, getFilePath }: { assetId: string; contentVersion: number; zoomLevel: number; onZoom: (fn: (z: number) => number) => void; getFilePath: (id: string) => Promise<string | null> }) {
   const [src, setSrc] = useState<string | null>(null)
 
   useEffect(() => {
     getFilePath(assetId).then((p) => {
-      if (p) setSrc(`slz-file://${p}?v=${encodeURIComponent(updatedAt)}`)
+      if (p) setSrc(`slz-file://${p}?v=${contentVersion}`)
     })
-  }, [assetId, updatedAt, getFilePath])
+  }, [assetId, contentVersion, getFilePath])
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (!e.metaKey && !e.ctrlKey) return
@@ -84,14 +84,14 @@ function ImageViewer({ assetId, updatedAt, zoomLevel, onZoom, getFilePath }: { a
 
 // --- PDF viewer ---
 
-function PdfViewer({ assetId, updatedAt, getFilePath }: { assetId: string; updatedAt: string; getFilePath: (id: string) => Promise<string | null> }) {
+function PdfViewer({ assetId, contentVersion, getFilePath }: { assetId: string; contentVersion: number; getFilePath: (id: string) => Promise<string | null> }) {
   const [src, setSrc] = useState<string | null>(null)
 
   useEffect(() => {
     getFilePath(assetId).then((p) => {
-      if (p) setSrc(`slz-file://${p}?v=${encodeURIComponent(updatedAt)}`)
+      if (p) setSrc(`slz-file://${p}?v=${contentVersion}`)
     })
-  }, [assetId, updatedAt, getFilePath])
+  }, [assetId, contentVersion, getFilePath])
 
   if (!src) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
 
@@ -157,15 +157,34 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   } as CSSProperties), [themeColors])
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isDirty, setIsDirty] = useState(false)
+  const [externalChangePending, setExternalChangePending] = useState(false)
+  const [contentVersion, setContentVersion] = useState(0)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const baselineMtimeRef = useRef<number | null>(null)
   const contentRef = useRef(content)
+  const isDirtyRef = useRef(false)
   const onStatsRef = useRef(onStats)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   contentRef.current = content
+  isDirtyRef.current = isDirty
   onStatsRef.current = onStats
 
   const renderMode = getEffectiveRenderMode(asset.title, asset.render_mode)
   const isBinary = isBinaryRenderMode(renderMode)
+
+  // Read file from disk + refresh baseline mtime. Clears dirty + pending flags.
+  const loadFromDisk = useCallback(async (): Promise<void> => {
+    const [c, mtime] = await Promise.all([
+      readContent(asset.id),
+      window.api.assets.getMtime(asset.id),
+    ])
+    setContent(c ?? '')
+    baselineMtimeRef.current = mtime
+    setIsDirty(false)
+    setExternalChangePending(false)
+    setContentVersion(v => v + 1)
+  }, [asset.id, readContent])
 
   useEffect(() => {
     const text = content ?? ''
@@ -176,35 +195,44 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
     })
   }, [content, asset.id])
 
+  // Load on mount / asset change. Flush pending save on unmount (with mtime guard).
   useEffect(() => {
     if (isBinary) {
       setLoading(false)
+      window.api.assets.getMtime(asset.id).then((m) => { baselineMtimeRef.current = m })
+      setContentVersion(v => v + 1)
       window.api.assets.getFileSize(asset.id).then((size) => {
         onStatsRef.current?.({ fileSize: size, words: 0, lines: 0 })
       })
       return
     }
     setLoading(true)
-    readContent(asset.id).then((c) => {
-      setContent(c ?? '')
-      setLoading(false)
-    })
+    loadFromDisk().finally(() => setLoading(false))
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
-        if (contentRef.current !== null) saveContent(asset.id, contentRef.current)
+        saveTimerRef.current = null
+      }
+      if (isDirtyRef.current && contentRef.current !== null) {
+        // Best-effort flush. mtime guard happens inside saveContent path at the
+        // handler level — we can't await a newer-disk check in cleanup.
+        saveContent(asset.id, contentRef.current)
       }
     }
-  }, [asset.id, isBinary, readContent, saveContent])
+  }, [asset.id, isBinary, loadFromDisk, saveContent])
 
-  // Re-read content when asset is updated externally (e.g. CLI write/append)
-  const prevUpdatedAtRef = useRef(asset.updated_at)
+  // fs.watch subscription — disk is the single source of truth for content.
   useEffect(() => {
-    if (prevUpdatedAtRef.current === asset.updated_at) return
-    prevUpdatedAtRef.current = asset.updated_at
-    if (isBinary || saveTimerRef.current) return
-    readContent(asset.id).then((c) => setContent(c ?? ''))
-  }, [asset.updated_at, asset.id, isBinary, readContent])
+    const off = window.api.assets.onContentChanged((changedId) => {
+      if (changedId !== asset.id) return
+      if (isDirtyRef.current) {
+        setExternalChangePending(true)
+      } else {
+        loadFromDisk()
+      }
+    })
+    return () => { off() }
+  }, [asset.id, loadFromDisk])
 
   // Notify parent of content changes for find bar
   useEffect(() => {
@@ -225,61 +253,115 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
 
   const handleChange = useCallback((value: string) => {
     setContent(value)
+    setIsDirty(true)
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      saveContent(asset.id, value)
+    saveTimerRef.current = setTimeout(async () => {
+      saveTimerRef.current = null
+      const currentMtime = await window.api.assets.getMtime(asset.id)
+      if (
+        currentMtime != null &&
+        baselineMtimeRef.current != null &&
+        currentMtime > baselineMtimeRef.current
+      ) {
+        // External write happened while we were holding a draft. Surface conflict
+        // instead of clobbering disk.
+        setExternalChangePending(true)
+        return
+      }
+      await saveContent(asset.id, value)
+      const newMtime = await window.api.assets.getMtime(asset.id)
+      baselineMtimeRef.current = newMtime
+      setIsDirty(false)
     }, 500)
   }, [asset.id, saveContent])
 
-  if (loading) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
-  if (renderMode === 'image') return <ImageViewer assetId={asset.id} updatedAt={asset.updated_at} zoomLevel={zoomLevel} onZoom={onZoom} getFilePath={getFilePath} />
-  if (renderMode === 'pdf') return <PdfViewer assetId={asset.id} updatedAt={asset.updated_at} getFilePath={getFilePath} />
+  const handleReloadFromDisk = useCallback((): void => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    loadFromDisk()
+  }, [loadFromDisk])
 
-  const hasPreview = renderMode === 'markdown' || renderMode === 'html-preview' || renderMode === 'svg-preview' || renderMode === 'mermaid-preview'
+  const handleKeepMine = useCallback(async (): Promise<void> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    if (contentRef.current == null) return
+    await saveContent(asset.id, contentRef.current)
+    const newMtime = await window.api.assets.getMtime(asset.id)
+    baselineMtimeRef.current = newMtime
+    setIsDirty(false)
+    setExternalChangePending(false)
+  }, [asset.id, saveContent])
 
-  if (renderMode === 'markdown' && viewMode === 'preview') {
-    return (
-      <div className="flex-1 overflow-y-auto">
-        <RichTextEditor value={content ?? ''} onChange={handleChange} placeholder="Write markdown..." variant={variant} fontFamily={notesFontFamily} checkedHighlight={notesCheckedHighlight} showToolbar={notesShowToolbar} spellcheck={notesSpellcheck} themeColors={themeColors} />
-      </div>
-    )
-  }
+  const banner = externalChangePending ? (
+    <div className="shrink-0 flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px]" data-testid="asset-conflict-banner">
+      <span className="flex-1 text-muted-foreground">File changed externally.</span>
+      <Button variant="outline" size="sm" className="!h-6 text-[10px] px-2" onClick={handleReloadFromDisk} data-testid="asset-conflict-reload">Reload</Button>
+      <Button variant="outline" size="sm" className="!h-6 text-[10px] px-2" onClick={handleKeepMine} data-testid="asset-conflict-keep">Keep mine</Button>
+    </div>
+  ) : null
 
-  if (renderMode === 'markdown' && viewMode === 'split') {
-    return (
-      <div className="flex-1 flex flex-row overflow-hidden">
-        <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder="Write markdown..." spellCheck={false} />
-        <div className="flex-1 border-l border-border min-w-0 min-h-0">
-          <div className="mk-doc" data-variant={variant} style={themeStyle}>
-            <div className="mk-doc-scroll">
-              <div className="mk-doc-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ''}</ReactMarkdown>
+  const inner = ((): React.ReactElement => {
+    if (loading) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
+    if (renderMode === 'image') return <ImageViewer assetId={asset.id} contentVersion={contentVersion} zoomLevel={zoomLevel} onZoom={onZoom} getFilePath={getFilePath} />
+    if (renderMode === 'pdf') return <PdfViewer assetId={asset.id} contentVersion={contentVersion} getFilePath={getFilePath} />
+
+    const hasPreview = renderMode === 'markdown' || renderMode === 'html-preview' || renderMode === 'svg-preview' || renderMode === 'mermaid-preview'
+
+    if (renderMode === 'markdown' && viewMode === 'preview') {
+      return (
+        <div className="flex-1 overflow-y-auto">
+          <RichTextEditor value={content ?? ''} onChange={handleChange} placeholder="Write markdown..." variant={variant} fontFamily={notesFontFamily} checkedHighlight={notesCheckedHighlight} showToolbar={notesShowToolbar} spellcheck={notesSpellcheck} themeColors={themeColors} />
+        </div>
+      )
+    }
+
+    if (renderMode === 'markdown' && viewMode === 'split') {
+      return (
+        <div className="flex-1 flex flex-row overflow-hidden">
+          <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder="Write markdown..." spellCheck={false} />
+          <div className="flex-1 border-l border-border min-w-0 min-h-0">
+            <div className="mk-doc" data-variant={variant} style={themeStyle}>
+              <div className="mk-doc-scroll">
+                <div className="mk-doc-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ''}</ReactMarkdown>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    )
-  }
+      )
+    }
 
-  if (hasPreview && viewMode === 'preview') {
-    return <div className="flex-1 flex flex-col overflow-hidden"><AssetPreview renderMode={renderMode} content={content ?? ''} zoomLevel={zoomLevel} onZoom={onZoom} /></div>
-  }
+    if (hasPreview && viewMode === 'preview') {
+      return <div className="flex-1 flex flex-col overflow-hidden"><AssetPreview renderMode={renderMode} content={content ?? ''} zoomLevel={zoomLevel} onZoom={onZoom} /></div>
+    }
 
-  if (hasPreview && viewMode === 'split') {
-    return (
-      <div className="flex-1 flex flex-row overflow-hidden">
-        <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder={`Write ${getExtensionFromTitle(asset.title) || 'content'}...`} spellCheck={false} />
-        <div className="flex-1 flex flex-col border-l border-border overflow-hidden min-w-0">
-          <AssetPreview renderMode={renderMode} content={content ?? ''} zoomLevel={zoomLevel} onZoom={onZoom} />
+    if (hasPreview && viewMode === 'split') {
+      return (
+        <div className="flex-1 flex flex-row overflow-hidden">
+          <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder={`Write ${getExtensionFromTitle(asset.title) || 'content'}...`} spellCheck={false} />
+          <div className="flex-1 flex flex-col border-l border-border overflow-hidden min-w-0">
+            <AssetPreview renderMode={renderMode} content={content ?? ''} zoomLevel={zoomLevel} onZoom={onZoom} />
+          </div>
         </div>
+      )
+    }
+
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none" placeholder={`Write ${getExtensionFromTitle(asset.title) || 'content'}...`} spellCheck={false} />
       </div>
     )
-  }
+  })()
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none" placeholder={`Write ${getExtensionFromTitle(asset.title) || 'content'}...`} spellCheck={false} />
+    <div className="flex-1 flex flex-col min-h-0">
+      {banner}
+      {inner}
     </div>
   )
 }

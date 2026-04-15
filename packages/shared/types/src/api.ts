@@ -285,6 +285,8 @@ export interface ElectronAPI {
     reorder: (data: string[] | { folderId: string | null; assetIds: string[] }) => Promise<void>
     readContent: (id: string) => Promise<string | null>
     getFilePath: (id: string) => Promise<string | null>
+    getMtime: (id: string) => Promise<number | null>
+    onContentChanged: (callback: (assetId: string) => void) => () => void
     upload: (data: { taskId: string; sourcePath: string; title?: string }) => Promise<TaskAsset>
     getFileSize: (id: string) => Promise<number | null>
     cleanupTask: (taskId: string) => Promise<void>

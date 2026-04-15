@@ -23,6 +23,7 @@ import { randomUUID } from 'crypto'
 import { removeWorktree, createWorktree, runWorktreeSetupScript, getCurrentBranch, isGitRepo, copyIgnoredFiles, resolveCopyBehavior } from '@slayzone/worktrees/main'
 import archiver from 'archiver'
 import { buildPdfHtml, buildMermaidPdfHtml, buildPngHtml, renderToPdf, renderToPng } from './asset-export'
+import { startAssetWatcher } from './asset-watcher'
 
 type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -904,6 +905,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
   // --- Task Assets ---
 
   const assetsDir = path.join(process.env.SLAYZONE_DB_DIR || app.getPath('userData'), 'assets')
+  startAssetWatcher(assetsDir)
 
   function getAssetFilePath(taskId: string, assetId: string, title: string): string {
     const ext = getExtensionFromTitle(title) || '.txt'
@@ -1055,6 +1057,17 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     const existing = db.prepare('SELECT * FROM task_assets WHERE id = ?').get(id) as Record<string, unknown> | undefined
     if (!existing) return null
     return getAssetFilePath(existing.task_id as string, id, existing.title as string)
+  })
+
+  ipcMain.handle('db:assets:getMtime', (_, id: string) => {
+    const existing = db.prepare('SELECT * FROM task_assets WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    if (!existing) return null
+    const filePath = getAssetFilePath(existing.task_id as string, id, existing.title as string)
+    try {
+      return statSync(filePath).mtimeMs
+    } catch {
+      return null
+    }
   })
 
   ipcMain.handle('db:assets:upload', (_, data: { taskId: string; sourcePath: string; title?: string }) => {

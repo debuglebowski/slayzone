@@ -61,6 +61,12 @@ const api: ElectronAPI = {
     reorder: (data) => ipcRenderer.invoke('db:assets:reorder', data),
     readContent: (id) => ipcRenderer.invoke('db:assets:readContent', id),
     getFilePath: (id) => ipcRenderer.invoke('db:assets:getFilePath', id),
+    getMtime: (id) => ipcRenderer.invoke('db:assets:getMtime', id),
+    onContentChanged: (callback: (assetId: string) => void) => {
+      const handler = (_: unknown, assetId: string) => callback(assetId)
+      ipcRenderer.on('assets:content-changed', handler)
+      return () => ipcRenderer.removeListener('assets:content-changed', handler)
+    },
     upload: (data) => ipcRenderer.invoke('db:assets:upload', data),
     getFileSize: (id) => ipcRenderer.invoke('db:assets:getFileSize', id),
     cleanupTask: (taskId) => ipcRenderer.invoke('db:assets:cleanupTask', taskId),
