@@ -94,8 +94,12 @@ interface RichTextEditorProps {
   autoFocus?: boolean
   editorRef?: MutableRefObject<Editor | null>
   onReady?: (editor: Editor) => void
-  /** Visual density / page-feel variant. Defaults to 'page'. */
-  variant?: 'page' | 'compact' | 'inline'
+  /** Chrome preset. 'page' = Notion-like page (default). 'inline' = constrained sidebar chrome. */
+  variant?: 'page' | 'inline'
+  /** Y-axis density (text size, line height, vertical padding). */
+  readability?: 'compact' | 'normal'
+  /** X-axis width (column max-width, horizontal padding). */
+  width?: 'narrow' | 'wide'
   fontFamily?: 'sans' | 'mono'
   checkedHighlight?: boolean
   showToolbar?: boolean
@@ -118,6 +122,8 @@ export function RichTextEditor({
   editorRef: externalEditorRef,
   onReady,
   variant = 'page',
+  readability,
+  width,
   fontFamily,
   checkedHighlight,
   showToolbar,
@@ -273,6 +279,8 @@ export function RichTextEditor({
       data-testid={testId}
       className={cn('mk-doc', className)}
       data-variant={variant}
+      data-readability={readability}
+      data-width={width}
       data-font={fontFamily === 'mono' ? 'mono' : undefined}
       data-checked-highlight={checkedHighlight ? 'true' : undefined}
       data-themed={themeColors ? 'true' : undefined}

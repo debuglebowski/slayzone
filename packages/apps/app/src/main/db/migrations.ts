@@ -1951,6 +1951,15 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(`ALTER TABLE projects ADD COLUMN lock_config TEXT;`)
     }
+  },
+  {
+    version: 109,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE task_assets ADD COLUMN readability_override TEXT DEFAULT NULL;
+        ALTER TABLE task_assets ADD COLUMN width_override TEXT DEFAULT NULL;
+      `)
+    }
   }
 ]
 

@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type CSSProperties, type DragEvent } from 'react'
-import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ChevronDown, ImageDown, FileCode, Archive } from 'lucide-react'
+import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ChevronDown, ImageDown, FileCode, Archive, Rows2, Rows3, Maximize2, AlignCenter, type LucideIcon } from 'lucide-react'
 import {
-  cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, PanelToggle, Button, Input,
+  cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button, Input,
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent,
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from '@slayzone/ui'
-import { RichTextEditor, noteVariant } from '@slayzone/editor'
+import { RichTextEditor } from '@slayzone/editor'
 import type { RenderMode, TaskAsset, AssetFolder } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode, canExportAsPdf, canExportAsPng, canExportAsHtml } from '@slayzone/task/shared'
 import ReactMarkdown from 'react-markdown'
@@ -55,6 +55,33 @@ function hasPreviewToggle(mode: RenderMode): boolean {
 function hasZoom(mode: RenderMode): boolean {
   return mode === 'image' || mode === 'svg-preview' || mode === 'mermaid-preview'
 }
+
+function IconToggleButton({ icon: Icon, active, onClick, tooltip }: {
+  icon: LucideIcon
+  active: boolean
+  onClick: () => void
+  tooltip: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-pressed={active}
+          className={cn(
+            'flex items-center justify-center size-6 rounded transition-colors',
+            active ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          )}
+          onClick={onClick}
+        >
+          <Icon className="size-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{tooltip}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+const TOGGLE_PILL_CLASS = 'flex items-center shrink-0 bg-surface-1 border border-border rounded-md p-0.5 gap-0.5'
 
 // --- Image viewer ---
 
@@ -126,7 +153,7 @@ export interface AssetStats {
   lines: number
 }
 
-function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, saveContent, getFilePath, onStats, onContentReady, scrollToLineRef }: {
+function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, saveContent, getFilePath, onStats, onContentReady, scrollToLineRef, effectiveReadability, effectiveWidth }: {
   asset: TaskAsset
   viewMode: 'preview' | 'split' | 'raw'
   zoomLevel: number
@@ -137,9 +164,10 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   onStats?: (stats: AssetStats) => void
   onContentReady?: (content: string) => void
   scrollToLineRef?: React.MutableRefObject<((line: number) => void) | null>
+  effectiveReadability: 'compact' | 'normal'
+  effectiveWidth: 'narrow' | 'wide'
 }) {
-  const { notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
-  const variant = noteVariant(notesLineSpacing)
+  const { notesFontFamily, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
   const { editorThemeId, contentVariant } = useTheme()
   const themeColors: EditorThemeColors = useMemo(
     () => getThemeEditorColors(editorThemeId, contentVariant),
@@ -314,7 +342,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
     if (renderMode === 'markdown' && viewMode === 'preview') {
       return (
         <div className="flex-1 overflow-y-auto">
-          <RichTextEditor value={content ?? ''} onChange={handleChange} placeholder="Write markdown..." variant={variant} fontFamily={notesFontFamily} checkedHighlight={notesCheckedHighlight} showToolbar={notesShowToolbar} spellcheck={notesSpellcheck} themeColors={themeColors} />
+          <RichTextEditor value={content ?? ''} onChange={handleChange} placeholder="Write markdown..." readability={effectiveReadability} width={effectiveWidth} fontFamily={notesFontFamily} checkedHighlight={notesCheckedHighlight} showToolbar={notesShowToolbar} spellcheck={notesSpellcheck} themeColors={themeColors} />
         </div>
       )
     }
@@ -324,7 +352,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
         <div className="flex-1 flex flex-row overflow-hidden">
           <textarea ref={textareaRef} value={content ?? ''} onChange={(e) => handleChange(e.target.value)} className="flex-1 bg-transparent text-xs font-mono p-3 resize-none outline-none min-w-0" placeholder="Write markdown..." spellCheck={false} />
           <div className="flex-1 border-l border-border min-w-0 min-h-0">
-            <div className="mk-doc" data-variant={variant} style={themeStyle}>
+            <div className="mk-doc" data-readability={effectiveReadability} data-width={effectiveWidth} style={themeStyle}>
               <div className="mk-doc-scroll">
                 <div className="mk-doc-body">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ''}</ReactMarkdown>
@@ -421,7 +449,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     }
   }, [selectedId, onActiveAssetIdChange])
 
-  const { editorMarkdownViewMode } = useAppearance()
+  const { editorMarkdownViewMode, notesReadability, notesWidth } = useAppearance()
   const assetDefaultViewMode = editorMarkdownViewMode === 'code' ? 'raw' : editorMarkdownViewMode === 'split' ? 'split' : 'preview'
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
   const [zoomLevel, setZoomLevel] = useState(1)
@@ -469,6 +497,8 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
 
   const selectedAsset = assets.find(a => a.id === selectedId) ?? null
   const selectedRenderMode = selectedAsset ? getEffectiveRenderMode(selectedAsset.title, selectedAsset.render_mode) : null
+  const effectiveReadability: 'compact' | 'normal' = selectedAsset?.readability_override ?? notesReadability
+  const effectiveWidth: 'narrow' | 'wide' = selectedAsset?.width_override ?? notesWidth
 
   useEffect(() => {
     const asset = assets.find(a => a.id === selectedId)
@@ -991,31 +1021,63 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                     <button type="button" className="size-6 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setZoomLevel(z => Math.min(4, z + 0.25))}><ZoomIn className="size-3.5" /></button>
                   </div>
                 )}
-                {hasPreviewToggle(selectedRenderMode) && (
-                  <PanelToggle
-                    variant="raised"
-                    panels={[
-                      { id: 'preview', icon: Eye, label: 'Preview', active: viewMode === 'preview' },
-                      { id: 'split', icon: Columns2, label: 'Split', active: viewMode === 'split' },
-                      { id: 'raw', icon: Code2, label: 'Raw', active: viewMode === 'raw' },
-                    ]}
-                    onChange={(id) => { const mode = id as 'preview' | 'split' | 'raw'; setViewMode(mode); if (selectedAsset) updateAsset({ id: selectedAsset.id, viewMode: mode }) }}
-                  />
+                {selectedRenderMode === 'markdown' && viewMode !== 'raw' && (
+                  <>
+                    <div className={TOGGLE_PILL_CLASS}>
+                      <IconToggleButton
+                        icon={effectiveReadability === 'compact' ? Rows2 : Rows3}
+                        active={effectiveReadability === 'compact'}
+                        onClick={() => {
+                          const next = effectiveReadability === 'compact' ? 'normal' : 'compact'
+                          const override = next === notesReadability ? null : next
+                          updateAsset({ id: selectedAsset.id, readabilityOverride: override })
+                        }}
+                        tooltip={`Readability: ${effectiveReadability === 'compact' ? 'Compact' : 'Normal'}${selectedAsset.readability_override ? ' (override)' : ''}`}
+                      />
+                    </div>
+                    <div className={TOGGLE_PILL_CLASS}>
+                      <IconToggleButton
+                        icon={effectiveWidth === 'wide' ? Maximize2 : AlignCenter}
+                        active={effectiveWidth === 'wide'}
+                        onClick={() => {
+                          const next = effectiveWidth === 'wide' ? 'narrow' : 'wide'
+                          const override = next === notesWidth ? null : next
+                          updateAsset({ id: selectedAsset.id, widthOverride: override })
+                        }}
+                        tooltip={`Width: ${effectiveWidth === 'wide' ? 'Wide' : 'Narrow'}${selectedAsset.width_override ? ' (override)' : ''}`}
+                      />
+                    </div>
+                  </>
                 )}
-                <div className="bg-surface-3 rounded-lg p-1">
-                  <Select
-                    value={selectedAsset.render_mode ?? '__auto__'}
-                    onValueChange={(v) => updateAsset({ id: selectedAsset.id, renderMode: v === '__auto__' ? null : v as RenderMode })}
-                  >
-                    <SelectTrigger size="sm" className="!h-7 text-xs w-auto min-w-0 gap-1.5 px-2.5 border-0 bg-transparent"><SelectValue /></SelectTrigger>
-                    <SelectContent position="popper" side="bottom" className="max-h-none overflow-y-visible">
-                      <SelectItem value="__auto__">Auto ({RENDER_MODE_INFO[getEffectiveRenderMode(selectedAsset.title, null)].label})</SelectItem>
-                      {(Object.keys(RENDER_MODE_INFO) as RenderMode[]).map((mode) => (
-                        <SelectItem key={mode} value={mode}>{RENDER_MODE_INFO[mode].label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {hasPreviewToggle(selectedRenderMode) && (
+                  <div className={TOGGLE_PILL_CLASS}>
+                    {([
+                      { mode: 'preview' as const, icon: Eye, title: 'Preview' },
+                      { mode: 'split' as const, icon: Columns2, title: 'Split view' },
+                      { mode: 'raw' as const, icon: Code2, title: 'Raw' },
+                    ]).map(({ mode, icon, title }) => (
+                      <IconToggleButton
+                        key={mode}
+                        icon={icon}
+                        active={viewMode === mode}
+                        onClick={() => { setViewMode(mode); updateAsset({ id: selectedAsset.id, viewMode: mode }) }}
+                        tooltip={title}
+                      />
+                    ))}
+                  </div>
+                )}
+                <Select
+                  value={selectedAsset.render_mode ?? '__auto__'}
+                  onValueChange={(v) => updateAsset({ id: selectedAsset.id, renderMode: v === '__auto__' ? null : v as RenderMode })}
+                >
+                  <SelectTrigger size="sm" className="!h-7 text-xs w-auto min-w-0 gap-1.5 px-2.5 shrink-0"><SelectValue /></SelectTrigger>
+                  <SelectContent position="popper" side="bottom" className="max-h-none overflow-y-visible">
+                    <SelectItem value="__auto__">Auto ({RENDER_MODE_INFO[getEffectiveRenderMode(selectedAsset.title, null)].label})</SelectItem>
+                    {(Object.keys(RENDER_MODE_INFO) as RenderMode[]).map((mode) => (
+                      <SelectItem key={mode} value={mode}>{RENDER_MODE_INFO[mode].label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
             {selectedAsset && selectedRenderMode && (() => {
@@ -1026,6 +1088,8 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
               const hasExport = hasPdf || hasPng || hasHtml
 
               return (
+                <>
+                <div className="w-px h-5 bg-border shrink-0 mx-2" />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="!h-7 gap-1 px-1.5 shrink-0" title="Download">
@@ -1071,6 +1135,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
+                </>
               )
             })()}
           </div>
@@ -1181,6 +1246,8 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                 onStats={setAssetStats}
                 onContentReady={(c) => { contentForFindRef.current = c }}
                 scrollToLineRef={scrollToLineRef}
+                effectiveReadability={effectiveReadability}
+                effectiveWidth={effectiveWidth}
               />
             </>
           ) : (

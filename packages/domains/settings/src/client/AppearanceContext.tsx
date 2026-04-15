@@ -48,7 +48,9 @@ export function AppearanceProvider({
       window.api.settings.get('browser_default_devices'),
       window.api.settings.get('sidebar_badge_mode'),
       window.api.settings.get('notes_font_family'),
+      window.api.settings.get('notes_readability'),
       window.api.settings.get('notes_line_spacing'),
+      window.api.settings.get('notes_width'),
       window.api.settings.get('notes_checked_highlight'),
       window.api.settings.get('notes_show_toolbar'),
       window.api.settings.get('notes_spellcheck'),
@@ -60,9 +62,16 @@ export function AppearanceProvider({
       diffContext, diffWs,
       browserZoom, browserUrl, browserDevices,
       sidebarBadge,
-      notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck,
+      notesFontFamily, notesReadability, legacyNotesLineSpacing, notesWidth, notesCheckedHighlight, notesShowToolbar, notesSpellcheck,
       mdViewMode,
     ]) => {
+      // One-shot migration: notes_line_spacing → notes_readability
+      let readabilityValue = notesReadability
+      if (!readabilityValue && legacyNotesLineSpacing) {
+        readabilityValue = legacyNotesLineSpacing
+        window.api.settings.set('notes_readability', legacyNotesLineSpacing)
+        window.api.settings.set('notes_line_spacing', '')
+      }
       const d = appearanceDefaults
       performance.mark('sz:appearance:end')
       setSettings({
@@ -83,7 +92,8 @@ export function AppearanceProvider({
         browserDeviceDefaults: tryParseJson<BrowserDeviceDefaults | null>(browserDevices, null),
         sidebarBadgeMode: (sidebarBadge === 'none' || sidebarBadge === 'count') ? sidebarBadge : 'blob',
         notesFontFamily: notesFontFamily === 'mono' ? 'mono' : 'sans',
-        notesLineSpacing: notesLineSpacing === 'compact' ? 'compact' : 'normal',
+        notesReadability: readabilityValue === 'compact' ? 'compact' : 'normal',
+        notesWidth: notesWidth === 'wide' ? 'wide' : 'narrow',
         notesCheckedHighlight: notesCheckedHighlight === '1',
         notesShowToolbar: notesShowToolbar === '1',
         notesSpellcheck: notesSpellcheck !== '0',

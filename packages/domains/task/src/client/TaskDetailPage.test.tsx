@@ -81,7 +81,7 @@ vi.mock('@slayzone/ui', () => {
     getColumnStatusStyle: () => null,
     projectColorBg: () => undefined,
     useAppearance: () => ({
-      colorTintsEnabled: false, notesFontFamily: 'monospace', notesLineSpacing: 1.5,
+      colorTintsEnabled: false, notesFontFamily: 'monospace', notesReadability: 'normal', notesWidth: 'narrow',
       notesCheckedHighlight: false, notesShowToolbar: false, notesSpellcheck: false,
     }),
     matchesShortcut: () => false,

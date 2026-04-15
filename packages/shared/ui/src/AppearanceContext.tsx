@@ -28,7 +28,8 @@ export interface AppearanceSettings {
   browserDeviceDefaults: BrowserDeviceDefaults | null
   // Editor
   notesFontFamily: 'sans' | 'mono'
-  notesLineSpacing: 'compact' | 'normal'
+  notesReadability: 'compact' | 'normal'
+  notesWidth: 'narrow' | 'wide'
   notesCheckedHighlight: boolean
   notesShowToolbar: boolean
   notesSpellcheck: boolean
@@ -55,7 +56,8 @@ export const appearanceDefaults: AppearanceSettings = {
   browserDefaultUrl: '',
   browserDeviceDefaults: null,
   notesFontFamily: 'sans',
-  notesLineSpacing: 'normal',
+  notesReadability: 'normal',
+  notesWidth: 'narrow',
   notesCheckedHighlight: false,
   notesShowToolbar: false,
   notesSpellcheck: true,

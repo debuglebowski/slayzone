@@ -193,6 +193,8 @@ export interface TaskAsset {
   title: string
   render_mode: RenderMode | null
   view_mode: string | null
+  readability_override: 'compact' | 'normal' | null
+  width_override: 'narrow' | 'wide' | null
   language: string | null
   order: number
   created_at: string
@@ -214,6 +216,8 @@ export interface UpdateAssetInput {
   folderId?: string | null
   renderMode?: RenderMode | null
   viewMode?: string | null
+  readabilityOverride?: 'compact' | 'normal' | null
+  widthOverride?: 'narrow' | 'wide' | null
   content?: string
   language?: string | null
 }

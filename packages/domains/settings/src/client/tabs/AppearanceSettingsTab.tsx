@@ -58,7 +58,8 @@ export function AppearanceSettingsTab() {
   const [reduceMotion, setReduceMotion] = useState(false)
   const [sidebarBadgeMode, setSidebarBadgeMode] = useState<'none' | 'blob' | 'count'>('blob')
   const [notesFontFamily, setNotesFontFamily] = useState<'sans' | 'mono'>('sans')
-  const [notesLineSpacing, setNotesLineSpacing] = useState<'compact' | 'normal'>('normal')
+  const [notesReadability, setNotesReadability] = useState<'compact' | 'normal'>('normal')
+  const [notesWidth, setNotesWidth] = useState<'narrow' | 'wide'>('narrow')
   const [notesCheckedHighlight, setNotesCheckedHighlight] = useState(false)
   const [notesShowToolbar, setNotesShowToolbar] = useState(false)
   const [notesSpellcheck, setNotesSpellcheck] = useState(true)
@@ -71,7 +72,14 @@ export function AppearanceSettingsTab() {
     window.api.settings.get('reduce_motion').then(val => setReduceMotion(val === '1'))
     window.api.settings.get('sidebar_badge_mode').then(val => setSidebarBadgeMode((val === 'none' || val === 'count') ? val : 'blob'))
     window.api.settings.get('notes_font_family').then(val => setNotesFontFamily(val === 'mono' ? 'mono' : 'sans'))
-    window.api.settings.get('notes_line_spacing').then(val => setNotesLineSpacing(val === 'compact' ? 'compact' : 'normal'))
+    Promise.all([
+      window.api.settings.get('notes_readability'),
+      window.api.settings.get('notes_line_spacing'),
+    ]).then(([readability, legacy]) => {
+      const value = readability || legacy
+      setNotesReadability(value === 'compact' ? 'compact' : 'normal')
+    })
+    window.api.settings.get('notes_width').then(val => setNotesWidth(val === 'wide' ? 'wide' : 'narrow'))
     window.api.settings.get('notes_checked_highlight').then(val => setNotesCheckedHighlight(val === '1'))
     window.api.settings.get('notes_show_toolbar').then(val => setNotesShowToolbar(val === '1'))
     window.api.settings.get('notes_spellcheck').then(val => setNotesSpellcheck(val !== '0'))
@@ -190,14 +198,26 @@ export function AppearanceSettingsTab() {
             </Select>
           </div>
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
-            <SettingLabel tip="Vertical space between lines in the notes editor">Line spacing</SettingLabel>
-            <Select value={notesLineSpacing} onValueChange={(v) => { setNotesLineSpacing(v as 'compact' | 'normal'); window.api.settings.set('notes_line_spacing', v) }}>
+            <SettingLabel tip="Vertical density of rendered markdown — text size, line height, and vertical padding">Readability</SettingLabel>
+            <Select value={notesReadability} onValueChange={(v) => { setNotesReadability(v as 'compact' | 'normal'); window.api.settings.set('notes_readability', v) }}>
               <SelectTrigger className="w-48">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent position="popper" side="bottom" className="max-h-none">
                 <SelectItem value="normal">Normal</SelectItem>
                 <SelectItem value="compact">Compact</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+            <SettingLabel tip="Horizontal width of rendered markdown — column max-width and horizontal padding">Width</SettingLabel>
+            <Select value={notesWidth} onValueChange={(v) => { setNotesWidth(v as 'narrow' | 'wide'); window.api.settings.set('notes_width', v) }}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" side="bottom" className="max-h-none">
+                <SelectItem value="narrow">Narrow</SelectItem>
+                <SelectItem value="wide">Wide</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -62,7 +62,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
-import { RichTextEditor, noteVariant } from '@slayzone/editor'
+import { RichTextEditor } from '@slayzone/editor'
 import { normalizeDescription, stripMarkdown, getExtensionFromTitle, getEffectiveRenderMode, RENDER_MODE_INFO } from '@slayzone/task/shared'
 import { useTheme, useDialogStore, type SearchFileContext } from '@slayzone/settings/client'
 import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog, SlayNudgeBanner, useSlayNudge } from '@slayzone/terminal'
@@ -203,7 +203,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const { modes } = useTerminalModes()
 
   const { editorThemeId, contentVariant } = useTheme()
-  const { notesFontFamily, notesLineSpacing, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
+  const { notesFontFamily, notesReadability, notesWidth, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
   const notesThemeColors: EditorThemeColors = useMemo(
     () => getThemeEditorColors(editorThemeId, contentVariant),
     [editorThemeId, contentVariant]
@@ -2208,7 +2208,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onBlur={handleDescriptionSave}
                   placeholder="Add description..."
                   testId="task-description-editor"
-                  variant={noteVariant(notesLineSpacing, 'inline')}
+                  variant="inline"
                   fontFamily={notesFontFamily}
                   checkedHighlight={notesCheckedHighlight}
                   showToolbar={notesShowToolbar}
@@ -2546,7 +2546,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         onChange={setDescriptionValue}
         onSave={handleDescriptionSave}
         fontFamily={notesFontFamily}
-        variant={noteVariant(notesLineSpacing)}
+        readability={notesReadability}
+        width={notesWidth}
         checkedHighlight={notesCheckedHighlight}
         showToolbar={notesShowToolbar}
         spellcheck={notesSpellcheck}

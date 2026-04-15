@@ -6,7 +6,7 @@ import { history } from '@milkdown/plugin-history'
 import { indent } from '@milkdown/plugin-indent'
 import { listener, listenerCtx } from '@milkdown/plugin-listener'
 import { replaceAll } from '@milkdown/utils'
-import { noteVariant, taskListPlugin } from '@slayzone/editor'
+import { taskListPlugin } from '@slayzone/editor'
 import { remarkFrontmatterPlugin, frontmatterSchema, frontmatterView } from './milkdown-frontmatter'
 import { useTheme } from '@slayzone/settings/client'
 import { getThemeEditorColors, useAppearance } from '@slayzone/ui'
@@ -25,8 +25,7 @@ interface MarkdownFileEditorProps {
 export function MarkdownFileEditor({ filePath, content, onChange, onSave, version }: MarkdownFileEditorProps) {
   const { editorThemeId, contentVariant } = useTheme()
   const themeColors = useMemo(() => getThemeEditorColors(editorThemeId, contentVariant), [editorThemeId, contentVariant])
-  const { notesLineSpacing } = useAppearance()
-  const variant = noteVariant(notesLineSpacing)
+  const { notesReadability, notesWidth } = useAppearance()
 
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
@@ -108,7 +107,7 @@ export function MarkdownFileEditor({ filePath, content, onChange, onSave, versio
   } as CSSProperties
 
   return (
-    <div className="mk-doc" data-variant={variant} data-themed="true" style={themeStyle}>
+    <div className="mk-doc" data-readability={notesReadability} data-width={notesWidth} data-themed="true" style={themeStyle}>
       <div ref={containerRef} className="mk-doc-scroll" />
     </div>
   )

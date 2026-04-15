@@ -3,7 +3,6 @@ import remarkGfm from 'remark-gfm'
 import type { CSSProperties } from 'react'
 import { useTheme } from '@slayzone/settings/client'
 import { getThemeEditorColors, useAppearance } from '@slayzone/ui'
-import { noteVariant } from '@slayzone/editor'
 import { CodeEditor } from './CodeEditor'
 
 interface MarkdownSplitViewProps {
@@ -19,8 +18,7 @@ interface MarkdownSplitViewProps {
 export function MarkdownSplitView({ filePath, content, onChange, onSave, version, goToPosition, onGoToPositionApplied }: MarkdownSplitViewProps) {
   const { editorThemeId, contentVariant } = useTheme()
   const colors = getThemeEditorColors(editorThemeId, contentVariant)
-  const { notesLineSpacing } = useAppearance()
-  const variant = noteVariant(notesLineSpacing)
+  const { notesReadability, notesWidth } = useAppearance()
 
   const themeStyle = {
     '--mk-bg': colors.background,
@@ -47,7 +45,7 @@ export function MarkdownSplitView({ filePath, content, onChange, onSave, version
         />
       </div>
       <div className="flex-1 border-l border-border min-w-0 min-h-0">
-        <div className="mk-doc" data-variant={variant} style={themeStyle}>
+        <div className="mk-doc" data-readability={notesReadability} data-width={notesWidth} style={themeStyle}>
           <div className="mk-doc-scroll">
             <div className="mk-doc-body">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
