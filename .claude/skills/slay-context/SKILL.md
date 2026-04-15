@@ -24,7 +24,7 @@ For each file that exists and does **not** already contain a "SlayZone Environme
 
 You are running inside a SlayZone task terminal — a desktop task management app with integrated AI coding assistants. Your terminal session, browser panel, and task metadata are all managed by the app.
 
-Use the \`slay\` CLI to read and update your task, manage subtasks, control the browser panel, and more. The current task ID is available via \`$SLAYZONE_TASK_ID\` (set automatically in task terminals).
+Use the \`slay\` CLI to read and update your task, manage subtasks, control the browser panel, and more. The current task ID is available via \`$SLAYZONE_TASK_ID\` and the current project via \`$SLAYZONE_PROJECT_ID\` (both set automatically in task terminals).
 ```
 
 **Rules:**

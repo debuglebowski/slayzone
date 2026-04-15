@@ -15,9 +15,7 @@ depends_on:
 trigger: auto
 ---
 
-Use the `slay` CLI to interact with the SlayZone task management system. The current task ID is available via `$SLAYZONE_TASK_ID` (set automatically in task terminals).
-
-**Global flag:** `--dev` — use development database.
+Use the `slay` CLI to interact with the SlayZone task management system. The current task ID is available via `$SLAYZONE_TASK_ID` and the current project via `$SLAYZONE_PROJECT_ID` (both set automatically in task terminals).
 
 All ID arguments support prefix matching (e.g., `a1b2` matches the full UUID starting with `a1b2`).
 
