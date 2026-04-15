@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { File, FileText, Link2, Unlink } from 'lucide-react'
-import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Switch, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn } from '@slayzone/ui'
+import { File, FileText, Link2, RefreshCw, Unlink } from 'lucide-react'
+import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn } from '@slayzone/ui'
+import { useWatchedFile } from '@slayzone/file-editor/client/useWatchedFile'
 import type { AiConfigItem, CliProvider, SyncHealth, SyncReason } from '../shared'
 import { PROVIDER_PATHS, PROVIDER_LABELS } from '../shared/provider-registry'
 
@@ -48,17 +49,14 @@ export function ProjectInstructions({
   const [providerHealth, setProviderHealth] = useState<Partial<Record<CliProvider, { health: SyncHealth; reason: SyncReason | null; contentHash?: string | null; lineCount?: number | null }>>>({})
   const [linkedVariant, setLinkedVariant] = useState<AiConfigItem | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [fileContent, setFileContent] = useState('')
-  const [originalFileContent, setOriginalFileContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [variants, setVariants] = useState<AiConfigItem[]>([])
-  const [autoSync, setAutoSync] = useState(true)
 
   const isProject = !!projectId && !!projectPath
   const files = dedupeProviderFiles(providerHealth).sort((a, b) => a.path.localeCompare(b.path))
   const selectedFile = files.find((f) => f.path === selectedPath)
-  const dirty = fileContent !== originalFileContent
+  const selectedProvider = selectedFile?.providers[0] ?? null
 
   const HASH_COLORS = ['#f97316','#8b5cf6','#06b6d4','#ec4899','#84cc16','#eab308','#14b8a6']
 
@@ -105,38 +103,22 @@ export function ProjectInstructions({
 
   useEffect(() => { void load() }, [load])
 
-  // Load file content when selection changes (custom mode only)
-  useEffect(() => {
-    if (linkedVariant || !selectedFile || !projectPath) {
-      if (!linkedVariant) {
-        setFileContent('')
-        setOriginalFileContent('')
-      }
-      return
-    }
-    const provider = selectedFile.providers[0]
-    void window.api.aiConfig.readProviderInstructions(projectPath, provider).then((result) => {
-      setFileContent(result.content)
-      setOriginalFileContent(result.content)
-    })
-  }, [selectedPath, projectPath, linkedVariant])
-
-  // Debounced auto-save (custom mode only)
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const latestContent = useRef(fileContent)
-  latestContent.current = fileContent
-
-  useEffect(() => {
-    if (!autoSync || linkedVariant || !dirty || !selectedFile || !projectId || !projectPath) return
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(async () => {
-      const content = latestContent.current
-      const result = await window.api.aiConfig.pushProviderInstructions(projectId, projectPath, selectedFile.providers[0], content)
-      setOriginalFileContent(content)
+  // Editable file: read/save/watch via shared primitive. relPath null in linked-variant mode
+  // (Textarea is readOnly there).
+  const watched = useWatchedFile({
+    projectPath: !linkedVariant && projectPath ? projectPath : null,
+    relPath: !linkedVariant && selectedFile ? selectedFile.path : null,
+    read: useCallback(async () => {
+      if (!projectPath || !selectedProvider) return null
+      const r = await window.api.aiConfig.readProviderInstructions(projectPath, selectedProvider)
+      return r.content
+    }, [projectPath, selectedProvider]),
+    save: useCallback(async (content: string) => {
+      if (!projectId || !projectPath || !selectedProvider) return
+      const result = await window.api.aiConfig.pushProviderInstructions(projectId, projectPath, selectedProvider, content)
       setProviderHealth(result.providerHealth ?? {})
-    }, 500)
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current) }
-  }, [fileContent, dirty, selectedFile, projectId, projectPath, linkedVariant, autoSync])
+    }, [projectId, projectPath, selectedProvider]),
+  })
 
   const openPicker = useCallback(async () => {
     const items = await window.api.aiConfig.listInstructionVariants()
@@ -185,10 +167,6 @@ export function ProjectInstructions({
 
   const headerActions = (
     <div className="flex items-center gap-3">
-      <label className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Switch checked={autoSync} onCheckedChange={setAutoSync} />
-        Auto-sync
-      </label>
       {linkedVariant ? (
         <div className="flex items-center gap-1.5">
           <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={openPicker}>
@@ -314,12 +292,31 @@ export function ProjectInstructions({
           {/* Right: file editor */}
           <div className="flex min-w-0 flex-1 flex-col">
             {selectedFile ? (
-              <Textarea
-                className="min-h-0 max-h-none flex-1 resize-none rounded-none border-0 shadow-none focus-visible:ring-0 bg-transparent dark:bg-transparent [padding-top:1rem] [padding-bottom:1rem] [field-sizing:fixed] font-mono text-sm"
-                placeholder="Write instructions..."
-                value={fileContent}
-                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setFileContent(e.target.value)}
-              />
+              <>
+                {watched.diskChanged && (
+                  <div className="flex items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs">
+                    <div className="flex items-center gap-1.5 text-amber-500">
+                      <RefreshCw className="size-3" />
+                      <span>File changed on disk</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[11px] border-amber-500/30"
+                      onClick={() => void watched.reloadFromDisk()}
+                    >
+                      Reload
+                    </Button>
+                  </div>
+                )}
+                <Textarea
+                  className="min-h-0 max-h-none flex-1 resize-none rounded-none border-0 shadow-none focus-visible:ring-0 bg-transparent dark:bg-transparent [padding-top:1rem] [padding-bottom:1rem] [field-sizing:fixed] font-mono text-sm"
+                  placeholder="Write instructions..."
+                  value={watched.content}
+                  onChange={(e: ChangeEvent<HTMLTextAreaElement>) => watched.setContent(e.target.value)}
+                  onBlur={watched.onBlur}
+                />
+              </>
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
                 <p>{files.length === 0 ? 'No provider files found' : 'Select a file to edit'}</p>

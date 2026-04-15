@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
+    "@slayzone/file-editor": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@xyflow/react": "^12.10.2",
     "js-yaml": "^4.1.1",
