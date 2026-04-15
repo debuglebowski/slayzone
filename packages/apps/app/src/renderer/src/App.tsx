@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
 import { initShortcuts } from './shortcut-init'
-import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen } from 'lucide-react'
+import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -24,7 +24,7 @@ import { usePanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { useDetectedRepos } from '@slayzone/projects/client/useDetectedRepos'
 import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/projects'
-import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectDurationLocked, isScheduleLocked } from '@slayzone/projects'
+import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectDurationLocked, isScheduleLocked, hasActiveLockOverride, clearLockOverrides } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider, type SearchFileContext } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import { usePty } from '@slayzone/terminal/client'
@@ -315,7 +315,6 @@ function App(): React.JSX.Element {
   // Project lock guard — wraps all task-open paths
   const durationLocked = projectLockEnabled && (isProjectDurationLocked(selectedProject) || isScheduleLocked(selectedProject))
   const guardTaskOpen = useCallback((taskId: string, fn: (id: string) => void) => {
-    if (durationLocked) return
     if (projectLockEnabled) {
       const existing = useTabStore.getState().tabs.some(t => t.type === 'task' && t.taskId === taskId)
       if (!existing && selectedProject && isRateLimited(selectedProject)) {
@@ -325,7 +324,7 @@ function App(): React.JSX.Element {
       if (!existing && selectedProject) recordTaskOpen(selectedProject.id)
     }
     fn(taskId)
-  }, [durationLocked, projectLockEnabled, selectedProject])
+  }, [projectLockEnabled, selectedProject])
 
   const openTask = useCallback((taskId: string) => {
     guardTaskOpen(taskId, (id) => startTransition(() => rawOpenTask(id)))
@@ -1084,6 +1083,10 @@ function App(): React.JSX.Element {
                 >
                     {tab.type === 'home' ? (
                     <div id="home-detail" className="flex flex-col flex-1 h-full">
+                    {durationLocked && selectedProject?.lock_config ? (
+                      <ProjectLockScreen project={selectedProject} lockedUntil={selectedProject.lock_config?.locked_until} schedule={selectedProject.lock_config?.schedule} onUnlocked={updateProject} />
+                    ) : (
+                    <>
                       <header className="mb-4 window-no-drag space-y-2">
                         <div className="flex items-center gap-4">
                           <div className="flex-shrink-0">
@@ -1096,16 +1099,21 @@ function App(): React.JSX.Element {
                           </div>
                           {projects.length > 0 && !(projectPathMissing && selectedProjectId) && (
                             <div className="ml-auto flex items-center gap-1">
-                              {selectedProject && projectLockEnabled && <ProjectLockPopover project={selectedProject} onUpdated={updateProject} onCloseProjectTabs={(pid) => {
-                                const { tabs } = useTabStore.getState()
-                                for (let i = tabs.length - 1; i >= 0; i--) {
-                                  const t = tabs[i]
-                                  if (t.type === 'task') {
-                                    const task = tasks.find(tk => tk.id === t.taskId)
-                                    if (task?.project_id === pid) useTabStore.getState().closeTabByTaskId(t.taskId)
-                                  }
-                                }
-                              }} />}
+                              {selectedProject && projectLockEnabled && hasActiveLockOverride(selectedProject) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 gap-1.5 px-2 text-xs font-medium text-amber-600 dark:text-amber-400"
+                                  onClick={() => {
+                                    clearLockOverrides(selectedProject.id)
+                                    updateProject(selectedProject)
+                                  }}
+                                >
+                                  <Lock className="size-3.5" />
+                                  Re-lock
+                                </Button>
+                              )}
+                              {selectedProject && projectLockEnabled && <ProjectLockPopover project={selectedProject} onUpdated={updateProject} />}
                               <div className="h-4 w-px bg-border" />
                               <FilterBar filter={filter} onChange={setFilter} tags={projectTags} columns={selectedProject?.columns_config} />
                             </div>
@@ -1139,8 +1147,6 @@ function App(): React.JSX.Element {
                             <Button onClick={handleFixProjectPath}>Update path</Button>
                           </div>
                         </div>
-                      ) : durationLocked && selectedProject?.lock_config ? (
-                        <ProjectLockScreen project={selectedProject} lockedUntil={selectedProject.lock_config?.locked_until} schedule={selectedProject.lock_config?.schedule} onUnlocked={updateProject} />
                       ) : (
                         <div ref={homePanel.homeContainerRef} className="flex-1 min-h-0 flex">
                           {HOME_PANEL_ORDER.filter(id => homePanel.homePanelVisibility[id]).map((id, i) => {
@@ -1185,6 +1191,8 @@ function App(): React.JSX.Element {
                           })}
                         </div>
                       )}
+                    </>
+                    )}
                     </div>
                     ) : (
                     <Suspense fallback={<TaskShell />}>

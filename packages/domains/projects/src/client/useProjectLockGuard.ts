@@ -18,17 +18,21 @@ export function isRateLimited(project: Project): boolean {
   return log.length >= cfg.max_tasks
 }
 
-export function isProjectDurationLocked(project: Project | null | undefined): boolean {
-  const lockedUntil = project?.lock_config?.locked_until
-  if (!lockedUntil) return false
-  return new Date(lockedUntil).getTime() > Date.now()
-}
-
-// Session-only schedule overrides — resets on app restart
+// Session-only lock overrides — reset on app restart
+const durationOverrides = new Set<string>()
 const scheduleOverrides = new Set<string>()
+
+export function overrideDurationLock(projectId: string): void {
+  durationOverrides.add(projectId)
+}
 
 export function overrideScheduleLock(projectId: string): void {
   scheduleOverrides.add(projectId)
+}
+
+export function clearLockOverrides(projectId: string): void {
+  durationOverrides.delete(projectId)
+  scheduleOverrides.delete(projectId)
 }
 
 function parseHHMM(s: string): number {
@@ -36,10 +40,12 @@ function parseHHMM(s: string): number {
   return h * 60 + m
 }
 
-export function isScheduleLocked(project: Project | null | undefined): boolean {
-  if (!project) return false
-  if (scheduleOverrides.has(project.id)) return false
-  const sched = project.lock_config?.schedule
+function isWithinDuration(lockedUntil: string | null | undefined): boolean {
+  if (!lockedUntil) return false
+  return new Date(lockedUntil).getTime() > Date.now()
+}
+
+function isWithinSchedule(sched: { from: string; to: string } | null | undefined): boolean {
   if (!sched) return false
   const now = new Date()
   const current = now.getHours() * 60 + now.getMinutes()
@@ -47,4 +53,23 @@ export function isScheduleLocked(project: Project | null | undefined): boolean {
   const to = parseHHMM(sched.to)
   if (from <= to) return current >= from && current < to   // same-day: 09:00–17:00
   return current >= from || current < to                    // overnight: 18:00–09:00
+}
+
+export function isProjectDurationLocked(project: Project | null | undefined): boolean {
+  if (!project) return false
+  if (durationOverrides.has(project.id)) return false
+  return isWithinDuration(project.lock_config?.locked_until)
+}
+
+export function isScheduleLocked(project: Project | null | undefined): boolean {
+  if (!project) return false
+  if (scheduleOverrides.has(project.id)) return false
+  return isWithinSchedule(project.lock_config?.schedule)
+}
+
+export function hasActiveLockOverride(project: Project | null | undefined): boolean {
+  if (!project) return false
+  if (durationOverrides.has(project.id) && isWithinDuration(project.lock_config?.locked_until)) return true
+  if (scheduleOverrides.has(project.id) && isWithinSchedule(project.lock_config?.schedule)) return true
+  return false
 }

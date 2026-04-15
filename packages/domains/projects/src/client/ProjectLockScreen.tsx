@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Lock } from 'lucide-react'
 import { Button } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
-import { isScheduleLocked, overrideScheduleLock } from './useProjectLockGuard'
+import { isScheduleLocked, overrideScheduleLock, overrideDurationLock } from './useProjectLockGuard'
 
 interface ProjectLockScreenProps {
   project: Project
@@ -52,22 +52,10 @@ export function ProjectLockScreen({ project, lockedUntil, schedule, onUnlocked }
     return () => clearInterval(id)
   }, [hasDuration, schedule, project, onUnlocked])
 
-  const handleUnlockEarly = useCallback(async () => {
-    if (hasDuration) {
-      // Duration = one-shot → clear from DB
-      const updated = await window.api.db.updateProject({
-        id: project.id,
-        lockConfig: {
-          ...project.lock_config!,
-          locked_until: null,
-        },
-      })
-      onUnlocked(updated as unknown as Project)
-    } else if (schedule) {
-      // Schedule = recurring → session-only override (no DB write)
-      overrideScheduleLock(project.id)
-      onUnlocked(project)
-    }
+  const handleUnlockEarly = useCallback(() => {
+    if (hasDuration) overrideDurationLock(project.id)
+    else if (schedule) overrideScheduleLock(project.id)
+    onUnlocked(project)
   }, [project, hasDuration, schedule, onUnlocked])
 
   // Auto-unlock when duration timer expires
@@ -79,7 +67,7 @@ export function ProjectLockScreen({ project, lockedUntil, schedule, onUnlocked }
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center space-y-4">
         <Lock className="h-16 w-16 text-muted-foreground mx-auto" />
-        <p className="text-2xl font-bold">Project Locked</p>
+        <p className="text-2xl font-bold">{project.name} locked</p>
         {hasDuration ? (
           <p className="text-4xl font-mono tabular-nums text-muted-foreground">
             {formatRemaining(remaining)}
@@ -89,9 +77,11 @@ export function ProjectLockScreen({ project, lockedUntil, schedule, onUnlocked }
             Available at {schedule.to}
           </p>
         ) : null}
-        <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={handleUnlockEarly}>
-          Unlock early
-        </Button>
+        {!project.lock_config?.disable_unlock_early && (
+          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={handleUnlockEarly}>
+            Unlock early
+          </Button>
+        )}
       </div>
     </div>
   )

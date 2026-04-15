@@ -32,6 +32,8 @@ export interface ProjectLockConfig {
     from: string
     to: string
   } | null
+  /** When true, hide "Unlock early" button on lockscreen. Default false. */
+  disable_unlock_early?: boolean
 }
 
 export interface Project {

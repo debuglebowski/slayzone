@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Lock, LockOpen, Timer, Clock } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Lock, LockOpen, Timer, Clock, AlertTriangle } from 'lucide-react'
 import {
   Button,
   Popover,
@@ -11,14 +11,26 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
-  Input
+  Input,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
 } from '@slayzone/ui'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project, ProjectLockConfig } from '@slayzone/projects/shared'
 
 interface ProjectLockPopoverProps {
   project: Project
   onUpdated: (project: Project) => void
-  onCloseProjectTabs: (projectId: string) => void
 }
 
 const DURATION_UNITS = [
@@ -33,90 +45,82 @@ const WINDOW_OPTIONS = [
   { value: '60', label: '1 hour' },
 ]
 
-export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: ProjectLockPopoverProps) {
+export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverProps) {
   const config = project.lock_config
   const hasAnyLock = !!(config?.locked_until || config?.rate_limit || config?.schedule)
 
+  const [open, setOpen] = useState(false)
+  const [whyOpen, setWhyOpen] = useState(false)
+  const [confirmDisableOpen, setConfirmDisableOpen] = useState(false)
+
+  // Local pending state — reset to persisted config when popover opens
   const [durationEnabled, setDurationEnabled] = useState(false)
   const [durationValue, setDurationValue] = useState(30)
   const [durationUnit, setDurationUnit] = useState<'minutes' | 'hours'>('minutes')
 
-  const [rateLimitEnabled, setRateLimitEnabled] = useState(!!config?.rate_limit)
-  const [maxTasks, setMaxTasks] = useState(config?.rate_limit?.max_tasks ?? 3)
-  const [perMinutes, setPerMinutes] = useState(String(config?.rate_limit?.per_minutes ?? 60))
+  const [rateLimitEnabled, setRateLimitEnabled] = useState(false)
+  const [maxTasks, setMaxTasks] = useState(3)
+  const [perMinutes, setPerMinutes] = useState('60')
 
-  const [scheduleEnabled, setScheduleEnabled] = useState(!!config?.schedule)
-  const [scheduleFrom, setScheduleFrom] = useState(config?.schedule?.from ?? '18:00')
-  const [scheduleTo, setScheduleTo] = useState(config?.schedule?.to ?? '09:00')
+  const [scheduleEnabled, setScheduleEnabled] = useState(false)
+  const [scheduleFrom, setScheduleFrom] = useState('18:00')
+  const [scheduleTo, setScheduleTo] = useState('09:00')
 
-  const [open, setOpen] = useState(false)
+  const [disableUnlockEarly, setDisableUnlockEarly] = useState(false)
 
-  async function handleLockNow() {
-    const ms = durationUnit === 'hours' ? durationValue * 3_600_000 : durationValue * 60_000
-    const locked_until = new Date(Date.now() + ms).toISOString()
-    const updated = await window.api.db.updateProject({
-      id: project.id,
-      lockConfig: {
-        locked_until,
-        rate_limit: config?.rate_limit ?? null,
-        schedule: config?.schedule ?? null,
-      }
-    })
-    onUpdated(updated as unknown as Project)
-    onCloseProjectTabs(project.id)
-    setOpen(false)
-  }
-
-  async function handleRateLimitChange(enabled: boolean, tasks?: number, minutes?: string) {
-    const newMaxTasks = tasks ?? maxTasks
-    const newPerMinutes = minutes ?? perMinutes
-    if (enabled !== undefined) setRateLimitEnabled(enabled)
-    if (tasks !== undefined) setMaxTasks(tasks)
-    if (minutes !== undefined) setPerMinutes(minutes)
-
-    const rate_limit = enabled
-      ? { max_tasks: newMaxTasks, per_minutes: parseInt(newPerMinutes, 10) }
-      : null
-    const updated = await window.api.db.updateProject({
-      id: project.id,
-      lockConfig: {
-        locked_until: config?.locked_until ?? null,
-        rate_limit,
-        schedule: config?.schedule ?? null,
-      }
-    })
-    onUpdated(updated as unknown as Project)
-  }
-
-  async function handleScheduleChange(enabled: boolean, from?: string, to?: string) {
-    const newFrom = from ?? scheduleFrom
-    const newTo = to ?? scheduleTo
-    if (enabled !== undefined) setScheduleEnabled(enabled)
-    if (from !== undefined) setScheduleFrom(from)
-    if (to !== undefined) setScheduleTo(to)
-
-    const schedule = enabled ? { from: newFrom, to: newTo } : null
-    const updated = await window.api.db.updateProject({
-      id: project.id,
-      lockConfig: {
-        locked_until: config?.locked_until ?? null,
-        rate_limit: config?.rate_limit ?? null,
-        schedule,
-      }
-    })
-    onUpdated(updated as unknown as Project)
-  }
-
-  async function handleClear() {
-    const updated = await window.api.db.updateProject({
-      id: project.id,
-      lockConfig: null,
-    })
-    onUpdated(updated as unknown as Project)
-    setRateLimitEnabled(false)
+  // Reset local state from persisted config whenever popover opens
+  useEffect(() => {
+    if (!open) return
     setDurationEnabled(false)
-    setScheduleEnabled(false)
+    setDurationValue(30)
+    setDurationUnit('minutes')
+    setRateLimitEnabled(!!config?.rate_limit)
+    setMaxTasks(config?.rate_limit?.max_tasks ?? 3)
+    setPerMinutes(String(config?.rate_limit?.per_minutes ?? 60))
+    setScheduleEnabled(!!config?.schedule)
+    setScheduleFrom(config?.schedule?.from ?? '18:00')
+    setScheduleTo(config?.schedule?.to ?? '09:00')
+    setDisableUnlockEarly(config?.disable_unlock_early ?? false)
+  }, [open, config])
+
+  const isDirty = useMemo(() => {
+    if (durationEnabled) return true
+    if (rateLimitEnabled !== !!config?.rate_limit) return true
+    if (rateLimitEnabled) {
+      if (maxTasks !== config?.rate_limit?.max_tasks) return true
+      if (parseInt(perMinutes, 10) !== config?.rate_limit?.per_minutes) return true
+    }
+    if (scheduleEnabled !== !!config?.schedule) return true
+    if (scheduleEnabled) {
+      if (scheduleFrom !== config?.schedule?.from) return true
+      if (scheduleTo !== config?.schedule?.to) return true
+    }
+    if (disableUnlockEarly !== (config?.disable_unlock_early ?? false)) return true
+    return false
+  }, [config, durationEnabled, rateLimitEnabled, maxTasks, perMinutes, scheduleEnabled, scheduleFrom, scheduleTo, disableUnlockEarly])
+
+  async function handleApply() {
+    const locked_until = durationEnabled
+      ? new Date(Date.now() + (durationUnit === 'hours' ? durationValue * 3_600_000 : durationValue * 60_000)).toISOString()
+      : config?.locked_until ?? null
+    const lockConfig: ProjectLockConfig = {
+      locked_until,
+      rate_limit: rateLimitEnabled
+        ? { max_tasks: maxTasks, per_minutes: parseInt(perMinutes, 10) }
+        : null,
+      schedule: scheduleEnabled ? { from: scheduleFrom, to: scheduleTo } : null,
+      disable_unlock_early: disableUnlockEarly,
+    }
+    const updated = await window.api.db.updateProject({ id: project.id, lockConfig })
+    onUpdated(updated as unknown as Project)
     setOpen(false)
+  }
+
+  function handleClearLocal() {
+    setDurationEnabled(false)
+    setRateLimitEnabled(false)
+    setScheduleEnabled(false)
+    setDisableUnlockEarly(false)
   }
 
   return (
@@ -131,8 +135,25 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
           Lock
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-3" align="end">
+      <PopoverContent
+        className="w-80 p-3"
+        align="end"
+        onInteractOutside={(e) => {
+          const target = e.target as HTMLElement | null
+          if (target?.closest('[data-slot="alert-dialog-content"], [data-slot="alert-dialog-overlay"], [data-slot="dialog-content"], [data-slot="dialog-overlay"]')) {
+            e.preventDefault()
+          }
+        }}
+      >
         <div className="space-y-3">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold">Lock project</span>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => setWhyOpen(true)}>
+              Why?
+            </Button>
+          </div>
+
           {/* Duration Lock Card */}
           <div className="rounded-lg border border-border bg-surface-1 p-3 space-y-3">
             <div className="flex items-center justify-between">
@@ -165,9 +186,6 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button size="sm" className="h-8 text-xs" onClick={handleLockNow}>
-                    Lock
-                  </Button>
                 </div>
               </>
             )}
@@ -180,10 +198,7 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                 <Timer className="size-3.5 text-muted-foreground" />
                 <span className="text-xs font-medium">Rate Limit</span>
               </div>
-              <Switch
-                checked={rateLimitEnabled}
-                onCheckedChange={(checked) => handleRateLimitChange(checked)}
-              />
+              <Switch checked={rateLimitEnabled} onCheckedChange={setRateLimitEnabled} />
             </div>
             {rateLimitEnabled && (
               <>
@@ -195,14 +210,11 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                     type="number"
                     min={1}
                     value={maxTasks}
-                    onChange={(e) => {
-                      const v = Math.max(1, parseInt(e.target.value, 10) || 1)
-                      handleRateLimitChange(true, v)
-                    }}
+                    onChange={(e) => setMaxTasks(Math.max(1, parseInt(e.target.value, 10) || 1))}
                     className="h-8 flex-1 min-w-0 text-xs"
                   />
                   <span className="text-muted-foreground whitespace-nowrap">tasks per</span>
-                  <Select value={perMinutes} onValueChange={(v) => handleRateLimitChange(true, undefined, v)}>
+                  <Select value={perMinutes} onValueChange={setPerMinutes}>
                     <SelectTrigger size="sm" className="flex-1 text-xs">
                       <SelectValue />
                     </SelectTrigger>
@@ -224,10 +236,7 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                 <Clock className="size-3.5 text-muted-foreground" />
                 <span className="text-xs font-medium">Schedule</span>
               </div>
-              <Switch
-                checked={scheduleEnabled}
-                onCheckedChange={(checked) => handleScheduleChange(checked)}
-              />
+              <Switch checked={scheduleEnabled} onCheckedChange={setScheduleEnabled} />
             </div>
             {scheduleEnabled && (
               <>
@@ -238,14 +247,14 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
                   <Input
                     type="time"
                     value={scheduleFrom}
-                    onChange={(e) => handleScheduleChange(true, e.target.value)}
+                    onChange={(e) => setScheduleFrom(e.target.value)}
                     className="h-8 flex-1 min-w-0 text-xs"
                   />
                   <span className="text-muted-foreground">to</span>
                   <Input
                     type="time"
                     value={scheduleTo}
-                    onChange={(e) => handleScheduleChange(true, undefined, e.target.value)}
+                    onChange={(e) => setScheduleTo(e.target.value)}
                     className="h-8 flex-1 min-w-0 text-xs"
                   />
                 </div>
@@ -253,14 +262,89 @@ export function ProjectLockPopover({ project, onUpdated, onCloseProjectTabs }: P
             )}
           </div>
 
-          {/* Clear */}
-          {hasAnyLock && (
-            <Button variant="ghost" size="sm" className="w-full h-7 text-xs text-muted-foreground" onClick={handleClear}>
-              Clear all locks
+          <div className="h-px bg-border mx-8 my-3" />
+
+          {/* Disable unlock early */}
+          <div className={`rounded-lg border p-3 ${disableUnlockEarly ? 'border-amber-500/50 bg-amber-500/10' : 'border-border bg-surface-1'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium">Disable unlock early</p>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Hide "Unlock early" button on lockscreen
+                </p>
+              </div>
+              <Switch
+                checked={disableUnlockEarly}
+                onCheckedChange={(v) => {
+                  if (v) setConfirmDisableOpen(true)
+                  else setDisableUnlockEarly(false)
+                }}
+              />
+            </div>
+            {disableUnlockEarly && (
+              <div className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="size-3.5 shrink-0 mt-px" />
+                <span>No escape until lock expires. Locked sessions cannot be ended early. Use at your own risk.</span>
+              </div>
+            )}
+          </div>
+
+          {/* Footer: Clear + Apply */}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            {hasAnyLock ? (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={handleClearLocal}>
+                Clear all locks
+              </Button>
+            ) : (
+              <span />
+            )}
+            <Button size="sm" className="h-8 text-xs" disabled={!isDirty} onClick={handleApply}>
+              Apply
             </Button>
-          )}
+          </div>
         </div>
       </PopoverContent>
+
+      <AlertDialog open={confirmDisableOpen} onOpenChange={setConfirmDisableOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-5 text-amber-500" />
+              Disable unlock early?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Once locked, you will not be able to end the session early. The project will remain locked until the duration expires or the schedule window ends. Use at your own risk.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => setDisableUnlockEarly(true)}
+            >
+              Disable
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={whyOpen} onOpenChange={setWhyOpen}>
+        <DialogContent>
+          <DialogHeader className="gap-3">
+            <DialogTitle>Why lock a project?</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  A focus tool to enforce deep work, prevent context switching, and protect time blocks from yourself.
+                </p>
+                <p className="rounded-md border border-border bg-surface-1 p-3 text-xs italic">
+                  Example: lock the side-project for 2 hours every weekday morning so the day job can't bleed in.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
     </Popover>
   )
 }
