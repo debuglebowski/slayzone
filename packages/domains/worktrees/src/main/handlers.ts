@@ -62,7 +62,14 @@ import {
   getResolvedCommitDag,
   getResolvedForkGraph,
   getResolvedUpstreamGraph,
-  getResolvedRecentCommits
+  getResolvedRecentCommits,
+  listStashes,
+  createStash,
+  applyStash,
+  popStash,
+  dropStash,
+  branchFromStash,
+  getStashDiff
 } from './git-worktree'
 import { runAiCommand } from './merge-ai'
 import {
@@ -557,6 +564,35 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
 
   ipcMain.handle('git:getResolvedRecentCommits', (_, path: string, count: number, branchName: string) => {
     return getResolvedRecentCommits(path, count, branchName)
+  })
+
+  // Stash operations
+  ipcMain.handle('git:listStashes', (_, repoPath: string) => {
+    return listStashes(repoPath)
+  })
+
+  ipcMain.handle('git:createStash', (_, repoPath: string, message: string, includeUntracked: boolean, keepIndex: boolean) => {
+    return createStash(repoPath, message, includeUntracked, keepIndex)
+  })
+
+  ipcMain.handle('git:applyStash', (_, repoPath: string, index: number) => {
+    return applyStash(repoPath, index)
+  })
+
+  ipcMain.handle('git:popStash', (_, repoPath: string, index: number) => {
+    return popStash(repoPath, index)
+  })
+
+  ipcMain.handle('git:dropStash', (_, repoPath: string, index: number) => {
+    return dropStash(repoPath, index)
+  })
+
+  ipcMain.handle('git:branchFromStash', (_, repoPath: string, index: number, branchName: string) => {
+    return branchFromStash(repoPath, index, branchName)
+  })
+
+  ipcMain.handle('git:getStashDiff', (_, repoPath: string, index: number) => {
+    return getStashDiff(repoPath, index)
   })
 
   // GitHub CLI (gh) operations

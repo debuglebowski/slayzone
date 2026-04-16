@@ -289,6 +289,33 @@ export interface RebaseOntoResult {
   error?: string
 }
 
+// --- Stash ---
+
+export interface StashEntry {
+  /** 0-based index, matches `stash@{N}` */
+  index: number
+  /** Short SHA of the stash commit */
+  sha: string
+  /** Reflog-style message (e.g. "WIP on main: 1a2b3c Some commit") */
+  rawMessage: string
+  /** User-provided or auto-generated label */
+  message: string
+  /** Branch the stash was created on */
+  branch: string
+  /** Unix timestamp (seconds) */
+  createdAt: number
+  filesChanged: number
+  insertions: number
+  deletions: number
+  includesUntracked: boolean
+}
+
+export interface StashApplyResult {
+  success: boolean
+  conflicted: boolean
+  error?: string
+}
+
 export interface GitDiffSnapshot {
   targetPath: string
   files: string[]

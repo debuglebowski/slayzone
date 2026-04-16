@@ -695,6 +695,7 @@ const api: ElectronAPI = {
     setVisible: (viewId, visible) => ipcRenderer.invoke('browser:set-visible', viewId, visible),
     hideAll: () => ipcRenderer.invoke('browser:hide-all'),
     showAll: () => ipcRenderer.invoke('browser:show-all'),
+    setHandoffPolicy: (viewId, policy) => ipcRenderer.invoke('browser:set-handoff-policy', viewId, policy),
     navigate: (viewId, url) => ipcRenderer.invoke('browser:navigate', viewId, url),
     goBack: (viewId) => ipcRenderer.invoke('browser:go-back', viewId),
     goForward: (viewId) => ipcRenderer.invoke('browser:go-forward', viewId),
@@ -711,7 +712,7 @@ const api: ElectronAPI = {
     setKeyboardPassthrough: (viewId, enabled) => ipcRenderer.invoke('browser:set-keyboard-passthrough', viewId, enabled),
     sendInputEvent: (viewId, input) => ipcRenderer.invoke('browser:send-input-event', viewId, input),
     onBrowserViewShortcut: (cb) => {
-      const handler = (_event: unknown, data: { viewId: string; key: string; shift: boolean; alt: boolean; meta: boolean; control: boolean }) => cb(data)
+      const handler = (_event: unknown, data: { viewId: string; key: string; shift: boolean; alt: boolean; meta: boolean; control: boolean; kind?: string }) => cb(data)
       ipcRenderer.on('browser-view:shortcut', handler)
       return () => ipcRenderer.removeListener('browser-view:shortcut', handler)
     },

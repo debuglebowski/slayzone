@@ -725,6 +725,8 @@ export interface ElectronAPI {
       partition?: string
       url: string
       bounds: { x: number; y: number; width: number; height: number }
+      kind?: 'browser-tab' | 'web-panel'
+      desktopHandoffPolicy?: DesktopHandoffPolicy | null
     }) => Promise<string>
     destroyView: (viewId: string) => Promise<void>
     destroyAllForTask: (taskId: string) => Promise<void>
@@ -734,6 +736,7 @@ export interface ElectronAPI {
     setVisible: (viewId: string, visible: boolean) => Promise<void>
     hideAll: () => Promise<void>
     showAll: () => Promise<void>
+    setHandoffPolicy: (viewId: string, policy: DesktopHandoffPolicy | null) => Promise<void>
 
     // Navigation
     navigate: (viewId: string, url: string) => Promise<void>
@@ -762,6 +765,7 @@ export interface ElectronAPI {
       alt: boolean
       meta: boolean
       control: boolean
+      kind?: string
     }) => void) => () => void
 
     onBrowserViewFocused: (cb: (payload: { viewId: string }) => void) => () => void

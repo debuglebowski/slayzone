@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync, chmodSync, constants as fsCons
 import { cp, stat, mkdir } from 'fs/promises'
 import path from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
-import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, IgnoredFileNode, ResolvedCommit, ResolvedGraph, ForkGraphResult } from '../shared/types'
+import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, IgnoredFileNode, ResolvedCommit, ResolvedGraph, ForkGraphResult, StashEntry, StashApplyResult } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
 import { execAsync, execGit, execGitFileList, trimOutput } from './exec-async'
 
@@ -1671,4 +1671,139 @@ export async function getResolvedRecentCommits(
     isHead: i === 0
   }))
   return { commits: resolved, baseBranch: branchName, branches: [branchName] }
+}
+
+// --- Stash ---
+
+const STASH_FIELD_SEP = '\x1f'
+
+function parseStashLine(line: string, index: number): Omit<StashEntry, 'filesChanged' | 'insertions' | 'deletions' | 'includesUntracked'> | null {
+  const parts = line.split(STASH_FIELD_SEP)
+  if (parts.length < 3) return null
+  const [sha, rawMessage, timestamp] = parts
+  const createdAt = Number(timestamp) || 0
+  // rawMessage format: "WIP on <branch>: <sha> <subject>" or "On <branch>: <user-msg>"
+  let branch = 'unknown'
+  let message = rawMessage
+  const onMatch = rawMessage.match(/^(?:WIP )?[Oo]n ([^:]+): (.*)$/)
+  if (onMatch) {
+    branch = onMatch[1]
+    message = onMatch[2]
+  }
+  return { index, sha, rawMessage, message, branch, createdAt }
+}
+
+export async function listStashes(repoPath: string): Promise<StashEntry[]> {
+  try {
+    const format = ['%H', '%gs', '%ct'].join(STASH_FIELD_SEP)
+    const out = await execGit(['reflog', 'show', 'stash', `--format=${format}`], { cwd: repoPath })
+    const lines = out.split('\n').filter(Boolean)
+    const entries: StashEntry[] = []
+    for (let i = 0; i < lines.length; i++) {
+      const base = parseStashLine(lines[i], i)
+      if (!base) continue
+      let filesChanged = 0
+      let insertions = 0
+      let deletions = 0
+      let includesUntracked = false
+      try {
+        const stats = await execGit(['stash', 'show', '--shortstat', `stash@{${i}}`], { cwd: repoPath })
+        // e.g. " 3 files changed, 42 insertions(+), 18 deletions(-)"
+        const fc = stats.match(/(\d+)\s+files?\s+changed/)
+        const ins = stats.match(/(\d+)\s+insertions?/)
+        const del = stats.match(/(\d+)\s+deletions?/)
+        if (fc) filesChanged = Number(fc[1])
+        if (ins) insertions = Number(ins[1])
+        if (del) deletions = Number(del[1])
+      } catch { /* empty stash or no diff */ }
+      try {
+        // stash^3 exists iff untracked files were included
+        await execGit(['rev-parse', '--verify', `stash@{${i}}^3`], { cwd: repoPath })
+        includesUntracked = true
+      } catch { /* no untracked */ }
+      entries.push({ ...base, filesChanged, insertions, deletions, includesUntracked })
+    }
+    return entries
+  } catch {
+    return []
+  }
+}
+
+export async function createStash(
+  repoPath: string,
+  message: string,
+  includeUntracked: boolean,
+  keepIndex: boolean
+): Promise<GitSyncResult> {
+  const args = ['stash', 'push']
+  if (includeUntracked) args.push('-u')
+  if (keepIndex) args.push('-k')
+  if (message) args.push('-m', message)
+  try {
+    const result = await execAsync('git', args, { cwd: repoPath })
+    if (result.status !== 0) {
+      return { success: false, error: result.stderr.trim() || 'stash push failed' }
+    }
+    // "No local changes to save" comes back with status 0 — detect it
+    if (/No local changes to save/.test(result.stdout)) {
+      return { success: false, error: 'No local changes to save' }
+    }
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+async function runStashApplyOrPop(
+  repoPath: string,
+  subcommand: 'apply' | 'pop',
+  index: number
+): Promise<StashApplyResult> {
+  const result = await execAsync('git', ['stash', subcommand, `stash@{${index}}`], { cwd: repoPath })
+  if (result.status === 0) return { success: true, conflicted: false }
+  const combined = `${result.stdout}\n${result.stderr}`
+  const conflicted = /CONFLICT|needs merge|could not (?:restore|apply)/i.test(combined)
+  return {
+    success: false,
+    conflicted,
+    error: result.stderr.trim() || result.stdout.trim() || `stash ${subcommand} failed`
+  }
+}
+
+export function applyStash(repoPath: string, index: number): Promise<StashApplyResult> {
+  return runStashApplyOrPop(repoPath, 'apply', index)
+}
+
+export function popStash(repoPath: string, index: number): Promise<StashApplyResult> {
+  return runStashApplyOrPop(repoPath, 'pop', index)
+}
+
+export async function dropStash(repoPath: string, index: number): Promise<GitSyncResult> {
+  try {
+    await execGit(['stash', 'drop', `stash@{${index}}`], { cwd: repoPath })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export async function branchFromStash(
+  repoPath: string,
+  index: number,
+  branchName: string
+): Promise<GitSyncResult> {
+  try {
+    await execGit(['stash', 'branch', branchName, `stash@{${index}}`], { cwd: repoPath })
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export async function getStashDiff(repoPath: string, index: number): Promise<string> {
+  try {
+    return await execGit(['stash', 'show', '-p', '--no-color', `stash@{${index}}`], { cwd: repoPath })
+  } catch {
+    return ''
+  }
 }

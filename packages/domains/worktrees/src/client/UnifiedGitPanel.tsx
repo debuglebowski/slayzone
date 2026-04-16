@@ -1,6 +1,6 @@
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { Check, X, SkipForward, AlertTriangle, RefreshCw, Plus } from 'lucide-react'
-import { Button, Checkbox, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, cn, useShortcutDisplay } from '@slayzone/ui'
+import { Button, Checkbox, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, cn, useShortcutDisplay } from '@slayzone/ui'
 import type { Task, UpdateTaskInput, MergeContext } from '@slayzone/task/shared'
 import type { FilterState } from '@slayzone/tasks'
 import type { Project, DetectedRepo } from '@slayzone/projects/shared'
@@ -11,7 +11,8 @@ import { ProjectGeneralTab } from './ProjectGeneralTab'
 import { WorktreesTab, type WorktreesTabHandle } from './WorktreesTab'
 import { PullRequestTab } from './PullRequestTab'
 import { ProjectPrTab } from './ProjectPrTab'
-export type GitTabId = 'general' | 'changes' | 'conflicts' | 'worktrees' | 'pr'
+import { StashTab, type StashTabHandle } from './StashTab'
+export type GitTabId = 'general' | 'changes' | 'conflicts' | 'worktrees' | 'pr' | 'stash'
 
 type UnifiedGitPanelProps = {
   task?: Task | null
@@ -104,6 +105,8 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
   const isRebase = !!task && task.merge_state === 'rebase-conflicts'
   const diffRef = useRef<GitDiffPanelHandle>(null)
   const worktreesRef = useRef<WorktreesTabHandle>(null)
+  const stashRef = useRef<StashTabHandle>(null)
+  const [stashShowAll, setStashShowAll] = useState(false)
   const [conflictToolbar, setConflictToolbar] = useState<ConflictToolbarData | null>(null)
 
   const showWorktrees = !task
@@ -210,6 +213,12 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
         >
           Diff
         </TabButton>
+        <TabButton
+          active={activeTab === 'stash'}
+          onClick={() => setActiveTab('stash')}
+        >
+          Stash
+        </TabButton>
         {showWorktrees && (
           <TabButton
             active={activeTab === 'worktrees'}
@@ -283,6 +292,23 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
             <Plus className="h-3.5 w-3.5" />
           </IconButton>
         )}
+        {activeTab === 'stash' && (
+          <>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+              <Switch checked={stashShowAll} onCheckedChange={setStashShowAll} />
+              All branches
+            </label>
+            <IconButton
+              aria-label="Refresh"
+              variant="ghost"
+              className="h-7 w-7"
+              title="Refresh"
+              onClick={() => stashRef.current?.refresh()}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </IconButton>
+          </>
+        )}
         {activeTab === 'conflicts' && conflictToolbar && (
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground">
@@ -339,6 +365,14 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
           <WorktreesTab
             ref={worktreesRef}
             visible={visible && activeTab === 'worktrees'}
+          />
+        </div>
+        <div className={cn('absolute inset-0', activeTab !== 'stash' && 'hidden')}>
+          <StashTab
+            ref={stashRef}
+            visible={visible && activeTab === 'stash'}
+            pollIntervalMs={pollIntervalMs}
+            showAll={stashShowAll}
           />
         </div>
         {hasConflicts && task && (
