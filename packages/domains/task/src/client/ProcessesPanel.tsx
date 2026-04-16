@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Play, Square, RotateCcw, Plus, Trash2, Cpu, Pencil, FileText, MoreHorizontal, CornerDownLeft, Info, Loader2 } from 'lucide-react'
+import { Play, Square, RotateCcw, Plus, Trash2, Cpu, Pencil, FileText, MoreHorizontal, CornerDownLeft, Info, Loader2, Globe } from 'lucide-react'
 import { cn, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { ProcessDialog } from './ProcessDialog'
 type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
@@ -29,6 +29,7 @@ export interface ProcessEntry {
   restartCount: number
   spawnedAt: string | null
   processTitle: string | null
+  serverUrl?: string | null
 }
 
 const STATUS_CONFIG: Record<ProcessStatus, { label: string; dot: string; badge: string }> = {
@@ -36,6 +37,14 @@ const STATUS_CONFIG: Record<ProcessStatus, { label: string; dot: string; badge: 
   stopped:   { label: 'Idle',      dot: 'bg-muted-foreground/30',    badge: 'text-muted-foreground bg-muted/60 border-border' },
   completed: { label: 'Completed', dot: 'bg-blue-400',               badge: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
   error:     { label: 'Failed',    dot: 'bg-red-500',                badge: 'text-red-500 bg-red-500/10 border-red-500/20' },
+}
+
+const ANSI_RX = /\x1b\[[0-9;]*m/g
+const URL_RX = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+)(?::\d+)?(?:\/[^\s"')]*)?)/i
+
+function extractUrlFromLine(line: string): string | null {
+  const m = line.replace(ANSI_RX, '').match(URL_RX)
+  return m ? m[1] : null
 }
 
 function StatusBadge({ status }: { status: ProcessStatus }) {
@@ -76,6 +85,7 @@ function ProcessRow({
   onInject: () => void
   logEndRef: (el: HTMLDivElement | null) => void
 }) {
+  const serverUrl = proc.status === 'running' ? proc.serverUrl ?? null : null
   return (
     <div className="rounded-lg border border-border bg-surface-3 overflow-hidden group/row">
       <div className="flex items-center gap-3 px-3.5 py-3">
@@ -88,34 +98,6 @@ function ProcessRow({
             )}
           </div>
           <span className="text-[11px] font-mono text-muted-foreground/55 truncate">{proc.command}</span>
-        </div>
-
-        {/* Status + metadata */}
-        <div className="flex items-center gap-2 shrink-0">
-          {proc.status === 'error' && proc.exitCode !== null && (
-            <span className="text-[10px] text-red-400/70 font-mono">exit {proc.exitCode}</span>
-          )}
-          {proc.status === 'running' && (
-            <span className="text-[10px] text-muted-foreground/30 font-mono flex items-center gap-1.5">
-              {stats && (
-                <>
-                  <span className="text-muted-foreground/15">·</span>
-                  <span>{stats.cpu.toFixed(1)}%</span>
-                  <span className="text-muted-foreground/15">·</span>
-                  <span>{stats.rss >= 1024 ? `${(stats.rss / 1024).toFixed(0)} MB` : `${stats.rss} KB`}</span>
-                </>
-              )}
-              {proc.restartCount > 0 && (
-                <><span className="text-muted-foreground/15">·</span><span>↺{proc.restartCount}</span></>
-              )}
-            </span>
-          )}
-          {proc.processTitle && (
-            <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-muted-foreground bg-muted/60 border-border">
-              {proc.processTitle}
-            </span>
-          )}
-          <StatusBadge status={proc.status} />
         </div>
 
         {/* Stop + Restart — visible when running */}
@@ -192,6 +174,46 @@ function ProcessRow({
         </div>
       </div>
 
+      {/* Pills row */}
+      <div className="flex items-center gap-1.5 flex-wrap px-3.5 pb-2.5 -mt-1">
+        <StatusBadge status={proc.status} />
+        {serverUrl && (
+          <a
+            href={serverUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => { e.preventDefault(); void window.api.shell.openExternal(serverUrl) }}
+            className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-sky-400 bg-sky-400/10 border-sky-400/20 hover:bg-sky-400/20 transition-colors"
+            title={`Open ${serverUrl}`}
+          >
+            <Globe className="size-2.5" />
+            {serverUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+          </a>
+        )}
+        {proc.processTitle && (
+          <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-muted-foreground bg-muted/60 border-border">
+            {proc.processTitle}
+          </span>
+        )}
+        {proc.status === 'error' && proc.exitCode !== null && (
+          <span className="text-[10px] text-red-400/70 font-mono">exit {proc.exitCode}</span>
+        )}
+        {proc.status === 'running' && (stats || proc.restartCount > 0) && (
+          <span className="text-[10px] text-muted-foreground/40 font-mono flex items-center gap-1.5 ml-auto">
+            {stats && (
+              <>
+                <span>{stats.cpu.toFixed(1)}%</span>
+                <span className="text-muted-foreground/15">·</span>
+                <span>{stats.rss >= 1024 ? `${(stats.rss / 1024).toFixed(0)} MB` : `${stats.rss} KB`}</span>
+              </>
+            )}
+            {proc.restartCount > 0 && (
+              <><span className="text-muted-foreground/15">·</span><span>↺{proc.restartCount}</span></>
+            )}
+          </span>
+        )}
+      </div>
+
       {/* Log panel */}
       {expanded && (
         <div className="bg-neutral-950 dark:bg-black border-t border-neutral-900">
@@ -234,15 +256,26 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId }: { 
   useEffect(() => {
     setLoading(true)
     window.api.processes.listForTask(taskId, projectId).then((list) => {
-      setProcesses(list as ProcessEntry[])
+      const entries = (list as ProcessEntry[]).map(p => {
+        if (p.serverUrl || p.status !== 'running') return p
+        for (let i = p.logBuffer.length - 1; i >= 0; i--) {
+          const url = extractUrlFromLine(p.logBuffer[i])
+          if (url) return { ...p, serverUrl: url }
+        }
+        return p
+      })
+      setProcesses(entries)
       setLoading(false)
     })
   }, [taskId, projectId])
 
   useEffect(() => {
     const unsub = window.api.processes.onLog((processId, line) => {
+      const url = extractUrlFromLine(line)
       setProcesses(prev =>
-        prev.map(p => p.id === processId ? { ...p, logBuffer: [...p.logBuffer.slice(-499), line] } : p)
+        prev.map(p => p.id === processId
+          ? { ...p, logBuffer: [...p.logBuffer.slice(-499), line], serverUrl: url ?? p.serverUrl }
+          : p)
       )
     })
     return unsub
@@ -250,7 +283,9 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId }: { 
 
   useEffect(() => {
     const unsub = window.api.processes.onStatus((processId, status) => {
-      setProcesses(prev => prev.map(p => p.id === processId ? { ...p, status } : p))
+      setProcesses(prev => prev.map(p => p.id === processId
+        ? { ...p, status, serverUrl: status === 'running' ? p.serverUrl : null }
+        : p))
     })
     return unsub
   }, [])
