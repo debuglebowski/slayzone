@@ -38,7 +38,7 @@ export const docsSections = [
     body: `
       <p>SlayZone is a desktop app for macOS, Windows, and Linux. It is signed and notarized, so it installs just like any other app.</p>
       <ol>
-        <li>Download the installer for your OS from the <a href="/index.html">homepage</a>.</li>
+        <li>Download the installer for your OS from the <a href="/">homepage</a>.</li>
         <li>Run the installer and launch the app.</li>
         <li>That's it. No cloud accounts required.</li>
       </ol>

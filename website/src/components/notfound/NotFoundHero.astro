@@ -26,7 +26,7 @@ const asciiArt = ` _  _    ___  _  _
       </div>
     </div>
   </div>
-  <p class="hint">or just <a href="/index.html">go home</a></p>
+  <p class="hint">or just <a href="/">go home</a></p>
 </div>
 
 <style>
@@ -134,14 +134,14 @@ const asciiArt = ` _  _    ___  _  _
         { type: 'cmd', text: '  exit       — go home' },
         { type: 'cmd', text: '  sudo       — nice try' },
       ],
-      home: () => { window.location.href = '/index.html'; return [] },
-      docs: () => { window.location.href = '/docs.html'; return [] },
-      faq: () => { window.location.href = '/faq.html'; return [] },
+      home: () => { window.location.href = '/'; return [] },
+      docs: () => { window.location.href = '/docs'; return [] },
+      faq: () => { window.location.href = '/faq'; return [] },
       github: () => {
         window.open('https://github.com/debuglebowski/SlayZone', '_blank')
         return [{ type: 'ok', text: 'Opening GitHub...' }]
       },
-      exit: () => { window.location.href = '/index.html'; return [] },
+      exit: () => { window.location.href = '/'; return [] },
       whoami: () => [{ type: 'out', text: 'A lost visitor looking for something that does not exist.' }],
       pwd: () => [{ type: 'out', text: '/dev/null/404' }],
       date: () => [{ type: 'out', text: new Date().toString() }],
