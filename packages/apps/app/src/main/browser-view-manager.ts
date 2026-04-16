@@ -2,6 +2,7 @@ import { clipboard, Menu, shell, WebContentsView, session, type BrowserWindow } 
 import { join } from 'path'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import type { BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
+import type { DesktopHandoffPolicy } from '@slayzone/task/shared'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
 import {
   buildBrowserLinkContextMenuItems,
@@ -26,12 +27,16 @@ const MODIFIED_LINK_CAPTURE_SCRIPT = buildBrowserCreateTaskFromLinkCaptureScript
   BROWSER_CREATE_TASK_FROM_LINK_INSTALLED_KEY
 )
 
+export type ViewKind = 'browser-tab' | 'web-panel'
+
 export interface CreateViewOpts {
   taskId: string
   tabId: string
   partition?: string
   url: string
   bounds: ViewBounds
+  kind?: ViewKind
+  desktopHandoffPolicy?: DesktopHandoffPolicy | null
 }
 
 export interface ViewBounds {
@@ -52,6 +57,8 @@ interface ViewEntry {
   lastUsed: number
   isMultiDevice: boolean
   keyboardPassthrough: boolean
+  kind: ViewKind
+  desktopHandoffPolicy: DesktopHandoffPolicy | null
 }
 
 interface BrowserViewEvent {
@@ -101,6 +108,7 @@ export class BrowserViewManager {
   private chromeExtensions: ElectronChromeExtensions | null = null
   private lastCreateTaskFromLinkSignature = ''
   private lastCreateTaskFromLinkAt = 0
+  private onHandoffPolicyChange: ((wcId: number, policy: DesktopHandoffPolicy | null) => void) | null = null
 
   setMainWindow(win: BrowserWindow) {
     this.mainWindow = win
@@ -108,6 +116,19 @@ export class BrowserViewManager {
 
   setChromeExtensions(ext: ElectronChromeExtensions) {
     this.chromeExtensions = ext
+  }
+
+  setHandoffPolicyChangeCallback(cb: (wcId: number, policy: DesktopHandoffPolicy | null) => void) {
+    this.onHandoffPolicyChange = cb
+  }
+
+  setHandoffPolicy(viewId: string, policy: DesktopHandoffPolicy | null): void {
+    const entry = this.views.get(viewId)
+    if (!entry) return
+    entry.desktopHandoffPolicy = policy
+    if (!entry.view.webContents.isDestroyed()) {
+      this.onHandoffPolicyChange?.(entry.view.webContents.id, policy)
+    }
   }
 
   createView(opts: CreateViewOpts): string | null {
@@ -119,9 +140,12 @@ export class BrowserViewManager {
 
     const viewId = `bv-${++viewCounter}`
     const partition = opts.partition || 'persist:browser-tabs'
+    const kind: ViewKind = opts.kind ?? 'browser-tab'
 
-    // LRU eviction: enforce cap for single-device views
-    this.evictIfNeeded(opts.taskId)
+    // LRU eviction: enforce cap for single-device views (skip web-panel kind)
+    if (kind !== 'web-panel') {
+      this.evictIfNeeded(opts.taskId)
+    }
 
     const view = new WebContentsView({
       webPreferences: {
@@ -133,6 +157,7 @@ export class BrowserViewManager {
       },
     })
 
+    const initialPolicy = opts.desktopHandoffPolicy ?? null
     const entry: ViewEntry = {
       view,
       taskId: opts.taskId,
@@ -144,6 +169,8 @@ export class BrowserViewManager {
       lastUsed: Date.now(),
       isMultiDevice: false,
       keyboardPassthrough: false,
+      kind,
+      desktopHandoffPolicy: initialPolicy,
     }
 
     this.views.set(viewId, entry)
@@ -159,12 +186,17 @@ export class BrowserViewManager {
     }
 
     this.attachEventListeners(viewId, view)
-    this.applySpoofing(view.webContents)
+    this.applySpoofing(view.webContents, entry)
 
-    // Register tab with Chrome extension system
-    if (this.chromeExtensions && win) {
+    // Register tab with Chrome extension system (browser tabs only)
+    if (kind !== 'web-panel' && this.chromeExtensions && win) {
       this.chromeExtensions.addTab(view.webContents, win)
       this.chromeExtensions.selectTab(view.webContents)
+    }
+
+    // Mirror initial handoff policy so main-process hardening listeners see it immediately
+    if (initialPolicy) {
+      this.onHandoffPolicyChange?.(view.webContents.id, initialPolicy)
     }
 
     if (opts.url && opts.url !== 'about:blank') {
@@ -178,9 +210,14 @@ export class BrowserViewManager {
     const entry = this.views.get(viewId)
     if (!entry) return
 
-    // Unregister from Chrome extension system before destroying
-    if (this.chromeExtensions && !entry.view.webContents.isDestroyed()) {
+    // Unregister from Chrome extension system before destroying (browser tabs only)
+    if (entry.kind !== 'web-panel' && this.chromeExtensions && !entry.view.webContents.isDestroyed()) {
       this.chromeExtensions.removeTab(entry.view.webContents)
+    }
+
+    // Clear handoff policy mirror
+    if (!entry.view.webContents.isDestroyed()) {
+      this.onHandoffPolicyChange?.(entry.view.webContents.id, null)
     }
 
     this.views.delete(viewId)
@@ -230,8 +267,8 @@ export class BrowserViewManager {
     entry.visible = visible
     if (visible) {
       entry.lastUsed = Date.now()
-      // Notify extension system of active tab change
-      if (this.chromeExtensions) {
+      // Notify extension system of active tab change (browser tabs only)
+      if (entry.kind !== 'web-panel' && this.chromeExtensions) {
         this.chromeExtensions.selectTab(entry.view.webContents)
       }
     }
@@ -467,6 +504,10 @@ export class BrowserViewManager {
     return wc?.id ?? null
   }
 
+  getKind(viewId: string): ViewKind | null {
+    return this.views.get(viewId)?.kind ?? null
+  }
+
   getZoomFactor(viewId: string): number | null {
     const wc = this.getWebContents(viewId)
     return wc?.zoomFactor ?? null
@@ -642,7 +683,7 @@ export class BrowserViewManager {
 
   // --- Internal ---
 
-  private applySpoofing(wc: Electron.WebContents): void {
+  private applySpoofing(wc: Electron.WebContents, entry: ViewEntry): void {
     // chrome.csi and chrome.loadTimes are Chrome-specific APIs that BotGuard checks.
     // The electron-chrome-extensions library provides real chrome.runtime but not these.
     const CSI_LOADTIMES_SCRIPT = `(function() {
@@ -665,7 +706,8 @@ export class BrowserViewManager {
       if (!wc.mainFrame) return
       // Inject chrome.csi/loadTimes on all pages (lightweight, no Object.defineProperty)
       wc.mainFrame.executeJavaScript(CSI_LOADTIMES_SCRIPT).catch(() => {})
-      // Inject full desktop handoff hardening on non-Google sites (Figma, etc.)
+      // Inject full desktop handoff hardening only when a policy is set (web panels with handoff)
+      if (!entry.desktopHandoffPolicy) return
       try {
         if (url && new URL(url).hostname.endsWith('.google.com')) return
       } catch { /* invalid URL — inject */ }
@@ -709,7 +751,7 @@ export class BrowserViewManager {
   private evictIfNeeded(taskId: string): void {
     const taskViews: { viewId: string; entry: ViewEntry }[] = []
     for (const [viewId, entry] of this.views) {
-      if (entry.taskId === taskId && !entry.isMultiDevice) {
+      if (entry.taskId === taskId && !entry.isMultiDevice && entry.kind !== 'web-panel') {
         taskViews.push({ viewId, entry })
       }
     }
@@ -739,29 +781,43 @@ export class BrowserViewManager {
       }
     }
 
-    // Intercept link clicks that would open new windows.
-    // Cmd+Click → 'foreground-tab', Middle-click → 'background-tab', window.open() → 'new-window'
-    wc.setWindowOpenHandler((details) => {
-      if (details.disposition === 'foreground-tab' || details.disposition === 'background-tab') {
+    if (entry.kind === 'web-panel') {
+      // Web panels: allow real popup windows (OAuth flows need BrowserWindow on
+      // the same session so auth cookies propagate back). Route other popups
+      // through renderer for handoff-aware routing.
+      wc.setWindowOpenHandler((details) => {
+        // Real popup windows (window.open with features) — always allow for OAuth.
+        // The popup inherits the WCV's session, so cookies flow back.
+        if (details.disposition === 'new-window' && /^https?:\/\//i.test(details.url)) {
+          return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } }
+        }
+        // Link clicks and other dispositions — emit event for renderer routing
         if (/^https?:\/\//i.test(details.url)) {
-          send({
-            viewId,
-            type: 'new-tab-request',
-            url: details.url,
-            background: details.disposition === 'background-tab',
-            taskId: entry.taskId,
-          })
+          send({ viewId, type: 'web-panel:popup-request', url: details.url, disposition: details.disposition })
         }
         return { action: 'deny' }
-      }
-      // Allow real popup windows only when the page explicitly requested window features.
-      // Modifier-based link opens can also surface as `new-window`, and those should stay denied
-      // so preload click capture can repurpose the gesture without spawning a BrowserWindow.
-      if (details.disposition === 'new-window' && details.features && /^https?:\/\//i.test(details.url)) {
-        return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } }
-      }
-      return { action: 'deny' }
-    })
+      })
+    } else {
+      // Browser tabs: Cmd+Click → new-tab-request, window.open() with features → allow popup
+      wc.setWindowOpenHandler((details) => {
+        if (details.disposition === 'foreground-tab' || details.disposition === 'background-tab') {
+          if (/^https?:\/\//i.test(details.url)) {
+            send({
+              viewId,
+              type: 'new-tab-request',
+              url: details.url,
+              background: details.disposition === 'background-tab',
+              taskId: entry.taskId,
+            })
+          }
+          return { action: 'deny' }
+        }
+        if (details.disposition === 'new-window' && details.features && /^https?:\/\//i.test(details.url)) {
+          return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } }
+        }
+        return { action: 'deny' }
+      })
+    }
 
     // Track child popup windows (OAuth) for cleanup when view is destroyed
     const childWindows = new Set<Electron.BrowserWindow>()
@@ -836,7 +892,9 @@ export class BrowserViewManager {
         return
       }
 
-      // All other Cmd/Ctrl shortcuts — forward to renderer as synthetic KeyboardEvent
+      // All other Cmd/Ctrl shortcuts — forward to renderer as synthetic KeyboardEvent.
+      // Web panels forward shortcuts too so app-level hotkeys (Cmd+B, etc.) still work,
+      // but the renderer's shortcut handler must not create browser tabs from web-panel views.
       win.webContents.send('browser-view:shortcut', {
         viewId,
         key: input.key,
@@ -844,6 +902,7 @@ export class BrowserViewManager {
         alt: Boolean(input.alt),
         meta: Boolean(input.meta),
         control: Boolean(input.control),
+        kind: entry.kind,
       })
     })
 
@@ -930,7 +989,11 @@ export class BrowserViewManager {
         linkURL: params.linkURL,
         linkText: params.linkText,
       }
-      const items = buildBrowserLinkContextMenuItems(input)
+      let items = buildBrowserLinkContextMenuItems(input)
+      // Web panels have no tabs — filter out "Open in new tab"
+      if (entry.kind === 'web-panel') {
+        items = items.filter((item) => item.action !== 'open-link-in-new-tab')
+      }
       if (items.length === 0) return
 
       event.preventDefault()

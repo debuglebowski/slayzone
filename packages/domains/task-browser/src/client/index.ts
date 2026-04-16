@@ -1,4 +1,6 @@
 export { BrowserPanel } from './BrowserPanel'
 export type { BrowserPanelHandle } from './BrowserPanel'
+export { useBrowserView } from './useBrowserView'
+export type { BrowserViewState, LoadError } from './useBrowserViewEvents'
 export { computeScale } from './scale'
 export { MOBILE_UA, IPAD_UA } from './device-presets'

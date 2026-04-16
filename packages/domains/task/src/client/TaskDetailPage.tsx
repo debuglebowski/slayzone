@@ -2109,6 +2109,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               )}
               <div data-panel-id={wp.id} className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === wp.id && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths[wp.id] }}>
                 <WebPanelView
+                  taskId={task.id}
                   panelId={wp.id}
                   url={task.web_panel_urls?.[wp.id] || wp.baseUrl}
                   baseUrl={wp.baseUrl}
@@ -2119,6 +2120,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onUrlChange={handleWebPanelUrlChange}
                   onFaviconChange={handleWebPanelFaviconChange}
                   isResizing={isResizing}
+                  isActive={isActive}
                 />
               </div>
             </div>

@@ -1,14 +1,21 @@
 import { useState, useEffect, useRef } from 'react'
 
+interface DesktopHandoffPolicy {
+  protocol: string
+  hostScope?: string
+}
+
 interface UseBrowserViewLifecycleOpts {
   tabId: string
   taskId: string
   url: string
   partition?: string
+  kind?: 'browser-tab' | 'web-panel'
+  desktopHandoffPolicy?: DesktopHandoffPolicy | null
 }
 
 export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { viewId: string | null } {
-  const { tabId, taskId, url, partition } = opts
+  const { tabId, taskId, url, partition, kind, desktopHandoffPolicy } = opts
   const [viewId, setViewId] = useState<string | null>(null)
   const mountedRef = useRef(true)
   const currentTabIdRef = useRef(tabId)
@@ -30,6 +37,8 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
           partition,
           url: url || 'about:blank',
           bounds: { x: 0, y: 0, width: 1, height: 1 },
+          kind,
+          desktopHandoffPolicy,
         })
 
         if (!id) {

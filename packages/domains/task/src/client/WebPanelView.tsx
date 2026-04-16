@@ -1,6 +1,7 @@
-import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { RotateCw, X, Globe, Copy, Check, RotateCcw } from 'lucide-react'
-import { IconButton, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import { IconButton, Tooltip, TooltipTrigger, TooltipContent, useAppearance } from '@slayzone/ui'
+import { useBrowserView } from '@slayzone/task-browser'
 import {
   inferHostScopeFromUrl,
   inferProtocolFromUrl,
@@ -11,16 +12,10 @@ import {
   normalizeDesktopProtocol,
 } from '../shared/handoff'
 import type { DesktopHandoffPolicy } from '../shared/types'
-
-interface WebviewElement extends HTMLElement {
-  reload(): void
-  stop(): void
-  loadURL(url: string): void
-  getURL(): string
-  getWebContentsId(): number
-}
+import { useState } from 'react'
 
 interface WebPanelViewProps {
+  taskId: string
   panelId: string
   url: string
   baseUrl: string
@@ -31,9 +26,11 @@ interface WebPanelViewProps {
   onUrlChange: (panelId: string, url: string) => void
   onFaviconChange?: (panelId: string, favicon: string) => void
   isResizing?: boolean
+  isActive?: boolean
 }
 
 export function WebPanelView({
+  taskId,
   panelId,
   url,
   baseUrl,
@@ -44,23 +41,10 @@ export function WebPanelView({
   onUrlChange,
   onFaviconChange,
   isResizing,
+  isActive,
 }: WebPanelViewProps) {
-  const webviewRef = useRef<WebviewElement>(null)
-  const [webviewReady, setWebviewReady] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [loadError, setLoadError] = useState<{ code: number; description: string } | null>(null)
-  const [initialSrc] = useState(() => (url || 'about:blank').replace(/^file:\/\//, 'slz-file://'))
-  const loadedUrlRef = useRef(url)
-
-  const handleNavigate = useCallback(() => {
-    const wv = webviewRef.current
-    if (!wv) return
-    setLoadError(null)
-    const currentUrl = wv.getURL().replace(/^slz-file:\/\//, 'file://')
-    loadedUrlRef.current = currentUrl
-    onUrlChange(panelId, currentUrl)
-  }, [panelId, onUrlChange])
+  const { browserDefaultZoom } = useAppearance()
 
   const desktopHandoffPolicy = useMemo<DesktopHandoffPolicy | null>(() => {
     if (!blockDesktopHandoff) return null
@@ -75,146 +59,76 @@ export function WebPanelView({
     return hostScope ? { protocol, hostScope } : { protocol }
   }, [blockDesktopHandoff, handoffProtocol, handoffHostScope, baseUrl])
 
-  const syncDesktopHandoffPolicy = useCallback((wv: WebviewElement) => {
-    void window.api.webview.setDesktopHandoffPolicy(wv.getWebContentsId(), desktopHandoffPolicy)
-  }, [desktopHandoffPolicy])
+  const actionsRef = useRef<{ navigate: (url: string) => void }>({ navigate: () => {} })
 
-  useEffect(() => {
-    const wv = webviewRef.current
-    if (!wv) return
+  const onPopupRoute = useCallback((popupUrl: string) => {
+    if (isLoopbackUrl(popupUrl)) return
+    if (desktopHandoffPolicy && isEncodedDesktopHandoffUrl(popupUrl, desktopHandoffPolicy)) return
 
-    const onStartLoading = () => setIsLoading(true)
-    const onStopLoading = () => setIsLoading(false)
-    const onDidAttach = () => {
-      syncDesktopHandoffPolicy(wv)
-    }
-    const onDomReady = () => {
-      setLoadError(null)
-      setWebviewReady(true)
-      loadedUrlRef.current = wv.getURL().replace(/^slz-file:\/\//, 'file://')
-      syncDesktopHandoffPolicy(wv)
-    }
-
-    const onFavicon = (e: Event) => {
-      const favicons = (e as CustomEvent).detail?.favicons as string[] | undefined
-      if (favicons?.[0] && onFaviconChange) {
-        onFaviconChange(panelId, favicons[0])
-      }
-    }
-
-    const onNewWindow = (e: Event) => {
-      const detail = (e as CustomEvent).detail
-      const popupUrl = detail?.url ?? ''
-      if (!popupUrl.startsWith('http://') && !popupUrl.startsWith('https://')) return
-      // Popups from webviews without desktop handoff open as real BrowserWindows — skip.
-      if (detail?.disposition === 'new-window' && !desktopHandoffPolicy) return
-
-      if (desktopHandoffPolicy) {
-        if (isLoopbackUrl(popupUrl)) return
-
-        // Suppress explicit encoded handoff links.
-        if (isEncodedDesktopHandoffUrl(popupUrl, desktopHandoffPolicy)) return
-
-        // Keep same-host popups inside the panel to avoid browser-level handoff paths.
-        if (
-          desktopHandoffPolicy.hostScope &&
-          isUrlWithinHostScope(popupUrl, desktopHandoffPolicy.hostScope)
-        ) {
-          wv.loadURL(popupUrl)
-          return
-        }
-      }
-
-      // Default behavior: open popup in system browser.
-      void window.api.shell.openExternal(
-        popupUrl,
-        desktopHandoffPolicy ? { desktopHandoff: desktopHandoffPolicy } : undefined
-      ).catch(() => {})
-    }
-
-    const onWillNavigate = (e: Event) => {
-      if (!desktopHandoffPolicy) return
-      const nextUrl = (e as CustomEvent).detail?.url ?? ''
-      if (!nextUrl) return
-      if (isLoopbackUrl(nextUrl)) {
-        e.preventDefault()
-        return
-      }
-      if (!isEncodedDesktopHandoffUrl(nextUrl, desktopHandoffPolicy)) return
-      e.preventDefault()
-    }
-
-    const onFocus = () => wv.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
-
-    const onFailLoad = (e: Event) => {
-      const detail = (e as CustomEvent).detail
-      const errorCode = detail?.errorCode ?? 0
-      if (errorCode === -3) return
-      setIsLoading(false)
-      setLoadError({ code: errorCode, description: detail?.errorDescription ?? 'Load failed' })
-    }
-
-    const onCrashed = () => {
-      setIsLoading(false)
-      setLoadError({ code: -1, description: 'Webview process crashed' })
-    }
-
-    wv.addEventListener('did-attach', onDidAttach)
-    wv.addEventListener('dom-ready', onDomReady)
-    wv.addEventListener('will-navigate', onWillNavigate)
-    wv.addEventListener('will-frame-navigate', onWillNavigate)
-    wv.addEventListener('did-navigate', handleNavigate)
-    wv.addEventListener('did-navigate-in-page', handleNavigate)
-    wv.addEventListener('did-start-loading', onStartLoading)
-    wv.addEventListener('did-stop-loading', onStopLoading)
-    wv.addEventListener('page-favicon-updated', onFavicon)
-    wv.addEventListener('new-window', onNewWindow)
-    wv.addEventListener('focus', onFocus)
-    wv.addEventListener('did-fail-load', onFailLoad)
-    wv.addEventListener('crashed', onCrashed)
-
-    return () => {
-      wv.removeEventListener('did-attach', onDidAttach)
-      wv.removeEventListener('dom-ready', onDomReady)
-      wv.removeEventListener('will-navigate', onWillNavigate)
-      wv.removeEventListener('will-frame-navigate', onWillNavigate)
-      wv.removeEventListener('did-navigate', handleNavigate)
-      wv.removeEventListener('did-navigate-in-page', handleNavigate)
-      wv.removeEventListener('did-start-loading', onStartLoading)
-      wv.removeEventListener('did-stop-loading', onStopLoading)
-      wv.removeEventListener('page-favicon-updated', onFavicon)
-      wv.removeEventListener('new-window', onNewWindow)
-      wv.removeEventListener('focus', onFocus)
-      wv.removeEventListener('did-fail-load', onFailLoad)
-      wv.removeEventListener('crashed', onCrashed)
-    }
-  }, [handleNavigate, panelId, onFaviconChange, desktopHandoffPolicy, syncDesktopHandoffPolicy])
-
-  useEffect(() => {
-    const wv = webviewRef.current
-    if (!wv || !webviewReady) return
-    syncDesktopHandoffPolicy(wv)
-  }, [webviewReady, syncDesktopHandoffPolicy])
-
-  useEffect(() => {
-    const wv = webviewRef.current
-    if (!wv || !webviewReady || !url || url === 'about:blank') return
-    if (url === loadedUrlRef.current) return
-    const currentUrl = wv.getURL().replace(/^slz-file:\/\//, 'file://')
-    if (url === currentUrl) {
-      loadedUrlRef.current = url
+    if (
+      desktopHandoffPolicy?.hostScope &&
+      isUrlWithinHostScope(popupUrl, desktopHandoffPolicy.hostScope)
+    ) {
+      actionsRef.current.navigate(popupUrl)
       return
     }
-    loadedUrlRef.current = url
-    wv.loadURL(url.replace(/^file:\/\//, 'slz-file://'))
-  }, [url, webviewReady])
+
+    void window.api.shell.openExternal(
+      popupUrl,
+      desktopHandoffPolicy ? { desktopHandoff: desktopHandoffPolicy } : undefined
+    ).catch(() => {})
+  }, [desktopHandoffPolicy])
+
+  const { viewId, state, actions, placeholderRef } = useBrowserView({
+    tabId: panelId,
+    taskId,
+    url: (url || 'about:blank').replace(/^file:\/\//, 'slz-file://'),
+    partition: 'persist:web-panels',
+    kind: 'web-panel',
+    desktopHandoffPolicy,
+    onPopupRoute,
+    isResizing,
+    visible: isActive !== false,
+  })
+  actionsRef.current = actions
+
+  // Apply browser baseline zoom to match browser panel rendering
+  useEffect(() => {
+    if (viewId) actions.setZoom(browserDefaultZoom / 100)
+  }, [viewId, browserDefaultZoom, actions])
+
+  // Sync URL changes to parent — skip OAuth/SSO intermediate pages
+  const onUrlChangeRef = useRef(onUrlChange)
+  onUrlChangeRef.current = onUrlChange
+  const prevUrlRef = useRef(state.url)
+  useEffect(() => {
+    if (!state.url || state.url === prevUrlRef.current) return
+    prevUrlRef.current = state.url
+    // Don't persist transient OAuth/SSO URLs — they're dead-ends when reloaded
+    try {
+      const u = new URL(state.url)
+      if (u.pathname.includes('sso') || u.pathname.includes('oauth') || u.pathname.includes('callback') || u.pathname.includes('auth/') || u.searchParams.has('code') || u.searchParams.has('state')) return
+    } catch { /* invalid URL — skip persist */ return }
+    onUrlChangeRef.current(panelId, state.url)
+  }, [state.url, panelId])
+
+  // Sync favicon changes to parent
+  const onFaviconChangeRef = useRef(onFaviconChange)
+  onFaviconChangeRef.current = onFaviconChange
+  const prevFaviconRef = useRef(state.favicon)
+  useEffect(() => {
+    if (!state.favicon || state.favicon === prevFaviconRef.current) return
+    prevFaviconRef.current = state.favicon
+    onFaviconChangeRef.current?.(panelId, state.favicon)
+  }, [state.favicon, panelId])
 
   return (
     <div className="flex flex-col h-full">
       {/* Header — h-10 matches Terminal/Browser/Editor tab bars */}
       <div className="shrink-0 flex items-center h-10 px-2 gap-1.5 border-b border-border bg-surface-1">
         <Globe className="size-3.5 text-muted-foreground shrink-0" />
-        <span className="text-xs font-medium text-muted-foreground flex-1">{name}</span>
+        <span className="text-xs font-medium text-muted-foreground shrink-0">{name}</span>
+        <span className="text-[10px] text-muted-foreground/50 truncate flex-1 min-w-0 ml-2 bg-muted/50 rounded-full px-2 py-0.5">{state.url || url}</span>
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -224,8 +138,7 @@ export function WebPanelView({
                 size="icon-sm"
                 aria-label="Copy URL"
                 onClick={() => {
-                  const currentUrl = webviewRef.current?.getURL() ?? url
-                  navigator.clipboard.writeText(currentUrl)
+                  navigator.clipboard.writeText(state.url || url)
                   setCopied(true)
                   setTimeout(() => setCopied(false), 1500)
                 }}
@@ -245,12 +158,8 @@ export function WebPanelView({
                 size="icon-sm"
                 aria-label="Reset to original URL"
                 onClick={() => {
-                  const wv = webviewRef.current
-                  if (!wv) return
-                  setLoadError(null)
-                  loadedUrlRef.current = baseUrl
+                  actions.navigate(baseUrl)
                   onUrlChange(panelId, baseUrl)
-                  wv.loadURL(baseUrl.replace(/^file:\/\//, 'slz-file://'))
                 }}
               >
                 <RotateCcw className="size-3.5" />
@@ -266,41 +175,32 @@ export function WebPanelView({
               <IconButton
                 variant="ghost"
                 size="icon-sm"
-                aria-label={isLoading ? 'Stop loading' : 'Reload'}
+                aria-label={state.isLoading ? 'Stop loading' : 'Reload'}
                 onClick={() => {
-                  const wv = webviewRef.current
-                  if (!wv) return
-                  if (isLoading) wv.stop()
-                  else wv.reload()
+                  if (state.isLoading) actions.stop()
+                  else actions.reload()
                 }}
               >
-                {isLoading ? <X className="size-3.5" /> : <RotateCw className="size-3.5" />}
+                {state.isLoading ? <X className="size-3.5" /> : <RotateCw className="size-3.5" />}
               </IconButton>
             </span>
           </TooltipTrigger>
-          <TooltipContent>{isLoading ? 'Stop loading' : 'Reload'}</TooltipContent>
+          <TooltipContent>{state.isLoading ? 'Stop loading' : 'Reload'}</TooltipContent>
         </Tooltip>
       </div>
 
-      {/* Webview */}
+      {/* WCV placeholder */}
       <div className="relative flex-1">
-        <webview
-          ref={webviewRef}
-          src={initialSrc}
-          partition="persist:web-panels"
-          className="absolute inset-0"
-          // @ts-expect-error - webview attributes not in React types
-          allowpopups="true"
-        />
-        {loadError && (
+        <div ref={placeholderRef} data-view-id={viewId} data-web-panel className="absolute inset-0" />
+        {state.error && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#1a1a1a] text-neutral-400 gap-2">
             <div className="text-xs font-medium text-neutral-300">Failed to load</div>
-            <div className="text-[11px] text-neutral-500">{loadError.description}</div>
+            <div className="text-[11px] text-neutral-500">{state.error.description}</div>
             <IconButton
               variant="ghost"
               size="icon-sm"
               aria-label="Retry"
-              onClick={() => { setLoadError(null); webviewRef.current?.reload() }}
+              onClick={() => actions.reload()}
             >
               <RotateCw className="size-3.5" />
             </IconButton>

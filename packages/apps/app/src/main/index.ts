@@ -1750,6 +1750,15 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
   })
 
   // --- Browser View Manager (WebContentsView) ---
+  // Wire handoff policy mirror so main-process hardening listeners see WCV policies
+  browserViewManager.setHandoffPolicyChangeCallback((wcId, policy) => {
+    if (policy) {
+      webviewDesktopHandoffPolicy.set(wcId, policy)
+    } else {
+      webviewDesktopHandoffPolicy.delete(wcId)
+    }
+  })
+
   // Lifecycle
   ipcMain.handle('browser:create-view', (_, opts: CreateViewOpts) => browserViewManager.createView(opts))
   ipcMain.handle('browser:destroy-view', (_, viewId: string) => browserViewManager.destroyView(viewId))
@@ -1760,6 +1769,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
   ipcMain.handle('browser:set-visible', (_, viewId: string, visible: boolean) => browserViewManager.setVisible(viewId, visible))
   ipcMain.handle('browser:hide-all', () => browserViewManager.hideAll())
   ipcMain.handle('browser:show-all', () => browserViewManager.showAll())
+  ipcMain.handle('browser:set-handoff-policy', (_, viewId: string, policy: DesktopHandoffPolicy | null) => browserViewManager.setHandoffPolicy(viewId, policy))
 
   // Navigation
   ipcMain.handle('browser:navigate', (_, viewId: string, url: string) => browserViewManager.navigate(viewId, url))
@@ -2116,8 +2126,10 @@ const webviewDesktopHandoffPolicyCleanupRegistered = new Set<number>()
 const WEBVIEW_INIT_SCRIPT = WEBVIEW_DESKTOP_HANDOFF_SCRIPT
 
 app.on('web-contents-created', (_, wc) => {
-  const isLoopbackHandoffUrlForWebview = (url: string): boolean => {
-    if (wc.getType() !== 'webview') return false
+  // Handoff blocking helpers — check policy map at invocation time (lazy guard).
+  // Works for both legacy <webview> and WCV-managed views because both populate
+  // webviewDesktopHandoffPolicy via their respective paths.
+  const isLoopbackHandoffUrl = (url: string): boolean => {
     const desktopHandoffPolicy = webviewDesktopHandoffPolicy.get(wc.id)
     if (!desktopHandoffPolicy) return false
     if (!isLoopbackUrl(url)) return false
@@ -2127,32 +2139,20 @@ app.on('web-contents-created', (_, wc) => {
   }
 
   const shouldBlockDesktopHandoffUrl = (url: string): boolean => {
-    if (isLoopbackHandoffUrlForWebview(url)) return true
-    if (wc.getType() !== 'webview') return false
+    if (isLoopbackHandoffUrl(url)) return true
     const desktopHandoffPolicy = webviewDesktopHandoffPolicy.get(wc.id)
     if (!desktopHandoffPolicy) return false
     return isEncodedDesktopHandoffUrl(url, desktopHandoffPolicy)
   }
 
-  // Allow http/https popups as real BrowserWindows (needed for OAuth flows like Google Sign-In)
-  // but deny external protocol popups (figma://, slack://, etc.).
-  // The renderer's 'new-window' event still fires — BrowserPanel/WebPanelView skip
-  // disposition:'new-window' to avoid double-opening.
+  const isWebviewOrHasPolicy = () => wc.getType() === 'webview' || webviewDesktopHandoffPolicy.has(wc.id)
+
+  // Handoff hardening: legacy webviews + WCV views with policies.
+  // setWindowOpenHandler for legacy webviews only — WCV views get their handler from the manager.
   if (wc.getType() === 'webview') {
     wc.setWindowOpenHandler((details) => {
-      // Webviews with desktop handoff policies (Figma, etc.) must deny popups so the
-      // renderer can apply UA spoofing, script injection, and same-host navigation.
       if (webviewDesktopHandoffPolicy.has(wc.id)) return { action: 'deny' }
-      // Only allow window.open() with features (disposition 'new-window') for http/https.
-      // These are OAuth/payment popups that need a real BrowserWindow for postMessage.
-      // Regular target="_blank" links (disposition 'foreground-tab') stay denied —
-      // the renderer's new-window event handles them as new browser tabs.
       if (details.disposition === 'new-window' && /^https?:\/\//i.test(details.url)) {
-        // Don't override webPreferences — Electron internally sets opener references
-        // for window.opener cross-process proxying. Overriding replaces those via
-        // shallow merge, breaking postMessage back to the webview (needed for OAuth).
-        // The popup inherits the webview's session (persist:browser-tabs) automatically,
-        // and sandbox/contextIsolation/nodeIntegration already default to secure values.
         return {
           action: 'allow',
           overrideBrowserWindowOptions: {
@@ -2162,7 +2162,6 @@ app.on('web-contents-created', (_, wc) => {
       }
       return { action: 'deny' }
     })
-    // Track child popup windows so we can clean up when the webview is destroyed
     const childWindows = new Set<Electron.BrowserWindow>()
     wc.on('did-create-window', (childWindow) => {
       childWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -2175,74 +2174,78 @@ app.on('web-contents-created', (_, wc) => {
       }
       childWindows.clear()
     })
-    wc.on('will-frame-navigate', (event) => {
-      if (isBlockedScheme(event.url) || shouldBlockDesktopHandoffUrl(event.url)) {
-        event.preventDefault()
-      }
-    })
-
-    let spoofingReady = false
-    let spoofingPending = false
-    const ensureDesktopHandoffSpoofing = async () => {
-      if (spoofingReady || spoofingPending) return
-      spoofingPending = true
-      try {
-        if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
-        await wc.debugger.sendCommand('Emulation.setUserAgentOverride', {
-          userAgent: _chromeUa,
-          userAgentMetadata: {
-            brands: [
-              { brand: 'Google Chrome', version: _chromiumVersion },
-              { brand: 'Chromium', version: _chromiumVersion },
-              { brand: 'Not_A Brand', version: '8' },
-            ],
-            fullVersionList: [
-              { brand: 'Google Chrome', version: `${_chromiumVersion}.0.0.0` },
-              { brand: 'Chromium', version: `${_chromiumVersion}.0.0.0` },
-              { brand: 'Not_A Brand', version: '8.0.0.0' },
-            ],
-            mobile: false,
-            platform: _uaPlatform,
-            platformVersion: _uaPlatformVersion,
-            architecture: process.arch === 'arm64' ? 'arm' : 'x86',
-            model: '',
-            bitness: '64',
-          },
-        })
-        spoofingReady = true
-      } catch {
-        // Best-effort spoofing; fallback session/user-agent overrides remain active.
-        spoofingReady = false
-      } finally {
-        spoofingPending = false
-      }
-    }
-
-    const maybeApplyDesktopHandoffHardening = () => {
-      // Respect the per-panel setting and avoid global side-effects for unrelated webviews.
-      const desktopHandoffPolicy = webviewDesktopHandoffPolicy.get(wc.id)
-      if (!desktopHandoffPolicy) return
-      void ensureDesktopHandoffSpoofing()
-      wc.mainFrame?.executeJavaScript(WEBVIEW_INIT_SCRIPT).catch(() => {})
-    }
-
-    wc.on('did-start-navigation', (_event, _navigationUrl, _isInPlace, isMainFrame) => {
-      if (!isMainFrame) return
-      maybeApplyDesktopHandoffHardening()
-    })
-    wc.on('did-navigate', () => {
-      maybeApplyDesktopHandoffHardening()
-    })
-    wc.once('destroyed', () => {
-      webviewDesktopHandoffPolicy.delete(wc.id)
-      webviewDesktopHandoffPolicyCleanupRegistered.delete(wc.id)
-      try {
-        if (wc.debugger.isAttached()) wc.debugger.detach()
-      } catch {
-        // ignore
-      }
-    })
   }
+
+  // Frame navigation guard + handoff hardening — applies to both webview and WCV with policy.
+  // Listeners check policy lazily at invocation time, so policy can be set after creation.
+  wc.on('will-frame-navigate', (event) => {
+    if (!isWebviewOrHasPolicy()) return
+    if (isBlockedScheme(event.url) || shouldBlockDesktopHandoffUrl(event.url)) {
+      event.preventDefault()
+    }
+  })
+
+  let spoofingReady = false
+  let spoofingPending = false
+  const ensureDesktopHandoffSpoofing = async () => {
+    if (spoofingReady || spoofingPending) return
+    spoofingPending = true
+    try {
+      if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+      await wc.debugger.sendCommand('Emulation.setUserAgentOverride', {
+        userAgent: _chromeUa,
+        userAgentMetadata: {
+          brands: [
+            { brand: 'Google Chrome', version: _chromiumVersion },
+            { brand: 'Chromium', version: _chromiumVersion },
+            { brand: 'Not_A Brand', version: '8' },
+          ],
+          fullVersionList: [
+            { brand: 'Google Chrome', version: `${_chromiumVersion}.0.0.0` },
+            { brand: 'Chromium', version: `${_chromiumVersion}.0.0.0` },
+            { brand: 'Not_A Brand', version: '8.0.0.0' },
+          ],
+          mobile: false,
+          platform: _uaPlatform,
+          platformVersion: _uaPlatformVersion,
+          architecture: process.arch === 'arm64' ? 'arm' : 'x86',
+          model: '',
+          bitness: '64',
+        },
+      })
+      spoofingReady = true
+    } catch {
+      spoofingReady = false
+    } finally {
+      spoofingPending = false
+    }
+  }
+
+  const maybeApplyDesktopHandoffHardening = () => {
+    const desktopHandoffPolicy = webviewDesktopHandoffPolicy.get(wc.id)
+    if (!desktopHandoffPolicy) return
+    void ensureDesktopHandoffSpoofing()
+    wc.mainFrame?.executeJavaScript(WEBVIEW_INIT_SCRIPT).catch(() => {})
+  }
+
+  wc.on('did-start-navigation', (_event, _navigationUrl, _isInPlace, isMainFrame) => {
+    if (!isMainFrame) return
+    if (!isWebviewOrHasPolicy()) return
+    maybeApplyDesktopHandoffHardening()
+  })
+  wc.on('did-navigate', () => {
+    if (!isWebviewOrHasPolicy()) return
+    maybeApplyDesktopHandoffHardening()
+  })
+  wc.once('destroyed', () => {
+    webviewDesktopHandoffPolicy.delete(wc.id)
+    webviewDesktopHandoffPolicyCleanupRegistered.delete(wc.id)
+    try {
+      if (wc.debugger.isAttached()) wc.debugger.detach()
+    } catch {
+      // ignore
+    }
+  })
 
   // will-navigate: same-frame main navigation (link clicks, window.location, etc.)
   // Covers both webview type AND 'window' type (popup windows spawned by allowpopups webviews).

@@ -774,7 +774,11 @@ function App(): React.JSX.Element {
       // WebContentsView is a separate web contents — focusin never fires in
       // renderer when it has focus. Set browser scope before dispatching so
       // the shortcut registry sees the correct active scopes.
-      scopeTracker.setComponentScope('browser', payload.viewId)
+      // Web panels should NOT activate browser scope — browser-scoped shortcuts
+      // (T for new tab, D for split) are wrong for web panels.
+      if (payload.kind !== 'web-panel') {
+        scopeTracker.setComponentScope('browser', payload.viewId)
+      }
       // Dispatch on document (not window) so react-hotkeys-hook sees it —
       // it listens on document. Events on document also bubble to window,
       // so raw window.addEventListener handlers still work.
@@ -793,12 +797,15 @@ function App(): React.JSX.Element {
   }, [])
 
   // When a WebContentsView gains focus, dispatch a synthetic focusin on the
-  // browser panel element so TaskDetailPage's glow tracking picks it up.
+  // owning panel element so TaskDetailPage's glow tracking picks it up.
+  // Uses DOM lookup via data-view-id → closest data-panel-id to work for
+  // both browser tabs and web panels.
   useEffect(() => {
-    return window.api.browser.onBrowserViewFocused(() => {
-      const browserPanel = document.querySelector('[data-panel-id="browser"]')
-      if (browserPanel) {
-        browserPanel.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    return window.api.browser.onBrowserViewFocused(({ viewId }) => {
+      const el = document.querySelector(`[data-view-id="${viewId}"]`)
+      const panel = el?.closest('[data-panel-id]')
+      if (panel) {
+        panel.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
       }
     })
   }, [])
