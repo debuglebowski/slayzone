@@ -211,6 +211,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
         next.set(dirPath, items)
         return next
       })
+      return items
     },
     [projectPath]
   )
@@ -253,23 +254,54 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   }), [])
 
   const handleToggleFolder = useCallback(
-    (folderPath: string, chainPaths?: string[]) => {
+    async (folderPath: string, chainPaths?: string[]) => {
       const allPaths = chainPaths?.length ? chainPaths : [folderPath]
+
+      if (expandedFolders.has(folderPath)) {
+        // Collapsing — remove all chain paths
+        setExpandedFolders((prev) => {
+          const next = new Set(prev)
+          for (const p of allPaths) next.delete(p)
+          return next
+        })
+        return
+      }
+
+      // Expanding — load chain + auto-expand single-child dirs
+      const toExpand = [...allPaths]
+      const loaded = new Map<string, DirEntry[]>()
+
+      const getOrLoad = async (dirPath: string): Promise<DirEntry[]> => {
+        const cached = dirContents.get(dirPath) ?? loaded.get(dirPath)
+        if (cached) return cached
+        const items = await loadDir(dirPath)
+        loaded.set(dirPath, items)
+        return items
+      }
+
+      for (const p of allPaths) {
+        await getOrLoad(p)
+      }
+
+      // Auto-expand until we hit a dir with 2+ children (or file/empty)
+      let leaf = folderPath
+      for (let i = 0; i < 20; i++) {
+        const children = await getOrLoad(leaf)
+        if (children.length === 1 && children[0].type === 'directory') {
+          toExpand.push(children[0].path)
+          leaf = children[0].path
+        } else {
+          break
+        }
+      }
+
       setExpandedFolders((prev) => {
         const next = new Set(prev)
-        if (next.has(folderPath)) {
-          for (const p of allPaths) next.delete(p)
-        } else {
-          for (const p of allPaths) next.add(p)
-        }
+        for (const p of toExpand) next.add(p)
         return next
       })
-      // Load any uncached directories in the chain
-      for (const p of allPaths) {
-        if (!dirContents.has(p)) loadDir(p)
-      }
     },
-    [loadDir, dirContents]
+    [loadDir, dirContents, expandedFolders]
   )
 
   const handleCreate = useCallback(
