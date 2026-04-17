@@ -67,6 +67,12 @@ export function isScheduleLocked(project: Project | null | undefined): boolean {
   return isWithinSchedule(project.lock_config?.schedule)
 }
 
+export function isProjectLocked(project: Project | null | undefined): boolean {
+  return isProjectDurationLocked(project) || isScheduleLocked(project)
+}
+
+export const PROJECT_LOCKED_TOAST = 'Project is locked — cannot open new tabs'
+
 export function hasActiveLockOverride(project: Project | null | undefined): boolean {
   if (!project) return false
   if (durationOverrides.has(project.id) && isWithinDuration(project.lock_config?.locked_until)) return true

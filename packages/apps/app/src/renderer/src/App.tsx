@@ -24,7 +24,7 @@ import { usePanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { useDetectedRepos } from '@slayzone/projects/client/useDetectedRepos'
 import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/projects'
-import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectDurationLocked, isScheduleLocked, hasActiveLockOverride, clearLockOverrides } from '@slayzone/projects'
+import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectLocked, PROJECT_LOCKED_TOAST, hasActiveLockOverride, clearLockOverrides } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider, type SearchFileContext } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import { usePty } from '@slayzone/terminal/client'
@@ -311,20 +311,31 @@ function App(): React.JSX.Element {
 
   const selectedProject = useMemo(() => projects.find((p) => p.id === selectedProjectId) ?? null, [projects, selectedProjectId])
 
-  // Project lock guard — wraps all task-open paths
-  const durationLocked = isProjectDurationLocked(selectedProject) || isScheduleLocked(selectedProject)
-  const guardTaskOpen = useCallback((taskId: string, fn: (id: string) => void) => {
+  // Project lock guard — single chokepoint for task-open paths. Resolves the task's
+  // project from `tasks` state, or accepts a `projectOverride` for freshly-created
+  // tasks not yet in state (closure lag from setTasks).
+  const durationLocked = isProjectLocked(selectedProject)
+  const guardTaskOpen = useCallback((taskId: string, fn: (id: string) => void, projectOverride?: Project) => {
     const existing = useTabStore.getState().tabs.some(t => t.type === 'task' && t.taskId === taskId)
-    if (!existing && selectedProject && isRateLimited(selectedProject)) {
+    if (existing) { fn(taskId); return }
+    const taskProject = projectOverride ?? (() => {
+      const task = tasks.find(t => t.id === taskId)
+      return task ? projects.find(p => p.id === task.project_id) : undefined
+    })()
+    if (taskProject && isProjectLocked(taskProject)) {
+      toast(PROJECT_LOCKED_TOAST)
+      return
+    }
+    if (taskProject && isRateLimited(taskProject)) {
       toast('Task limit reached — try again later')
       return
     }
-    if (!existing && selectedProject) recordTaskOpen(selectedProject.id)
+    if (taskProject) recordTaskOpen(taskProject.id)
     fn(taskId)
-  }, [selectedProject])
+  }, [tasks, projects])
 
-  const openTask = useCallback((taskId: string) => {
-    guardTaskOpen(taskId, (id) => startTransition(() => rawOpenTask(id)))
+  const openTask = useCallback((taskId: string, projectOverride?: Project) => {
+    guardTaskOpen(taskId, (id) => startTransition(() => rawOpenTask(id)), projectOverride)
   }, [guardTaskOpen, rawOpenTask, startTransition])
 
   const guardedOpenTaskInBackground = useCallback((taskId: string) => {
@@ -485,7 +496,6 @@ function App(): React.JSX.Element {
   useGuardedHotkeys(getKeys('new-task'), (e) => {
     if (projects.length > 0) {
       e.preventDefault(); trackShortcut(getKeys('new-task'))
-      if (durationLocked) { toast('Project is locked — cannot open new tabs'); return }
       useDialogStore.getState().openCreateTask()
     }
   }, { enableOnFormTags: true, enabled: !isRecording })
@@ -872,7 +882,7 @@ function App(): React.JSX.Element {
   // Scratch terminal
   const handleCreateScratchTerminal = useCallback(async (): Promise<void> => {
     if (!selectedProjectId) return
-    if (durationLocked) { toast('Project is locked — cannot open new tabs'); return }
+    if (durationLocked) { toast(PROJECT_LOCKED_TOAST); return }
     const existing = tasks.filter((t) => t.project_id === selectedProjectId).map((t) => t.title.match(/^Terminal (\d+)$/)).filter(Boolean).map((m) => parseInt(m![1], 10))
     const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
     const status = getDefaultStatus(selectedProject?.columns_config)
@@ -899,11 +909,11 @@ function App(): React.JSX.Element {
 
   const handleTaskCreatedAndOpen = (task: Task): void => {
     setTasks((prev) => [task, ...prev]); useDialogStore.getState().closeCreateTask()
-    if (durationLocked) { toast('Project is locked — cannot open new tabs'); return }
     setTerminalFocusRequests((prev) => ({ ...prev, [task.id]: (prev[task.id] ?? 0) + 1 }))
     const lookup = useTabStore.getState()._taskLookup
     useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
-    openTask(task.id)
+    // Pass project override — guardTaskOpen can't resolve from stale `tasks` closure.
+    openTask(task.id, projects.find(p => p.id === task.project_id))
   }
 
   const handleTerminalFocusRequestHandled = useCallback((taskId: string, requestId: number): void => {
