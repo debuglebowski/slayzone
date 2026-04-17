@@ -196,14 +196,14 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
 
   const worktreeColorMap = useMemo(() => {
     const map = new Map<string, string>()
-    const nonMain = worktrees.filter(wt => !wt.isMain)
-    if (nonMain.length === 0) return map
+    const paths = worktrees.filter(wt => !wt.isMain).map(wt => wt.path).sort()
+    if (paths.length === 0) return map
     const usedIndices = new Set<number>()
-    for (const wt of nonMain) {
-      let idx = hashStr(wt.path) % WORKTREE_COLORS.length
+    for (const path of paths) {
+      let idx = hashStr(path) % WORKTREE_COLORS.length
       while (usedIndices.has(idx) && usedIndices.size < WORKTREE_COLORS.length) idx = (idx + 1) % WORKTREE_COLORS.length
       usedIndices.add(idx)
-      map.set(wt.path, WORKTREE_COLORS[idx])
+      map.set(path, WORKTREE_COLORS[idx])
     }
     return map
   }, [worktrees])

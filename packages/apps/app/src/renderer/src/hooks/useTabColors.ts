@@ -36,7 +36,7 @@ export function useTabColors(
       byProject.set(task.project_id, group)
     }
     for (const entries of byProject.values()) {
-      const distinctPaths = [...new Set(entries.map((e) => e.worktreePath))]
+      const distinctPaths = [...new Set(entries.map((e) => e.worktreePath))].sort()
       const pathToColor = new Map<string, string>()
       const usedIndices = new Set<number>()
       for (const path of distinctPaths) {
