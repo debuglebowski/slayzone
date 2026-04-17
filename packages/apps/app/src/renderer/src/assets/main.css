@@ -346,7 +346,7 @@
 /* ---- Width — X axis only (column max-width, horizontal padding) ---- */
 /* narrow is the .mk-doc default — 720px column with 2rem pad-x */
 .mk-doc[data-width="wide"] {
-  --mk-pad-x: 0.75rem;
+  --mk-pad-x: var(--mk-pad-top);
   --mk-content-max: none;
 }
 
