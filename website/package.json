@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "astro build",
+    "build": "pnpm build:og && astro build",
     "dev": "astro dev",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "build:og": "node scripts/build-og.mjs"
   },
   "devDependencies": {
     "astro": "^5.14.3",
