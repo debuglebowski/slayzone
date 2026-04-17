@@ -12,6 +12,19 @@ const sidebarSections = [
     links: faqGroups.map((group) => ({ href: `#${group.id}`, label: group.title })),
   },
 ]
+
+const faqSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqGroups.flatMap((group) =>
+    group.items.map((item) => ({
+      '@type': 'Question',
+      name: item.question,
+      acceptedAnswer: { '@type': 'Answer', text: item.answer },
+    })),
+  ),
+}
+const faqSchemaJson = JSON.stringify(faqSchema).replace(/</g, '\\u003c')
 ---
 
 <BaseLayout
@@ -19,6 +32,9 @@ const sidebarSections = [
   description="SlayZone FAQ: workflow, supported AI coding agents (Claude Code, Codex, Gemini), privacy, local-first data storage, pricing, platform requirements."
   canonicalPath="/faq"
 >
+  <Fragment slot="head">
+    <script type="application/ld+json" set:html={faqSchemaJson} />
+  </Fragment>
   <Fragment slot="nav"><SiteNav current="faq" /></Fragment>
   <SidebarLayout
     title="Frequently Asked Questions"
