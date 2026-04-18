@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { toast } from '@slayzone/ui'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
@@ -9,7 +10,6 @@ import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
 import type { Project } from '@slayzone/projects/shared'
 import { getDefaultStatus } from '@slayzone/projects/shared'
-import { SuccessToast } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
 import {
   createTaskSchema,
@@ -62,7 +62,6 @@ export function CreateTaskDialog({
   onTagCreated
 }: CreateTaskDialogProps): React.JSX.Element {
   const [createTagOpen, setCreateTagOpen] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('__none__')
@@ -89,9 +88,10 @@ export function CreateTaskDialog({
   const selectedProject = projects.find((project) => project.id === selectedProjectId)
   const projectStatusOptions = buildStatusOptions(selectedProject?.columns_config)
 
-  // Fetch templates when project changes
+  // Fetch templates when project changes. Skip on close so UI doesn't mutate during exit animation.
   useEffect(() => {
-    if (!open || !selectedProjectId) {
+    if (!open) return
+    if (!selectedProjectId) {
       setTemplates([])
       setSelectedTemplateId('__none__')
       return
@@ -164,14 +164,12 @@ export function CreateTaskDialog({
     if (shouldAutoCreateWorktree && task.worktree_path) {
       track('worktree_created', { auto_vs_manual: 'auto' })
     }
+    toast.success(`Created "${task.title}"`)
     if (opts?.andOpen && onCreatedAndOpen) {
       onCreatedAndOpen(task)
     } else {
       onCreated(task)
     }
-    form.reset()
-    setShowSuccess(true)
-    setTimeout(() => setShowSuccess(false), 3000)
   }
 
   const onSubmit = async (data: CreateTaskFormData): Promise<void> => {
@@ -474,11 +472,6 @@ export function CreateTaskDialog({
             </div>
           </form>
         </Form>
-        <SuccessToast
-          message="Task created successfully!"
-          show={showSuccess}
-          onComplete={() => setShowSuccess(false)}
-        />
       </DialogContent>
     </Dialog>
   )
