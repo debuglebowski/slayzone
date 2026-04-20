@@ -2194,7 +2194,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
 
           {/* Description */}
-          <Collapsible open={descriptionOpen} onOpenChange={setDescriptionOpen} className={cn("flex flex-col min-h-0 rounded-md border border-border overflow-hidden", descriptionExpanded && descriptionOpen && "flex-1")}>
+          <Collapsible open={descriptionOpen} onOpenChange={setDescriptionOpen} className={cn("flex flex-col rounded-md border border-border overflow-hidden", descriptionExpanded && descriptionOpen ? "min-h-0 flex-1" : "shrink-0")}>
             <div className={cn("flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground", descriptionOpen && "border-b border-border")}>
               <CollapsibleTrigger className="flex items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
                 <ChevronRight className="size-3 transition-transform" />
@@ -2244,8 +2244,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           </Collapsible>
 
           {/* Sub-tasks (only for top-level tasks) */}
-          {!parentTask && <Collapsible open={subTasksOpen} onOpenChange={setSubTasksOpen} className="group/sub rounded-md border border-border overflow-hidden">
-            <div className="flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground group-data-[state=open]/sub:border-b border-border">
+          {!parentTask && <Collapsible open={subTasksOpen} onOpenChange={setSubTasksOpen} className={cn("group/sub rounded-md border border-border flex flex-col", subTasksOpen && !(descriptionExpanded && descriptionOpen) ? "flex-1 min-h-0" : "shrink-0")}>
+            <div className="shrink-0 flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground group-data-[state=open]/sub:border-b border-border">
               <CollapsibleTrigger className="flex items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
                 <ChevronRight className="size-3 transition-transform" />
                 Sub-tasks
@@ -2256,10 +2256,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 </span>
               )}
             </div>
-            <CollapsibleContent className="p-2">
+            <CollapsibleContent className="p-2 flex-1 min-h-0 flex flex-col">
               <DndContext sensors={subTaskSensors} collisionDetection={closestCenter} onDragEnd={handleSubTaskDragEnd}>
               <SortableContext items={subTasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col gap-0.5 max-h-[40vh] overflow-y-auto">
+              <div className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
                 {subTasks.map(sub => (
                   <SortableSubTask
                     key={sub.id}
@@ -2303,7 +2303,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           </Collapsible>}
 
           {/* Assets */}
-          {!parentTask && <Collapsible open={assetsOpen} onOpenChange={setAssetsOpen} className="group/assets rounded-md border border-border overflow-hidden">
+          {!parentTask && <Collapsible open={assetsOpen} onOpenChange={setAssetsOpen} className="group/assets shrink-0 rounded-md border border-border overflow-hidden">
             <div className="flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground group-data-[state=open]/assets:border-b border-border">
               <CollapsibleTrigger className="flex items-center gap-1.5 hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
                 <ChevronRight className="size-3 transition-transform" />
@@ -2314,7 +2314,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               )}
             </div>
             <CollapsibleContent className="p-2">
-              <div className="flex flex-col gap-0.5 max-h-[30vh] overflow-y-auto">
+              <div className="flex flex-col gap-0.5 max-h-[30vh] overflow-y-auto overscroll-contain">
                 {assets.map(asset => (
                   <button
                     key={asset.id}
@@ -2345,11 +2345,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             </CollapsibleContent>
           </Collapsible>}
 
-          {/* Spacer — pushes remaining groups to bottom */}
-          {!(descriptionExpanded && descriptionOpen) && <div className="flex-1" />}
-
           {/* Details */}
-          <Collapsible open={descriptionExpanded && descriptionOpen ? detailsOpen : true} onOpenChange={setDetailsOpen}>
+          <Collapsible open={descriptionExpanded && descriptionOpen ? detailsOpen : true} onOpenChange={setDetailsOpen} className="shrink-0 mt-auto">
             {descriptionExpanded && descriptionOpen && (
               <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
                 <ChevronRight className="size-3 transition-transform" />
