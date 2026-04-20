@@ -19,6 +19,7 @@ import { SearchableCodeView } from '@slayzone/file-editor/client/SearchableCodeV
 import { useAssets } from './useAssets'
 import { AssetFindBar } from './AssetFindBar'
 import { AssetSearchPanel } from './AssetSearchPanel'
+import { AssetVersionsDialog } from './AssetVersionsDialog'
 
 export interface AssetsPanelHandle {
   selectAsset: (id: string) => void
@@ -475,7 +476,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     createAsset, updateAsset, deleteAsset, renameAsset, moveAssetToFolder,
     readContent, saveContent, uploadAsset, uploadDir, getFilePath,
     downloadFile, downloadFolder, downloadAsPdf, downloadAsPng, downloadAsHtml, downloadAllAsZip,
-    listVersions, readVersion, createVersion, diffVersions,
+    listVersions, readVersion, createVersion, renameVersion, diffVersions, setCurrentVersion,
     createFolder, deleteFolder, renameFolder,
     getAssetPath, folderPathMap,
   } = useAssets(taskId, initialActiveAssetId)
@@ -509,9 +510,10 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
   const [findUseRegex, setFindUseRegex] = useState(false)
   const [findFocusToken, setFindFocusToken] = useState(0)
 
-  // Versions dropdown state
+  // Versions modal state
   const [assetVersions, setAssetVersions] = useState<AssetVersion[]>([])
   const [versionsLoading, setVersionsLoading] = useState(false)
+  const [versionsDialogOpen, setVersionsDialogOpen] = useState(false)
   const [viewingVersion, setViewingVersion] = useState<{
     version: AssetVersion
     content: string
@@ -1246,40 +1248,19 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <DropdownMenu onOpenChange={(open) => { if (open && selectedAsset) refreshVersions(selectedAsset.id) }}>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="!h-7 px-1.5 shrink-0" title="Versions">
-                      <History className="size-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-[260px] max-h-[400px] overflow-auto">
-                    {versionsLoading && (
-                      <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
-                    )}
-                    {!versionsLoading && assetVersions.length === 0 && (
-                      <DropdownMenuItem disabled>No versions</DropdownMenuItem>
-                    )}
-                    {assetVersions.map((v, idx) => {
-                      const isLatest = idx === 0 && assetVersions.length > 1
-                      return (
-                        <DropdownMenuItem
-                          key={v.id}
-                          onSelect={() => selectedAsset && openVersion(selectedAsset.id, v, assetVersions)}
-                          className="flex items-center justify-between gap-3"
-                        >
-                          <span className="font-mono text-xs">v{v.version_num}{isLatest ? ' · latest' : ''}</span>
-                          <span className="text-muted-foreground text-[10px] truncate max-w-[140px]">
-                            {v.name ?? new Date(v.created_at).toLocaleString()}
-                          </span>
-                        </DropdownMenuItem>
-                      )
-                    })}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={() => selectedAsset && handleCreateVersion(selectedAsset.id)}>
-                      <FilePlus className="size-3 mr-2" /> Create version
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="!h-7 px-1.5 shrink-0"
+                  title="Versions"
+                  onClick={() => {
+                    if (!selectedAsset) return
+                    setVersionsDialogOpen(true)
+                    void refreshVersions(selectedAsset.id)
+                  }}
+                >
+                  <History className="size-3.5" />
+                </Button>
                 </>
               )
             })()}
@@ -1411,6 +1392,31 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
           )}
         </div>
       </div>
+      <AssetVersionsDialog
+        open={versionsDialogOpen}
+        onOpenChange={setVersionsDialogOpen}
+        versions={assetVersions}
+        currentVersionId={selectedAsset?.current_version_id ?? null}
+        loading={versionsLoading}
+        onSetCurrent={async (ref) => {
+          if (!selectedAsset) return
+          await setCurrentVersion(selectedAsset.id, ref)
+          await refreshVersions(selectedAsset.id)
+        }}
+        onRename={async (ref, newName) => {
+          if (!selectedAsset) return
+          await renameVersion(selectedAsset.id, ref, newName)
+          await refreshVersions(selectedAsset.id)
+        }}
+        onOpenPreview={(v) => {
+          if (!selectedAsset) return
+          void openVersion(selectedAsset.id, v, assetVersions)
+        }}
+        onCreateVersion={async () => {
+          if (!selectedAsset) return
+          await handleCreateVersion(selectedAsset.id)
+        }}
+      />
       <Dialog open={viewingVersion !== null} onOpenChange={(open) => { if (!open) setViewingVersion(null) }}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>

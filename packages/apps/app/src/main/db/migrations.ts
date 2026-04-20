@@ -1994,6 +1994,38 @@ const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    version: 112,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE asset_versions ADD COLUMN parent_id TEXT REFERENCES asset_versions(id) ON DELETE SET NULL;
+        ALTER TABLE task_assets ADD COLUMN current_version_id TEXT REFERENCES asset_versions(id) ON DELETE SET NULL;
+      `)
+      // Backfill parent_id: link each version to its predecessor by version_num
+      db.exec(`
+        UPDATE asset_versions AS v
+        SET parent_id = (
+          SELECT p.id FROM asset_versions AS p
+          WHERE p.asset_id = v.asset_id AND p.version_num = v.version_num - 1
+        )
+        WHERE v.parent_id IS NULL;
+      `)
+      // Backfill current_version_id: latest version per asset
+      db.exec(`
+        UPDATE task_assets AS a
+        SET current_version_id = (
+          SELECT v.id FROM asset_versions AS v
+          WHERE v.asset_id = a.id
+          ORDER BY v.version_num DESC
+          LIMIT 1
+        )
+        WHERE current_version_id IS NULL;
+      `)
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_asset_versions_parent ON asset_versions(parent_id);
+      `)
+    }
   }
 ]
 

@@ -16,6 +16,7 @@ export interface AssetVersion {
   author_type: 'user' | 'agent' | null
   author_id: string | null
   created_at: string
+  parent_id: VersionId | null
 }
 
 export type VersionRef = number | string

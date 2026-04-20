@@ -20,7 +20,8 @@ const SCHEMA = `
     task_id TEXT NOT NULL,
     title TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    current_version_id TEXT
   );
   CREATE TABLE asset_versions (
     id TEXT PRIMARY KEY,
@@ -31,11 +32,13 @@ const SCHEMA = `
     name TEXT,
     author_type TEXT,
     author_id TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    parent_id TEXT REFERENCES asset_versions(id) ON DELETE SET NULL
   );
   CREATE UNIQUE INDEX idx_asset_versions_num ON asset_versions(asset_id, version_num);
   CREATE UNIQUE INDEX idx_asset_versions_name ON asset_versions(asset_id, name) WHERE name IS NOT NULL;
   CREATE INDEX idx_asset_versions_hash ON asset_versions(content_hash);
+  CREATE INDEX idx_asset_versions_parent ON asset_versions(parent_id);
   CREATE TABLE asset_blobs (hash TEXT PRIMARY KEY, size INTEGER NOT NULL);
 `
 

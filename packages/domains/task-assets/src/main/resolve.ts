@@ -12,6 +12,38 @@ export function getLatestVersion(db: DbLike, assetId: AssetId | string): AssetVe
   return parseRow(row)
 }
 
+/**
+ * Current (HEAD) version — the one the app treats as active.
+ * Read from `task_assets.current_version_id`. Falls back to latest if
+ * the pointer is unset (pre-v112 data paths, or freshly created assets
+ * mid-transaction before the pointer gets written).
+ */
+export function getCurrentVersion(db: DbLike, assetId: AssetId | string): AssetVersion | null {
+  const row = db
+    .prepare(
+      `SELECT v.* FROM asset_versions v
+       JOIN task_assets a ON a.current_version_id = v.id
+       WHERE a.id = ?`
+    )
+    .get(assetId)
+  const current = parseRow(row)
+  if (current) return current
+  return getLatestVersion(db, assetId)
+}
+
+export function hasChildren(db: DbLike, versionId: string): boolean {
+  const row = db
+    .prepare('SELECT 1 FROM asset_versions WHERE parent_id = ? LIMIT 1')
+    .get(versionId) as { 1: number } | undefined
+  return !!row
+}
+
+/** Immutable if version has children (became a parent) or is named. */
+export function isLocked(db: DbLike, version: AssetVersion): boolean {
+  if (version.name !== null) return true
+  return hasChildren(db, version.id)
+}
+
 export function getByVersionNum(
   db: DbLike,
   assetId: AssetId | string,

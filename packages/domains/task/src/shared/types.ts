@@ -199,6 +199,7 @@ export interface TaskAsset {
   order: number
   created_at: string
   updated_at: string
+  current_version_id: string | null
 }
 
 export interface CreateAssetInput {

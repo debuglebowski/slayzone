@@ -32,6 +32,7 @@ export interface UseAssetsReturn {
   renameVersion: (assetId: string, versionRef: VersionRef, newName: string | null) => Promise<AssetVersion>
   diffVersions: (assetId: string, a: VersionRef, b?: VersionRef) => Promise<DiffResult>
   pruneVersions: (assetId: string, opts: { keepLast?: number; keepNamed?: boolean; dryRun?: boolean }) => Promise<PruneReport>
+  setCurrentVersion: (assetId: string, versionRef: VersionRef) => Promise<AssetVersion>
   // Folder ops
   createFolder: (params: { name: string; parentId?: string | null }) => Promise<AssetFolder | null>
   updateFolder: (data: UpdateAssetFolderInput) => Promise<void>
@@ -223,6 +224,16 @@ export function useAssets(taskId: string | null | undefined, initialSelectedId?:
     return window.api.assets.versions.prune({ assetId, ...opts })
   }, [])
 
+  const setCurrentVersion = useCallback(async (assetId: string, versionRef: VersionRef): Promise<AssetVersion> => {
+    const v = await window.api.assets.versions.setCurrent({ assetId, versionRef })
+    // Refresh asset rows so current_version_id in local state matches DB.
+    if (taskId) {
+      const refreshed = await window.api.assets.getByTask(taskId)
+      setAssets(refreshed)
+    }
+    return v
+  }, [taskId])
+
   // --- Folder CRUD ---
 
   const createFolder = useCallback(async (params: { name: string; parentId?: string | null }): Promise<AssetFolder | null> => {
@@ -260,7 +271,7 @@ export function useAssets(taskId: string | null | undefined, initialSelectedId?:
     createAsset, updateAsset, deleteAsset, renameAsset, moveAssetToFolder,
     readContent, saveContent, uploadAsset, uploadDir, getFilePath,
     downloadFile, downloadFolder, downloadAsPdf, downloadAsPng, downloadAsHtml, downloadAllAsZip,
-    listVersions, readVersion, createVersion, renameVersion, diffVersions, pruneVersions,
+    listVersions, readVersion, createVersion, renameVersion, diffVersions, pruneVersions, setCurrentVersion,
     createFolder, updateFolder, deleteFolder, renameFolder,
     getAssetPath, pathToFolderId, folderPathMap,
   }

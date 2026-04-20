@@ -28,7 +28,8 @@ import {
   BlobStore,
   betterSqliteTxn,
   createVersion,
-  mutateLatestVersion,
+  saveCurrent,
+  setCurrentVersion,
   listVersions,
   resolveVersionRef,
   readVersionContent,
@@ -958,6 +959,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
       order: row.order as number,
       created_at: row.created_at as string,
       updated_at: row.updated_at as string,
+      current_version_id: (row.current_version_id as string) ?? null,
     }
   }
 
@@ -1050,29 +1052,18 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
       }
     }
 
-    // Write content to disk if provided. UI saves default to mutating the
-    // latest version in place (data.mutateVersion === true) — only the
-    // explicit "Create version" action creates new versions from UI.
+    // UI autosave: `saveCurrent` mutates current in place when mutable
+    // (tip + unnamed) or auto-branches when locked. Explicit "Create
+    // version" still uses `createVersion` to always create a row.
     if (data.content !== undefined) {
       const filePath = getAssetFilePath(taskId, data.id, newTitle)
       mkdirSync(path.dirname(filePath), { recursive: true })
       const bytes = Buffer.from(data.content, 'utf-8')
       writeFileSync(filePath, bytes)
-      try {
-        if (data.mutateVersion) {
-          mutateLatestVersion(db, versionTxn, blobStore, { assetId: data.id, bytes, author: uiAuthor })
-        } else {
-          createVersion(db, versionTxn, blobStore, { assetId: data.id, bytes, author: uiAuthor })
-        }
-      } catch (err: unknown) {
-        if (isVersionError(err) && err.code === 'NAMED_IMMUTABLE') {
-          // Latest is named — fall back to creating a new version even though
-          // mutate was requested. UI users should not lose data because of a
-          // name on the latest row.
-          createVersion(db, versionTxn, blobStore, { assetId: data.id, bytes, author: uiAuthor })
-        } else {
-          throw err
-        }
+      if (data.mutateVersion) {
+        saveCurrent(db, versionTxn, blobStore, { assetId: data.id, bytes, author: uiAuthor })
+      } else {
+        createVersion(db, versionTxn, blobStore, { assetId: data.id, bytes, author: uiAuthor })
       }
     }
 
@@ -1282,6 +1273,23 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
         dryRun: data.dryRun,
       })
     )
+  })
+
+  ipcMain.handle('db:assets:versions:setCurrent', (_, data: { assetId: string; versionRef: VersionRef }) => {
+    return wrapVersionError(() => {
+      const existing = db.prepare('SELECT * FROM task_assets WHERE id = ?').get(data.assetId) as Record<string, unknown> | undefined
+      if (!existing) throw new Error('Asset not found')
+      const v = setCurrentVersion(db, versionTxn, data.assetId, data.versionRef)
+      // Flush the switched version's bytes to disk so the editor reloads
+      // the correct content. Without this, the on-disk file still reflects
+      // the prior current and saves would diff against stale bytes.
+      const bytes = readVersionContent(blobStore, v)
+      const filePath = getAssetFilePath(existing.task_id as string, data.assetId, existing.title as string)
+      mkdirSync(path.dirname(filePath), { recursive: true })
+      writeFileSync(filePath, bytes)
+      onMutation?.()
+      return v
+    })
   })
 
   // --- Asset Download ---

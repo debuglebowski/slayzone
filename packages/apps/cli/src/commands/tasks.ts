@@ -4,7 +4,8 @@ import { openDb, notifyApp, postJson, resolveProject, resolveProjectArg, getAsse
 import {
   BlobStore,
   createVersion,
-  mutateLatestVersion,
+  saveCurrent,
+  mutateVersion,
   listVersions,
   resolveVersionRef,
   readVersionContent,
@@ -1597,8 +1598,8 @@ function assetsSubcommand(): Command {
   cmd
     .command('write <assetId>')
     .description('Replace asset content from stdin')
-    .option('--mutate-version', 'Amend latest version in place instead of creating a new one')
-    .action(async (assetId: string, opts: { mutateVersion?: boolean }) => {
+    .option('--mutate-version [ref]', 'Bare: autosave to current (auto-branches if locked). With ref: bypass lock and mutate the target version in place')
+    .action(async (assetId: string, opts: { mutateVersion?: boolean | string }) => {
       const db = openDb()
       const asset = resolveAsset(db, assetId)
 
@@ -1614,9 +1615,11 @@ function assetsSubcommand(): Command {
       const raw = db.raw()
       const txn = nodeSqliteTxn(raw)
       try {
-        const v = opts.mutateVersion
-          ? mutateLatestVersion(raw, txn, blobStore, { assetId: asset.id, bytes, author: cliAuthor() })
-          : createVersion(raw, txn, blobStore, { assetId: asset.id, bytes, author: cliAuthor() })
+        const v = typeof opts.mutateVersion === 'string'
+          ? mutateVersion(raw, txn, blobStore, { assetId: asset.id, ref: opts.mutateVersion, bytes, author: cliAuthor() })
+          : opts.mutateVersion === true
+            ? saveCurrent(raw, txn, blobStore, { assetId: asset.id, bytes, author: cliAuthor() })
+            : createVersion(raw, txn, blobStore, { assetId: asset.id, bytes, author: cliAuthor() })
         db.run(`UPDATE task_assets SET updated_at = :now WHERE id = :id`, {
           ':id': asset.id,
           ':now': new Date().toISOString(),
@@ -1638,8 +1641,8 @@ function assetsSubcommand(): Command {
   cmd
     .command('append <assetId>')
     .description('Append to asset content from stdin')
-    .option('--mutate-version', 'Amend latest version in place instead of creating a new one')
-    .action(async (assetId: string, opts: { mutateVersion?: boolean }) => {
+    .option('--mutate-version [ref]', 'Bare: autosave to current (auto-branches if locked). With ref: bypass lock and mutate the target version in place')
+    .action(async (assetId: string, opts: { mutateVersion?: boolean | string }) => {
       const db = openDb()
       const asset = resolveAsset(db, assetId)
 
@@ -1655,9 +1658,11 @@ function assetsSubcommand(): Command {
       const raw = db.raw()
       const txn = nodeSqliteTxn(raw)
       try {
-        const v = opts.mutateVersion
-          ? mutateLatestVersion(raw, txn, blobStore, { assetId: asset.id, bytes: fullBytes, author: cliAuthor() })
-          : createVersion(raw, txn, blobStore, { assetId: asset.id, bytes: fullBytes, author: cliAuthor() })
+        const v = typeof opts.mutateVersion === 'string'
+          ? mutateVersion(raw, txn, blobStore, { assetId: asset.id, ref: opts.mutateVersion, bytes: fullBytes, author: cliAuthor() })
+          : opts.mutateVersion === true
+            ? saveCurrent(raw, txn, blobStore, { assetId: asset.id, bytes: fullBytes, author: cliAuthor() })
+            : createVersion(raw, txn, blobStore, { assetId: asset.id, bytes: fullBytes, author: cliAuthor() })
         db.run(`UPDATE task_assets SET updated_at = :now WHERE id = :id`, {
           ':id': asset.id,
           ':now': new Date().toISOString(),
