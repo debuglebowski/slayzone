@@ -67,7 +67,7 @@ import { normalizeDescription, stripMarkdown, getExtensionFromTitle, getEffectiv
 import { useTheme, useDialogStore, type SearchFileContext } from '@slayzone/settings/client'
 import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog, SlayNudgeBanner, useSlayNudge } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal/shared'
-import { TerminalContainer, type TerminalContainerHandle } from '@slayzone/task-terminals'
+import { TerminalContainer, type TerminalContainerHandle, ConfirmDisplayModeDialog, type TabDisplayMode, isChatSupported } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
 import { buildStatusOptions, cn, getColumnStatusStyle, getTerminalStateStyle, PriorityIcon, useAppearance, matchesShortcut, useShortcutStore, useShortcutDisplay, withModalGuard, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
 import { BrowserPanel, type BrowserPanelHandle } from '@slayzone/task-browser'
@@ -475,6 +475,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [gitDefaultTab, setGitDefaultTab] = useState<GitTabId>('general')
   const fileEditorRef = useRef<FileEditorViewHandle>(null)
   const terminalContainerRef = useRef<TerminalContainerHandle>(null)
+  const [mainTabDisplayMode, setMainTabDisplayMode] = useState<TabDisplayMode>('xterm')
+  const [pendingChatEnable, setPendingChatEnable] = useState(false)
   const browserPanelRef = useRef<BrowserPanelHandle>(null)
   const assetsPanelRef = useRef<AssetsPanelHandle>(null)
   const pendingEditorFileRef = useRef<string | null>(null)
@@ -1868,6 +1870,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onRetry={handleRestartTerminal}
                   onFocusRequestHandled={handleTerminalFocusRequestHandled}
                   onMainTabActiveChange={setIsMainTabActive}
+                  onMainDisplayModeChange={setMainTabDisplayMode}
                   onOpenUrl={openDevServerInBrowser}
                   onOpenFile={handleQuickOpenFile}
                   onMainReset={handleResetTerminal}
@@ -2114,8 +2117,25 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                   </DropdownMenuItem>
                                 </>
                               )}
+                              {isChatSupported(task.terminal_mode) && mainTabDisplayMode !== 'chat' && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => setPendingChatEnable(true)}>
+                                    Enable chat (beta)
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
+                          <ConfirmDisplayModeDialog
+                            open={pendingChatEnable}
+                            target="chat"
+                            onConfirm={() => {
+                              void terminalContainerRef.current?.setMainDisplayMode('chat')
+                              setPendingChatEnable(false)
+                            }}
+                            onCancel={() => setPendingChatEnable(false)}
+                          />
                         </div>
                       </TooltipTrigger>
                       <TooltipContent>Switch to Main tab to use these controls</TooltipContent>

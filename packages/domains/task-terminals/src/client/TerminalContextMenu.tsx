@@ -19,9 +19,7 @@ import {
 } from 'lucide-react'
 import type { TerminalHandle } from '@slayzone/terminal/client/Terminal'
 import type { TabDisplayMode } from '../shared/types'
-
-/** Modes for which the chat transport is available. Keep in sync with main/agents/registry.ts */
-const CHAT_SUPPORTED_MODES: readonly string[] = ['claude-code']
+import { CHAT_SUPPORTED_MODES } from '../shared/chat-modes'
 
 interface TerminalContextMenuProps {
   children: React.ReactNode
@@ -115,7 +113,7 @@ export function TerminalContextMenu({
       <ContextMenuTrigger asChild>
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-52">
+      <ContextMenuContent className="w-64">
         {/* Clipboard */}
         <ContextMenuItem disabled={!hasSelection} onSelect={handleCopy}>
           <Copy className="size-4" />

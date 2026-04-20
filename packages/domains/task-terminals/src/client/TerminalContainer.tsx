@@ -6,9 +6,11 @@ import { useTheme } from '@slayzone/settings/client'
 import { useTaskTerminals } from './useTaskTerminals'
 import { TerminalTabBar, type TerminalTabBarHandle } from './TerminalTabBar'
 import { TerminalSplitGroup, type TerminalSplitGroupHandle } from './TerminalSplitGroup'
+import type { TabDisplayMode } from '../shared/types'
 
 export interface TerminalContainerHandle {
   closeActiveGroup: () => Promise<boolean>
+  setMainDisplayMode: (target: TabDisplayMode) => Promise<void>
 }
 
 interface TerminalContainerProps {
@@ -37,6 +39,7 @@ interface TerminalContainerProps {
   onRetry?: () => void
   onFocusRequestHandled?: (requestId: number) => void
   onMainTabActiveChange?: (isMainActive: boolean) => void
+  onMainDisplayModeChange?: (mode: TabDisplayMode) => void
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onMainReset?: () => void
@@ -64,6 +67,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   onRetry,
   onFocusRequestHandled,
   onMainTabActiveChange,
+  onMainDisplayModeChange,
   onOpenUrl,
   onOpenFile,
   onMainReset,
@@ -112,6 +116,12 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   useEffect(() => {
     onMainTabActiveChange?.(activeGroup?.isMain ?? false)
   }, [activeGroup?.isMain, onMainTabActiveChange])
+
+  // Notify parent when main tab display mode changes
+  const mainTabDisplayMode = tabs.find(t => t.isMain)?.displayMode
+  useEffect(() => {
+    if (mainTabDisplayMode) onMainDisplayModeChange?.(mainTabDisplayMode)
+  }, [mainTabDisplayMode, onMainDisplayModeChange])
 
   // Forward main tab state changes to task-level callbacks
   useEffect(() => {
@@ -270,6 +280,11 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   }, [groups, closeGroup, setActiveGroupId])
 
   useImperativeHandle(ref, () => ({
+    setMainDisplayMode: async (target: TabDisplayMode): Promise<void> => {
+      const mainTab = tabs.find(t => t.isMain)
+      if (!mainTab) return
+      await setTabDisplayMode(mainTab.id, target)
+    },
     closeActiveGroup: async (): Promise<boolean> => {
       const active = document.activeElement as HTMLElement | null
       const paneEl = active?.closest('[data-session-id]')
@@ -302,7 +317,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
         return true
       }
     }
-  }), [taskId, groups, closeTab, closeGroupAndFocusAdjacent, activeGroupId])
+  }), [taskId, tabs, groups, closeTab, closeGroupAndFocusAdjacent, activeGroupId, setTabDisplayMode])
 
   // Build pane props for the active group
   const paneProps = useMemo(() => {
