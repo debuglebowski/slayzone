@@ -8,11 +8,13 @@
  * Creating a stub chrome.runtime here would shadow the real one and
  * break extension content script messaging (sendMessage/connect).
  */
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import {
   BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY,
   type BrowserCreateTaskFromLinkCapturePayload,
 } from './browser-link-task-capture'
+
+webFrame.setVisualZoomLevelLimits(1, 3)
 
 function sendTaskLinkPayload(payload: BrowserCreateTaskFromLinkCapturePayload): void {
   ipcRenderer.send('browser:request-create-task-from-link', payload)
