@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Input, Label, Tooltip, TooltipTrigger, TooltipContent, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button } from '@slayzone/ui'
-import type { WorktreeCopyBehavior } from '@slayzone/projects/shared'
+import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 interface CopyPreset {
@@ -20,12 +20,14 @@ export function WorktreesSettingsTab() {
   const [worktreeBasePath, setWorktreeBasePath] = useState('')
   const [autoCreateWorktreeOnTaskCreate, setAutoCreateWorktreeOnTaskCreate] = useState(false)
   const [copyBehavior, setCopyBehavior] = useState<WorktreeCopyBehavior>('ask')
+  const [submoduleInit, setSubmoduleInit] = useState<WorktreeSubmoduleInit>('auto')
   const [presets, setPresets] = useState<CopyPreset[]>([])
 
   useEffect(() => {
     window.api.settings.get('worktree_base_path').then(val => setWorktreeBasePath(val ?? ''))
     window.api.settings.get('auto_create_worktree_on_task_create').then(val => setAutoCreateWorktreeOnTaskCreate(val === '1'))
     window.api.settings.get('worktree_copy_behavior').then(val => setCopyBehavior((val as WorktreeCopyBehavior) ?? 'ask'))
+    window.api.settings.get('worktree_submodule_init').then(val => setSubmoduleInit((val as WorktreeSubmoduleInit) ?? 'auto'))
     window.api.settings.get('worktree_copy_presets').then(val => {
       const parsed = val ? JSON.parse(val) as CopyPreset[] : null
       setPresets(parsed && parsed.length > 0 ? parsed : FALLBACK_PRESETS)
@@ -126,6 +128,32 @@ export function WorktreesSettingsTab() {
             <SelectContent>
               <SelectItem value="ask">Ask every time</SelectItem>
               <SelectItem value="none">Don't copy</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <Label className="text-base font-semibold">Submodules</Label>
+        <p className="text-sm text-muted-foreground">
+          When creating a worktree in a repo with <code className="font-mono">.gitmodules</code>, should submodules be initialized automatically?
+        </p>
+        <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+          <span className="text-sm">Submodule init</span>
+          <Select
+            value={submoduleInit}
+            onValueChange={(value) => {
+              const v = value as WorktreeSubmoduleInit
+              setSubmoduleInit(v)
+              window.api.settings.set('worktree_submodule_init', v)
+            }}
+          >
+            <SelectTrigger className="max-w-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Auto-init when .gitmodules present</SelectItem>
+              <SelectItem value="skip">Skip</SelectItem>
             </SelectContent>
           </Select>
         </div>

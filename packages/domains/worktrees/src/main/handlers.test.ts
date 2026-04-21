@@ -4,7 +4,8 @@
  */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerWorktreeHandlers } from './handlers.js'
-import { createWorktree, runWorktreeSetupScriptSync } from './git-worktree.js'
+import { createWorktree, runWorktreeSetupScriptSync, initSubmodulesSync } from './git-worktree.js'
+import { resolveSubmoduleInitBehavior } from './handlers.js'
 import { execSync } from 'child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -156,6 +157,68 @@ await describe('git:removeWorktree', () => {
     const wtPath = path.join(root, 'wt-1')
     await h.invoke('git:removeWorktree', repoPath, wtPath)
     expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
+  })
+})
+
+// --- Submodule init ---
+
+await describe('resolveSubmoduleInitBehavior', () => {
+  test('defaults to auto when nothing set', () => {
+    expect(resolveSubmoduleInitBehavior(h.db as never)).toBe('auto')
+  })
+
+  test('uses global setting when project has no override', () => {
+    h.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('worktree_submodule_init', 'skip')").run()
+    expect(resolveSubmoduleInitBehavior(h.db as never)).toBe('skip')
+    h.db.prepare("DELETE FROM settings WHERE key = 'worktree_submodule_init'").run()
+  })
+
+  test('project override beats global', () => {
+    h.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('worktree_submodule_init', 'skip')").run()
+    const pid = 'proj-submod-test'
+    h.db.prepare("INSERT INTO projects (id, name, color, sort_order, created_at, updated_at, worktree_submodule_init) VALUES (?, 'test', '#fff', 0, datetime('now'), datetime('now'), 'auto')").run(pid)
+    expect(resolveSubmoduleInitBehavior(h.db as never, pid)).toBe('auto')
+    h.db.prepare('DELETE FROM projects WHERE id = ?').run(pid)
+    h.db.prepare("DELETE FROM settings WHERE key = 'worktree_submodule_init'").run()
+  })
+})
+
+await describe('initSubmodules', () => {
+  test('returns no-gitmodules when .gitmodules absent', () => {
+    const wtPath = path.join(root, 'wt-nosubmod')
+    fs.mkdirSync(wtPath)
+    const result = initSubmodulesSync(wtPath)
+    expect(result.ran).toBe(false)
+    expect(result.reason).toBe('no-gitmodules')
+  })
+
+  test('initializes submodule when .gitmodules present', async () => {
+    // Post-CVE-2022-39253: file:// submodules denied by default. Allow for all
+    // subsequent git invocations (including the spawn inside initSubmodulesSync).
+    process.env.GIT_CONFIG_PARAMETERS = "'protocol.file.allow=always'"
+
+    const subSrc = path.join(root, 'sub-src')
+    fs.mkdirSync(subSrc)
+    git('git init -b main', subSrc)
+    fs.writeFileSync(path.join(subSrc, 'lib.txt'), 'submodule lib')
+    git('git add -A', subSrc)
+    git('git commit -m "sub init"', subSrc)
+
+    git(`git submodule add ${subSrc} vendor/foo`)
+    git('git commit -m "add submodule"')
+
+    const wtPath = path.join(root, 'wt-submod')
+    await createWorktree(repoPath, wtPath, 'feature-submod')
+    expect(fs.existsSync(path.join(wtPath, '.gitmodules'))).toBe(true)
+    expect(fs.readdirSync(path.join(wtPath, 'vendor', 'foo')).length).toBe(0)
+
+    const result = initSubmodulesSync(wtPath)
+    expect(result.ran).toBe(true)
+    expect(result.success).toBe(true)
+    expect(fs.existsSync(path.join(wtPath, 'vendor', 'foo', 'lib.txt'))).toBe(true)
+
+    await h.invoke('git:removeWorktree', repoPath, wtPath)
+    delete process.env.GIT_CONFIG_PARAMETERS
   })
 })
 

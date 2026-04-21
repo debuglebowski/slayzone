@@ -59,6 +59,7 @@ import {
   resolveChildBranches,
   copyIgnoredFiles,
   getIgnoredFileTree,
+  initSubmodules,
   getResolvedCommitDag,
   getResolvedForkGraph,
   getResolvedUpstreamGraph,
@@ -85,11 +86,11 @@ import {
   getGhUser,
   editPrComment
 } from './gh-cli'
-import type { CreateWorktreeOpts, MergeWithAIResult, ConflictAnalysis, CreatePrInput, MergePrInput, EditPrCommentInput } from '../shared/types'
+import type { CreateWorktreeOpts, MergeWithAIResult, ConflictAnalysis, CreatePrInput, MergePrInput, EditPrCommentInput, WorktreeSubmoduleResult, CreateWorktreePhase, CreateWorktreePhaseEvent } from '../shared/types'
 
 import { readdir, stat as fsStat } from 'fs/promises'
 import path from 'path'
-import type { WorktreeCopyBehavior } from '@slayzone/projects/shared'
+import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
 
 // Cache for detectChildRepos — avoids repeated readdir + git rev-parse on every tab switch
 const CHILD_REPO_CACHE_MAX = 50
@@ -140,6 +141,20 @@ export function resolveCopyBehavior(db: Database, projectId?: string): { behavio
   }
 
   return { behavior, customPaths }
+}
+
+export function resolveSubmoduleInitBehavior(db: Database, projectId?: string): WorktreeSubmoduleInit {
+  if (projectId) {
+    try {
+      const row = db.prepare('SELECT worktree_submodule_init FROM projects WHERE id = ?')
+        .get(projectId) as { worktree_submodule_init: string | null } | undefined
+      if (row?.worktree_submodule_init) return row.worktree_submodule_init as WorktreeSubmoduleInit
+    } catch { /* column may not exist on stale DB — fall through */ }
+  }
+
+  const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'worktree_submodule_init'")
+    .get() as { value: string } | undefined
+  return (settingRow?.value as WorktreeSubmoduleInit) || 'auto'
 }
 
 export function registerWorktreeHandlers(ipcMain: IpcMain, db: Database): void {
@@ -202,18 +217,39 @@ export function registerWorktreeHandlers(ipcMain: IpcMain, db: Database): void {
     return detectWorktrees(repoPath)
   })
 
-  ipcMain.handle('git:createWorktree', async (_, opts: CreateWorktreeOpts) => {
-    const { repoPath, targetPath, branch, sourceBranch, projectId } = opts
+  ipcMain.handle('git:createWorktree', async (event, opts: CreateWorktreeOpts) => {
+    const { repoPath, targetPath, branch, sourceBranch, projectId, requestId } = opts
+
+    const emit = (phase: CreateWorktreePhase) => {
+      if (!requestId) return
+      const payload: CreateWorktreePhaseEvent = { requestId, phase }
+      event.sender.send('git:createWorktree:phase', payload)
+    }
+
+    emit('creating')
     await createWorktree(repoPath, targetPath, branch, sourceBranch)
 
+    emit('copying')
     // Copy ignored files based on settings ('ask' is handled client-side)
     const { behavior, customPaths } = resolveCopyBehavior(db, projectId)
     if (behavior === 'all' || behavior === 'custom') {
       await copyIgnoredFiles(repoPath, targetPath, behavior, customPaths)
     }
 
+    emit('submodules')
+    const submoduleBehavior = resolveSubmoduleInitBehavior(db, projectId)
+    let submoduleResult: WorktreeSubmoduleResult
+    if (submoduleBehavior === 'skip') {
+      submoduleResult = { ran: false, reason: 'skipped' }
+    } else {
+      submoduleResult = await initSubmodules(targetPath)
+    }
+
+    emit('setup')
     const setupResult = await runWorktreeSetupScript(targetPath, repoPath, sourceBranch)
-    return { setupResult }
+
+    emit('done')
+    return { setupResult, submoduleResult }
   })
 
   ipcMain.handle('git:removeWorktree', (_, repoPath: string, worktreePath: string, branchHint?: string) => {

@@ -224,6 +224,10 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: Database): void {
       fields.push('worktree_copy_paths = ?')
       values.push(data.worktreeCopyPaths)
     }
+    if (data.worktreeSubmoduleInit !== undefined) {
+      fields.push('worktree_submodule_init = ?')
+      values.push(data.worktreeSubmoduleInit)
+    }
     if (data.executionContext !== undefined) {
       fields.push('execution_context = ?')
       values.push(data.executionContext ? JSON.stringify(data.executionContext) : null)

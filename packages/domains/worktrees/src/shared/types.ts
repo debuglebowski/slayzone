@@ -4,6 +4,27 @@ export interface CreateWorktreeOpts {
   branch?: string
   sourceBranch?: string
   projectId?: string
+  /** Correlation id for phase progress events. Omit → no progress emitted. */
+  requestId?: string
+}
+
+export interface WorktreeSubmoduleResult {
+  ran: boolean
+  success?: boolean
+  output?: string
+  reason?: 'no-gitmodules' | 'skipped' | 'failed' | 'timeout'
+}
+
+export interface CreateWorktreeResult {
+  setupResult: { ran: boolean; success?: boolean; output?: string }
+  submoduleResult: WorktreeSubmoduleResult
+}
+
+export type CreateWorktreePhase = 'creating' | 'copying' | 'submodules' | 'setup' | 'done'
+
+export interface CreateWorktreePhaseEvent {
+  requestId: string
+  phase: CreateWorktreePhase
 }
 
 export interface IgnoredFileNode {

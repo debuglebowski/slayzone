@@ -33,7 +33,7 @@ export interface ChatSessionInfo {
 }
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '@slayzone/task-terminals/shared'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
-import type { CreateWorktreeOpts, IgnoredFileNode, DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, ResolvedGraph, ForkGraphResult, GhPullRequest, GhPrTimelineEvent, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput, StashEntry, StashApplyResult } from '@slayzone/worktrees/shared'
+import type { CreateWorktreeOpts, CreateWorktreeResult, CreateWorktreePhase, IgnoredFileNode, DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, ResolvedGraph, ForkGraphResult, GhPullRequest, GhPrTimelineEvent, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput, StashEntry, StashApplyResult } from '@slayzone/worktrees/shared'
 import type { MergeContext } from '@slayzone/task/shared'
 import type {
   AiConfigItem,
@@ -553,7 +553,8 @@ export interface ElectronAPI {
     isGitRepo: (path: string) => Promise<boolean>
     detectChildRepos: (projectPath: string) => Promise<{ name: string; path: string }[]>
     detectWorktrees: (repoPath: string) => Promise<DetectedWorktree[]>
-    createWorktree: (opts: CreateWorktreeOpts) => Promise<{ setupResult: { ran: boolean; success?: boolean; output?: string } }>
+    createWorktree: (opts: CreateWorktreeOpts) => Promise<CreateWorktreeResult>
+    onCreateWorktreePhase: (requestId: string, cb: (phase: CreateWorktreePhase) => void) => () => void
     removeWorktree: (repoPath: string, worktreePath: string, branchToDelete?: string) => Promise<{ branchDeleted?: boolean; branchError?: string }>
     init: (path: string) => Promise<void>
     getCurrentBranch: (path: string) => Promise<string | null>

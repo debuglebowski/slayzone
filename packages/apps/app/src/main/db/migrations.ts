@@ -2026,6 +2026,30 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_asset_versions_parent ON asset_versions(parent_id);
       `)
     }
+  },
+  {
+    version: 113,
+    up: (db) => {
+      // Persist chat-agent event buffer per terminal_tabs row so chat history
+      // survives Electron app reload (in-memory Map in chat-transport-manager
+      // gets wiped on shutdownChatTransports() at app quit).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_events (
+          tab_id TEXT NOT NULL REFERENCES terminal_tabs(id) ON DELETE CASCADE,
+          seq INTEGER NOT NULL,
+          event TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (tab_id, seq)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_events_tab_seq ON chat_events(tab_id, seq);
+      `)
+    }
+  },
+  {
+    version: 114,
+    up: (db) => {
+      db.exec(`ALTER TABLE projects ADD COLUMN worktree_submodule_init TEXT DEFAULT NULL`)
+    }
   }
 ]
 

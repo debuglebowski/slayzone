@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync, chmodSync, constants as fsCons
 import { cp, stat, mkdir } from 'fs/promises'
 import path from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
-import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, IgnoredFileNode, ResolvedCommit, ResolvedGraph, ForkGraphResult, StashEntry, StashApplyResult } from '../shared/types'
+import type { ConflictFileContent, DetectedWorktree, GitDiffSnapshot, GitSyncResult, MergeResult, RebaseProgress, RebaseCommitInfo, CommitInfo, AheadBehind, StatusSummary, BranchDetail, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, IgnoredFileNode, ResolvedCommit, ResolvedGraph, ForkGraphResult, StashEntry, StashApplyResult, WorktreeSubmoduleResult } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
 import { execAsync, execGit, execGitFileList, trimOutput } from './exec-async'
 
@@ -219,6 +219,124 @@ export function runWorktreeSetupScriptSync(
   })
 
   return { ran: true, success, output }
+}
+
+const SUBMODULE_INIT_TIMEOUT_MS = 5 * 60_000
+
+function hasGitmodules(worktreePath: string): boolean {
+  return existsSync(path.join(worktreePath, '.gitmodules'))
+}
+
+/**
+ * Run `git submodule update --init --recursive` in the new worktree.
+ * Streams stdout/stderr via onData. Skipped if .gitmodules absent.
+ */
+export function initSubmodules(
+  worktreePath: string,
+  onData?: (chunk: string) => void
+): Promise<WorktreeSubmoduleResult> {
+  if (!hasGitmodules(worktreePath)) {
+    return Promise.resolve({ ran: false, reason: 'no-gitmodules' })
+  }
+
+  const startedAt = Date.now()
+
+  return new Promise((resolve) => {
+    const child = spawn('git', ['submodule', 'update', '--init', '--recursive'], {
+      cwd: worktreePath,
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+
+    const chunks: string[] = []
+    let timedOut = false
+
+    const handleData = (data: Buffer) => {
+      const text = data.toString()
+      chunks.push(text)
+      onData?.(text)
+    }
+
+    child.stdout?.on('data', handleData)
+    child.stderr?.on('data', handleData)
+
+    const timeout = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGTERM')
+    }, SUBMODULE_INIT_TIMEOUT_MS)
+
+    child.on('close', (code) => {
+      clearTimeout(timeout)
+      const output = chunks.join('').trim()
+      const success = !timedOut && code === 0
+      const reason = timedOut ? 'timeout' : !success ? 'failed' : undefined
+
+      recordDiagnosticEvent({
+        level: success ? 'info' : 'error',
+        source: 'git',
+        event: success ? 'git.submodule_init_ok' : 'git.submodule_init_failed',
+        message: success
+          ? `Submodule init completed in ${Date.now() - startedAt}ms`
+          : timedOut
+            ? 'Submodule init timed out'
+            : `Submodule init failed (exit ${code})`,
+        payload: {
+          worktreePath,
+          durationMs: Date.now() - startedAt,
+          exitCode: code,
+          output: trimOutput(output)
+        }
+      })
+
+      resolve({ ran: true, success, output, reason })
+    })
+
+    child.on('error', (err) => {
+      clearTimeout(timeout)
+      recordDiagnosticEvent({
+        level: 'error',
+        source: 'git',
+        event: 'git.submodule_init_failed',
+        message: err.message,
+        payload: { worktreePath }
+      })
+      resolve({ ran: true, success: false, output: err.message, reason: 'failed' })
+    })
+  })
+}
+
+/** Synchronous version for tests. Same behavior, blocks the process. */
+export function initSubmodulesSync(worktreePath: string): WorktreeSubmoduleResult {
+  if (!hasGitmodules(worktreePath)) {
+    return { ran: false, reason: 'no-gitmodules' }
+  }
+
+  const startedAt = Date.now()
+  const result = spawnSync('git', ['submodule', 'update', '--init', '--recursive'], {
+    cwd: worktreePath,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 60_000
+  })
+
+  const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
+  const success = result.status === 0
+
+  recordDiagnosticEvent({
+    level: success ? 'info' : 'error',
+    source: 'git',
+    event: success ? 'git.submodule_init_ok' : 'git.submodule_init_failed',
+    message: success
+      ? `Submodule init completed in ${Date.now() - startedAt}ms`
+      : `Submodule init failed (exit ${result.status})`,
+    payload: {
+      worktreePath,
+      durationMs: Date.now() - startedAt,
+      exitCode: result.status,
+      output: trimOutput(output)
+    }
+  })
+
+  return { ran: true, success, output, reason: success ? undefined : 'failed' }
 }
 
 /** OS/editor artifacts that should never be copied to worktrees. */

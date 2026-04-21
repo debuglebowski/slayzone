@@ -14,6 +14,8 @@ export {
 
 export type WorktreeCopyBehavior = 'ask' | 'none' | 'all' | 'custom'
 
+export type WorktreeSubmoduleInit = 'auto' | 'skip'
+
 export interface TaskAutomationConfig {
   on_terminal_active: string | null
   on_terminal_idle: string | null
@@ -46,6 +48,8 @@ export interface Project {
   worktree_copy_behavior: WorktreeCopyBehavior | null
   /** Comma-separated relative paths (paths must not contain commas) */
   worktree_copy_paths: string | null
+  /** null = inherit global 'worktree_submodule_init' setting */
+  worktree_submodule_init: WorktreeSubmoduleInit | null
   columns_config: ColumnConfig[] | null
   execution_context: ExecutionContext | null
   /** Folder name of the default child repo (for multi-repo projects) */
@@ -82,6 +86,7 @@ export interface UpdateProjectInput {
   worktreeSourceBranch?: string | null
   worktreeCopyBehavior?: WorktreeCopyBehavior | null
   worktreeCopyPaths?: string | null
+  worktreeSubmoduleInit?: WorktreeSubmoduleInit | null
   columnsConfig?: ColumnConfig[] | null
   executionContext?: ExecutionContext | null
   selectedRepo?: string | null

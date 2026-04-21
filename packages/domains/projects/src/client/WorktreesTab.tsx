@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
-import type { Project, WorktreeCopyBehavior } from '@slayzone/projects/shared'
+import type { Project, WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
 import { SettingsTabIntro } from './project-settings-shared'
 
 type CopyOverride = 'inherit' | WorktreeCopyBehavior
+type SubmoduleOverride = 'inherit' | WorktreeSubmoduleInit
 
 interface WorktreesTabProps {
   project: Project
@@ -17,6 +18,7 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
   const [sourceBranch, setSourceBranch] = useState('')
   const [copyOverride, setCopyOverride] = useState<CopyOverride>('inherit')
   const [customPaths, setCustomPaths] = useState('')
+  const [submoduleOverride, setSubmoduleOverride] = useState<SubmoduleOverride>('inherit')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -30,6 +32,7 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
     setSourceBranch(project.worktree_source_branch || '')
     setCopyOverride((project.worktree_copy_behavior as CopyOverride) ?? 'inherit')
     setCustomPaths(project.worktree_copy_paths || '')
+    setSubmoduleOverride((project.worktree_submodule_init as SubmoduleOverride) ?? 'inherit')
   }, [project])
 
   const openComputerSettings = () => {
@@ -49,7 +52,8 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
             : autoCreateOverride === 'on',
         worktreeSourceBranch: sourceBranch.trim() || null,
         worktreeCopyBehavior: copyOverride === 'inherit' ? null : copyOverride,
-        worktreeCopyPaths: copyOverride === 'custom' ? customPaths.trim() || null : null
+        worktreeCopyPaths: copyOverride === 'custom' ? customPaths.trim() || null : null,
+        worktreeSubmoduleInit: submoduleOverride === 'inherit' ? null : submoduleOverride
       })
       onUpdated(updated)
     } finally {
@@ -161,6 +165,37 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
               </p>
             </div>
           )}
+        </div>
+
+        <div className="space-y-1">
+          <Label>Submodule init</Label>
+          <p className="text-xs text-muted-foreground">
+            Initialize submodules (<code className="font-mono">git submodule update --init --recursive</code>) when a worktree is created.
+          </p>
+          <div className="flex items-center gap-2">
+            <Select
+              value={submoduleOverride}
+              onValueChange={(value) => setSubmoduleOverride(value as SubmoduleOverride)}
+            >
+              <SelectTrigger className="max-w-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">Use computer setting</SelectItem>
+                <SelectItem value="auto">Auto-init when .gitmodules present</SelectItem>
+                <SelectItem value="skip">Skip</SelectItem>
+              </SelectContent>
+            </Select>
+            {submoduleOverride === 'inherit' && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                onClick={openComputerSettings}
+              >
+                Go to computer setting
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-end gap-2">
