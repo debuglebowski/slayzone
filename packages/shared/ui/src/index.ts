@@ -20,6 +20,7 @@ export { useShortcutStore } from './useShortcutStore'
 export { useShortcutDisplay } from './useShortcutDisplay'
 export { useShortcutAction } from './useShortcutAction'
 export { projectColorBg, type ProjectColorVariant } from './project-color'
+export { WORKTREE_COLORS, hashStr } from './worktree-color'
 export { useAppearance, AppearanceContext, appearanceDefaults, type AppearanceSettings, type BrowserDeviceDefaults } from './AppearanceContext'
 export { getTerminalStateStyle, type TerminalStateStyle } from './terminal-state'
 export {

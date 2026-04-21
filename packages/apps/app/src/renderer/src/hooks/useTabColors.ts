@@ -2,8 +2,7 @@ import { useMemo } from 'react'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { Tab } from '@slayzone/settings'
-
-const WORKTREE_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+import { WORKTREE_COLORS, hashStr } from '@slayzone/ui'
 
 export function useTabColors(
   tabs: Tab[],
@@ -26,26 +25,18 @@ export function useTabColors(
 
   const taskWorktreeColors = useMemo(() => {
     const map = new Map<string, string>()
-    const byProject = new Map<string, { taskId: string; effectivePath: string }[]>()
+    const byProject = new Map<string, { taskId: string; worktreePath: string }[]>()
     for (const tab of tabs) {
       if (tab.type !== 'task') continue
       const task = tasks.find((t) => t.id === tab.taskId)
       if (!task?.project_id) continue
-      const project = projects.find((p) => p.id === task.project_id)
-      const effectivePath = task.worktree_path || project?.path
-      if (!effectivePath) continue
+      if (!task.worktree_path) continue
       const group = byProject.get(task.project_id) ?? []
-      group.push({ taskId: tab.taskId, effectivePath })
+      group.push({ taskId: tab.taskId, worktreePath: task.worktree_path })
       byProject.set(task.project_id, group)
     }
-    const hashStr = (s: string): number => {
-      let h = 0
-      for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0
-      return Math.abs(h)
-    }
     for (const entries of byProject.values()) {
-      const distinctPaths = [...new Set(entries.map((e) => e.effectivePath))]
-      if (distinctPaths.length < 2) continue
+      const distinctPaths = [...new Set(entries.map((e) => e.worktreePath))].sort()
       const pathToColor = new Map<string, string>()
       const usedIndices = new Set<number>()
       for (const path of distinctPaths) {
@@ -55,11 +46,11 @@ export function useTabColors(
         pathToColor.set(path, WORKTREE_COLORS[idx])
       }
       for (const entry of entries) {
-        map.set(entry.taskId, pathToColor.get(entry.effectivePath)!)
+        map.set(entry.taskId, pathToColor.get(entry.worktreePath)!)
       }
     }
     return map
-  }, [tabs, tasks, projects])
+  }, [tabs, tasks])
 
   const tabCycleOrder = useMemo(() => {
     const homeIndex = tabs.findIndex((tab) => tab.type === 'home')

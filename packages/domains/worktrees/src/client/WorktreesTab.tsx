@@ -33,7 +33,9 @@ import {
   TooltipContent,
   TooltipTrigger,
   Input,
-  PriorityIcon
+  PriorityIcon,
+  WORKTREE_COLORS,
+  hashStr
 } from '@slayzone/ui'
 import { type FilterState, groupTasksBy, getViewConfig, type Column } from '@slayzone/tasks'
 import { resolveColumns } from '@slayzone/projects/shared'
@@ -41,7 +43,6 @@ import type { Task } from '@slayzone/task/shared'
 import type { DetectedWorktree } from '../shared/types'
 import { CreateWorktreeDialog } from './CreateWorktreeDialog'
 import { useGitPanelContext } from './UnifiedGitPanel'
-
 
 interface WorktreesTabProps {
   visible: boolean
@@ -193,6 +194,20 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
     return rootNodes
   }, [worktrees, tasks])
 
+  const worktreeColorMap = useMemo(() => {
+    const map = new Map<string, string>()
+    const paths = worktrees.filter(wt => !wt.isMain).map(wt => wt.path).sort()
+    if (paths.length === 0) return map
+    const usedIndices = new Set<number>()
+    for (const path of paths) {
+      let idx = hashStr(path) % WORKTREE_COLORS.length
+      while (usedIndices.has(idx) && usedIndices.size < WORKTREE_COLORS.length) idx = (idx + 1) % WORKTREE_COLORS.length
+      usedIndices.add(idx)
+      map.set(path, WORKTREE_COLORS[idx])
+    }
+    return map
+  }, [worktrees])
+
   const handleRemoveWorktree = async (path: string) => {
     if (!projectPath) return
     try {
@@ -244,6 +259,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
               <WorktreeCard
                 key={node.path}
                 node={{ ...node, isDirty: dirtyStatuses[node.path] ?? false }}
+                worktreeColor={worktreeColorMap.get(node.path)}
                 isExpanded={expandedPaths.has(node.path)}
                 onToggleExpand={() => toggleExpand(node.path)}
                 onRemove={() => setDeleteConfirmOpen(node.path)}
@@ -476,12 +492,14 @@ function renderTree(nodes: WorktreeNode[], expandedPaths: Set<string>, renderNod
 
 function WorktreeCard({
   node,
+  worktreeColor,
   isExpanded,
   onToggleExpand,
   onRemove,
   onAssign
 }: {
   node: WorktreeNode
+  worktreeColor?: string
   isExpanded: boolean
   onToggleExpand: () => void
   onRemove: () => void
@@ -523,16 +541,22 @@ function WorktreeCard({
         </div>
       )}
 
-      <div 
+      <div
         className={cn(
           "mb-1 rounded-lg border transition-all",
-          isActive 
-            ? "border-primary/50 bg-primary/10 shadow-md ring-1 ring-primary/20" 
-            : node.isMain 
-              ? "border-primary/20 bg-primary/5 shadow-sm" 
+          isActive
+            ? "border-primary/50 bg-primary/10 shadow-md ring-1 ring-primary/20"
+            : node.isMain
+              ? "border-primary/20 bg-primary/5 shadow-sm"
               : "border-border bg-surface-1 hover:border-border/80 hover:shadow-sm"
         )}
-        style={{ marginLeft: node.depth * 20 }}
+        style={{
+          marginLeft: node.depth * 20,
+          ...(worktreeColor && {
+            borderLeftWidth: 3,
+            borderLeftColor: worktreeColor,
+          })
+        }}
       >
         <div className="p-3 space-y-2">
           <div className="flex items-center gap-2">
