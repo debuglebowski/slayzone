@@ -1,0 +1,129 @@
+---
+import VerdictBadge from './VerdictBadge.astro'
+
+const {
+  rows,
+  competitorName,
+} = Astro.props
+---
+
+<div class="matrix-shell">
+  <div class="matrix-scroll">
+    <table class="matrix-table">
+      <colgroup>
+        <col class="capability-col" />
+        <col class="equal-col" />
+        <col class="equal-col" />
+        <col class="equal-col" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th>SlayZone</th>
+          <th>{competitorName}</th>
+          <th>Why it matters</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row: any) => (
+          <tr>
+            <td class="capability">
+              <div class="capability-label">{row.label}</div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <VerdictBadge verdict={row.slayzone.verdict} compact />
+                <p>{row.slayzone.note}</p>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <VerdictBadge verdict={row.competitor.verdict} compact />
+                <p>{row.competitor.note}</p>
+              </div>
+            </td>
+            <td class="why">{row.why}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  .matrix-shell {
+    border: 1px solid #ece7dd;
+    border-radius: 28px;
+    background: linear-gradient(180deg, #fffdf9 0%, #ffffff 100%);
+    overflow: hidden;
+    box-shadow: 0 22px 70px rgba(33, 25, 17, 0.08);
+  }
+  .matrix-scroll {
+    overflow-x: auto;
+  }
+  .matrix-table {
+    width: 100%;
+    min-width: 1040px;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  .matrix-table col.capability-col {
+    width: 180px;
+  }
+  .matrix-table col.equal-col {
+    width: calc((100% - 180px) / 3);
+  }
+  .matrix-table th,
+  .matrix-table td {
+    padding: 20px 22px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid #eee7db;
+  }
+  .matrix-table th {
+    background: #fff7ef;
+    color: #4b453d;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .matrix-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .capability-label {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+    color: #1a1a2e;
+  }
+  .cell-stack {
+    display: grid;
+    gap: 10px;
+  }
+  .cell-stack p,
+  .why {
+    margin: 0;
+    color: #5d5b67;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  @media (max-width: 900px) {
+    .matrix-shell {
+      border-radius: 20px;
+    }
+    .matrix-table th,
+    .matrix-table td {
+      padding: 16px;
+    }
+    .capability-label {
+      font-size: 16px;
+    }
+    .cell-stack p,
+    .why {
+      font-size: 13px;
+    }
+  }
+</style>

@@ -1,0 +1,59 @@
+---
+const {
+  verdict,
+  compact = false,
+} = Astro.props
+
+const labels = {
+  yes: 'Yes',
+  partial: 'Partial',
+  no: 'No',
+  unknown: 'Unknown',
+}
+
+const verdictClass = `verdict verdict-${verdict} ${compact ? 'compact' : ''}`.trim()
+---
+
+<span class={verdictClass}>{labels[verdict as keyof typeof labels]}</span>
+
+<style>
+  .verdict {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .verdict.compact {
+    min-width: 0;
+    padding: 5px 10px;
+    font-size: 10px;
+  }
+  .verdict-yes {
+    background: rgba(61, 214, 140, 0.12);
+    border-color: rgba(61, 214, 140, 0.28);
+    color: #107b46;
+  }
+  .verdict-partial {
+    background: rgba(247, 168, 37, 0.14);
+    border-color: rgba(247, 168, 37, 0.32);
+    color: #9c5f00;
+  }
+  .verdict-no {
+    background: rgba(244, 67, 54, 0.1);
+    border-color: rgba(244, 67, 54, 0.22);
+    color: #a13028;
+  }
+  .verdict-unknown {
+    background: #f3f4f8;
+    border-color: #e2e5ec;
+    color: #666d80;
+  }
+</style>

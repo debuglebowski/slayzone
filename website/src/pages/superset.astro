@@ -1,0 +1,656 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+import SiteNav from '../components/SiteNav.astro'
+import SiteFooter from '../components/SiteFooter.astro'
+import VerdictBadge from '../components/comparison/VerdictBadge.astro'
+import HeadToHeadMatrix from '../components/comparison/HeadToHeadMatrix.astro'
+import { getCompetitorCanon } from '../data/competitorCanon'
+import { buildHeadToHeadRows, supersetEditorial, supersetScorecardKeys } from '../data/headToHead'
+import supersetHero from '../../../comparison/superset/assets/homepage-hero.png'
+import slayzoneHero from '../../../comparison/assets/slayzone-homepage-hero.png'
+
+const competitor = await getCompetitorCanon('superset')
+const allRows = buildHeadToHeadRows(competitor)
+const scorecardRows = buildHeadToHeadRows(competitor, supersetScorecardKeys)
+const factBadges = [`Last checked ${competitor.last_checked}`]
+---
+
+<BaseLayout
+  title="SlayZone vs Superset.sh"
+  description="SlayZone vs Superset.sh compared: board-first AI agent orchestration, local-first kanban, real PTY terminals, embedded browser, MCP server, git worktrees."
+  canonicalPath="/superset"
+>
+  <Fragment slot="nav"><SiteNav current="comparison" /></Fragment>
+
+  <!-- 1. Title card with screenshots, verdict, freshness -->
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">{supersetEditorial.eyebrow}</p>
+      <h1>{supersetEditorial.title}</h1>
+      <p class="summary">{supersetEditorial.summary}</p>
+      <div class="fact-badges">
+        {factBadges.map((badge) => <span>{badge}</span>)}
+      </div>
+    </div>
+    <aside class="verdict-card">
+      <p class="verdict-label">Quick verdict</p>
+      <p class="verdict-text">{supersetEditorial.verdict}</p>
+      <div class="verdict-tags">
+        <span class="verdict-tag">Closest architectural competitor</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="screenshot-compare">
+    <figure class="screenshot-fig slayzone-fig">
+      <div class="screenshot-media">
+        <img
+          src={slayzoneHero.src}
+          width={slayzoneHero.width}
+          height={slayzoneHero.height}
+          alt="SlayZone homepage — kanban with terminals, card to terminal to agent workflow."
+          loading="eager"
+        />
+      </div>
+      <figcaption>SlayZone — kanban board with per-task terminals, browser, and worktree isolation.</figcaption>
+    </figure>
+    <figure class="screenshot-fig competitor-fig">
+      <div class="screenshot-media">
+        <img
+          src={supersetHero.src}
+          width={supersetHero.width}
+          height={supersetHero.height}
+          alt="Superset workspace UI with terminal, workspace sidebar, and review panel."
+          loading="eager"
+        />
+      </div>
+      <figcaption>Superset — workspace sidebar, live agent terminal, and change-review panel.</figcaption>
+    </figure>
+  </section>
+
+  <!-- 2. Pick X if -->
+  <section class="difference-grid">
+    <article class="difference-card slayzone-card">
+      <p class="card-kicker">Pick SlayZone if</p>
+      <ul>
+        {supersetEditorial.pickSlayzone.map((item) => <li>{item}</li>)}
+      </ul>
+    </article>
+    <article class="difference-card competitor-card">
+      <p class="card-kicker">Pick Superset if</p>
+      <ul>
+        {supersetEditorial.pickCompetitor.map((item) => <li>{item}</li>)}
+      </ul>
+    </article>
+  </section>
+
+  <!-- 3. Per-product sections -->
+  <section class="product-sections">
+    <article class="product-block slayzone-block">
+      <p class="section-kicker">About SlayZone</p>
+      <h2>Task-first agent orchestration</h2>
+      <p class="product-what">{supersetEditorial.slayzone.what}</p>
+      <div class="strengths-weaknesses">
+        <div class="sw-col">
+          <p class="sw-label strengths-label">Strengths</p>
+          <ul>
+            {supersetEditorial.slayzone.strengths.map((s) => <li>{s}</li>)}
+          </ul>
+        </div>
+        <div class="sw-col">
+          <p class="sw-label weaknesses-label">Weaknesses</p>
+          <ul>
+            {supersetEditorial.slayzone.weaknesses.map((w) => <li>{w}</li>)}
+          </ul>
+        </div>
+      </div>
+    </article>
+
+    <article class="product-block competitor-block">
+      <p class="section-kicker">About Superset</p>
+      <h2>Workspace-first agent execution</h2>
+      <p class="product-what">{supersetEditorial.superset.what}</p>
+      <div class="strengths-weaknesses">
+        <div class="sw-col">
+          <p class="sw-label strengths-label">Strengths</p>
+          <ul>
+            {supersetEditorial.superset.strengths.map((s) => <li>{s}</li>)}
+          </ul>
+        </div>
+        <div class="sw-col">
+          <p class="sw-label weaknesses-label">Weaknesses</p>
+          <ul>
+            {supersetEditorial.superset.weaknesses.map((w) => <li>{w}</li>)}
+          </ul>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- 4. At-a-glance scorecard -->
+  <section class="section-block" id="scorecard">
+    <div class="section-copy">
+      <p class="section-kicker">At a glance</p>
+      <h2>Same stack instincts. Different center of gravity.</h2>
+      <p>
+        {competitor.relevance.rationale}
+      </p>
+    </div>
+    <div class="scorecard-grid">
+      {scorecardRows.map((row) => (
+        <article class="scorecard">
+          <p class="scorecard-label">{row.label}</p>
+          <div class="scorecard-head">
+            <span class="scorecard-name">SlayZone</span>
+            <VerdictBadge verdict={row.slayzone.verdict} compact />
+          </div>
+          <div class="scorecard-head competitor">
+            <span class="scorecard-name">{competitor.name}</span>
+            <VerdictBadge verdict={row.competitor.verdict} compact />
+          </div>
+          <p class="scorecard-why">{row.why}</p>
+        </article>
+      ))}
+    </div>
+    <p class="jump-link"><a href="#matrix">See full matrix →</a></p>
+  </section>
+
+  <!-- 5. Full matrix -->
+  <section class="section-block" id="matrix">
+    <div class="section-copy">
+      <p class="section-kicker">Full matrix</p>
+      <h2>Where SlayZone leads, where Superset leads, where both are already table stakes.</h2>
+      <p>
+        Superset is strong wherever branch-first desktop execution matters: real PTY, browser, review surface,
+        worktrees, and agent breadth. SlayZone wins where task visibility, board ergonomics, and local-first
+        orchestration matter more than workspace polish.
+      </p>
+    </div>
+    <HeadToHeadMatrix rows={allRows} competitorName={competitor.name} />
+  </section>
+
+  <!-- Pricing note -->
+  <section class="pricing-note">
+    <div class="pricing-grid">
+      <div class="pricing-item">
+        <p class="pricing-label">SlayZone pricing</p>
+        <p>Free and open source. No account required.</p>
+      </div>
+      <div class="pricing-item">
+        <p class="pricing-label">Superset pricing</p>
+        <p>{competitor.pricing.summary}</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-strip">
+    <div>
+      <p class="section-kicker">Decide for yourself</p>
+      <h2>Try both. Pick the one that fits your workflow.</h2>
+    </div>
+    <div class="cta-links">
+      <a href="/comparison" class="cta-link ghost">Back to field comparison</a>
+      <a href="/" class="cta-link">See SlayZone homepage</a>
+    </div>
+  </section>
+
+  <!-- Feedback / correction -->
+  <section class="feedback-strip">
+    <p class="section-kicker">Spot something off?</p>
+    <p class="feedback-text">
+      We strive to keep this comparison as objective as possible. If a claim is wrong, outdated, or unfair to either side, tell us.
+    </p>
+    <a
+      href="https://github.com/debuglebowski/SlayZone/issues/new?title=Comparison%20correction%3A%20SlayZone%20vs%20Superset&body=Which%20claim%20is%20wrong%20or%20outdated%3F%0A%0ASource%3A%0A%0ASuggested%20fix%3A"
+      target="_blank"
+      rel="noopener"
+      class="feedback-btn"
+    >Open GitHub Issue</a>
+  </section>
+
+  <Fragment slot="footer"><SiteFooter /></Fragment>
+</BaseLayout>
+
+<style>
+  /* ─── Hero ─── */
+  .hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+    gap: 24px;
+    margin: 32px 0 40px;
+    padding: 34px;
+    border: 1px solid #efe7dd;
+    border-radius: 32px;
+    background:
+      radial-gradient(circle at top left, rgba(244, 104, 23, 0.15), transparent 34%),
+      linear-gradient(180deg, #fff8f1 0%, #fffdfb 46%, #ffffff 100%);
+    overflow: hidden;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    inset: auto -12% -38% auto;
+    width: 360px;
+    height: 360px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(247, 228, 99, 0.22), transparent 68%);
+    pointer-events: none;
+  }
+  .hero-copy,
+  .verdict-card {
+    position: relative;
+    z-index: 1;
+  }
+  .eyebrow,
+  .section-kicker,
+  .card-kicker,
+  .verdict-label,
+  .pricing-label,
+  .scorecard-label,
+  .sw-label {
+    margin: 0 0 10px;
+    color: #8a5a2c;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  h1,
+  h2 {
+    margin: 0;
+    color: #1a1a2e;
+    line-height: 0.98;
+    letter-spacing: -0.05em;
+  }
+  h1 {
+    max-width: 10ch;
+    font-size: clamp(48px, 8vw, 82px);
+  }
+  h2 {
+    font-size: clamp(28px, 4vw, 42px);
+  }
+  .summary,
+  .section-copy p,
+  .verdict-text,
+  .product-what,
+  .cta-strip h2 {
+    color: #554f49;
+    font-size: 18px;
+    line-height: 1.65;
+  }
+  .summary {
+    max-width: 62ch;
+    margin: 18px 0 0;
+  }
+  .fact-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 24px;
+  }
+  .fact-badges span {
+    padding: 10px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid #ecdcca;
+    color: #615445;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .verdict-card {
+    align-self: start;
+    padding: 24px;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.86);
+    border: 1px solid #f0e4d5;
+    box-shadow: 0 18px 40px rgba(37, 24, 12, 0.08);
+  }
+  .verdict-text {
+    margin: 0 0 18px;
+    font-size: 16px;
+  }
+  .verdict-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .verdict-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(244, 104, 23, 0.08);
+    border: 1px solid rgba(244, 104, 23, 0.24);
+    color: #8a3f0a;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  /* ─── Screenshot compare (top) ─── */
+  .screenshot-compare {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    margin-bottom: 40px;
+  }
+  .screenshot-fig {
+    margin: 0;
+    border-radius: 26px;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #eee4d8;
+    box-shadow: 0 18px 50px rgba(36, 25, 13, 0.06);
+  }
+  .screenshot-fig img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+  }
+  .screenshot-fig .screenshot-media {
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+  }
+  .screenshot-fig figcaption {
+    padding: 14px 18px 16px;
+    color: #635a52;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  /* ─── Pick X if ─── */
+  .difference-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+  .difference-card {
+    border-radius: 28px;
+    padding: 28px;
+    border: 1px solid #ece4da;
+    background: #fff;
+  }
+  .slayzone-card {
+    background: linear-gradient(180deg, #fff7ee 0%, #fff 100%);
+  }
+  .competitor-card {
+    background: linear-gradient(180deg, #fbfaf7 0%, #fff 100%);
+  }
+  .difference-card ul {
+    margin: 0;
+    padding-left: 18px;
+    color: #574e46;
+    display: grid;
+    gap: 10px;
+  }
+
+  /* ─── Per-product sections ─── */
+  .product-sections {
+    display: grid;
+    gap: 20px;
+    margin-top: 48px;
+  }
+  .product-block {
+    padding: 32px;
+    border-radius: 28px;
+    border: 1px solid #ece4da;
+    background: #fff;
+  }
+  .slayzone-block {
+    background: linear-gradient(180deg, #fff8f1 0%, #fff 100%);
+  }
+  .competitor-block {
+    background: linear-gradient(180deg, #faf9f7 0%, #fff 100%);
+  }
+  .product-block h2 {
+    font-size: clamp(24px, 3.4vw, 36px);
+    margin-bottom: 12px;
+  }
+  .product-what {
+    max-width: 72ch;
+    margin: 0 0 24px;
+  }
+  .strengths-weaknesses {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+  .sw-col {
+    padding: 20px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid #f1e9dd;
+  }
+  .strengths-label {
+    color: #107b46;
+  }
+  .weaknesses-label {
+    color: #a13028;
+  }
+  .sw-col ul {
+    margin: 0;
+    padding-left: 18px;
+    color: #574e46;
+    display: grid;
+    gap: 8px;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  /* ─── Scorecard ─── */
+  .section-block {
+    margin-top: 72px;
+  }
+  .section-copy {
+    max-width: 760px;
+    margin-bottom: 26px;
+  }
+  .section-copy p {
+    margin: 14px 0 0;
+  }
+  .scorecard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .scorecard {
+    padding: 22px;
+    border-radius: 24px;
+    border: 1px solid #eee5d9;
+    background: linear-gradient(180deg, #fffcf8 0%, #fff 100%);
+  }
+  .scorecard-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .scorecard-head.competitor {
+    padding-top: 12px;
+    border-top: 1px solid #f1ebdf;
+  }
+  .scorecard-name {
+    color: #1f2032;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .scorecard-why {
+    margin: 16px 0 0;
+    color: #625a51;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .jump-link {
+    margin: 20px 0 0;
+    text-align: center;
+  }
+  .jump-link a {
+    color: #8a5a2c;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    letter-spacing: 0.04em;
+  }
+  .jump-link a:hover {
+    text-decoration: underline;
+  }
+
+  /* ─── Pricing note ─── */
+  .pricing-note {
+    margin-top: 48px;
+  }
+  .pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+  .pricing-item {
+    padding: 22px;
+    border-radius: 22px;
+    background: #fff8f1;
+    border: 1px solid #f1e1d1;
+  }
+  .pricing-item p {
+    margin: 0;
+    color: #554f49;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  /* ─── CTA ─── */
+  .cta-strip {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 24px;
+    margin: 72px 0 10px;
+    padding: 28px;
+    border-radius: 28px;
+    border: 1px solid #efe4d6;
+    background: linear-gradient(180deg, #fff7ef 0%, #fff 100%);
+  }
+  .cta-strip h2 {
+    max-width: 14ch;
+    font-size: clamp(28px, 3.6vw, 40px);
+  }
+  .cta-links {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .cta-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 46px;
+    padding: 0 18px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .cta-link.ghost {
+    background: transparent;
+    color: #1a1a2e;
+    border: 1px solid #eadbc9;
+  }
+
+  /* ─── Feedback strip ─── */
+  .feedback-strip {
+    margin: 48px 0 10px;
+    padding: 28px 32px;
+    border-radius: 24px;
+    border: 1px dashed #e5d9c6;
+    background: #fffdf9;
+    text-align: center;
+  }
+  .feedback-text {
+    margin: 0 auto 18px;
+    max-width: 56ch;
+    color: #6a6259;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .feedback-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 0 18px;
+    border-radius: 999px;
+    background: #1a1a2e;
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .feedback-btn:hover {
+    background: #2a2a3e;
+  }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 1000px) {
+    .hero,
+    .screenshot-compare,
+    .difference-grid,
+    .pricing-grid,
+    .cta-strip {
+      grid-template-columns: 1fr;
+    }
+    .hero,
+    .cta-strip {
+      display: grid;
+    }
+    .scorecard-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .strengths-weaknesses {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 720px) {
+    .hero,
+    .difference-card,
+    .scorecard,
+    .product-block,
+    .cta-strip {
+      padding: 22px;
+      border-radius: 22px;
+    }
+    .scorecard-grid {
+      grid-template-columns: 1fr;
+    }
+    .summary,
+    .section-copy p,
+    .product-what {
+      font-size: 16px;
+    }
+    .cta-links {
+      justify-content: stretch;
+    }
+    .cta-link {
+      width: 100%;
+    }
+    .screenshot-fig {
+      border-radius: 20px;
+    }
+    .sw-col {
+      padding: 16px;
+      border-radius: 16px;
+    }
+  }
+</style>
