@@ -142,7 +142,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     if (willCreateRef.current) { e.preventDefault(); willCreateRef.current = false }
   }, [])
   const renameInputRef = useRef<HTMLInputElement>(null)
-  const cancelRenameRef = useRef(false)
+  const renameValueRef = useRef('')
 
   // --- Drag and drop state ---
   const dragPathRef = useRef<string | null>(null)
@@ -344,13 +344,30 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
         await window.api.fs.rename(projectPath, oldPath, newPath)
         track('file_renamed')
         onFileRenamed?.(oldPath, newPath)
+        const srcPrefix = oldPath + '/'
+        setExpandedFolders((prev) => {
+          let changed = false
+          const next = new Set<string>()
+          for (const p of prev) {
+            if (p === oldPath) {
+              next.add(newPath)
+              changed = true
+            } else if (p.startsWith(srcPrefix)) {
+              next.add(newPath + p.slice(oldPath.length))
+              changed = true
+            } else {
+              next.add(p)
+            }
+          }
+          return changed ? next : prev
+        })
         await loadDir(parentDir)
       } catch (err) {
         console.error('Rename failed:', err)
       }
       setRenaming(null)
     },
-    [renaming, projectPath, loadDir, onFileRenamed]
+    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders]
   )
 
   const executeDelete = useCallback(
@@ -397,6 +414,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   const startRename = useCallback((entry: DirEntry) => {
     setRenaming(entry.path)
     setRenameValue(entry.name)
+    renameValueRef.current = entry.name
   }, [])
 
   useEffect(() => {
@@ -871,13 +889,16 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
               <Input
                 ref={renameInputRef}
                 value={renameValue}
-                onChange={(e) => setRenameValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { cancelRenameRef.current = false; handleRename(entry.path, renameValue) }
-                  if (e.key === 'Escape') { cancelRenameRef.current = true; setRenaming(null) }
+                onChange={(e) => { setRenameValue(e.target.value); renameValueRef.current = e.target.value }}
+                onKeyDownCapture={(e) => {
+                  if (e.key === 'Escape') { renameValueRef.current = ''; setRenaming(null) }
                 }}
-                onBlur={() => { if (!cancelRenameRef.current) handleRename(entry.path, renameValue); cancelRenameRef.current = false }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleRename(entry.path, renameValueRef.current)
+                }}
+                onBlur={() => { if (renameValueRef.current.trim()) handleRename(entry.path, renameValueRef.current) }}
                 className="h-6 text-xs font-mono py-0 px-1"
+                data-testid="rename-input"
               />
             </div>
           ) : (
@@ -947,13 +968,16 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
           <Input
             ref={renameInputRef}
             value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { cancelRenameRef.current = false; handleRename(entry.path, renameValue) }
-              if (e.key === 'Escape') { cancelRenameRef.current = true; setRenaming(null) }
+            onChange={(e) => { setRenameValue(e.target.value); renameValueRef.current = e.target.value }}
+            onKeyDownCapture={(e) => {
+              if (e.key === 'Escape') { renameValueRef.current = ''; setRenaming(null) }
             }}
-            onBlur={() => { if (!cancelRenameRef.current) handleRename(entry.path, renameValue); cancelRenameRef.current = false }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleRename(entry.path, renameValueRef.current)
+            }}
+            onBlur={() => { if (renameValueRef.current.trim()) handleRename(entry.path, renameValueRef.current) }}
             className="h-6 text-xs font-mono py-0 px-1"
+            data-testid="rename-input"
           />
         </div>
       )
