@@ -556,7 +556,26 @@ test.describe('CLI: slay', () => {
 
     test('subtask-add creates a subtask', () => {
       const title = `CLI new subtask ${Date.now()}`
-      const r = runCli('tasks', 'subtask-add', parentTaskId.slice(0, 8), title)
+      const r = runCli('tasks', 'subtask-add', title, '--parent', parentTaskId.slice(0, 8))
+      expect(r.status).toBe(0)
+      expect(r.stdout).toContain('Created subtask:')
+
+      const r2 = runCli('tasks', 'subtasks', parentTaskId.slice(0, 8), '--json')
+      const subtasks = JSON.parse(r2.stdout) as { title: string }[]
+      expect(subtasks.some((t) => t.title === title)).toBe(true)
+    })
+
+    test('subtask-add defaults parent to $SLAYZONE_TASK_ID', () => {
+      const title = `CLI env-default subtask ${Date.now()}`
+      const r = spawnSync('node', [SLAY_JS, 'tasks', 'subtask-add', title], {
+        env: {
+          ...process.env,
+          SLAYZONE_DB_PATH: dbPath,
+          SLAYZONE_MCP_PORT: String(mcpPort),
+          SLAYZONE_TASK_ID: parentTaskId,
+        },
+        encoding: 'utf8',
+      })
       expect(r.status).toBe(0)
       expect(r.stdout).toContain('Created subtask:')
 
@@ -569,11 +588,11 @@ test.describe('CLI: slay', () => {
       const extId = `sub-dedup-${Date.now()}`
       const title = `CLI subtask dedup ${extId}`
 
-      const r1 = runCli('tasks', 'subtask-add', parentTaskId.slice(0, 8), title, '--external-id', extId)
+      const r1 = runCli('tasks', 'subtask-add', title, '--parent', parentTaskId.slice(0, 8), '--external-id', extId)
       expect(r1.status).toBe(0)
       expect(r1.stdout).toContain('Created subtask:')
 
-      const r2 = runCli('tasks', 'subtask-add', parentTaskId.slice(0, 8), 'duplicate', '--external-id', extId)
+      const r2 = runCli('tasks', 'subtask-add', 'duplicate', '--parent', parentTaskId.slice(0, 8), '--external-id', extId)
       expect(r2.status).toBe(0)
       expect(r2.stdout).toContain('Exists:')
       expect(r2.stdout).toContain(title)
@@ -581,7 +600,7 @@ test.describe('CLI: slay', () => {
 
     test('subtask-add populates provider_config with default flags', async ({ mainWindow }) => {
       const title = `CLI subtask flags ${Date.now()}`
-      const r = runCli('tasks', 'subtask-add', parentTaskId.slice(0, 8), title)
+      const r = runCli('tasks', 'subtask-add', title, '--parent', parentTaskId.slice(0, 8))
       expect(r.status).toBe(0)
 
       const subtasks = await mainWindow.evaluate(

@@ -161,8 +161,8 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
 
 - \`slay tasks subtasks [id] [--json]\` — list subtasks of a task.
 
-- \`slay tasks subtask-add [parentId] <title> [--description <text>] [--status <status>] [--priority <1-5>] [--external-id <id>] [--external-provider <provider>]\`
-  Add a subtask. Parent defaults to \`$SLAYZONE_TASK_ID\`. The subtask inherits the parent's terminal mode. \`--external-id\` deduplication works the same as task creation.
+- \`slay tasks subtask-add <title> [--parent <id>] [--description <text>] [--status <status>] [--priority <1-5>] [--external-id <id>] [--external-provider <provider>]\`
+  Add a subtask. \`--parent\` defaults to \`$SLAYZONE_TASK_ID\`. The subtask inherits the parent's terminal mode. \`--external-id\` deduplication works the same as task creation.
 
 ## Task tags
 

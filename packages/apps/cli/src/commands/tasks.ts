@@ -738,17 +738,18 @@ export function tasksCommand(): Command {
       }
     })
 
-  // slay tasks subtask-add [parentId] <title>
+  // slay tasks subtask-add <title>
   cmd
-    .command('subtask-add [parentId] <title>')
-    .description('Add a subtask (parentId defaults to $SLAYZONE_TASK_ID)')
+    .command('subtask-add <title>')
+    .description('Add a subtask (parent defaults to $SLAYZONE_TASK_ID)')
+    .option('--parent <id>', 'Parent task ID (defaults to $SLAYZONE_TASK_ID)')
     .option('--description <text>', 'Subtask description')
     .option('--status <status>', 'Initial status key')
     .option('--priority <n>', 'Priority 1-5', '3')
     .option('--external-id <id>', 'External ID for deduplication (skips if already exists)')
     .option('--external-provider <provider>', 'External provider namespace', 'cli')
-    .action(async (parentId, title, opts) => {
-      parentId = resolveId(parentId)
+    .action(async (title, opts) => {
+      const parentId = resolveId(opts.parent)
       const db = openDb()
 
       const parents = db.query<{ id: string; project_id: string; terminal_mode: string | null }>(
