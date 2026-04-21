@@ -999,10 +999,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       })
     }
 
-    // Insert path into terminal (escape if has spaces)
+    // Insert path into terminal (escape if has spaces).
+    // Route through xterm paste() so bracketed-paste wraps the payload when
+    // the foreground app enabled ?2004h (e.g. Claude Code) — required for
+    // CC's image-from-path detection. Plain shells without bracketed paste
+    // get raw bytes, same as a direct PTY write.
     const insertPath = (path: string) => {
       const escaped = path.includes(' ') ? `"${path}"` : path
-      window.api.pty.write(sessionId, escaped)
+      terminalRef.current?.paste(escaped)
     }
 
     // Process a single file
