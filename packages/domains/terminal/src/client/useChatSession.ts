@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import type { AgentEvent } from '../shared/agent-events'
 import {
   initialState,
@@ -48,6 +48,8 @@ export interface UseChatSessionResult {
   state: ChatTimelineState
   timeline: TimelineItem[]
   inFlight: boolean
+  /** True until the initial buffer replay resolves (on mount / tab reopen). */
+  hydrating: boolean
   sendMessage: (text: string) => Promise<void>
   interrupt: () => Promise<void>
   kill: () => Promise<void>
@@ -75,43 +77,16 @@ export interface UseChatSessionOpts {
  */
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   const [state, dispatch] = useReducer(reducer, undefined, initialState)
+  const [hydrating, setHydrating] = useState(true)
   const lastSeqRef = useRef<number>(-1)
 
   useEffect(() => {
     let cancelled = false
+    setHydrating(true)
     const chat = getChatApi()
 
-    // Kick off session (idempotent — main returns existing if any)
-    chat.create({
-      tabId: opts.tabId,
-      taskId: opts.taskId,
-      mode: opts.mode,
-      cwd: opts.cwd,
-      providerFlagsOverride: opts.providerFlagsOverride ?? null,
-    }).catch((e) => {
-      // Surface to UI via stderr-like entry.
-      dispatch({
-        type: 'event',
-        event: { kind: 'error', message: (e as Error).message ?? String(e) },
-      })
-    })
-
-    // Replay buffered events. Note: we request AFTER create so any init events are buffered.
-    void chat
-      .getBufferSince(opts.tabId, -1)
-      .then((buffered) => {
-        if (cancelled) return
-        for (const { seq, event } of buffered) {
-          if (seq > lastSeqRef.current) {
-            dispatch({ type: 'event', event })
-            lastSeqRef.current = seq
-          }
-        }
-      })
-      .catch(() => {
-        /* ignore replay failures */
-      })
-
+    // Subscribe BEFORE create so we don't miss events emitted between
+    // session spawn and the getBufferSince call below.
     const offEvent = chat.onEvent((tabId, event, seq) => {
       if (cancelled || tabId !== opts.tabId) return
       if (seq <= lastSeqRef.current) return
@@ -123,6 +98,44 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       if (cancelled || tabId !== opts.tabId) return
       dispatch({ type: 'process-exit', code, signal })
     })
+
+    // Serialize: AWAIT create, THEN replay. The create handler awaits
+    // whichBinary() before populating the in-memory session map, so a
+    // parallel getBufferSince would race and return [] for cold reattach.
+    // Awaiting guarantees session.buffer is seeded with persisted history.
+    void (async () => {
+      try {
+        await chat.create({
+          tabId: opts.tabId,
+          taskId: opts.taskId,
+          mode: opts.mode,
+          cwd: opts.cwd,
+          providerFlagsOverride: opts.providerFlagsOverride ?? null,
+        })
+      } catch (e) {
+        // Surface create failure but still attempt replay (e.g. session may
+        // exist from a previous reattach despite this create rejecting).
+        dispatch({
+          type: 'event',
+          event: { kind: 'error', message: (e as Error).message ?? String(e) },
+        })
+      }
+      if (cancelled) return
+      try {
+        const buffered = await chat.getBufferSince(opts.tabId, -1)
+        if (cancelled) return
+        for (const { seq, event } of buffered) {
+          if (seq > lastSeqRef.current) {
+            dispatch({ type: 'event', event })
+            lastSeqRef.current = seq
+          }
+        }
+      } catch {
+        /* ignore replay failures */
+      } finally {
+        if (!cancelled) setHydrating(false)
+      }
+    })()
 
     return () => {
       cancelled = true
@@ -157,6 +170,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     state,
     timeline: state.timeline,
     inFlight: isInFlight(state),
+    hydrating,
     sendMessage,
     interrupt,
     kill,

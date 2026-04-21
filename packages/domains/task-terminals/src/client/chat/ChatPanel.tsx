@@ -16,7 +16,7 @@ import { ChatViewContext } from './ChatViewContext'
 import { cn, toast } from '@slayzone/ui'
 import { ConfirmDisplayModeDialog } from '../ConfirmDisplayModeDialog'
 import type { TabDisplayMode } from '../../shared/types'
-import { useChatSession, type TimelineItem } from '@slayzone/terminal/client'
+import { useChatSession, PulseGrid, type TimelineItem } from '@slayzone/terminal/client'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
 import { useAutocomplete } from './autocomplete/useAutocomplete'
 import { createSkillsSource } from './autocomplete/sources/skills'
@@ -92,7 +92,7 @@ const SUGGESTED_PROMPTS = [
 
 export function ChatPanel(props: ChatPanelProps) {
   const { tabId, taskId, mode, cwd, providerFlagsOverride, permissionNotice: overrideNotice, onSetDisplayMode } = props
-  const { state, timeline, inFlight, sendMessage, interrupt, reset: resetTimeline } = useChatSession({
+  const { state, timeline, inFlight, hydrating, sendMessage, interrupt, reset: resetTimeline } = useChatSession({
     tabId,
     taskId,
     mode,
@@ -442,7 +442,9 @@ export function ChatPanel(props: ChatPanelProps) {
       {/* Timeline */}
       <div className="relative flex-1 min-h-0">
         <div ref={listRef} className="h-full overflow-y-auto pt-4">
-          {isEmpty && !inFlight ? (
+          {hydrating ? (
+            <HydratingState />
+          ) : isEmpty && !inFlight ? (
             <EmptyState
               onPick={(text) => {
                 void sendMessage(text)
@@ -664,6 +666,14 @@ export function ChatPanel(props: ChatPanelProps) {
       />
     </div>
     </ChatViewContext.Provider>
+  )
+}
+
+function HydratingState() {
+  return (
+    <div className="h-full relative">
+      <PulseGrid />
+    </div>
   )
 }
 
