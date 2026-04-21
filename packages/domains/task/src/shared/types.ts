@@ -300,6 +300,8 @@ export interface Task {
   // Worktree
   worktree_path: string | null
   worktree_parent_branch: string | null
+  // Transient — populated by main handlers from worktree color-registry. NOT a DB column.
+  worktree_color?: string | null
   // Custom working directory (overrides project.path, overridden by worktree_path)
   base_dir: string | null
   browser_url: string | null

@@ -33,9 +33,7 @@ import {
   TooltipContent,
   TooltipTrigger,
   Input,
-  PriorityIcon,
-  WORKTREE_COLORS,
-  hashStr
+  PriorityIcon
 } from '@slayzone/ui'
 import { type FilterState, groupTasksBy, getViewConfig, type Column } from '@slayzone/tasks'
 import { resolveColumns } from '@slayzone/projects/shared'
@@ -194,20 +192,6 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
     return rootNodes
   }, [worktrees, tasks])
 
-  const worktreeColorMap = useMemo(() => {
-    const map = new Map<string, string>()
-    const paths = worktrees.filter(wt => !wt.isMain).map(wt => wt.path).sort()
-    if (paths.length === 0) return map
-    const usedIndices = new Set<number>()
-    for (const path of paths) {
-      let idx = hashStr(path) % WORKTREE_COLORS.length
-      while (usedIndices.has(idx) && usedIndices.size < WORKTREE_COLORS.length) idx = (idx + 1) % WORKTREE_COLORS.length
-      usedIndices.add(idx)
-      map.set(path, WORKTREE_COLORS[idx])
-    }
-    return map
-  }, [worktrees])
-
   const handleRemoveWorktree = async (path: string) => {
     if (!projectPath) return
     try {
@@ -259,7 +243,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
               <WorktreeCard
                 key={node.path}
                 node={{ ...node, isDirty: dirtyStatuses[node.path] ?? false }}
-                worktreeColor={worktreeColorMap.get(node.path)}
+                worktreeColor={node.color}
                 isExpanded={expandedPaths.has(node.path)}
                 onToggleExpand={() => toggleExpand(node.path)}
                 onRemove={() => setDeleteConfirmOpen(node.path)}

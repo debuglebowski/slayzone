@@ -57,6 +57,7 @@ export interface DetectedWorktree {
   branch: string | null
   isMain: boolean
   isDirty?: boolean
+  color?: string
 }
 
 export interface MergeResult {

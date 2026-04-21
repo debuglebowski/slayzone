@@ -20,7 +20,7 @@ import {
 import path from 'path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, rmSync, copyFileSync, statSync, readdirSync, createWriteStream } from 'fs'
 import { randomUUID } from 'crypto'
-import { removeWorktree, createWorktree, runWorktreeSetupScript, getCurrentBranch, isGitRepo, copyIgnoredFiles, resolveCopyBehavior } from '@slayzone/worktrees/main'
+import { removeWorktree, createWorktree, runWorktreeSetupScript, getCurrentBranch, isGitRepo, copyIgnoredFiles, resolveCopyBehavior, getWorktreeColor, ensureProjectWorktreeColors } from '@slayzone/worktrees/main'
 import archiver from 'archiver'
 import { buildPdfHtml, buildMermaidPdfHtml, buildPngHtml, renderToPdf, renderToPng } from './asset-export'
 import { startAssetWatcher } from './asset-watcher'
@@ -115,6 +115,43 @@ function parseTask(row: Record<string, unknown> | undefined): Task | null {
 
 function parseTasks(rows: Record<string, unknown>[]): Task[] {
   return rows.map((row) => parseTask(row)!)
+}
+
+/** Attaches transient worktree_color field. Lazy-detects for cold projects (one IPC per
+ *  unique project per process lifetime). Tasks without worktree_path are returned untouched. */
+async function attachWorktreeColors(db: Database, tasks: Task[]): Promise<Task[]> {
+  const projectIds = new Set<string>()
+  for (const t of tasks) {
+    if (t.worktree_path && t.project_id) projectIds.add(t.project_id)
+  }
+  if (projectIds.size === 0) return tasks
+
+  const projectPaths = new Map<string, string>()
+  for (const pid of projectIds) {
+    const row = db.prepare('SELECT path FROM projects WHERE id = ?').get(pid) as { path: string } | undefined
+    if (row?.path) projectPaths.set(pid, row.path)
+  }
+
+  await Promise.all([...projectPaths.values()].map((p) => ensureProjectWorktreeColors(p)))
+
+  return tasks.map((t) => {
+    if (!t.worktree_path) return t
+    const ppath = projectPaths.get(t.project_id)
+    if (!ppath) return t
+    const color = getWorktreeColor(ppath, t.worktree_path)
+    return color ? { ...t, worktree_color: color } : t
+  })
+}
+
+async function parseAndColorTasks(db: Database, rows: Record<string, unknown>[]): Promise<Task[]> {
+  return attachWorktreeColors(db, parseTasks(rows))
+}
+
+async function parseAndColorTask(db: Database, row: Record<string, unknown> | undefined): Promise<Task | null> {
+  const task = parseTask(row)
+  if (!task) return null
+  const [colored] = await attachWorktreeColors(db, [task])
+  return colored
 }
 
 function getProjectColumns(db: Database, projectId: string): ColumnConfig[] | null {
@@ -555,7 +592,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
   }
 
   // Task CRUD
-  ipcMain.handle('db:tasks:getAll', () => {
+  ipcMain.handle('db:tasks:getAll', async () => {
     const rows = db
       .prepare(`SELECT t.*, el.external_url AS linear_url
         FROM tasks t
@@ -563,10 +600,10 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
         WHERE t.deleted_at IS NULL
         ORDER BY t."order" ASC, t.created_at DESC`)
       .all() as Record<string, unknown>[]
-    return parseTasks(rows)
+    return parseAndColorTasks(db, rows)
   })
 
-  ipcMain.handle('db:tasks:getByProject', (_, projectId: string) => {
+  ipcMain.handle('db:tasks:getByProject', async (_, projectId: string) => {
     const rows = db
       .prepare(
         `SELECT t.*, el.external_url AS linear_url
@@ -576,17 +613,17 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
         ORDER BY t."order" ASC, t.created_at DESC`
       )
       .all(projectId) as Record<string, unknown>[]
-    return parseTasks(rows)
+    return parseAndColorTasks(db, rows)
   })
 
-  ipcMain.handle('db:tasks:get', (_, id: string) => {
+  ipcMain.handle('db:tasks:get', async (_, id: string) => {
     const row = db.prepare(
       `SELECT t.*, el.external_url AS linear_url
       FROM tasks t
       LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
       WHERE t.id = ?`
     ).get(id) as Record<string, unknown> | undefined
-    return parseTask(row)
+    return parseAndColorTask(db, row)
   })
 
   ipcMain.handle('db:tasks:create', async (_, data: CreateTaskInput) => {
@@ -679,7 +716,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     return task
   })
 
-  ipcMain.handle('db:tasks:getSubTasks', (_, parentId: string) => {
+  ipcMain.handle('db:tasks:getSubTasks', async (_, parentId: string) => {
     const rows = db
       .prepare(
         `SELECT t.*, el.external_url AS linear_url
@@ -689,7 +726,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
         ORDER BY t."order" ASC, t.created_at DESC`
       )
       .all(parentId) as Record<string, unknown>[]
-    return parseTasks(rows)
+    return parseAndColorTasks(db, rows)
   })
 
   ipcMain.handle('db:tasks:update', (_, data: UpdateTaskInput) => {

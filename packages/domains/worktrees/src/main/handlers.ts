@@ -73,6 +73,7 @@ import {
   getStashDiff
 } from './git-worktree'
 import { runAiCommand } from './merge-ai'
+import { ensureColors } from './color-registry'
 import {
   checkGhInstalled,
   hasGithubRemote,
@@ -213,8 +214,11 @@ export function registerWorktreeHandlers(ipcMain: IpcMain, db: Database): void {
     return detection
   })
 
-  ipcMain.handle('git:detectWorktrees', (_, repoPath: string) => {
-    return detectWorktrees(repoPath)
+  ipcMain.handle('git:detectWorktrees', async (_, repoPath: string) => {
+    const detected = await detectWorktrees(repoPath)
+    const nonMainPaths = detected.filter(d => !d.isMain).map(d => d.path)
+    const colors = ensureColors(repoPath, nonMainPaths)
+    return detected.map(d => d.isMain ? d : { ...d, color: colors.get(d.path) })
   })
 
   ipcMain.handle('git:createWorktree', async (event, opts: CreateWorktreeOpts) => {
