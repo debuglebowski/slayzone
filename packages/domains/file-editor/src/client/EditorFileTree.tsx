@@ -142,6 +142,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     if (willCreateRef.current) { e.preventDefault(); willCreateRef.current = false }
   }, [])
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const cancelRenameRef = useRef(false)
 
   // --- Drag and drop state ---
   const dragPathRef = useRef<string | null>(null)
@@ -864,37 +865,54 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
           onDrop={(e) => handleFolderDrop(e, entry.path)}
           className={cn(isDropHover && 'bg-primary/10 ring-1 ring-primary/30 rounded')}
         >
-          <ContextMenu>
-            <ContextMenuTrigger asChild>
-              <button
-                draggable
-                onDragStart={(e) => handleDragStart(e, entry)}
-                onDragEnd={handleDragEnd}
-                data-path={entry.path}
-                className={cn(
-                  'group/folder flex w-full select-none items-center gap-1.5 rounded px-1 py-1 text-xs hover:bg-muted/50',
-                  isSelected && 'bg-primary/15',
-                  isFocused && 'ring-1 ring-primary/40',
-                  isCut && 'opacity-40',
-                  entry.ignored && 'opacity-40'
-                )}
-                style={{ paddingLeft: pad }}
-                onClick={(e) => handleEntryClick(e, entry, chainPaths)}
-              >
-                {expanded
-                  ? <FolderOpen className="size-4 shrink-0 text-amber-400" />
-                  : <Folder className="size-4 shrink-0 text-amber-500/80" />}
-                <span className={cn("truncate font-mono", gitStatusColor(dirGitStatus.get(entry.path)), entry.ignored && 'italic')}>{label}</span>
-                <GitStatusBadge status={dirGitStatus.get(entry.path)} />
-                {entry.isSymlink && (
-                  <span title="Symbolic link"><ArrowUpRight className="size-3 shrink-0 text-muted-foreground/60" /></span>
-                )}
-              </button>
-            </ContextMenuTrigger>
-            <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>
-              {renderContextMenuItems(entry, true)}
-            </ContextMenuContent>
-          </ContextMenu>
+          {renaming === entry.path ? (
+            <div style={{ paddingLeft: pad }} className="flex items-center gap-1.5 py-0.5">
+              <Folder className="size-4 shrink-0 text-amber-500/80" />
+              <Input
+                ref={renameInputRef}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { cancelRenameRef.current = false; handleRename(entry.path, renameValue) }
+                  if (e.key === 'Escape') { cancelRenameRef.current = true; setRenaming(null) }
+                }}
+                onBlur={() => { if (!cancelRenameRef.current) handleRename(entry.path, renameValue); cancelRenameRef.current = false }}
+                className="h-6 text-xs font-mono py-0 px-1"
+              />
+            </div>
+          ) : (
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <button
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, entry)}
+                  onDragEnd={handleDragEnd}
+                  data-path={entry.path}
+                  className={cn(
+                    'group/folder flex w-full select-none items-center gap-1.5 rounded px-1 py-1 text-xs hover:bg-muted/50',
+                    isSelected && 'bg-primary/15',
+                    isFocused && 'ring-1 ring-primary/40',
+                    isCut && 'opacity-40',
+                    entry.ignored && 'opacity-40'
+                  )}
+                  style={{ paddingLeft: pad }}
+                  onClick={(e) => handleEntryClick(e, entry, chainPaths)}
+                >
+                  {expanded
+                    ? <FolderOpen className="size-4 shrink-0 text-amber-400" />
+                    : <Folder className="size-4 shrink-0 text-amber-500/80" />}
+                  <span className={cn("truncate font-mono", gitStatusColor(dirGitStatus.get(entry.path)), entry.ignored && 'italic')}>{label}</span>
+                  <GitStatusBadge status={dirGitStatus.get(entry.path)} />
+                  {entry.isSymlink && (
+                    <span title="Symbolic link"><ArrowUpRight className="size-3 shrink-0 text-muted-foreground/60" /></span>
+                  )}
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent onCloseAutoFocus={preventAutoFocus}>
+                {renderContextMenuItems(entry, true)}
+              </ContextMenuContent>
+            </ContextMenu>
+          )}
 
           {expanded && compactChildren(entry.path, dirContents).map((c) =>
             renderEntry(c.entry, depth + 1, c.displayName, c.chainPaths)
@@ -931,10 +949,10 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRename(entry.path, renameValue)
-              if (e.key === 'Escape') setRenaming(null)
+              if (e.key === 'Enter') { cancelRenameRef.current = false; handleRename(entry.path, renameValue) }
+              if (e.key === 'Escape') { cancelRenameRef.current = true; setRenaming(null) }
             }}
-            onBlur={() => handleRename(entry.path, renameValue)}
+            onBlur={() => { if (!cancelRenameRef.current) handleRename(entry.path, renameValue); cancelRenameRef.current = false }}
             className="h-6 text-xs font-mono py-0 px-1"
           />
         </div>
