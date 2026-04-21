@@ -869,6 +869,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       ref={renameInputRef}
       value={renameValue}
       onChange={(e) => { setRenameValue(e.target.value); renameValueRef.current = e.target.value }}
+      // Capture phase: shared Input auto-blurs on Escape before bubble onKeyDown, so clearing the ref here prevents onBlur from committing.
       onKeyDownCapture={(e) => {
         if (e.key === 'Escape') { renameValueRef.current = ''; setRenaming(null) }
       }}
