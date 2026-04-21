@@ -1,8 +1,10 @@
 <!-- Defines window.__feat helpers. Must appear BEFORE visual component scripts. -->
 <script is:inline>
   window.__feat = {
+    static: new URLSearchParams(window.location.search).has('static'),
     sleep: function(ms) { return new Promise(r => setTimeout(r, ms)); },
     loopOnVisible: function(el, fn, threshold) {
+      if (window.__feat.static) return;
       let timer = null, running = false;
       const obs = new IntersectionObserver((entries) => {
         entries.forEach(e => {
