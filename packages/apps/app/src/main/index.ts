@@ -1501,6 +1501,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
   ipcMain.on('app:is-jira-integration-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_jira_integration') })
   ipcMain.handle('app:is-loop-mode-enabled', () => isLabEnabled('labs_loop_mode'))
   ipcMain.on('app:is-loop-mode-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_loop_mode') })
+  ipcMain.handle('app:is-agent-panel-label-enabled', () => isLabEnabled('labs_agent_panel_label'))
+  ipcMain.on('app:is-agent-panel-label-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_agent_panel_label') })
   ipcMain.handle('app:get-protocol-client-status', () => protocolClientStatus)
   ipcMain.handle('app:get-zoom-factor', () => mainWindow?.webContents.zoomFactor ?? 1)
   ipcMain.handle('app:adjust-zoom', (_event, command: AppZoomCommand) => applyAppZoom(command))

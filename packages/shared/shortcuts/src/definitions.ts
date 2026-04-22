@@ -44,7 +44,7 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'toggle-project-tabs', label: 'Project-Scoped Tabs', group: 'Tabs', defaultKeys: 'mod+shift+h', scope: 'global' },
 
   // Task Panels (task scope)
-  { id: 'panel-terminal', label: 'Agent', group: 'Task Panels', defaultKeys: 'mod+o', scope: 'task' },
+  { id: 'panel-terminal', label: 'Terminal', group: 'Task Panels', defaultKeys: 'mod+o', scope: 'task' },
   { id: 'panel-browser', label: 'Browser', group: 'Task Panels', defaultKeys: 'mod+b', scope: 'task' },
   { id: 'browser-new-tab', label: 'New Browser Tab', group: 'Task Panels', defaultKeys: 'mod+t', scope: 'task' },
   { id: 'panel-editor', label: 'Editor', group: 'Task Panels', defaultKeys: 'mod+e', scope: 'task' },

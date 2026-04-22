@@ -181,6 +181,8 @@ const api: ElectronAPI = {
     isJiraIntegrationEnabledSync: ipcRenderer.sendSync('app:is-jira-integration-enabled-sync') as boolean,
     isLoopModeEnabled: () => ipcRenderer.invoke('app:is-loop-mode-enabled'),
     isLoopModeEnabledSync: ipcRenderer.sendSync('app:is-loop-mode-enabled-sync') as boolean,
+    isAgentPanelLabelEnabled: () => ipcRenderer.invoke('app:is-agent-panel-label-enabled'),
+    isAgentPanelLabelEnabledSync: ipcRenderer.sendSync('app:is-agent-panel-label-enabled-sync') as boolean,
     getZoomFactor: () => ipcRenderer.invoke('app:get-zoom-factor'),
     adjustZoom: (command: 'in' | 'out' | 'reset') => ipcRenderer.invoke('app:adjust-zoom', command) as Promise<number>,
     isPlaywright: process.env.PLAYWRIGHT === '1',

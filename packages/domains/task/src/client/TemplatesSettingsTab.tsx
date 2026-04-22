@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Button, Label, Switch, Input, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import { Button, Label, Switch, Input, Tooltip, TooltipTrigger, TooltipContent, getAgentPanelLabel } from '@slayzone/ui'
 import {
   Select,
   SelectContent,
@@ -26,7 +26,7 @@ import { BUILTIN_PANEL_IDS } from '@slayzone/task/shared'
 const NONE = '__none__'
 
 const PANEL_LABELS: Record<string, string> = {
-  terminal: 'Agent',
+  terminal: getAgentPanelLabel(),
   browser: 'Browser',
   editor: 'Editor',
   diff: 'Git',

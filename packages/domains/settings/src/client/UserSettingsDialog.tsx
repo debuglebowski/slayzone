@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { XIcon } from 'lucide-react'
-import { Dialog, DialogContent, SettingsLayout } from '@slayzone/ui'
+import { Dialog, DialogContent, SettingsLayout, getAgentPanelLabel } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { useTelemetry, TelemetrySettings } from '@slayzone/telemetry/client'
@@ -81,7 +81,7 @@ export function UserSettingsDialog({
       key: 'panels',
       label: 'Panels',
       children: [
-        { key: 'panels/terminal', label: 'Agent' },
+        { key: 'panels/terminal', label: getAgentPanelLabel() },
         { key: 'panels/browser', label: 'Browser' },
         { key: 'panels/editor', label: 'Editor' },
         { key: 'panels/git', label: 'Git' },
