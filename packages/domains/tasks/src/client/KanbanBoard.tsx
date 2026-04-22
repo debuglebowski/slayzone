@@ -228,7 +228,7 @@ export function KanbanBoard({
       onDragEnd={handleDragEnd}
     >
       <div className="relative h-full min-h-0">
-      <div className="flex gap-4 overflow-x-auto pr-16 h-full [&::-webkit-scrollbar]:hidden">
+      <div className="flex h-full min-h-0 min-w-0 gap-4 overflow-x-auto pr-16 scrollbar-thin">
         {visibleColumns.map((column) => (
           <KanbanColumn
             key={column.id}

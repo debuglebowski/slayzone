@@ -196,7 +196,7 @@ export function KanbanColumn({
     overColumnId === column.id && activeColumnId !== null && activeColumnId !== column.id
 
   return (
-    <div className="flex w-72 shrink-0 flex-col h-full">
+    <div className="flex h-full min-h-0 w-72 shrink-0 flex-col">
       <div className="mb-2 flex items-center justify-between px-2 select-none">
         <div className="flex items-center gap-2">
           {(() => {
@@ -243,7 +243,7 @@ export function KanbanColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          'flex-1 h-full rounded-lg bg-surface-2 p-2 min-h-[200px] overflow-y-auto scrollbar-hide',
+          'flex-1 min-h-0 overflow-y-auto rounded-lg bg-surface-2 p-2 scrollbar-thin',
           showDropHighlight && 'bg-surface-3 ring-2 ring-primary/20'
         )}
       >
