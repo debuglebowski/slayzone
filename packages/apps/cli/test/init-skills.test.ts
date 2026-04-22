@@ -67,23 +67,51 @@ h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
 /** Run the init-skills insertion logic directly (mirrors init.ts action) */
 function runInitSkills(sdb: ReturnType<typeof createSlayDbAdapter>, projectId: string, projectPath: string, providers: string[] = ['claude']) {
   const registryId = 'builtin-slayzone'
-  const installedSkills: { slug: string; content: string }[] = []
+  const syncedSkills: { slug: string; content: string }[] = []
   let installed = 0
+  let updated = 0
   let skipped = 0
 
   for (const skill of BUILTIN_SKILLS) {
     const entryId = `builtin-${skill.slug}`
     const hash = createHash('sha256').update(skill.content).digest('hex')
+    const now = new Date().toISOString()
 
-    const existing = sdb.query<{ id: string }>(
-      `SELECT id FROM ai_config_items WHERE type = 'skill' AND slug = :slug AND scope = 'project' AND project_id = :projectId`,
+    const existing = sdb.query<{ id: string; metadata_json: string }>(
+      `SELECT id, metadata_json FROM ai_config_items WHERE type = 'skill' AND slug = :slug AND scope = 'project' AND project_id = :projectId`,
       { ':slug': skill.slug, ':projectId': projectId }
     )
 
-    if (existing.length > 0) { skipped++; continue }
+    if (existing.length > 0) {
+      const existingMeta = JSON.parse(existing[0].metadata_json || '{}') as {
+        marketplace?: { installedVersion?: string; [key: string]: unknown }
+        [key: string]: unknown
+      }
+      if (existingMeta.marketplace?.installedVersion === hash) {
+        skipped++
+        continue
+      }
+      const metadata = {
+        ...existingMeta,
+        marketplace: {
+          ...(existingMeta.marketplace ?? {}),
+          registryId,
+          registryName: 'SlayZone Built-in',
+          entryId,
+          installedVersion: hash,
+          installedAt: now,
+        },
+      }
+      sdb.run(
+        `UPDATE ai_config_items SET content = :content, metadata_json = :metadata, updated_at = :now WHERE id = :id`,
+        { ':content': skill.content, ':metadata': JSON.stringify(metadata), ':now': now, ':id': existing[0].id }
+      )
+      syncedSkills.push({ slug: skill.slug, content: skill.content })
+      updated++
+      continue
+    }
 
     const id = crypto.randomUUID()
-    const now = new Date().toISOString()
     const metadata = {
       marketplace: { registryId, registryName: 'SlayZone Built-in', entryId, installedVersion: hash, installedAt: now }
     }
@@ -93,7 +121,7 @@ function runInitSkills(sdb: ReturnType<typeof createSlayDbAdapter>, projectId: s
        VALUES (:id, 'skill', 'project', :projectId, :name, :slug, :content, :metadata, :now, :now)`,
       { ':id': id, ':projectId': projectId, ':name': skill.name, ':slug': skill.slug, ':content': skill.content, ':metadata': JSON.stringify(metadata), ':now': now }
     )
-    installedSkills.push({ slug: skill.slug, content: skill.content })
+    syncedSkills.push({ slug: skill.slug, content: skill.content })
     installed++
   }
 
@@ -101,14 +129,14 @@ function runInitSkills(sdb: ReturnType<typeof createSlayDbAdapter>, projectId: s
   for (const provider of providers) {
     const mapping = PROVIDER_PATHS[provider as keyof typeof PROVIDER_PATHS]
     if (!mapping?.skillsDir) continue
-    for (const skill of installedSkills) {
+    for (const skill of syncedSkills) {
       const filePath = path.join(projectPath, mapping.skillsDir, skill.slug, 'SKILL.md')
       fs.mkdirSync(path.dirname(filePath), { recursive: true })
       fs.writeFileSync(filePath, skill.content, 'utf-8')
     }
   }
 
-  return { installed, skipped, installedSkills }
+  return { installed, updated, skipped, syncedSkills }
 }
 
 describe('init skills — DB insertion', () => {
@@ -128,8 +156,9 @@ describe('init skills — DB insertion', () => {
   })
 
   test('skips already-installed skills on second run', () => {
-    const { installed, skipped } = runInitSkills(db, initProjId, initProjDir)
+    const { installed, updated, skipped } = runInitSkills(db, initProjId, initProjDir)
     expect(installed).toBe(0)
+    expect(updated).toBe(0)
     expect(skipped).toBe(BUILTIN_SKILLS.length)
 
     // No duplicates
@@ -138,6 +167,34 @@ describe('init skills — DB insertion', () => {
       { ':pid': initProjId }
     )
     expect(rows.length).toBe(BUILTIN_SKILLS.length)
+  })
+
+  test('resyncs stale skills when registry content differs', () => {
+    // Corrupt installedVersion for one skill to simulate drift
+    const targetSlug = BUILTIN_SKILLS[0].slug
+    const row = db.query<{ id: string; metadata_json: string }>(
+      `SELECT id, metadata_json FROM ai_config_items WHERE type = 'skill' AND slug = :slug AND project_id = :pid LIMIT 1`,
+      { ':slug': targetSlug, ':pid': initProjId }
+    )[0]
+    const meta = JSON.parse(row.metadata_json)
+    meta.marketplace.installedVersion = 'stale-hash'
+    db.run(`UPDATE ai_config_items SET metadata_json = :m, content = :c WHERE id = :id`, {
+      ':m': JSON.stringify(meta),
+      ':c': 'outdated content',
+      ':id': row.id,
+    })
+
+    const { installed, updated, skipped } = runInitSkills(db, initProjId, initProjDir)
+    expect(installed).toBe(0)
+    expect(updated).toBe(1)
+    expect(skipped).toBe(BUILTIN_SKILLS.length - 1)
+
+    // Content was refreshed from registry
+    const refreshed = db.query<{ content: string }>(
+      `SELECT content FROM ai_config_items WHERE type = 'skill' AND slug = :slug AND project_id = :pid LIMIT 1`,
+      { ':slug': targetSlug, ':pid': initProjId }
+    )[0]
+    expect(refreshed.content).toBe(BUILTIN_SKILLS[0].content)
   })
 })
 

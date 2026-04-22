@@ -69,27 +69,60 @@ export function initCommand(): Command {
       }
 
       const registryId = 'builtin-slayzone'
-      const installedSkills: { slug: string; content: string }[] = []
+      const syncedSkills: { slug: string; content: string }[] = []
 
       let installed = 0
+      let updated = 0
       let skipped = 0
 
       for (const skill of BUILTIN_SKILLS) {
         const entryId = `builtin-${skill.slug}`
         const hash = createHash('sha256').update(skill.content).digest('hex')
+        const now = new Date().toISOString()
 
-        const existing = db.query<{ id: string }>(
-          `SELECT id FROM ai_config_items WHERE type = 'skill' AND slug = :slug AND scope = 'project' AND project_id = :projectId`,
+        const existing = db.query<{ id: string; metadata_json: string }>(
+          `SELECT id, metadata_json FROM ai_config_items WHERE type = 'skill' AND slug = :slug AND scope = 'project' AND project_id = :projectId`,
           { ':slug': skill.slug, ':projectId': projectId }
         )
 
         if (existing.length > 0) {
-          skipped++
+          const existingMeta = JSON.parse(existing[0].metadata_json || '{}') as {
+            marketplace?: { installedVersion?: string; [key: string]: unknown }
+            [key: string]: unknown
+          }
+          if (existingMeta.marketplace?.installedVersion === hash) {
+            skipped++
+            continue
+          }
+
+          const metadata = {
+            ...existingMeta,
+            marketplace: {
+              ...(existingMeta.marketplace ?? {}),
+              registryId,
+              registryName: 'SlayZone Built-in',
+              entryId,
+              installedVersion: hash,
+              installedAt: now,
+            },
+          }
+
+          db.run(
+            `UPDATE ai_config_items SET content = :content, metadata_json = :metadata, updated_at = :now WHERE id = :id`,
+            {
+              ':content': skill.content,
+              ':metadata': JSON.stringify(metadata),
+              ':now': now,
+              ':id': existing[0].id,
+            }
+          )
+          syncedSkills.push({ slug: skill.slug, content: skill.content })
+          updated++
+          console.log(`  Updated ${skill.name}`)
           continue
         }
 
         const id = crypto.randomUUID()
-        const now = new Date().toISOString()
 
         const metadata = {
           marketplace: {
@@ -114,17 +147,17 @@ export function initCommand(): Command {
             ':now': now,
           }
         )
-        installedSkills.push({ slug: skill.slug, content: skill.content })
+        syncedSkills.push({ slug: skill.slug, content: skill.content })
         installed++
         console.log(`  Installed ${skill.name}`)
       }
 
       // Write skill files to disk
-      if (projectPath && installedSkills.length > 0) {
+      if (projectPath && syncedSkills.length > 0) {
         for (const provider of providers) {
           const mapping = PROVIDER_PATHS[provider]
           if (!mapping?.skillsDir) continue
-          for (const skill of installedSkills) {
+          for (const skill of syncedSkills) {
             const filePath = path.join(projectPath, mapping.skillsDir, skill.slug, 'SKILL.md')
             fs.mkdirSync(path.dirname(filePath), { recursive: true })
             fs.writeFileSync(filePath, skill.content, 'utf-8')
@@ -134,11 +167,15 @@ export function initCommand(): Command {
 
       db.close()
 
-      if (installed > 0) {
+      if (installed + updated > 0) {
         await notifyApp()
-        console.log(`\nInstalled ${installed} skill${installed === 1 ? '' : 's'} for "${projectName}"${skipped > 0 ? `, ${skipped} already installed` : ''}`)
+        const parts: string[] = []
+        if (installed > 0) parts.push(`installed ${installed}`)
+        if (updated > 0) parts.push(`updated ${updated}`)
+        if (skipped > 0) parts.push(`${skipped} unchanged`)
+        console.log(`\n${parts.join(', ')} for "${projectName}"`)
       } else {
-        console.log(`All ${skipped} skills already installed for "${projectName}"`)
+        console.log(`All ${skipped} skills up to date for "${projectName}"`)
       }
     })
 
