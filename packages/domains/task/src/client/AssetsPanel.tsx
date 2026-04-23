@@ -22,6 +22,7 @@ import { useAssets } from './useAssets'
 import { AssetFindBar } from './AssetFindBar'
 import { AssetSearchPanel } from './AssetSearchPanel'
 import { AssetVersionsDialog } from './AssetVersionsDialog'
+import { AssetVersionDiffView } from './AssetVersionDiffView'
 
 export interface AssetsPanelHandle {
   selectAsset: (id: string) => void
@@ -1433,7 +1434,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
         }}
       />
       <Dialog open={viewingVersion !== null} onOpenChange={(open) => { if (!open) setViewingVersion(null) }}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className={viewingVersion?.mode === 'diff' ? 'max-w-5xl' : 'max-w-3xl'}>
           <DialogHeader>
             <DialogTitle>
               v{viewingVersion?.version.version_num}
@@ -1445,39 +1446,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
             </DialogDescription>
           </DialogHeader>
           {viewingVersion && viewingVersion.mode === 'diff' && viewingVersion.diff ? (
-            viewingVersion.diff.kind === 'binary' ? (
-              <pre className="font-mono text-xs bg-muted p-3 rounded">
-                (binary differs)
-                {`\n  a: ${viewingVersion.diff.a.hash.slice(0, 8)}  ${viewingVersion.diff.a.size} bytes`}
-                {`\n  b: ${viewingVersion.diff.b.hash.slice(0, 8)}  ${viewingVersion.diff.b.size} bytes`}
-              </pre>
-            ) : viewingVersion.diff.hunks.length === 0 ? (
-              <pre className="font-mono text-xs bg-muted p-3 rounded text-muted-foreground">
-                (no differences)
-              </pre>
-            ) : (
-              <pre className="font-mono text-xs whitespace-pre-wrap break-words bg-muted p-3 rounded max-h-[60vh] overflow-auto">
-                {viewingVersion.diff.hunks.map((hunk, hi) => (
-                  <div key={hi} className={hi > 0 ? 'mt-3 pt-3 border-t border-border' : ''}>
-                    {hunk.lines.map((line, li) => (
-                      <span
-                        key={li}
-                        className={
-                          line.kind === 'add'
-                            ? 'text-green-600 dark:text-green-400 block'
-                            : line.kind === 'del'
-                              ? 'text-red-600 dark:text-red-400 block'
-                              : 'block opacity-70'
-                        }
-                      >
-                        {line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}
-                        {line.text}
-                      </span>
-                    ))}
-                  </div>
-                ))}
-              </pre>
-            )
+            <AssetVersionDiffView diff={viewingVersion.diff} />
           ) : (
             <pre className="font-mono text-xs whitespace-pre-wrap break-words bg-muted p-3 rounded max-h-[60vh] overflow-auto">
               {viewingVersion?.content}
