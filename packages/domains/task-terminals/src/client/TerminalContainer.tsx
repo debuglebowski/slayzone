@@ -49,6 +49,10 @@ interface TerminalContainerProps {
   overlay?: React.ReactNode
   /** Title of the root task — shown as "Main" row label in manager sidebar. */
   taskTitle?: string
+  /** Status of the root task — drives the manager-sidebar root icon + strikethrough. */
+  taskStatus?: string
+  /** Progress of the root task (0-100) — drives the progress ring around the root pty dot. */
+  taskProgress?: number
   /** Persisted orchestrator/manager-mode toggle state (from task.manager_mode). */
   initialManagerMode?: boolean
 }
@@ -80,6 +84,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   rightContent,
   overlay,
   taskTitle,
+  taskStatus,
+  taskProgress,
   initialManagerMode,
 }: TerminalContainerProps, ref) {
   const {
@@ -425,6 +431,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
         <ManagerSidebar
           rootTaskId={taskId}
           rootTitle={taskTitle ?? 'Main'}
+          rootStatus={taskStatus}
+          rootProgress={taskProgress}
           selectedTaskId={managerSelectedTask?.id ?? null}
           onSelect={handleManagerSelect}
           onToggleOff={handleManagerToggle}
