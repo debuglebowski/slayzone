@@ -582,19 +582,31 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
   }, [])
   const renameInputRef = useRef<HTMLInputElement>(null)
 
-  // Expanded folders state
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
+  // Expanded folders state — persisted in localStorage per task.
+  // null sentinel = nothing persisted yet; auto-expand all once folders load.
+  const expandedStorageKey = `slayzone:assets-panel:expanded:${taskId}`
+  const [expandedFolders, setExpandedFolders] = useState<Set<string> | null>(() => {
+    try {
+      const raw = window.localStorage?.getItem(expandedStorageKey)
+      if (raw) return new Set(JSON.parse(raw) as string[])
+    } catch { /* ignore */ }
+    return null
+  })
 
-  // Auto-expand all folders on first load
+  // Auto-expand all folders on first load when nothing was persisted
   useEffect(() => {
-    if (folders.length > 0) {
-      setExpandedFolders(prev => {
-        const next = new Set(prev)
-        for (const f of folders) next.add(f.id)
-        return next
-      })
+    if (expandedFolders === null && folders.length > 0) {
+      setExpandedFolders(new Set(folders.map(f => f.id)))
     }
-  }, [folders])
+  }, [folders, expandedFolders])
+
+  // Persist on change
+  useEffect(() => {
+    if (expandedFolders === null) return
+    try {
+      window.localStorage?.setItem(expandedStorageKey, JSON.stringify([...expandedFolders]))
+    } catch { /* ignore */ }
+  }, [expandedFolders, expandedStorageKey])
 
   // Focus create/rename inputs when they appear
   useEffect(() => { if (renaming) renameInputRef.current?.focus() }, [renaming])
@@ -771,7 +783,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
 
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolders(prev => {
-      const next = new Set(prev)
+      const next = new Set(prev ?? [])
       if (next.has(folderId)) next.delete(folderId)
       else next.add(folderId)
       return next
@@ -844,7 +856,7 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
     return (
       <>
         {subFolders.map(folder => {
-          const expanded = expandedFolders.has(folder.id)
+          const expanded = expandedFolders?.has(folder.id) ?? true
           const isDropTarget = dropTargetFolder === folder.id
           const isRenaming = renaming?.id === folder.id && renaming.type === 'folder'
 
