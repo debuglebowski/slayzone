@@ -19,28 +19,30 @@ Automations are project-scoped, event-driven actions. They fire shell commands i
 
 ## Commands
 
-- `slay automations list --project <name|id> [--json]`
-  List automations for a project. Shows enabled state, trigger type, run count, and last run time.
+- `slay automations list --project <name|id> [--json]` — list automations for a project.
+  - Shows enabled state, trigger type, run count, and last run time
 
-- `slay automations view <id> [--json]`
-  View full automation details including trigger config, conditions, and actions.
+- `slay automations view <id> [--json]` — view full automation details including trigger config, conditions, and actions.
 
-- `slay automations create <name> --project <name|id> --trigger <type> [--action-command <cmd>] [--trigger-from-status <status>] [--trigger-to-status <status>] [--cron <expression>] [--description <text>] [--config <file>]`
-  Create an automation. For simple automations, use `--action-command` to specify a shell command. For complex setups with multiple actions or conditions, use `--config <file>` which accepts a JSON file with `{ trigger_config, conditions?, actions }` — this overrides all other flags.
+- `slay automations create <name> --project <name|id> --trigger <type> [--action-command <cmd>] [--trigger-from-status <status>] [--trigger-to-status <status>] [--cron <expression>] [--description <text>] [--config <file>]` — create an automation.
+  - For simple automations, use `--action-command` to specify a shell command
+  - For complex setups with multiple actions or conditions, use `--config <file>` with JSON `{ trigger_config, conditions?, actions }` — overrides all other flags
 
-- `slay automations update <id> [--name <n>] [--description <text>] [--enabled] [--disabled] [--trigger <type>] [--action-command <cmd>] [--trigger-from-status <s>] [--trigger-to-status <s>] [--cron <expr>]`
-  Update an automation. At least one option required.
+- `slay automations update <id> [--name <n>] [--description <text>] [--enabled] [--disabled] [--trigger <type>] [--action-command <cmd>] [--trigger-from-status <s>] [--trigger-to-status <s>] [--cron <expr>]` — update an automation.
+  - At least one option required
 
 - `slay automations delete <id>` — permanently delete an automation.
 
-- `slay automations toggle <id>`
-  Flip the enabled/disabled state. You don't need to know the current state — it toggles automatically.
+- `slay automations toggle <id>` — flip the enabled/disabled state.
+  - You don't need to know the current state — it toggles automatically
 
-- `slay automations run <id>`
-  Manually trigger an automation. Requires the SlayZone app to be running (uses the app's HTTP API). Reports status and duration.
+- `slay automations run <id>` — manually trigger an automation.
+  - Requires the SlayZone app to be running (uses the app's HTTP API)
+  - Reports status and duration
 
-- `slay automations runs <id> [--limit <n>] [--json]`
-  View execution history. Shows status, duration, and any errors. Default limit is 10.
+- `slay automations runs <id> [--limit <n>] [--json]` — view execution history.
+  - Shows status, duration, and any errors
+  - Default limit: 10
 
 ## Config file example
 

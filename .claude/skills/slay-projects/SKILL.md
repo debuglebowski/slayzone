@@ -10,11 +10,13 @@ Project names are resolved via case-insensitive substring matching — `slay tas
 
 ## Commands
 
-- `slay projects list [--json]`
-  List all projects with task counts and paths.
+- `slay projects list [--json]` — list all projects with task counts and paths.
 
-- `slay projects create <name> [--path <path>] [--color <hex>] [--json]`
-  Create a project. `--path` is optional — projects can exist without a directory. Relative paths are resolved from the current working directory and the directory is created recursively if it doesn't exist. Color defaults to #3b82f6.
+- `slay projects create <name> [--path <path>] [--color <hex>] [--json]` — create a project.
+  - `--path` is optional — projects can exist without a directory
+  - Relative paths are resolved from the current working directory; directory is created recursively if it doesn't exist
+  - Color defaults to #3b82f6
 
-- `slay projects update <name|id> [--name <n>] [--color <hex>] [--path <path>] [--json]`
-  Update a project. At least one option required. Setting `--path` also auto-creates the directory.
+- `slay projects update <name|id> [--name <n>] [--color <hex>] [--path <path>] [--json]` — update a project.
+  - At least one option required
+  - Setting `--path` also auto-creates the directory
