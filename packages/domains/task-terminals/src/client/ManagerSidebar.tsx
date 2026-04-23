@@ -449,14 +449,14 @@ export function ManagerSidebar({
             data-testid="manager-node-root"
             onClick={() => onSelect(null)}
             className={cn(
-              'w-full flex items-center gap-2 h-9 px-2 rounded-md text-left text-base shrink-0 transition-colors',
+              'w-full flex items-center gap-2 h-9 px-2 rounded-md text-left text-sm shrink-0 transition-colors',
               isRootSelected
                 ? 'bg-tab-active text-foreground'
                 : 'text-foreground hover:bg-accent/50'
             )}
           >
             <RootStatusIcon className={cn('shrink-0 size-4', rootStatusStyle?.iconClass)} aria-label={rootStatusStyle?.label} />
-            <span className={cn('truncate flex-1 font-semibold', rootCompleted && 'line-through opacity-60')}>{rootTitle || 'Main'}</span>
+            <span className={cn('truncate flex-1', rootCompleted && 'line-through opacity-60')}>{rootTitle || 'Main'}</span>
             <ProgressDot sessionId={rootSessionId} progress={rootProgress ?? 0} isDone={rootCompleted} />
           </button>
           {tree.map((node) => (
