@@ -48,8 +48,6 @@ function openTaskInTab(taskId: string): void {
 
 const WIDTH_STORAGE_KEY = 'slayzone:manager-sidebar-width'
 const HIDE_COMPLETED_KEY = 'slayzone:manager-sidebar-hide-completed'
-const MIN_WIDTH = 160
-const MAX_WIDTH = 480
 const DEFAULT_WIDTH = 240
 const COMPLETED_STATUSES = new Set(['done', 'canceled', 'completed', 'archived'])
 
@@ -58,7 +56,7 @@ function loadWidth(): number {
   const raw = window.localStorage?.getItem(WIDTH_STORAGE_KEY)
   const n = raw ? Number.parseInt(raw, 10) : NaN
   if (!Number.isFinite(n)) return DEFAULT_WIDTH
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n))
+  return Math.max(0, n)
 }
 
 // Minimal shape of a Task we use here. Avoid importing @slayzone/task/shared
@@ -403,7 +401,7 @@ export function ManagerSidebar({
     const onMove = (ev: MouseEvent) => {
       const start = dragStartRef.current
       if (!start) return
-      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, start.startWidth + (ev.clientX - start.x)))
+      const next = Math.max(0, start.startWidth + (ev.clientX - start.x))
       setWidth(next)
     }
     const onUp = () => {
