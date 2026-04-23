@@ -18,13 +18,17 @@ Interpret `$ARGUMENTS`:
 - `major` — bump the major number (e.g. 0.3.0 -> 1.0.0)
 - Anything else — treat as an explicit version string (e.g. `0.5.0`)
 
-### 2. Bump version
+### 2. Auto-title the task
+
+Invoke the `slay-auto-title` skill to rename the current task to reflect the release (e.g. `Release v<new-version>`). Skip if the task title already matches.
+
+### 3. Bump version
 
 Update `"version"` in both:
 - `packages/apps/app/package.json`
 - `packages/apps/cli/package.json`
 
-### 3. Generate changelog
+### 4. Generate changelog
 
 Run `npx changelogen --from <previous-tag> --to main --output CHANGELOG.md --hideAuthorEmail` (use `pnpx` if available).
 
@@ -33,7 +37,7 @@ The tool will prepend a `## <old-tag>...main` section to CHANGELOG.md. After it 
 - Update the compare link to `compare/<old-tag>...v<new-version>`
 - Verify the file has no duplicate sections from the tool overwriting previous edits
 
-### 4. Update in-app changelog
+### 5. Update in-app changelog
 
 Read `packages/apps/app/src/renderer/src/components/changelog/changelog-data.json`.
 
@@ -48,7 +52,7 @@ Categories:
 - `improvement` — enhancements to existing features
 - `fix` — bug fixes users would notice
 
-### 5. Commit and confirm
+### 6. Commit and confirm
 
 ```
 git add CHANGELOG.md packages/apps/app/package.json packages/apps/cli/package.json packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
@@ -66,7 +70,7 @@ git tag v<new-version>
 git push && git push origin v<new-version>
 ```
 
-### 6. Confirm
+### 7. Confirm
 
 Print a summary:
 - Previous version -> new version
