@@ -10,17 +10,17 @@ SlayZone ships with predefined panels for Figma, Notion, GitHub, Excalidraw, and
 
 ## Commands
 
-- `slay panels list [--json]`
-  List all web panels with their ID, name, URL, keyboard shortcut, and enabled state.
+- `slay panels list [--json]` — list all web panels with their ID, name, URL, keyboard shortcut, and enabled state.
 
-- `slay panels create <name> <url> [-s <letter>] [--block-handoff] [--protocol <protocol>]`
-  Create a custom web panel. `-s` assigns a single-letter keyboard shortcut (some letters are reserved: t, b, e, g, s). `--block-handoff` prevents desktop app protocol URLs (e.g. `figma://`) from opening the native app — keeps navigation inside the panel. `--protocol` specifies which desktop protocol to block (inferred from URL hostname if omitted; requires `--block-handoff`).
+- `slay panels create <name> <url> [-s <letter>] [--block-handoff] [--protocol <protocol>]` — create a custom web panel.
+  - `-s` assigns a single-letter keyboard shortcut (some letters reserved: t, b, e, g, s)
+  - `--block-handoff` prevents desktop app protocol URLs (e.g. `figma://`) from opening the native app — keeps navigation inside the panel
+  - `--protocol` specifies which desktop protocol to block (inferred from URL hostname if omitted; requires `--block-handoff`)
 
-- `slay panels delete <id-or-name>`
-  Delete a web panel by ID or name (case-insensitive name match).
+- `slay panels delete <id-or-name>` — delete a web panel by ID or name (case-insensitive name match).
 
-- `slay panels enable <id-or-name>`
-  Show the panel in task view. Panels are enabled by default when created.
+- `slay panels enable <id-or-name>` — show the panel in task view.
+  - Panels are enabled by default when created
 
-- `slay panels disable <id-or-name>`
-  Hide the panel from task view without deleting it. The panel config is preserved.
+- `slay panels disable <id-or-name>` — hide the panel from task view without deleting it.
+  - The panel config is preserved
