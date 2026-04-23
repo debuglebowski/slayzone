@@ -11,6 +11,15 @@ export const TERMINAL_MODE_TO_PROVIDER: Partial<Record<string, CliProvider>> = {
   'copilot': 'copilot',
 }
 
+/** Resolve a terminal mode setting to a provider kind; falls back to 'claude'. */
+export function defaultProviderFromMode(mode: string | null | undefined): CliProvider {
+  if (mode) {
+    const provider = TERMINAL_MODE_TO_PROVIDER[mode]
+    if (provider) return provider
+  }
+  return 'claude'
+}
+
 export const PROVIDER_PATHS: Record<CliProvider, ProviderPathMapping> = {
   claude: {
     rootInstructions: 'CLAUDE.md',

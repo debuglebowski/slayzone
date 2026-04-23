@@ -43,7 +43,7 @@ import {
   PROVIDER_PATHS,
   PROVIDER_LABELS,
   COMPUTER_PROVIDER_PATHS,
-  TERMINAL_MODE_TO_PROVIDER,
+  defaultProviderFromMode,
   isConfigurableCliProvider,
   filterConfigurableCliProviders,
   isConfigurableMcpTarget,
@@ -1064,10 +1064,10 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   // --- Root instructions + skills status ---
 
-  function getDefaultProviderKind(): CliProvider | undefined {
+  function getDefaultProviderKind(): CliProvider {
     const mode = (db.prepare("SELECT value FROM settings WHERE key = 'default_terminal_mode'")
-      .get() as { value: string } | undefined)?.value ?? 'claude-code'
-    return TERMINAL_MODE_TO_PROVIDER[mode]
+      .get() as { value: string } | undefined)?.value
+    return defaultProviderFromMode(mode)
   }
 
   function getEnabledProviders(projectId: string): CliProvider[] {
@@ -1084,7 +1084,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
     // Always include the default terminal mode's provider
     const defaultKind = getDefaultProviderKind()
-    if (defaultKind && !providers.includes(defaultKind)) {
+    if (!providers.includes(defaultKind)) {
       providers.push(defaultKind)
     }
     return providers
@@ -2128,16 +2128,13 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     return false
   })
 
-  ipcMain.handle('ai-config:setup-slay', (_event, projectPath: string, command: 'instructions' | 'skills'): { ok: boolean; error?: string } => {
+  ipcMain.handle('ai-config:setup-slay', (_event, projectPath: string): { ok: boolean; error?: string } => {
     try {
       const cwd = path.resolve(projectPath)
       const shell = process.env.SHELL || userInfo().shell || '/bin/zsh'
       const isFish = shell.endsWith('/fish')
       const shellArgs = isFish ? ['-i', '-l'] : ['-l']
-      const cmd = command === 'instructions'
-        ? 'slay init instructions >> CLAUDE.md'
-        : 'slay init skills'
-      execFileSync(shell, [...shellArgs, '-c', cmd], { cwd, timeout: 10000 })
+      execFileSync(shell, [...shellArgs, '-c', 'slay init'], { cwd, timeout: 10000 })
       return { ok: true }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }

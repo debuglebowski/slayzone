@@ -718,7 +718,7 @@ export interface ElectronAPI {
     pullProviderSkill: (projectId: string, projectPath: string, provider: CliProvider, itemId: string) => Promise<ProjectSkillStatus>
     getComputerFiles: () => Promise<ComputerFileEntry[]>
     checkSlayConfigured: (projectPath: string) => Promise<boolean>
-    setupSlay: (projectPath: string, command: 'instructions' | 'skills') => Promise<{ ok: boolean; error?: string }>
+    setupSlay: (projectPath: string) => Promise<{ ok: boolean; error?: string }>
 
     // Marketplace
     marketplace: {
@@ -753,6 +753,7 @@ export interface ElectronAPI {
     watch: (rootPath: string) => Promise<void>
     unwatch: (rootPath: string) => Promise<void>
     onFileChanged: (callback: (rootPath: string, relPath: string) => void) => () => void
+    onFileDeleted: (callback: (rootPath: string, relPath: string) => void) => () => void
   }
   screenshot: {
     captureView: (viewId: string) => Promise<{ success: boolean; path?: string }>

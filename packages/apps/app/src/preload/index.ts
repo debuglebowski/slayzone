@@ -686,7 +686,7 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('ai-config:pull-provider-skill', projectId, projectPath, provider, itemId),
     getComputerFiles: () => ipcRenderer.invoke('ai-config:get-computer-files'),
     checkSlayConfigured: (projectPath) => ipcRenderer.invoke('ai-config:check-slay-configured', projectPath),
-    setupSlay: (projectPath, command) => ipcRenderer.invoke('ai-config:setup-slay', projectPath, command),
+    setupSlay: (projectPath) => ipcRenderer.invoke('ai-config:setup-slay', projectPath),
 
     marketplace: {
       listRegistries: () => ipcRenderer.invoke('ai-config:marketplace:list-registries'),
@@ -723,6 +723,11 @@ const api: ElectronAPI = {
       const handler = (_event: unknown, rootPath: string, relPath: string) => callback(rootPath, relPath)
       ipcRenderer.on('fs:changed', handler)
       return () => ipcRenderer.removeListener('fs:changed', handler)
+    },
+    onFileDeleted: (callback) => {
+      const handler = (_event: unknown, rootPath: string, relPath: string) => callback(rootPath, relPath)
+      ipcRenderer.on('fs:deleted', handler)
+      return () => ipcRenderer.removeListener('fs:deleted', handler)
     }
   },
   leaderboard: {

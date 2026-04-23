@@ -19,28 +19,24 @@ type RunState = 'idle' | 'running' | 'done' | 'error'
 
 export function SlayNudgeBanner({ projectPath, onDismiss, onSetupComplete }: SlayNudgeBannerProps) {
   const [infoOpen, setInfoOpen] = useState(false)
-  const [instructionsState, setInstructionsState] = useState<RunState>('idle')
-  const [skillsState, setSkillsState] = useState<RunState>('idle')
+  const [setupState, setSetupState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
 
-  const runCommand = async (command: 'instructions' | 'skills') => {
-    const setState = command === 'instructions' ? setInstructionsState : setSkillsState
-    setState('running')
+  const runSetup = async () => {
+    setSetupState('running')
     setError(null)
-    const result = await window.api.aiConfig.setupSlay(projectPath, command)
+    const result = await window.api.aiConfig.setupSlay(projectPath)
     if (result.ok) {
-      setState('done')
+      setSetupState('done')
     } else {
-      setState('error')
+      setSetupState('error')
       setError(result.error ?? 'Unknown error')
     }
   }
 
-  const anyRan = instructionsState === 'done' || skillsState === 'done'
-
   const handleDialogChange = (open: boolean) => {
     setInfoOpen(open)
-    if (!open && anyRan) onSetupComplete()
+    if (!open && setupState === 'done') onSetupComplete()
   }
 
   return (
@@ -48,7 +44,7 @@ export function SlayNudgeBanner({ projectPath, onDismiss, onSetupComplete }: Sla
       <div className="shrink-0 bg-amber-50 dark:bg-amber-500/5 border-b border-amber-200 dark:border-amber-500/10 px-4 py-2 flex items-center gap-2">
         <Info className="h-3.5 w-3.5 text-amber-700 dark:text-amber-500 shrink-0" />
         <span className="text-xs text-amber-700 dark:text-amber-500">
-          Add <code className="px-1 rounded font-mono">slay</code> to your CLAUDE.md so AI agents can interact with your tasks
+          Set up the <code className="px-1 rounded font-mono">slay</code> CLI so AI agents can interact with your tasks
         </span>
         <button
           className="text-xs text-amber-700 dark:text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 underline shrink-0"
@@ -77,39 +73,19 @@ export function SlayNudgeBanner({ projectPath, onDismiss, onSetupComplete }: Sla
               running inside SlayZone interact with your tasks &mdash; reading descriptions, updating
               status, managing subtasks, controlling the browser panel, and coordinating with other agents.
             </p>
-
+            <p>
+              Running setup appends a SlayZone environment description to your agent instruction file
+              (CLAUDE.md, AGENTS.md, etc. based on your configured providers) and installs the built-in
+              slay skills so agents know every available command.
+            </p>
           </div>
 
-          <div className="space-y-4 pt-2">
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium">
-                1. Add instructions
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Appends a SlayZone environment description to your CLAUDE.md.
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 bg-muted px-3 py-1.5 rounded text-xs font-mono">
-                  slay init instructions {'>'}{'>'}  CLAUDE.md
-                </code>
-                <RunButton state={instructionsState} onClick={() => runCommand('instructions')} />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium">
-                2. Add skills
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Creates a skill file with the full slay command reference so agents know
-                every available command.
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 bg-muted px-3 py-1.5 rounded text-xs font-mono">
-                  slay init skills
-                </code>
-                <RunButton state={skillsState} onClick={() => runCommand('skills')} />
-              </div>
+          <div className="space-y-1.5 pt-2">
+            <div className="flex items-center gap-2">
+              <code className="flex-1 bg-muted px-3 py-1.5 rounded text-xs font-mono">
+                slay init
+              </code>
+              <RunButton state={setupState} onClick={runSetup} />
             </div>
           </div>
 
@@ -119,7 +95,7 @@ export function SlayNudgeBanner({ projectPath, onDismiss, onSetupComplete }: Sla
 
           <div className="bg-muted/50 rounded-md px-3 py-2.5 mt-2">
             <p className="text-xs text-muted-foreground">
-              This is fully reversible &mdash; just delete the added lines from CLAUDE.md
+              This is fully reversible &mdash; just delete the appended lines from the instruction file
               and remove the generated skill directory to undo.
             </p>
           </div>

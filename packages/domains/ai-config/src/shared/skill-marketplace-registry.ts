@@ -66,6 +66,7 @@ All ID arguments support prefix matching (e.g., \`a1b2\` matches the full UUID s
 
 ## Other
 
+- \`slay init\` — bootstrap agent config (append instructions to root file + install skills) for the cwd's project
 - \`slay init instructions\` — print SlayZone agent configuration template
 - \`slay init skills\` — install all built-in slay skills from the marketplace registry
 - \`slay completions <shell>\` — generate shell completions (fish | zsh | bash)
