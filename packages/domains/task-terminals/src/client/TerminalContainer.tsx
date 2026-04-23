@@ -198,6 +198,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   }, [taskId, tabs, getSessionId, subscribePrompt])
 
   // Track terminal process titles for tab labels
+  const [isManagerResizing, setIsManagerResizing] = useState(false)
   const [terminalTitles, setTerminalTitles] = useState<Map<string, string>>(new Map())
   useEffect(() => {
     const unsubs: Array<() => void> = []
@@ -436,6 +437,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           selectedTaskId={managerSelectedTask?.id ?? null}
           onSelect={handleManagerSelect}
           onToggleOff={handleManagerToggle}
+          onResizingChange={setIsManagerResizing}
         />
       )}
       <div className="flex-1 min-w-0 flex flex-col">
@@ -456,7 +458,9 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           onManagerToggle={agentManagerEnabled && hasSubtasks ? handleManagerToggle : undefined}
         />
         <div className="flex-1 min-h-0 relative">
-          {showingSubtaskPty && managerSelectedTask ? (
+          {isManagerResizing ? (
+            <div className="h-full bg-black" />
+          ) : showingSubtaskPty && managerSelectedTask ? (
             <TerminalView
               key={`manager:${managerSelectedTask.id}`}
               sessionId={`${managerSelectedTask.id}:${managerSelectedTask.id}`}

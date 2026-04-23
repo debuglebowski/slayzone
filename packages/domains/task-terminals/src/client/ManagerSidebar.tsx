@@ -85,6 +85,8 @@ export interface ManagerSidebarProps {
   onSelect: (task: ManagerTask | null) => void
   /** Click handler for the manager-mode toggle button rendered in the sidebar header. */
   onToggleOff?: () => void
+  /** Fires true on drag start, false on drag end. Parent can hide terminal during resize. */
+  onResizingChange?: (resizing: boolean) => void
 }
 
 interface TreeNode {
@@ -347,6 +349,7 @@ export function ManagerSidebar({
   selectedTaskId,
   onSelect,
   onToggleOff,
+  onResizingChange,
 }: ManagerSidebarProps): React.JSX.Element {
   const [descendants, setDescendants] = useState<ManagerTask[]>([])
 
@@ -396,6 +399,7 @@ export function ManagerSidebar({
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     dragStartRef.current = { x: e.clientX, startWidth: width }
+    onResizingChange?.(true)
     const onMove = (ev: MouseEvent) => {
       const start = dragStartRef.current
       if (!start) return
@@ -408,12 +412,13 @@ export function ManagerSidebar({
       document.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      onResizingChange?.(false)
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
-  }, [width])
+  }, [width, onResizingChange])
 
   return (
     <div
