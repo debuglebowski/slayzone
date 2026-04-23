@@ -8,7 +8,7 @@ import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isCompletedStatus, isTerminalStatus } from '@slayzone/projects/shared'
 import { TaskProgressPopover } from '@slayzone/task/client'
 import type { TerminalState } from '@slayzone/terminal/shared'
-import { Card, CardContent, Tooltip, TooltipContent, TooltipTrigger, Popover, PopoverContent, PopoverTrigger, cn, getTerminalStateStyle, PriorityIcon } from '@slayzone/ui'
+import { Card, CardContent, Tooltip, TooltipContent, TooltipTrigger, Popover, PopoverContent, PopoverTrigger, ProgressRing, cn, getTerminalStateStyle, PriorityIcon } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
 import { todayISO } from './kanban'
 import { priorityOptions } from '@slayzone/task/shared'
@@ -158,16 +158,37 @@ export function KanbanCard({
               )}
               <p className="text-xs font-medium line-clamp-3 flex-1 leading-tight whitespace-pre-wrap break-words">{task.title}</p>
               <div className="flex items-start gap-1.5 shrink-0">
-              {(cp?.terminal ?? true) && (() => {
-                const stateStyle = terminalState !== 'starting' ? getTerminalStateStyle(terminalState) : null
-                return stateStyle ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className={cn('h-2 w-2 rounded-full shrink-0 ml-0.5', stateStyle.color)} />
-                    </TooltipTrigger>
-                    <TooltipContent>{stateStyle.label}</TooltipContent>
-                  </Tooltip>
-                ) : null
+              {(() => {
+                const terminalOn = cp?.terminal ?? true
+                const stateStyle = terminalOn && terminalState !== 'starting' ? getTerminalStateStyle(terminalState) : null
+                const progress = task.progress ?? 0
+                const showProgressRing = progress > 0 && !isCompletedStatus(task.status, columns)
+                if (!stateStyle && !showProgressRing) return null
+                const blobColor = stateStyle?.color ?? 'bg-muted-foreground/30'
+                const tooltipText = [stateStyle?.label, showProgressRing ? `${Math.round(progress)}%` : null].filter(Boolean).join(' · ')
+                return (
+                  <TaskProgressPopover
+                    value={progress}
+                    onCommit={(next) => onUpdateTask?.(task.id, { progress: next })}
+                    tooltip={tooltipText}
+                  >
+                    <button
+                      type="button"
+                      className="relative inline-flex items-center justify-center shrink-0 size-3.5 ml-0.5 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {showProgressRing && (
+                        <ProgressRing
+                          value={progress}
+                          size={14}
+                          strokeWidth={1.5}
+                          className="absolute inset-0"
+                        />
+                      )}
+                      <span className={cn('w-2 h-2 rounded-full', blobColor)} />
+                    </button>
+                  </TaskProgressPopover>
+                )
               })()}
               {(cp?.merge ?? true) && task.merge_state && (
                 <Tooltip>
@@ -200,21 +221,12 @@ export function KanbanCard({
               )}
               </div>
             </div>
-            {/* Bottom row: progress + subtasks + tags + blocked + due date */}
+            {/* Bottom row: subtasks + tags + blocked + due date */}
             {(() => {
-              const showProgress = (task.progress ?? 0) > 0 && !isCompletedStatus(task.status, columns)
-              const showRow = showProgress || resolvedTags.length > 0 || (subTaskCount && subTaskCount.total > 0) || ((cp?.dueDate ?? true) && task.due_date) || ((cp?.blocked ?? true) && isBlocked)
+              const showRow = resolvedTags.length > 0 || (subTaskCount && subTaskCount.total > 0) || ((cp?.dueDate ?? true) && task.due_date) || ((cp?.blocked ?? true) && isBlocked)
               if (!showRow) return null
               return (
               <div className="flex items-center gap-3 mt-3">
-                {showProgress && (
-                  <TaskProgressPopover
-                    value={task.progress ?? 0}
-                    onCommit={(next) => onUpdateTask?.(task.id, { progress: next })}
-                    size={14}
-                    strokeWidth={2}
-                  />
-                )}
                 {(cp?.subtasks ?? true) && subTaskCount && subTaskCount.total > 0 && (() => {
                   const pct = subTaskCount.done / subTaskCount.total
                   const r = 8

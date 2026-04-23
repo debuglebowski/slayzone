@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Gauge } from 'lucide-react'
-import { Popover, PopoverContent, PopoverTrigger, ProgressRing, Slider, cn } from '@slayzone/ui'
+import { Popover, PopoverContent, PopoverTrigger, ProgressRing, Slider, Tooltip, TooltipContent, TooltipTrigger, cn } from '@slayzone/ui'
 
 const PRESETS = [0, 25, 50, 75, 100] as const
 
@@ -16,6 +16,8 @@ interface TaskProgressPopoverProps {
   align?: 'start' | 'center' | 'end'
   /** Override the trigger. If omitted, renders a small ring button. */
   children?: ReactNode
+  /** When provided, wraps trigger in a Radix Tooltip. */
+  tooltip?: ReactNode
 }
 
 export function TaskProgressPopover({
@@ -29,6 +31,7 @@ export function TaskProgressPopover({
   label = 'Progress',
   align = 'start',
   children,
+  tooltip,
 }: TaskProgressPopoverProps): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [local, setLocal] = useState(value)
@@ -64,9 +67,20 @@ export function TaskProgressPopover({
     </button>
   )
 
+  const trigger = children ?? defaultTrigger
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{children ?? defaultTrigger}</PopoverTrigger>
+      {tooltip ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{tooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      )}
       <PopoverContent
         className="w-72 p-4"
         align={align}
