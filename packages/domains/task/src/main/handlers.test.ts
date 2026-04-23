@@ -158,6 +158,20 @@ describe('db:tasks:getSubTasks', () => {
   })
 })
 
+describe('db:tasks:getSubTasksRecursive', () => {
+  test('returns whole subtree, excludes root and archived', () => {
+    const parent = createTask('SubParentR')
+    const c1 = createTask('Child1R', { parentId: parent.id })
+    const c2 = createTask('Child2R', { parentId: parent.id })
+    const g1 = createTask('Grand1R', { parentId: c1.id })
+    const g2 = createTask('Grand2R', { parentId: g1.id })
+    h.invoke('db:tasks:archive', c2.id)
+    const all = h.invoke('db:tasks:getSubTasksRecursive', parent.id) as Task[]
+    const ids = all.map(t => t.id).sort()
+    expect(ids).toEqual([c1.id, g1.id, g2.id].sort())
+  })
+})
+
 // --- Update ---
 
 describe('db:tasks:update', () => {

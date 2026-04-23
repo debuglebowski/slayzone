@@ -109,7 +109,8 @@ function parseTask(row: Record<string, unknown> | undefined): Task | null {
     loop_config: safeJsonParse(row.loop_config),
     is_temporary: Boolean(row.is_temporary),
     is_blocked: Boolean(row.is_blocked),
-    active_asset_id: (row.active_asset_id as string) ?? null
+    active_asset_id: (row.active_asset_id as string) ?? null,
+    manager_mode: Boolean(row.manager_mode)
   } as Task
 }
 
@@ -433,6 +434,10 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
     fields.push('progress = ?')
     values.push(Math.max(0, Math.min(100, Math.round(data.progress))))
   }
+  if (data.managerMode !== undefined) {
+    fields.push('manager_mode = ?')
+    values.push(data.managerMode ? 1 : 0)
+  }
   if (data.dueDate !== undefined) { fields.push('due_date = ?'); values.push(data.dueDate) }
   if (data.projectId !== undefined) {
     fields.push('project_id = ?'); values.push(data.projectId)
@@ -737,6 +742,27 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
         ORDER BY t."order" ASC, t.created_at DESC`
       )
       .all(parentId) as Record<string, unknown>[]
+    return parseAndColorTasks(db, rows)
+  })
+
+  ipcMain.handle('db:tasks:getSubTasksRecursive', async (_, rootId: string) => {
+    const rows = db
+      .prepare(
+        `WITH RECURSIVE subtree(id) AS (
+          SELECT id FROM tasks
+          WHERE parent_id = ? AND archived_at IS NULL AND deleted_at IS NULL
+          UNION ALL
+          SELECT t.id FROM tasks t
+          JOIN subtree s ON t.parent_id = s.id
+          WHERE t.archived_at IS NULL AND t.deleted_at IS NULL
+        )
+        SELECT t.*, el.external_url AS linear_url
+        FROM tasks t
+        JOIN subtree ON subtree.id = t.id
+        LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
+        ORDER BY t."order" ASC, t.created_at DESC`
+      )
+      .all(rootId) as Record<string, unknown>[]
     return parseAndColorTasks(db, rows)
   })
 

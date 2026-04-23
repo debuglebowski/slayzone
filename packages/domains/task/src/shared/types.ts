@@ -334,6 +334,8 @@ export interface Task {
   repo_name: string | null
   // External link (populated via JOIN)
   linear_url: string | null
+  // Orchestrator (subtask manager) sidebar toggle state, persisted per task
+  manager_mode: boolean
   created_at: string
   updated_at: string
 }
@@ -422,6 +424,8 @@ export interface UpdateTaskInput {
   prUrl?: string | null
   // Temporary task
   isTemporary?: boolean
+  // Orchestrator sidebar toggle state
+  managerMode?: boolean
   // Blocked
   isBlocked?: boolean
   blockedComment?: string | null

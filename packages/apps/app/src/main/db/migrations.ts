@@ -2056,6 +2056,12 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(`ALTER TABLE tasks ADD COLUMN progress INTEGER NOT NULL DEFAULT 0`)
     }
+  },
+  {
+    version: 116,
+    up: (db) => {
+      db.exec(`ALTER TABLE tasks ADD COLUMN manager_mode INTEGER NOT NULL DEFAULT 0`)
+    }
   }
 ]
 
