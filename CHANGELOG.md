@@ -1,6 +1,50 @@
 # Changelog
 
 
+## v0.22.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.21.0...v0.22.0)
+
+### 🚀 Enhancements
+
+- **task:** Add progress field (0-100) w/ UI + CLI ([723f6de2](https://github.com/debuglebowski/slayzone/commit/723f6de2))
+- **skills:** Resync builtin skills + expand CLI reference ([dfa7d72f](https://github.com/debuglebowski/slayzone/commit/dfa7d72f))
+- **app:** Hide task tabs + show count in explode mode ([b733bf6b](https://github.com/debuglebowski/slayzone/commit/b733bf6b))
+- **labs:** Gate Agent panel rename behind labs flag ([8656ceda](https://github.com/debuglebowski/slayzone/commit/8656ceda))
+- **tasks:** Persist manager_mode per task + recursive subtask query ([70943e00](https://github.com/debuglebowski/slayzone/commit/70943e00))
+- **task-terminals:** Agent overview sidebar + manager-mode orchestrator ([ab157dd5](https://github.com/debuglebowski/slayzone/commit/ab157dd5))
+- **task-terminals:** Agent sidebar polish — tree lines, status, progress ([1c14b4a8](https://github.com/debuglebowski/slayzone/commit/1c14b4a8))
+- **cli:** Slay init wrapper — instructions + skills bootstrap ([b4952aa7](https://github.com/debuglebowski/slayzone/commit/b4952aa7))
+- **task-terminals:** Agent sidebar row context menu ([c1554457](https://github.com/debuglebowski/slayzone/commit/c1554457))
+- **kanban:** Progress ring around blob, gray fallback ([9cd4d573](https://github.com/debuglebowski/slayzone/commit/9cd4d573))
+- **task-terminals:** Hide terminal during agent overview resize ([d682360f](https://github.com/debuglebowski/slayzone/commit/d682360f))
+- **assets-panel:** Persist folder expanded state per task ([17738d94](https://github.com/debuglebowski/slayzone/commit/17738d94))
+
+### 🩹 Fixes
+
+- **cli:** Hint alt DB when openDb misses ([35bbdcb9](https://github.com/debuglebowski/slayzone/commit/35bbdcb9))
+- **app:** Anchor overlay views in explode mode ([408c95e1](https://github.com/debuglebowski/slayzone/commit/408c95e1))
+- **renderer:** Allow blob workers in CSP for Vite HMR ([5de14de9](https://github.com/debuglebowski/slayzone/commit/5de14de9))
+- **file-editor:** Close/flag tabs when underlying file deleted ([0c63dbf5](https://github.com/debuglebowski/slayzone/commit/0c63dbf5))
+- **ai-config:** Scrub orphan marketplace metadata on seed ([e9286eca](https://github.com/debuglebowski/slayzone/commit/e9286eca))
+
+### 💅 Refactors
+
+- **ui:** Rename Terminal panel label to Agent ([dbf7755d](https://github.com/debuglebowski/slayzone/commit/dbf7755d))
+
+### 📖 Documentation
+
+- **cli:** Slay init — rewrite INSTRUCTIONS ([8ae04c02](https://github.com/debuglebowski/slayzone/commit/8ae04c02))
+- **release:** Add auto-title step ([c28ab443](https://github.com/debuglebowski/slayzone/commit/c28ab443))
+
+### 🏡 Chore
+
+- **skills:** Resync builtin slay skill docs + register sync-slay-skill ([3e5d6a93](https://github.com/debuglebowski/slayzone/commit/3e5d6a93))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.21.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.20.0...v0.21.0)

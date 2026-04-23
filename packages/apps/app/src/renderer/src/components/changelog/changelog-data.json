@@ -1,5 +1,72 @@
 [
   {
+    "version": "0.22.0",
+    "date": "2026-04-23",
+    "tagline": "Orchestration & progress",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Agent overview sidebar",
+        "description": "New agent sidebar with tree lines, status, and manager-mode orchestration for multi-task supervision."
+      },
+      {
+        "category": "feature",
+        "title": "Task progress field",
+        "description": "Track 0–100 progress per task with a progress ring in kanban, plus UI and CLI support."
+      },
+      {
+        "category": "feature",
+        "title": "slay init CLI",
+        "description": "Bootstrap a project with SlayZone instructions and skills from the CLI."
+      },
+      {
+        "category": "feature",
+        "title": "Agent sidebar context menu",
+        "description": "Right-click rows in the agent sidebar to act on individual agents."
+      },
+      {
+        "category": "improvement",
+        "title": "Terminal panel renamed to Agent",
+        "description": "Relabeled the Terminal panel to Agent across the UI."
+      },
+      {
+        "category": "improvement",
+        "title": "Explode-mode tab count",
+        "description": "Task tabs hide in explode mode and a count shows how many are open."
+      },
+      {
+        "category": "improvement",
+        "title": "Persistent assets folder state",
+        "description": "The assets panel remembers which folders are expanded per task."
+      },
+      {
+        "category": "improvement",
+        "title": "Smoother agent overview resize",
+        "description": "Terminal hides during agent-overview resizing to prevent flicker."
+      },
+      {
+        "category": "fix",
+        "title": "Editor tabs track deleted files",
+        "description": "Editor tabs close or flag when the underlying file is deleted on disk."
+      },
+      {
+        "category": "fix",
+        "title": "Overlay anchoring in explode mode",
+        "description": "Overlay views now anchor correctly when explode mode toggles."
+      },
+      {
+        "category": "fix",
+        "title": "Seed skips orphan marketplace metadata",
+        "description": "AI-config seed scrubs orphan marketplace metadata instead of erroring."
+      },
+      {
+        "category": "fix",
+        "title": "Clearer CLI DB error",
+        "description": "slay CLI hints at alternate DB paths when openDb can't find one."
+      }
+    ]
+  },
+  {
     "version": "0.21.0",
     "date": "2026-04-21",
     "tagline": "Asset history & chat",
