@@ -18,6 +18,7 @@ import {
   isVersionError,
 } from '@slayzone/task-assets/main'
 import { browserCommand } from './browser'
+import { TASK_JSON_COLUMNS, serializeTaskForJson, type TaskJsonRow } from './task-json'
 import {
   getDefaultStatus,
   getDoneStatus,
@@ -222,8 +223,8 @@ export function tasksCommand(): Command {
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
       const limitClause = doneFilter ? '' : 'LIMIT :limit'
-      const tasks = db.query<TaskRow>(
-        `SELECT t.id, t.project_id, t.title, t.status, t.priority, p.name AS project_name, t.created_at
+      const tasks = db.query<TaskJsonRow>(
+        `SELECT ${TASK_JSON_COLUMNS.join(', ')}, p.name AS project_name
          FROM tasks t
          JOIN projects p ON t.project_id = p.id
          ${where}
@@ -264,11 +265,12 @@ export function tasksCommand(): Command {
             (tagMap[r.task_id] ??= []).push(r.name)
           }
         }
-        const enriched = filteredTasks.map((t) => ({
-          ...t,
-          is_blocked: blockedIds.has(t.id),
-          tags: tagMap[t.id] ?? [],
-        }))
+        const enriched = filteredTasks.map((t) =>
+          serializeTaskForJson(t, {
+            isBlocked: blockedIds.has(t.id),
+            tags: tagMap[t.id] ?? [],
+          })
+        )
         console.log(JSON.stringify(enriched, null, 2))
       } else {
         printTasks(filteredTasks, blockedIds)

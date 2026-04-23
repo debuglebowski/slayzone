@@ -5,6 +5,7 @@
 import { createTestHarness, test, expect, describe } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAll } from './test-harness.js'
 import { resolveProject } from '../src/db-helpers.mjs'
+import { TASK_JSON_COLUMNS, serializeTaskForJson, type TaskJsonRow } from '../src/commands/task-json.ts'
 
 const h = await createTestHarness()
 const db = createSlayDbAdapter(h.db)
@@ -253,6 +254,54 @@ await describe('tasks list --json tag augmentation', () => {
     expect(tagMap[t1]).toHaveLength(2)
     expect(tagMap[t2]).toHaveLength(1)
     expect(tagMap[t2]).toContain('chore')
+  })
+})
+
+// --- LIST --json contract (issue #78) ---
+
+await describe('tasks list --json public contract', () => {
+  test('serializer exposes description, status, and core fields', () => {
+    const taskId = createTask('WithDesc', { status: 'in_progress' })
+    h.db.prepare('UPDATE tasks SET description = ? WHERE id = ?').run('body text', taskId)
+
+    // Use the shared SELECT + serializer that prod uses — locks the contract.
+    const rows = db.query<TaskJsonRow>(
+      `SELECT ${TASK_JSON_COLUMNS.join(', ')}, p.name AS project_name
+       FROM tasks t JOIN projects p ON t.project_id = p.id
+       WHERE t.id = :id`,
+      { ':id': taskId }
+    )
+    expect(rows).toHaveLength(1)
+    const json = serializeTaskForJson(rows[0], { isBlocked: false, tags: ['bug'] })
+
+    expect(json.id).toBe(taskId)
+    expect(json.description).toBe('body text')
+    expect(json.status).toBe('in_progress')
+    expect(json.project_name).toBe('TaskExtProj')
+    expect(json.tags).toEqual(['bug'])
+    expect(json.is_blocked).toBe(false)
+  })
+
+  test('internal columns are NOT exposed', () => {
+    const taskId = createTask('NoLeak')
+    const rows = db.query<TaskJsonRow>(
+      `SELECT ${TASK_JSON_COLUMNS.join(', ')}, p.name AS project_name
+       FROM tasks t JOIN projects p ON t.project_id = p.id
+       WHERE t.id = :id`,
+      { ':id': taskId }
+    )
+    const json = serializeTaskForJson(rows[0], { isBlocked: false, tags: [] })
+    const exposed = Object.keys(json)
+
+    // Internal columns must stay out of the public JSON contract.
+    for (const internal of [
+      'provider_config', 'terminal_mode', 'claude_flags', 'codex_flags',
+      'claude_session_id', 'archived_at', 'is_temporary', 'panel_visibility',
+      'worktree_path', 'browser_url', 'editor_open_files',
+      'dangerously_skip_permissions', 'order',
+    ]) {
+      expect(exposed).not.toContain(internal)
+    }
   })
 })
 
