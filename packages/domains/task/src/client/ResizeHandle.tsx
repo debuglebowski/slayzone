@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react'
+import { useRef, useCallback, useEffect, type CSSProperties } from 'react'
 
 interface ResizeHandleProps {
   width: number
@@ -8,6 +8,7 @@ interface ResizeHandleProps {
   onDragStart?: () => void
   onDragEnd?: () => void
   onReset?: () => void
+  style?: CSSProperties
 }
 
 export function ResizeHandle({
@@ -17,7 +18,8 @@ export function ResizeHandle({
   onWidthChange,
   onDragStart,
   onDragEnd,
-  onReset
+  onReset,
+  style,
 }: ResizeHandleProps) {
   const isDragging = useRef(false)
   const startX = useRef(0)
@@ -67,6 +69,7 @@ export function ResizeHandle({
       className="w-4 shrink-0 cursor-col-resize flex items-center justify-center group z-10"
       onMouseDown={handleMouseDown}
       onDoubleClick={onReset}
+      style={style}
     >
       <div className="w-1 h-8 rounded-full opacity-0 group-hover:opacity-100 group-active:opacity-100 bg-primary/30 group-active:bg-primary/50 transition-opacity" />
     </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { PanelConfig, PanelView, WebPanelDefinition } from '../shared/types'
-import { DEFAULT_PANEL_CONFIG, isPanelEnabled } from '../shared/types'
-import { mergePredefinedWebPanels } from '../shared/panel-config'
+import { DEFAULT_PANEL_CONFIG, isPanelEnabled, orderIdToTaskId, orderIdToHomeId } from '../shared/types'
+import { mergePanelOrder, mergePredefinedWebPanels } from '../shared/panel-config'
 
 const SETTINGS_KEY = 'panel_config'
 const CHANGE_EVENT = 'panel-config-changed'
@@ -10,7 +10,7 @@ function loadConfig(): Promise<PanelConfig> {
   return window.api.settings.get(SETTINGS_KEY).then(raw => {
     if (raw) {
       try {
-        return mergePredefinedWebPanels(JSON.parse(raw) as PanelConfig)
+        return mergePanelOrder(mergePredefinedWebPanels(JSON.parse(raw) as PanelConfig))
       } catch { /* ignore */ }
     }
     return DEFAULT_PANEL_CONFIG
@@ -22,6 +22,10 @@ export function usePanelConfig(): {
   updateConfig: (next: PanelConfig) => Promise<void>
   enabledWebPanels: WebPanelDefinition[]
   isBuiltinEnabled: (id: string, view: PanelView) => boolean
+  /** Returns ordered task-view panel IDs (e.g. 'terminal','browser','editor','assets','web:*','diff','settings','processes'). */
+  getOrderedTaskIds: () => string[]
+  /** Returns ordered home-view panel IDs (e.g. 'git','editor','processes','web:*'). Omits task-only panels. */
+  getOrderedHomeIds: () => string[]
 } {
   const [config, setConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG)
 
@@ -53,5 +57,18 @@ export function usePanelConfig(): {
     [config]
   )
 
-  return { config, updateConfig, enabledWebPanels, isBuiltinEnabled }
+  const getOrderedTaskIds = useCallback(() => {
+    return (config.order ?? []).map(orderIdToTaskId)
+  }, [config])
+
+  const getOrderedHomeIds = useCallback(() => {
+    const out: string[] = []
+    for (const id of config.order ?? []) {
+      const h = orderIdToHomeId(id)
+      if (h) out.push(h)
+    }
+    return out
+  }, [config])
+
+  return { config, updateConfig, enabledWebPanels, isBuiltinEnabled, getOrderedTaskIds, getOrderedHomeIds }
 }

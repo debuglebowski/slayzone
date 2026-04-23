@@ -108,6 +108,10 @@ export interface PanelConfig {
   viewEnabled: Partial<Record<PanelView, Record<string, boolean>>>
   webPanels: WebPanelDefinition[]
   deletedPredefined?: string[] // IDs of predefined panels the user removed
+  // Unified reorder across home + task views. IDs use settings-modal style:
+  // 'terminal', 'browser', 'editor', 'assets', 'git', 'settings', 'processes', 'web:*'.
+  // 'git' maps to task panel 'diff' and home panel 'git'. Task-only panels are skipped on home.
+  order?: string[]
 }
 
 /** Check if a panel is enabled for a specific view. Defaults to true if not set. */
@@ -119,6 +123,22 @@ export function isPanelEnabled(config: PanelConfig, id: string, view: PanelView)
 export type WebPanelUrls = Record<string, string>
 
 export const BUILTIN_PANEL_IDS = ['terminal', 'browser', 'editor', 'assets', 'diff', 'settings', 'processes'] as const
+
+// IDs used in PanelConfig.order (settings-modal style). 'git' is the shared row that
+// maps to 'diff' on task view and 'git' on home view.
+export const PANEL_ORDER_IDS = ['terminal', 'browser', 'editor', 'assets', 'git', 'settings', 'processes'] as const
+export type PanelOrderId = typeof PANEL_ORDER_IDS[number] | `web:${string}`
+
+/** Map a PanelConfig.order ID to its task-view panel ID. */
+export function orderIdToTaskId(id: string): string {
+  return id === 'git' ? 'diff' : id
+}
+
+/** Map a PanelConfig.order ID to its home-view panel ID, or null if task-only. */
+export function orderIdToHomeId(id: string): string | null {
+  if (id === 'terminal' || id === 'browser' || id === 'assets' || id === 'settings') return null
+  return id // 'git', 'editor', 'processes', 'web:*'
+}
 
 export const PREDEFINED_WEB_PANELS: WebPanelDefinition[] = [
   {
@@ -137,6 +157,11 @@ export const PREDEFINED_WEB_PANELS: WebPanelDefinition[] = [
   { id: 'web:monosketch', name: 'Monosketch', baseUrl: 'https://app.monosketch.io', shortcut: 'u', predefined: true }
 ]
 
+export const DEFAULT_PANEL_ORDER: string[] = [
+  'terminal', 'browser', 'editor', 'assets', 'git', 'settings', 'processes',
+  ...PREDEFINED_WEB_PANELS.map(wp => wp.id),
+]
+
 export const DEFAULT_PANEL_CONFIG: PanelConfig = {
   viewEnabled: {
     home: { git: true, editor: true, processes: true, tests: true, automations: true },
@@ -145,7 +170,8 @@ export const DEFAULT_PANEL_CONFIG: PanelConfig = {
       ...Object.fromEntries(PREDEFINED_WEB_PANELS.map(wp => [wp.id, false]))
     },
   },
-  webPanels: [...PREDEFINED_WEB_PANELS]
+  webPanels: [...PREDEFINED_WEB_PANELS],
+  order: [...DEFAULT_PANEL_ORDER],
 }
 
 // --- Task Assets ---

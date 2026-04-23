@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
-import { ChevronRight, Cpu, FileCode, GitCompare, Globe, Plus, Settings2, SquareTerminal, Trash2 } from 'lucide-react'
+import { ChevronRight, Cpu, FileCode, GitCompare, Globe, GripVertical, Paperclip, Plus, Settings2, SquareTerminal, Trash2 } from 'lucide-react'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, sortableKeyboardCoordinates, useSortable, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSeparator, Switch, Tooltip, TooltipContent, TooltipTrigger, IconButton, getAgentPanelLabel } from '@slayzone/ui'
 import type { PanelConfig, PanelView, WebPanelDefinition } from '@slayzone/task/shared'
 import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal/shared'
-import { DEFAULT_PANEL_CONFIG, isPanelEnabled, inferHostScopeFromUrl, inferProtocolFromUrl, mergePredefinedWebPanels, normalizeDesktopProtocol, validatePanelShortcut } from '@slayzone/task/shared'
+import { DEFAULT_PANEL_CONFIG, isPanelEnabled, inferHostScopeFromUrl, inferProtocolFromUrl, mergePanelOrder, mergePredefinedWebPanels, normalizeDesktopProtocol, validatePanelShortcut } from '@slayzone/task/shared'
 import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { PanelBreadcrumb } from './PanelBreadcrumb'
@@ -16,8 +19,136 @@ interface PanelsSettingsTabProps {
   onDefaultTerminalModeChange: (mode: TerminalMode) => void
 }
 
+interface PanelRowDescriptor {
+  icon: typeof Globe
+  label: string
+  homeToggle: { enabled: boolean; onChange: (v: boolean) => void } | null
+  taskToggle: { enabled: boolean; onChange: (v: boolean) => void } | null
+  onClick?: () => void
+  webSubtitle?: string
+}
+
+function buildPanelRowDescriptors(
+  panelConfig: PanelConfig,
+  navigateTo: (tab: string) => void,
+  togglePanel: (id: string, view: PanelView, enabled: boolean) => void,
+): Map<string, PanelRowDescriptor> {
+  const m = new Map<string, PanelRowDescriptor>()
+  m.set('terminal', {
+    icon: SquareTerminal, label: getAgentPanelLabel(),
+    homeToggle: null,
+    taskToggle: { enabled: isPanelEnabled(panelConfig, 'terminal', 'task'), onChange: c => togglePanel('terminal', 'task', c) },
+    onClick: () => navigateTo('panels/terminal'),
+  })
+  m.set('browser', {
+    icon: Globe, label: 'Browser',
+    homeToggle: null,
+    taskToggle: { enabled: isPanelEnabled(panelConfig, 'browser', 'task'), onChange: c => togglePanel('browser', 'task', c) },
+    onClick: () => navigateTo('panels/browser'),
+  })
+  m.set('editor', {
+    icon: FileCode, label: 'Editor',
+    homeToggle: { enabled: isPanelEnabled(panelConfig, 'editor', 'home'), onChange: c => togglePanel('editor', 'home', c) },
+    taskToggle: { enabled: isPanelEnabled(panelConfig, 'editor', 'task'), onChange: c => togglePanel('editor', 'task', c) },
+    onClick: () => navigateTo('panels/editor'),
+  })
+  m.set('assets', {
+    icon: Paperclip, label: 'Assets',
+    homeToggle: null,
+    taskToggle: { enabled: isPanelEnabled(panelConfig, 'assets', 'task'), onChange: c => togglePanel('assets', 'task', c) },
+  })
+  m.set('git', {
+    icon: GitCompare, label: 'Git',
+    homeToggle: { enabled: isPanelEnabled(panelConfig, 'git', 'home'), onChange: c => togglePanel('git', 'home', c) },
+    taskToggle: { enabled: isPanelEnabled(panelConfig, 'diff', 'task'), onChange: c => togglePanel('diff', 'task', c) },
+    onClick: () => navigateTo('panels/git'),
+  })
+  m.set('settings', {
+    icon: Settings2, label: 'Settings',
+    homeToggle: null,
+    taskToggle: { enabled: isPanelEnabled(panelConfig, 'settings', 'task'), onChange: c => togglePanel('settings', 'task', c) },
+  })
+  m.set('processes', {
+    icon: Cpu, label: 'Processes',
+    homeToggle: { enabled: isPanelEnabled(panelConfig, 'processes', 'home'), onChange: c => togglePanel('processes', 'home', c) },
+    taskToggle: { enabled: isPanelEnabled(panelConfig, 'processes', 'task'), onChange: c => togglePanel('processes', 'task', c) },
+  })
+  for (const wp of panelConfig.webPanels) {
+    m.set(wp.id, {
+      icon: Globe, label: wp.name,
+      homeToggle: null,
+      taskToggle: { enabled: isPanelEnabled(panelConfig, wp.id, 'task'), onChange: c => togglePanel(wp.id, 'task', c) },
+      onClick: () => navigateTo(`panels/${wp.id}`),
+      webSubtitle: wp.baseUrl,
+    })
+  }
+  return m
+}
+
+function SortablePanelRow({ id, descriptor }: { id: string; descriptor: PanelRowDescriptor }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+  const Icon = descriptor.icon
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-3 h-11 rounded-lg border px-2 w-full text-left hover:bg-accent/30 transition-colors"
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="shrink-0 flex items-center justify-center size-6 text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing touch-none"
+        aria-label="Drag to reorder"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <GripVertical className="size-4" />
+      </button>
+      <button
+        type="button"
+        onClick={descriptor.onClick ?? (() => {})}
+        disabled={!descriptor.onClick}
+        className="flex items-center gap-3 flex-1 min-w-0 text-left disabled:cursor-default"
+      >
+        <Icon className="size-4 shrink-0" />
+        <span className="text-sm font-medium truncate">{descriptor.label}</span>
+        {descriptor.webSubtitle && (
+          <span className="text-xs text-muted-foreground truncate flex-1">{descriptor.webSubtitle}</span>
+        )}
+      </button>
+      {descriptor.webSubtitle && (
+        <span className="shrink-0 px-1.5 py-0.5 rounded-full border border-border text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+          External
+        </span>
+      )}
+      <div className="flex items-center gap-5 shrink-0 pr-2">
+        {descriptor.homeToggle
+          ? <Switch checked={descriptor.homeToggle.enabled} onCheckedChange={descriptor.homeToggle.onChange} onClick={(e) => e.stopPropagation()} />
+          : <Tooltip><TooltipTrigger asChild><span><Switch disabled checked={false} onClick={(e) => e.stopPropagation()} /></span></TooltipTrigger><TooltipContent side="top">Task-only panel</TooltipContent></Tooltip>
+        }
+        {descriptor.taskToggle
+          ? <Switch checked={descriptor.taskToggle.enabled} onCheckedChange={descriptor.taskToggle.onChange} onClick={(e) => e.stopPropagation()} />
+          : <span className="w-8" />
+        }
+      </div>
+      {descriptor.onClick
+        ? <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+        : <span className="w-3.5" />}
+    </div>
+  )
+}
+
 export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTerminalMode, onDefaultTerminalModeChange }: PanelsSettingsTabProps) {
   const [panelConfig, setPanelConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
   const [terminalFontFamily, setTerminalFontFamily] = useState('Menlo, Monaco, "Courier New", monospace')
   const [terminalScrollback, setTerminalScrollback] = useState('5000')
   
@@ -31,6 +162,10 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
   // Diff
   const [diffContextLines, setDiffContextLines] = useState<'0' | '3' | '5' | 'all'>('3')
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(false)
+  const [diffContinuousFlow, setDiffContinuousFlow] = useState(false)
+  const [diffTreeCollapsed, setDiffTreeCollapsed] = useState(false)
+  const [diffSideBySide, setDiffSideBySide] = useState(false)
+  const [diffWrap, setDiffWrap] = useState(false)
 
   // Commit graph defaults
   const [graphCollapsed, setGraphCollapsed] = useState(false)
@@ -78,6 +213,10 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
       window.api.settings.get('editor_indent_tabs'),
       window.api.settings.get('diff_context_lines'),
       window.api.settings.get('diff_ignore_whitespace'),
+      window.api.settings.get('diff_continuous_flow'),
+      window.api.settings.get('diff_tree_collapsed'),
+      window.api.settings.get('diff_side_by_side'),
+      window.api.settings.get('diff_wrap'),
       window.api.settings.get('dev_server_toast_enabled'),
       window.api.settings.get('dev_server_auto_open_browser'),
       window.api.settings.get('browser_default_url'),
@@ -85,8 +224,8 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
       window.api.settings.get('browser_default_devices'),
       window.api.settings.get('commit_graph_config'),
       window.api.settings.get('editor_markdown_view_mode'),
-    ]).then(([pc, tff, ts, eww, erw, ets, eit, dcl, diw, dste, dsaob, bdu, bdz, bdd, cgc, emvm]) => {
-      if (pc) setPanelConfig(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig))
+    ]).then(([pc, tff, ts, eww, erw, ets, eit, dcl, diw, dcf, dtc, dsbs, dwr, dste, dsaob, bdu, bdz, bdd, cgc, emvm]) => {
+      if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
       if (tff) setTerminalFontFamily(tff)
       if (ts) setTerminalScrollback(ts)
       if (eww === 'on') setEditorWordWrap('on')
@@ -95,6 +234,10 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
       if (eit === '1') setEditorIndentTabs(true)
       if (dcl) setDiffContextLines(dcl as any)
       if (diw === '1') setDiffIgnoreWhitespace(true)
+      if (dcf === '1') setDiffContinuousFlow(true)
+      if (dtc === '1') setDiffTreeCollapsed(true)
+      if (dsbs === '1') setDiffSideBySide(true)
+      if (dwr === '1') setDiffWrap(true)
       if (dste === '0') setDevServerToastEnabled(false)
       if (dsaob === '1') setDevServerAutoOpenBrowser(true)
       if (bdu) setBrowserDefaultUrl(bdu)
@@ -123,7 +266,7 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
 
     const cleanupIpc = window.api?.app?.onSettingsChanged?.(() => {
       window.api.settings.get('panel_config').then(pc => {
-        if (pc) setPanelConfig(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig))
+        if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
       })
     })
     return () => { cleanupIpc?.() }
@@ -250,132 +393,78 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
     <>
       <SettingsTabIntro title="Panels" description="Choose which panels are available per view." />
 
-      {activeTab === 'panels' && (
-        <div className="space-y-6">
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 px-4">
-              <Label className="text-base font-semibold flex-1">Native</Label>
-              <div className="flex items-center gap-5 shrink-0">
-                <span className="text-[10px] font-medium text-muted-foreground w-8 text-center">Home</span>
-                <span className="text-[10px] font-medium text-muted-foreground w-8 text-center">Task</span>
-              </div>
-              <span className="w-3.5" />
-            </div>
-            <div className="space-y-2">
-              {/* Terminal — task only */}
-              <button type="button" className="flex items-center gap-3 h-11 rounded-lg border px-4 w-full text-left hover:bg-accent/30 transition-colors" onClick={() => navigateTo('panels/terminal')}>
-                <SquareTerminal className="size-4 shrink-0" />
-                <span className="text-sm font-medium flex-1">{getAgentPanelLabel()}</span>
-
+      {activeTab === 'panels' && (() => {
+        const rowDescriptors = buildPanelRowDescriptors(panelConfig, navigateTo, togglePanel)
+        const orderedIds = (panelConfig.order ?? []).filter(id => rowDescriptors.has(id))
+        const handleDragEnd = (e: DragEndEvent) => {
+          const { active, over } = e
+          if (!over || active.id === over.id) return
+          const oldIdx = orderedIds.indexOf(String(active.id))
+          const newIdx = orderedIds.indexOf(String(over.id))
+          if (oldIdx < 0 || newIdx < 0) return
+          const nextOrdered = arrayMove(orderedIds, oldIdx, newIdx)
+          const next = [...nextOrdered, ...(panelConfig.order ?? []).filter(id => !rowDescriptors.has(id))]
+          savePanelConfig({ ...panelConfig, order: next })
+        }
+        return (
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 px-4">
+                <span className="w-3.5" />
+                <Label className="text-base font-semibold flex-1">Panels</Label>
                 <div className="flex items-center gap-5 shrink-0">
-                  <Tooltip><TooltipTrigger asChild><span><Switch disabled checked={false} onClick={(e) => e.stopPropagation()} /></span></TooltipTrigger><TooltipContent side="top">Task-only panel</TooltipContent></Tooltip>
-                  <Switch checked={isPanelEnabled(panelConfig, 'terminal', 'task')} onCheckedChange={(c) => togglePanel('terminal', 'task', c)} onClick={(e) => e.stopPropagation()} />
-                </div>
-                <ChevronRight className="size-3.5 shrink-0" />
-              </button>
-              {/* Browser — task only */}
-              <button type="button" className="flex items-center gap-3 h-11 rounded-lg border px-4 w-full text-left hover:bg-accent/30 transition-colors" onClick={() => navigateTo('panels/browser')}>
-                <Globe className="size-4 shrink-0" />
-                <span className="text-sm font-medium flex-1">Browser</span>
-
-                <div className="flex items-center gap-5 shrink-0">
-                  <Tooltip><TooltipTrigger asChild><span><Switch disabled checked={false} onClick={(e) => e.stopPropagation()} /></span></TooltipTrigger><TooltipContent side="top">Task-only panel</TooltipContent></Tooltip>
-                  <Switch checked={isPanelEnabled(panelConfig, 'browser', 'task')} onCheckedChange={(c) => togglePanel('browser', 'task', c)} onClick={(e) => e.stopPropagation()} />
-                </div>
-                <ChevronRight className="size-3.5 shrink-0" />
-              </button>
-              {/* Editor — shared */}
-              <button type="button" className="flex items-center gap-3 h-11 rounded-lg border px-4 w-full text-left hover:bg-accent/30 transition-colors" onClick={() => navigateTo('panels/editor')}>
-                <FileCode className="size-4 shrink-0" />
-                <span className="text-sm font-medium flex-1">Editor</span>
-
-                <div className="flex items-center gap-5 shrink-0">
-                  <Switch checked={isPanelEnabled(panelConfig, 'editor', 'home')} onCheckedChange={(c) => togglePanel('editor', 'home', c)} onClick={(e) => e.stopPropagation()} />
-                  <Switch checked={isPanelEnabled(panelConfig, 'editor', 'task')} onCheckedChange={(c) => togglePanel('editor', 'task', c)} onClick={(e) => e.stopPropagation()} />
-                </div>
-                <ChevronRight className="size-3.5 shrink-0" />
-              </button>
-              {/* Git — shared (home='git', task='diff') */}
-              <button type="button" className="flex items-center gap-3 h-11 rounded-lg border px-4 w-full text-left hover:bg-accent/30 transition-colors" onClick={() => navigateTo('panels/git')}>
-                <GitCompare className="size-4 shrink-0" />
-                <span className="text-sm font-medium flex-1">Git</span>
-
-                <div className="flex items-center gap-5 shrink-0">
-                  <Switch checked={isPanelEnabled(panelConfig, 'git', 'home')} onCheckedChange={(c) => togglePanel('git', 'home', c)} onClick={(e) => e.stopPropagation()} />
-                  <Switch checked={isPanelEnabled(panelConfig, 'diff', 'task')} onCheckedChange={(c) => togglePanel('diff', 'task', c)} onClick={(e) => e.stopPropagation()} />
-                </div>
-                <ChevronRight className="size-3.5 shrink-0" />
-              </button>
-              {/* Settings — task only */}
-              <button type="button" className="flex items-center gap-3 h-11 rounded-lg border px-4 w-full text-left hover:bg-accent/30 transition-colors" onClick={() => {}}>
-                <Settings2 className="size-4 shrink-0" />
-                <span className="text-sm font-medium flex-1">Settings</span>
-
-                <div className="flex items-center gap-5 shrink-0">
-                  <Tooltip><TooltipTrigger asChild><span><Switch disabled checked={false} onClick={(e) => e.stopPropagation()} /></span></TooltipTrigger><TooltipContent side="top">Task-only panel</TooltipContent></Tooltip>
-                  <Switch checked={isPanelEnabled(panelConfig, 'settings', 'task')} onCheckedChange={(c) => togglePanel('settings', 'task', c)} onClick={(e) => e.stopPropagation()} />
+                  <span className="text-[10px] font-medium text-muted-foreground w-8 text-center">Home</span>
+                  <span className="text-[10px] font-medium text-muted-foreground w-8 text-center">Task</span>
                 </div>
                 <span className="w-3.5" />
-              </button>
-              {/* Processes — shared */}
-              <button type="button" className="flex items-center gap-3 h-11 rounded-lg border px-4 w-full text-left hover:bg-accent/30 transition-colors" onClick={() => {}}>
-                <Cpu className="size-4 shrink-0" />
-                <span className="text-sm font-medium flex-1">Processes</span>
-                <div className="flex items-center gap-5 shrink-0">
-                  <Switch checked={isPanelEnabled(panelConfig, 'processes', 'home')} onCheckedChange={(c) => togglePanel('processes', 'home', c)} onClick={(e) => e.stopPropagation()} />
-                  <Switch checked={isPanelEnabled(panelConfig, 'processes', 'task')} onCheckedChange={(c) => togglePanel('processes', 'task', c)} onClick={(e) => e.stopPropagation()} />
-                </div>
-                <span className="w-3.5" />
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Label className="text-base font-semibold">External</Label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <IconButton variant="ghost" size="icon-sm" aria-label="About external panels" className="text-muted-foreground/50">
-                    <Plus className="size-3" />
-                  </IconButton>
-                </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-64">
-                  Web views embedded as panels inside tasks.
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="space-y-2">
-              {panelConfig.webPanels.map(wp => (
-                <button key={wp.id} type="button" className="flex items-center gap-3 h-11 rounded-lg border px-4 w-full text-left hover:bg-accent/30 transition-colors" onClick={() => navigateTo(`panels/${wp.id}`)}>
-                  <Globe className="size-4 shrink-0" />
-                  <span className="text-sm font-medium">{wp.name}</span>
-                  <span className="text-xs text-muted-foreground truncate flex-1">{wp.baseUrl}</span>
-                  <Switch checked={isPanelEnabled(panelConfig, wp.id, 'task')} onCheckedChange={(c) => togglePanel(wp.id, 'task', c)} onClick={(e) => e.stopPropagation()} />
-                  <ChevronRight className="size-3.5 shrink-0" />
-                </button>
-              ))}
-              {panelConfig.webPanels.length === 0 && <p className="text-sm text-muted-foreground">No external panels configured.</p>}
-            </div>
-            <div className="grid grid-cols-[1fr_1fr_80px] gap-2 pt-2">
-              <Input placeholder="Name" value={newPanelName} onChange={(e) => setNewPanelName(e.target.value)} />
-              <Input placeholder="URL" value={newPanelUrl} onChange={(e) => setNewPanelUrl(e.target.value)} />
-              <Input placeholder="Key" maxLength={1} value={newPanelShortcut} onChange={(e) => setNewPanelShortcut(e.target.value.slice(-1))} />
-            </div>
-            {panelShortcutError && <p className="text-xs text-destructive">{panelShortcutError}</p>}
-            <label className="flex items-center gap-2 text-xs cursor-pointer">
-              <input type="checkbox" checked={newPanelBlockDesktopHandoff} onChange={(e) => { setNewPanelBlockDesktopHandoff(e.target.checked); if (e.target.checked && !newPanelHandoffProtocol.trim()) setNewPanelHandoffProtocol(inferProtocolFromUrl(newPanelUrl) ?? ''); if (!e.target.checked) setNewPanelProtocolError('') }} />
-              <span className="text-muted-foreground">Block desktop app handoff links</span>
-            </label>
-            {newPanelBlockDesktopHandoff && (
-              <div className="space-y-1">
-                <Input placeholder="Protocol (e.g. figma)" value={newPanelHandoffProtocol} onChange={(e) => { setNewPanelHandoffProtocol(e.target.value); setNewPanelProtocolError('') }} />
               </div>
-            )}
-            {newPanelProtocolError && <p className="text-xs text-destructive">{newPanelProtocolError}</p>}
-            <Button size="sm" onClick={handleAddCustomPanel} disabled={!newPanelName.trim() || !newPanelUrl.trim()}><Plus className="size-3.5 mr-1" /> Add Panel</Button>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={orderedIds} strategy={verticalListSortingStrategy}>
+                  <div className="space-y-2">
+                    {orderedIds.map(id => {
+                      const d = rowDescriptors.get(id)!
+                      return <SortablePanelRow key={id} id={id} descriptor={d} />
+                    })}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Label className="text-base font-semibold">Add external panel</Label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <IconButton variant="ghost" size="icon-sm" aria-label="About external panels" className="text-muted-foreground/50">
+                      <Plus className="size-3" />
+                    </IconButton>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="max-w-64">
+                    Web views embedded as panels inside tasks.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="grid grid-cols-[1fr_1fr_80px] gap-2">
+                <Input placeholder="Name" value={newPanelName} onChange={(e) => setNewPanelName(e.target.value)} />
+                <Input placeholder="URL" value={newPanelUrl} onChange={(e) => setNewPanelUrl(e.target.value)} />
+                <Input placeholder="Key" maxLength={1} value={newPanelShortcut} onChange={(e) => setNewPanelShortcut(e.target.value.slice(-1))} />
+              </div>
+              {panelShortcutError && <p className="text-xs text-destructive">{panelShortcutError}</p>}
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" checked={newPanelBlockDesktopHandoff} onChange={(e) => { setNewPanelBlockDesktopHandoff(e.target.checked); if (e.target.checked && !newPanelHandoffProtocol.trim()) setNewPanelHandoffProtocol(inferProtocolFromUrl(newPanelUrl) ?? ''); if (!e.target.checked) setNewPanelProtocolError('') }} />
+                <span className="text-muted-foreground">Block desktop app handoff links</span>
+              </label>
+              {newPanelBlockDesktopHandoff && (
+                <div className="space-y-1">
+                  <Input placeholder="Protocol (e.g. figma)" value={newPanelHandoffProtocol} onChange={(e) => { setNewPanelHandoffProtocol(e.target.value); setNewPanelProtocolError('') }} />
+                </div>
+              )}
+              {newPanelProtocolError && <p className="text-xs text-destructive">{newPanelProtocolError}</p>}
+              <Button size="sm" onClick={handleAddCustomPanel} disabled={!newPanelName.trim() || !newPanelUrl.trim()}><Plus className="size-3.5 mr-1" /> Add Panel</Button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {activeTab === 'panels/terminal' && (
         <div className="rounded-lg border p-5 space-y-6">
@@ -511,6 +600,22 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
             <span className="text-sm text-muted-foreground">Ignore whitespace</span>
             <Switch checked={diffIgnoreWhitespace} onCheckedChange={(c) => { setDiffIgnoreWhitespace(c); window.api.settings.set('diff_ignore_whitespace', c ? '1' : '0') }} />
           </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Continuous flow</span>
+            <Switch checked={diffContinuousFlow} onCheckedChange={(c) => { setDiffContinuousFlow(c); window.api.settings.set('diff_continuous_flow', c ? '1' : '0'); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Hide file tree</span>
+            <Switch checked={diffTreeCollapsed} onCheckedChange={(c) => { setDiffTreeCollapsed(c); window.api.settings.set('diff_tree_collapsed', c ? '1' : '0'); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Side-by-side</span>
+            <Switch checked={diffSideBySide} onCheckedChange={(c) => { setDiffSideBySide(c); window.api.settings.set('diff_side_by_side', c ? '1' : '0'); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Wrap lines</span>
+            <Switch checked={diffWrap} onCheckedChange={(c) => { setDiffWrap(c); window.api.settings.set('diff_wrap', c ? '1' : '0'); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+          </div>
         </div>
       )}
 
@@ -545,6 +650,22 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Ignore whitespace</span>
                   <Switch checked={diffIgnoreWhitespace} onCheckedChange={(c) => { setDiffIgnoreWhitespace(c); window.api.settings.set('diff_ignore_whitespace', c ? '1' : '0') }} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Continuous flow</span>
+                  <Switch checked={diffContinuousFlow} onCheckedChange={(c) => { setDiffContinuousFlow(c); window.api.settings.set('diff_continuous_flow', c ? '1' : '0'); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Hide file tree</span>
+                  <Switch checked={diffTreeCollapsed} onCheckedChange={(c) => { setDiffTreeCollapsed(c); window.api.settings.set('diff_tree_collapsed', c ? '1' : '0'); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Side-by-side</span>
+                  <Switch checked={diffSideBySide} onCheckedChange={(c) => { setDiffSideBySide(c); window.api.settings.set('diff_side_by_side', c ? '1' : '0'); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Wrap lines</span>
+                  <Switch checked={diffWrap} onCheckedChange={(c) => { setDiffWrap(c); window.api.settings.set('diff_wrap', c ? '1' : '0'); window.dispatchEvent(new Event('sz:settings-changed')) }} />
                 </div>
               </div>
             </div>

@@ -379,7 +379,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [browserTabs, setBrowserTabs] = useState<BrowserTabsState>(initialData?.browserTabs ?? defaultBrowserTabs)
 
   // Global panel configuration (which panels are enabled, custom web panels)
-  const { enabledWebPanels, isBuiltinEnabled } = usePanelConfig()
+  const { enabledWebPanels, isBuiltinEnabled, getOrderedTaskIds } = usePanelConfig()
+  const orderedTaskIds = useMemo(() => getOrderedTaskIds(), [getOrderedTaskIds])
+  const panelOrderIdx = useMemo(() => {
+    const m: Record<string, number> = {}
+    orderedTaskIds.forEach((id, i) => { m[id] = i })
+    return m
+  }, [orderedTaskIds])
+  const panelOrderStyle = (id: string): { order: number } => ({ order: panelOrderIdx[id] ?? 0 })
+  const getFirstVisibleTaskPanelId = (): string | null => orderedTaskIds.find(id => panelVisibility[id]) ?? null
 
   // Panel sizes for resizable panels
   const [panelSizes, updatePanelSizes, resetPanelSize, resetAllPanels] = usePanelSizes()
@@ -1709,28 +1717,27 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             <div className="min-w-0">
               <PanelToggle
                 panels={(() => {
-                  const builtins: { id: string; icon: typeof Globe; label: string; shortcut?: string | null }[] = [
-                    { id: 'terminal', icon: TerminalIcon, label: getAgentPanelLabel(), shortcut: panelTerminalShortcut },
-                    { id: 'browser', icon: Globe, label: 'Browser', shortcut: panelBrowserShortcut },
-                    { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut },
-                    { id: 'assets', icon: Paperclip, label: 'Assets', shortcut: panelAssetsShortcut },
-                    { id: 'diff', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut },
-                    { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut },
-                    { id: 'settings', icon: Settings2, label: 'Settings', shortcut: panelSettingsShortcut },
-                  ].filter(p => isBuiltinEnabled(p.id, 'task') && !(task.is_temporary && p.id === 'settings'))
-
-                  // Insert web panels after editor
-                  const editorIdx = builtins.findIndex(p => p.id === 'editor')
-                  const webItems = enabledWebPanels.map(wp => ({
-                    id: wp.id,
-                    icon: Globe,
-                    label: wp.name,
-                    shortcut: wp.shortcut ? `⌘${wp.shortcut.toUpperCase()}` : undefined
-                  }))
-                  const insertIdx = editorIdx >= 0 ? editorIdx + 1 : builtins.length
-                  builtins.splice(insertIdx, 0, ...webItems)
-
-                  return builtins.map(p => ({ ...p, active: !!panelVisibility[p.id] }))
+                  const entries: Record<string, { id: string; icon: typeof Globe; label: string; shortcut?: string | null }> = {
+                    terminal: { id: 'terminal', icon: TerminalIcon, label: getAgentPanelLabel(), shortcut: panelTerminalShortcut },
+                    browser: { id: 'browser', icon: Globe, label: 'Browser', shortcut: panelBrowserShortcut },
+                    editor: { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut },
+                    assets: { id: 'assets', icon: Paperclip, label: 'Assets', shortcut: panelAssetsShortcut },
+                    diff: { id: 'diff', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut },
+                    processes: { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut },
+                    settings: { id: 'settings', icon: Settings2, label: 'Settings', shortcut: panelSettingsShortcut },
+                  }
+                  for (const wp of enabledWebPanels) {
+                    entries[wp.id] = { id: wp.id, icon: Globe, label: wp.name, shortcut: wp.shortcut ? `⌘${wp.shortcut.toUpperCase()}` : undefined }
+                  }
+                  const ordered = orderedTaskIds
+                    .map(id => entries[id])
+                    .filter((e): e is NonNullable<typeof e> => !!e)
+                    .filter(p => {
+                      const isBuiltin = ['terminal', 'browser', 'editor', 'assets', 'diff', 'processes', 'settings'].includes(p.id)
+                      if (isBuiltin) return isBuiltinEnabled(p.id, 'task') && !(task.is_temporary && p.id === 'settings')
+                      return true // web panels already filtered by enabledWebPanels
+                    })
+                  return ordered.map(p => ({ ...p, active: !!panelVisibility[p.id] }))
                 })()}
                 onChange={handlePanelToggle}
               />
@@ -1780,7 +1787,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             !compact && "rounded-md bg-surface-1 border border-border",
             !compact && multipleVisiblePanels && focusedPanel === 'terminal' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]"
           )}
-          style={compact ? { flex: 1 } : containerWidth > 0 ? { width: resolvedWidths.terminal } : { flex: 1 }}
+          style={compact ? { flex: 1 } : containerWidth > 0 ? { width: resolvedWidths.terminal, order: panelOrderIdx.terminal ?? 0 } : { flex: 1, order: panelOrderIdx.terminal ?? 0 }}
         >
           {projectPathMissing && project?.path && (
             <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2">
@@ -2172,7 +2179,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         )}
 
         {/* Non-terminal panels hidden in compact mode */}
-        {!compact && panelVisibility.terminal && panelVisibility.browser && (
+        {!compact && panelVisibility.browser && getFirstVisibleTaskPanelId() !== 'browser' && (
           <ResizeHandle
             width={resolvedWidths.browser ?? 200}
             minWidth={200}
@@ -2180,12 +2187,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             onDragStart={() => setIsResizing(true)}
             onDragEnd={() => setIsResizing(false)}
             onReset={resetAllPanels}
+            style={panelOrderStyle('browser')}
           />
         )}
 
         {/* Browser Panel */}
         {!compact && panelVisibility.browser && (
-          <div data-panel-id="browser" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'browser' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.browser }}>
+          <div data-panel-id="browser" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'browser' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.browser, ...panelOrderStyle('browser') }}>
             <BrowserPanel
               ref={browserPanelRef}
               className="h-full"
@@ -2203,8 +2211,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           </div>
         )}
 
-        {/* Resize handle: Browser | Editor or Terminal | Editor */}
-        {!compact && panelVisibility.editor && (panelVisibility.browser || panelVisibility.terminal) && (
+        {/* Resize handle before Editor */}
+        {!compact && panelVisibility.editor && getFirstVisibleTaskPanelId() !== 'editor' && (
           <ResizeHandle
             width={resolvedWidths.editor ?? 250}
             minWidth={250}
@@ -2212,12 +2220,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             onDragStart={() => setIsResizing(true)}
             onDragEnd={() => setIsResizing(false)}
             onReset={resetAllPanels}
+            style={panelOrderStyle('editor')}
           />
         )}
 
         {/* File Editor Panel */}
         {!compact && panelVisibility.editor && effectiveRepoPath && (
-          <div data-panel-id="editor" className={cn("shrink-0 overflow-hidden rounded-md bg-surface-1 border border-border transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'editor' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.editor }}>
+          <div data-panel-id="editor" className={cn("shrink-0 overflow-hidden rounded-md bg-surface-1 border border-border transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'editor' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.editor, ...panelOrderStyle('editor') }}>
             <FileEditorView
               ref={fileEditorRefCallback}
               projectPath={effectiveRepoPath}
@@ -2227,8 +2236,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           </div>
         )}
 
-        {/* Resize handle: ... | Assets */}
-        {!compact && panelVisibility.assets && (panelVisibility.terminal || panelVisibility.browser || panelVisibility.editor) && (
+        {/* Resize handle before Assets */}
+        {!compact && panelVisibility.assets && getFirstVisibleTaskPanelId() !== 'assets' && (
           <ResizeHandle
             width={resolvedWidths.assets ?? 300}
             minWidth={200}
@@ -2236,22 +2245,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             onDragStart={() => setIsResizing(true)}
             onDragEnd={() => setIsResizing(false)}
             onReset={resetAllPanels}
+            style={panelOrderStyle('assets')}
           />
         )}
 
         {/* Assets Panel */}
         {!compact && panelVisibility.assets && (
-          <div data-panel-id="assets" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'assets' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.assets }}>
+          <div data-panel-id="assets" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'assets' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.assets, ...panelOrderStyle('assets') }}>
             <AssetsPanel ref={assetsPanelRef} taskId={task.id} isResizing={isResizing} initialActiveAssetId={task.active_asset_id} onActiveAssetIdChange={handleActiveAssetIdChange} />
           </div>
         )}
 
-        {/* Web Panels (custom + predefined) — rendered between editor and diff */}
-        {!compact && enabledWebPanels.map((wp, idx) => {
+        {/* Web Panels (custom + predefined) */}
+        {!compact && enabledWebPanels.map((wp) => {
           if (!panelVisibility[wp.id]) return null
-          // Show resize handle if there's a visible panel before this one
-          const hasLeftNeighbor = panelVisibility.terminal || panelVisibility.browser || panelVisibility.editor || panelVisibility.assets ||
-            enabledWebPanels.slice(0, idx).some(prev => panelVisibility[prev.id])
+          const hasLeftNeighbor = getFirstVisibleTaskPanelId() !== wp.id
           return (
             <div key={wp.id} className="contents">
               {hasLeftNeighbor && (
@@ -2262,9 +2270,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onDragStart={() => setIsResizing(true)}
                   onDragEnd={() => setIsResizing(false)}
                   onReset={resetAllPanels}
+                  style={panelOrderStyle(wp.id)}
                 />
               )}
-              <div data-panel-id={wp.id} className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === wp.id && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths[wp.id] }}>
+              <div data-panel-id={wp.id} className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden transition-shadow duration-200", multipleVisiblePanels && focusedPanel === wp.id && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths[wp.id], ...panelOrderStyle(wp.id) }}>
                 <WebPanelView
                   taskId={task.id}
                   panelId={wp.id}
@@ -2284,8 +2293,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           )
         })}
 
-        {/* Resize handle: Editor/WebPanels | Diff or Browser | Diff or Terminal | Diff */}
-        {!compact && panelVisibility.diff && (panelVisibility.editor || panelVisibility.browser || panelVisibility.terminal || enabledWebPanels.some(wp => panelVisibility[wp.id])) && (
+        {/* Resize handle before Diff */}
+        {!compact && panelVisibility.diff && getFirstVisibleTaskPanelId() !== 'diff' && (
           <ResizeHandle
             width={resolvedWidths.diff ?? 50}
             minWidth={50}
@@ -2293,12 +2302,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             onDragStart={() => setIsResizing(true)}
             onDragEnd={() => setIsResizing(false)}
             onReset={resetAllPanels}
+            style={panelOrderStyle('diff')}
           />
         )}
 
         {/* Git Panel */}
         {!compact && panelVisibility.diff && (
-          <div data-panel-id="diff" data-testid="task-git-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'diff' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.diff }}>
+          <div data-panel-id="diff" data-testid="task-git-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'diff' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.diff, ...panelOrderStyle('diff') }}>
             <UnifiedGitPanel
               ref={gitPanelRef}
               task={task}
@@ -2318,8 +2328,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           </div>
         )}
 
-        {/* Resize handle: Diff | Settings or Editor | Settings or ... */}
-        {!compact && panelVisibility.settings && (panelVisibility.diff || panelVisibility.editor || panelVisibility.browser || panelVisibility.terminal || enabledWebPanels.some(wp => panelVisibility[wp.id])) && (
+        {/* Resize handle before Settings */}
+        {!compact && panelVisibility.settings && getFirstVisibleTaskPanelId() !== 'settings' && (
           <ResizeHandle
             width={resolvedWidths.settings ?? 440}
             minWidth={200}
@@ -2327,12 +2337,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             onDragStart={() => setIsResizing(true)}
             onDragEnd={() => setIsResizing(false)}
             onReset={resetAllPanels}
+            style={panelOrderStyle('settings')}
           />
         )}
 
         {/* Settings Panel */}
         {!compact && panelVisibility.settings && (
-        <div data-panel-id="settings" data-testid="task-settings-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border p-3 flex flex-col gap-4 overflow-y-auto transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'settings' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.settings }}>
+        <div data-panel-id="settings" data-testid="task-settings-panel" className={cn("shrink-0 rounded-md bg-surface-1 border border-border p-3 flex flex-col gap-4 overflow-y-auto transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'settings' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.settings, ...panelOrderStyle('settings') }}>
           <TaskSettingsPanel
             taskId={task.id}
             renderDefaultContent={() => {
@@ -2622,8 +2633,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         </div>
         )}
 
-        {/* Resize handle: ... | Processes */}
-        {!compact && panelVisibility.processes && (panelVisibility.terminal || panelVisibility.browser || panelVisibility.editor || panelVisibility.diff || panelVisibility.settings || enabledWebPanels.some(wp => panelVisibility[wp.id])) && (
+        {/* Resize handle before Processes */}
+        {!compact && panelVisibility.processes && getFirstVisibleTaskPanelId() !== 'processes' && (
           <ResizeHandle
             width={resolvedWidths.processes ?? 300}
             minWidth={200}
@@ -2631,12 +2642,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             onDragStart={() => setIsResizing(true)}
             onDragEnd={() => setIsResizing(false)}
             onReset={resetAllPanels}
+            style={panelOrderStyle('processes')}
           />
         )}
 
         {/* Processes Panel */}
         {!compact && panelVisibility.processes && (
-          <div data-panel-id="processes" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'processes' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.processes }}>
+          <div data-panel-id="processes" className={cn("shrink-0 rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col transition-shadow duration-200", multipleVisiblePanels && focusedPanel === 'processes' && "shadow-[0_0_18px_rgba(255,255,255,0.25)]")} style={{ width: resolvedWidths.processes, ...panelOrderStyle('processes') }}>
             <ProcessesPanel taskId={task.id} projectId={project?.id ?? null} cwd={effectiveRepoPath || project?.path} terminalSessionId={getMainSessionId(task.id)} onOpenUrl={openDevServerInBrowser} />
           </div>
         )}

@@ -68,7 +68,7 @@ import { useUsage } from '@/components/usage/useUsage'
 import { useOnboardingChecklist } from '@/hooks/useOnboardingChecklist'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 // Extracted hooks (self-contained, clean interfaces)
-import { useHomePanel, HOME_PANEL_ORDER, HOME_PANEL_SIZE_KEY } from '@/hooks/useHomePanel'
+import { useHomePanel, HOME_PANEL_SIZE_KEY } from '@/hooks/useHomePanel'
 import { useTerminalStateTracking } from '@/hooks/useTerminalStateTracking'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
 import { useTabColors } from '@/hooks/useTabColors'
@@ -185,11 +185,12 @@ function App(): React.JSX.Element {
   const explodeGridRef = useRef<HTMLDivElement | null>(null)
   const [explodeGridWidth, setExplodeGridWidth] = useState(0)
   const [panelSizes, updatePanelSizes, resetPanelSize] = usePanelSizes()
-  const { isBuiltinEnabled: isHomePanelEnabled } = usePanelConfig()
+  const { isBuiltinEnabled: isHomePanelEnabled, getOrderedHomeIds } = usePanelConfig()
+  const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
   const [updateVersion, setUpdateVersion] = useState<string | null>(null)
 
   // Home panel state (extracted — owns its own state fully)
-  const homePanel = useHomePanel(selectedProjectId, panelSizes)
+  const homePanel = useHomePanel(selectedProjectId, panelSizes, orderedHomeIds)
 
   // Multi-repo detection for home tab
   const homeSelectedProject = useMemo(() => projects.find(p => p.id === selectedProjectId), [projects, selectedProjectId])
@@ -1226,21 +1227,29 @@ function App(): React.JSX.Element {
                               <FilterBar filter={filter} onChange={setFilter} tags={projectTags} columns={selectedProject?.columns_config} />
                             </div>
                           )}
-                          {projects.length > 0 && (
-                            <div className="min-w-0">
-                            <PanelToggle
-                              panels={[
-                                { id: 'kanban', icon: Kanban, label: 'Kanban', active: homePanel.homePanelVisibility.kanban, disabled: !selectedProjectId },
-                                { id: 'git', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut, active: homePanel.homePanelVisibility.git, disabled: !selectedProjectId },
-                                { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut, active: homePanel.homePanelVisibility.editor, disabled: !selectedProjectId },
-                                { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut, active: homePanel.homePanelVisibility.processes, disabled: !selectedProjectId },
-                                ...(testsPanelEnabled ? [{ id: 'tests', icon: FlaskConical, label: 'Tests', shortcut: panelTestsShortcut, active: homePanel.homePanelVisibility.tests, disabled: !selectedProjectId }] : []),
-                                { id: 'automations', icon: Zap, label: 'Automations', shortcut: panelAutomationsShortcut, active: homePanel.homePanelVisibility.automations, disabled: !selectedProjectId },
-                              ].filter(p => p.id === 'kanban' || isHomePanelEnabled(p.id, 'home'))}
-                              onChange={(id, active) => homePanel.setHomePanelVisibility(prev => ({ ...prev, [id]: active }))}
-                            />
-                            </div>
-                          )}
+                          {projects.length > 0 && (() => {
+                            const entries: Record<string, { id: string; icon: typeof Kanban; label: string; shortcut?: string | null; active: boolean; disabled: boolean }> = {
+                              kanban: { id: 'kanban', icon: Kanban, label: 'Kanban', active: homePanel.homePanelVisibility.kanban, disabled: !selectedProjectId },
+                              git: { id: 'git', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut, active: homePanel.homePanelVisibility.git, disabled: !selectedProjectId },
+                              editor: { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut, active: homePanel.homePanelVisibility.editor, disabled: !selectedProjectId },
+                              processes: { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut, active: homePanel.homePanelVisibility.processes, disabled: !selectedProjectId },
+                              tests: { id: 'tests', icon: FlaskConical, label: 'Tests', shortcut: panelTestsShortcut, active: homePanel.homePanelVisibility.tests, disabled: !selectedProjectId },
+                              automations: { id: 'automations', icon: Zap, label: 'Automations', shortcut: panelAutomationsShortcut, active: homePanel.homePanelVisibility.automations, disabled: !selectedProjectId },
+                            }
+                            const ordered = homePanel.orderedHomePanelIds
+                              .map(id => entries[id])
+                              .filter((e): e is NonNullable<typeof e> => !!e)
+                              .filter(p => p.id === 'kanban' || isHomePanelEnabled(p.id, 'home'))
+                              .filter(p => p.id !== 'tests' || testsPanelEnabled)
+                            return (
+                              <div className="min-w-0">
+                                <PanelToggle
+                                  panels={ordered}
+                                  onChange={(id, active) => homePanel.setHomePanelVisibility(prev => ({ ...prev, [id]: active }))}
+                                />
+                              </div>
+                            )
+                          })()}
                         </div>
                       </header>
 
@@ -1257,7 +1266,7 @@ function App(): React.JSX.Element {
                         </div>
                       ) : (
                         <div ref={homePanel.homeContainerRef} className="flex-1 min-h-0 flex">
-                          {HOME_PANEL_ORDER.filter(id => homePanel.homePanelVisibility[id]).map((id, i) => {
+                          {homePanel.orderedHomePanelIds.filter(id => homePanel.homePanelVisibility[id]).map((id, i) => {
                             const projectPath = homeResolvedRepo.path ?? (projects.find(p => p.id === selectedProjectId)?.path ?? null)
                             const w = homePanel.homeResolvedWidths[id] ?? 400
                             return (

@@ -5,16 +5,26 @@ import { track } from '@slayzone/telemetry/client'
 import { useHomePanelState } from '@/hooks/useHomePanelVisibility'
 
 export type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
-const HOME_PANEL_ORDER: HomePanel[] = ['kanban', 'git', 'editor', 'processes', 'tests', 'automations']
+const DEFAULT_HOME_PANEL_ORDER: HomePanel[] = ['kanban', 'git', 'editor', 'processes', 'tests', 'automations']
 const HOME_PANEL_SIZE_KEY: Record<HomePanel, string> = { kanban: 'kanban', git: 'diff', editor: 'editor', processes: 'processes', tests: 'tests', automations: 'automations' }
 const HANDLE_WIDTH = 16
 
-export { HOME_PANEL_ORDER, HOME_PANEL_SIZE_KEY }
+export { DEFAULT_HOME_PANEL_ORDER as HOME_PANEL_ORDER, HOME_PANEL_SIZE_KEY }
 
 export function useHomePanel(
   selectedProjectId: string,
-  panelSizes: Record<string, number | 'auto'>
+  panelSizes: Record<string, number | 'auto'>,
+  userOrderedIds?: string[]
 ) {
+  const HOME_PANEL_ORDER: HomePanel[] = useMemo(() => {
+    if (!userOrderedIds || userOrderedIds.length === 0) return DEFAULT_HOME_PANEL_ORDER
+    const known = new Set<string>(DEFAULT_HOME_PANEL_ORDER as string[])
+    const valid = userOrderedIds.filter(id => known.has(id)) as HomePanel[]
+    const out: HomePanel[] = ['kanban']
+    for (const id of valid) if (id !== 'kanban' && !out.includes(id)) out.push(id)
+    for (const id of DEFAULT_HOME_PANEL_ORDER) if (!out.includes(id)) out.push(id)
+    return out
+  }, [userOrderedIds])
   const [homePanelState, setHomePanelState] = useHomePanelState(selectedProjectId)
   const homePanelVisibility = homePanelState.visibility
   const visibilityRef = useRef(homePanelVisibility)
@@ -84,6 +94,7 @@ export function useHomePanel(
     pendingHomeSearchToggleRef,
     homeEditorRefCallback,
     homeContainerRef,
-    homeResolvedWidths
+    homeResolvedWidths,
+    orderedHomePanelIds: HOME_PANEL_ORDER,
   }
 }

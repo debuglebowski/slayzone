@@ -1,6 +1,21 @@
 import type { PanelConfig, WebPanelDefinition } from './types'
-import { PREDEFINED_WEB_PANELS } from './types'
+import { PREDEFINED_WEB_PANELS, DEFAULT_PANEL_ORDER, PANEL_ORDER_IDS } from './types'
 import { inferHostScopeFromUrl, inferProtocolFromUrl } from './handoff'
+
+/** Ensure config.order exists and contains every current panel ID (natives + web).
+ *  Missing IDs are appended in their default position; removed web panels are pruned. */
+export function mergePanelOrder(config: PanelConfig): PanelConfig {
+  const validIds = new Set<string>([...PANEL_ORDER_IDS, ...config.webPanels.map(wp => wp.id)])
+  const prev = config.order ?? []
+  const filtered = prev.filter(id => validIds.has(id))
+  const present = new Set(filtered)
+  const missing: string[] = []
+  for (const id of DEFAULT_PANEL_ORDER) if (validIds.has(id) && !present.has(id)) missing.push(id)
+  for (const wp of config.webPanels) if (!present.has(wp.id) && !DEFAULT_PANEL_ORDER.includes(wp.id)) missing.push(wp.id)
+  const next = [...filtered, ...missing]
+  const changed = !config.order || next.length !== prev.length || next.some((id, i) => id !== prev[i])
+  return changed ? { ...config, order: next } : config
+}
 
 /** Merge predefined panels into stored config (adds missing, syncs defaults, skips user-deleted). */
 export function mergePredefinedWebPanels(config: PanelConfig): PanelConfig {
