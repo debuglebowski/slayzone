@@ -461,7 +461,20 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const devServerAutoOpenCallbackRef = useRef<((url: string) => void) | null>(null)
   const browserOpenRef = useRef(panelVisibility.browser)
   const gitPanelRef = useRef<UnifiedGitPanelHandle>(null)
-  const [gitDefaultTab, setGitDefaultTab] = useState<GitTabId>('general')
+  const [gitDefaultTab, setGitDefaultTab] = useState<GitTabId>(() => task?.git_active_tab ?? 'general')
+  const gitTabSyncedRef = useRef(!!task?.git_active_tab)
+  useEffect(() => {
+    if (gitTabSyncedRef.current) return
+    if (task?.git_active_tab) {
+      setGitDefaultTab(task.git_active_tab)
+      gitTabSyncedRef.current = true
+    }
+  }, [task?.git_active_tab])
+  const handleGitTabChange = useCallback((tab: GitTabId) => {
+    setGitDefaultTab(tab)
+    gitTabSyncedRef.current = true
+    if (task?.id) void window.api.db.updateTask({ id: task.id, gitActiveTab: tab })
+  }, [task?.id])
   const fileEditorRef = useRef<FileEditorViewHandle>(null)
   const terminalContainerRef = useRef<TerminalContainerHandle>(null)
   const [mainTabDisplayMode, setMainTabDisplayMode] = useState<TabDisplayMode>('xterm')
@@ -2317,6 +2330,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               completedStatus={completedStatus}
               visible={panelVisibility.diff}
               defaultTab={gitDefaultTab}
+              onTabChange={handleGitTabChange}
               pollIntervalMs={5000}
               onUpdateTask={updateTaskAndNotify}
               onTaskUpdated={handleTaskUpdate}

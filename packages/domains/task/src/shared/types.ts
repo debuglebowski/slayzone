@@ -399,6 +399,8 @@ export interface Task {
   editor_open_files: EditorOpenFilesState | null
   // Diff panel collapsed file keys (JSON array of `${source}:${path}` strings)
   diff_collapsed_files: string[] | null
+  // Git panel active sub-tab (persisted per task)
+  git_active_tab: GitTabId | null
   // Merge mode
   merge_state: MergeState | null
   merge_context: MergeContext | null
@@ -501,6 +503,8 @@ export interface UpdateTaskInput {
   // Editor state
   editorOpenFiles?: EditorOpenFilesState | null
   diffCollapsedFiles?: string[] | null
+  // Git panel active sub-tab
+  gitActiveTab?: GitTabId | null
   // Merge mode
   mergeState?: MergeState | null
   mergeContext?: MergeContext | null

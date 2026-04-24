@@ -2129,6 +2129,12 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(`ALTER TABLE tasks ADD COLUMN diff_collapsed_files TEXT DEFAULT NULL`)
     }
+  },
+  {
+    version: 121,
+    up: (db) => {
+      db.exec(`ALTER TABLE tasks ADD COLUMN git_active_tab TEXT DEFAULT NULL`)
+    }
   }
 ]
 
