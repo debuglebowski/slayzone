@@ -4,9 +4,9 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { SortableContext, sortableKeyboardCoordinates, useSortable, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSeparator, Switch, Tooltip, TooltipContent, TooltipTrigger, IconButton, getAgentPanelLabel } from '@slayzone/ui'
-import type { PanelConfig, PanelView, WebPanelDefinition } from '@slayzone/task/shared'
+import type { PanelConfig, PanelView, WebPanelDefinition, GitTabId, GitTabVisibility } from '@slayzone/task/shared'
 import type { TerminalMode, TerminalModeInfo } from '@slayzone/terminal/shared'
-import { DEFAULT_PANEL_CONFIG, isPanelEnabled, inferHostScopeFromUrl, inferProtocolFromUrl, mergePanelOrder, mergePredefinedWebPanels, normalizeDesktopProtocol, validatePanelShortcut } from '@slayzone/task/shared'
+import { DEFAULT_PANEL_CONFIG, DEFAULT_GIT_TAB_ORDER, GIT_TAB_LABELS, isGitTabEnabled, isPanelEnabled, inferHostScopeFromUrl, inferProtocolFromUrl, mergePanelOrder, mergePredefinedWebPanels, normalizeDesktopProtocol, normalizeGitTabOrder, normalizeGitTabVisibility, validatePanelShortcut } from '@slayzone/task/shared'
 import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { PanelBreadcrumb } from './PanelBreadcrumb'
@@ -83,6 +83,56 @@ function buildPanelRowDescriptors(
     })
   }
   return m
+}
+
+function SortableGitTabRow({
+  id,
+  enabled,
+  onToggle,
+  locked,
+  lockedHint,
+}: {
+  id: GitTabId
+  enabled: boolean
+  onToggle: (next: boolean) => void
+  locked?: boolean
+  lockedHint?: string
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-3 h-9 rounded-md border px-2"
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="shrink-0 flex items-center justify-center size-6 text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing touch-none"
+        aria-label="Drag to reorder"
+      >
+        <GripVertical className="size-4" />
+      </button>
+      <span className="text-sm flex-1 min-w-0 truncate">{GIT_TAB_LABELS[id]}</span>
+      {locked
+        ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span><Switch disabled checked /></span>
+            </TooltipTrigger>
+            <TooltipContent side="top">{lockedHint ?? 'Always visible'}</TooltipContent>
+          </Tooltip>
+        )
+        : <Switch checked={enabled} onCheckedChange={onToggle} />
+      }
+    </div>
+  )
 }
 
 function SortablePanelRow({ id, descriptor }: { id: string; descriptor: PanelRowDescriptor }) {
@@ -172,6 +222,10 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
   const [graphShowBranches, setGraphShowBranches] = useState(true)
   const [graphBreakOnTags, setGraphBreakOnTags] = useState(true)
   const [graphBreakOnMerges, setGraphBreakOnMerges] = useState(true)
+
+  // Git sub-tab order + visibility
+  const [gitTabOrder, setGitTabOrder] = useState<GitTabId[]>(() => [...DEFAULT_GIT_TAB_ORDER])
+  const [gitTabVisibility, setGitTabVisibility] = useState<GitTabVisibility>({})
   
   // Browser
   const [devServerToastEnabled, setDevServerToastEnabled] = useState(true)
@@ -224,7 +278,9 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
       window.api.settings.get('browser_default_devices'),
       window.api.settings.get('commit_graph_config'),
       window.api.settings.get('editor_markdown_view_mode'),
-    ]).then(([pc, tff, ts, eww, erw, ets, eit, dcl, diw, dcf, dtc, dsbs, dwr, dste, dsaob, bdu, bdz, bdd, cgc, emvm]) => {
+      window.api.settings.get('git_tab_order'),
+      window.api.settings.get('git_tab_visibility'),
+    ]).then(([pc, tff, ts, eww, erw, ets, eit, dcl, diw, dcf, dtc, dsbs, dwr, dste, dsaob, bdu, bdz, bdd, cgc, emvm, gto, gtv]) => {
       if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
       if (tff) setTerminalFontFamily(tff)
       if (ts) setTerminalScrollback(ts)
@@ -262,6 +318,8 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
         } catch { /* ignore */ }
       }
       if (emvm === 'split' || emvm === 'code') setEditorMarkdownViewMode(emvm)
+      setGitTabOrder(normalizeGitTabOrder(gto))
+      setGitTabVisibility(normalizeGitTabVisibility(gtv))
     })
 
     const cleanupIpc = window.api?.app?.onSettingsChanged?.(() => {
@@ -628,9 +686,52 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
           if ('breakOnMerges' in patch) setGraphBreakOnMerges(next.breakOnMerges as boolean)
           window.api.settings.set('commit_graph_config', JSON.stringify(next))
         }
+        const handleGitTabDragEnd = (e: DragEndEvent) => {
+          const { active, over } = e
+          if (!over || active.id === over.id) return
+          const oldIdx = gitTabOrder.indexOf(active.id as GitTabId)
+          const newIdx = gitTabOrder.indexOf(over.id as GitTabId)
+          if (oldIdx < 0 || newIdx < 0) return
+          const next = arrayMove(gitTabOrder, oldIdx, newIdx)
+          setGitTabOrder(next)
+          window.api.settings.set('git_tab_order', JSON.stringify(next))
+          window.dispatchEvent(new Event('sz:settings-changed'))
+        }
+        const toggleGitTab = (id: GitTabId, enabled: boolean) => {
+          const next: GitTabVisibility = { ...gitTabVisibility, [id]: enabled }
+          setGitTabVisibility(next)
+          window.api.settings.set('git_tab_visibility', JSON.stringify(next))
+          window.dispatchEvent(new Event('sz:settings-changed'))
+        }
         return (
           <div className="rounded-lg border p-5 space-y-6">
             <PanelBreadcrumb label="Git" onBack={() => navigateTo('panels')} />
+
+            {/* Tabs — order + visibility */}
+            <div>
+              <Label className="text-base font-semibold">Tabs</Label>
+              <p className="text-xs text-muted-foreground mt-1">Drag to reorder. Toggle to show/hide. Conflicts tab always appears when a merge/rebase is in progress.</p>
+              <div className="mt-3">
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleGitTabDragEnd}>
+                  <SortableContext items={gitTabOrder} strategy={verticalListSortingStrategy}>
+                    <div className="space-y-1.5">
+                      {gitTabOrder.map(id => (
+                        <SortableGitTabRow
+                          key={id}
+                          id={id}
+                          enabled={isGitTabEnabled(gitTabVisibility, id)}
+                          onToggle={(v) => toggleGitTab(id, v)}
+                          locked={id === 'conflicts'}
+                          lockedHint="Shown automatically during merge conflicts"
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              </div>
+            </div>
+
+            <div className="h-px bg-border" />
 
             {/* Diff settings */}
             <div>

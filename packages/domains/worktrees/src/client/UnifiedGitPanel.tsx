@@ -3,6 +3,7 @@ import { Check, X, SkipForward, AlertTriangle, RefreshCw, Plus, PanelLeftClose, 
 import { Button, Checkbox, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tooltip, TooltipContent, TooltipTrigger, cn, useShortcutDisplay } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
 import type { Task, UpdateTaskInput, MergeContext } from '@slayzone/task/shared'
+import { DEFAULT_GIT_TAB_ORDER, isGitTabEnabled, normalizeGitTabOrder, normalizeGitTabVisibility, type GitTabId, type GitTabVisibility } from '@slayzone/task/shared'
 import type { FilterState } from '@slayzone/tasks'
 import type { Project, DetectedRepo } from '@slayzone/projects/shared'
 import { GitDiffPanel, type GitDiffPanelHandle } from './GitDiffPanel'
@@ -13,7 +14,7 @@ import { WorktreesTab, type WorktreesTabHandle } from './WorktreesTab'
 import { PullRequestTab } from './PullRequestTab'
 import { ProjectPrTab } from './ProjectPrTab'
 import { StashTab, type StashTabHandle } from './StashTab'
-export type GitTabId = 'general' | 'changes' | 'conflicts' | 'worktrees' | 'pr' | 'stash'
+export type { GitTabId } from '@slayzone/task/shared'
 
 type UnifiedGitPanelProps = {
   task?: Task | null
@@ -112,6 +113,36 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
 
   const showWorktrees = !task
   const [hasGithubRemote, setHasGithubRemote] = useState(false)
+  const [tabOrder, setTabOrder] = useState<GitTabId[]>(() => [...DEFAULT_GIT_TAB_ORDER])
+  const [tabVisibility, setTabVisibility] = useState<GitTabVisibility>({})
+
+  // Single predicate used by both render + auto-switch fallback.
+  // Conflicts tab bypasses the user toggle — always shown when merge/rebase conflicts are live.
+  const isTabVisible = useCallback((id: GitTabId): boolean => {
+    if (id === 'conflicts') return hasConflicts
+    if (!isGitTabEnabled(tabVisibility, id)) return false
+    if (id === 'worktrees') return showWorktrees
+    if (id === 'pr') return hasGithubRemote && (!task || !!task.pr_url)
+    return true
+  }, [hasConflicts, tabVisibility, showWorktrees, hasGithubRemote, task])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () => {
+      Promise.all([
+        window.api.settings.get('git_tab_order'),
+        window.api.settings.get('git_tab_visibility'),
+      ]).then(([order, vis]) => {
+        if (cancelled) return
+        setTabOrder(normalizeGitTabOrder(order))
+        setTabVisibility(normalizeGitTabVisibility(vis))
+      })
+    }
+    load()
+    const handler = () => load()
+    window.addEventListener('sz:settings-changed', handler)
+    return () => { cancelled = true; window.removeEventListener('sz:settings-changed', handler) }
+  }, [])
 
   const { diffContinuousFlow, diffTreeCollapsed, diffSideBySide, diffWrap } = useAppearance()
   const setBoolSetting = useCallback((key: string, value: boolean) => {
@@ -135,18 +166,13 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
     if (isUncommitted) setActiveTab('changes')
   }, [isUncommitted])
 
-  // Reset active tab if worktrees/pr becomes hidden (or stale 'branches' from persisted state)
+  // Reset active tab if it becomes hidden (runtime gate, user toggle, or stale 'branches').
   useEffect(() => {
-    if (!showWorktrees && activeTab === 'worktrees') {
-      setActiveTab('general')
+    if ((activeTab as string) === 'branches' || !isTabVisible(activeTab)) {
+      const fallback = tabOrder.find(isTabVisible) ?? 'general'
+      setActiveTab(fallback)
     }
-    if (!hasGithubRemote && activeTab === 'pr') {
-      setActiveTab('general')
-    }
-    if ((activeTab as string) === 'branches') {
-      setActiveTab('general')
-    }
-  }, [showWorktrees, hasGithubRemote, activeTab])
+  }, [activeTab, isTabVisible, tabOrder])
 
   // Merge-mode: commit and continue merge
   const handleCommitAndContinueMerge = useCallback(async () => {
@@ -206,51 +232,76 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
       <div className="h-full flex flex-col">
       {/* Unified header: tabs left, actions right */}
       <div className="shrink-0 h-10 px-2 border-b border-border bg-surface-1 flex items-center gap-1">
-        <TabButton
-          active={activeTab === 'general'}
-          onClick={() => setActiveTab('general')}
-          shortcut={gitGeneralShortcut}
-        >
-          General
-        </TabButton>
-        <TabButton
-          active={activeTab === 'changes'}
-          onClick={() => setActiveTab('changes')}
-          shortcut={gitDiffShortcut}
-        >
-          Diff
-        </TabButton>
-        <TabButton
-          active={activeTab === 'stash'}
-          onClick={() => setActiveTab('stash')}
-        >
-          Stash
-        </TabButton>
-        {showWorktrees && (
-          <TabButton
-            active={activeTab === 'worktrees'}
-            onClick={() => setActiveTab('worktrees')}
-          >
-            Worktrees
-          </TabButton>
-        )}
-        {hasConflicts && (
-          <TabButton
-            active={activeTab === 'conflicts'}
-            onClick={() => setActiveTab('conflicts')}
-            badge
-          >
-            Conflicts
-          </TabButton>
-        )}
-        {hasGithubRemote && (!task || task.pr_url) && (
-          <TabButton
-            active={activeTab === 'pr'}
-            onClick={() => setActiveTab('pr')}
-          >
-            {task ? <>Pull request{task.pr_url && <span className="text-muted-foreground ml-1">#{task.pr_url.match(/\/pull\/(\d+)/)?.[1]}</span>}</> : 'Pull requests'}
-          </TabButton>
-        )}
+        {tabOrder.map(tabId => {
+          if (!isTabVisible(tabId)) return null
+          switch (tabId) {
+            case 'general':
+              return (
+                <TabButton
+                  key="general"
+                  active={activeTab === 'general'}
+                  onClick={() => setActiveTab('general')}
+                  shortcut={gitGeneralShortcut}
+                >
+                  General
+                </TabButton>
+              )
+            case 'changes':
+              return (
+                <TabButton
+                  key="changes"
+                  active={activeTab === 'changes'}
+                  onClick={() => setActiveTab('changes')}
+                  shortcut={gitDiffShortcut}
+                >
+                  Diff
+                </TabButton>
+              )
+            case 'stash':
+              return (
+                <TabButton
+                  key="stash"
+                  active={activeTab === 'stash'}
+                  onClick={() => setActiveTab('stash')}
+                >
+                  Stash
+                </TabButton>
+              )
+            case 'worktrees':
+              return (
+                <TabButton
+                  key="worktrees"
+                  active={activeTab === 'worktrees'}
+                  onClick={() => setActiveTab('worktrees')}
+                >
+                  Worktrees
+                </TabButton>
+              )
+            case 'conflicts':
+              return (
+                <TabButton
+                  key="conflicts"
+                  active={activeTab === 'conflicts'}
+                  onClick={() => setActiveTab('conflicts')}
+                  badge
+                >
+                  Conflicts
+                </TabButton>
+              )
+            case 'pr':
+              return (
+                <TabButton
+                  key="pr"
+                  active={activeTab === 'pr'}
+                  onClick={() => setActiveTab('pr')}
+                >
+                  {task ? <>Pull request{task.pr_url && <span className="text-muted-foreground ml-1">#{task.pr_url.match(/\/pull\/(\d+)/)?.[1]}</span>}</> : 'Pull requests'}
+                </TabButton>
+              )
+            default:
+              return null
+          }
+        })}
 
         {/* Right-aligned actions */}
         <div className="flex-1" />

@@ -1288,7 +1288,7 @@ function App(): React.JSX.Element {
                                   )}
                                   {id === 'git' && (
                                     <Suspense fallback={<div className="h-full animate-pulse bg-muted/30 rounded" />}>
-                                    <UnifiedGitPanel ref={homePanel.homeGitPanelRef} projectId={selectedProjectId} projectPath={projectPath} visible={true}
+                                    <UnifiedGitPanel ref={homePanel.homeGitPanelRef} projectId={selectedProjectId} projectPath={projectPath} visible={isViewActive}
                                       defaultTab={homePanel.homeGitDefaultTab} onTabChange={homePanel.setHomeGitDefaultTab} tasks={tasks} filter={filter} projects={projects}
                                       onTaskClick={(t) => handleTaskClick(t, { metaKey: false })}
                                       onUpdateTask={(data) => window.api.db.updateTask(data).then(t => { updateTask(t); return t })}

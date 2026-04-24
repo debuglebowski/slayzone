@@ -162,6 +162,65 @@ export const DEFAULT_PANEL_ORDER: string[] = [
   ...PREDEFINED_WEB_PANELS.map(wp => wp.id),
 ]
 
+// Git panel sub-tabs (rendered inside UnifiedGitPanel).
+export type GitTabId = 'general' | 'changes' | 'conflicts' | 'worktrees' | 'pr' | 'stash'
+
+export const DEFAULT_GIT_TAB_ORDER: readonly GitTabId[] = [
+  'general', 'changes', 'stash', 'worktrees', 'conflicts', 'pr',
+]
+
+export const GIT_TAB_LABELS: Record<GitTabId, string> = {
+  general: 'General',
+  changes: 'Diff',
+  stash: 'Stash',
+  worktrees: 'Worktrees',
+  conflicts: 'Conflicts',
+  pr: 'Pull request',
+}
+
+/** Per-tab enable/disable. Missing key = enabled (default on). */
+export type GitTabVisibility = Partial<Record<GitTabId, boolean>>
+
+export function isGitTabEnabled(vis: GitTabVisibility, id: GitTabId): boolean {
+  return vis[id] !== false
+}
+
+/** Parse persisted `git_tab_visibility` value, tolerating unknown keys. */
+export function normalizeGitTabVisibility(raw: string | null | undefined): GitTabVisibility {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: GitTabVisibility = {}
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (k in GIT_TAB_LABELS && typeof v === 'boolean') out[k as GitTabId] = v
+    }
+    return out
+  } catch { return {} }
+}
+
+/** Parse persisted `git_tab_order` value, tolerating unknown/missing ids. */
+export function normalizeGitTabOrder(raw: string | null | undefined): GitTabId[] {
+  const fallback = [...DEFAULT_GIT_TAB_ORDER]
+  if (!raw) return fallback
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return fallback
+    const seen = new Set<GitTabId>()
+    const out: GitTabId[] = []
+    for (const v of parsed) {
+      if (typeof v === 'string' && v in GIT_TAB_LABELS && !seen.has(v as GitTabId)) {
+        seen.add(v as GitTabId)
+        out.push(v as GitTabId)
+      }
+    }
+    for (const id of DEFAULT_GIT_TAB_ORDER) if (!seen.has(id)) out.push(id)
+    return out
+  } catch {
+    return fallback
+  }
+}
+
 export const DEFAULT_PANEL_CONFIG: PanelConfig = {
   viewEnabled: {
     home: { git: true, editor: true, processes: true, tests: true, automations: true },
