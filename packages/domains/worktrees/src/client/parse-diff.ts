@@ -30,12 +30,6 @@ export interface FileDiff {
   isDeleted: boolean
   additions: number
   deletions: number
-  /**
-   * Set by `ensureInlineHighlights` after inline-highlight pass has run for
-   * this file's hunks. Lets callers invoke the helper idempotently so we
-   * only compute highlights for files the user actually looks at.
-   */
-  _highlightsApplied?: boolean
 }
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/
@@ -83,16 +77,21 @@ export function computeInlineHighlights(
   }
 }
 
+// WeakMap-backed marker. Keying off the FileDiff identity avoids mutating
+// cached parse-result objects, so the parse cache stays a pure value cache.
+// Garbage-collected automatically when the FileDiff falls out of cache.
+const highlightsAppliedMark = new WeakSet<FileDiff>()
+
 /**
  * Compute inline char-level highlights for paired add/delete lines in the
- * given FileDiff. Idempotent — a `_highlightsApplied` flag on the FileDiff
- * short-circuits repeat calls. Called lazily by `DiffView` just before a file
+ * given FileDiff. Idempotent via a module-level WeakSet — first call computes,
+ * later calls are no-ops. Called lazily by `DiffView` just before a file
  * renders so offscreen files in large patches never pay the cost.
  */
 export function ensureInlineHighlights(fileDiff: FileDiff): void {
-  if (fileDiff._highlightsApplied) return
+  if (highlightsAppliedMark.has(fileDiff)) return
   applyInlineHighlights(fileDiff.hunks)
-  fileDiff._highlightsApplied = true
+  highlightsAppliedMark.add(fileDiff)
 }
 
 function applyInlineHighlights(hunks: DiffHunk[]): void {

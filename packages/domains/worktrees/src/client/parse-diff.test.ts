@@ -361,7 +361,6 @@ test('ensureInlineHighlights is idempotent', () => {
   const fd = parseUnifiedDiff(patch)[0]
   ensureInlineHighlights(fd)
   ensureInlineHighlights(fd) // second call is a no-op
-  expect(fd._highlightsApplied).toBe(true)
   const lines = fd.hunks[0].lines
   expect(lines[0].highlights).toEqual([{ start: 10, end: 11 }])
 })
