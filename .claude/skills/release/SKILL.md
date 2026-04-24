@@ -52,6 +52,8 @@ Categories:
 - `improvement` — enhancements to existing features
 - `fix` — bug fixes users would notice
 
+**Deduplicate by feature, not by commit.** One feature often spans multiple commits (initial impl + follow-up fixes + polish + refactor). Collapse all commits touching the same user-facing capability into a single entry. Group by what the user sees, not by git history. If a feature was added then later fixed in the same release window, emit one entry describing the final state (usually `feature`, not `feature` + `fix`). Same for iterative improvements to one area — merge into one `improvement` entry.
+
 ### 6. Commit and confirm
 
 ```
