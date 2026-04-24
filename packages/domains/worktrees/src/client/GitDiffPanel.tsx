@@ -936,8 +936,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
                   All turns
                 </button>
                 {[...turns].reverse().map((t, idx) => {
-                  // Newest visible turn = Turn 1, older = 2,3,...
-                  const n = idx + 1
+                  // Newest = highest number. With turns sorted oldest→newest,
+                  // reversed iteration starts at newest (idx 0) → n = length - idx.
+                  const n = turns.length - idx
                   const active = selectedTurnId === t.id
                   const tip = [
                     t.task_title ? `Task: ${t.task_title}` : null,
