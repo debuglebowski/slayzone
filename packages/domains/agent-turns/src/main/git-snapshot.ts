@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -93,4 +93,12 @@ export async function deleteTurnRef(repoPath: string, turnId: string): Promise<v
 export async function diffIsEmpty(repoPath: string, fromSha: string, toSha: string): Promise<boolean> {
   const res = await exec(['diff', '--quiet', fromSha, toSha], repoPath)
   return res.status === 0
+}
+
+/** Synchronous variant for list-time filtering. Returns true if SHAs are
+ * identical OR `git diff --quiet` exits 0. */
+export function diffIsEmptySync(repoPath: string, fromSha: string, toSha: string): boolean {
+  if (fromSha === toSha) return true
+  const r = spawnSync('git', ['diff', '--quiet', fromSha, toSha], { cwd: repoPath })
+  return r.status === 0
 }
