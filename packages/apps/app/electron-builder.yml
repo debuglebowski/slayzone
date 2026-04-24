@@ -34,6 +34,9 @@ mac:
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    - NSDesktopFolderUsageDescription: Application requests access to the user's Desktop folder.
+    - NSRemovableVolumesUsageDescription: Application requests access to removable volumes.
+    - NSNetworkVolumesUsageDescription: Application requests access to network volumes.
   notarize: true
 dmg:
   artifactName: ${productName}-${arch}.${ext}

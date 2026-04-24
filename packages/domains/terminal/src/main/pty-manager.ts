@@ -1,5 +1,5 @@
 import * as pty from 'node-pty'
-import { existsSync, writeSync } from 'fs'
+import { accessSync, constants as fsConstants, existsSync, writeSync } from 'fs'
 import { execFile } from 'child_process'
 import { app, BrowserWindow, Notification, nativeTheme } from 'electron'
 import { homedir, platform, userInfo } from 'os'
@@ -620,21 +620,41 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       mcpEnv
     )
 
-    // Validate cwd exists before spawn — posix_spawnp fails with an opaque
-    // error when the directory is missing.  Fall back to homedir so the
-    // terminal still opens.
+    // Validate cwd exists AND is readable before spawn. posix_spawnp fails
+    // opaquely on missing dirs; a dir that exists but isn't readable (mode
+    // bits, ACL, or macOS TCC denying reads on Desktop/Documents/iCloud/
+    // network volumes) lets spawn succeed but then shell init breaks — e.g.
+    // `brew shellenv` aborts with "current working directory must be readable
+    // to $USER to run brew", which in turn breaks PATH for every CLI launched
+    // through the shell (droid, etc.). Fall back to homedir in either case.
     let effectiveCwd = transport ? transport.cwd : (cwd || homedir())
-    if (!transport && effectiveCwd && !existsSync(effectiveCwd)) {
+    if (!transport && effectiveCwd) {
       const fallback = homedir()
-      recordDiagnosticEvent({
-        level: 'warn',
-        source: 'pty',
-        event: 'pty.cwd_fallback',
-        sessionId,
-        taskId,
-        message: `cwd not found: ${effectiveCwd}, falling back to ${fallback}`
-      })
-      effectiveCwd = fallback
+      if (!existsSync(effectiveCwd)) {
+        recordDiagnosticEvent({
+          level: 'warn',
+          source: 'pty',
+          event: 'pty.cwd_fallback',
+          sessionId,
+          taskId,
+          message: `cwd not found: ${effectiveCwd}, falling back to ${fallback}`
+        })
+        effectiveCwd = fallback
+      } else {
+        try {
+          accessSync(effectiveCwd, fsConstants.R_OK)
+        } catch {
+          recordDiagnosticEvent({
+            level: 'warn',
+            source: 'pty',
+            event: 'pty.cwd_unreadable_fallback',
+            sessionId,
+            taskId,
+            message: `cwd not readable: ${effectiveCwd}, falling back to ${fallback}. Check dir perms or grant SlayZone Full Disk Access in System Settings → Privacy & Security.`
+          })
+          effectiveCwd = fallback
+        }
+      }
     }
 
     const spawnOptions = {
