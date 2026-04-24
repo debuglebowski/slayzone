@@ -206,7 +206,7 @@ await describe('initChatTurnSubscriber', () => {
 })
 
 await describe('initPtyTurnSubscriber', () => {
-  test('claude-code mode tab + non-empty Enter → row', async () => {
+  test('claude-code mode tab + non-empty Enter → row w/ empty prompt', async () => {
     const { tabId, repo, taskId } = freshTask()
     fs.writeFileSync(path.join(repo, 'pty.txt'), 'change')
     const sub = initPtyTurnSubscriber(h.db)
@@ -214,7 +214,10 @@ await describe('initPtyTurnSubscriber', () => {
     await new Promise((r) => setTimeout(r, 250))
     const list = listTurnsForWorktree(h.db, repo)
     expect(list).toHaveLength(1)
-    expect(list[0].prompt_preview).toBe('do work')
+    // Raw PTY stdin is unreliable (contains edit keystrokes/escapes) — we don't
+    // reconstruct it. prompt_preview stays empty until a structured-event source
+    // exists for TUI agents.
+    expect(list[0].prompt_preview).toBe('')
     expect(list[0].terminal_tab_id).toBe(tabId)
   })
 

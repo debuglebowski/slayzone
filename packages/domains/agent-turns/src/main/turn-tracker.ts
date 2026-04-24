@@ -10,6 +10,18 @@ import {
   findTurnsToPrune,
 } from './db'
 
+/**
+ * Check whether a prompt text is "clean" enough to store as a preview.
+ * Structured-event sources (chat mode `user-message`) always pass. Raw PTY
+ * stdin snapshots don't — they contain edit keystrokes, escape sequences,
+ * and bracketed-paste wrappers that can't be reliably reconstructed.
+ */
+function isCleanPrompt(text: string): boolean {
+  // Reject control bytes and ESC, but allow tab (0x09), LF (0x0a), CR (0x0d).
+  // eslint-disable-next-line no-control-regex
+  return !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x1b]/.test(text)
+}
+
 /** Canonical worktree path: realpath when possible, fall back to raw path. */
 function canonical(p: string): string {
   try {
@@ -96,7 +108,9 @@ export async function recordTurnBoundary(
       task_id: ctx.taskId,
       terminal_tab_id: tabId,
       snapshot_sha: sha,
-      prompt_preview: promptText.replace(/\s+/g, ' ').trim().slice(0, 200),
+      prompt_preview: isCleanPrompt(promptText)
+        ? promptText.replace(/\s+/g, ' ').trim().slice(0, 200)
+        : '',
       created_at: Date.now(),
     })
   } catch (err) {
@@ -139,20 +153,24 @@ export function initChatTurnSubscriber(db: Database): (tabId: string, event: Age
 /**
  * xterm-mode entrypoint: each Enter press in an AGENT-mode PTY (claude-code,
  * codex, gemini, etc.) is a turn boundary. Plain shell tabs are skipped.
+ *
+ * Raw stdin is dropped — it contains edit keystrokes and escape sequences
+ * that can't be reliably reconstructed into the user's logical prompt.
+ * Turn snapshot still recorded; `prompt_preview` stays empty until a
+ * structured-event source exists (see `detectUserPrompt` hook below).
  */
 export function initPtyTurnSubscriber(
   db: Database
 ): (sessionId: string, taskId: string, line: string) => void {
   return (sessionId, taskId, line) => {
-    const trimmed = line.trim()
-    if (!trimmed) return
+    if (!line.trim()) return
     const parts = sessionId.split(':')
     const tabId = parts.length > 1 ? parts.slice(1).join(':') : taskId
     const tabMode = db.prepare(`SELECT mode FROM terminal_tabs WHERE id = ?`).get(tabId) as
       | { mode: string }
       | undefined
     if (!tabMode || tabMode.mode === 'terminal') return
-    void recordTurnBoundary(db, tabId, trimmed).catch((err) => {
+    void recordTurnBoundary(db, tabId, '').catch((err) => {
       console.error('[turn-tracker] recordTurnBoundary (pty) failed:', err)
     })
   }
