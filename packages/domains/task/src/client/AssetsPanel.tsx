@@ -455,7 +455,9 @@ function AssetPreview({ renderMode, content, zoomLevel = 1, onZoom }: { renderMo
   const zoomStyle = zoomLevel !== 1 ? { transform: `scale(${zoomLevel})`, transformOrigin: 'top left' } : undefined
 
   if (renderMode === 'svg-preview') return <div className="flex-1 p-4 overflow-auto" onWheel={handleWheel}><div style={zoomStyle} dangerouslySetInnerHTML={{ __html: content }} /></div>
-  if (renderMode === 'mermaid-preview' && content.trim()) return <div className="flex-1 p-4 overflow-auto" onWheel={handleWheel}><div style={zoomStyle}><MermaidBlock code={content} /></div></div>
+  // mermaid-preview: MermaidBlock owns its own zoom/pan controls, so skip the
+  // outer wheel-zoom wrapper to avoid two stacked zoom systems.
+  if (renderMode === 'mermaid-preview' && content.trim()) return <div className="flex-1 p-4 overflow-auto"><MermaidBlock code={content} /></div>
   return null
 }
 
