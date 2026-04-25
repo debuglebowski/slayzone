@@ -2,7 +2,7 @@ import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { realpathSync } from 'node:fs'
 import { listTurnsForWorktree } from './db'
-import { diffIsEmptyCached } from './git-snapshot'
+import { diffIsEmptyCached, listTurnFilesCached, listWorkingChangedFiles } from './git-snapshot'
 import type { AgentTurnRange } from '../shared/types'
 
 function canonical(p: string): string {
@@ -10,15 +10,20 @@ function canonical(p: string): string {
 }
 
 /**
- * Drop turns whose `prev_sha..snap_sha` produces no diff right now (e.g. legacy
- * rows, same-tree-different-commit-SHA cases that bypassed insert dedupe, or
- * any future scenario where the range collapses). After filtering, the
- * `prev_snapshot_sha` chain stays correct — each surviving row's prev still
- * points at the prior surviving row's snapshot, so consecutive diffs remain
- * meaningful. We re-thread prev_snapshot_sha so dropped turns don't leave
- * dangling SHAs.
+ * Filter rules:
+ *  1. Drop turns whose `prev_sha..snap_sha` is an empty diff (legacy / dedupe
+ *     bypass / collapsed range).
+ *  2. Drop turns whose changed files have zero overlap with the current
+ *     working tree changes — a turn whose files are fully reverted/committed
+ *     no longer corresponds to anything in `git status` and shouldn't take a
+ *     numbered slot in the UI.
+ *
+ * Re-thread `prev_snapshot_sha` so dropped turns don't leave dangling SHAs:
+ * each surviving row's prev points at the prior surviving row's snapshot, so
+ * consecutive diffs remain meaningful.
  */
 function filterAndRethread(repoPath: string, rows: AgentTurnRange[]): AgentTurnRange[] {
+  const workingSet = listWorkingChangedFiles(repoPath)
   const out: AgentTurnRange[] = []
   let prevSha: string | null = null
   for (const r of rows) {
@@ -29,6 +34,12 @@ function filterAndRethread(repoPath: string, rows: AgentTurnRange[]): AgentTurnR
     }
     if (from === null && diffIsEmptyCached(repoPath, `${r.snapshot_sha}^`, r.snapshot_sha)) {
       // First turn but identical to its parent (HEAD-at-snap-time) — no real changes. Drop.
+      continue
+    }
+    const fromForFiles = from ?? `${r.snapshot_sha}^`
+    const turnFiles = listTurnFilesCached(repoPath, fromForFiles, r.snapshot_sha)
+    if (!turnFiles.some((f) => workingSet.has(f))) {
+      // Turn's files no longer present in working tree changes — drop, keep prevSha.
       continue
     }
     out.push({ ...r, prev_snapshot_sha: from })
