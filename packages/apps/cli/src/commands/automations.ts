@@ -1,7 +1,14 @@
 import { Command } from 'commander'
 import fs from 'node:fs'
+import { TEMPLATE_VARIABLES } from '@slayzone/automations/shared'
 import { openDb, notifyApp, resolveProject, resolveProjectArg } from '../db'
 import { apiPost } from '../api'
+
+function templateVarsHelp(): string {
+  const w = Math.max(...TEMPLATE_VARIABLES.map(v => v.name.length)) + 6
+  const lines = TEMPLATE_VARIABLES.map(v => `  {{${v.name}}}`.padEnd(w + 4) + v.desc)
+  return `\nTemplate variables (use in --action-command):\n${lines.join('\n')}\n`
+}
 
 interface AutomationRow extends Record<string, unknown> {
   id: string
@@ -149,6 +156,7 @@ export function automationsCommand(): Command {
     .option('--cron <expression>', 'Cron expression (for cron trigger)')
     .option('--description <text>', 'Automation description')
     .option('--config <file>', 'JSON config file (overrides flags)')
+    .addHelpText('after', templateVarsHelp())
     .action(async (name: string, opts) => {
       const db = openDb()
       const project = resolveProject(db, resolveProjectArg(opts.project))

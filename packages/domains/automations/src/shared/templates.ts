@@ -28,3 +28,18 @@ export function resolveTemplate(template: string, ctx: TemplateContext): string 
     return value != null ? String(value) : ''
   })
 }
+
+export const TEMPLATE_VARIABLES: readonly { name: string; desc: string }[] = [
+  { name: 'task.id', desc: 'Task ID' },
+  { name: 'task.name', desc: 'Task name' },
+  { name: 'task.status', desc: 'Current status' },
+  { name: 'task.priority', desc: 'Priority 1-5' },
+  { name: 'task.worktree_path', desc: 'Git worktree path' },
+  { name: 'task.branch', desc: 'Git branch' },
+  { name: 'task.terminal_mode', desc: 'Terminal mode' },
+  { name: 'task.terminal_mode_flags', desc: 'Terminal mode flags' },
+  { name: 'project.name', desc: 'Project name' },
+  { name: 'project.path', desc: 'Project filesystem path' },
+  { name: 'trigger.old_status', desc: 'Status before change' },
+  { name: 'trigger.new_status', desc: 'Status after change' },
+] as const

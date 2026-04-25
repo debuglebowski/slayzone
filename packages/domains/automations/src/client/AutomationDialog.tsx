@@ -6,7 +6,7 @@ import {
   taskStatusOptions,
 } from '@slayzone/ui'
 import { Plus, Trash2 } from 'lucide-react'
-import type { Automation, TriggerConfig, ConditionConfig, ActionConfig, CreateAutomationInput, UpdateAutomationInput } from '@slayzone/automations/shared'
+import { TEMPLATE_VARIABLES, type Automation, type TriggerConfig, type ConditionConfig, type ActionConfig, type CreateAutomationInput, type UpdateAutomationInput } from '@slayzone/automations/shared'
 
 interface AutomationDialogProps {
   open: boolean
@@ -365,24 +365,16 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
                 </tr>
               </thead>
               <tbody className="text-muted-foreground">
-                <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{task.id}}'}</td><td className="px-2 py-1 border border-border/40">Task ID</td></tr>
-                <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{task.name}}'}</td><td className="px-2 py-1 border border-border/40">Task title</td></tr>
-                {showAllVars && (<>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{task.status}}'}</td><td className="px-2 py-1 border border-border/40">Current status</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{task.priority}}'}</td><td className="px-2 py-1 border border-border/40">Priority (1-5)</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{task.worktree_path}}'}</td><td className="px-2 py-1 border border-border/40">Worktree path</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{task.branch}}'}</td><td className="px-2 py-1 border border-border/40">Branch name</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{task.terminal_mode}}'}</td><td className="px-2 py-1 border border-border/40">Terminal mode (claude-code, codex, etc.)</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{task.terminal_mode_flags}}'}</td><td className="px-2 py-1 border border-border/40">Terminal mode flags</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{project.name}}'}</td><td className="px-2 py-1 border border-border/40">Project name</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{project.path}}'}</td><td className="px-2 py-1 border border-border/40">Project directory path</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{trigger.old_status}}'}</td><td className="px-2 py-1 border border-border/40">Previous status (status change only)</td></tr>
-                  <tr><td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{'{{trigger.new_status}}'}</td><td className="px-2 py-1 border border-border/40">New status (status change only)</td></tr>
-                </>)}
+                {(showAllVars ? TEMPLATE_VARIABLES : TEMPLATE_VARIABLES.slice(0, 2)).map(v => (
+                  <tr key={v.name}>
+                    <td className="px-2 py-1 font-mono text-foreground/70 border border-border/40">{`{{${v.name}}}`}</td>
+                    <td className="px-2 py-1 border border-border/40">{v.desc}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
             <button type="button" onClick={() => setShowAllVars(v => !v)} className="text-xs text-muted-foreground hover:text-foreground w-full text-center">
-              {showAllVars ? 'Show less' : `Show all (${12} variables)`}
+              {showAllVars ? 'Show less' : `Show all (${TEMPLATE_VARIABLES.length} variables)`}
             </button>
           </div>
         </div>

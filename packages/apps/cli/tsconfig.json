@@ -11,7 +11,8 @@
       "@slayzone/task/shared/panel-config": ["../../domains/task/src/shared/panel-config.ts"],
       "@slayzone/task/shared/handoff": ["../../domains/task/src/shared/handoff.ts"],
       "@slayzone/task/shared/reparent-validation": ["../../domains/task/src/shared/reparent-validation.ts"],
-      "@slayzone/ai-config/shared": ["../../domains/ai-config/src/shared/index.ts"]
+      "@slayzone/ai-config/shared": ["../../domains/ai-config/src/shared/index.ts"],
+      "@slayzone/automations/shared": ["../../domains/automations/src/shared/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

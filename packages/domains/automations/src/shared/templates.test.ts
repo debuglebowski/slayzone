@@ -2,7 +2,7 @@
  * Template resolution tests
  * Run with: npx tsx packages/domains/automations/src/shared/templates.test.ts
  */
-import { resolveTemplate, type TemplateContext } from './templates.js'
+import { resolveTemplate, TEMPLATE_VARIABLES, type TemplateContext } from './templates.js'
 
 let pass = 0
 let fail = 0
@@ -148,6 +148,28 @@ test('empty template → empty string', () => {
 
 test('empty context → all vars empty', () => {
   expect(resolveTemplate('{{task.name}} {{project.path}}', {})).toBe(' ')
+})
+
+console.log('\nTEMPLATE_VARIABLES — registry')
+
+test('has 12 entries', () => {
+  expect(TEMPLATE_VARIABLES.length).toBe(12)
+})
+
+test('every name resolves non-empty against full context', () => {
+  const ctx: TemplateContext = {
+    task: {
+      id: 't1', name: 'n', status: 's', priority: 3,
+      worktree_path: '/wt', branch: 'b',
+      terminal_mode: 'claude-code', terminal_mode_flags: '--foo',
+    },
+    project: { id: 'p1', name: 'P', path: '/p' },
+    trigger: { old_status: 'o', new_status: 'n' },
+  }
+  for (const v of TEMPLATE_VARIABLES) {
+    const out = resolveTemplate(`{{${v.name}}}`, ctx)
+    if (out === '') throw new Error(`${v.name} resolved empty — registry/TemplateContext drift`)
+  }
 })
 
 console.log(`\n${pass} passed, ${fail} failed`)
