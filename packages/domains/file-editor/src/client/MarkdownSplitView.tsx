@@ -1,9 +1,22 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { CSSProperties } from 'react'
+import { isValidElement, useState, useEffect, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import { MermaidBlock } from './MermaidBlock'
 import { useTheme } from '@slayzone/settings/client'
 import { getThemeEditorColors, useAppearance } from '@slayzone/ui'
 import { CodeEditor } from './CodeEditor'
+
+const markdownComponents = {
+  pre({ children }: { children?: ReactNode }) {
+    if (isValidElement(children)) {
+      const child = children as ReactElement<{ className?: string; children?: ReactNode }>
+      if (child.props?.className === 'language-mermaid') {
+        return <MermaidBlock code={String(child.props.children ?? '').replace(/\n$/, '')} />
+      }
+    }
+    return <pre>{children}</pre>
+  },
+}
 
 interface MarkdownSplitViewProps {
   filePath: string
@@ -19,6 +32,14 @@ export function MarkdownSplitView({ filePath, content, onChange, onSave, version
   const { editorThemeId, contentVariant } = useTheme()
   const colors = getThemeEditorColors(editorThemeId, contentVariant)
   const { notesReadability, notesWidth } = useAppearance()
+
+  // Debounce preview updates so ReactMarkdown (and MermaidBlock) only re-render
+  // when typing pauses — eliminates diagram flicker from positional remounts
+  const [previewContent, setPreviewContent] = useState(content)
+  useEffect(() => {
+    const timer = setTimeout(() => setPreviewContent(content), 300)
+    return () => clearTimeout(timer)
+  }, [content])
 
   const themeStyle = {
     '--mk-bg': colors.background,
@@ -48,7 +69,9 @@ export function MarkdownSplitView({ filePath, content, onChange, onSave, version
         <div className="mk-doc" data-readability={notesReadability} data-width={notesWidth} style={themeStyle}>
           <div className="mk-doc-scroll">
             <div className="mk-doc-body">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {previewContent}
+              </ReactMarkdown>
             </div>
           </div>
         </div>
