@@ -198,17 +198,20 @@ export function TerminalContextMenu({
               <Hash className="size-4" />
               Copy Conversation ID
             </ContextMenuItem>
-            {onResetSession && (
-              <ContextMenuItem variant="destructive" onSelect={onResetSession}>
-                <Power className="size-4" />
-                Reset Session
-              </ContextMenuItem>
-            )}
             {chatSupported && onSetDisplayMode && (
               <ContextMenuItem onSelect={() => setPendingChatEnable(true)}>
                 <MessageSquare className="size-4" />
                 Enable chat (beta)
               </ContextMenuItem>
+            )}
+            {onResetSession && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem variant="destructive" onSelect={onResetSession}>
+                  <Power className="size-4" />
+                  Reset Session
+                </ContextMenuItem>
+              </>
             )}
           </>
         )}
