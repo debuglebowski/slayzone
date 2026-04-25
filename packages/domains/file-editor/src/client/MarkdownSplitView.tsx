@@ -1,22 +1,12 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { isValidElement, useState, useEffect, type CSSProperties, type ReactElement, type ReactNode } from 'react'
-import { MermaidBlock } from './MermaidBlock'
+import { useState, useEffect, type CSSProperties } from 'react'
+import { mermaidCodeOverride } from '@slayzone/markdown/client'
 import { useTheme } from '@slayzone/settings/client'
 import { getThemeEditorColors, useAppearance } from '@slayzone/ui'
 import { CodeEditor } from './CodeEditor'
 
-const markdownComponents = {
-  pre({ children }: { children?: ReactNode }) {
-    if (isValidElement(children)) {
-      const child = children as ReactElement<{ className?: string; children?: ReactNode }>
-      if (child.props?.className === 'language-mermaid') {
-        return <MermaidBlock code={String(child.props.children ?? '').replace(/\n$/, '')} />
-      }
-    }
-    return <pre>{children}</pre>
-  },
-}
+const markdownComponents = { code: mermaidCodeOverride }
 
 interface MarkdownSplitViewProps {
   filePath: string

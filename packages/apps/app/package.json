@@ -40,6 +40,7 @@
     "@slayzone/history": "workspace:*",
     "@slayzone/icons": "workspace:*",
     "@slayzone/integrations": "workspace:*",
+    "@slayzone/markdown": "workspace:*",
     "@slayzone/onboarding": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",

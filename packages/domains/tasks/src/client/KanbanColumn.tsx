@@ -196,7 +196,7 @@ export function KanbanColumn({
     overColumnId === column.id && activeColumnId !== null && activeColumnId !== column.id
 
   return (
-    <div className="flex h-full min-h-0 w-72 shrink-0 flex-col">
+    <div data-testid="kanban-column" className="flex h-full min-h-0 w-72 shrink-0 flex-col">
       <div className="mb-2 flex items-center justify-between px-2 select-none">
         <div className="flex items-center gap-2">
           {(() => {

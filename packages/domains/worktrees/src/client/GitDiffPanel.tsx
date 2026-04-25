@@ -238,11 +238,24 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [collapsedFiles, task?.id])
   const [selectedTurnId, setSelectedTurnId] = useState<string | 'all'>('all')
-  const turns = useAgentTurns(targetPath)
+  // Bumped after each working-tree snapshot fetch (effect below) so the turn
+  // list re-runs the server-side filter — turns whose files no longer appear
+  // in `git status` get pruned (and stop occupying a numbered slot).
+  const [turnsRefreshKey, setTurnsRefreshKey] = useState(0)
+  const turns = useAgentTurns(targetPath, turnsRefreshKey)
   const selectedTurn: AgentTurnRange | null = useMemo(
     () => (selectedTurnId === 'all' ? null : turns.find((t) => t.id === selectedTurnId) ?? null),
     [selectedTurnId, turns]
   )
+  // If the selected turn was filtered out (its files are no longer in working
+  // tree changes), fall back to "All turns" — otherwise the chip row would
+  // show no active button and the diff would silently switch to all-turns
+  // mode without the user realizing.
+  useEffect(() => {
+    if (selectedTurnId !== 'all' && !turns.some((t) => t.id === selectedTurnId)) {
+      setSelectedTurnId('all')
+    }
+  }, [selectedTurnId, turns])
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
   const confirmActionRef = useRef<ConfirmAction | null>(null)
   if (confirmAction) confirmActionRef.current = confirmAction
@@ -273,6 +286,15 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     pollIntervalMs,
   })
   const error = commitError ?? fetchError
+
+  // Snapshot identity is stable across polls when content unchanged
+  // (snapshotsEqual short-circuit in the store), so this only fires on real
+  // working-tree updates → re-runs the server-side turn filter without a
+  // tight loop.
+  useEffect(() => {
+    if (!snapshot) return
+    setTurnsRefreshKey((k) => k + 1)
+  }, [snapshot])
 
   const refreshRef = useRef(refresh)
   refreshRef.current = refresh

@@ -46,6 +46,7 @@
     "@milkdown/utils": "^7.19.2",
     "@slayzone/editor": "workspace:*",
     "@slayzone/icons": "workspace:*",
+    "@slayzone/markdown": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",
@@ -54,7 +55,6 @@
     "ignore": "^5.3.2",
     "lezer-toml": "^1.0.0",
     "lucide-react": "^0.562.0",
-    "mermaid": "^11.13.0",
     "react-markdown": "^10.1.0",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1"

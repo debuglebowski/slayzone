@@ -132,4 +132,64 @@ export function diffIsEmptyCached(repoPath: string, fromSha: string, toSha: stri
 /** Test-only: clear the cache between scenarios. */
 export function _resetDiffEmptyCacheForTests(): void {
   diffEmptyCache.clear()
+  turnFilesCache.clear()
+}
+
+/**
+ * Cached `git diff --name-only fromSha..toSha`. Files in a turn's range are a
+ * pure function of the SHA pair (content-addressed), so cache forever within
+ * the bounded LRU. Used by list-time intersection filter.
+ */
+const TURN_FILES_CACHE_MAX = 2000
+const turnFilesCache = new Map<string, string[]>()
+
+export function listTurnFilesCached(repoPath: string, fromSha: string, toSha: string): string[] {
+  const key = `${repoPath}\x00${fromSha}\x00${toSha}`
+  const hit = turnFilesCache.get(key)
+  if (hit !== undefined) {
+    turnFilesCache.delete(key)
+    turnFilesCache.set(key, hit)
+    return hit
+  }
+  const r = spawnSync('git', ['diff', '--name-only', '-z', fromSha, toSha], { cwd: repoPath, encoding: 'utf-8' })
+  const files = r.status === 0
+    ? r.stdout.split('\0').filter((s) => s.length > 0)
+    : []
+  turnFilesCache.set(key, files)
+  if (turnFilesCache.size > TURN_FILES_CACHE_MAX) {
+    const oldestKey = turnFilesCache.keys().next().value
+    if (oldestKey !== undefined) turnFilesCache.delete(oldestKey)
+  }
+  return files
+}
+
+/**
+ * Set of file paths currently changed in the working tree (tracked edits +
+ * untracked non-ignored). NOT cached — working tree state is volatile. Used
+ * by list-time filter to drop turns whose files no longer have any current
+ * change in the worktree.
+ */
+export function listWorkingChangedFiles(repoPath: string): Set<string> {
+  const r = spawnSync('git', ['status', '--porcelain=v1', '-uall', '-z'], { cwd: repoPath, encoding: 'utf-8' })
+  const set = new Set<string>()
+  if (r.status !== 0) return set
+  // -z output: each entry = `XY <path>\0` (renames add `<orig>\0` after).
+  const parts = r.stdout.split('\0')
+  let i = 0
+  while (i < parts.length) {
+    const entry = parts[i]
+    if (!entry) { i++; continue }
+    const xy = entry.slice(0, 2)
+    const path = entry.slice(3)
+    if (path) set.add(path)
+    // Renames/copies (R/C in either column) carry an extra origin path entry.
+    if (xy[0] === 'R' || xy[0] === 'C' || xy[1] === 'R' || xy[1] === 'C') {
+      const orig = parts[i + 1]
+      if (orig) set.add(orig)
+      i += 2
+    } else {
+      i += 1
+    }
+  }
+  return set
 }

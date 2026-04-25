@@ -109,6 +109,9 @@ importers:
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../../domains/integrations
+      '@slayzone/markdown':
+        specifier: workspace:*
+        version: link:../../shared/markdown
       '@slayzone/onboarding':
         specifier: workspace:*
         version: link:../../domains/onboarding
@@ -553,6 +556,9 @@ importers:
       '@slayzone/icons':
         specifier: workspace:*
         version: link:../../shared/icons
+      '@slayzone/markdown':
+        specifier: workspace:*
+        version: link:../../shared/markdown
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -580,9 +586,6 @@ importers:
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)
-      mermaid:
-        specifier: ^11.13.0
-        version: 11.13.0
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.8)(react@19.2.3)
@@ -836,6 +839,9 @@ importers:
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../integrations
+      '@slayzone/markdown':
+        specifier: workspace:*
+        version: link:../../shared/markdown
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../projects
@@ -887,9 +893,6 @@ importers:
       marked:
         specifier: ^15.0.0
         version: 15.0.12
-      mermaid:
-        specifier: ^11.13.0
-        version: 11.13.0
       react:
         specifier: ^19.0.0
         version: 19.2.3
@@ -1250,6 +1253,9 @@ importers:
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
+      '@slayzone/markdown':
+        specifier: workspace:*
+        version: link:../../shared/markdown
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../projects
@@ -1283,9 +1289,6 @@ importers:
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)
-      mermaid:
-        specifier: ^11.13.0
-        version: 11.13.0
       react:
         specifier: ^19.0.0
         version: 19.2.3
@@ -1370,6 +1373,49 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/shared/markdown:
+    dependencies:
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../../domains/settings
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../ui
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      mermaid:
+        specifier: ^11.13.0
+        version: 11.13.0
+    devDependencies:
+      '@testing-library/react':
+        specifier: ^16.3.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.8)
+      '@vitejs/plugin-react':
+        specifier: ^5.1.1
+        version: 5.1.2(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+      jsdom:
+        specifier: ^26.0.0
+        version: 26.1.0
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.3(react@19.2.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@24.12.0)(jsdom@26.1.0)(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
 
   packages/shared/platform:
     devDependencies:
@@ -11470,6 +11516,18 @@ snapshots:
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
       vite: 7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)
+    transitivePeerDependencies:
+      - supports-color
+
+  '@vitejs/plugin-react@5.1.2(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))':
+    dependencies:
+      '@babel/core': 7.28.6
+      '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.28.6)
+      '@babel/plugin-transform-react-jsx-source': 7.27.1(@babel/core@7.28.6)
+      '@rolldown/pluginutils': 1.0.0-beta.53
+      '@types/babel__core': 7.20.5
+      react-refresh: 0.18.0
+      vite: 7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)
     transitivePeerDependencies:
       - supports-color
 

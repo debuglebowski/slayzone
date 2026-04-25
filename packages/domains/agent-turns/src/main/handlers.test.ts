@@ -106,6 +106,38 @@ await describe('list filters empty-diff turns + re-threads prev_snapshot_sha', (
     expect(list1[1].snapshot_sha).toBe(list2[1].snapshot_sha)
   })
 
+  test('drops turns whose files no longer appear in working tree changes', async () => {
+    const { tabId, repo } = freshTask()
+    // Turn 1: only changes ephemeral.txt
+    fs.writeFileSync(path.join(repo, 'ephemeral.txt'), 'x')
+    await recordTurnBoundary(h.db, tabId, 'p1')
+    // Turn 2: changes kept.txt
+    fs.writeFileSync(path.join(repo, 'kept.txt'), 'y')
+    await recordTurnBoundary(h.db, tabId, 'p2')
+
+    // Both turns initially visible (both files present in working tree).
+    let list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(2)
+
+    // Revert ephemeral.txt → no longer in `git status`. Turn 1 must drop.
+    fs.unlinkSync(path.join(repo, 'ephemeral.txt'))
+    list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(1)
+    expect(list[0].prev_snapshot_sha).toBeNull() // re-threaded as the new first turn
+  })
+
+  test('drops all turns when working tree is clean', async () => {
+    const { tabId, repo } = freshTask()
+    fs.writeFileSync(path.join(repo, 'temp.txt'), 'a')
+    await recordTurnBoundary(h.db, tabId, 'p1')
+    fs.writeFileSync(path.join(repo, 'temp.txt'), 'b')
+    await recordTurnBoundary(h.db, tabId, 'p2')
+
+    fs.unlinkSync(path.join(repo, 'temp.txt'))
+    const list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(0)
+  })
+
   test('canonicalizes incoming worktreePath via realpath', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'c.txt'), 'data')
