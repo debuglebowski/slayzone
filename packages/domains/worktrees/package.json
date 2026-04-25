@@ -31,6 +31,7 @@
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/editor": "workspace:*",
+    "@slayzone/markdown": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",
@@ -41,7 +42,6 @@
     "@tanstack/react-virtual": "^3.13.22",
     "codemirror": "^6.0.1",
     "lucide-react": "^0.562.0",
-    "mermaid": "^11.13.0",
     "react-markdown": "^10.1.0",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1"

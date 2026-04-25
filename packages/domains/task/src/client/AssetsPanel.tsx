@@ -16,6 +16,9 @@ import type { RenderMode, TaskAsset, AssetFolder } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode, canExportAsPdf, canExportAsPng, canExportAsHtml } from '@slayzone/task/shared'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { mermaidCodeOverride } from '@slayzone/markdown/client'
+
+const markdownComponents = { code: mermaidCodeOverride }
 import { useAppearance, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
 import { useTheme } from '@slayzone/settings/client'
 import { SearchableCodeView } from '@slayzone/file-editor/client/SearchableCodeView'
@@ -377,7 +380,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
             <div className="mk-doc" data-readability={effectiveReadability} data-width={effectiveWidth} style={themeStyle}>
               <div className="mk-doc-scroll">
                 <div className="mk-doc-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content ?? ''}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content ?? ''}</ReactMarkdown>
                 </div>
               </div>
             </div>
