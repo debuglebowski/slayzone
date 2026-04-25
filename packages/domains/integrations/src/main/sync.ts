@@ -21,9 +21,11 @@ import {
   getDoneStatus,
   getStatusByCategories,
   isKnownStatus,
+  isTerminalStatus,
   type ColumnConfig,
   type WorkflowCategory
 } from '@slayzone/workflow'
+import { onTaskReachedTerminal } from '@slayzone/terminal/main'
 import { getAdapter, getRegisteredProviders } from './adapters'
 import type { NormalizedIssue, ProviderAdapter } from './adapters'
 
@@ -391,6 +393,8 @@ export async function runProviderSync(
           const priority = resolvePriorityFromExtras(remoteIssue.extras, task.priority)
           applyRemoteUpdate(db, task.id, remoteIssue, localStatus, remoteIssue.extras.priority !== undefined ? priority : undefined)
           const updatedTask = loadTask(db, task.id)!
+          const columns = getProjectColumns(db, task.project_id)
+          if (isTerminalStatus(localStatus, columns)) onTaskReachedTerminal(task.id)
           upsertNormalizedFieldState(db, link.id, updatedTask, remoteIssue)
           result.pulled += 1
           result.conflictsResolved += 1

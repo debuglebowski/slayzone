@@ -1563,6 +1563,13 @@ export function broadcastRespawnRequest(taskId: string): void {
   })
 }
 
+/** Single invariant entry point for "task reached a terminal status". Called from
+ *  every status-write path (updateTask via runtimeAdapter, integrations sync/pull,
+ *  bulk remap, project automation). Add new side-effects here, not at call sites. */
+export function onTaskReachedTerminal(taskId: string): void {
+  killPtysByTaskId(taskId)
+}
+
 export function killPtysByTaskId(taskId: string): void {
   const toKill = [...sessions.entries()]
     .filter(([, session]) => session.taskId === taskId)

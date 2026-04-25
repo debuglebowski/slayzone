@@ -108,7 +108,7 @@ import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/main'
-import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, startIdleChecker, stopIdleChecker, dismissAllNotifications, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest } from '@slayzone/terminal/main'
+import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, dismissAllNotifications, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest } from '@slayzone/terminal/main'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import { attachFloatingAgent, setupFloatingAgent } from './floating-agent'
 import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/main'
@@ -1035,6 +1035,7 @@ app.whenReady().then(async () => {
     killTaskProcesses,
     recordDiagnosticEvent,
     requestPtyRespawn: broadcastRespawnRequest,
+    onReachedTerminal: onTaskReachedTerminal,
   })
   logBoot('task runtime adapters configured')
 
@@ -1096,7 +1097,7 @@ app.whenReady().then(async () => {
 
   // Task automation: auto-move tasks on terminal state change
   onGlobalStateChange((sessionId, newState, oldState) => {
-    handleTerminalStateChange(db, sessionId, newState, oldState, notifyTasksChanged)
+    handleTerminalStateChange(db, sessionId, newState, oldState, notifyTasksChanged, onTaskReachedTerminal)
   })
 
   // Expose test helpers for e2e

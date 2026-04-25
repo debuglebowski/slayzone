@@ -38,13 +38,18 @@ export interface TaskRuntimeAdapters {
   /** Broadcast a respawn request to the renderer when a task transitions from a
    *  terminal status back to a non-terminal one. Renderer decides whether to act. */
   requestPtyRespawn: (taskId: string) => void
+  /** Single invariant: all side-effects of "task reached a terminal status".
+   *  Wired by the app to terminal/main's onTaskReachedTerminal. Add new side
+   *  effects there, not at call sites. */
+  onReachedTerminal: (taskId: string) => void
 }
 
 const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   killPtysByTaskId: () => {},
   killTaskProcesses: () => {},
   recordDiagnosticEvent: () => {},
-  requestPtyRespawn: () => {}
+  requestPtyRespawn: () => {},
+  onReachedTerminal: () => {}
 }
 
 let runtimeAdapters: TaskRuntimeAdapters = defaultRuntimeAdapters
@@ -555,7 +560,10 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
     ? isTerminalStatus(existing.status, targetColumns)
     : false
   const revived = effectiveStatus !== undefined && !reachedTerminal && previouslyTerminal
-  if (reachedTerminal || projectChanged) {
+  if (reachedTerminal) {
+    runtimeAdapters.onReachedTerminal(data.id)
+  } else if (projectChanged) {
+    // Project change rehomes the task — kill its PTYs but no other "terminal" semantics.
     runtimeAdapters.killPtysByTaskId(data.id)
   }
   // Clear snooze when task reaches terminal status

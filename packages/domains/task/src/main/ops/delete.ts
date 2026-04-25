@@ -1,12 +1,13 @@
 import type { Database } from 'better-sqlite3'
 import { recordActivityEvents } from '@slayzone/history/main'
+import { taskEvents } from '../events.js'
 import { buildTaskDeletedEvents } from '../history.js'
 import { cleanupTaskImmediate, parseTask, type OpDeps } from './shared.js'
 
 export type DeleteTaskResult = boolean | { blocked: true; reason: 'linked_to_provider' }
 
 export function deleteTaskOp(db: Database, id: string, deps: OpDeps): DeleteTaskResult {
-  const { onMutation } = deps
+  const { ipcMain, onMutation } = deps
   const previousRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
   const previousTask = parseTask(previousRow)
   const linkCount = (db.prepare(
@@ -27,6 +28,10 @@ export function deleteTaskOp(db: Database, id: string, deps: OpDeps): DeleteTask
     return updateResult
   })()
   if (result.changes > 0) {
+    ipcMain.emit('db:tasks:delete:done', null, id)
+    if (previousTask) {
+      taskEvents.emit('task:deleted', { taskId: id, projectId: previousTask.project_id })
+    }
     onMutation?.()
   }
   return result.changes > 0

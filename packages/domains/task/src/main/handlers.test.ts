@@ -787,7 +787,8 @@ describe('updateTask — revive flow (terminal → non-terminal)', () => {
     killPtysByTaskId: (id) => killCalls.push(id),
     killTaskProcesses: () => {},
     recordDiagnosticEvent: () => {},
-    requestPtyRespawn: (id) => respawnCalls.push(id)
+    requestPtyRespawn: (id) => respawnCalls.push(id),
+    onReachedTerminal: (id) => killCalls.push(id)
   })
 
   const reviveProjectId = crypto.randomUUID()

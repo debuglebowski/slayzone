@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { recordActivityEvents } from '@slayzone/history/main'
 import { buildTaskUpdatedEvents } from '../history.js'
+import { taskEvents } from '../events.js'
 import { colorOne, parseTask, updateTask, type OpDeps } from './shared.js'
 
 export async function updateTaskOp(db: Database, data: UpdateTaskInput, deps: OpDeps): Promise<Task | null> {
@@ -23,6 +24,14 @@ export async function updateTaskOp(db: Database, data: UpdateTaskInput, deps: Op
 
   if (result.nextTask) {
     ipcMain.emit('db:tasks:update:done', null, data.id, { oldStatus: result.previousTask?.status })
+    const projectId = result.nextTask.project_id ?? result.previousTask?.project_id ?? data.projectId
+    if (projectId) {
+      taskEvents.emit('task:updated', {
+        taskId: data.id,
+        projectId,
+        oldStatus: result.previousTask?.status,
+      })
+    }
     onMutation?.()
   }
   return colorOne(db, result.nextTask)

@@ -77,10 +77,13 @@ import {
 } from './sync-helpers'
 import {
   getDefaultStatus,
+  isTerminalStatus,
   resolveColumns,
+  parseColumnsConfig,
   type ColumnConfig,
   type WorkflowCategory
 } from '@slayzone/workflow'
+import { onTaskReachedTerminal } from '@slayzone/terminal/main'
 import { getAdapter, getRegisteredProviders, normalizeGithubIssue } from './adapters'
 import type { NormalizedIssue, ProviderAdapter } from './adapters'
 
@@ -2046,6 +2049,12 @@ export function registerIntegrationHandlers(
     const updatedTask = getTaskById(db, task.id)
     persistNormalizedBaseline(db, link.id, updatedTask, remoteIssue)
 
+    const pullProjectColumns = db.prepare('SELECT columns_config FROM projects WHERE id = ?')
+      .get(task.project_id) as { columns_config: string | null } | undefined
+    if (isTerminalStatus(localStatus, parseColumnsConfig(pullProjectColumns?.columns_config ?? null))) {
+      onTaskReachedTerminal(task.id)
+    }
+
     db.prepare(`UPDATE external_links SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(link.id)
     db.prepare(`UPDATE integration_connections SET last_synced_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(connection.id)
 
@@ -2144,8 +2153,14 @@ export function registerIntegrationHandlers(
     if (input.taskRemapping && Object.keys(input.taskRemapping).length > 0) {
       for (const [oldStatus, newStatus] of Object.entries(input.taskRemapping)) {
         if (!newColumns.some((c) => c.id === newStatus)) continue
+        const reachedTerminal = isTerminalStatus(newStatus, newColumns)
+        const affectedIds = reachedTerminal
+          ? (db.prepare('SELECT id FROM tasks WHERE project_id = ? AND status = ?')
+              .all(input.projectId, oldStatus) as Array<{ id: string }>).map((r) => r.id)
+          : []
         db.prepare('UPDATE tasks SET status = ?, updated_at = datetime(\'now\') WHERE project_id = ? AND status = ?')
           .run(newStatus, input.projectId, oldStatus)
+        for (const id of affectedIds) onTaskReachedTerminal(id)
       }
     }
 

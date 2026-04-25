@@ -17,6 +17,7 @@
   "dependencies": {
     "@slayzone/history": "workspace:*",
     "@slayzone/tags": "workspace:*",
+    "@slayzone/task": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "date-fns": "^4.1.0",

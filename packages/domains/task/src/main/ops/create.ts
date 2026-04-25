@@ -3,6 +3,7 @@ import type { CreateTaskInput, ProviderConfig, Task } from '@slayzone/task/share
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
 import { recordActivityEvents } from '@slayzone/history/main'
 import { buildTaskCreatedEvents } from '../history.js'
+import { taskEvents } from '../events.js'
 import { getTemplateForTask } from '../template-handlers.js'
 import {
   colorOne,
@@ -99,6 +100,7 @@ export async function createTaskOp(db: Database, data: CreateTaskInput, deps: Op
   const task = parseTask(row)
   if (task) {
     ipcMain.emit('db:tasks:create:done', null, id, data.projectId)
+    taskEvents.emit('task:created', { taskId: id, projectId: data.projectId })
     onMutation?.()
   }
   return colorOne(db, task)

@@ -1,11 +1,13 @@
 import type { Database } from 'better-sqlite3'
 import type { Task } from '@slayzone/task/shared'
 import { recordActivityEvents } from '@slayzone/history/main'
+import { taskEvents } from '../events.js'
 import { buildTaskArchivedEvents } from '../history.js'
 import { cleanupTaskFull, parseTask, parseTasks, type OpDeps } from './shared.js'
 
 export async function archiveTaskOp(db: Database, id: string, deps: OpDeps): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
+  const projectRow = db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(id) as { project_id: string } | undefined
   const toArchiveRows = db.prepare('SELECT * FROM tasks WHERE id = ? OR parent_id = ?').all(id, id) as Record<string, unknown>[]
   const toArchiveTasks = parseTasks(toArchiveRows)
   await cleanupTaskFull(db, id)
@@ -22,6 +24,9 @@ export async function archiveTaskOp(db: Database, id: string, deps: OpDeps): Pro
     return parseTask(row)
   })()
   ipcMain.emit('db:tasks:archive:done', null, id)
+  if (projectRow) {
+    taskEvents.emit('task:archived', { taskId: id, projectId: projectRow.project_id })
+  }
   onMutation?.()
   return archivedTask
 }

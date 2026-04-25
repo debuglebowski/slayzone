@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3'
 import type { Task } from '@slayzone/task/shared'
 import { recordActivityEvents } from '@slayzone/history/main'
 import { buildTaskUnarchivedEvents } from '../history.js'
+import { taskEvents } from '../events.js'
 import { parseTask, type OpDeps } from './shared.js'
 
 export function unarchiveTaskOp(db: Database, id: string, deps: OpDeps): Task | null {
@@ -18,6 +19,9 @@ export function unarchiveTaskOp(db: Database, id: string, deps: OpDeps): Task | 
     }
     return nextTask
   })()
+  if (task) {
+    taskEvents.emit('task:unarchived', { taskId: id, projectId: task.project_id })
+  }
   ipcMain.emit('db:tasks:unarchive:done', null, id)
   onMutation?.()
   return task

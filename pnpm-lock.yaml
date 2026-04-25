@@ -416,6 +416,9 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry

@@ -5,6 +5,7 @@
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine, cronMatches } from './engine.js'
 import type { Automation, AutomationRun } from '@slayzone/automations/shared'
+import { taskEvents } from '@slayzone/task/main'
 
 const h = await createTestHarness()
 
@@ -73,7 +74,7 @@ await describe('status change filtering', () => {
     const id = createAutomation({ toStatus: 'todo' })
     notifyCount = 0
     // Simulate a task update where status didn't change
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     // The task is still 'todo', so oldStatus === newStatus → skipped
     const runs = getRuns(id)
     expect(runs).toHaveLength(0)
@@ -81,14 +82,14 @@ await describe('status change filtering', () => {
 
   test('oldStatus undefined → no event fired', () => {
     const id = createAutomation({ toStatus: 'todo' })
-    testIpcMain.emit('db:tasks:update:done', null, taskId, {})
+    taskEvents.emit('task:updated', { taskId, projectId })
     const runs = getRuns(id)
     expect(runs).toHaveLength(0)
   })
 
   test('meta undefined → no event fired', () => {
     const id = createAutomation({ toStatus: 'todo' })
-    testIpcMain.emit('db:tasks:update:done', null, taskId)
+    taskEvents.emit('task:updated', { taskId, projectId })
     const runs = getRuns(id)
     expect(runs).toHaveLength(0)
   })
@@ -98,7 +99,7 @@ await describe('status change filtering', () => {
     notifyCount = 0
     // Change task status to 'done' then emit
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     // Wait for async execution
     await new Promise(r => setTimeout(r, 200))
     const runs = getRuns(id)
@@ -117,7 +118,7 @@ await describe('trigger matching', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ toStatus: 'in_progress' })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('in_progress', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -128,7 +129,7 @@ await describe('trigger matching', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ toStatus: 'done' })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('in_progress', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -139,7 +140,7 @@ await describe('trigger matching', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ fromStatus: 'todo' })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('in_progress', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -150,7 +151,7 @@ await describe('trigger matching', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ fromStatus: 'in_progress' })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -161,7 +162,7 @@ await describe('trigger matching', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ fromStatus: 'todo', toStatus: 'done' })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -172,7 +173,7 @@ await describe('trigger matching', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({}) // no from/to
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('whatever', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -183,7 +184,7 @@ await describe('trigger matching', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ enabled: false })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -198,7 +199,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ conditions: [] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -210,7 +211,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run('/tmp/wt', taskId)
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'worktree_path', operator: 'exists' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ?, worktree_path = NULL WHERE id = ?').run('todo', taskId)
@@ -221,7 +222,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'worktree_path', operator: 'exists' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -232,7 +233,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'priority', operator: 'equals', value: 3 } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -243,7 +244,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'priority', operator: 'equals', value: 99 } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -259,7 +260,7 @@ await describe('condition evaluation', () => {
       ]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -270,7 +271,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'worktree_path', operator: 'not_exists' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -282,7 +283,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run('/tmp/wt', taskId)
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'worktree_path', operator: 'not_exists' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ?, worktree_path = NULL WHERE id = ?').run('todo', taskId)
@@ -293,7 +294,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'priority', operator: 'not_equals', value: 99 } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -304,7 +305,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'priority', operator: 'not_equals', value: 3 } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -315,7 +316,7 @@ await describe('condition evaluation', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ conditions: [{ type: 'task_property', params: { field: 'priority', operator: 'like', value: 3 } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -330,7 +331,7 @@ await describe('run lifecycle', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ actions: [{ type: 'run_command', params: { command: 'echo ok' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 500))
     const runs = getRuns(id)
     expect(runs.length).toBeGreaterThan(0)
@@ -344,7 +345,7 @@ await describe('run lifecycle', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ actions: [{ type: 'run_command', params: { command: 'exit 1' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 500))
     const runs = getRuns(id)
     expect(runs.length).toBeGreaterThan(0)
@@ -358,7 +359,7 @@ await describe('run lifecycle', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     const id = createAutomation({ actions: [{ type: 'run_command', params: { command: 'echo ok' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 500))
     expect(getAutomation(id).run_count).toBe(1)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -370,7 +371,7 @@ await describe('run lifecycle', () => {
     notifyCount = 0
     createAutomation({ actions: [{ type: 'run_command', params: { command: 'echo ok' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 500))
     expect(notifyCount).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -385,7 +386,7 @@ await describe('change_task_status action', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     createAutomation({ actions: [{ type: 'change_task_status', params: { status: 'review' } }] })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 500))
     const task = h.db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as { status: string }
     expect(task.status).toBe('review')
@@ -431,7 +432,7 @@ await describe('run retention', () => {
 
     // Trigger one execution which will prune
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 500))
 
     const after = (h.db.prepare('SELECT COUNT(*) as c FROM automation_runs WHERE automation_id = ?').get(id) as { c: number }).c
@@ -501,7 +502,7 @@ await describe('cascade chain', () => {
     const idB = createAutomation({ name: 'B', toStatus: 'review', actions: [{ type: 'run_command', params: { command: 'echo cascaded' } }] })
 
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 1000))
 
     // A should have run (changed status to 'review')
@@ -523,7 +524,7 @@ await describe('cascade chain', () => {
     createAutomation({ name: 'Pong', fromStatus: 'ping', toStatus: 'pong', actions: [{ type: 'change_task_status', params: { status: 'ping' } }] })
 
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('ping', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 2000))
 
     // Should have run some times but NOT infinitely (depth limit = 5)
@@ -546,7 +547,7 @@ await describe('multiple automations matching same event', () => {
     const id2 = createAutomation({ name: 'Second', actions: [{ type: 'run_command', params: { command: 'echo second' } }] })
 
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 500))
 
     expect(getRuns(id1).length).toBeGreaterThan(0)
@@ -572,7 +573,7 @@ await describe('cross-project isolation in engine', () => {
 
     // Fire event for our task (projectId, not otherProjectId)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
 
     expect(getRuns(otherId)).toHaveLength(0)
@@ -588,7 +589,7 @@ await describe('missing task or project in context', () => {
     h.db.prepare('DELETE FROM automation_runs').run()
     createAutomation({})
     // Emit with a fake taskId that doesn't exist in DB
-    testIpcMain.emit('db:tasks:update:done', null, 'nonexistent-task', { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId: 'nonexistent-task', projectId, oldStatus: 'todo' })
     // Engine should not crash — task SELECT returns undefined, early return
   })
 
@@ -652,7 +653,7 @@ await describe('run_command with explicit cwd', () => {
 
 // --- CHANGE_TASK_STATUS EMITS EVENT ---
 
-await describe('change_task_status emits db:tasks:update:done', () => {
+await describe('change_task_status emits task:updated', () => {
   test('emit fires with oldStatus', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
@@ -660,11 +661,11 @@ await describe('change_task_status emits db:tasks:update:done', () => {
     // Track emits
     let emittedTaskId: string | null = null
     let emittedOldStatus: string | null = null
-    const trackingListener = (_event: unknown, tid: string, meta?: { oldStatus?: string }) => {
-      emittedTaskId = tid
-      emittedOldStatus = meta?.oldStatus ?? null
+    const trackingListener = (payload: { taskId: string; oldStatus?: string }) => {
+      emittedTaskId = payload.taskId
+      emittedOldStatus = payload.oldStatus ?? null
     }
-    listeners.get('db:tasks:update:done')?.push(trackingListener as Listener)
+    taskEvents.on('task:updated', trackingListener)
 
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
     const id = createAutomation({ actions: [{ type: 'change_task_status', params: { status: 'shipped' } }] })
@@ -673,9 +674,7 @@ await describe('change_task_status emits db:tasks:update:done', () => {
     expect(emittedTaskId).toBe(taskId)
     expect(emittedOldStatus).toBe('todo')
 
-    // Cleanup listener
-    const arr = listeners.get('db:tasks:update:done')!
-    arr.splice(arr.indexOf(trackingListener as Listener), 1)
+    taskEvents.off('task:updated', trackingListener)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
   })
 })
@@ -694,7 +693,7 @@ await describe('in condition on tags field', () => {
       conditions: [{ type: 'task_property', params: { field: 'tags', operator: 'in', value: [tagId] } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('DELETE FROM task_tags WHERE task_id = ?').run(taskId)
@@ -709,7 +708,7 @@ await describe('in condition on tags field', () => {
       conditions: [{ type: 'task_property', params: { field: 'tags', operator: 'in', value: ['nonexistent-tag'] } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -726,7 +725,7 @@ await describe('in condition on tags field', () => {
       conditions: [{ type: 'task_property', params: { field: 'tags', operator: 'in', value: [] } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('DELETE FROM task_tags WHERE task_id = ?').run(taskId)
@@ -745,7 +744,7 @@ await describe('in condition on regular field', () => {
       conditions: [{ type: 'task_property', params: { field: 'priority', operator: 'in', value: ['3', '5'] } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -758,7 +757,7 @@ await describe('in condition on regular field', () => {
       conditions: [{ type: 'task_property', params: { field: 'priority', operator: 'in', value: [1, 2, 5] } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -771,7 +770,7 @@ await describe('in condition on regular field', () => {
       conditions: [{ type: 'task_property', params: { field: 'priority', operator: 'in', value: '3' } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
@@ -789,7 +788,7 @@ await describe('exists/not_exists with empty string', () => {
       conditions: [{ type: 'task_property', params: { field: 'worktree_path', operator: 'exists' } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
     h.db.prepare('UPDATE tasks SET status = ?, worktree_path = NULL WHERE id = ?').run('todo', taskId)
@@ -803,7 +802,7 @@ await describe('exists/not_exists with empty string', () => {
       conditions: [{ type: 'task_property', params: { field: 'worktree_path', operator: 'not_exists' } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
     h.db.prepare('UPDATE tasks SET status = ?, worktree_path = NULL WHERE id = ?').run('todo', taskId)
@@ -820,7 +819,7 @@ await describe('task_created trigger', () => {
       triggerType: 'task_created',
       actions: [{ type: 'run_command', params: { command: 'echo created', cwd: '/tmp' } }]
     })
-    testIpcMain.emit('db:tasks:create:done', null, taskId, projectId)
+    taskEvents.emit('task:created', { taskId, projectId })
     await new Promise(r => setTimeout(r, 500))
     const runs = getRuns(id)
     expect(runs.length).toBeGreaterThan(0)
@@ -834,7 +833,7 @@ await describe('task_created trigger', () => {
       triggerType: 'task_created',
       actions: [{ type: 'run_command', params: { command: 'echo created', cwd: '/tmp' } }]
     })
-    testIpcMain.emit('db:tasks:create:done', null, taskId, 'other-project')
+    taskEvents.emit('task:created', { taskId, projectId: 'other-project' })
     await new Promise(r => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
   })
@@ -850,7 +849,7 @@ await describe('task_archived trigger', () => {
       triggerType: 'task_archived',
       actions: [{ type: 'run_command', params: { command: 'echo archived', cwd: '/tmp' } }]
     })
-    testIpcMain.emit('db:tasks:archive:done', null, taskId)
+    taskEvents.emit('task:archived', { taskId, projectId })
     await new Promise(r => setTimeout(r, 500))
     const runs = getRuns(id)
     expect(runs.length).toBeGreaterThan(0)
@@ -865,7 +864,7 @@ await describe('task_archived trigger', () => {
       actions: [{ type: 'run_command', params: { command: 'echo archived' } }]
     })
     // Engine looks up project_id, gets undefined, skips
-    testIpcMain.emit('db:tasks:archive:done', null, 'nonexistent-task')
+    taskEvents.emit('task:archived', { taskId: 'nonexistent-task', projectId })
   })
 })
 
@@ -965,7 +964,7 @@ await describe('template context: terminal_mode_flags', () => {
       actions: [{ type: 'run_command', params: { command: 'test "{{task.terminal_mode_flags}}" = "--verbose"', cwd: '/tmp' } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    testIpcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise(r => setTimeout(r, 500))
     const runs = h.db.prepare('SELECT * FROM automation_runs ORDER BY started_at DESC LIMIT 1').all() as AutomationRun[]
     expect(runs[0].status).toBe('success')
@@ -987,6 +986,7 @@ await describe('run_command stderr handling', () => {
   })
 })
 
+taskEvents.removeAllListeners()
 engine.stop()
 h.cleanup()
 console.log('\nDone')

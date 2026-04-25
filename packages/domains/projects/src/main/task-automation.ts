@@ -10,7 +10,8 @@ export function handleTerminalStateChange(
   sessionId: string,
   newState: string,
   oldState: string,
-  notifyTasksChanged: () => void
+  notifyTasksChanged: () => void,
+  onReachedTerminal?: (taskId: string) => void
 ): void {
   let targetField: 'on_terminal_active' | 'on_terminal_idle' | null = null
   if (newState === 'running') targetField = 'on_terminal_active'
@@ -35,6 +36,7 @@ export function handleTerminalStateChange(
     if (!newStatus || newStatus === task.status) return
 
     db.prepare("UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, task.id)
+    if (isTerminalStatus(newStatus, columns)) onReachedTerminal?.(task.id)
     notifyTasksChanged()
   } catch { /* ignore errors — automation is best-effort */ }
 }

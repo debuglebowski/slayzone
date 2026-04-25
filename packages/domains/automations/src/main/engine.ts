@@ -4,6 +4,7 @@ import type { Automation, AutomationEvent, AutomationRow, AutomationRun } from '
 import { finishAutomationActionRun, recordActivityEvent, startAutomationActionRun, trimOutputTail } from '@slayzone/history/main'
 import { parseAutomationRow } from '@slayzone/automations/shared'
 import { resolveTemplate, type TemplateContext } from '@slayzone/automations/shared'
+import { taskEvents } from '@slayzone/task/main'
 import { exec } from 'child_process'
 
 const MAX_DEPTH = 5
@@ -53,32 +54,32 @@ export class AutomationEngine {
   start(ipcMain: IpcMain): void {
 
     // --- Task status change ---
-    ipcMain.on('db:tasks:update:done', (_event, taskId: string, meta?: { oldStatus?: string }) => {
-      const task = this.db.prepare('SELECT id, project_id, status FROM tasks WHERE id = ?').get(taskId) as {
-        id: string; project_id: string; status: string
-      } | undefined
-      if (!task) return
-      if (meta?.oldStatus === undefined || meta.oldStatus === task.status) return
+    taskEvents.on('task:updated', ({ taskId, projectId, oldStatus }) => {
+      if (oldStatus === undefined) return
+      const row = this.db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as { status: string } | undefined
+      if (!row) return
+      if (oldStatus === row.status) return
 
       this.handleEvent({
         type: 'task_status_change',
-        taskId: task.id,
-        projectId: task.project_id,
-        oldStatus: meta.oldStatus,
-        newStatus: task.status,
+        taskId,
+        projectId,
+        oldStatus,
+        newStatus: row.status,
         depth: this.currentDepth,
       })
     })
 
     // --- Task created ---
-    ipcMain.on('db:tasks:create:done', (_event, taskId: string, projectId: string) => {
+    taskEvents.on('task:created', ({ taskId, projectId }) => {
       this.handleEvent({ type: 'task_created', taskId, projectId, depth: 0 })
     })
 
     // --- Task archived ---
-    ipcMain.on('db:tasks:archive:done', (_event, taskId: string) => {
-      const task = this.db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId) as { project_id: string } | undefined
-      if (task) this.handleEvent({ type: 'task_archived', taskId, projectId: task.project_id, depth: 0 })
+    taskEvents.on('task:archived', ({ taskId, projectId }) => {
+      const exists = this.db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId)
+      if (!exists) return
+      this.handleEvent({ type: 'task_archived', taskId, projectId, depth: 0 })
     })
 
     // --- Task tag changed ---
