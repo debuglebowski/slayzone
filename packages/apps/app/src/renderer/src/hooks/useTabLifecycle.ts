@@ -56,9 +56,17 @@ export function useTabLifecycle({
         if (exitCode !== 0) return
         const latestMode = tasks.find((task) => task.id === tab.taskId)?.terminal_mode
         if (subscribedMode && latestMode && subscribedMode !== latestMode) return
-        void window.api.db.deleteTask(tab.taskId).catch(() => {})
-        setTasks((prev) => prev.filter((task) => task.id !== tab.taskId))
-        useTabStore.getState().closeTabByTaskId(tab.taskId)
+        void (async () => {
+          // Skip auto-close when the PTY exit was triggered by a display-mode
+          // switch (terminal → chat). setTabDisplayMode persists displayMode
+          // before killing the PTY, so the row already reflects the new mode.
+          const tabsList = await window.api.tabs.list(tab.taskId).catch(() => null)
+          const mainTab = tabsList?.find((t) => t.isMain)
+          if (mainTab?.displayMode === 'chat') return
+          await window.api.db.deleteTask(tab.taskId).catch(() => {})
+          setTasks((prev) => prev.filter((task) => task.id !== tab.taskId))
+          useTabStore.getState().closeTabByTaskId(tab.taskId)
+        })()
       })
     })
 

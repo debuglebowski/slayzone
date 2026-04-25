@@ -175,21 +175,26 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
       if (!tab) return
       if (tab.displayMode === displayMode) return
 
-      // Kill whichever transport is currently live for this tab.
-      // Both calls are idempotent/no-op if nothing is running.
+      // Persist display mode FIRST (before PTY kill) so that any listener
+      // reacting to the PTY exit below (e.g. temp-task auto-close) sees the
+      // new mode in the DB and can distinguish "user toggled mode" from
+      // "user terminated the session".
+      const updated = await window.api.tabs.update({ id: tabId, displayMode })
+
+      // Kill the OLD transport BEFORE flipping client state. If we flipped
+      // first, React would mount the new transport (e.g. ChatPanel →
+      // chat.create) and the kill below would race-kill the fresh session.
       const sessionId = `${taskId}:${tabId}`
       try {
-        await window.api.pty.kill(sessionId)
-      } catch {
-        /* ignore */
-      }
-      try {
-        await window.api.chat.remove(tabId)
+        if (tab.displayMode === 'xterm') {
+          await window.api.pty.kill(sessionId)
+        } else {
+          await window.api.chat.remove(tabId)
+        }
       } catch {
         /* ignore */
       }
 
-      const updated = await window.api.tabs.update({ id: tabId, displayMode })
       if (updated) {
         setTabs((prev) => prev.map((t) => (t.id === tabId ? updated : t)))
       }

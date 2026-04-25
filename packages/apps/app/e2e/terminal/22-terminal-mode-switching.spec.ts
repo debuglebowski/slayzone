@@ -157,6 +157,51 @@ test.describe('Terminal mode switching', () => {
     expect(updated?.terminal_mode).toBe('codex')
   })
 
+  test('toggling chat on temporary task does not delete the task', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    const temp = await s.createTask({
+      projectId,
+      title: 'Chat toggle temp survives',
+      status: 'in_progress',
+      isTemporary: true,
+      terminalMode: 'claude-code',
+    })
+    await s.refreshData()
+
+    await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Chat toggle temp survives' })
+
+    // Open terminal menu, enable chat
+    await mainWindow.locator('[data-testid="terminal-menu-trigger"]:visible').first().click()
+    await mainWindow.getByRole('menuitem', { name: /Enable chat/ }).click()
+    await mainWindow.getByRole('button', { name: 'Enable' }).click()
+
+    // displayMode flips to 'chat' in DB
+    await expect.poll(async () => {
+      const list = await mainWindow.evaluate((id) => window.api.tabs.list(id), temp.id)
+      return list.find((t) => t.isMain)?.displayMode
+    }, { timeout: 5_000 }).toBe('chat')
+
+    // Task still exists — auto-close hook must NOT have deleted it
+    // Poll a few cycles to ensure the PTY exit handler had time to fire.
+    await mainWindow.waitForTimeout(500)
+    const tasks = await mainWindow.evaluate(() => window.api.db.getTasks())
+    expect(tasks.some((t) => t.id === temp.id)).toBe(true)
+
+    // Now toggle back to xterm via ChatPanel's "Disable chat" button.
+    await mainWindow.getByRole('button', { name: 'Disable chat' }).click()
+    await mainWindow.getByRole('button', { name: 'Disable' }).click()
+
+    await expect.poll(async () => {
+      const list = await mainWindow.evaluate((id) => window.api.tabs.list(id), temp.id)
+      return list.find((t) => t.isMain)?.displayMode
+    }, { timeout: 5_000 }).toBe('xterm')
+
+    // Task still alive
+    await mainWindow.waitForTimeout(500)
+    const tasksAfter = await mainWindow.evaluate(() => window.api.db.getTasks())
+    expect(tasksAfter.some((t) => t.id === temp.id)).toBe(true)
+  })
+
   test('temporary terminal task is removed from active task list when tab is closed', async ({ mainWindow, electronApp }) => {
     const s = seed(mainWindow)
     const temp = await s.createTask({
