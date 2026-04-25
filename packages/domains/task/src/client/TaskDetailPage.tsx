@@ -65,7 +65,7 @@ import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
 import { RichTextEditor } from '@slayzone/editor'
 import { normalizeDescription, stripMarkdown, getExtensionFromTitle, getEffectiveRenderMode, RENDER_MODE_INFO } from '@slayzone/task/shared'
 import { useTheme, useDialogStore, type SearchFileContext } from '@slayzone/settings/client'
-import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog, SlayNudgeBanner, useSlayNudge, PtyStateDot } from '@slayzone/terminal'
+import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog, SlayNudgeBanner, useSlayNudge, PtyStateDot, PtyProgressDot } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal/shared'
 import { TerminalContainer, type TerminalContainerHandle, ConfirmDisplayModeDialog, type TabDisplayMode, isChatSupported } from '@slayzone/task-terminals'
 import { UnifiedGitPanel, type UnifiedGitPanelHandle, type GitTabId } from '@slayzone/worktrees'
@@ -83,16 +83,19 @@ import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
 
-function SortableSubTask({ sub, columns, statusOptions, onNavigate, onUpdate, onDelete }: {
+function TaskOverviewRow({ sub, columns, statusOptions, onNavigate, onUpdate, onDelete, dragHandle, rowRef, rowStyle, isDragging, isRoot }: {
   sub: Task
   columns?: Project['columns_config']
   statusOptions: Array<{ value: string; label: string }>
   onNavigate?: (id: string) => void
   onUpdate: (id: string, updates: Record<string, unknown>) => void
-  onDelete: (id: string) => void
+  onDelete?: (id: string) => void
+  dragHandle?: React.ReactNode
+  rowRef?: (node: HTMLElement | null) => void
+  rowStyle?: React.CSSProperties
+  isDragging?: boolean
+  isRoot?: boolean
 }): React.JSX.Element {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: sub.id })
-  const style = { transform: CSS.Transform.toString(transform), transition }
   const statusStyle = getColumnStatusStyle(sub.status, columns)
   const StatusIcon = statusStyle?.icon
   const [statusOpen, setStatusOpen] = useState(false)
@@ -101,27 +104,31 @@ function SortableSubTask({ sub, columns, statusOptions, onNavigate, onUpdate, on
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
-          ref={setNodeRef}
-          style={style}
+          ref={rowRef}
+          style={rowStyle}
           className={cn(
             "relative flex items-center gap-2 py-1 px-1 rounded cursor-pointer hover:bg-muted/50 group select-none",
-            isDragging && "opacity-50"
+            isDragging && "opacity-50",
+            isRoot && "bg-muted/30 font-medium"
           )}
         >
-          <span {...attributes} {...listeners} className="absolute -left-4 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground">
-            <GripVertical className="size-3" />
-          </span>
+          {dragHandle}
           <Popover open={statusOpen} onOpenChange={setStatusOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                aria-label={`Status: ${statusStyle?.label ?? sub.status}`}
-                onClick={(e) => e.stopPropagation()}
-                className="shrink-0 cursor-pointer transition-opacity hover:opacity-70"
-              >
-                {StatusIcon && <StatusIcon className={cn("size-3.5", statusStyle?.iconClass)} />}
-              </button>
-            </PopoverTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={`Status: ${statusStyle?.label ?? sub.status}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="shrink-0 cursor-pointer transition-opacity hover:opacity-70"
+                  >
+                    {StatusIcon && <StatusIcon className={cn("size-3.5", statusStyle?.iconClass)} />}
+                  </button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{statusStyle?.label ?? sub.status} — {Math.round(sub.progress ?? 0)}% complete</TooltipContent>
+            </Tooltip>
             <PopoverContent className="w-44 p-1" align="start" onClick={(e) => e.stopPropagation()}>
               {statusOptions.map((opt) => {
                 const optStyle = getColumnStatusStyle(opt.value, columns)
@@ -150,6 +157,9 @@ function SortableSubTask({ sub, columns, statusOptions, onNavigate, onUpdate, on
           >
             {sub.title}
           </span>
+          <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <PtyProgressDot sessionId={`${sub.id}:${sub.id}`} progress={sub.progress} alwaysShow />
+          </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
@@ -175,11 +185,38 @@ function SortableSubTask({ sub, columns, statusOptions, onNavigate, onUpdate, on
             </ContextMenuRadioGroup>
           </ContextMenuSubContent>
         </ContextMenuSub>
-        <ContextMenuSeparator />
-        <ContextMenuItem variant="destructive" onSelect={() => onDelete(sub.id)}>Delete</ContextMenuItem>
+        {onDelete && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem variant="destructive" onSelect={() => onDelete(sub.id)}>Delete</ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   )
+}
+
+function SortableSubTask(props: {
+  sub: Task
+  columns?: Project['columns_config']
+  statusOptions: Array<{ value: string; label: string }>
+  onNavigate?: (id: string) => void
+  onUpdate: (id: string, updates: Record<string, unknown>) => void
+  onDelete: (id: string) => void
+}): React.JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.sub.id })
+  const style = { transform: CSS.Transform.toString(transform), transition }
+  const dragHandle = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span {...attributes} {...listeners} className="absolute -left-4 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground">
+          <GripVertical className="size-3" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>Drag to reorder</TooltipContent>
+    </Tooltip>
+  )
+  return <TaskOverviewRow {...props} rowRef={setNodeRef} rowStyle={style} isDragging={isDragging} dragHandle={dragHandle} />
 }
 
 export interface TaskDetailPageProps {
@@ -2498,6 +2535,18 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               <DndContext sensors={subTaskSensors} collisionDetection={closestCenter} onDragEnd={handleSubTaskDragEnd}>
               <SortableContext items={subTasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
               <div className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+                {task && (
+                  <TaskOverviewRow
+                    sub={task}
+                    columns={project?.columns_config}
+                    statusOptions={statusOptions}
+                    onUpdate={async (id, updates) => {
+                      const updated = await window.api.db.updateTask({ id, ...updates })
+                      onTaskUpdated(updated)
+                    }}
+                    isRoot
+                  />
+                )}
                 {subTasks.map(sub => (
                   <SortableSubTask
                     key={sub.id}

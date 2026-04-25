@@ -5,7 +5,6 @@ import {
   Switch,
   Label,
   getTaskStatusStyle,
-  ProgressRing,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -17,8 +16,11 @@ import {
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
   PriorityIcon,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
 } from '@slayzone/ui'
-import { PtyStateDot } from '@slayzone/terminal'
+import { PtyProgressDot } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 
 const BUILTIN_STATUSES: ReadonlyArray<{ value: string; label: string }> = [
@@ -214,14 +216,8 @@ function RowContextMenu({ task, onOpenChange, children }: { task: ManagerTask; o
   )
 }
 
-function ProgressDot({ sessionId, progress, isDone }: { sessionId: string; progress: number; isDone: boolean }): React.JSX.Element {
-  const show = !isDone && progress > 0
-  return (
-    <span className="relative inline-flex items-center justify-center shrink-0 size-3.5">
-      {show && <ProgressRing value={progress} size={14} strokeWidth={1.5} className="absolute inset-0" />}
-      <PtyStateDot sessionId={sessionId} />
-    </span>
-  )
+function ProgressDot({ sessionId, progress }: { sessionId: string; progress: number; isDone?: boolean }): React.JSX.Element | null {
+  return <PtyProgressDot sessionId={sessionId} progress={progress} alwaysShow />
 }
 
 function TreeGuides({ depth, ancestorFlags }: { depth: number; ancestorFlags: boolean[] }): React.JSX.Element | null {
@@ -307,21 +303,31 @@ function NodeRow({
           <span className={cn('truncate flex-1', isCompleted && 'line-through opacity-60')}>{node.task.title || 'Untitled'}</span>
           <span className="shrink-0 flex items-center justify-center size-4">
             {hasChildren && (
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setExpanded((v) => !v)
-                }}
-                aria-label={expanded ? 'Collapse' : 'Expand'}
-                className="flex items-center justify-center size-4 rounded hover:bg-accent/40"
-              >
-                <ChevronRight className={cn('size-3.5 transition-transform', expanded && 'rotate-90')} />
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setExpanded((v) => !v)
+                    }}
+                    aria-label={expanded ? 'Collapse' : 'Expand'}
+                    className="flex items-center justify-center size-4 rounded hover:bg-accent/40"
+                  >
+                    <ChevronRight className={cn('size-3.5 transition-transform', expanded && 'rotate-90')} />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{expanded ? 'Collapse' : 'Expand'}</TooltipContent>
+              </Tooltip>
             )}
           </span>
-          <StatusIcon className={cn('shrink-0 size-3.5', statusStyle?.iconClass)} aria-label={statusStyle?.label} />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <StatusIcon className={cn('shrink-0 size-3.5', statusStyle?.iconClass)} aria-label={statusStyle?.label} />
+            </TooltipTrigger>
+            <TooltipContent>{statusStyle?.label ?? node.task.status} — {Math.round(node.task.progress)}% complete</TooltipContent>
+          </Tooltip>
           <ProgressDot sessionId={sessionId} progress={node.task.progress} isDone={isCompleted} />
         </span>
       </button>
@@ -455,7 +461,12 @@ export function ManagerSidebar({
                 : 'text-foreground hover:bg-accent/50'
             )}
           >
-            <RootStatusIcon className={cn('shrink-0 size-4', rootStatusStyle?.iconClass)} aria-label={rootStatusStyle?.label} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <RootStatusIcon className={cn('shrink-0 size-4', rootStatusStyle?.iconClass)} aria-label={rootStatusStyle?.label} />
+              </TooltipTrigger>
+              <TooltipContent>{rootStatusStyle?.label ?? rootStatus ?? 'Status'} — {Math.round(rootProgress ?? 0)}% complete</TooltipContent>
+            </Tooltip>
             <span className={cn('truncate flex-1', rootCompleted && 'line-through opacity-60')}>{rootTitle || 'Main'}</span>
             <ProgressDot sessionId={rootSessionId} progress={rootProgress ?? 0} isDone={rootCompleted} />
           </button>

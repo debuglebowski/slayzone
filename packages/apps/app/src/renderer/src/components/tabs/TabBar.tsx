@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { Home, X } from 'lucide-react'
-import { cn, ProgressRing, Tooltip, TooltipTrigger, TooltipContent, getTerminalStateStyle, projectColorBg, useShortcutDisplay, withShortcut } from '@slayzone/ui'
+import { cn, TerminalProgressDot, Tooltip, TooltipTrigger, TooltipContent, projectColorBg, useShortcutDisplay, withShortcut } from '@slayzone/ui'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import {
   DndContext,
@@ -60,14 +60,7 @@ interface TabContentProps {
   inputRef?: React.RefObject<HTMLInputElement | null>
 }
 
-function getStateInfo(state: TerminalState | undefined) {
-  return getTerminalStateStyle(state)
-}
-
 function TabContent({ title, isActive, isDragging, onClose, terminalState, isSubTask, isTemporary, projectColor, progress, isDone, isEditing, editValue, onEditChange, onEditSubmit, onEditCancel, inputRef }: TabContentProps): React.JSX.Element {
-  const stateInfo = getStateInfo(terminalState)
-  const showProgressRing = !isDone && progress != null && progress > 0
-
   return (
     <div
       className={cn(
@@ -88,41 +81,7 @@ function TabContent({ title, isActive, isDragging, onClose, terminalState, isSub
       }}
     >
       {projectColor && <div className="pointer-events-none absolute inset-0 rounded-md opacity-0 transition-opacity group-hover:opacity-100 bg-black/10 dark:bg-white/10" />}
-      {stateInfo && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="relative inline-flex items-center justify-center shrink-0 size-3.5">
-              {showProgressRing && (
-                <ProgressRing
-                  value={progress!}
-                  size={14}
-                  strokeWidth={1.5}
-                  className="absolute inset-0"
-                />
-              )}
-              <span className={cn('w-2 h-2 rounded-full', stateInfo.color)} />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            {showProgressRing ? `${stateInfo.label} · ${Math.round(progress!)}%` : stateInfo.label}
-          </TooltipContent>
-        </Tooltip>
-      )}
-      {!stateInfo && showProgressRing && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="relative inline-flex items-center justify-center shrink-0 size-3.5">
-              <ProgressRing
-                value={progress!}
-                size={14}
-                strokeWidth={1.5}
-                className="absolute inset-0"
-              />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">{Math.round(progress!)}%</TooltipContent>
-        </Tooltip>
-      )}
+      <TerminalProgressDot state={terminalState} progress={progress} isDone={isDone} tooltipSide="bottom" />
       {isSubTask && <span className="text-[10px] text-muted-foreground/60 shrink-0">SUB</span>}
       {isEditing ? (
         <input

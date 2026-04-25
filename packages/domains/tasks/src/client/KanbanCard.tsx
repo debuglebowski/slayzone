@@ -8,7 +8,7 @@ import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isCompletedStatus, isTerminalStatus } from '@slayzone/projects/shared'
 import { TaskProgressPopover } from '@slayzone/task/client'
 import type { TerminalState } from '@slayzone/terminal/shared'
-import { Card, CardContent, Tooltip, TooltipContent, TooltipTrigger, Popover, PopoverContent, PopoverTrigger, ProgressRing, cn, getTerminalStateStyle, PriorityIcon } from '@slayzone/ui'
+import { Card, CardContent, Tooltip, TooltipContent, TooltipTrigger, Popover, PopoverContent, PopoverTrigger, TerminalProgressDot, cn, getTerminalStateStyle, PriorityIcon } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
 import { todayISO } from './kanban'
 import { priorityOptions } from '@slayzone/task/shared'
@@ -160,12 +160,13 @@ export function KanbanCard({
               <div className="flex items-start gap-1.5 shrink-0">
               {(() => {
                 const terminalOn = cp?.terminal ?? true
-                const stateStyle = terminalOn && terminalState !== 'starting' ? getTerminalStateStyle(terminalState) : null
+                const stateForBlob = terminalOn && terminalState !== 'starting' ? terminalState : undefined
+                const stateStyle = getTerminalStateStyle(stateForBlob)
                 const progress = task.progress ?? 0
-                const showProgressRing = progress > 0 && !isCompletedStatus(task.status, columns)
-                if (!stateStyle && !showProgressRing) return null
-                const blobColor = stateStyle?.color ?? 'bg-muted-foreground/30'
-                const tooltipText = [stateStyle?.label, showProgressRing ? `${Math.round(progress)}%` : null].filter(Boolean).join(' · ')
+                const isDone = isCompletedStatus(task.status, columns)
+                const showProgress = progress > 0 && !isDone
+                if (!stateStyle && !showProgress) return null
+                const tooltipText = [stateStyle?.label, showProgress ? `${Math.round(progress)}%` : null].filter(Boolean).join(' · ')
                 return (
                   <TaskProgressPopover
                     value={progress}
@@ -174,18 +175,10 @@ export function KanbanCard({
                   >
                     <button
                       type="button"
-                      className="relative inline-flex items-center justify-center shrink-0 size-3.5 ml-0.5 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="inline-flex items-center justify-center shrink-0 ml-0.5 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {showProgressRing && (
-                        <ProgressRing
-                          value={progress}
-                          size={14}
-                          strokeWidth={1.5}
-                          className="absolute inset-0"
-                        />
-                      )}
-                      <span className={cn('w-2 h-2 rounded-full', blobColor)} />
+                      <TerminalProgressDot state={stateForBlob} progress={progress} isDone={isDone} alwaysShow noTooltip />
                     </button>
                   </TaskProgressPopover>
                 )

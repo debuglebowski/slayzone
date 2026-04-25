@@ -1,23 +1,28 @@
 import { useEffect, useState } from 'react'
-import { cn, getTerminalStateStyle, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
+import { TerminalProgressDot, type TerminalProgressDotProps } from '@slayzone/ui'
 import type { TerminalState } from '../shared/types'
 import { usePty } from './PtyContext'
 
-export function PtyStateDot({ sessionId }: { sessionId: string }): React.JSX.Element | null {
+export function useTerminalState(sessionId: string): TerminalState {
   const { getState, subscribeState } = usePty()
   const [state, setState] = useState<TerminalState>(() => getState(sessionId))
   useEffect(() => {
     setState(getState(sessionId))
     return subscribeState(sessionId, (next) => setState(next))
   }, [sessionId, getState, subscribeState])
-  const style = getTerminalStateStyle(state)
-  if (!style) return <span className="shrink-0 size-2" aria-hidden />
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className={cn('shrink-0 size-2 rounded-full', style.color)} aria-label={`Terminal: ${style.label}`} />
-      </TooltipTrigger>
-      <TooltipContent>Terminal: {style.label}</TooltipContent>
-    </Tooltip>
-  )
+  return state
+}
+
+export function PtyStateDot({ sessionId }: { sessionId: string }): React.JSX.Element | null {
+  const state = useTerminalState(sessionId)
+  return <TerminalProgressDot state={state} />
+}
+
+export interface PtyProgressDotProps extends Omit<TerminalProgressDotProps, 'state'> {
+  sessionId: string
+}
+
+export function PtyProgressDot({ sessionId, ...rest }: PtyProgressDotProps): React.JSX.Element | null {
+  const state = useTerminalState(sessionId)
+  return <TerminalProgressDot state={state} {...rest} />
 }
