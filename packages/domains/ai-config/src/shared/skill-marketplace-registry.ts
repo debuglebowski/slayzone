@@ -573,20 +573,28 @@ All commands support ID prefix matching.
   - \`--full\` replays the existing buffer first before streaming new output
   - Streams until the session exits
 
-- \`slay pty write <id> <data>\` — send raw data directly to PTY stdin.
-  - No newline handling or encoding — sends exactly what you provide
-  - Use for low-level control
-
-- \`slay pty submit <id> [text] [--wait] [--no-wait] [--timeout <ms>]\` — high-level text submission with AI-mode awareness.
+- \`slay pty submit <id> [text] [--wait] [--no-wait] [--timeout <ms>]\` — **default for sending input.** High-level text submission with AI-mode awareness.
   - If no text argument is given, reads from stdin (pipe-friendly)
+  - Appends a trailing newline to submit
   - For AI modes like \`claude-code\`, internal newlines are encoded as Kitty shift-enter sequences (\`\\x1b[13;2u\`) so multi-line text is submitted as a single input
   - **Wait behavior:** by default waits for the session to reach the \`attention\` state (= AI CLI ready for input) before sending. Automatic for AI modes. Use \`--no-wait\` to send immediately (default for plain terminal modes)
   - Timeout defaults to 60 seconds
+
+- \`slay pty type <id> <data>\` (alias: \`write\`) — send raw bytes to PTY stdin. **Use only when \`submit\` is wrong** — e.g. appending text mid-prompt without submitting, or sending exact byte sequences. No newline added, no encoding.
+
+- Key helper subcommands (\`slay pty <key> <id>\`) — send a single control sequence:
+  - \`arrow-up\`, \`arrow-down\`, \`arrow-left\`, \`arrow-right\` — cursor / history nav
+  - \`tab\`, \`shift-tab\` — autocomplete; \`shift-tab\` cycles claude-code modes (plan/auto-accept/normal)
+  - \`backspace\` — delete char
+  - \`escape\` — ESC key (double-invoke to cancel a claude-code generation)
+  - \`cancel\` — Ctrl+C interrupt
 
 - \`slay pty wait <id> [--state <state>] [--timeout <ms>] [--json]\` — block until a session reaches a specific state.
   - Default state: \`attention\` (AI ready for input)
   - Default timeout: 60 seconds
   - Exit codes: 0 = reached state, 2 = timeout, 1 = session died
+
+- \`slay pty respawn <task-id>\` — kill + remount a task's main PTY. Task must be open in the app. Task-id prefix supported.
 
 - \`slay pty kill <id>\` — terminate a PTY session.
 

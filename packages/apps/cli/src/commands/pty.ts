@@ -145,15 +145,39 @@ export function ptyCommand(): Command {
       }
     })
 
-  // slay pty write <id> <data>
+  // slay pty type <id> <data>  (alias: write)
   cmd
-    .command('write <id> <data>')
-    .description('Send raw data to PTY stdin (id prefix supported)')
+    .command('type <id> <data>')
+    .alias('write')
+    .description('Send raw bytes to PTY stdin — no newline, no encoding (id prefix supported)')
     .action(async (idPrefix, data) => {
       const sessions = await apiGet<PtyInfo[]>('/api/pty')
       const session = resolveSession(sessions, idPrefix)
       await apiPost<{ ok: boolean }>(`/api/pty/${encodedId(session.sessionId)}/write`, { data })
     })
+
+  // Key helper subcommands — each sends a specific control sequence
+  const KEYS: Record<string, string> = {
+    'arrow-up': '\x1b[A',
+    'arrow-down': '\x1b[B',
+    'arrow-right': '\x1b[C',
+    'arrow-left': '\x1b[D',
+    tab: '\t',
+    'shift-tab': '\x1b[Z',
+    backspace: '\x7f',
+    escape: '\x1b',
+    cancel: '\x03',
+  }
+  for (const [name, seq] of Object.entries(KEYS)) {
+    cmd
+      .command(`${name} <id>`)
+      .description(`Send ${name} key to PTY stdin (id prefix supported)`)
+      .action(async (idPrefix: string) => {
+        const sessions = await apiGet<PtyInfo[]>('/api/pty')
+        const session = resolveSession(sessions, idPrefix)
+        await apiPost<{ ok: boolean }>(`/api/pty/${encodedId(session.sessionId)}/write`, { data: seq })
+      })
+  }
 
   // slay pty submit <id> [text]
   cmd
