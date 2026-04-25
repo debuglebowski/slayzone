@@ -1,6 +1,92 @@
 # Changelog
 
 
+## v0.23.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.22.0...v0.23.0)
+
+### 🚀 Enhancements
+
+- **task-terminals:** Remove width clamps on agent overview sidebar ([7a78bd53](https://github.com/debuglebowski/slayzone/commit/7a78bd53))
+- **task-assets:** Side-by-side diff for asset versions ([ebff234b](https://github.com/debuglebowski/slayzone/commit/ebff234b))
+- **panels:** Dnd reorder in settings, unified home + task order ([a3bae103](https://github.com/debuglebowski/slayzone/commit/a3bae103))
+- **worktrees:** Revamp diff viewer ([1d438fa7](https://github.com/debuglebowski/slayzone/commit/1d438fa7))
+- **assets:** Add loading state to assets panel ([ea3b66bc](https://github.com/debuglebowski/slayzone/commit/ea3b66bc))
+- **agent-turns:** Track agent turn boundaries with scoped diffs ([9519f633](https://github.com/debuglebowski/slayzone/commit/9519f633))
+- **worktrees:** Push-based fs watcher + diff store ([55ba6865](https://github.com/debuglebowski/slayzone/commit/55ba6865))
+- **settings:** Reorderable + toggleable git sub-tabs ([972f991a](https://github.com/debuglebowski/slayzone/commit/972f991a))
+- **agent-turns:** Filter empty-diff turns at list time ([ebb35645](https://github.com/debuglebowski/slayzone/commit/ebb35645))
+- **worktrees:** Emit watcher-failure → renderer tightens poll ([392046ba](https://github.com/debuglebowski/slayzone/commit/392046ba))
+- **task:** Persist git panel active sub-tab per task ([672e84de](https://github.com/debuglebowski/slayzone/commit/672e84de))
+- **worktrees:** Turn pill tooltips + filter garbled legacy prompts ([43869d3d](https://github.com/debuglebowski/slayzone/commit/43869d3d))
+- **task:** TaskEvents bus + onReachedTerminal invariant ([ed3b469a](https://github.com/debuglebowski/slayzone/commit/ed3b469a))
+- **cli:** Tasks commands → REST API ([3310f23a](https://github.com/debuglebowski/slayzone/commit/3310f23a))
+- **pty:** Force-respawn — slay pty respawn ([d6c1a679](https://github.com/debuglebowski/slayzone/commit/d6c1a679))
+- **cli:** Pty type + key helper subcommands ([2890043b](https://github.com/debuglebowski/slayzone/commit/2890043b))
+- **worktrees:** Recursive file selection in copy-files dialog ([#76](https://github.com/debuglebowski/slayzone/pull/76))
+- **chat:** Fuzzy slash search via fzf ([b6c0b13c](https://github.com/debuglebowski/slayzone/commit/b6c0b13c))
+- **settings:** Default tab display mode (Terminal/Chat) ([54b1506b](https://github.com/debuglebowski/slayzone/commit/54b1506b))
+- **file-editor:** Render mermaid diagrams in markdown split view ([#80](https://github.com/debuglebowski/slayzone/pull/80))
+
+### 🩹 Fixes
+
+- **kanban:** Restore overflow scrollbars ([17725947](https://github.com/debuglebowski/slayzone/commit/17725947))
+- **projects:** Automation never un-completes or un-cancels tasks ([5c2cb60a](https://github.com/debuglebowski/slayzone/commit/5c2cb60a))
+- **cli:** Tasks list --json missing description ([#78](https://github.com/debuglebowski/slayzone/pull/78))
+- **terminal:** Raise fd limit + answer OSC queries ([da9ef3a3](https://github.com/debuglebowski/slayzone/commit/da9ef3a3))
+- **task-terminals:** Unbold agent overview root row ([2d6a361b](https://github.com/debuglebowski/slayzone/commit/2d6a361b))
+- **worktrees:** Export getGitWatcher/closeGitWatcher ([928c3549](https://github.com/debuglebowski/slayzone/commit/928c3549))
+- **terminal:** Fall back to homedir when PTY cwd is unreadable ([e8d2609a](https://github.com/debuglebowski/slayzone/commit/e8d2609a))
+- **agent-turns:** Snapshot always commits w/ parent=HEAD, dedupe by diff ([91c44b11](https://github.com/debuglebowski/slayzone/commit/91c44b11))
+- **agent-turns:** Strict worktree path match in onChanged ([3bc4f77f](https://github.com/debuglebowski/slayzone/commit/3bc4f77f))
+- **worktrees:** Turn numbering newest=highest in GitDiffPanel ([1914bd24](https://github.com/debuglebowski/slayzone/commit/1914bd24))
+- **worktrees:** SBS diff single scroll per column, halves synced ([7a925315](https://github.com/debuglebowski/slayzone/commit/7a925315))
+- **agent-turns:** Drop raw PTY stdin from prompt_preview ([101b488f](https://github.com/debuglebowski/slayzone/commit/101b488f))
+- **task-terminals:** Preserve temp task on chat toggle ([52f90d18](https://github.com/debuglebowski/slayzone/commit/52f90d18))
+- **chat:** Inject SLAYZONE_TASK_ID + enriched PATH into chat SDK ([c15b651b](https://github.com/debuglebowski/slayzone/commit/c15b651b))
+- **worktrees:** Enforce ancestor-excludes-descendant invariant in copy-files dialog ([763f363d](https://github.com/debuglebowski/slayzone/commit/763f363d))
+- **task:** Drop wheel-zoom wrapper for mermaid asset preview ([699f24b4](https://github.com/debuglebowski/slayzone/commit/699f24b4))
+
+### 💅 Refactors
+
+- **ui:** Extract PulseGrid to shared/ui ([3ad00dde](https://github.com/debuglebowski/slayzone/commit/3ad00dde))
+- **worktrees:** Mark applied highlights via WeakSet, keep parse cache pure ([0b6e56d8](https://github.com/debuglebowski/slayzone/commit/0b6e56d8))
+- **app:** Split mcp-server into mcp-tools + rest-api ([22e07e44](https://github.com/debuglebowski/slayzone/commit/22e07e44))
+- **cli:** Split tasks.ts into per-command modules ([301c9815](https://github.com/debuglebowski/slayzone/commit/301c9815))
+- **task:** Extract ops/ + events from handlers.ts ([70c22d80](https://github.com/debuglebowski/slayzone/commit/70c22d80))
+- **app:** Split mcp-tools + rest-api per task op + harnesses ([db3b343b](https://github.com/debuglebowski/slayzone/commit/db3b343b))
+- **ui:** Unify terminal state dot + progress ring → TerminalProgressDot ([3b00f3a0](https://github.com/debuglebowski/slayzone/commit/3b00f3a0))
+- **automations:** TEMPLATE_VARIABLES single source ([49766492](https://github.com/debuglebowski/slayzone/commit/49766492))
+- **settings:** Drop labs flags for agent panel + label ([fa4c07e2](https://github.com/debuglebowski/slayzone/commit/fa4c07e2))
+- **terminal:** Regroup ai context menu items ([996c160b](https://github.com/debuglebowski/slayzone/commit/996c160b))
+- **markdown:** Extract shared MermaidBlock package ([#81](https://github.com/debuglebowski/slayzone/pull/81))
+
+### 📖 Documentation
+
+- **slay:** Add `slay init` to CLI reference ([c66cd1ef](https://github.com/debuglebowski/slayzone/commit/c66cd1ef))
+- **skills:** Regen slay SKILL.md reference ([e669b45c](https://github.com/debuglebowski/slayzone/commit/e669b45c))
+- **release:** Dedupe changelog entries by feature not commit ([280136a8](https://github.com/debuglebowski/slayzone/commit/280136a8))
+- **skills:** Expand slay-pty ref with type/key/respawn ([b7d67865](https://github.com/debuglebowski/slayzone/commit/b7d67865))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.22.0 ([08b75794](https://github.com/debuglebowski/slayzone/commit/08b75794))
+- **skills:** Remove sync-slay-skill ([6971b2b2](https://github.com/debuglebowski/slayzone/commit/6971b2b2))
+- Gitignore .plans/ ([c24b00aa](https://github.com/debuglebowski/slayzone/commit/c24b00aa))
+
+### ✅ Tests
+
+- **worktrees:** Add store/highlight/parse-diff cache tests ([b889f282](https://github.com/debuglebowski/slayzone/commit/b889f282))
+- **e2e:** Cli automation trigger spec ([099d55e8](https://github.com/debuglebowski/slayzone/commit/099d55e8))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Kalle
+- Nadim ([@nadimest](https://github.com/nadimest))
+- Ian Thorslund
+- Kdrapel ([@kdrapel](https://github.com/kdrapel))
+
 ## v0.22.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.21.0...v0.22.0)

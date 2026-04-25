@@ -1,5 +1,107 @@
 [
   {
+    "version": "0.23.0",
+    "date": "2026-04-26",
+    "tagline": "Turns, diffs & mermaid",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Agent turns with scoped diffs",
+        "description": "Track agent turn boundaries with per-turn diffs, tooltips, and filtered empty turns in the git panel."
+      },
+      {
+        "category": "feature",
+        "title": "Side-by-side worktree diff viewer",
+        "description": "Revamped diff viewer with side-by-side mode for files and asset versions, synced scrolling, and newest-first turn numbering."
+      },
+      {
+        "category": "feature",
+        "title": "Mermaid diagrams in markdown",
+        "description": "Render mermaid diagrams inline in the markdown split view and asset previews."
+      },
+      {
+        "category": "feature",
+        "title": "Recursive copy-files dialog",
+        "description": "Pick whole folders in the copy-files dialog with ancestor/descendant deduping."
+      },
+      {
+        "category": "feature",
+        "title": "Fuzzy slash command search",
+        "description": "Chat slash menu now uses fzf for fuzzy matching across commands."
+      },
+      {
+        "category": "feature",
+        "title": "Default tab display mode",
+        "description": "Choose Terminal or Chat as the default panel for new task tabs in settings."
+      },
+      {
+        "category": "feature",
+        "title": "PTY helper commands",
+        "description": "New slay pty type, key, and respawn subcommands for scripting terminal interactions."
+      },
+      {
+        "category": "improvement",
+        "title": "Reorderable settings panels",
+        "description": "Drag to reorder panels in settings and toggle git sub-tabs, with a unified home and task order."
+      },
+      {
+        "category": "improvement",
+        "title": "Push-based git watcher",
+        "description": "Worktree changes now stream via fs watcher instead of polling, with renderer fallback when the watcher fails."
+      },
+      {
+        "category": "improvement",
+        "title": "Assets panel loading state",
+        "description": "Assets panel shows a loading indicator while files are scanned."
+      },
+      {
+        "category": "improvement",
+        "title": "Persistent git sub-tab",
+        "description": "Each task remembers which git panel sub-tab was last active."
+      },
+      {
+        "category": "improvement",
+        "title": "Wider agent overview sidebar",
+        "description": "Removed width clamps on the agent overview sidebar so it can grow as needed."
+      },
+      {
+        "category": "improvement",
+        "title": "Faster CLI task commands",
+        "description": "slay tasks commands now go through the REST API for faster, in-app-aware updates."
+      },
+      {
+        "category": "fix",
+        "title": "Kanban overflow scrollbars",
+        "description": "Restored horizontal and vertical scrollbars in the kanban view."
+      },
+      {
+        "category": "fix",
+        "title": "Automations no longer un-complete tasks",
+        "description": "Project automations skip tasks that are already completed or cancelled instead of reopening them."
+      },
+      {
+        "category": "fix",
+        "title": "CLI tasks list --json description",
+        "description": "slay tasks list --json now includes the task description field."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal robustness",
+        "description": "Raised the fd limit, answered OSC queries, and fell back to homedir when the PTY cwd is unreadable."
+      },
+      {
+        "category": "fix",
+        "title": "Chat env injection",
+        "description": "Chat SDK now receives SLAYZONE_TASK_ID and the enriched PATH so spawned tools see the same env as terminals."
+      },
+      {
+        "category": "fix",
+        "title": "Preserve temp task on chat toggle",
+        "description": "Toggling the chat panel no longer discards a temporary task."
+      }
+    ]
+  },
+  {
     "version": "0.22.0",
     "date": "2026-04-23",
     "tagline": "Orchestration & progress",
