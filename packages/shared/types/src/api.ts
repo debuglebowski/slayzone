@@ -498,6 +498,8 @@ export interface ElectronAPI {
     onData: (callback: (sessionId: string, data: string, seq: number) => void) => () => void
     onExit: (callback: (sessionId: string, exitCode: number) => void) => () => void
     onRespawnSuggested: (callback: (taskId: string) => void) => () => void
+    onForceRespawn: (callback: (taskId: string, reqId: number) => void) => () => void
+    ackForceRespawn: (reqId: number, ok: boolean) => void
     onSessionNotFound: (callback: (sessionId: string) => void) => () => void
     onAttention: (callback: (sessionId: string) => void) => () => void
     onStateChange: (

@@ -1,7 +1,7 @@
 import * as pty from 'node-pty'
 import { accessSync, constants as fsConstants, existsSync, writeSync } from 'fs'
 import { execFile } from 'child_process'
-import { app, BrowserWindow, Notification, nativeTheme } from 'electron'
+import { app, BrowserWindow, Notification, nativeTheme, ipcMain } from 'electron'
 import { homedir, platform, userInfo } from 'os'
 import type { Database } from 'better-sqlite3'
 import { DEV_SERVER_URL_PATTERN, extractOscTitle } from '@slayzone/terminal/shared'
@@ -1560,6 +1560,67 @@ export function broadcastRespawnRequest(taskId: string): void {
     event: 'pty.respawn_suggested',
     sessionId: taskId,
     taskId
+  })
+}
+
+/** Pending force-respawn ack waiters, keyed by per-call reqId. Each REST call
+ *  gets its own reqId so the renderer can dedupe stale retries (race between
+ *  ack send and retry interval firing) without affecting concurrent calls. */
+let nextForceRespawnReqId = 1
+const pendingForceRespawnAcks = new Map<number, (ok: boolean) => void>()
+
+ipcMain.on('pty:respawn-forced:ack', (_e, reqId: number, ok: boolean) => {
+  const resolve = pendingForceRespawnAcks.get(reqId)
+  if (!resolve) return
+  pendingForceRespawnAcks.delete(reqId)
+  resolve(ok)
+})
+
+const FORCE_RESPAWN_RETRY_MS = 250
+
+/** Force a respawn of a task's main PTY regardless of liveness or mode.
+ *  Awaits the renderer's ack to confirm a TaskDetailPage actually handled it.
+ *  Retries the broadcast on an interval so a freshly-mounted TaskDetailPage
+ *  (e.g. just opened via `app:open-task`) still catches the request after its
+ *  useEffect attaches the listener. Used by CLI `slay pty respawn`. */
+export function requestForceRespawn(
+  taskId: string,
+  timeoutMs: number
+): Promise<'ok' | 'error' | 'no-window' | 'timeout'> {
+  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve('no-window')
+  recordDiagnosticEvent({
+    level: 'info',
+    source: 'pty',
+    event: 'pty.respawn_forced',
+    sessionId: taskId,
+    taskId
+  })
+  const reqId = nextForceRespawnReqId++
+  return new Promise((resolve) => {
+    let resolved = false
+    const finish = (r: 'ok' | 'error' | 'timeout'): void => {
+      if (resolved) return
+      resolved = true
+      clearInterval(retry)
+      clearTimeout(timer)
+      pendingForceRespawnAcks.delete(reqId)
+      resolve(r)
+    }
+    pendingForceRespawnAcks.set(reqId, (ok) => finish(ok ? 'ok' : 'error'))
+    const send = (): void => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        finish('timeout')
+        return
+      }
+      try {
+        mainWindow.webContents.send('pty:respawn-forced', taskId, reqId)
+      } catch {
+        // window destroyed mid-send — let timeout catch it
+      }
+    }
+    send()
+    const retry = setInterval(send, FORCE_RESPAWN_RETRY_MS)
+    const timer = setTimeout(() => finish('timeout'), timeoutMs)
   })
 }
 

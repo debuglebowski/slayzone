@@ -24,6 +24,7 @@ import { registerPtyFollowRoute } from './pty/follow'
 import { registerPtyWaitRoute } from './pty/wait'
 import { registerPtyWriteRoute } from './pty/write'
 import { registerPtyKillRoute } from './pty/kill'
+import { registerPtyRespawnRoute } from './pty/respawn'
 import { registerBrowserUrlRoute } from './browser/url'
 import { registerBrowserNavigateRoute } from './browser/navigate'
 import { registerBrowserClickRoute } from './browser/click'
@@ -70,6 +71,7 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerPtyWaitRoute(app, deps)
   registerPtyWriteRoute(app, deps)
   registerPtyKillRoute(app, deps)
+  registerPtyRespawnRoute(app, deps)
 
   // Browser
   registerBrowserUrlRoute(app, deps)

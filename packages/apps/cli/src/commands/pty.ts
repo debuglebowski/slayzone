@@ -224,6 +224,26 @@ export function ptyCommand(): Command {
       }
     })
 
+  // slay pty respawn <task-id>
+  cmd
+    .command('respawn <task-id>')
+    .description('Respawn a task\'s main PTY (kill + remount). Task must be open in app. Task-id prefix supported')
+    .action(async (taskIdPrefix: string) => {
+      // Resolve task id via active sessions when possible (gives prefix matching).
+      // Falls back to raw value so respawning a task with no live PTY still works.
+      const sessions = await apiGet<PtyInfo[]>('/api/pty')
+      const matches = [...new Set(sessions.filter(s => s.taskId.startsWith(taskIdPrefix)).map(s => s.taskId))]
+      let taskId = taskIdPrefix
+      if (matches.length === 1) {
+        taskId = matches[0]
+      } else if (matches.length > 1) {
+        console.error(`Ambiguous task-id prefix "${taskIdPrefix}". Matches: ${matches.join(', ')}`)
+        process.exit(1)
+      }
+      await apiPost<{ ok: boolean }>('/api/pty/respawn', { taskId })
+      console.log(`Respawn requested: ${taskId}`)
+    })
+
   // slay pty kill <id>
   cmd
     .command('kill <id>')

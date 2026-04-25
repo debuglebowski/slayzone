@@ -758,6 +758,51 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     return unsubscribe
   }, [task, getMainSessionId, handleRestartTerminal, handleResetTerminal])
 
+  // Force respawn: CLI-triggered (`slay pty respawn`). Each REST call gets a
+  // unique reqId from main. We dedupe stale retries (race: ack in-flight while
+  // main fires one more retry) by tracking handled reqIds. Concurrent reqIds
+  // arriving during an in-flight restart are coalesced — they all receive the
+  // current run's outcome, since respawn is idempotent.
+  const forceRespawnInFlightRef = useRef(false)
+  const forceRespawnPendingReqsRef = useRef<Set<number>>(new Set())
+  const forceRespawnHandledReqsRef = useRef<number[]>([])
+  useEffect(() => {
+    if (!task) return
+    return window.api.pty.onForceRespawn(async (taskId, reqId) => {
+      if (taskId !== task.id) return
+      // Stale retry for an already-completed reqId — re-ack idempotently.
+      if (forceRespawnHandledReqsRef.current.includes(reqId)) {
+        window.api.pty.ackForceRespawn(reqId, true)
+        return
+      }
+      // In-flight: coalesce. The current run's result will ack this reqId too.
+      if (forceRespawnInFlightRef.current) {
+        forceRespawnPendingReqsRef.current.add(reqId)
+        return
+      }
+      forceRespawnInFlightRef.current = true
+      forceRespawnPendingReqsRef.current.add(reqId)
+      let ok = false
+      try {
+        await handleRestartTerminal()
+        ok = true
+      } finally {
+        const reqs = [...forceRespawnPendingReqsRef.current]
+        forceRespawnPendingReqsRef.current.clear()
+        for (const r of reqs) {
+          forceRespawnHandledReqsRef.current.push(r)
+          window.api.pty.ackForceRespawn(r, ok)
+        }
+        // Bound the handled-reqs cache; only need it long enough to absorb
+        // stale retries that race with the ack.
+        if (forceRespawnHandledReqsRef.current.length > 100) {
+          forceRespawnHandledReqsRef.current = forceRespawnHandledReqsRef.current.slice(-50)
+        }
+        forceRespawnInFlightRef.current = false
+      }
+    })
+  }, [task, handleRestartTerminal])
+
   // Doctor: validate CLI binary and dependencies
   const handleDoctor = useCallback(async () => {
     if (!task) return

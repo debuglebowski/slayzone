@@ -1,6 +1,6 @@
 export { registerPtyHandlers } from './handlers'
 export { registerUsageHandlers } from './usage'
-export { killAllPtys, killPty, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, dismissAllNotifications, getPtyPids, onSessionChange, onGlobalStateChange, listPtys, getBuffer, getBufferSince, writePty, getState, hasPty, subscribeToPtyData, subscribeToStateChange, onPtyInputSubmit, redirectSessionWindow, setOnHostKillHandler, broadcastRespawnRequest, PTY_EXIT_KILLED_BY_HOST } from './pty-manager'
+export { killAllPtys, killPty, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, dismissAllNotifications, getPtyPids, onSessionChange, onGlobalStateChange, listPtys, getBuffer, getBufferSince, writePty, getState, hasPty, subscribeToPtyData, subscribeToStateChange, onPtyInputSubmit, redirectSessionWindow, setOnHostKillHandler, broadcastRespawnRequest, requestForceRespawn, PTY_EXIT_KILLED_BY_HOST } from './pty-manager'
 export { resolveUserShell, getShellStartupArgs, whichBinary } from './shell-env'
 export { syncTerminalModes } from './startup-sync'
 export { registerChatHandlers, shutdownChatTransports, inspectPermissionFlags } from './chat-handlers'

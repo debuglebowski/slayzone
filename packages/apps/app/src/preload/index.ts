@@ -378,6 +378,14 @@ const api: ElectronAPI = {
       ipcRenderer.on('pty:respawn-suggested', handler)
       return () => ipcRenderer.removeListener('pty:respawn-suggested', handler)
     },
+    onForceRespawn: (callback: (taskId: string, reqId: number) => void) => {
+      const handler = (_event: unknown, taskId: string, reqId: number) => callback(taskId, reqId)
+      ipcRenderer.on('pty:respawn-forced', handler)
+      return () => ipcRenderer.removeListener('pty:respawn-forced', handler)
+    },
+    ackForceRespawn: (reqId: number, ok: boolean) => {
+      ipcRenderer.send('pty:respawn-forced:ack', reqId, ok)
+    },
     onSessionNotFound: (callback: (sessionId: string) => void) => {
       const handler = (_event: unknown, sessionId: string) => callback(sessionId)
       ipcRenderer.on('pty:session-not-found', handler)
