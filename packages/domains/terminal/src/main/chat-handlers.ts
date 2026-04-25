@@ -19,6 +19,8 @@ import {
   clearChatEventsForTab,
 } from './chat-events-store'
 import { parseShellArgs } from './adapters/flag-parser'
+import { buildMcpEnv } from './mcp-env'
+import { getEnrichedPath } from './shell-env'
 import { supportsChatMode } from './agents/registry'
 import { listSkills } from './skills'
 import { listCommands } from './commands'
@@ -175,6 +177,15 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
     const initialBuffer = loadChatEvents(db, opts.tabId)
     const initialNextSeq = getNextSeqForTab(db, opts.tabId)
 
+    // Match PTY behavior: chat SDK subprocess + its nested Bash tool need the user's
+    // enriched PATH so they find pnpm/nvm/asdf-installed binaries (slay, node, etc).
+    // Electron's bare PATH would otherwise hide them.
+    const enrichedPath = getEnrichedPath()
+    const subprocessEnv: Record<string, string> = {
+      ...buildMcpEnv(db, opts.taskId),
+      ...(enrichedPath ? { PATH: enrichedPath } : {}),
+    }
+
     const info = await createChat({
       tabId: opts.tabId,
       taskId: opts.taskId,
@@ -182,6 +193,7 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
       cwd: opts.cwd,
       conversationId: providerCfg.chatConversationId ?? null,
       providerFlags,
+      env: subprocessEnv,
       initialBuffer,
       initialNextSeq,
       onPersistSessionId: (id) => {

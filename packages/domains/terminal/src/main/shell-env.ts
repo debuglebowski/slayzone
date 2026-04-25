@@ -1,4 +1,4 @@
-import { execFile } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
 import fs from 'node:fs'
 import { platform, userInfo } from 'os'
 import { promisify } from 'util'
@@ -73,6 +73,46 @@ export function getShellStartupArgs(shellPath: string): string[] {
   }
 
   return []
+}
+
+/**
+ * Cached PATH from a login+interactive shell. Captures nvm/pnpm/asdf/brew
+ * additions that Electron's bundled env misses. Lazy — first call spawns the
+ * shell (~50-100ms); subsequent calls return cached value. Returns null if
+ * shell invocation fails (Windows or broken shell init).
+ *
+ * Used by both PTY-adjacent spawns (process-manager) and chat SDK spawns
+ * (chat-handlers) so subprocess Bash tools find the same binaries the user has.
+ */
+let cachedEnrichedPath: string | null | undefined
+export function getEnrichedPath(): string | null {
+  if (cachedEnrichedPath !== undefined) return cachedEnrichedPath
+  cachedEnrichedPath = resolveEnrichedPath()
+  return cachedEnrichedPath
+}
+
+function resolveEnrichedPath(): string | null {
+  if (platform() === 'win32') return null
+  const shell = resolveUserShell()
+  // Fish: $PATH is a list — `echo $PATH` prints space-separated, invalid as OS PATH.
+  // `string join ":" $PATH` produces colon-joined.
+  const isFish = shell.endsWith('/fish')
+  const cmd = isFish ? 'string join ":" $PATH' : 'echo $PATH'
+
+  // Interactive login shell first — sources .zshrc/.bashrc where pnpm/nvm add PATH
+  try {
+    const args = getShellStartupArgs(shell)
+    const result = execFileSync(shell, [...args, '-c', cmd], { timeout: 5000, encoding: 'utf-8' }).trim()
+    if (result) return result
+  } catch { /* fall through */ }
+
+  // Fallback: login only — sources .zprofile/.bash_profile
+  try {
+    const result = execFileSync(shell, ['-l', '-c', cmd], { timeout: 5000, encoding: 'utf-8' }).trim()
+    if (result) return result
+  } catch { /* fall through */ }
+
+  return null
 }
 
 export function quoteForShell(arg: string): string {

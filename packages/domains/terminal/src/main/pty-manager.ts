@@ -16,6 +16,7 @@ import { quoteForShell, buildExecCommand, resolveUserShell, getShellStartupArgs,
 import { shouldShellFallback, shouldNotifySessionNotFound, buildRecoveryMessage } from './pty-exit-strategy'
 import { computeSyncQueryResponse, type TerminalTheme } from './sync-query-response'
 import { filterBufferData } from './filter-buffer-data'
+import { buildMcpEnv } from './mcp-env'
 export { filterBufferData }
 
 // Database reference for notifications
@@ -591,15 +592,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       }
     })
 
-    // Inject MCP env vars so AI terminals know their task and MCP server
-    const mcpEnv: Record<string, string> = {}
-    if (taskId) {
-      mcpEnv.SLAYZONE_TASK_ID = taskId
-      const taskRow = db?.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId) as { project_id: string } | undefined
-      if (taskRow?.project_id) mcpEnv.SLAYZONE_PROJECT_ID = taskRow.project_id
-    }
-    const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined
-    if (mcpPort) mcpEnv.SLAYZONE_MCP_PORT = String(mcpPort)
+    const mcpEnv = buildMcpEnv(db, taskId)
 
     const baseEnv = {
       ...process.env,
