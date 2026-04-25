@@ -7,6 +7,12 @@ import { registerProcessesDeleteRoute } from './processes/delete'
 import { registerProcessesFollowRoute } from './processes/follow'
 import { registerOpenTaskRoute } from './tasks/open'
 import { registerCloseTaskRoute } from './tasks/close'
+import { registerArchiveTaskRoute } from './tasks/archive'
+import { registerArchiveManyTaskRoute } from './tasks/archive-many'
+import { registerCreateTaskRoute } from './tasks/create'
+import { registerDeleteTaskRoute } from './tasks/delete'
+import { registerUnarchiveTaskRoute } from './tasks/unarchive'
+import { registerUpdateTaskRoute } from './tasks/update'
 import { registerOpenAssetRoute } from './assets/open'
 import { registerAssetsExportPdfRoute } from './assets/export-pdf'
 import { registerAssetsExportPngRoute } from './assets/export-png'
@@ -41,6 +47,12 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   // Tasks
   registerOpenTaskRoute(app, deps)
   registerCloseTaskRoute(app, deps)
+  registerCreateTaskRoute(app, deps)
+  registerUpdateTaskRoute(app, deps)
+  registerDeleteTaskRoute(app, deps)
+  registerArchiveTaskRoute(app, deps)
+  registerArchiveManyTaskRoute(app, deps)
+  registerUnarchiveTaskRoute(app, deps)
 
   // Assets
   registerOpenAssetRoute(app, deps)

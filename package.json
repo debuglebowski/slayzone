@@ -38,6 +38,7 @@
     "lint:deps": "knip --include dependencies,unlisted",
     "lint:theme": "bash scripts/lint-theme.sh",
     "format": "prettier --write .",
+    "test:unit": "bash packages/shared/test-utils/run-all.sh",
     "test:e2e": "pnpm --filter @slayzone/app test:e2e",
     "test:e2e:browser-modified-link": "npx playwright test --config packages/apps/app/playwright.config.ts packages/apps/app/e2e/24-browser-panel.spec.ts -g \"prefilled task draft\" --repeat-each=5",
     "test:e2e:loop": "pnpm --filter @slayzone/app test:e2e:loop",

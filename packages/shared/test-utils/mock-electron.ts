@@ -25,9 +25,17 @@ export const BrowserWindow = class MockBrowserWindow {
   webContents = { send: () => {} }
 }
 
+// Capture all ipcMain.emit calls for tests. Reset via __resetIpcEmitCalls().
+export const __ipcEmitCalls: unknown[][] = []
+export function __resetIpcEmitCalls(): void { __ipcEmitCalls.length = 0 }
+
 export const ipcMain = {
   handle: () => {},
-  on: () => {}
+  on: () => {},
+  emit: (...args: unknown[]) => {
+    __ipcEmitCalls.push(args)
+    return false
+  }
 }
 
 export const Notification = class MockNotification {

@@ -52,6 +52,32 @@ run_test_no_loader() {
   fi
 }
 
+run_test_electron_loader() {
+  echo ""
+  echo "=== $1 (electron+loader) ==="
+  if ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import'; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# Wave 5 — taskEvents bus + REST routes + MCP tools + CLI integration
+run_test_electron_loader packages/domains/task/src/main/events.test.ts
+run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/archive.test.ts
+run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/archive-many.test.ts
+run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/create.test.ts
+run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/delete.test.ts
+run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/unarchive.test.ts
+run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/update.test.ts
+run_test_electron_loader packages/apps/app/src/main/mcp-tools/archive-task.test.ts
+run_test_electron_loader packages/apps/app/src/main/mcp-tools/archive-many-task.test.ts
+run_test_electron_loader packages/apps/app/src/main/mcp-tools/create-task.test.ts
+run_test_electron_loader packages/apps/app/src/main/mcp-tools/delete-task.test.ts
+run_test_electron_loader packages/apps/app/src/main/mcp-tools/unarchive-task.test.ts
+run_test_electron_loader packages/apps/app/src/main/mcp-tools/update-task.test.ts
+run_test_electron_loader packages/apps/cli/test/tasks-rest.test.ts
+
 # CLI command tests (need Electron Node for better-sqlite3 + ESM interop)
 run_test_no_loader packages/apps/cli/test/db.test.ts
 run_test_no_loader packages/apps/cli/test/tags.test.ts

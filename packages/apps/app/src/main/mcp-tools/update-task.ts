@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { ipcMain } from 'electron'
 import { z } from 'zod'
-import { updateTask } from '@slayzone/task/main'
+import { updateTaskOp } from '@slayzone/task/main'
 import { isKnownStatus } from '@slayzone/projects/shared'
 import { broadcastToWindows } from '../broadcast-to-windows'
 import { getProjectColumns, getAllowedStatusesText } from './shared'
@@ -45,7 +46,11 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
 
       let updated
       try {
-        updated = updateTask(deps.db, { id: task_id, ...fields, dueDate: due_date, parentId: parent_id })
+        updated = await updateTaskOp(
+          deps.db,
+          { id: task_id, ...fields, dueDate: due_date, parentId: parent_id },
+          { ipcMain }
+        )
       } catch (err) {
         return { content: [{ type: 'text' as const, text: (err as Error).message }], isError: true }
       }
