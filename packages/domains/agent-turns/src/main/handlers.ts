@@ -2,7 +2,13 @@ import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { realpathSync } from 'node:fs'
 import { listTurnsForWorktree } from './db'
-import { diffIsEmptyCached, listTurnFilesCached, listWorkingChangedFiles } from './git-snapshot'
+import {
+  diffIsEmptyCached,
+  listTurnFilesCached,
+  listWorkingChangedFiles,
+  getHeadSha,
+  getCommitParentCached,
+} from './git-snapshot'
 import type { AgentTurnRange } from '../shared/types'
 
 function canonical(p: string): string {
@@ -11,12 +17,16 @@ function canonical(p: string): string {
 
 /**
  * Filter rules:
- *  1. Drop turns whose `prev_sha..snap_sha` is an empty diff (legacy / dedupe
+ *  1. Drop turns whose snap was taken before a commit landed — i.e. snap's
+ *     parent (= HEAD-at-snap-time) is no longer current HEAD. Otherwise
+ *     historical turns ghost-resurrect every time their old files get edited
+ *     again post-commit (their `prev..snap` diff still references those files).
+ *  2. Drop turns whose `prev_sha..snap_sha` is an empty diff (legacy / dedupe
  *     bypass / collapsed range).
- *  2. Drop turns whose changed files have zero overlap with the current
- *     working tree changes — a turn whose files are fully reverted/committed
- *     no longer corresponds to anything in `git status` and shouldn't take a
- *     numbered slot in the UI.
+ *  3. Drop turns whose changed files have zero overlap with the current
+ *     working tree changes — a turn whose files are fully reverted no longer
+ *     corresponds to anything in `git status` and shouldn't take a numbered
+ *     slot in the UI.
  *
  * Re-thread `prev_snapshot_sha` so dropped turns don't leave dangling SHAs:
  * each surviving row's prev points at the prior surviving row's snapshot, so
@@ -24,9 +34,17 @@ function canonical(p: string): string {
  */
 function filterAndRethread(repoPath: string, rows: AgentTurnRange[]): AgentTurnRange[] {
   const workingSet = listWorkingChangedFiles(repoPath)
+  const headSha = getHeadSha(repoPath)
   const out: AgentTurnRange[] = []
   let prevSha: string | null = null
   for (const r of rows) {
+    // Rule 1: snap.parent must be current HEAD. Snaps whose parent diverged
+    // (commits landed since) are pre-commit history — drop them, even if
+    // their files coincidentally re-appear in a fresh edit.
+    if (headSha !== null) {
+      const parent = getCommitParentCached(repoPath, r.snapshot_sha)
+      if (parent !== null && parent !== headSha) continue
+    }
     const from = prevSha
     if (from !== null && diffIsEmptyCached(repoPath, from, r.snapshot_sha)) {
       // Dropped: keep prevSha — next surviving row will diff against the older base.

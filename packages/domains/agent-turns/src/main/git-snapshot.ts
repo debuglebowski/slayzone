@@ -133,6 +133,7 @@ export function diffIsEmptyCached(repoPath: string, fromSha: string, toSha: stri
 export function _resetDiffEmptyCacheForTests(): void {
   diffEmptyCache.clear()
   turnFilesCache.clear()
+  parentCache.clear()
 }
 
 /**
@@ -161,6 +162,43 @@ export function listTurnFilesCached(repoPath: string, fromSha: string, toSha: st
     if (oldestKey !== undefined) turnFilesCache.delete(oldestKey)
   }
   return files
+}
+
+/**
+ * Current HEAD sha for a repo. Working-tree-volatile (commits move it), so
+ * not cached. Returns null on failure.
+ */
+export function getHeadSha(repoPath: string): string | null {
+  const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf-8' })
+  if (r.status !== 0) return null
+  const out = r.stdout.trim()
+  return out || null
+}
+
+/**
+ * First-parent sha for a commit. Snap commits are single-parent (built via
+ * `commit-tree -p HEAD`), so this returns HEAD-at-snap-time. Cached — the
+ * answer is a pure function of the input sha.
+ */
+const PARENT_CACHE_MAX = 2000
+const parentCache = new Map<string, string | null>()
+
+export function getCommitParentCached(repoPath: string, sha: string): string | null {
+  const key = `${repoPath}\x00${sha}`
+  const hit = parentCache.get(key)
+  if (hit !== undefined) {
+    parentCache.delete(key)
+    parentCache.set(key, hit)
+    return hit
+  }
+  const r = spawnSync('git', ['rev-parse', `${sha}^`], { cwd: repoPath, encoding: 'utf-8' })
+  const result = r.status === 0 ? (r.stdout.trim() || null) : null
+  parentCache.set(key, result)
+  if (parentCache.size > PARENT_CACHE_MAX) {
+    const oldestKey = parentCache.keys().next().value
+    if (oldestKey !== undefined) parentCache.delete(oldestKey)
+  }
+  return result
 }
 
 /**

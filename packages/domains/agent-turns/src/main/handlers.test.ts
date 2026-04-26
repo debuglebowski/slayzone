@@ -138,6 +138,40 @@ await describe('list filters empty-diff turns + re-threads prev_snapshot_sha', (
     expect(list).toHaveLength(0)
   })
 
+  test('BUG: ghost turns resurrect after commit + new edit to same file', async () => {
+    // Repro: user runs N turns touching a.txt, commits them, then edits a.txt
+    // again. Filter currently resurrects all N pre-commit turns because a.txt
+    // appears in the new working set, even though those turns are fully
+    // committed and irrelevant to the new uncommitted change.
+    const { tabId, repo } = freshTask()
+    fs.writeFileSync(path.join(repo, 'a.txt'), '1')
+    await recordTurnBoundary(h.db, tabId, 'p1')
+    fs.writeFileSync(path.join(repo, 'a.txt'), '2')
+    await recordTurnBoundary(h.db, tabId, 'p2')
+    fs.writeFileSync(path.join(repo, 'a.txt'), '3')
+    await recordTurnBoundary(h.db, tabId, 'p3')
+
+    // Three pre-commit turns visible
+    let list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(3)
+
+    // Commit them all
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'work')
+
+    // Working tree clean → no turns (passes today)
+    list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(0)
+
+    // User edits a.txt again, no new turn recorded yet
+    fs.writeFileSync(path.join(repo, 'a.txt'), '4')
+
+    // Bug: filter resurrects all 3 historical turns because a.txt now in
+    // working set. Expected: 0 (committed turns must stay dropped).
+    list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(0)
+  })
+
   test('canonicalizes incoming worktreePath via realpath', async () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'c.txt'), 'data')
