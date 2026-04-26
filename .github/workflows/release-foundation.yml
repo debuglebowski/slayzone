@@ -215,6 +215,12 @@ jobs:
         env:
           CI_SKIP_POSTINSTALL: '1'
 
+      - name: Remove posix on Windows (unix-only native module)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path node_modules/.pnpm -Filter "posix@*" -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
       - name: Import macOS certificate
         if: runner.os == 'macOS'
         env:
