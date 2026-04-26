@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.23.1",
+    "date": "2026-04-26",
+    "tagline": "Polish pass",
+    "items": [
+      {
+        "category": "fix",
+        "title": "Sub-tasks panel self-reference",
+        "description": "Drop the current task from its own Sub-tasks panel."
+      },
+      {
+        "category": "fix",
+        "title": "HTML in markdown editor",
+        "description": "Render inline HTML in the markdown editor and asset previews."
+      },
+      {
+        "category": "fix",
+        "title": "Stale agent turns",
+        "description": "Drop agent turns whose snapshot parent has diverged from HEAD."
+      }
+    ]
+  },
+  {
     "version": "0.23.0",
     "date": "2026-04-26",
     "tagline": "Turns, diffs & mermaid",

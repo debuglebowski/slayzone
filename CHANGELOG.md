@@ -1,6 +1,20 @@
 # Changelog
 
 
+## v0.23.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.23.0...v0.23.1)
+
+### 🩹 Fixes
+
+- **task:** Drop self-reference from Sub-tasks panel ([5ed0a888](https://github.com/debuglebowski/slayzone/commit/5ed0a888))
+- **markdown:** Render html in editor + assets preview ([4f18adc5](https://github.com/debuglebowski/slayzone/commit/4f18adc5))
+- **agent-turns:** Drop turns whose snap parent diverged from HEAD ([4f654ff7](https://github.com/debuglebowski/slayzone/commit/4f654ff7))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.23.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.22.0...v0.23.0)
