@@ -83,7 +83,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
 
-function TaskOverviewRow({ sub, columns, statusOptions, onNavigate, onUpdate, onDelete, dragHandle, rowRef, rowStyle, isDragging, isRoot }: {
+function TaskOverviewRow({ sub, columns, statusOptions, onNavigate, onUpdate, onDelete, dragHandle, rowRef, rowStyle, isDragging }: {
   sub: Task
   columns?: Project['columns_config']
   statusOptions: Array<{ value: string; label: string }>
@@ -94,7 +94,6 @@ function TaskOverviewRow({ sub, columns, statusOptions, onNavigate, onUpdate, on
   rowRef?: (node: HTMLElement | null) => void
   rowStyle?: React.CSSProperties
   isDragging?: boolean
-  isRoot?: boolean
 }): React.JSX.Element {
   const statusStyle = getColumnStatusStyle(sub.status, columns)
   const StatusIcon = statusStyle?.icon
@@ -108,8 +107,7 @@ function TaskOverviewRow({ sub, columns, statusOptions, onNavigate, onUpdate, on
           style={rowStyle}
           className={cn(
             "relative flex items-center gap-2 py-1 px-1 rounded cursor-pointer hover:bg-muted/50 group select-none",
-            isDragging && "opacity-50",
-            isRoot && "bg-muted/30 font-medium"
+            isDragging && "opacity-50"
           )}
         >
           {dragHandle}
@@ -2535,18 +2533,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
               <DndContext sensors={subTaskSensors} collisionDetection={closestCenter} onDragEnd={handleSubTaskDragEnd}>
               <SortableContext items={subTasks.map(s => s.id)} strategy={verticalListSortingStrategy}>
               <div className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
-                {task && (
-                  <TaskOverviewRow
-                    sub={task}
-                    columns={project?.columns_config}
-                    statusOptions={statusOptions}
-                    onUpdate={async (id, updates) => {
-                      const updated = await window.api.db.updateTask({ id, ...updates })
-                      onTaskUpdated(updated)
-                    }}
-                    isRoot
-                  />
-                )}
                 {subTasks.map(sub => (
                   <SortableSubTask
                     key={sub.id}
