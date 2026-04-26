@@ -16,14 +16,8 @@
       "node-abi": "^4.28.0"
     },
     "patchedDependencies": {
-      "@convex-dev/auth@0.0.90": "patches/@convex-dev__auth@0.0.90.patch"
-    },
-    "packageExtensions": {
-      "posix": {
-        "os": [
-          "!win32"
-        ]
-      }
+      "@convex-dev/auth@0.0.90": "patches/@convex-dev__auth@0.0.90.patch",
+      "posix@4.2.0": "patches/posix@4.2.0.patch"
     }
   },
   "scripts": {

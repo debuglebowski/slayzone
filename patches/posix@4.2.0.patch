@@ -1,0 +1,12 @@
+diff --git a/package.json b/package.json
+index 86fff5b7d4c34b74c3479742f6438fad33e7a087..89c056db9f07eca13a92da01fb5d13aa4eaede22 100644
+--- a/package.json
++++ b/package.json
+@@ -23,5 +23,6 @@
+     "scripts" : {
+         "test" : "make test"
+     },
+-    "engines" : { "node": ">= 0.10.0" }
++    "engines" : { "node": ">= 0.10.0" },
++    "os" : ["darwin", "linux"]
+ }
