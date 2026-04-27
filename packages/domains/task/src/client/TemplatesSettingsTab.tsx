@@ -95,7 +95,7 @@ export function TemplatesSettingsTab({ projectId }: TemplatesSettingsTabProps) {
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-base font-semibold">Templates</h3>
+          <h3 className="text-base font-semibold">Task Templates</h3>
           <p className="text-sm text-muted-foreground mt-1">
             Pre-configure defaults for new tasks. The default template auto-applies when creating tasks.
           </p>

@@ -13,7 +13,7 @@ test.describe('Tag management', () => {
   const openTagsSection = async (mainWindow: import('@playwright/test').Page) => {
     await mainWindow.evaluate((id) => {
       window.dispatchEvent(new CustomEvent('open-project-settings', {
-        detail: { projectId: id, tab: 'tags' }
+        detail: { projectId: id, tab: 'tasks/tags' }
       }))
     }, projectId)
     const dialog = projectSettingsDialog(mainWindow)

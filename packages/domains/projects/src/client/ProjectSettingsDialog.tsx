@@ -19,7 +19,7 @@ interface ProjectSettingsDialogProps {
   project: Project | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  initialTab?: 'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'worktrees' | 'repos' | 'integrations' | 'ai-config' | 'tests' | 'tags' | 'templates'
+  initialTab?: 'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'tasks/tags' | 'worktrees' | 'repos' | 'integrations' | 'ai-config' | 'tests' | 'templates'
   groupBy?: 'none' | 'path' | 'label'
   onGroupByChange?: (value: 'none' | 'path' | 'label') => void
   integrationOnboardingProvider?: IntegrationProvider | null
@@ -43,7 +43,7 @@ export function ProjectSettingsDialog({
   onChanged,
   renderTemplatesTab
 }: ProjectSettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'worktrees' | 'repos' | 'tags' | 'templates' | 'integrations' | 'ai-config' | 'tests'>('general')
+  const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'tasks/tags' | 'worktrees' | 'repos' | 'templates' | 'integrations' | 'ai-config' | 'tests'>('general')
   const detectedRepos = useDetectedRepos(open ? project?.path ?? null : null)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
@@ -91,12 +91,12 @@ export function ProjectSettingsDialog({
       children: [
         { key: 'tasks/general', label: 'General' },
         { key: 'tasks/statuses', label: 'Statuses' },
+        { key: 'tasks/tags', label: 'Tags' },
       ]
     },
+    ...(renderTemplatesTab ? [{ key: 'templates' as const, label: 'Task Templates' }] : []),
     { key: 'worktrees', label: 'Worktrees' },
     ...(detectedRepos.length > 0 ? [{ key: 'repos' as const, label: 'Repositories' }] : []),
-    { key: 'tags', label: 'Tags' },
-    ...(renderTemplatesTab ? [{ key: 'templates' as const, label: 'Templates' }] : []),
     { key: 'tests', label: 'Tests' },
     { key: 'integrations' as const, label: 'Integrations' },
   ]
@@ -170,7 +170,7 @@ export function ProjectSettingsDialog({
             />
           )}
 
-          {activeTab === 'tags' && project && (
+          {activeTab === 'tasks/tags' && project && (
             <TagsSettingsTab projectId={project.id} />
           )}
 
