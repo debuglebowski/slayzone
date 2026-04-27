@@ -678,21 +678,15 @@ function App(): React.JSX.Element {
   }, { enableOnFormTags: true, enabled: !isRecording })
 
   const navigateCycle = useCallback((direction: 1 | -1) => {
-    const filtered = tabCycleOrder.filter((i) => toVisibleIndex(i) >= 0)
-    const cycle: ('context' | number)[] = [...filtered]
-    if (showContextManager && cycle.length > 0) cycle.splice(1, 0, 'context')
+    const cycle = tabCycleOrder.filter((i) => toVisibleIndex(i) >= 0)
     if (cycle.length === 0) return
     const { activeTabIndex: idx, activeView: view } = useTabStore.getState()
-    const pos = view === 'context' ? cycle.indexOf('context') : cycle.indexOf(idx)
+    const pos = view === 'context' ? -1 : cycle.indexOf(idx)
     const current = pos >= 0 ? pos : 0
     const target = cycle[(current + direction + cycle.length) % cycle.length]
-    if (target === 'context') {
-      useTabStore.getState().setActiveView('context')
-    } else {
-      useTabStore.getState().setActiveView('tabs')
-      setActiveTabIndex(target)
-    }
-  }, [tabCycleOrder, toVisibleIndex, showContextManager, setActiveTabIndex])
+    useTabStore.getState().setActiveView('tabs')
+    setActiveTabIndex(target)
+  }, [tabCycleOrder, toVisibleIndex, setActiveTabIndex])
 
   useGuardedHotkeys(getKeys('next-tab'), (e) => {
     e.preventDefault()
