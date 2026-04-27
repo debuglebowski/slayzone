@@ -5,6 +5,15 @@ export interface AgentTurn {
   task_id: string | null
   terminal_tab_id: string
   snapshot_sha: string
+  /**
+   * HEAD commit SHA at the moment the snap was taken. The snap commit is built
+   * with `commit-tree -p HEAD`, so this == `snapshot_sha^`. Stored explicitly
+   * so list-time filtering can drop pre-commit ghosts via a pure SQL check
+   * (no git spawn, no cache poisoning). NULL only for legacy rows inserted
+   * before migration 122 when backfill failed (repo gone, etc.) — those are
+   * treated as stale and dropped.
+   */
+  head_sha_at_snap: string | null
   prompt_preview: string
   created_at: number
 }

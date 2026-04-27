@@ -7,7 +7,6 @@ import {
   listTurnFilesCached,
   listWorkingChangedFiles,
   getHeadSha,
-  getCommitParentCached,
 } from './git-snapshot'
 import type { AgentTurnRange } from '../shared/types'
 
@@ -17,10 +16,12 @@ function canonical(p: string): string {
 
 /**
  * Filter rules:
- *  1. Drop turns whose snap was taken before a commit landed — i.e. snap's
- *     parent (= HEAD-at-snap-time) is no longer current HEAD. Otherwise
- *     historical turns ghost-resurrect every time their old files get edited
- *     again post-commit (their `prev..snap` diff still references those files).
+ *  1. Drop turns whose `head_sha_at_snap` (HEAD-at-snap-time, stored on the
+ *     row at insert) doesn't equal current HEAD. Catches the post-commit
+ *     ghost-resurrect case: a snap taken before a commit landed must not
+ *     reappear when the same files are edited again. NULL = legacy row whose
+ *     migration backfill failed (e.g. repo gone) — also drop, can't reason
+ *     about it. SQL-driven, no git spawn, no cache to poison.
  *  2. Drop turns whose `prev_sha..snap_sha` is an empty diff (legacy / dedupe
  *     bypass / collapsed range).
  *  3. Drop turns whose changed files have zero overlap with the current
@@ -37,14 +38,14 @@ function filterAndRethread(repoPath: string, rows: AgentTurnRange[]): AgentTurnR
   const headSha = getHeadSha(repoPath)
   const out: AgentTurnRange[] = []
   let prevSha: string | null = null
+  // Fail-closed: if `git rev-parse HEAD` failed (broken repo, perms, etc.) we
+  // can't safely classify any row as fresh, so drop everything. Better an empty
+  // turn list than ghost turns from random history.
+  if (headSha === null) return out
   for (const r of rows) {
-    // Rule 1: snap.parent must be current HEAD. Snaps whose parent diverged
-    // (commits landed since) are pre-commit history — drop them, even if
-    // their files coincidentally re-appear in a fresh edit.
-    if (headSha !== null) {
-      const parent = getCommitParentCached(repoPath, r.snapshot_sha)
-      if (parent !== null && parent !== headSha) continue
-    }
+    // Rule 1: HEAD-at-snap-time must equal current HEAD. Pre-commit snaps
+    // (and unrecoverable legacy NULLs) drop. Pure SQL value — no git, no cache.
+    if (r.head_sha_at_snap !== headSha) continue
     const from = prevSha
     if (from !== null && diffIsEmptyCached(repoPath, from, r.snapshot_sha)) {
       // Dropped: keep prevSha — next surviving row will diff against the older base.

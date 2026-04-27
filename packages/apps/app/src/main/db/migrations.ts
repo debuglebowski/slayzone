@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { spawnSync } from 'node:child_process'
 import { parseSkillFrontmatter, renderSkillFrontmatter, validateSkillFrontmatter } from '@slayzone/ai-config/shared'
 
 interface Migration {
@@ -2134,6 +2135,33 @@ const migrations: Migration[] = [
     version: 121,
     up: (db) => {
       db.exec(`ALTER TABLE tasks ADD COLUMN git_active_tab TEXT DEFAULT NULL`)
+    }
+  },
+  {
+    version: 122,
+    up: (db) => {
+      // Add HEAD-at-snap-time column to agent_turns. Stored explicitly so
+      // list-time filter can drop pre-commit ghosts via SQL — replaces the
+      // prior `git rev-parse <sha>^` per-row probe (which had a null-cache
+      // poisoning surface). Backfill via git for existing rows; rows whose
+      // repo can't be reached stay NULL → filter treats as stale (drops).
+      db.exec(`ALTER TABLE agent_turns ADD COLUMN head_sha_at_snap TEXT`)
+      const rows = db.prepare(
+        `SELECT id, worktree_path, snapshot_sha FROM agent_turns`
+      ).all() as Array<{ id: string; worktree_path: string; snapshot_sha: string }>
+      const update = db.prepare(
+        `UPDATE agent_turns SET head_sha_at_snap = ? WHERE id = ?`
+      )
+      for (const row of rows) {
+        const r = spawnSync('git', ['rev-parse', `${row.snapshot_sha}^`], {
+          cwd: row.worktree_path,
+          encoding: 'utf-8',
+        })
+        if (r.status === 0) {
+          const sha = r.stdout.trim()
+          if (sha) update.run(sha, row.id)
+        }
+      }
     }
   }
 ]
