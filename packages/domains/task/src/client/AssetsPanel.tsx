@@ -294,6 +294,8 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
       const newMtime = await window.api.assets.getMtime(asset.id)
       baselineMtimeRef.current = newMtime
       setIsDirty(false)
+      // Bump version so HTML/PDF/Image preview iframes reload from disk after save
+      setContentVersion(v => v + 1)
     }, 500)
   }, [asset.id, saveContent])
 
@@ -386,7 +388,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
     }
 
     if (hasPreview && viewMode === 'preview') {
-      return <div className="flex-1 flex flex-col overflow-hidden"><AssetPreview renderMode={renderMode} content={content ?? ''} zoomLevel={zoomLevel} onZoom={onZoom} /></div>
+      return <div className="flex-1 flex flex-col overflow-hidden"><AssetPreview renderMode={renderMode} content={content ?? ''} assetId={asset.id} contentVersion={contentVersion} getFilePath={getFilePath} zoomLevel={zoomLevel} onZoom={onZoom} /></div>
     }
 
     if (hasPreview && viewMode === 'split') {
@@ -407,7 +409,7 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
             />
           </div>
           <div className="flex-1 flex flex-col border-l border-border overflow-hidden min-w-0">
-            <AssetPreview renderMode={renderMode} content={content ?? ''} zoomLevel={zoomLevel} onZoom={onZoom} />
+            <AssetPreview renderMode={renderMode} content={content ?? ''} assetId={asset.id} contentVersion={contentVersion} getFilePath={getFilePath} zoomLevel={zoomLevel} onZoom={onZoom} />
           </div>
         </div>
       )
@@ -439,14 +441,14 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
 
 // --- Preview pane ---
 
-function AssetPreview({ renderMode, content, zoomLevel = 1, onZoom }: { renderMode: RenderMode; content: string; zoomLevel?: number; onZoom?: (fn: (z: number) => number) => void }) {
+function AssetPreview({ renderMode, content, assetId, contentVersion, getFilePath, zoomLevel = 1, onZoom }: { renderMode: RenderMode; content: string; assetId: string; contentVersion: number; getFilePath: (id: string) => Promise<string | null>; zoomLevel?: number; onZoom?: (fn: (z: number) => number) => void }) {
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (!e.metaKey && !e.ctrlKey) return
     e.preventDefault()
     onZoom?.(z => Math.min(4, Math.max(0.25, z + (e.deltaY > 0 ? -0.1 : 0.1))))
   }, [onZoom])
 
-  if (renderMode === 'html-preview') return <iframe srcDoc={content} sandbox="allow-scripts" className="flex-1 bg-white" title="HTML preview" />
+  if (renderMode === 'html-preview') return <HtmlPreviewFrame assetId={assetId} contentVersion={contentVersion} getFilePath={getFilePath} />
 
   const zoomStyle = zoomLevel !== 1 ? { transform: `scale(${zoomLevel})`, transformOrigin: 'top left' } : undefined
 
@@ -455,6 +457,20 @@ function AssetPreview({ renderMode, content, zoomLevel = 1, onZoom }: { renderMo
   // outer wheel-zoom wrapper to avoid two stacked zoom systems.
   if (renderMode === 'mermaid-preview' && content.trim()) return <div className="flex-1 p-4 overflow-auto"><MermaidBlock code={content} /></div>
   return null
+}
+
+// HTML preview via slz-file:// custom scheme (registered with bypassCSP +
+// secure privileges). Cannot use srcDoc/blob/data URLs: parent renderer's CSP
+// `script-src 'self'` is inherited by them and blocks inline + CDN scripts.
+// slz-file gets its own origin and bypasses CSP so user HTML runs unmodified.
+// `contentVersion` cache-busts on each save so the iframe reloads after edits.
+function HtmlPreviewFrame({ assetId, contentVersion, getFilePath }: { assetId: string; contentVersion: number; getFilePath: (id: string) => Promise<string | null> }) {
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    getFilePath(assetId).then(p => { if (p) setSrc(`slz-file://${p}?v=${contentVersion}`) })
+  }, [assetId, contentVersion, getFilePath])
+  if (!src) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
+  return <iframe src={src} sandbox="allow-scripts" className="flex-1 bg-white" title="HTML preview" />
 }
 
 // --- Main panel ---
