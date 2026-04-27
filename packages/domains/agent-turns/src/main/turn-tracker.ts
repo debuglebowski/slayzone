@@ -82,8 +82,9 @@ export async function recordTurnBoundary(
   const ctx = resolveTabContext(db, tabId)
   if (!ctx) return
   const id = randomUUID()
-  const sha = await snapshotWorktree(ctx.worktreePath, id)
-  if (!sha) return
+  const snap = await snapshotWorktree(ctx.worktreePath, id)
+  if (!snap) return
+  const { snapshotSha: sha, headSha } = snap
 
   const prev = getLatestTurnForWorktree(db, ctx.worktreePath)
   // Dedupe semantically — commit SHA always differs (commit message includes
@@ -108,6 +109,7 @@ export async function recordTurnBoundary(
       task_id: ctx.taskId,
       terminal_tab_id: tabId,
       snapshot_sha: sha,
+      head_sha_at_snap: headSha,
       prompt_preview: isCleanPrompt(promptText)
         ? promptText.replace(/\s+/g, ' ').trim().slice(0, 200)
         : '',

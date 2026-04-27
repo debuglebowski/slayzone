@@ -21,6 +21,13 @@ function exec(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<Exe
   })
 }
 
+export interface SnapshotResult {
+  /** SHA of the snap commit (commit-tree output, pinned via refs/slayzone/turns/). */
+  snapshotSha: string
+  /** HEAD SHA at snap time. Snap is built with `-p HEAD`, so == `snapshotSha^`. */
+  headSha: string
+}
+
 /**
  * Snapshot index+worktree (incl. untracked) as a dangling commit, pin via
  * `refs/slayzone/turns/<turnId>` so `git gc` can't reap it. Non-destructive:
@@ -31,10 +38,12 @@ function exec(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<Exe
  * non-ignored). Excludes: gitignored files (intentional — match user
  * expectations from `git status`).
  *
- * Returns SHA on success, null on failure (silent — turn tracking must never
- * break chat).
+ * Returns `{snapshotSha, headSha}` on success, null on failure (silent — turn
+ * tracking must never break chat). `headSha` is the HEAD-at-snap-time, stored
+ * on the row so list-time filtering can drop pre-commit ghosts without re-
+ * spawning `git rev-parse <sha>^` (and without risking null cache poisoning).
  */
-export async function snapshotWorktree(repoPath: string, turnId: string): Promise<string | null> {
+export async function snapshotWorktree(repoPath: string, turnId: string): Promise<SnapshotResult | null> {
   // Resolve HEAD; bail if no commits yet (e.g. brand-new repo with no commits).
   const head = await exec(['rev-parse', 'HEAD'], repoPath)
   if (head.status !== 0) return null
@@ -74,7 +83,7 @@ export async function snapshotWorktree(repoPath: string, turnId: string): Promis
 
     const ref = await exec(['update-ref', `refs/slayzone/turns/${turnId}`, sha], repoPath)
     if (ref.status !== 0) return null
-    return sha
+    return { snapshotSha: sha, headSha }
   } finally {
     if (tmpDir) {
       try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
@@ -133,7 +142,6 @@ export function diffIsEmptyCached(repoPath: string, fromSha: string, toSha: stri
 export function _resetDiffEmptyCacheForTests(): void {
   diffEmptyCache.clear()
   turnFilesCache.clear()
-  parentCache.clear()
 }
 
 /**
@@ -173,32 +181,6 @@ export function getHeadSha(repoPath: string): string | null {
   if (r.status !== 0) return null
   const out = r.stdout.trim()
   return out || null
-}
-
-/**
- * First-parent sha for a commit. Snap commits are single-parent (built via
- * `commit-tree -p HEAD`), so this returns HEAD-at-snap-time. Cached — the
- * answer is a pure function of the input sha.
- */
-const PARENT_CACHE_MAX = 2000
-const parentCache = new Map<string, string | null>()
-
-export function getCommitParentCached(repoPath: string, sha: string): string | null {
-  const key = `${repoPath}\x00${sha}`
-  const hit = parentCache.get(key)
-  if (hit !== undefined) {
-    parentCache.delete(key)
-    parentCache.set(key, hit)
-    return hit
-  }
-  const r = spawnSync('git', ['rev-parse', `${sha}^`], { cwd: repoPath, encoding: 'utf-8' })
-  const result = r.status === 0 ? (r.stdout.trim() || null) : null
-  parentCache.set(key, result)
-  if (parentCache.size > PARENT_CACHE_MAX) {
-    const oldestKey = parentCache.keys().next().value
-    if (oldestKey !== undefined) parentCache.delete(oldestKey)
-  }
-  return result
 }
 
 /**

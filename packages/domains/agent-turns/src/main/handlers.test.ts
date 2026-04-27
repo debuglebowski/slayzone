@@ -54,9 +54,11 @@ await describe('list filters empty-diff turns + re-threads prev_snapshot_sha', (
     await recordTurnBoundary(h.db, tabId, 'p2')
 
     // Inject a malformed legacy turn: snapshot_sha = the latest, so prev..this is empty.
-    const latest = h.db.prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1').get(repo) as { snapshot_sha: string }
-    h.db.prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?)').run(
-      crypto.randomUUID(), repo, tabId, latest.snapshot_sha, 'noop', Date.now() + 1000
+    // head_sha_at_snap mirrors the latest row's, so Rule 1 doesn't drop it — the
+    // empty-diff Rule 2 is what we want to exercise here.
+    const latest = h.db.prepare('SELECT snapshot_sha, head_sha_at_snap FROM agent_turns WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1').get(repo) as { snapshot_sha: string; head_sha_at_snap: string }
+    h.db.prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)').run(
+      crypto.randomUUID(), repo, tabId, latest.snapshot_sha, latest.head_sha_at_snap, 'noop', Date.now() + 1000
     )
 
     const list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
@@ -72,14 +74,15 @@ await describe('list filters empty-diff turns + re-threads prev_snapshot_sha', (
     fs.writeFileSync(path.join(repo, 'b.txt'), 'third')
     await recordTurnBoundary(h.db, tabId, 'p3')
 
-    const rows = h.db.prepare('SELECT * FROM agent_turns WHERE worktree_path = ? ORDER BY created_at ASC').all(repo) as Array<{ id: string; snapshot_sha: string; created_at: number }>
+    const rows = h.db.prepare('SELECT * FROM agent_turns WHERE worktree_path = ? ORDER BY created_at ASC').all(repo) as Array<{ id: string; snapshot_sha: string; head_sha_at_snap: string; created_at: number }>
     expect(rows.length).toBe(3)
 
     // Inject a malformed duplicate slotted BETWEEN row[0] and row[1] in time
     // (snap = row[0].snap so prev..this is empty → must be filtered).
+    // head_sha_at_snap matches so Rule 1 doesn't pre-empt the test.
     const between = (rows[0].created_at + rows[1].created_at) / 2 + 0.5
-    h.db.prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?)').run(
-      crypto.randomUUID(), repo, tabId, rows[0].snapshot_sha, 'dup', Math.round(between)
+    h.db.prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)').run(
+      crypto.randomUUID(), repo, tabId, rows[0].snapshot_sha, rows[0].head_sha_at_snap, 'dup', Math.round(between)
     )
 
     const list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
@@ -168,6 +171,164 @@ await describe('list filters empty-diff turns + re-threads prev_snapshot_sha', (
 
     // Bug: filter resurrects all 3 historical turns because a.txt now in
     // working set. Expected: 0 (committed turns must stay dropped).
+    list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(0)
+  })
+
+  test('REPRO: multi-commit cycles — only turns whose parent == current HEAD survive', async () => {
+    // Scenario: user works in 3 commit cycles. Each cycle = N turns, then commit.
+    // After 3 cycles, edits same files again. Filter must drop ALL pre-current-HEAD
+    // turns (their snap parent points to an old HEAD), regardless of how many
+    // historical HEADs the snaps were taken at.
+    const { tabId, repo } = freshTask()
+    const file = path.join(repo, 'a.txt')
+
+    // Cycle 1: 3 turns at HEAD0
+    fs.writeFileSync(file, 'c1-1'); await recordTurnBoundary(h.db, tabId, '1')
+    fs.writeFileSync(file, 'c1-2'); await recordTurnBoundary(h.db, tabId, '2')
+    fs.writeFileSync(file, 'c1-3'); await recordTurnBoundary(h.db, tabId, '3')
+    git(repo, 'add', '.'); git(repo, 'commit', '-m', 'cycle-1')
+
+    // Cycle 2: 2 turns at HEAD1
+    fs.writeFileSync(file, 'c2-1'); await recordTurnBoundary(h.db, tabId, '4')
+    fs.writeFileSync(file, 'c2-2'); await recordTurnBoundary(h.db, tabId, '5')
+    git(repo, 'add', '.'); git(repo, 'commit', '-m', 'cycle-2')
+
+    // Cycle 3: 2 turns at HEAD2 (current)
+    fs.writeFileSync(file, 'c3-1'); await recordTurnBoundary(h.db, tabId, '6')
+    fs.writeFileSync(file, 'c3-2'); await recordTurnBoundary(h.db, tabId, '7')
+    git(repo, 'add', '.'); git(repo, 'commit', '-m', 'cycle-3')
+
+    // Working tree clean after final commit → 0 turns
+    let list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(0)
+
+    // Now edit the SAME file (`a.txt`) again. All historical turns touched a.txt,
+    // so file-overlap rule alone won't drop them. Only parent-vs-HEAD rule does.
+    fs.writeFileSync(file, 'post-c3-edit')
+    list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    // BUG: if filter resurrects ANY of the 7 pre-commit turns, count > 0.
+    // Expected: 0 (no current-HEAD snap exists yet).
+    expect(list).toHaveLength(0)
+  })
+
+  test('REPRO: mix of stale + current-HEAD snaps — only current-HEAD ones visible', async () => {
+    // Closer to user's repro: 50 stale snaps (parent = various old HEADs) plus
+    // a few fresh snaps (parent = current HEAD). Working set overlaps SOME old
+    // turns' files. Only the fresh snaps with non-empty diff + file overlap
+    // should survive.
+    const { tabId, repo } = freshTask()
+    const fileA = path.join(repo, 'a.txt')
+    const fileB = path.join(repo, 'b.txt')
+    const fileC = path.join(repo, 'c.txt')
+
+    // 5 commit cycles, 4 turns each = 20 stale snaps
+    for (let cycle = 0; cycle < 5; cycle++) {
+      for (let t = 0; t < 4; t++) {
+        fs.writeFileSync(fileA, `cycle${cycle}-t${t}-A`)
+        fs.writeFileSync(fileB, `cycle${cycle}-t${t}-B`)
+        await recordTurnBoundary(h.db, tabId, `c${cycle}-t${t}`)
+      }
+      git(repo, 'add', '.'); git(repo, 'commit', '-m', `cycle-${cycle}`)
+    }
+
+    // After all commits, working tree is clean → 0 turns
+    let list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(0)
+
+    // Now a fresh agent turn at current HEAD touches a NEW file (c.txt)
+    fs.writeFileSync(fileC, 'fresh')
+    await recordTurnBoundary(h.db, tabId, 'fresh-turn-1')
+
+    // ALSO modify a.txt (which every stale snap also touched). This is the
+    // adversarial case: file-overlap alone would resurrect every stale snap.
+    fs.writeFileSync(fileA, 'post-commit-edit')
+
+    list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    // Expected: just the 1 fresh turn (parent = current HEAD).
+    // BUG: if any stale snaps slip through, count > 1.
+    expect(list).toHaveLength(1)
+    expect(list[0].prompt_preview).toBe('fresh-turn-1')
+  })
+
+  test('REPRO: file-overlap rule must NOT save a stale-parent snap', async () => {
+    // Minimal direct repro: one stale snap + one fresh snap, both touch
+    // the SAME file that's in the current working set. Stale must drop
+    // (parent != HEAD) even though its files overlap working set.
+    const { tabId, repo } = freshTask()
+    const file = path.join(repo, 'shared.txt')
+
+    fs.writeFileSync(file, 'v1')
+    await recordTurnBoundary(h.db, tabId, 'stale')
+    git(repo, 'add', '.'); git(repo, 'commit', '-m', 'commit-stale')
+
+    fs.writeFileSync(file, 'v2')
+    await recordTurnBoundary(h.db, tabId, 'fresh')
+
+    const list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    // Expected: 1 (only fresh). Stale's parent is the pre-commit HEAD, not current.
+    expect(list).toHaveLength(1)
+    expect(list[0].prompt_preview).toBe('fresh')
+  })
+
+  test('legacy row with NULL head_sha_at_snap is dropped (unrecoverable backfill)', async () => {
+    // Rows inserted before migration 122 whose backfill failed (repo gone,
+    // git crash, etc.) end up with head_sha_at_snap = NULL. Filter cannot
+    // reason about their staleness, so drops them.
+    const { tabId, repo } = freshTask()
+    fs.writeFileSync(path.join(repo, 'live.txt'), 'live')
+    await recordTurnBoundary(h.db, tabId, 'live')
+
+    // Inject a NULL-head row with valid snap pointing to live snap (so file
+    // overlap would otherwise pass).
+    const live = h.db.prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? LIMIT 1').get(repo) as { snapshot_sha: string }
+    h.db.prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, NULL, ?, ?)').run(
+      crypto.randomUUID(), repo, tabId, live.snapshot_sha, 'legacy', Date.now() + 1000
+    )
+
+    const list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(1) // only the live one
+    expect(list[0].prompt_preview).toBe('live')
+  })
+
+  test('column-driven Rule 1: stale row dropped without any git rev-parse spawn', async () => {
+    // Insert a snap whose head_sha_at_snap is FAKE (does not match any real
+    // commit). Filter must drop it via the SQL column comparison alone — no
+    // git rev-parse, no cache. If filter regressed to spawning git for parent
+    // lookup, it would hit the in-memory `live` snap's parent (= live's HEAD)
+    // and the row could survive depending on the real value.
+    const { tabId, repo } = freshTask()
+    fs.writeFileSync(path.join(repo, 'live.txt'), 'live')
+    await recordTurnBoundary(h.db, tabId, 'live')
+
+    const live = h.db.prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? LIMIT 1').get(repo) as { snapshot_sha: string }
+    // Fake stale-HEAD value — definitely not current HEAD.
+    const fakeStaleHead = '0000000000000000000000000000000000000000'
+    h.db.prepare('INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)').run(
+      crypto.randomUUID(), repo, tabId, live.snapshot_sha, fakeStaleHead, 'stale', Date.now() + 1000
+    )
+
+    const list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(1)
+    expect(list[0].prompt_preview).toBe('live')
+  })
+
+  test('fail-closed: when current HEAD lookup fails, returns empty list', async () => {
+    // Simulate a broken repo by destroying .git after turns are recorded.
+    // getHeadSha returns null → filter must drop everything (don't risk
+    // showing ghost turns whose freshness can't be verified).
+    const { tabId, repo } = freshTask()
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'one')
+    await recordTurnBoundary(h.db, tabId, 'p1')
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'two')
+    await recordTurnBoundary(h.db, tabId, 'p2')
+
+    // Sanity: turns visible while repo intact.
+    let list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
+    expect(list).toHaveLength(2)
+
+    // Break the repo (remove .git) so `git rev-parse HEAD` fails.
+    fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true })
     list = (await h.invoke('agent-turns:list', repo)) as AgentTurnRange[]
     expect(list).toHaveLength(0)
   })

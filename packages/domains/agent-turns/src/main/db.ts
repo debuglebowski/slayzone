@@ -9,15 +9,17 @@ export interface InsertTurn {
   task_id: string | null
   terminal_tab_id: string
   snapshot_sha: string
+  /** HEAD SHA at snap time. See AgentTurn.head_sha_at_snap. */
+  head_sha_at_snap: string
   prompt_preview: string
   created_at: number
 }
 
 export function insertTurn(db: Database, t: InsertTurn): void {
   db.prepare(
-    `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, prompt_preview, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(t.id, t.worktree_path, t.task_id, t.terminal_tab_id, t.snapshot_sha, t.prompt_preview, t.created_at)
+    `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(t.id, t.worktree_path, t.task_id, t.terminal_tab_id, t.snapshot_sha, t.head_sha_at_snap, t.prompt_preview, t.created_at)
 }
 
 export function deleteTurn(db: Database, id: string): void {
