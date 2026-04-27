@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.23.2",
+    "date": "2026-04-27",
+    "tagline": "Tab cycle & HTML preview",
+    "items": [
+      {
+        "category": "fix",
+        "title": "HTML asset preview scripts",
+        "description": "HTML asset previews now execute scripts via the slz-file:// protocol."
+      },
+      {
+        "category": "fix",
+        "title": "Ctrl+Tab cycle",
+        "description": "Exclude the context manager tab from the Ctrl+Tab cycle."
+      }
+    ]
+  },
+  {
     "version": "0.23.1",
     "date": "2026-04-26",
     "tagline": "Polish pass",

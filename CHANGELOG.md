@@ -1,6 +1,27 @@
 # Changelog
 
 
+## v0.23.2
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.23.1...v0.23.2)
+
+### 🩹 Fixes
+
+- **task:** Html asset preview executes scripts via slz-file:// ([ab64502e](https://github.com/debuglebowski/slayzone/commit/ab64502e))
+- **tabs:** Exclude context manager from Ctrl+Tab cycle ([2804cb8c](https://github.com/debuglebowski/slayzone/commit/2804cb8c))
+
+### 💅 Refactors
+
+- **agent-turns:** Store HEAD-at-snap on row, drop git-spawn filter ([c391e721](https://github.com/debuglebowski/slayzone/commit/c391e721))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.23.0 ([57420151](https://github.com/debuglebowski/slayzone/commit/57420151))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.23.1
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.23.0...v0.23.1)
