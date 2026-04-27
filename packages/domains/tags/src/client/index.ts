@@ -1,2 +1,2 @@
-export { CreateTagDialog, TAG_PRESETS } from './CreateTagDialog'
+export { CreateTagDialog } from './CreateTagDialog'
 export { TagSelector } from './TagSelector'

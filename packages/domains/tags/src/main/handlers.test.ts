@@ -21,14 +21,14 @@ describe('db:tags:create', () => {
   test('creates tag with defaults', () => {
     const tag = h.invoke('db:tags:create', { name: 'bug', projectId }) as Tag
     expect(tag.name).toBe('bug')
-    expect(tag.color).toBe('#6b7280')
+    expect(tag.color).toBe('#6366f1')
     expect(tag.project_id).toBe(projectId)
     expect(tag.sort_order).toBe(0)
     expect(tag.id).toBeTruthy()
   })
 
   test('creates tag with custom color', () => {
-    const tag = h.invoke('db:tags:create', { name: 'feat', color: '#ff0000', projectId }) as Tag
+    const tag = h.invoke('db:tags:create', { name: 'feat', color: '#ff0000', textColor: '#ffffff', projectId }) as Tag
     expect(tag.color).toBe('#ff0000')
     expect(tag.sort_order).toBe(1)
   })
@@ -40,8 +40,24 @@ describe('db:tags:create', () => {
   })
 
   test('auto-increments sort_order per project', () => {
-    const tag = h.invoke('db:tags:create', { name: 'chore', projectId }) as Tag
+    const tag = h.invoke('db:tags:create', { name: 'chore', color: '#22c55e', textColor: '#ffffff', projectId }) as Tag
     expect(tag.sort_order).toBe(2)
+  })
+
+  test('rejects duplicate (color, text_color) within project', () => {
+    let threw = false
+    try {
+      h.invoke('db:tags:create', { name: 'dup', color: '#22c55e', textColor: '#ffffff', projectId })
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(true)
+  })
+
+  test('same color across different projects allowed', () => {
+    const tag = h.invoke('db:tags:create', { name: 'green', color: '#22c55e', textColor: '#ffffff', projectId: projectId2 }) as Tag
+    expect(tag.color).toBe('#22c55e')
+    expect(tag.project_id).toBe(projectId2)
   })
 })
 

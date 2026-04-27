@@ -2163,6 +2163,141 @@ const migrations: Migration[] = [
         }
       }
     }
+  },
+  {
+    version: 123,
+    up: (db) => {
+      // Enforce per-project uniqueness on (color, text_color) for tags.
+      // Snapshot of TAG_PRESETS at v123 — kept inline so future preset
+      // edits do not re-shape this migration's behavior on replay.
+      const PRESETS: Array<{ bg: string; text: string }> = [
+        { bg: '#fecaca', text: '#991b1b' },
+        { bg: '#ef4444', text: '#ffffff' },
+        { bg: '#991b1b', text: '#fecaca' },
+        { bg: '#fed7aa', text: '#9a3412' },
+        { bg: '#f97316', text: '#ffffff' },
+        { bg: '#9a3412', text: '#fed7aa' },
+        { bg: '#fef08a', text: '#854d0e' },
+        { bg: '#eab308', text: '#422006' },
+        { bg: '#854d0e', text: '#fef9c3' },
+        { bg: '#bbf7d0', text: '#166534' },
+        { bg: '#22c55e', text: '#ffffff' },
+        { bg: '#166534', text: '#bbf7d0' },
+        { bg: '#99f6e4', text: '#115e59' },
+        { bg: '#14b8a6', text: '#ffffff' },
+        { bg: '#115e59', text: '#ccfbf1' },
+        { bg: '#bfdbfe', text: '#1e3a8a' },
+        { bg: '#3b82f6', text: '#ffffff' },
+        { bg: '#1e3a8a', text: '#bfdbfe' },
+        { bg: '#c7d2fe', text: '#3730a3' },
+        { bg: '#6366f1', text: '#ffffff' },
+        { bg: '#3730a3', text: '#c7d2fe' },
+        { bg: '#ddd6fe', text: '#5b21b6' },
+        { bg: '#a855f7', text: '#ffffff' },
+        { bg: '#5b21b6', text: '#ede9fe' },
+        { bg: '#fbcfe8', text: '#9d174d' },
+        { bg: '#ec4899', text: '#ffffff' },
+        { bg: '#9d174d', text: '#fce7f3' },
+        { bg: '#e5e7eb', text: '#1f2937' },
+        { bg: '#6b7280', text: '#ffffff' },
+        { bg: '#374151', text: '#e5e7eb' },
+      ]
+      const presetKey = (bg: string, text: string) => `${bg}:${text}`
+      const presetSet = new Set(PRESETS.map((p) => presetKey(p.bg, p.text)))
+      const parseHex = (hex: string): [number, number, number] | null => {
+        const m = /^#([0-9a-f]{6})$/i.exec(hex)
+        if (!m) return null
+        const v = m[1]
+        return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)]
+      }
+      const nearestPreset = (bg: string): { bg: string; text: string } => {
+        const rgb = parseHex(bg)
+        if (!rgb) return PRESETS[19] // indigo fallback (#6366f1/#ffffff)
+        let best = PRESETS[0]
+        let bestDist = Number.POSITIVE_INFINITY
+        for (const p of PRESETS) {
+          const prgb = parseHex(p.bg)
+          if (!prgb) continue
+          const dr = rgb[0] - prgb[0]
+          const dg = rgb[1] - prgb[1]
+          const db = rgb[2] - prgb[2]
+          const dist = dr * dr + dg * dg + db * db
+          if (dist < bestDist) { bestDist = dist; best = p }
+        }
+        return best
+      }
+
+      const updateColor = db.prepare('UPDATE tags SET color = ?, text_color = ? WHERE id = ?')
+
+      // Step 1 — force all custom (non-preset) colors to nearest preset.
+      const allTags = db.prepare(
+        'SELECT id, project_id, color, text_color FROM tags ORDER BY created_at ASC, id ASC'
+      ).all() as Array<{ id: string; project_id: string; color: string; text_color: string }>
+      for (const tag of allTags) {
+        if (!presetSet.has(presetKey(tag.color, tag.text_color))) {
+          const np = nearestPreset(tag.color)
+          updateColor.run(np.bg, np.text, tag.id)
+          tag.color = np.bg
+          tag.text_color = np.text
+        }
+      }
+
+      // Step 2 — per-project dedup. Keep oldest in each color group; reassign
+      // others to next free preset in project. If no free preset (project has
+      // ≥31 colliding tags), warn and leave duplicate — index creation in
+      // step 3 will be skipped to keep boot safe.
+      const tagsByProject = new Map<string, typeof allTags>()
+      for (const tag of allTags) {
+        const arr = tagsByProject.get(tag.project_id) ?? []
+        arr.push(tag)
+        tagsByProject.set(tag.project_id, arr)
+      }
+      for (const [projectId, tags] of tagsByProject) {
+        const used = new Set<string>()
+        const groups = new Map<string, typeof tags>()
+        for (const t of tags) {
+          const k = presetKey(t.color, t.text_color)
+          const g = groups.get(k) ?? []
+          g.push(t)
+          groups.set(k, g)
+        }
+        for (const k of groups.keys()) {
+          // group already sorted (allTags is) — first stays, rest reassign
+          used.add(k)
+        }
+        for (const [, group] of groups) {
+          if (group.length <= 1) continue
+          for (let i = 1; i < group.length; i++) {
+            const tag = group[i]
+            const free = PRESETS.find((p) => !used.has(presetKey(p.bg, p.text)))
+            if (!free) {
+              console.warn(
+                `[migration v123] tag color dedup overflow: project=${projectId} tag=${tag.id} color=${tag.color}/${tag.text_color} — leaving duplicate`
+              )
+              continue
+            }
+            updateColor.run(free.bg, free.text, tag.id)
+            tag.color = free.bg
+            tag.text_color = free.text
+            used.add(presetKey(free.bg, free.text))
+          }
+        }
+      }
+
+      // Step 3 — boot-safe unique index. Skip if collisions remain (overflow).
+      const remaining = db.prepare(
+        `SELECT 1 FROM tags GROUP BY project_id, color, text_color HAVING COUNT(*) > 1 LIMIT 1`
+      ).get() as unknown
+      if (!remaining) {
+        db.exec(
+          `CREATE UNIQUE INDEX IF NOT EXISTS tags_project_color_unique ON tags(project_id, color, text_color)`
+        )
+      } else {
+        console.warn(
+          `[migration v123] collisions remain after dedup — skipping unique index creation`
+        )
+      }
+    }
   }
 ]
 
