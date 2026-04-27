@@ -407,14 +407,6 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     return created
   })
 
-  ipcMain.handle('db:assets:getFileSize', (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_assets WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    if (!existing) return null
-    const filePath = getAssetFilePath(existing.task_id as string, id, existing.title as string)
-    if (!existsSync(filePath)) return null
-    return statSync(filePath).size
-  })
-
   ipcMain.handle('db:assets:uploadBlob', (_, data: { taskId: string; title: string; bytes: Uint8Array; folderId?: string | null }): TaskAsset | null => {
     const id = randomUUID()
     const folderId = data.folderId ?? null

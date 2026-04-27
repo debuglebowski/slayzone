@@ -134,12 +134,6 @@ function PdfViewer({ assetId, contentVersion, getFilePath }: { assetId: string; 
 
 // --- Asset content editor ---
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 function formatRelativeDate(iso: string): string {
   const d = new Date(iso)
   const now = new Date()
@@ -154,13 +148,7 @@ function formatRelativeDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-export interface AssetStats {
-  fileSize: number | null
-  words: number
-  lines: number
-}
-
-function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, saveContent, getFilePath, onStats, effectiveReadability, effectiveWidth, searchQuery, searchActiveIndex, searchMatchCase, searchRegex, onSearchMatchCountChange }: {
+function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, saveContent, getFilePath, effectiveReadability, effectiveWidth, searchQuery, searchActiveIndex, searchMatchCase, searchRegex, onSearchMatchCountChange }: {
   asset: TaskAsset
   viewMode: 'preview' | 'split' | 'raw'
   zoomLevel: number
@@ -168,7 +156,6 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   readContent: (id: string) => Promise<string | null>
   saveContent: (id: string, content: string) => Promise<void>
   getFilePath: (id: string) => Promise<string | null>
-  onStats?: (stats: AssetStats) => void
   effectiveReadability: 'compact' | 'normal'
   effectiveWidth: 'narrow' | 'wide'
   searchQuery: string
@@ -202,10 +189,8 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
   const baselineMtimeRef = useRef<number | null>(null)
   const contentRef = useRef(content)
   const isDirtyRef = useRef(false)
-  const onStatsRef = useRef(onStats)
   contentRef.current = content
   isDirtyRef.current = isDirty
-  onStatsRef.current = onStats
   const fileExt = getExtensionFromTitle(asset.title) || undefined
 
   const renderMode = getEffectiveRenderMode(asset.title, asset.render_mode)
@@ -224,24 +209,12 @@ function AssetContentEditor({ asset, viewMode, zoomLevel, onZoom, readContent, s
     setContentVersion(v => v + 1)
   }, [asset.id, readContent])
 
-  useEffect(() => {
-    const text = content ?? ''
-    const words = text.trim() ? text.trim().split(/\s+/).length : 0
-    const lines = text ? text.split('\n').length : 0
-    window.api.assets.getFileSize(asset.id).then((size) => {
-      onStatsRef.current?.({ fileSize: size, words, lines })
-    })
-  }, [content, asset.id])
-
   // Load on mount / asset change. Flush pending save on unmount (with mtime guard).
   useEffect(() => {
     if (isBinary) {
       setLoading(false)
       window.api.assets.getMtime(asset.id).then((m) => { baselineMtimeRef.current = m })
       setContentVersion(v => v + 1)
-      window.api.assets.getFileSize(asset.id).then((size) => {
-        onStatsRef.current?.({ fileSize: size, words: 0, lines: 0 })
-      })
       return
     }
     setLoading(true)
@@ -509,7 +482,6 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
   const assetDefaultViewMode = editorMarkdownViewMode === 'code' ? 'raw' : editorMarkdownViewMode === 'split' ? 'split' : 'preview'
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
   const [zoomLevel, setZoomLevel] = useState(1)
-  const [assetStats, setAssetStats] = useState<AssetStats>({ fileSize: null, words: 0, lines: 0 })
   const [dragOver, setDragOver] = useState(false)
   const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null)
   const dragAssetIdsRef = useRef<string[]>([])
@@ -1357,19 +1329,6 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
             >
               {sidebarVisible ? <PanelLeftClose className="size-4" /> : <PanelLeft className="size-4" />}
             </button>
-            {selectedAsset && (
-              <>
-                <div className="flex items-center gap-3 text-[10px] text-muted-foreground ml-1">
-                  {assetStats.fileSize != null && <span><span className="text-muted-foreground/60">Size:</span> {formatFileSize(assetStats.fileSize)}</span>}
-                  {!isBinaryRenderMode(selectedRenderMode!) && (
-                    <>
-                      <span><span className="text-muted-foreground/60">Words:</span> {assetStats.words}</span>
-                      <span><span className="text-muted-foreground/60">Lines:</span> {assetStats.lines}</span>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
             <div className="flex-1" />
             {selectedAsset && selectedRenderMode && (
               <div className="flex items-center gap-1.5">
@@ -1638,7 +1597,6 @@ export const AssetsPanel = forwardRef<AssetsPanelHandle, AssetsPanelProps>(funct
                 readContent={readContent}
                 saveContent={saveContent}
                 getFilePath={getFilePath}
-                onStats={setAssetStats}
                 effectiveReadability={effectiveReadability}
                 effectiveWidth={effectiveWidth}
                 searchQuery={findOpen ? findQuery : ''}

@@ -90,7 +90,6 @@ const api: ElectronAPI = {
     upload: (data) => ipcRenderer.invoke('db:assets:upload', data),
     uploadBlob: (data) => ipcRenderer.invoke('db:assets:uploadBlob', data),
     pasteFiles: (data) => ipcRenderer.invoke('db:assets:pasteFiles', data),
-    getFileSize: (id) => ipcRenderer.invoke('db:assets:getFileSize', id),
     cleanupTask: (taskId) => ipcRenderer.invoke('db:assets:cleanupTask', taskId),
     uploadDir: (data) => ipcRenderer.invoke('db:assets:uploadDir', data),
     downloadFile: (id) => ipcRenderer.invoke('db:assets:downloadFile', id),
