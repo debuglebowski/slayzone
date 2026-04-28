@@ -442,16 +442,13 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   const loadError = activeViewState.error
   const webviewReady = activeViewState.domReady
 
-  // Register browser panel for CLI access (strictly tab 0 only)
-  const isFirstTabActive = tabs.activeTabId === tabs.tabs[0]?.id
+  // Mirror the active tab id to the main-process registry so CLI calls without
+  // an explicit --tab flag default to whichever tab the user is currently viewing.
+  // Per-tab webContents registration is owned by BrowserTabPlaceholder.
   useEffect(() => {
-    if (!taskId || !activeViewId || !isFirstTabActive) return
-    void (async () => {
-      const wcId = await window.api.browser.getWebContentsId(activeViewId)
-      if (wcId) void window.api.webview.registerBrowserPanel(taskId, wcId)
-    })()
-    return () => { void window.api.webview.unregisterBrowserPanel(taskId) }
-  }, [taskId, activeViewId, isFirstTabActive])
+    if (!taskId) return
+    void window.api.webview.setActiveBrowserTab(taskId, tabs.activeTabId)
+  }, [taskId, tabs.activeTabId])
 
   // Sync keyboard passthrough to main process
   useEffect(() => {

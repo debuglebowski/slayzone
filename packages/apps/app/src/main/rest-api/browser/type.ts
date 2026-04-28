@@ -4,9 +4,9 @@ import type { RestApiDeps } from '../types'
 
 export function registerBrowserTypeRoute(app: Express, _deps: RestApiDeps): void {
   app.post('/api/browser/type', async (req, res) => {
-    const { taskId, selector, text, panel = 'hidden' } = req.body ?? {}
+    const { taskId, selector, text, panel = 'hidden', tabId } = req.body ?? {}
     if (!selector || text == null) { res.status(400).json({ error: 'selector and text required' }); return }
-    const bwc = await ensureBrowserWc(taskId, panel, res)
+    const bwc = await ensureBrowserWc(taskId, panel, res, undefined, tabId)
     if (!bwc) return
     try {
       const result = await execJs<{ ok: boolean; error?: string }>(bwc.wc, `(() => {

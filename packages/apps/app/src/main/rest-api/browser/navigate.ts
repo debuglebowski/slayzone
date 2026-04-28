@@ -4,7 +4,7 @@ import type { RestApiDeps } from '../types'
 
 export function registerBrowserNavigateRoute(app: Express, _deps: RestApiDeps): void {
   app.post('/api/browser/navigate', async (req, res) => {
-    const { taskId, url, panel = 'visible' } = req.body ?? {}
+    const { taskId, url, panel = 'visible', tabId } = req.body ?? {}
     if (!url) { res.status(400).json({ error: 'url required' }); return }
     try {
       const parsed = new URL(url)
@@ -14,7 +14,7 @@ export function registerBrowserNavigateRoute(app: Express, _deps: RestApiDeps): 
     } catch {
       res.status(400).json({ error: 'Invalid URL' }); return
     }
-    const result = await ensureBrowserWc(taskId, panel, res, url)
+    const result = await ensureBrowserWc(taskId, panel, res, url, tabId)
     if (!result) return
     try {
       // Skip loadURL when panel was just auto-opened — the renderer already created a tab with this URL

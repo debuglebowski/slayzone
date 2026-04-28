@@ -4,9 +4,9 @@ import type { RestApiDeps } from '../types'
 
 export function registerBrowserClickRoute(app: Express, _deps: RestApiDeps): void {
   app.post('/api/browser/click', async (req, res) => {
-    const { taskId, selector, panel = 'hidden' } = req.body ?? {}
+    const { taskId, selector, panel = 'hidden', tabId } = req.body ?? {}
     if (!selector) { res.status(400).json({ error: 'selector required' }); return }
-    const bwc = await ensureBrowserWc(taskId, panel, res)
+    const bwc = await ensureBrowserWc(taskId, panel, res, undefined, tabId)
     if (!bwc) return
     try {
       const result = await execJs<{ ok: boolean; error?: string; tag?: string; text?: string }>(bwc.wc, `(() => {

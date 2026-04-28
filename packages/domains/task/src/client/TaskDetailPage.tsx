@@ -1549,15 +1549,23 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // CLI: open browser panel when requested by main process (slay tasks browser --panel=visible)
   useEffect(() => {
     if (!isActive || !task) return
-    return window.api.app.onBrowserEnsurePanelOpen((taskId, url) => {
+    return window.api.app.onBrowserEnsurePanelOpen((taskId, url, tabId) => {
       if (taskId !== task.id) return
-      if (url) {
+      if (tabId) {
+        // CLI targeted an existing tab — open panel and switch to that tab.
+        // The navigate route will load `url` into the targeted tab's webContents.
+        handlePanelToggle('browser', true)
+        const tabs = browserTabsRef.current
+        if (tabs.tabs.some(t => t.id === tabId) && tabs.activeTabId !== tabId) {
+          handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
+        }
+      } else if (url) {
         openDevServerInBrowser(url)
       } else {
         handlePanelToggle('browser', true)
       }
     })
-  }, [isActive, task?.id, openDevServerInBrowser, handlePanelToggle])
+  }, [isActive, task?.id, openDevServerInBrowser, handlePanelToggle, handleBrowserTabsChange])
 
   const handleTagsChange = (newTagIds: string[]): void => {
     setTaskTagIds(newTagIds)

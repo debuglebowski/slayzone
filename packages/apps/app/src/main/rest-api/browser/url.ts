@@ -4,7 +4,13 @@ import type { RestApiDeps } from '../types'
 
 export function registerBrowserUrlRoute(app: Express, _deps: RestApiDeps): void {
   app.get('/api/browser/url', async (req, res) => {
-    const result = await ensureBrowserWc(req.query.taskId as string, (req.query.panel as 'visible' | 'hidden') ?? 'hidden', res)
+    const result = await ensureBrowserWc(
+      req.query.taskId as string,
+      (req.query.panel as 'visible' | 'hidden') ?? 'hidden',
+      res,
+      undefined,
+      req.query.tabId as string | undefined,
+    )
     if (!result) return
     res.json({ url: result.wc.getURL() })
   })

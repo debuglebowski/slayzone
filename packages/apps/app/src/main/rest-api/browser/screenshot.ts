@@ -8,8 +8,8 @@ import type { RestApiDeps } from '../types'
 
 export function registerBrowserScreenshotRoute(app: Express, _deps: RestApiDeps): void {
   app.post('/api/browser/screenshot', async (req, res) => {
-    const { taskId, panel = 'hidden' } = req.body ?? {}
-    const bwc = await ensureBrowserWc(taskId, panel, res)
+    const { taskId, panel = 'hidden', tabId } = req.body ?? {}
+    const bwc = await ensureBrowserWc(taskId, panel, res, undefined, tabId)
     if (!bwc) return
     try {
       const image = await bwc.wc.capturePage()

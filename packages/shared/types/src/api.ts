@@ -433,7 +433,7 @@ export interface ElectronAPI {
     onTasksChanged: (callback: () => void) => () => void
     onSettingsChanged: (callback: () => void) => () => void
     onCloseTask: (callback: (taskId: string) => void) => () => void
-    onBrowserEnsurePanelOpen: (callback: (taskId: string, url?: string) => void) => () => void
+    onBrowserEnsurePanelOpen: (callback: (taskId: string, url?: string, tabId?: string) => void) => () => void
     onOpenTask: (callback: (taskId: string) => void) => () => void
     onOpenAsset: (callback: (taskId: string, assetId: string) => void) => () => void
     onScreenshotTrigger: (callback: () => void) => () => void
@@ -799,8 +799,9 @@ export interface ElectronAPI {
       }
     ) => Promise<boolean>
     disableDeviceEmulation: (webviewId: number) => Promise<boolean>
-    registerBrowserPanel: (taskId: string, webContentsId: number) => Promise<void>
-    unregisterBrowserPanel: (taskId: string) => Promise<void>
+    registerBrowserTab: (taskId: string, tabId: string, webContentsId: number) => Promise<void>
+    unregisterBrowserTab: (taskId: string, tabId: string) => Promise<void>
+    setActiveBrowserTab: (taskId: string, tabId: string | null) => Promise<void>
   }
   browser: {
     // Lifecycle

@@ -32,6 +32,7 @@ import { registerBrowserTypeRoute } from './browser/type'
 import { registerBrowserEvalRoute } from './browser/eval'
 import { registerBrowserContentRoute } from './browser/content'
 import { registerBrowserScreenshotRoute } from './browser/screenshot'
+import { registerBrowserTabsRoute } from './browser/tabs'
 
 export type { RestApiDeps } from './types'
 
@@ -81,4 +82,5 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerBrowserEvalRoute(app, deps)
   registerBrowserContentRoute(app, deps)
   registerBrowserScreenshotRoute(app, deps)
+  registerBrowserTabsRoute(app, deps)
 }

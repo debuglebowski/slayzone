@@ -4,7 +4,13 @@ import type { RestApiDeps } from '../types'
 
 export function registerBrowserContentRoute(app: Express, _deps: RestApiDeps): void {
   app.get('/api/browser/content', async (req, res) => {
-    const bwc = await ensureBrowserWc(req.query.taskId as string, (req.query.panel as 'visible' | 'hidden') ?? 'hidden', res)
+    const bwc = await ensureBrowserWc(
+      req.query.taskId as string,
+      (req.query.panel as 'visible' | 'hidden') ?? 'hidden',
+      res,
+      undefined,
+      req.query.tabId as string | undefined,
+    )
     if (!bwc) return
     try {
       const content = await execJs(bwc.wc, `(() => {

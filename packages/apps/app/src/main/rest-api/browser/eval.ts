@@ -4,9 +4,9 @@ import type { RestApiDeps } from '../types'
 
 export function registerBrowserEvalRoute(app: Express, _deps: RestApiDeps): void {
   app.post('/api/browser/eval', async (req, res) => {
-    const { taskId, code, panel = 'hidden' } = req.body ?? {}
+    const { taskId, code, panel = 'hidden', tabId } = req.body ?? {}
     if (!code) { res.status(400).json({ error: 'code required' }); return }
-    const bwc = await ensureBrowserWc(taskId, panel, res)
+    const bwc = await ensureBrowserWc(taskId, panel, res, undefined, tabId)
     if (!bwc) return
     try {
       const result = await execJs(bwc.wc, code)

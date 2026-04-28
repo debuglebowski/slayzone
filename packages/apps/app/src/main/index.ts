@@ -15,7 +15,7 @@ import { readFileSync, promises as fsp, mkdirSync } from 'fs'
 import { electronApp, is } from '@electron-toolkit/utils'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore } from 'electron-chrome-web-store'
-import { registerBrowserPanel, unregisterBrowserPanel, clearBrowserRegistry } from './browser-registry'
+import { registerBrowserTab, unregisterBrowserTab, setActiveBrowserTab, clearBrowserRegistry } from './browser-registry'
 import { BrowserViewManager, type CreateViewOpts, type ViewBounds } from './browser-view-manager'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
@@ -1547,12 +1547,15 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     }
   )
 
-  // Browser panel registry (CLI browser control)
-  ipcMain.handle('webview:register-browser-panel', (_, taskId: string, webContentsId: number) => {
-    registerBrowserPanel(taskId, webContentsId)
+  // Browser panel registry (CLI browser control — per-tab)
+  ipcMain.handle('webview:register-browser-tab', (_, taskId: string, tabId: string, webContentsId: number) => {
+    registerBrowserTab(taskId, tabId, webContentsId)
   })
-  ipcMain.handle('webview:unregister-browser-panel', (_, taskId: string) => {
-    unregisterBrowserPanel(taskId)
+  ipcMain.handle('webview:unregister-browser-tab', (_, taskId: string, tabId: string) => {
+    unregisterBrowserTab(taskId, tabId)
+  })
+  ipcMain.handle('webview:set-active-browser-tab', (_, taskId: string, tabId: string | null) => {
+    setActiveBrowserTab(taskId, tabId)
   })
 
   // Webview shortcut interception

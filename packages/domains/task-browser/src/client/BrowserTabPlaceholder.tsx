@@ -54,6 +54,23 @@ export const BrowserTabPlaceholder = forwardRef<BrowserTabPlaceholderHandle, Bro
       if (visible) onOverlayChange?.(hiddenByOverlay)
     }, [visible, hiddenByOverlay, onOverlayChange])
 
+    // Register this tab's webContents with the main-process registry so the CLI
+    // can target it. Each tab registers independently; activeness is tracked
+    // separately by BrowserPanel via setActiveBrowserTab.
+    useEffect(() => {
+      if (!taskId || !viewId) return
+      let cancelled = false
+      void (async () => {
+        const wcId = await window.api.browser.getWebContentsId(viewId)
+        if (cancelled || wcId == null) return
+        await window.api.webview.registerBrowserTab(taskId, tabId, wcId)
+      })()
+      return () => {
+        cancelled = true
+        void window.api.webview.unregisterBrowserTab(taskId, tabId)
+      }
+    }, [taskId, tabId, viewId])
+
     return (
       <div
         ref={placeholderRef}

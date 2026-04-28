@@ -239,8 +239,8 @@ const api: ElectronAPI = {
       ipcRenderer.on('app:close-task', handler)
       return () => ipcRenderer.removeListener('app:close-task', handler)
     },
-    onBrowserEnsurePanelOpen: (callback: (taskId: string, url?: string) => void) => {
-      const handler = (_: unknown, taskId: string, url?: string) => callback(taskId, url)
+    onBrowserEnsurePanelOpen: (callback: (taskId: string, url?: string, tabId?: string) => void) => {
+      const handler = (_: unknown, taskId: string, url?: string, tabId?: string) => callback(taskId, url, tabId)
       ipcRenderer.on('browser:ensure-panel-open', handler)
       return () => ipcRenderer.removeListener('browser:ensure-panel-open', handler)
     },
@@ -795,10 +795,12 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('webview:enable-device-emulation', webviewId, params),
     disableDeviceEmulation: (webviewId) =>
       ipcRenderer.invoke('webview:disable-device-emulation', webviewId),
-    registerBrowserPanel: (taskId, webContentsId) =>
-      ipcRenderer.invoke('webview:register-browser-panel', taskId, webContentsId),
-    unregisterBrowserPanel: (taskId) =>
-      ipcRenderer.invoke('webview:unregister-browser-panel', taskId),
+    registerBrowserTab: (taskId, tabId, webContentsId) =>
+      ipcRenderer.invoke('webview:register-browser-tab', taskId, tabId, webContentsId),
+    unregisterBrowserTab: (taskId, tabId) =>
+      ipcRenderer.invoke('webview:unregister-browser-tab', taskId, tabId),
+    setActiveBrowserTab: (taskId, tabId) =>
+      ipcRenderer.invoke('webview:set-active-browser-tab', taskId, tabId),
   },
   browser: {
     createView: (opts) => ipcRenderer.invoke('browser:create-view', opts),
