@@ -90,6 +90,55 @@ export class AutomationEngine {
 
     // --- Cron ---
     this.cronInterval = setInterval(() => this.tickCron(), 60_000)
+
+    // Catch up on missed cron fires after offline period (app closed, sleep, etc.)
+    this.runCatchup()
+  }
+
+  /**
+   * Scan enabled cron automations with catchup_on_start=1. If any cron slot
+   * matched between last_run_at and now, fire once (coalesced — never replay
+   * every missed slot).
+   *
+   * Public so external triggers (e.g. powerMonitor.resume) can re-run it.
+   */
+  runCatchup(): void {
+    const rows = this.db.prepare(
+      "SELECT * FROM automations WHERE enabled = 1 AND catchup_on_start = 1 AND last_run_at IS NOT NULL AND json_extract(trigger_config, '$.type') = 'cron'"
+    ).all() as AutomationRow[]
+
+    const now = new Date()
+    const nowFloor = new Date(now)
+    nowFloor.setSeconds(0, 0)
+
+    for (const row of rows) {
+      const automation = parseAutomationRow(row)
+      const expression = automation.trigger_config.params.expression as string | undefined
+      if (!expression || !row.last_run_at) continue
+
+      // SQLite stores datetime('now') as 'YYYY-MM-DD HH:MM:SS' (UTC, no zone).
+      const lastRun = new Date(row.last_run_at.replace(' ', 'T') + 'Z')
+      if (Number.isNaN(lastRun.getTime())) continue
+      if (lastRun >= nowFloor) continue
+
+      // Walk back minute-by-minute from previous minute to (lastRun, exclusive).
+      // Stop at first match — we coalesce all missed fires into one run.
+      const cursor = new Date(nowFloor)
+      cursor.setMinutes(cursor.getMinutes() - 1)
+      while (cursor > lastRun) {
+        if (cronMatches(expression, cursor)) {
+          void this.executeAutomation(automation, {
+            type: 'cron',
+            projectId: automation.project_id,
+            cronExpression: expression,
+            depth: 0,
+            catchup: true,
+          }, 0)
+          break
+        }
+        cursor.setMinutes(cursor.getMinutes() - 1)
+      }
+    }
   }
 
   stop(): void {

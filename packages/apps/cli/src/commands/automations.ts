@@ -21,6 +21,7 @@ interface AutomationRow extends Record<string, unknown> {
   actions: string
   run_count: number
   last_run_at: string | null
+  catchup_on_start: number
   sort_order: number
   created_at: string
   updated_at: string
@@ -29,11 +30,20 @@ interface AutomationRow extends Record<string, unknown> {
 interface RunRow extends Record<string, unknown> {
   id: string
   automation_id: string
+  trigger_event: string | null
   status: string
   error: string | null
   duration_ms: number | null
   started_at: string
   completed_at: string | null
+}
+
+function isCatchupRun(row: RunRow): boolean {
+  if (!row.trigger_event) return false
+  try {
+    const ev = JSON.parse(row.trigger_event) as { catchup?: boolean }
+    return ev.catchup === true
+  } catch { return false }
 }
 
 const TRIGGER_TYPES = ['task_status_change', 'task_created', 'task_archived', 'task_tag_changed', 'cron', 'manual'] as const
@@ -60,6 +70,7 @@ function parseRow(row: AutomationRow) {
   return {
     ...row,
     enabled: Boolean(row.enabled),
+    catchup_on_start: Boolean(row.catchup_on_start),
     trigger_config: safeJsonParse(row.trigger_config),
     conditions: safeJsonParse(row.conditions) ?? [],
     actions: safeJsonParse(row.actions) ?? [],
@@ -137,6 +148,8 @@ export function automationsCommand(): Command {
       console.log(`Enabled:     ${parsed.enabled ? 'yes' : 'no'}`)
       if (row.description) console.log(`Description: ${row.description}`)
       console.log(`Trigger:     ${JSON.stringify(parsed.trigger_config)}`)
+      const triggerType = (parsed.trigger_config as { type?: string } | null)?.type
+      if (triggerType === 'cron') console.log(`Catchup:     ${parsed.catchup_on_start ? 'yes' : 'no'}`)
       if ((parsed.conditions as unknown[]).length > 0) console.log(`Conditions:  ${JSON.stringify(parsed.conditions)}`)
       console.log(`Actions:     ${JSON.stringify(parsed.actions)}`)
       console.log(`Runs:        ${row.run_count}`)
@@ -154,6 +167,7 @@ export function automationsCommand(): Command {
     .option('--trigger-from-status <status>', 'From status (for task_status_change)')
     .option('--trigger-to-status <status>', 'To status (for task_status_change)')
     .option('--cron <expression>', 'Cron expression (for cron trigger)')
+    .option('--no-catchup', 'Do not run on startup if a scheduled cron fire was missed (default: catchup on)')
     .option('--description <text>', 'Automation description')
     .option('--config <file>', 'JSON config file (overrides flags)')
     .addHelpText('after', templateVarsHelp())
@@ -206,9 +220,12 @@ export function automationsCommand(): Command {
         { ':pid': project.id }
       )[0] ?? { sort_order: 0 }
 
+      // commander's --no-catchup negates: opts.catchup === false when flag passed, true otherwise
+      const catchupOnStart = opts.catchup === false ? 0 : 1
+
       db.run(
-        `INSERT INTO automations (id, project_id, name, description, enabled, trigger_config, conditions, actions, sort_order, created_at, updated_at)
-         VALUES (:id, :pid, :name, :desc, 1, :trigger, :conditions, :actions, :sortOrder, :now, :now)`,
+        `INSERT INTO automations (id, project_id, name, description, enabled, trigger_config, conditions, actions, sort_order, catchup_on_start, created_at, updated_at)
+         VALUES (:id, :pid, :name, :desc, 1, :trigger, :conditions, :actions, :sortOrder, :catchup, :now, :now)`,
         {
           ':id': id,
           ':pid': project.id,
@@ -218,6 +235,7 @@ export function automationsCommand(): Command {
           ':conditions': JSON.stringify(conditions),
           ':actions': JSON.stringify(actions),
           ':sortOrder': nextOrder,
+          ':catchup': catchupOnStart,
           ':now': now,
         }
       )
@@ -240,10 +258,13 @@ export function automationsCommand(): Command {
     .option('--trigger-from-status <status>', 'From status')
     .option('--trigger-to-status <status>', 'To status')
     .option('--cron <expression>', 'Cron expression')
+    .option('--catchup', 'Enable run-on-startup-if-missed for cron triggers')
+    .option('--no-catchup', 'Disable run-on-startup-if-missed for cron triggers')
     .action(async (idPrefix: string, opts) => {
       if (opts.name === undefined && opts.description === undefined
         && opts.enabled === undefined && opts.disabled === undefined
-        && opts.trigger === undefined && opts.actionCommand === undefined) {
+        && opts.trigger === undefined && opts.actionCommand === undefined
+        && opts.catchup === undefined) {
         console.error('Provide at least one option to update.')
         process.exit(1)
       }
@@ -278,6 +299,11 @@ export function automationsCommand(): Command {
       if (opts.actionCommand) {
         sets.push('actions = :actions')
         params[':actions'] = JSON.stringify([{ type: 'run_command', params: { command: opts.actionCommand } }])
+      }
+
+      if (opts.catchup !== undefined) {
+        sets.push('catchup_on_start = :catchup')
+        params[':catchup'] = opts.catchup ? 1 : 0
       }
 
       db.run(`UPDATE automations SET ${sets.join(', ')} WHERE id = :id`, params)
@@ -373,7 +399,8 @@ export function automationsCommand(): Command {
         const id = r.id.slice(0, 8).padEnd(idW)
         const status = r.status.padEnd(statusW)
         const dur = r.duration_ms != null ? `${r.duration_ms}ms`.padEnd(10) : '-'.padEnd(10)
-        console.log(`${id}  ${status}  ${dur}  ${r.started_at}`)
+        const tag = isCatchupRun(r) ? '  (catchup)' : ''
+        console.log(`${id}  ${status}  ${dur}  ${r.started_at}${tag}`)
         if (r.error) console.log(`         error: ${r.error.slice(0, 80)}`)
       }
     })

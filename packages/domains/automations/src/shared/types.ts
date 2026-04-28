@@ -44,6 +44,7 @@ export interface Automation {
   actions: ActionConfig[]
   run_count: number
   last_run_at: string | null
+  catchup_on_start: boolean
   sort_order: number
   created_at: string
   updated_at: string
@@ -69,6 +70,7 @@ export interface CreateAutomationInput {
   trigger_config: TriggerConfig
   conditions?: ConditionConfig[]
   actions: ActionConfig[]
+  catchup_on_start?: boolean
 }
 
 export interface UpdateAutomationInput {
@@ -80,6 +82,7 @@ export interface UpdateAutomationInput {
   conditions?: ConditionConfig[]
   actions?: ActionConfig[]
   sort_order?: number
+  catchup_on_start?: boolean
 }
 
 // -- Events --
@@ -94,6 +97,8 @@ export interface AutomationEvent {
   cronExpression?: string
   automationId?: string
   depth?: number
+  /** True when this event was synthesized by runCatchup() to replay a missed cron fire. */
+  catchup?: boolean
 }
 
 // -- DB row (raw from SQLite, JSON not yet parsed) --
@@ -109,6 +114,7 @@ export interface AutomationRow {
   actions: string
   run_count: number
   last_run_at: string | null
+  catchup_on_start: number
   sort_order: number
   created_at: string
   updated_at: string
@@ -118,6 +124,7 @@ export function parseAutomationRow(row: AutomationRow): Automation {
   return {
     ...row,
     enabled: row.enabled === 1,
+    catchup_on_start: row.catchup_on_start === 1,
     trigger_config: JSON.parse(row.trigger_config),
     conditions: row.conditions ? JSON.parse(row.conditions) : [],
     actions: JSON.parse(row.actions),

@@ -74,6 +74,13 @@ export const webContents = {
   fromId: () => null
 }
 
+export const powerMonitor = {
+  on: () => {},
+  off: () => {},
+  addListener: () => {},
+  removeListener: () => {}
+}
+
 export const net = {
   request: () => ({
     on: () => {},
@@ -100,5 +107,5 @@ export const safeStorage = {
 
 export default {
   app, dialog, BrowserWindow, Notification, ipcMain, nativeTheme, shell,
-  clipboard, nativeImage, session, webContents, safeStorage, net
+  clipboard, nativeImage, session, webContents, safeStorage, net, powerMonitor
 }

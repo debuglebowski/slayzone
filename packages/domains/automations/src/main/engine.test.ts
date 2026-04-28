@@ -974,6 +974,92 @@ await describe('template context: terminal_mode_flags', () => {
 
 // --- STDERR HANDLING ---
 
+await describe('runCatchup (missed cron fires)', () => {
+  function createCronAutomation(opts: {
+    expression: string
+    lastRunAt: string | null
+    catchup?: boolean
+    enabled?: boolean
+    command?: string
+  }): string {
+    const id = crypto.randomUUID()
+    const trigger = { type: 'cron', params: { expression: opts.expression } }
+    const actions = [{ type: 'run_command', params: { command: opts.command ?? `echo catchup-${id}`, cwd: '/tmp' } }]
+    h.db.prepare(
+      `INSERT INTO automations (id, project_id, name, enabled, trigger_config, conditions, actions, sort_order, last_run_at, catchup_on_start)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+    ).run(
+      id, projectId, `Cron-${id.slice(0, 6)}`, opts.enabled !== false ? 1 : 0,
+      JSON.stringify(trigger), JSON.stringify([]), JSON.stringify(actions),
+      opts.lastRunAt, opts.catchup === false ? 0 : 1
+    )
+    return id
+  }
+
+  test('missed slot since last_run_at → fires once (coalesced)', async () => {
+    h.db.prepare('DELETE FROM automations').run()
+    h.db.prepare('DELETE FROM automation_runs').run()
+    // last_run_at = 1 hour ago, schedule every minute → 60 missed slots, but only 1 fire
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19)
+    const id = createCronAutomation({ expression: '* * * * *', lastRunAt: oneHourAgo })
+
+    engine.runCatchup()
+    await new Promise(r => setTimeout(r, 300))
+
+    const runs = getRuns(id)
+    expect(runs).toHaveLength(1)
+  })
+
+  test('catchup_on_start = 0 → no fire', async () => {
+    h.db.prepare('DELETE FROM automations').run()
+    h.db.prepare('DELETE FROM automation_runs').run()
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19)
+    const id = createCronAutomation({ expression: '* * * * *', lastRunAt: oneHourAgo, catchup: false })
+
+    engine.runCatchup()
+    await new Promise(r => setTimeout(r, 200))
+
+    expect(getRuns(id)).toHaveLength(0)
+  })
+
+  test('last_run_at = NULL → no fire (no baseline)', async () => {
+    h.db.prepare('DELETE FROM automations').run()
+    h.db.prepare('DELETE FROM automation_runs').run()
+    const id = createCronAutomation({ expression: '* * * * *', lastRunAt: null })
+
+    engine.runCatchup()
+    await new Promise(r => setTimeout(r, 200))
+
+    expect(getRuns(id)).toHaveLength(0)
+  })
+
+  test('disabled automation → no fire', async () => {
+    h.db.prepare('DELETE FROM automations').run()
+    h.db.prepare('DELETE FROM automation_runs').run()
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19)
+    const id = createCronAutomation({ expression: '* * * * *', lastRunAt: oneHourAgo, enabled: false })
+
+    engine.runCatchup()
+    await new Promise(r => setTimeout(r, 200))
+
+    expect(getRuns(id)).toHaveLength(0)
+  })
+
+  test('no slot matched between last_run_at and now → no fire', async () => {
+    h.db.prepare('DELETE FROM automations').run()
+    h.db.prepare('DELETE FROM automation_runs').run()
+    // Cron fires at minute 0 only. last_run = 30s ago (within same minute or just past) → no match in range
+    const tenSecAgo = new Date(Date.now() - 10 * 1000).toISOString().replace('T', ' ').slice(0, 19)
+    // Use an impossible cron (Feb 30) so no minute in range matches
+    const id = createCronAutomation({ expression: '0 0 30 2 *', lastRunAt: tenSecAgo })
+
+    engine.runCatchup()
+    await new Promise(r => setTimeout(r, 200))
+
+    expect(getRuns(id)).toHaveLength(0)
+  })
+})
+
 await describe('run_command stderr handling', () => {
   test('stderr with exit 0 → still success', async () => {
     h.db.prepare('DELETE FROM automations').run()

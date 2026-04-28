@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-  Button, Input, Label, Textarea,
+  Button, Input, Label, Textarea, Checkbox,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
   taskStatusOptions,
 } from '@slayzone/ui'
@@ -91,6 +91,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
   const [trigger, setTrigger] = useState<TriggerConfig>(EMPTY_TRIGGER)
   const [conditions, setConditions] = useState<ConditionConfig[]>([])
   const [actions, setActions] = useState<ActionConfig[]>([{ type: 'run_command', params: { command: '' } }])
+  const [catchupOnStart, setCatchupOnStart] = useState(true)
   const [showAllVars, setShowAllVars] = useState(false)
 
   useEffect(() => {
@@ -100,12 +101,14 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
       setTrigger(automation.trigger_config)
       setConditions(automation.conditions)
       setActions(automation.actions.length > 0 ? automation.actions : [{ type: 'run_command', params: { command: '' } }])
+      setCatchupOnStart(automation.catchup_on_start)
     } else {
       setName('')
       setDescription('')
       setTrigger({ ...EMPTY_TRIGGER })
       setConditions([])
       setActions([{ type: 'run_command', params: { command: '' } }])
+      setCatchupOnStart(true)
     }
   }, [automation, open])
 
@@ -122,6 +125,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
         trigger_config: trigger,
         conditions,
         actions: validActions,
+        catchup_on_start: catchupOnStart,
       } satisfies UpdateAutomationInput)
     } else {
       onSave({
@@ -131,6 +135,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
         trigger_config: trigger,
         conditions,
         actions: validActions,
+        catchup_on_start: catchupOnStart,
       } satisfies CreateAutomationInput)
     }
     onOpenChange(false)
@@ -269,6 +274,18 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
                     </button>
                   ))}
                 </div>
+                <Label
+                  className="flex items-center gap-2 cursor-pointer text-xs font-normal"
+                  style={{ marginTop: 20 }}
+                  data-testid="automation-catchup-checkbox-label"
+                >
+                  <Checkbox
+                    checked={catchupOnStart}
+                    onCheckedChange={(v) => setCatchupOnStart(v === true)}
+                    data-testid="automation-catchup-checkbox"
+                  />
+                  <span>Run on startup if a scheduled fire was missed</span>
+                </Label>
               </div>
             )}
           </div>

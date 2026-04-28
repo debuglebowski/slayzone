@@ -2298,6 +2298,12 @@ const migrations: Migration[] = [
         )
       }
     }
+  },
+  {
+    version: 124,
+    up: (db) => {
+      db.exec(`ALTER TABLE automations ADD COLUMN catchup_on_start INTEGER NOT NULL DEFAULT 1;`)
+    }
   }
 ]
 

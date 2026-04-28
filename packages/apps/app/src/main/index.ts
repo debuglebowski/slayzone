@@ -8,7 +8,7 @@ import { raiseFdLimit } from './raise-fd-limit'
 const fdLimitResult = raiseFdLimit()
 console.log('[fd-limit]', JSON.stringify(fdLimitResult))
 
-import { app, shell, BrowserWindow, ipcMain, nativeTheme, session, webContents, dialog, Menu, protocol, screen } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeTheme, session, webContents, dialog, Menu, protocol, screen, powerMonitor } from 'electron'
 import { join, extname, normalize, sep, resolve } from 'path'
 import { homedir } from 'os'
 import { readFileSync, promises as fsp, mkdirSync } from 'fs'
@@ -1160,6 +1160,7 @@ app.whenReady().then(async () => {
   const automationEngine = new AutomationEngine(db, notifyAutomationsChanged)
   registerAutomationHandlers(ipcMain, db, automationEngine)
   automationEngine.start(ipcMain)
+  powerMonitor.on('resume', () => automationEngine.runCatchup())
   registerUsageAnalyticsHandlers(ipcMain, db)
   registerBackupHandlers(ipcMain, db)
   startAutoBackup(db)

@@ -27,6 +27,11 @@ interface RunDetailEntry {
   testId: string
 }
 
+function isCatchupRun(run: AutomationRun): boolean {
+  const ev = run.trigger_event as { catchup?: boolean } | null | undefined
+  return ev?.catchup === true
+}
+
 function formatRelativeTime(value: string | null): string | null {
   if (!value) return null
   try {
@@ -329,6 +334,12 @@ export function AutomationCard({
                             <>
                               <span aria-hidden="true" className="text-muted-foreground/40">·</span>
                               <span>{run.duration_ms} ms</span>
+                            </>
+                          )}
+                          {isCatchupRun(run) && (
+                            <>
+                              <span aria-hidden="true" className="text-muted-foreground/40">·</span>
+                              <span title="Coalesced replay of one or more missed cron fires">catchup</span>
                             </>
                           )}
                         </div>

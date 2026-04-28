@@ -108,6 +108,36 @@ describe('automations list', () => {
   })
 })
 
+describe('automations catchup_on_start', () => {
+  test('default = 1 when not specified in INSERT', () => {
+    const id = createAutomation('CatchupDefault')
+    expect((getAutomation(id)).catchup_on_start).toBe(1)
+  })
+
+  test('explicit 0 persists', () => {
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+    h.db.prepare(
+      `INSERT INTO automations (id, project_id, name, enabled, trigger_config, conditions, actions, sort_order, catchup_on_start, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, '[]', ?, 0, 0, ?, ?)`
+    ).run(id, projectId, 'CatchupOff',
+      JSON.stringify({ type: 'cron', params: { expression: '*/5 * * * *' } }),
+      JSON.stringify([{ type: 'run_command', params: { command: 'echo' } }]),
+      now, now)
+    expect((getAutomation(id)).catchup_on_start).toBe(0)
+  })
+
+  test('toggle via UPDATE', () => {
+    const id = createAutomation('CatchupToggle')
+    h.db.prepare('UPDATE automations SET catchup_on_start = 0, updated_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), id)
+    expect((getAutomation(id)).catchup_on_start).toBe(0)
+    h.db.prepare('UPDATE automations SET catchup_on_start = 1, updated_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), id)
+    expect((getAutomation(id)).catchup_on_start).toBe(1)
+  })
+})
+
 describe('automation_runs', () => {
   test('stores and queries runs', () => {
     const autoId = createAutomation('RunTest')
