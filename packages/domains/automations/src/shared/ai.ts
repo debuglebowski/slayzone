@@ -46,10 +46,11 @@ export function buildAiHeadlessCommand(
 ): string | null {
   const pattern = HEADLESS_PATTERNS[provider.type]
   if (!pattern) return null
-  // Empty/whitespace-only flags fall back to the provider's default — the
-  // dialog stores `flags: ''` for newly-added AI actions, so treating empty
-  // as "use default" matches user expectations.
-  const flags = (params.flags?.trim() || provider.defaultFlags?.trim() || '')
+  // Only `undefined` falls back to the provider's defaults. An explicit empty
+  // string means "no flags" — the dialog seeds new actions with the provider's
+  // defaultFlags so users see what's running, and clearing the field is the
+  // signal to opt out of defaults.
+  const flags = (params.flags ?? provider.defaultFlags ?? '').trim()
   return pattern
     .replace('{prompt}', shellSingleQuote(params.prompt))
     .replace('{flags}', flags)

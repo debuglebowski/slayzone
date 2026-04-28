@@ -12,6 +12,7 @@ interface AiProviderOption {
   id: string
   label: string
   type: string
+  defaultFlags: string
 }
 
 interface AutomationDialogProps {
@@ -92,11 +93,15 @@ function toggleValue(arr: string[], val: string): string[] {
 const EMPTY_TRIGGER: TriggerConfig = { type: 'task_status_change', params: {} }
 const EMPTY_RUN_COMMAND: ActionConfig = { type: 'run_command', params: { command: '' } }
 
-function actionIsValid(action: ActionConfig): boolean {
-  if (action.type === 'ai') {
-    return !!(action.params.provider as string)?.trim() && !!(action.params.prompt as string)?.trim()
+function newAiAction(provider: AiProviderOption | undefined): ActionConfig {
+  return {
+    type: 'ai',
+    params: {
+      provider: provider?.id ?? '',
+      prompt: '',
+      flags: provider?.defaultFlags ?? '',
+    },
   }
-  return !!(action.params.command as string)?.trim()
 }
 
 export function AutomationDialog({ open, onOpenChange, automation, projectId, tags, onSave }: AutomationDialogProps) {
@@ -107,17 +112,40 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
   const [actions, setActions] = useState<ActionConfig[]>([{ ...EMPTY_RUN_COMMAND }])
   const [showAllVars, setShowAllVars] = useState(false)
   const [providers, setProviders] = useState<AiProviderOption[]>([])
+  const [providersLoaded, setProvidersLoaded] = useState(false)
 
   useEffect(() => {
     if (!open) return
-    window.api.terminalModes.list().then((modes: { id: string; label: string; type: string; enabled: boolean }[]) => {
+    setProvidersLoaded(false)
+    window.api.terminalModes.list().then((modes: { id: string; label: string; type: string; enabled: boolean; defaultFlags?: string | null }[]) => {
       setProviders(
         modes
           .filter(m => m.enabled && getHeadlessPattern(m.type))
-          .map(m => ({ id: m.id, label: m.label, type: m.type }))
+          .map(m => ({ id: m.id, label: m.label, type: m.type, defaultFlags: m.defaultFlags ?? '' }))
       )
-    }).catch(() => setProviders([]))
+      setProvidersLoaded(true)
+    }).catch(() => {
+      setProviders([])
+      setProvidersLoaded(true)
+    })
   }, [open])
+
+  // Validity is provider-aware: an AI action with a stale/disabled provider id
+  // fails validation so the Save button disables and the engine never runs it.
+  // While providers haven't loaded yet, skip the existence check to avoid
+  // flickering Save disabled when editing an existing automation.
+  const actionIsValid = (action: ActionConfig): boolean => {
+    if (action.type === 'ai') {
+      const providerId = (action.params.provider as string)?.trim()
+      if (!providerId) return false
+      if (!(action.params.prompt as string)?.trim()) return false
+      if (providersLoaded && !providers.some(p => p.id === providerId)) return false
+      // Mirror the engine's shell-injection guard so Save disables locally.
+      if (((action.params.flags as string) ?? '').includes('{{')) return false
+      return true
+    }
+    return !!(action.params.command as string)?.trim()
+  }
 
   useEffect(() => {
     if (automation) {
@@ -376,7 +404,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
                   size="sm"
                   className="h-6 text-xs"
                   disabled={providers.length === 0}
-                  onClick={() => setActions((prev: ActionConfig[]) => [...prev, { type: 'ai', params: { provider: providers[0]?.id ?? '', prompt: '', flags: '' } }])}
+                  onClick={() => setActions((prev: ActionConfig[]) => [...prev, newAiAction(providers[0])])}
                 >
                   <Sparkles className="w-3 h-3 mr-1" /> AI
                 </Button>
@@ -390,10 +418,15 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
                 setActions((prev: ActionConfig[]) => prev.map((a: ActionConfig, j: number) => {
                   if (j !== i) return a
                   if (newType === a.type) return a
-                  return newType === 'ai'
-                    ? { type: 'ai', params: { provider: providers[0]?.id ?? '', prompt: '', flags: '' } }
-                    : { ...EMPTY_RUN_COMMAND }
+                  return newType === 'ai' ? newAiAction(providers[0]) : { ...EMPTY_RUN_COMMAND }
                 }))
+
+              const storedProviderId = action.type === 'ai' ? ((action.params.provider as string) ?? '') : ''
+              const providerMissing = action.type === 'ai'
+                && providersLoaded
+                && !!storedProviderId
+                && !providers.some(p => p.id === storedProviderId)
+              const flagsHasTemplate = action.type === 'ai' && ((action.params.flags as string) ?? '').includes('{{')
 
               return (
                 <div key={i} className="rounded-md border border-border/40 bg-background/40 p-2 space-y-2">
@@ -407,7 +440,7 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
                     </Select>
                     {action.type === 'ai' && (
                       <Select
-                        value={(action.params.provider as string) || providers[0]?.id || ''}
+                        value={storedProviderId}
                         onValueChange={(v) => updateParam('provider', v)}
                       >
                         <SelectTrigger size="sm" className="flex-1"><SelectValue placeholder="Pick provider" /></SelectTrigger>
@@ -423,6 +456,12 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
                       </Button>
                     )}
                   </div>
+
+                  {providerMissing && (
+                    <p className="text-[11px] text-destructive">
+                      Provider "{storedProviderId}" is unavailable — pick another above.
+                    </p>
+                  )}
 
                   {action.type === 'run_command' ? (
                     <Textarea
@@ -442,9 +481,14 @@ export function AutomationDialog({ open, onOpenChange, automation, projectId, ta
                       <Input
                         value={(action.params.flags as string) ?? ''}
                         onChange={(e) => updateParam('flags', e.target.value)}
-                        placeholder="extra flags (optional, overrides provider defaults)"
+                        placeholder="provider flags (clear to run with no flags)"
                         className="font-mono text-[11px] h-7"
                       />
+                      {flagsHasTemplate && (
+                        <p className="text-[11px] text-destructive">
+                          Template variables are not allowed in flags — put them in the prompt above.
+                        </p>
+                      )}
                     </>
                   )}
                 </div>

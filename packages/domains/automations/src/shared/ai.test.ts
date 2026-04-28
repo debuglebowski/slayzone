@@ -112,13 +112,27 @@ test('escapes single quote in prompt', () => {
   expect(cmd).toBe(`claude -p 'it'\\''s broken'`)
 })
 
-test('explicit empty flags overrides default', () => {
+test('explicit empty flags overrides default — no flags applied', () => {
   const cmd = buildAiHeadlessCommand(
     { provider: 'claude-code', prompt: 'hi', flags: '' },
     { id: 'claude-code', type: 'claude-code', defaultFlags: '--allow' },
   )
-  // Empty string is treated as "no flags specified" — falls back to default.
-  // Test documents current behaviour: trim('') is falsy, so default applies.
+  expect(cmd).toBe(`claude -p 'hi'`)
+})
+
+test('whitespace-only flags also count as explicit empty', () => {
+  const cmd = buildAiHeadlessCommand(
+    { provider: 'claude-code', prompt: 'hi', flags: '   ' },
+    { id: 'claude-code', type: 'claude-code', defaultFlags: '--allow' },
+  )
+  expect(cmd).toBe(`claude -p 'hi'`)
+})
+
+test('undefined flags falls back to default', () => {
+  const cmd = buildAiHeadlessCommand(
+    { provider: 'claude-code', prompt: 'hi' },
+    { id: 'claude-code', type: 'claude-code', defaultFlags: '--allow' },
+  )
   expect(cmd).toBe(`claude -p 'hi' --allow`)
 })
 

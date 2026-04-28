@@ -292,9 +292,16 @@ export class AutomationEngine {
 
       const resolvedPrompt = resolveTemplate(params.prompt, ctx)
       if (!resolvedPrompt.trim()) throw new Error('AI action missing prompt')
-      const resolvedFlags = resolveTemplate(params.flags, ctx)
+      // Flags are NOT template-resolved — they're inserted unquoted into the
+      // shell command, so allowing user-controlled task/project text in there
+      // would be a shell-injection vector. Templates belong in the prompt
+      // (which is shell-quoted).
+      const rawFlags = typeof params.flags === 'string' ? params.flags : undefined
+      if (rawFlags?.includes('{{')) {
+        throw new Error('AI action: template variables are not allowed in flags — put them in the prompt')
+      }
       const command = buildAiHeadlessCommand(
-        { provider: providerId, prompt: resolvedPrompt, flags: resolvedFlags },
+        { provider: providerId, prompt: resolvedPrompt, flags: rawFlags },
         { id: row.id, type: row.type, defaultFlags: row.default_flags },
       )
       if (!command) {
