@@ -439,6 +439,25 @@ async function getIgnoredTopLevelEntries(repoPath: string): Promise<string[] | n
 }
 
 /**
+ * Copy with APFS clonefile (`cp -cR`) on macOS, fall back to `fs.cp` on
+ * non-darwin, non-APFS volumes, or any clone failure. Clone is copy-on-write
+ * — near-instant, near-zero disk overhead for things like node_modules.
+ * Set SLAYZONE_DISABLE_CLONEFILE=1 to force fallback path.
+ */
+async function clonefileCopy(src: string, dst: string, isDir: boolean): Promise<void> {
+  const useClone = process.platform === 'darwin' && process.env.SLAYZONE_DISABLE_CLONEFILE !== '1'
+  if (useClone) {
+    const code = await new Promise<number | null>((resolve) => {
+      const child = spawn('cp', ['-cR', src, dst], { stdio: 'ignore' })
+      child.on('close', (c) => resolve(c))
+      child.on('error', () => resolve(1))
+    })
+    if (code === 0) return
+  }
+  await cp(src, dst, { recursive: isDir, force: true })
+}
+
+/**
  * Copy ignored files from the source repo into a new worktree.
  * - 'all': copies every git-ignored file (via git ls-files)
  * - 'custom': copies only the specified paths (supports * and ? wildcards)
@@ -490,10 +509,7 @@ export async function copyIgnoredFiles(
       await mkdir(destDir, { recursive: true })
 
       const stats = await stat(sourcePath)
-      await cp(sourcePath, destPath, {
-        recursive: stats.isDirectory(),
-        force: true
-      })
+      await clonefileCopy(sourcePath, destPath, stats.isDirectory())
     } catch (err) {
       recordDiagnosticEvent({
         level: 'warn',

@@ -178,6 +178,64 @@ await test('skips path traversal attempts', async () => {
   git(`git worktree remove "${wtPath}" --force`)
 })
 
+await test('copied content bytes match source', async () => {
+  const wtPath = path.join(root, 'wt-copy-bytes')
+  await createWorktree(repoPath, wtPath, 'copy-test-bytes')
+
+  await copyIgnoredFiles(repoPath, wtPath, 'custom', ['dist', 'app.log'])
+  const srcBundle = fs.readFileSync(path.join(repoPath, 'dist', 'bundle.js'))
+  const dstBundle = fs.readFileSync(path.join(wtPath, 'dist', 'bundle.js'))
+  expect(srcBundle.equals(dstBundle)).toBe(true)
+  const srcLog = fs.readFileSync(path.join(repoPath, 'app.log'))
+  const dstLog = fs.readFileSync(path.join(wtPath, 'app.log'))
+  expect(srcLog.equals(dstLog)).toBe(true)
+
+  git(`git worktree remove "${wtPath}" --force`)
+})
+
+await test('fallback path works when clonefile disabled', async () => {
+  const wtPath = path.join(root, 'wt-copy-fallback')
+  await createWorktree(repoPath, wtPath, 'copy-test-fallback')
+
+  process.env.SLAYZONE_DISABLE_CLONEFILE = '1'
+  try {
+    await copyIgnoredFiles(repoPath, wtPath, 'custom', ['dist', 'app.log'])
+  } finally {
+    delete process.env.SLAYZONE_DISABLE_CLONEFILE
+  }
+  expect(fs.existsSync(path.join(wtPath, 'dist', 'bundle.js'))).toBe(true)
+  expect(fs.existsSync(path.join(wtPath, 'dist', 'nested', 'deep.js'))).toBe(true)
+  expect(fs.existsSync(path.join(wtPath, 'app.log'))).toBe(true)
+
+  git(`git worktree remove "${wtPath}" --force`)
+})
+
+await test('preserves symlinks (pnpm node_modules pattern)', async () => {
+  // Isolated repo so we don't pollute shared repoPath state
+  const symRepo = path.join(root, 'sym-repo')
+  fs.mkdirSync(symRepo)
+  git('git init', symRepo)
+  fs.writeFileSync(path.join(symRepo, 'README.md'), '# sym')
+  fs.writeFileSync(path.join(symRepo, '.gitignore'), 'node_modules/\n')
+  git('git add -A', symRepo)
+  git('git commit -m "init"', symRepo)
+
+  // Mimic pnpm: real file in .pnpm/, symlink in node_modules/
+  fs.mkdirSync(path.join(symRepo, 'node_modules', '.pnpm', 'pkg@1.0.0'), { recursive: true })
+  fs.writeFileSync(path.join(symRepo, 'node_modules', '.pnpm', 'pkg@1.0.0', 'index.js'), 'module.exports = 1')
+  fs.symlinkSync('.pnpm/pkg@1.0.0', path.join(symRepo, 'node_modules', 'pkg'))
+
+  const wtPath = path.join(root, 'wt-copy-symlink')
+  await createWorktree(symRepo, wtPath, 'copy-test-symlink')
+
+  await copyIgnoredFiles(symRepo, wtPath, 'custom', ['node_modules'])
+  const linkPath = path.join(wtPath, 'node_modules', 'pkg')
+  expect(fs.lstatSync(linkPath).isSymbolicLink()).toBe(true)
+  expect(fs.readlinkSync(linkPath)).toBe('.pnpm/pkg@1.0.0')
+
+  execSync(`git worktree remove "${wtPath}" --force`, { cwd: symRepo })
+})
+
 // --- resolveCopyBehavior ---
 
 section('resolveCopyBehavior')
