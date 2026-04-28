@@ -292,4 +292,83 @@ test.describe('Assets panel', () => {
     await expect(folderRow(mainWindow, 'seeded-folder')).toBeVisible({ timeout: 5_000 })
     await expect(assetRow(mainWindow, 'nested.md')).toBeVisible({ timeout: 3_000 })
   })
+
+  // --- Group 9: External-sync banner + caret preservation ---
+
+  test('conflict banner is absolute-positioned and does not shift editor', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    const asset = await s.createAsset({ taskId, title: 'sync-banner.md', content: 'initial\n' })
+    await s.refreshData()
+
+    await openAssetsPanel(mainWindow)
+    await assetRow(mainWindow, 'sync-banner.md').click()
+
+    // Switch to split mode so we get a SearchableCodeView (CodeMirror) with predictable bbox
+    const splitBtn = assetsPanel(mainWindow).locator('button[aria-pressed]').filter({ has: mainWindow.locator('.lucide-columns-2') }).first()
+    if (await splitBtn.isVisible().catch(() => false)) await splitBtn.click()
+
+    const editor = assetsPanel(mainWindow).locator('.cm-editor').first()
+    await expect(editor).toBeVisible({ timeout: 5_000 })
+
+    // Resolve disk path for external write
+    const filePath = await mainWindow.evaluate((id) => (window as any).api.assets.getFilePath(id), asset.id)
+    expect(filePath).toBeTruthy()
+
+    // Dirty the buffer
+    await editor.locator('.cm-content').click()
+    await mainWindow.keyboard.type('local edits')
+
+    const before = await editor.boundingBox()
+    expect(before).toBeTruthy()
+
+    // External write to provoke mtime mismatch → conflict banner
+    fs.writeFileSync(filePath as string, 'external write\n')
+
+    const banner = assetsPanel(mainWindow).locator('[data-testid="asset-conflict-banner"]')
+    await expect(banner).toBeVisible({ timeout: 5_000 })
+
+    // Banner is absolute-positioned (toast), not flow content
+    const position = await banner.evaluate((el) => getComputedStyle(el).position)
+    expect(position).toBe('absolute')
+
+    // Editor bbox must not have shifted — banner appearance is layout-neutral
+    const after = await editor.boundingBox()
+    expect(after).toBeTruthy()
+    expect(Math.round(after!.y)).toBe(Math.round(before!.y))
+    expect(Math.round(after!.height)).toBe(Math.round(before!.height))
+
+    // Reload + Keep mine remain reachable
+    await expect(banner.locator('[data-testid="asset-conflict-reload"]')).toBeVisible()
+    await expect(banner.locator('[data-testid="asset-conflict-keep"]')).toBeVisible()
+
+    // Cleanup: keep-mine to clear conflict before next test
+    await banner.locator('[data-testid="asset-conflict-keep"]').click()
+    await expect(banner).not.toBeVisible({ timeout: 3_000 })
+  })
+
+  test('caret survives save round-trip in code editor', async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    await s.createAsset({ taskId, title: 'caret-test.txt', content: '' })
+    await s.refreshData()
+
+    await openAssetsPanel(mainWindow)
+    await assetRow(mainWindow, 'caret-test.txt').click()
+
+    const editor = assetsPanel(mainWindow).locator('.cm-editor').first()
+    await expect(editor).toBeVisible({ timeout: 5_000 })
+
+    const cmContent = editor.locator('.cm-content')
+    await cmContent.click()
+
+    // Type, wait past 500ms save debounce, type more. Caret must remain at end →
+    // final doc string is in the order typed, not reset/reordered by replaceAll.
+    await mainWindow.keyboard.type('abc')
+    await mainWindow.waitForTimeout(800)
+    await mainWindow.keyboard.type('def')
+
+    await expect.poll(
+      async () => cmContent.evaluate((el) => el.textContent ?? ''),
+      { timeout: 3_000 }
+    ).toBe('abcdef')
+  })
 })
