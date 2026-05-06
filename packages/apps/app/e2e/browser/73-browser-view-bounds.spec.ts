@@ -4,6 +4,7 @@ import {
   ensureBrowserPanelVisible, ensureBrowserPanelHidden,
   openTaskViaSearch, getActiveViewId,
 } from '../fixtures/browser-view'
+import { getTestUrl, TEST_HOST_MATCH } from '../fixtures/test-server'
 
 test.describe('Browser view bounds (WebContentsView)', () => {
   let taskId: string
@@ -22,10 +23,10 @@ test.describe('Browser view bounds (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/'))
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 15000 }).toContain('example.com')
+    }, { timeout: 15000 }).toContain(TEST_HOST_MATCH)
 
     await expect.poll(async () => {
       const bounds = await testInvoke(mainWindow, 'browser:get-actual-native-bounds', viewId) as { x: number; y: number; width: number; height: number } | null

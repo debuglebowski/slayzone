@@ -5,6 +5,7 @@ import {
   openTaskViaSearch,
   newTabBtn, tabEntries,
 } from '../fixtures/browser-view'
+import { getTestUrl } from '../fixtures/test-server'
 
 test.describe('Browser loading animation', () => {
   let taskId: string
@@ -32,7 +33,8 @@ test.describe('Browser loading animation', () => {
   test('loading animation persists during first navigation', async ({ mainWindow }) => {
     const input = urlInput(mainWindow)
     await input.click()
-    await input.fill('https://example.com')
+    // Use slow route so the overlay has a window of visibility we can assert on.
+    await input.fill(await getTestUrl('/slow?ms=2000'))
     await mainWindow.keyboard.press('Enter')
 
     // Still visible during loading
@@ -48,7 +50,7 @@ test.describe('Browser loading animation', () => {
 
     const input = urlInput(mainWindow)
     await input.click()
-    await input.fill('https://example.org')
+    await input.fill(await getTestUrl('/title-Other'))
     await mainWindow.keyboard.press('Enter')
 
     // Should NOT show loading animation — page already has content
@@ -66,7 +68,7 @@ test.describe('Browser loading animation', () => {
     // Navigate
     const input = urlInput(mainWindow)
     await input.click()
-    await input.fill('https://example.com')
+    await input.fill(await getTestUrl('/'))
     await mainWindow.keyboard.press('Enter')
 
     // Wait for page to load — animation disappears

@@ -4,6 +4,7 @@ import {
   focusForAppShortcut, ensureBrowserPanelVisible, ensureBrowserPanelHidden,
   openTaskViaSearch, getActiveViewId,
 } from '../fixtures/browser-view'
+import { getTestUrl } from '../fixtures/test-server'
 
 function buildFullPageLinkDataUrl(linkText: string, href: string): string {
   return `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
@@ -211,7 +212,7 @@ test.describe('Browser panel', () => {
   test('new tab becomes active', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const count = await tabEntries(mainWindow).count()
-    await expect(tabEntries(mainWindow).nth(count - 1)).toHaveClass(/border border-neutral/)
+    await expect(tabEntries(mainWindow).nth(count - 1)).toHaveClass(/bg-tab-active/)
   })
 
   test('close active tab via X', async ({ mainWindow }) => {
@@ -264,7 +265,7 @@ test.describe('Browser panel', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
     // Navigate to a real page so webviewReady becomes true
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/'))
     await mainWindow.waitForTimeout(2000)
     const btn = keyboardPassthroughBtn(mainWindow)
     await expect(btn).toBeVisible()

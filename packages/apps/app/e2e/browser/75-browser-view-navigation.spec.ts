@@ -4,12 +4,17 @@ import {
   ensureBrowserPanelVisible,
   openTaskViaSearch, getViewsForTask, getActiveViewId,
 } from '../fixtures/browser-view'
+import { getTestUrl } from '../fixtures/test-server'
 
 test.describe('Browser view navigation (WebContentsView)', () => {
   let taskId: string
+  let urlA: string
+  let urlB: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
+    urlA = await getTestUrl('/title-Example')
+    urlB = await getTestUrl('/title-Other')
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Nav Tests', color: '#0ea5e9', path: TEST_PROJECT_PATH })
     const t = await s.createTask({ projectId: p.id, title: 'Navigation task', status: 'todo' })
@@ -24,13 +29,13 @@ test.describe('Browser view navigation (WebContentsView)', () => {
 
     const input = urlInput(mainWindow)
     await input.click()
-    await input.fill('https://example.com')
+    await input.fill(urlA)
     await mainWindow.keyboard.press('Enter')
 
     // Wait for navigation to complete
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 15000 }).toContain('example.com')
+    }, { timeout: 15000 }).toContain('/title-Example')
 
     // THE REAL TEST: is the native view actually on screen?
     const nativeBounds = await testInvoke(mainWindow, 'browser:get-actual-native-bounds', viewId) as { x: number; y: number; width: number; height: number }
@@ -45,24 +50,24 @@ test.describe('Browser view navigation (WebContentsView)', () => {
 
     const input = urlInput(mainWindow)
     await input.click()
-    await input.fill('https://example.com')
+    await input.fill(urlA)
     await mainWindow.keyboard.press('Enter')
 
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 10000 }).toContain('example.com')
+    }, { timeout: 10000 }).toContain('/title-Example')
   })
 
   test('navigate via IPC changes view URL', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.org')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, urlB)
 
     // Verify the view's URL updated in the manager
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 15000 }).toContain('example.org')
+    }, { timeout: 15000 }).toContain('/title-Other')
   })
 
   test('goBack and goForward work after navigation', async ({ mainWindow }) => {
@@ -70,28 +75,28 @@ test.describe('Browser view navigation (WebContentsView)', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     // Navigate to page A
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, urlA)
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 10000 }).toContain('example.com')
+    }, { timeout: 10000 }).toContain('/title-Example')
 
     // Navigate to page B
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.org')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, urlB)
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 10000 }).toContain('example.org')
+    }, { timeout: 10000 }).toContain('/title-Other')
 
     // Go back to A
     await testInvoke(mainWindow, 'browser:go-back', viewId)
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 10000 }).toContain('example.com')
+    }, { timeout: 10000 }).toContain('/title-Example')
 
     // Go forward to B
     await testInvoke(mainWindow, 'browser:go-forward', viewId)
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 10000 }).toContain('example.org')
+    }, { timeout: 10000 }).toContain('/title-Other')
   })
 
   test('reload reloads current URL', async ({ mainWindow }) => {
@@ -99,16 +104,16 @@ test.describe('Browser view navigation (WebContentsView)', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     // Navigate to a known URL
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, urlA)
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 10000 }).toContain('example.com')
+    }, { timeout: 10000 }).toContain('/title-Example')
 
     // Reload — URL should remain the same
     await testInvoke(mainWindow, 'browser:reload', viewId)
     await mainWindow.waitForTimeout(500)
     const url = await testInvoke(mainWindow, 'browser:get-url', viewId) as string
-    expect(url).toContain('example.com')
+    expect(url).toContain('/title-Example')
   })
 
   test('reload with ignoreCache works', async ({ mainWindow }) => {
@@ -134,12 +139,12 @@ test.describe('Browser view navigation (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewsBefore = await getViewsForTask(mainWindow, taskId)
 
-    // Navigate first tab's view to example.com
+    // Navigate first tab's view to URL A
     const firstViewId = viewsBefore[0]
-    await testInvoke(mainWindow, 'browser:navigate', firstViewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', firstViewId, urlA)
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', firstViewId)) as string
-    }, { timeout: 10000 }).toContain('example.com')
+    }, { timeout: 10000 }).toContain('/title-Example')
 
     // Create second tab
     await newTabBtn(mainWindow).click()
@@ -150,11 +155,11 @@ test.describe('Browser view navigation (WebContentsView)', () => {
     // Each view maintains its own URL
     const allViews = await getViewsForTask(mainWindow, taskId)
     const firstUrl = await testInvoke(mainWindow, 'browser:get-url', allViews[0]) as string
-    expect(firstUrl).toContain('example.com')
+    expect(firstUrl).toContain('/title-Example')
 
     // Second view is a new tab (about:blank or empty)
     const secondUrl = await testInvoke(mainWindow, 'browser:get-url', allViews[allViews.length - 1]) as string
-    expect(secondUrl).not.toContain('example.com')
+    expect(secondUrl).not.toContain('/title-Example')
 
     // Clean up: close second tab
     const count = await tabEntries(mainWindow).count()
@@ -199,10 +204,10 @@ test.describe('Browser view navigation (WebContentsView)', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     // Navigate to a real page first
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, urlA)
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 15000 }).toContain('example.com')
+    }, { timeout: 15000 }).toContain('/title-Example')
 
     // Execute JS and get return value
     const title = await testInvoke(mainWindow, 'browser:execute-js', viewId, 'document.title') as string
