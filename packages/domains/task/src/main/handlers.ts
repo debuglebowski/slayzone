@@ -18,6 +18,7 @@ import path from 'path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, rmSync, copyFileSync, statSync, readdirSync, createWriteStream } from 'fs'
 import { randomUUID } from 'crypto'
 import archiver from 'archiver'
+import { getDataRoot } from '@slayzone/platform'
 import { buildPdfHtml, buildMermaidPdfHtml, buildPngHtml, renderToPdf, renderToPng } from './artifact-export'
 import { startArtifactWatcher } from './artifact-watcher'
 import {
@@ -165,7 +166,7 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
 
   // --- Task Artifacts ---
 
-  const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const dataDir = getDataRoot()
   const artifactsDir = path.join(dataDir, 'artifacts')
   const blobStore = new BlobStore(dataDir)
   const versionTxn = betterSqliteTxn(db)

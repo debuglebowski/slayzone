@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron'
-import { app } from 'electron'
 import { copyFileSync, mkdirSync, readdirSync, unlinkSync, existsSync } from 'fs'
 import path from 'path'
+import { getDataRoot } from '@slayzone/platform'
 import type { Database } from 'better-sqlite3'
 import type {
   ColumnConfig,
@@ -20,7 +20,7 @@ import {
 const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
 
 function getProjectIconsDir(): string {
-  return path.join(process.env.SLAYZONE_DB_DIR || app.getPath('userData'), 'project-icons')
+  return path.join(getDataRoot(), 'project-icons')
 }
 
 function unlinkProjectIconFiles(projectId: string): void {

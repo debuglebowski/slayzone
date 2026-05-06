@@ -1,5 +1,5 @@
-import { app } from 'electron'
 import type { Database } from 'better-sqlite3'
+import { getDataRoot } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
@@ -199,7 +199,7 @@ export async function cleanupTaskFull(db: Database, taskId: string): Promise<voi
   cleanupTaskImmediate(taskId)
   runtimeAdapters.killTaskProcesses(taskId)
   // Clean up artifact files on disk
-  const artifactsBaseDir = path.join(process.env.SLAYZONE_DB_DIR || app.getPath('userData'), 'artifacts', taskId)
+  const artifactsBaseDir = path.join(getDataRoot(), 'artifacts', taskId)
   if (existsSync(artifactsBaseDir)) rmSync(artifactsBaseDir, { recursive: true, force: true })
 
   const task = db.prepare(
