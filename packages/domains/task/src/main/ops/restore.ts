@@ -1,6 +1,6 @@
 import type { Database } from 'better-sqlite3'
 import type { Task } from '@slayzone/task/shared'
-import { recordActivityEvents } from '@slayzone/history/main'
+import { recordActivityEvents } from '@slayzone/history/server'
 import { buildTaskRestoredEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { colorOne, parseTask, type OpDeps } from './shared.js'

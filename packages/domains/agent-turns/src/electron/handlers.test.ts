@@ -1,10 +1,10 @@
 /**
  * agent-turns:list IPC handler — filter + rethread of empty-diff turns.
- * Run: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/main/handlers.test.ts
+ * Run: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/electron/handlers.test.ts
  */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerAgentTurnsHandlers } from './handlers.js'
-import { recordTurnBoundary } from './turn-tracker.js'
+import { recordTurnBoundary } from '../server/turn-tracker.js'
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'

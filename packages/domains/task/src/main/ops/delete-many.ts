@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3'
-import { recordActivityEvents } from '@slayzone/history/main'
+import { recordActivityEvents } from '@slayzone/history/server'
 import { taskEvents } from '../events.js'
 import { buildTaskDeletedEvents } from '../history.js'
 import { cleanupTaskImmediate, parseTask, type OpDeps } from './shared.js'

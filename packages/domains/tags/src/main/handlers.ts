@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
-import { recordActivityEvents } from '@slayzone/history/main'
+import { recordActivityEvents } from '@slayzone/history/server'
 
 function buildTaskTagsChangedEvents(
   task: { id: string; project_id: string },

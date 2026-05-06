@@ -1,6 +1,6 @@
 /**
  * turn-tracker integration tests (worktree-scoped).
- * Run: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/main/turn-tracker.test.ts
+ * Run: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/server/turn-tracker.test.ts
  */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { recordTurnBoundary, initChatTurnSubscriber, initPtyTurnSubscriber } from './turn-tracker.js'

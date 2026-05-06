@@ -1,6 +1,6 @@
 import type { Database } from 'better-sqlite3'
 import type { Task } from '@slayzone/task/shared'
-import { parseProject } from '@slayzone/projects/main'
+import { parseProject } from '@slayzone/projects/server'
 import { parseTasks } from './shared.js'
 
 export interface BoardData {

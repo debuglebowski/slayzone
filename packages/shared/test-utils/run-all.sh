@@ -20,8 +20,8 @@ run_test() {
 
 run_test packages/domains/settings/src/main/handlers.test.ts
 run_test packages/domains/tags/src/main/handlers.test.ts
-run_test packages/domains/projects/src/main/handlers.test.ts
-run_test packages/domains/projects/src/main/task-automation.test.ts
+run_test packages/domains/projects/src/electron/handlers.test.ts
+run_test packages/domains/projects/src/server/task-automation.test.ts
 run_test packages/domains/task-terminals/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/template-handlers.test.ts
@@ -32,9 +32,9 @@ run_test packages/domains/file-editor/src/main/handlers.test.ts
 run_test packages/domains/diagnostics/src/main/service.test.ts
 run_test packages/domains/integrations/src/main/handlers.db.test.ts
 run_test packages/domains/worktrees/src/main/handlers.test.ts
-run_test packages/domains/agent-turns/src/main/db.test.ts
-run_test packages/domains/agent-turns/src/main/git-snapshot.test.ts
-run_test packages/domains/agent-turns/src/main/turn-tracker.test.ts
+run_test packages/domains/agent-turns/src/server/db.test.ts
+run_test packages/domains/agent-turns/src/server/git-snapshot.test.ts
+run_test packages/domains/agent-turns/src/server/turn-tracker.test.ts
 run_test packages/domains/integrations/src/main/handlers.api.test.ts
 run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts

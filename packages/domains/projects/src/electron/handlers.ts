@@ -11,11 +11,11 @@ import type {
 } from '@slayzone/projects/shared'
 import {
   getDefaultStatus,
-  parseColumnsConfig,
   prepareProjectCreate,
   resolveColumns,
   validateColumns
 } from '@slayzone/projects/shared'
+import { parseProject } from '../server/parse'
 
 const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
 
@@ -30,17 +30,6 @@ function unlinkProjectIconFiles(projectId: string): void {
     if (entry.startsWith(`${projectId}.`)) {
       try { unlinkSync(path.join(dir, entry)) } catch { /* best-effort */ }
     }
-  }
-}
-
-export function parseProject(row: Record<string, unknown> | undefined): Record<string, unknown> | null {
-  if (!row) return null
-  return {
-    ...row,
-    columns_config: parseColumnsConfig(row.columns_config),
-    execution_context: row.execution_context ? (() => { try { return JSON.parse(row.execution_context as string) } catch { return null } })() : null,
-    task_automation_config: row.task_automation_config ? (() => { try { return JSON.parse(row.task_automation_config as string) } catch { return null } })() : null,
-    lock_config: row.lock_config ? (() => { try { return JSON.parse(row.lock_config as string) } catch { return null } })() : null
   }
 }
 

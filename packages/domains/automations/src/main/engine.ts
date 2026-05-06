@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { ActionConfig, Automation, AutomationEvent, AutomationRow, AutomationRun } from '@slayzone/automations/shared'
-import { finishAutomationActionRun, recordActivityEvent, startAutomationActionRun, trimOutputTail } from '@slayzone/history/main'
+import { finishAutomationActionRun, recordActivityEvent, startAutomationActionRun, trimOutputTail } from '@slayzone/history/server'
 import { parseAutomationRow } from '@slayzone/automations/shared'
 import { buildAiHeadlessCommand, resolveTemplate, type TemplateContext } from '@slayzone/automations/shared'
 import { taskEvents } from '@slayzone/task/main'

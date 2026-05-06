@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { LocalLeaderboardStats } from '@slayzone/types'
-import { refreshUsageData, queryDailyTotals } from '@slayzone/usage-analytics/main'
+import { refreshUsageData, queryDailyTotals } from '@slayzone/usage-analytics/server'
 import { isCompletedStatus, parseColumnsConfig } from '@slayzone/projects/shared'
 
 async function getDailyTokens(db: Database): Promise<Array<{ date: string; totalTokens: number }>> {

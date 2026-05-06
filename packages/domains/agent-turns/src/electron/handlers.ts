@@ -1,14 +1,14 @@
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { realpathSync } from 'node:fs'
-import { listTurnsForWorktree } from './db'
+import { listTurnsForWorktree } from '../server/db'
 import {
   diffIsEmptyCached,
   listTurnFilesCached,
   listTreeBlobsCached,
   listWorkingChangedFiles,
   getHeadSha,
-} from './git-snapshot'
+} from '../server/git-snapshot'
 import type { AgentTurnRange } from '../shared/types'
 
 function canonical(p: string): string {

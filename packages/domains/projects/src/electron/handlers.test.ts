@@ -1,6 +1,6 @@
 /**
  * Projects handler contract tests
- * Run with: npx tsx packages/domains/projects/src/main/handlers.test.ts
+ * Run with: npx tsx packages/domains/projects/src/electron/handlers.test.ts
  */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerProjectHandlers } from './handlers.js'

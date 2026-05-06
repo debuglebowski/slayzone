@@ -1,7 +1,7 @@
 /**
  * Task automation integration tests
  * Tests handleTerminalStateChange: auto-moves tasks based on terminal state + project config
- * Run with: tsx --loader ./packages/shared/test-utils/loader.ts packages/domains/projects/src/main/task-automation.test.ts
+ * Run with: tsx --loader ./packages/shared/test-utils/loader.ts packages/domains/projects/src/server/task-automation.test.ts
  */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { handleTerminalStateChange } from './task-automation.js'

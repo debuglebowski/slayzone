@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
-import { listActivityEventsForTask, listAutomationActionRuns } from './recorder'
+import { listActivityEventsForTask, listAutomationActionRuns } from '../server/recorder'
 import type { ListTaskHistoryOptions } from '../shared/types'
 
 export function registerHistoryHandlers(ipcMain: IpcMain, db: Database): void {

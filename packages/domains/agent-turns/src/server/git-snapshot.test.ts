@@ -1,6 +1,6 @@
 /**
  * git-snapshot integration tests — uses a real temp git repo.
- * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/main/git-snapshot.test.ts
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/agent-turns/src/server/git-snapshot.test.ts
  */
 import { test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { snapshotWorktree, deleteTurnRef, diffIsEmpty } from './git-snapshot.js'

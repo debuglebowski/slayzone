@@ -9,6 +9,7 @@ import {
   getLatestTurnForWorktree,
   findTurnsToPrune,
 } from './db'
+import { agentTurnsEvents } from './events'
 
 /**
  * Check whether a prompt text is "clean" enough to store as a preview.
@@ -54,19 +55,6 @@ function resolveTabContext(
   const repoPath = row.worktree_path || row.project_path
   if (!repoPath) return null
   return { taskId: tab.task_id, worktreePath: canonical(repoPath) }
-}
-
-function broadcastChange(worktreePath: string): void {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { BrowserWindow } = require('electron') as typeof import('electron')
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (w.isDestroyed()) continue
-      w.webContents.send('agent-turns:changed', worktreePath)
-    }
-  } catch {
-    // non-electron context (tests) — no-op
-  }
 }
 
 /**
@@ -128,7 +116,7 @@ export async function recordTurnBoundary(
     await deleteTurnRef(ctx.worktreePath, sid)
   }
 
-  broadcastChange(ctx.worktreePath)
+  agentTurnsEvents.emit('agent-turns:changed', ctx.worktreePath)
 }
 
 /**

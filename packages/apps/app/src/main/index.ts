@@ -113,7 +113,8 @@ import { normalizeProjectStatusData } from './db/status-normalization'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
 // Domain handlers
-import { registerProjectHandlers, handleTerminalStateChange } from '@slayzone/projects/main'
+import { registerProjectHandlers } from '@slayzone/projects/electron'
+import { handleTerminalStateChange } from '@slayzone/projects/server'
 import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/main'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/main'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
@@ -125,7 +126,9 @@ import { attachFloatingAgent, setupFloatingAgent } from './floating-agent'
 import { attachTaskWindows, setupTaskWindows } from './task-windows'
 import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/main'
 import { registerWorktreeHandlers, closeGitWatcher } from '@slayzone/worktrees/main'
-import { registerAgentTurnsHandlers, initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/main'
+import { registerAgentTurnsHandlers } from '@slayzone/agent-turns/electron'
+import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
+import { wireDomainEvents } from './glue'
 import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics, setIpcSuccessHook } from '@slayzone/diagnostics/main'
 import { detectPreviousCrash, writeBootStub, writeCleanShutdownSentinel, scanCrashDumps } from './lifecycle/sentinel'
 import { acquireLockWithSelfHeal, lockOutcomeIsAcquired, type LockOutcome } from './lifecycle/single-instance'
@@ -133,10 +136,10 @@ import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { registerAiConfigHandlers } from '@slayzone/ai-config/main'
 import { registerIntegrationHandlers, ensureIntegrationSchema, startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags } from '@slayzone/integrations/main'
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/main'
-import { registerHistoryHandlers } from '@slayzone/history/main'
+import { registerHistoryHandlers } from '@slayzone/history/electron'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/main'
 import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/main'
-import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/main'
+import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/electron'
 import { registerScreenshotHandlers } from './screenshot'
 import { registerClipboardHandlers } from './clipboard-handlers'
 import { setProcessManagerWindow, initProcessManager, createProcess, spawnProcess, updateProcess, stopProcess, killProcess, restartProcess, listForTask, listAllProcesses, killTaskProcesses, killAllProcesses } from './process-manager'
@@ -1308,6 +1311,7 @@ app.whenReady().then(async () => {
   registerWorktreeHandlers(ipcMain, db)
   registerAgentTurnsHandlers(ipcMain, db)
   logBoot('files+worktree+agent-turns registered')
+  wireDomainEvents()
   // xterm-mode turn detection: every Enter press in a PTY = turn boundary.
   onPtyInputSubmit(initPtyTurnSubscriber(db))
   registerAiConfigHandlers(ipcMain, db)
