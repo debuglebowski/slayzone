@@ -5,6 +5,7 @@ import express from 'express'
 import type { Server } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
+import { getMcpPort, getServerHost } from '@slayzone/platform'
 import { notifyRenderer } from './notify-renderer'
 import { registerRestApi } from './rest-api'
 import { registerMcpTools } from './mcp-tools'
@@ -30,6 +31,8 @@ export function stopMcpServer(): void {
 }
 
 function getPreferredPort(db: Database): number {
+  const envPort = getMcpPort()
+  if (envPort !== undefined) return envPort
   try {
     const row = db.prepare("SELECT value FROM settings WHERE key = 'mcp_preferred_port' LIMIT 1").get() as { value: string } | undefined
     const port = parseInt(row?.value ?? '', 10)
@@ -39,6 +42,7 @@ function getPreferredPort(db: Database): number {
 
 export function startMcpServer(db: Database, opts?: { automationEngine?: { executeManual(id: string): Promise<unknown> } }): void {
   const port = getPreferredPort(db)
+  const host = getServerHost()
   const app = express()
   app.use(express.json())
 
@@ -151,15 +155,15 @@ export function startMcpServer(db: Database, opts?: { automationEngine?: { execu
     try {
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)").run(String(actualPort))
     } catch { /* non-fatal — CLI falls back to default port */ }
-    console.log(`[MCP] Server listening on http://127.0.0.1:${actualPort}/mcp`)
+    console.log(`[MCP] Server listening on http://${host}:${actualPort}/mcp`)
   }
 
-  httpServer = app.listen(port, '127.0.0.1')
+  httpServer = app.listen(port, host)
   httpServer.on('listening', onListening)
   httpServer.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE' && port !== 0) {
       console.warn(`[MCP] Port ${port} in use, falling back to dynamic port`)
-      httpServer = app.listen(0, '127.0.0.1')
+      httpServer = app.listen(0, host)
       httpServer.on('listening', onListening)
       httpServer.on('error', (err2) => console.error(`[MCP] Server error:`, err2))
     } else {

@@ -84,24 +84,25 @@ if (is.dev && !isPlaywright) {
   app.commandLine.appendSwitch('remote-debugging-port', '0')
 }
 
-// Linux XDG Base Directory compliance: move state data from ~/.config to ~/.local/state
+// Redirect userData early so Electron's lock, cookies, GPU cache, crash dumps,
+// and all per-instance state land in the right dir. Honors SLAYZONE_STORE_DIR
+// override on every platform; otherwise on Linux migrates ~/.config/slayzone →
+// ~/.local/state/slayzone (XDG). On macOS/Windows w/o override, Electron's
+// default already matches getStateDir(), so no setPath is needed.
 import { migrateXdgIfNeeded, migrateCliBinIfNeeded, getStateDir, installCli, checkCliInstalled, getCliBinTarget, getManualInstallHint } from '@slayzone/platform'
-if (process.platform === 'linux') {
-  const result = migrateXdgIfNeeded()
-  if (!result.failed) {
-    // Redirect userData on Linux — fresh install, post-migration, or already migrated.
-    // Skip only if migration failed (old dir exists but copy failed) — fall back to Electron default.
-    const stateDir = getStateDir()
-    mkdirSync(stateDir, { recursive: true })
-    app.setPath('userData', stateDir)
+{
+  const override = process.env.SLAYZONE_STORE_DIR
+  let target: string | null = null
+  if (override) {
+    target = override
+  } else if (process.platform === 'linux') {
+    const result = migrateXdgIfNeeded()
+    if (!result.failed) target = getStateDir()
   }
-}
-
-if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
-  // Playwright runs alongside the user's dev app, so isolate the entire
-  // Electron profile instead of only redirecting the SQLite DB path.
-  mkdirSync(process.env.SLAYZONE_USER_DATA_DIR, { recursive: true })
-  app.setPath('userData', process.env.SLAYZONE_USER_DATA_DIR)
+  if (target) {
+    mkdirSync(target, { recursive: true })
+    app.setPath('userData', target)
+  }
 }
 
 import icon from '../../resources/icon.png?asset'
@@ -881,7 +882,7 @@ app.whenReady().then(async () => {
   // left user content orphaned in assets/. This block recovers from that and
   // also handles fresh upgrades. See db/v127-disk-migration.ts.
   {
-    const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+    const dataDir = app.getPath('userData')
     try {
       const report = migrateV127DiskDir(join(dataDir, 'assets'), join(dataDir, 'artifacts'))
       if (report.mode !== 'noop') {
@@ -895,7 +896,7 @@ app.whenReady().then(async () => {
 
   // Seed initial artifact versions (v1) for any artifacts without history. Idempotent.
   {
-    const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+    const dataDir = app.getPath('userData')
     const artifactsDir = join(dataDir, 'artifacts')
     const blobStore = new BlobStore(dataDir)
     const txnRunner = betterSqliteTxn(db)

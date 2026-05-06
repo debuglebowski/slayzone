@@ -9,7 +9,7 @@ const LEGACY_DB_NAMES = ['omgslayzone.sqlite', 'omgslayzone.dev.sqlite'] as cons
 const DB_SUFFIXES = ['', '-wal', '-shm'] as const
 
 export const getDatabasePath = (): string => {
-  const userDataPath = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const userDataPath = app.getPath('userData')
   const dbName = app.isPackaged ? 'slayzone.sqlite' : 'slayzone.dev.sqlite'
   return path.join(userDataPath, dbName)
 }
@@ -18,7 +18,7 @@ let db: Database.Database | null = null
 let diagDb: Database.Database | null = null
 
 const getDiagnosticsDatabasePath = (): string => {
-  const userDataPath = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const userDataPath = app.getPath('userData')
   const dbName = app.isPackaged ? 'slayzone.diagnostics.sqlite' : 'slayzone.dev.diagnostics.sqlite'
   return path.join(userDataPath, dbName)
 }

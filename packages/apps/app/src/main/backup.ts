@@ -19,7 +19,7 @@ const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
 const BACKUP_REGEX = /^slayzone(?:\.dev)?\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)\.(auto|manual|migration)\.sqlite$/
 
 function getBackupsDir(): string {
-  const userDataPath = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const userDataPath = app.getPath('userData')
   const dir = path.join(userDataPath, 'backups')
   fs.mkdirSync(dir, { recursive: true })
   return dir
