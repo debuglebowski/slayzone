@@ -1239,6 +1239,9 @@ app.whenReady().then(async () => {
     ;(globalThis as Record<string, unknown>).__db = db
     ;(globalThis as Record<string, unknown>).__spawnProcess = spawnProcess
     ;(globalThis as Record<string, unknown>).__restorePtyHandlers = () => {
+      // Keep this list in sync with all handlers in @slayzone/terminal/main
+      // (handlers.ts + chat-handlers.ts). Adding a handler there without adding
+      // it here breaks tests that re-register via __restorePtyHandlers.
       for (const ch of [
         'terminalModes:list',
         'terminalModes:test',
@@ -1252,6 +1255,7 @@ app.whenReady().then(async () => {
         'pty:testExecutionContext',
         'pty:ccsListProfiles',
         'pty:write',
+        'pty:submit',
         'pty:resize',
         'pty:kill',
         'pty:exists',
@@ -1263,6 +1267,22 @@ app.whenReady().then(async () => {
         'pty:set-theme',
         'pty:validate',
         'pty:setShellOverride',
+        'session:list',
+        'session:getState',
+        'chat:list',
+        'chat:create',
+        'chat:send',
+        'chat:supports',
+        'chat:interrupt',
+        'chat:abortAndPop',
+        'chat:reset',
+        'chat:remove',
+        'chat:kill',
+        'chat:getBufferSince',
+        'chat:getInfo',
+        'chat:listAgents',
+        'chat:listCommands',
+        'chat:listSkills',
       ]) {
         ipcMain.removeHandler(ch)
       }
