@@ -22,9 +22,7 @@ function defaultDir(): string {
 }
 
 function getDbPath(dev: boolean): string {
-  // Full path override — used by e2e tests to share the running app's DB
-  if (process.env.SLAYZONE_DB_PATH) return process.env.SLAYZONE_DB_PATH
-  const dir = process.env.SLAYZONE_DB_DIR ?? defaultDir()
+  const dir = process.env.SLAYZONE_STORE_DIR ?? defaultDir()
   const name = dev ? 'slayzone.dev.sqlite' : 'slayzone.sqlite'
   return path.join(dir, name)
 }
@@ -45,7 +43,7 @@ export function getMcpPort(): number | null {
 }
 
 function getAlternateMcpPort(): number | null {
-  if (process.env.SLAYZONE_DB_PATH || process.env.SLAYZONE_MCP_PORT) return null
+  if (process.env.SLAYZONE_MCP_PORT) return null
   const dev = process.env.SLAYZONE_DEV === '1'
   const altPath = getDbPath(!dev)
   if (!fs.existsSync(altPath)) return null
@@ -103,7 +101,7 @@ export async function notifyApp(): Promise<void> {
 }
 
 export function getArtifactsDir(): string {
-  const dir = process.env.SLAYZONE_DB_DIR ?? defaultDir()
+  const dir = process.env.SLAYZONE_STORE_DIR ?? defaultDir()
   return path.join(dir, 'artifacts')
 }
 
@@ -113,8 +111,8 @@ export function openDb(): SlayDb {
 
   if (!fs.existsSync(dbPath)) {
     console.error(`Database not found: ${dbPath}`)
-    const altPath = !process.env.SLAYZONE_DB_PATH ? getDbPath(!dev) : null
-    if (altPath && fs.existsSync(altPath)) {
+    const altPath = getDbPath(!dev)
+    if (fs.existsSync(altPath)) {
       const hint = dev ? 'without --dev' : 'with --dev'
       console.error(`Found other database at: ${altPath}`)
       console.error(`Re-run ${hint} to target that database.`)
@@ -146,5 +144,5 @@ export function openDb(): SlayDb {
 }
 
 export function getDataDir(): string {
-  return process.env.SLAYZONE_DB_DIR ?? defaultDir()
+  return process.env.SLAYZONE_STORE_DIR ?? defaultDir()
 }
