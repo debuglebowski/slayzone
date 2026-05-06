@@ -392,7 +392,7 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
       handoffHostScope: newPanelBlockDesktopHandoff ? (inferHostScopeFromUrl(url) ?? undefined) : undefined,
     }
 
-    await savePanelConfig({ ...panelConfig, webPanels: [...panelConfig.webPanels, newPanel] })
+    await savePanelConfig(mergePanelOrder({ ...panelConfig, webPanels: [...panelConfig.webPanels, newPanel] }))
     setNewPanelName(''); setNewPanelUrl(''); setNewPanelShortcut(''); setNewPanelBlockDesktopHandoff(false); setNewPanelHandoffProtocol('');
   }
 
