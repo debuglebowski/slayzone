@@ -186,6 +186,7 @@ const api: ElectronAPI = {
   app: {
     getProtocolClientStatus: () => ipcRenderer.invoke('app:get-protocol-client-status'),
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
+    getTrpcPort: () => ipcRenderer.invoke('app:get-trpc-port') as Promise<number>,
     isTestsPanelEnabled: () => ipcRenderer.invoke('app:is-tests-panel-enabled'),
     isTestsPanelEnabledSync: ipcRenderer.sendSync('app:is-tests-panel-enabled-sync') as boolean,
     isJiraIntegrationEnabled: () => ipcRenderer.invoke('app:is-jira-integration-enabled'),

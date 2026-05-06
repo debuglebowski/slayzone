@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { ThemeProvider, tabStoreReady, useTabStore } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
+import { TrpcProvider } from '@slayzone/transport/client'
 import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
@@ -63,9 +64,10 @@ if (isFloatingAgent) {
   )
 } else {
   window.api.app.bootMark?.('renderer script entered')
-  // Wait for tab store to hydrate from SQLite before rendering —
-  // prevents race conditions where effects wipe persisted tabs.
-  tabStoreReady.then(() => {
+  // Wait for tab store + tRPC port discovery before rendering. Tab store
+  // hydrates from SQLite (prevents effect race wiping persisted tabs); tRPC
+  // port is needed to construct the WS URL passed to TrpcProvider.
+  Promise.all([tabStoreReady, window.api.app.getTrpcPort()]).then(([, trpcPort]) => {
     window.api.app.bootMark?.('tabStoreReady resolved')
     // Prefetch task details for open tabs — warms Suspense cache before React mounts.
     // Fire-and-forget: the cache's resolved-value tracking + notify ensures immediate
@@ -74,21 +76,24 @@ if (isFloatingAgent) {
       if (tab.type === 'task') taskDetailCache.prefetch('taskDetail', tab.taskId)
     }
 
+    const trpcUrl = `ws://127.0.0.1:${trpcPort}/trpc`
     performance.mark('sz:reactMount')
     window.api.app.bootMark?.('reactMount')
     createRoot(document.getElementById('root')!).render(
       <ConvexAuthBootstrap>
-        <PtyProvider>
-          <ThemeProvider>
-            <TelemetryProvider>
-              <UndoProvider>
-                <MaybeProfiler>
-                  <App />
-                </MaybeProfiler>
-              </UndoProvider>
-            </TelemetryProvider>
-          </ThemeProvider>
-        </PtyProvider>
+        <TrpcProvider url={trpcUrl}>
+          <PtyProvider>
+            <ThemeProvider>
+              <TelemetryProvider>
+                <UndoProvider>
+                  <MaybeProfiler>
+                    <App />
+                  </MaybeProfiler>
+                </UndoProvider>
+              </TelemetryProvider>
+            </ThemeProvider>
+          </PtyProvider>
+        </TrpcProvider>
       </ConvexAuthBootstrap>
     )
   })

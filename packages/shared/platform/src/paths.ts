@@ -28,6 +28,18 @@ export function getMcpPort(): number | undefined {
 }
 
 /**
+ * Returns the tRPC server port from SLAYZONE_PORT, or undefined if unset/invalid.
+ * Callers should fall back to a stored or auto-assigned port when undefined.
+ */
+export function getTrpcPort(): number | undefined {
+  const raw = process.env.SLAYZONE_PORT
+  if (!raw) return undefined
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0 || n > 65535) return undefined
+  return n
+}
+
+/**
  * Returns the host the local server should bind to. Defaults to 127.0.0.1.
  * Warns once on stderr when bound to a non-loopback address.
  */

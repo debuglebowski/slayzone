@@ -55,6 +55,7 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
