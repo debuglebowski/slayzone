@@ -233,25 +233,35 @@ test.describe('Terminal clear buffer', () => {
     // Wait for shell to be idle (prompt displayed = all PTY output flushed)
     await waitForPtyState(mainWindow, sessionId, 'idle')
 
-    await mainWindow.evaluate((id) => window.api.pty.clearBuffer(id), sessionId)
+    // Clear buffer and capture the seq AT clear time. Anything after this seq
+    // is *post-clear* output — markerA cannot appear there regardless of any
+    // late PTY redraw, eliminating the race the previous re-clear loop tried
+    // to paper over.
+    const cleared = await mainWindow.evaluate(
+      (id) => window.api.pty.clearBuffer(id),
+      sessionId
+    ) as { success: boolean; clearedSeq: number | null }
+    expect(cleared.success).toBe(true)
+    expect(cleared.clearedSeq).not.toBeNull()
+    const clearedSeq = cleared.clearedSeq as number
 
     await expect.poll(async () => mainWindow.evaluate((id) => window.api.pty.exists(id), sessionId)).toBe(true)
-    // Re-clear until buffer is free of marker A (in case of late PTY data)
-    await expect.poll(async () => {
-      const buffer = await readFullBuffer(mainWindow, sessionId)
-      if (buffer.includes(markerA)) {
-        await mainWindow.evaluate((id) => window.api.pty.clearBuffer(id), sessionId)
-        return false
-      }
-      return true
-    }, { timeout: 5_000 }).toBe(true)
 
     await runCommand(mainWindow, sessionId, `echo ${markerB}`)
-    await waitForBufferContains(mainWindow, sessionId, markerB)
 
-    const buffer = await readFullBuffer(mainWindow, sessionId)
-    expect(buffer).not.toContain(markerA)
-    expect(buffer).toContain(markerB)
+    const sinceClear = async () => {
+      const result = await mainWindow.evaluate(
+        ([id, seq]: [string, number]) => window.api.pty.getBufferSince(id, seq),
+        [sessionId, clearedSeq] as [string, number]
+      ) as { chunks: { data: string }[] } | null
+      return result?.chunks.map((c) => c.data).join('') ?? ''
+    }
+
+    await expect.poll(sinceClear, { timeout: 10_000 }).toContain(markerB)
+
+    const postClear = await sinceClear()
+    expect(postClear).toContain(markerB)
+    expect(postClear).not.toContain(markerA)
   })
 })
 
@@ -297,9 +307,12 @@ test.describe('Terminal restart shortcut', () => {
     await waitForPtySession(mainWindow, sessionId)
     await waitForPtyState(mainWindow, sessionId, 'idle')
 
-    // Old buffer content should be gone
-    const buffer = await readFullBuffer(mainWindow, sessionId)
-    expect(buffer).not.toContain(marker)
+    // Old buffer content should be gone. Allow a beat for the remount to flush
+    // the old serialized buffer; assertion polls the in-process buffer.
+    await expect.poll(
+      async () => (await readFullBuffer(mainWindow, sessionId)).includes(marker),
+      { timeout: 5_000 }
+    ).toBe(false)
   })
 })
 
