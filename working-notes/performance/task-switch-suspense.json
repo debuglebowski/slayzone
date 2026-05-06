@@ -1,18 +1,22 @@
 {
-  "timestamp": "2026-04-05T14:30:44.167Z",
-  "taskId": "de6a5520-544b-4a27-bbc5-5b33638b314e",
+  "timestamp": "2026-05-06T17:14:12.689Z",
+  "taskId": "d999ee0a-f861-4aaf-86df-e87937837d7b",
   "marks": [
     {
       "name": "sz:taskSwitch:start",
-      "startTime": 3573
+      "startTime": 3619.5
     },
     {
       "name": "sz:app:render",
-      "startTime": 3573.1
+      "startTime": 3619.7
+    },
+    {
+      "name": "sz:app:render",
+      "startTime": 3634.9
     },
     {
       "name": "sz:taskSwitch:end",
-      "startTime": 5596.5
+      "startTime": 5645.4
     }
   ],
   "fallbackDurationMs": 0,
