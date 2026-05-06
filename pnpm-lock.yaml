@@ -601,6 +601,9 @@ importers:
 
   packages/domains/integrations:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task

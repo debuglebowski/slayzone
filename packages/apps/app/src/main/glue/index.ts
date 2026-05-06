@@ -11,9 +11,18 @@
  */
 import { broadcastToWindows } from '../broadcast-to-windows'
 import { agentTurnsEvents } from '@slayzone/agent-turns/server'
+import { getGitWatcher } from '@slayzone/worktrees/server'
 
 export function wireDomainEvents(): void {
   agentTurnsEvents.on('agent-turns:changed', (worktreePath) => {
     broadcastToWindows('agent-turns:changed', worktreePath)
+  })
+
+  const gitWatcher = getGitWatcher()
+  gitWatcher.on('git:diff-changed', (payload) => {
+    broadcastToWindows('git:diff-changed', payload)
+  })
+  gitWatcher.on('git:diff-watch-failed', (payload) => {
+    broadcastToWindows('git:diff-watch-failed', payload)
   })
 }

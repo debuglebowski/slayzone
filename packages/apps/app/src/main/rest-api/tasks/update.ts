@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { ipcMain } from 'electron'
 import { updateTaskInputSchema, type UpdateTaskInput } from '@slayzone/task/shared'
-import { updateTaskOp } from '@slayzone/task/main'
+import { updateTaskOp } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 
 export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {

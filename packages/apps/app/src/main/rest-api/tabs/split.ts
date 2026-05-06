@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { splitTabRow } from '@slayzone/task-terminals/main'
+import { splitTabRow } from '@slayzone/task-terminals/server'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import type { RestApiDeps } from '../types'
 

@@ -7,7 +7,7 @@ import { createTestHarness, test, expect, describe } from '../../../../../../sha
 import { mountRestApp } from '../../../../../../shared/test-utils/rest-harness.js'
 import { spyTaskEvents } from '../../../../../../shared/test-utils/event-spy.js'
 import { __ipcEmitCalls, __resetIpcEmitCalls } from '../../../../../../shared/test-utils/mock-electron.js'
-import { taskEvents } from '@slayzone/task/main'
+import { taskEvents } from '@slayzone/task/server'
 import { registerUpdateTaskRoute } from './update.js'
 
 const h = await createTestHarness()

@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { submitPty } from '@slayzone/terminal/main'
+import { submitPty } from '@slayzone/terminal/electron'
 import type { RestApiDeps } from '../types'
 
 export function registerPtySubmitRoute(app: Express, _deps: RestApiDeps): void {

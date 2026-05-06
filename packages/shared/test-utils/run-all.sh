@@ -18,30 +18,30 @@ run_test() {
   fi
 }
 
-run_test packages/domains/settings/src/main/handlers.test.ts
-run_test packages/domains/tags/src/main/handlers.test.ts
+run_test packages/domains/settings/src/electron/handlers.test.ts
+run_test packages/domains/tags/src/electron/handlers.test.ts
 run_test packages/domains/projects/src/electron/handlers.test.ts
 run_test packages/domains/projects/src/server/task-automation.test.ts
-run_test packages/domains/task-terminals/src/main/handlers.test.ts
+run_test packages/domains/task-terminals/src/electron/handlers.test.ts
 run_test packages/domains/task/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/template-handlers.test.ts
-run_test packages/domains/ai-config/src/main/handlers.items.test.ts
-run_test packages/domains/ai-config/src/main/handlers.selections.test.ts
-run_test packages/domains/ai-config/src/main/handlers.context.test.ts
-run_test packages/domains/file-editor/src/main/handlers.test.ts
-run_test packages/domains/diagnostics/src/main/service.test.ts
-run_test packages/domains/integrations/src/main/handlers.db.test.ts
-run_test packages/domains/worktrees/src/main/handlers.test.ts
+run_test packages/domains/ai-config/src/electron/handlers.items.test.ts
+run_test packages/domains/ai-config/src/electron/handlers.selections.test.ts
+run_test packages/domains/ai-config/src/electron/handlers.context.test.ts
+run_test packages/domains/file-editor/src/electron/handlers.test.ts
+run_test packages/domains/diagnostics/src/electron/service.test.ts
+run_test packages/domains/integrations/src/electron/handlers.db.test.ts
+run_test packages/domains/worktrees/src/electron/handlers.test.ts
 run_test packages/domains/agent-turns/src/server/db.test.ts
 run_test packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_test packages/domains/agent-turns/src/server/turn-tracker.test.ts
-run_test packages/domains/integrations/src/main/handlers.api.test.ts
-run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
+run_test packages/domains/integrations/src/electron/handlers.api.test.ts
+run_test packages/domains/integrations/src/electron/handlers.analyze.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts
 run_test packages/domains/automations/src/shared/types.test.ts
 run_test packages/domains/automations/src/shared/ai.test.ts
-run_test packages/domains/automations/src/main/handlers.test.ts
-run_test packages/domains/automations/src/main/engine.test.ts
+run_test packages/domains/automations/src/electron/handlers.test.ts
+run_test packages/domains/automations/src/server/engine.test.ts
 
 run_test_no_loader() {
   echo ""
@@ -88,10 +88,10 @@ run_test_no_loader packages/apps/cli/test/tasks-ext.test.ts
 run_test_no_loader packages/apps/cli/test/projects-update.test.ts
 
 if [ -n "$LINEAR_API_KEY" ]; then
-  run_test_no_loader packages/domains/integrations/src/main/handlers.integration.linear.test.ts
+  run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.linear.test.ts
 fi
 if [ -n "$GITHUB_TOKEN" ]; then
-  run_test_no_loader packages/domains/integrations/src/main/handlers.integration.github.test.ts
+  run_test_no_loader packages/domains/integrations/src/electron/handlers.integration.github.test.ts
 fi
 
 echo ""

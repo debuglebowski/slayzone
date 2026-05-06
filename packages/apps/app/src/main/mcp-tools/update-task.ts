@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { ipcMain } from 'electron'
 import { z } from 'zod'
-import { updateTaskOp } from '@slayzone/task/main'
+import { updateTaskOp } from '@slayzone/task/server'
 import { isKnownStatus } from '@slayzone/projects/shared'
 import { broadcastToWindows } from '../broadcast-to-windows'
 import { getProjectColumns, getAllowedStatusesText } from './shared'

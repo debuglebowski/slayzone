@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import type { Express } from 'express'
 import { ZodError } from 'zod'
 import { unarchiveInputSchema } from '@slayzone/task/shared'
-import { unarchiveTaskOp } from '@slayzone/task/main'
+import { unarchiveTaskOp } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 
 export function registerUnarchiveTaskRoute(app: Express, deps: RestApiDeps): void {

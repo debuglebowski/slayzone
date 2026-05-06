@@ -1,0 +1,5 @@
+export { getGitWatcher, closeGitWatcher } from './git-watcher'
+export type { GitWatcher, GitWatcherEvents } from './git-watcher'
+export { removeWorktree, createWorktree, runWorktreeSetupScript, runWorktreeSetupScriptSync, getCurrentBranch, isGitRepo, copyIgnoredFiles, getIgnoredFileTree } from './git-worktree'
+export { ensureColors as ensureWorktreeColors, getColor as getWorktreeColor, getProjectColors as getProjectWorktreeColors, ensureProjectColors as ensureProjectWorktreeColors } from './color-registry'
+export { resolveCopyBehavior, resolveSubmoduleInitBehavior } from './copy-behavior'

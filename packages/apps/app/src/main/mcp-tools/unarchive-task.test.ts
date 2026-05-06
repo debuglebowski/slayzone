@@ -6,7 +6,7 @@ import { createTestHarness, test, expect, describe } from '../../../../../shared
 import { captureMcpServer } from '../../../../../shared/test-utils/mcp-harness.js'
 import { spyTaskEvents } from '../../../../../shared/test-utils/event-spy.js'
 import { __ipcEmitCalls, __resetIpcEmitCalls } from '../../../../../shared/test-utils/mock-electron.js'
-import { taskEvents } from '@slayzone/task/main'
+import { taskEvents } from '@slayzone/task/server'
 import { registerUnarchiveTaskTool } from './unarchive-task.js'
 
 const h = await createTestHarness()

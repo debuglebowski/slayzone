@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { createTabRow } from '@slayzone/task-terminals/main'
+import { createTabRow } from '@slayzone/task-terminals/server'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import type { RestApiDeps } from '../types'

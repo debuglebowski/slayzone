@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import { updateTask } from '@slayzone/task/main'
+import { updateTask } from '@slayzone/task/electron'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
 import {
   resolveCurrentTaskId,

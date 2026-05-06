@@ -5,7 +5,7 @@ import type { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { createStatsPoller } from './pid-stats'
 import { extractOscTitle } from '@slayzone/terminal/shared'
-import { resolveUserShell, getEnrichedPath } from '@slayzone/terminal/main'
+import { resolveUserShell, getEnrichedPath } from '@slayzone/terminal/server'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
 

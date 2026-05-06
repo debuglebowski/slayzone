@@ -115,30 +115,34 @@ import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigra
 // Domain handlers
 import { registerProjectHandlers } from '@slayzone/projects/electron'
 import { handleTerminalStateChange } from '@slayzone/projects/server'
-import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/main'
+import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/electron'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/main'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
-import { registerTagHandlers } from '@slayzone/tags/main'
-import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/main'
-import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/main'
+import { registerTagHandlers } from '@slayzone/tags/electron'
+import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/electron'
+import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/electron'
+import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalModes } from '@slayzone/terminal/server'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import { attachFloatingAgent, setupFloatingAgent } from './floating-agent'
 import { attachTaskWindows, setupTaskWindows } from './task-windows'
-import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/main'
-import { registerWorktreeHandlers, closeGitWatcher } from '@slayzone/worktrees/main'
+import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/electron'
+import { registerWorktreeHandlers } from '@slayzone/worktrees/electron'
+import { closeGitWatcher } from '@slayzone/worktrees/server'
 import { registerAgentTurnsHandlers } from '@slayzone/agent-turns/electron'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
 import { wireDomainEvents } from './glue'
-import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics, setIpcSuccessHook } from '@slayzone/diagnostics/main'
+import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics, setIpcSuccessHook } from '@slayzone/diagnostics/electron'
 import { detectPreviousCrash, writeBootStub, writeCleanShutdownSentinel, scanCrashDumps } from './lifecycle/sentinel'
 import { acquireLockWithSelfHeal, lockOutcomeIsAcquired, type LockOutcome } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
-import { registerAiConfigHandlers } from '@slayzone/ai-config/main'
-import { registerIntegrationHandlers, ensureIntegrationSchema, startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags } from '@slayzone/integrations/main'
-import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/main'
+import { registerAiConfigHandlers } from '@slayzone/ai-config/electron'
+import { registerIntegrationHandlers, ensureIntegrationSchema, ElectronStorageAdapter } from '@slayzone/integrations/electron'
+import { startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
+import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/electron'
 import { registerHistoryHandlers } from '@slayzone/history/electron'
-import { registerTestPanelHandlers } from '@slayzone/test-panel/main'
-import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/main'
+import { registerTestPanelHandlers } from '@slayzone/test-panel/electron'
+import { registerAutomationHandlers } from '@slayzone/automations/electron'
+import { AutomationEngine } from '@slayzone/automations/server'
 import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/electron'
 import { registerScreenshotHandlers } from './screenshot'
 import { registerClipboardHandlers } from './clipboard-handlers'
@@ -1242,7 +1246,7 @@ app.whenReady().then(async () => {
     ;(globalThis as Record<string, unknown>).__db = db
     ;(globalThis as Record<string, unknown>).__spawnProcess = spawnProcess
     ;(globalThis as Record<string, unknown>).__restorePtyHandlers = () => {
-      // Keep this list in sync with all handlers in @slayzone/terminal/main
+      // Keep this list in sync with all handlers in @slayzone/terminal/electron
       // (handlers.ts + chat-handlers.ts). Adding a handler there without adding
       // it here breaks tests that re-register via __restorePtyHandlers.
       for (const ch of [
@@ -1293,6 +1297,7 @@ app.whenReady().then(async () => {
     }
   }
 
+  setOnTaskReachedTerminalHandler(electronOnTaskReachedTerminal)
   registerTerminalTabsHandlers(ipcMain, db)
   logBoot('terminal-tabs handlers registered')
   registerChatHandlers(ipcMain, db, { onChatEvent: initChatTurnSubscriber(db) })
@@ -1316,6 +1321,7 @@ app.whenReady().then(async () => {
   onPtyInputSubmit(initPtyTurnSubscriber(db))
   registerAiConfigHandlers(ipcMain, db)
   logBoot('ai-config handlers registered')
+  setStorageAdapter(new ElectronStorageAdapter())
   const integrationHandles = registerIntegrationHandlers(ipcMain, db, { enableTestChannels: isPlaywright })
   logBoot('integration handlers registered')
   registerFileEditorHandlers(ipcMain)
@@ -1331,7 +1337,7 @@ app.whenReady().then(async () => {
   }
   const automationEngine = new AutomationEngine(db, notifyAutomationsChanged)
   registerAutomationHandlers(ipcMain, db, automationEngine)
-  automationEngine.start(ipcMain)
+  automationEngine.start()
   powerMonitor.on('resume', () => automationEngine.runCatchup())
   registerUsageAnalyticsHandlers(ipcMain, db)
   registerBackupHandlers(ipcMain, db)

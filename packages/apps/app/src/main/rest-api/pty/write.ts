@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { writePty } from '@slayzone/terminal/main'
+import { writePty } from '@slayzone/terminal/electron'
 import type { RestApiDeps } from '../types'
 
 export function registerPtyWriteRoute(app: Express, _deps: RestApiDeps): void {

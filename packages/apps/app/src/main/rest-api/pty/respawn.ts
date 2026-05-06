@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { requestForceRespawn } from '@slayzone/terminal/main'
+import { requestForceRespawn } from '@slayzone/terminal/electron'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import type { RestApiDeps } from '../types'
 

@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { dirname } from 'node:path'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
-import { buildPdfHtml, buildMermaidPdfHtml, renderToPdf } from '@slayzone/task/main'
+import { buildPdfHtml, buildMermaidPdfHtml, renderToPdf } from '@slayzone/task/electron'
 import { getEffectiveRenderMode, canExportAsPdf } from '@slayzone/task/shared'
 import { getArtifactFilePath } from './shared'
 import type { RestApiDeps } from '../types'

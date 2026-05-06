@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { ipcMain } from 'electron'
-import { unarchiveTaskOp } from '@slayzone/task/main'
+import { unarchiveTaskOp } from '@slayzone/task/server'
 import { unarchiveInputSchema } from '@slayzone/task/shared'
 import type { McpToolsDeps } from './types'
 

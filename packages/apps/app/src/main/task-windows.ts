@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain, app, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/main'
+import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/electron'
 
 interface OwnershipKey {
   taskId: string

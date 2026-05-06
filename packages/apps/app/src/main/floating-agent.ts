@@ -1,9 +1,9 @@
 import { BrowserWindow, ipcMain, screen, globalShortcut, app } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/main'
+import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/electron'
 import { toElectronAccelerator, shortcutDefinitions } from '@slayzone/shortcuts'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/electron'
 import { getDatabase } from './db'
 import {
   reduce,

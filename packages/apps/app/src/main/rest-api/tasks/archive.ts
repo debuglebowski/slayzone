@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import type { Express } from 'express'
 import { ZodError } from 'zod'
 import { ArchiveTaskInput } from '@slayzone/task/shared'
-import { archiveTaskOp } from '@slayzone/task/main'
+import { archiveTaskOp } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 
 export function registerArchiveTaskRoute(app: Express, deps: RestApiDeps): void {
