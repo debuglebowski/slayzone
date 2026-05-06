@@ -29,7 +29,7 @@ export async function listAction(opts: ListOpts): Promise<void> {
     status = resolveStatusId(status, listColumns) ?? status
   }
 
-  const conditions: string[] = ['t.archived_at IS NULL', 't.is_temporary = 0']
+  const conditions: string[] = ['t.archived_at IS NULL', 't.deleted_at IS NULL', 't.is_temporary = 0']
   const params: Record<string, string | number | null> = {}
 
   if (status) {
