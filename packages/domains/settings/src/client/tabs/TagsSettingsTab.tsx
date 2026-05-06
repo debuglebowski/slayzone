@@ -14,7 +14,23 @@ export function TagsSettingsTab({ projectId }: TagsSettingsTabProps) {
   const [dialogState, setDialogState] = useState<{ mode: 'create' } | { mode: 'edit'; tag: Tag } | null>(null)
 
   useEffect(() => {
-    window.api.tags.getTags().then(setAllTags)
+    let cancelled = false
+    const refresh = () => {
+      window.api.tags.getTags().then((next) => { if (!cancelled) setAllTags(next) })
+    }
+    refresh()
+    const onCreated = () => refresh()
+    const onUpdated = () => refresh()
+    const onDeleted = () => refresh()
+    window.addEventListener('slayzone:tag-created', onCreated as EventListener)
+    window.addEventListener('slayzone:tag-updated', onUpdated as EventListener)
+    window.addEventListener('slayzone:tag-deleted', onDeleted as EventListener)
+    return () => {
+      cancelled = true
+      window.removeEventListener('slayzone:tag-created', onCreated as EventListener)
+      window.removeEventListener('slayzone:tag-updated', onUpdated as EventListener)
+      window.removeEventListener('slayzone:tag-deleted', onDeleted as EventListener)
+    }
   }, [])
 
   const tags = allTags.filter((t) => t.project_id === projectId)
