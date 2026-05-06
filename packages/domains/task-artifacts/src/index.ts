@@ -1,2 +1,2 @@
 export * from './shared'
-export * from './main'
+export * from './server'

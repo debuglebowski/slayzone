@@ -116,7 +116,7 @@ import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigra
 import { registerProjectHandlers } from '@slayzone/projects/electron'
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/electron'
-import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/main'
+import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { registerTagHandlers } from '@slayzone/tags/electron'
 import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/electron'

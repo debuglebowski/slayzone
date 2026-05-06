@@ -34,7 +34,7 @@ import {
   pruneVersions,
   diffVersions,
   isVersionError,
-} from '@slayzone/task-artifacts/main'
+} from '@slayzone/task-artifacts/server'
 import type { AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
 import {
   addBlockerOp,
