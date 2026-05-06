@@ -1076,6 +1076,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   }, [])
 
+  // WebContentsView focus is delivered via IPC (the native view doesn't dispatch
+  // browser focusin events that bubble to the renderer). Mirror it onto the
+  // panel-glow state so a focused web panel renders the same focus shadow as
+  // any other focused panel.
+  useEffect(() => {
+    return window.api.browser.onBrowserViewFocused?.(() => setFocusedPanel('browser'))
+  }, [])
+
   // Cmd+W: close focused sub-item (terminal group, browser tab, editor file),
   // or fall through to close the task tab if nothing to close
   useEffect(() => {
