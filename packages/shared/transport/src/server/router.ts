@@ -2,6 +2,7 @@ import { router } from './trpc'
 import { agentTurnsRouter } from './routers/agent-turns'
 import { automationsRouter } from './routers/automations'
 import { diagnosticsRouter } from './routers/diagnostics'
+import { fileEditorRouter } from './routers/file-editor'
 import { historyRouter } from './routers/history'
 import { projectsRouter } from './routers/projects'
 import { tagsRouter } from './routers/tags'
@@ -13,6 +14,7 @@ export const appRouter = router({
   agentTurns: agentTurnsRouter,
   automations: automationsRouter,
   diagnostics: diagnosticsRouter,
+  fileEditor: fileEditorRouter,
   history: historyRouter,
   projects: projectsRouter,
   tags: tagsRouter,

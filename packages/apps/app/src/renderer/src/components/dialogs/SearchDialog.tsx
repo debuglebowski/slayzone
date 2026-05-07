@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   Command,
   CommandEmpty,
@@ -109,7 +110,7 @@ export function SearchDialog({
       setAllFiles(cacheRef.current.files)
       return
     }
-    window.api.fs.listAllFiles(path).then((list) => {
+    getTrpcVanillaClient().fileEditor.listAllFiles.query({ rootPath: path }).then((list) => {
       cacheRef.current = { path, files: list }
       setAllFiles(list)
     })

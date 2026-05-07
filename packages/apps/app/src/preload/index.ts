@@ -807,33 +807,6 @@ const api: ElectronAPI = {
       ensureFresh: () => ipcRenderer.invoke('ai-config:marketplace:ensure-fresh')
     }
   },
-  fs: {
-    readDir: (rootPath, dirPath) => ipcRenderer.invoke('fs:readDir', rootPath, dirPath),
-    readFile: (rootPath, filePath, force) => ipcRenderer.invoke('fs:readFile', rootPath, filePath, force),
-    writeFile: (rootPath, filePath, content) => ipcRenderer.invoke('fs:writeFile', rootPath, filePath, content),
-    createFile: (rootPath, filePath) => ipcRenderer.invoke('fs:createFile', rootPath, filePath),
-    createDir: (rootPath, dirPath) => ipcRenderer.invoke('fs:createDir', rootPath, dirPath),
-    rename: (rootPath, oldPath, newPath) => ipcRenderer.invoke('fs:rename', rootPath, oldPath, newPath),
-    delete: (rootPath, targetPath) => ipcRenderer.invoke('fs:delete', rootPath, targetPath),
-    copy: (rootPath, srcPath, destPath) => ipcRenderer.invoke('fs:copy', rootPath, srcPath, destPath),
-    copyIn: (rootPath, absoluteSrc, targetDir) => ipcRenderer.invoke('fs:copyIn', rootPath, absoluteSrc, targetDir),
-    showInFinder: (rootPath, targetPath) => ipcRenderer.invoke('fs:showInFinder', rootPath, targetPath),
-    listAllFiles: (rootPath) => ipcRenderer.invoke('fs:listAllFiles', rootPath),
-    searchFiles: (rootPath, query, opts) => ipcRenderer.invoke('fs:searchFiles', rootPath, query, opts),
-    gitStatus: (rootPath) => ipcRenderer.invoke('fs:gitStatus', rootPath),
-    watch: (rootPath) => ipcRenderer.invoke('fs:watch', rootPath),
-    unwatch: (rootPath) => ipcRenderer.invoke('fs:unwatch', rootPath),
-    onFileChanged: (callback) => {
-      const handler = (_event: unknown, rootPath: string, relPath: string) => callback(rootPath, relPath)
-      ipcRenderer.on('fs:changed', handler)
-      return () => ipcRenderer.removeListener('fs:changed', handler)
-    },
-    onFileDeleted: (callback) => {
-      const handler = (_event: unknown, rootPath: string, relPath: string) => callback(rootPath, relPath)
-      ipcRenderer.on('fs:deleted', handler)
-      return () => ipcRenderer.removeListener('fs:deleted', handler)
-    }
-  },
   leaderboard: {
     getLocalStats: () => ipcRenderer.invoke('leaderboard:get-local-stats')
   },

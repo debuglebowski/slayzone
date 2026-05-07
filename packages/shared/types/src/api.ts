@@ -80,7 +80,6 @@ import type {
   ListEntriesInput,
   SkillUpdateInfo
 } from '@slayzone/ai-config/shared'
-import type { DirEntry, ReadFileResult, FileSearchResult, SearchFilesOptions, GitStatusMap } from '@slayzone/file-editor/shared'
 import type {
   ConnectGithubInput,
   ConnectLinearInput,
@@ -832,25 +831,6 @@ export interface ElectronAPI {
       unlinkSkill: (itemId: string) => Promise<AiConfigItem>
       ensureFresh: () => Promise<void>
     }
-  }
-  fs: {
-    readDir: (rootPath: string, dirPath: string) => Promise<DirEntry[]>
-    readFile: (rootPath: string, filePath: string, force?: boolean) => Promise<ReadFileResult>
-    writeFile: (rootPath: string, filePath: string, content: string) => Promise<void>
-    createFile: (rootPath: string, filePath: string) => Promise<void>
-    createDir: (rootPath: string, dirPath: string) => Promise<void>
-    rename: (rootPath: string, oldPath: string, newPath: string) => Promise<void>
-    delete: (rootPath: string, targetPath: string) => Promise<void>
-    copy: (rootPath: string, srcPath: string, destPath: string) => Promise<void>
-    copyIn: (rootPath: string, absoluteSrc: string, targetDir?: string) => Promise<string>
-    showInFinder: (rootPath: string, targetPath: string) => Promise<void>
-    listAllFiles: (rootPath: string) => Promise<string[]>
-    searchFiles: (rootPath: string, query: string, options?: SearchFilesOptions) => Promise<FileSearchResult[]>
-    gitStatus: (rootPath: string) => Promise<GitStatusMap>
-    watch: (rootPath: string) => Promise<void>
-    unwatch: (rootPath: string) => Promise<void>
-    onFileChanged: (callback: (rootPath: string, relPath: string) => void) => () => void
-    onFileDeleted: (callback: (rootPath: string, relPath: string) => void) => () => void
   }
   screenshot: {
     captureView: (viewId: string) => Promise<{ success: boolean; path?: string }>

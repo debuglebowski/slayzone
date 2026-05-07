@@ -134,7 +134,7 @@ import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { registerAiConfigHandlers } from '@slayzone/ai-config/electron'
 import { registerIntegrationHandlers, ensureIntegrationSchema, ElectronStorageAdapter } from '@slayzone/integrations/electron'
 import { startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
-import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/electron'
+import { closeAllFileWatchers } from '@slayzone/file-editor/server'
 import { AutomationEngine, automationsEvents } from '@slayzone/automations/server'
 import { registerScreenshotHandlers } from './screenshot'
 import { registerClipboardHandlers } from './clipboard-handlers'
@@ -1312,7 +1312,6 @@ app.whenReady().then(async () => {
   setStorageAdapter(new ElectronStorageAdapter())
   const integrationHandles = registerIntegrationHandlers(ipcMain, db, { enableTestChannels: isPlaywright })
   logBoot('integration handlers registered')
-  registerFileEditorHandlers(ipcMain)
   registerClipboardHandlers(ipcMain)
   registerScreenshotHandlers(browserViewManager)
   registerExportImportHandlers(ipcMain, db, isPlaywright)
@@ -2299,7 +2298,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       ;(globalThis as Record<string, unknown>).__trpcPort = undefined
 
       // 4. Close file watchers
-      closeAllWatchers()
+      closeAllFileWatchers()
       closeArtifactWatcher()
       closeGitWatcher()
 

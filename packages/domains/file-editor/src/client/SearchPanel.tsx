@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
 import type { FileSearchResult, OpenFileOptions } from '../shared'
@@ -35,7 +36,7 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
     setSearching(true)
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await window.api.fs.searchFiles(projectPath, query, { matchCase, regex: useRegex })
+        const res = await getTrpcVanillaClient().fileEditor.searchFiles.query({ rootPath: projectPath, query, options: { matchCase, regex: useRegex } })
         setResults(res)
         setCollapsed(new Set())
         track('file_search_used', { had_results: res.length > 0 })

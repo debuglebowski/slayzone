@@ -17,6 +17,7 @@
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/automations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/file-editor": "workspace:*",
     "@slayzone/history": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import {
   File,
@@ -174,7 +175,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
 
   useEffect(() => {
     let cancelled = false
-    window.api.fs.gitStatus(projectPath).then((result) => {
+    getTrpcVanillaClient().fileEditor.gitStatus.query({ rootPath: projectPath }).then((result) => {
       if (cancelled || !result.isGitRepo) return
       setGitStatus(new Map(Object.entries(result.files)))
     }).catch(() => {})
@@ -213,7 +214,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
 
   const loadDir = useCallback(
     async (dirPath: string) => {
-      const items = await window.api.fs.readDir(projectPath, dirPath)
+      const items = await getTrpcVanillaClient().fileEditor.readDir.query({ rootPath: projectPath, dirPath: dirPath })
       setDirContents((prev) => {
         const next = new Map(prev)
         next.set(dirPath, items)
@@ -323,10 +324,10 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       const newPath = creating.parentPath ? `${creating.parentPath}/${name.trim()}` : name.trim()
       try {
         if (creating.type === 'file') {
-          await window.api.fs.createFile(projectPath, newPath)
+          await getTrpcVanillaClient().fileEditor.createFile.mutate({ rootPath: projectPath, filePath: newPath })
           track('file_created')
         } else {
-          await window.api.fs.createDir(projectPath, newPath)
+          await getTrpcVanillaClient().fileEditor.createDir.mutate({ rootPath: projectPath, dirPath: newPath })
           track('folder_created')
         }
         await loadDir(creating.parentPath)
@@ -350,7 +351,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       const parentDir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : ''
       const newPath = parentDir ? `${parentDir}/${newName.trim()}` : newName.trim()
       try {
-        await window.api.fs.rename(projectPath, oldPath, newPath)
+        await getTrpcVanillaClient().fileEditor.rename.mutate({ rootPath: projectPath, oldPath: oldPath, newPath: newPath })
         track('file_renamed')
         onFileRenamed?.(oldPath, newPath)
         const srcPrefix = oldPath + '/'
@@ -384,7 +385,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       const dirsToReload = new Set<string>()
       for (const p of paths) {
         try {
-          await window.api.fs.delete(projectPath, p)
+          await getTrpcVanillaClient().fileEditor.delete.mutate({ rootPath: projectPath, targetPath: p })
           track('file_deleted')
           dirsToReload.add(p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
         } catch (err) {
@@ -492,9 +493,9 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
           const destPath = resolveCollisionPath(rawDest, targetDir)
           try {
             if (clipboard.mode === 'copy') {
-              await window.api.fs.copy(projectPath, srcPath, destPath)
+              await getTrpcVanillaClient().fileEditor.copy.mutate({ rootPath: projectPath, srcPath: srcPath, destPath: destPath })
             } else {
-              await window.api.fs.rename(projectPath, srcPath, destPath)
+              await getTrpcVanillaClient().fileEditor.rename.mutate({ rootPath: projectPath, oldPath: srcPath, newPath: destPath })
               onFileRenamed?.(srcPath, destPath)
               const srcParent = srcPath.includes('/') ? srcPath.slice(0, srcPath.lastIndexOf('/')) : ''
               dirsToReload.add(srcParent)
@@ -517,9 +518,9 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
             const name = srcRel.includes('/') ? srcRel.slice(srcRel.lastIndexOf('/') + 1) : srcRel
             const rawDest = targetDir ? `${targetDir}/${name}` : name
             const destPath = resolveCollisionPath(rawDest, targetDir)
-            await window.api.fs.copy(projectPath, srcRel, destPath)
+            await getTrpcVanillaClient().fileEditor.copy.mutate({ rootPath: projectPath, srcPath: srcRel, destPath: destPath })
           } else {
-            await window.api.fs.copyIn(projectPath, abs, targetDir)
+            await getTrpcVanillaClient().fileEditor.copyIn.mutate({ rootPath: projectPath, absoluteSrc: abs, targetDir })
           }
         } catch (err) {
           console.error('External paste failed:', err)
@@ -540,7 +541,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       const destName = duplicateName(entry.name, names)
       const destPath = parentDir ? `${parentDir}/${destName}` : destName
       try {
-        await window.api.fs.copy(projectPath, entry.path, destPath)
+        await getTrpcVanillaClient().fileEditor.copy.mutate({ rootPath: projectPath, srcPath: entry.path, destPath: destPath })
         dirsToReload.add(parentDir)
       } catch (err) {
         console.error('Duplicate failed:', err)
@@ -557,7 +558,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   }, [projectPath])
 
   const handleRevealInFinder = useCallback((entry: DirEntry) => {
-    window.api.fs.showInFinder(projectPath, entry.path)
+    getTrpcVanillaClient().fileEditor.showInFinder.mutate({ rootPath: projectPath, targetPath: entry.path })
     track('reveal_in_finder')
   }, [projectPath])
 
@@ -674,7 +675,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     const srcParent = srcPath.includes('/') ? srcPath.slice(0, srcPath.lastIndexOf('/')) : ''
 
     try {
-      await window.api.fs.rename(projectPath, srcPath, newPath)
+      await getTrpcVanillaClient().fileEditor.rename.mutate({ rootPath: projectPath, oldPath: srcPath, newPath: newPath })
       onFileRenamed?.(srcPath, newPath)
 
       const srcPrefix = srcPath + '/'

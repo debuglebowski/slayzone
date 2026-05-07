@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 export interface UseWatchedFileOptions {
   projectPath: string | null
@@ -171,26 +172,27 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   useEffect(() => {
     if (!projectPath) return
 
-    void window.api.fs.watch(projectPath)
-    const unsubscribe = window.api.fs.onFileChanged((changedRoot, changedRel) => {
-      const normalize = (p: string) => p.replace(/\/+$/, '')
-      if (normalize(changedRoot) !== normalize(projectPath)) return
-      if (changedRel !== relPathRef.current) return
+    const sub = getTrpcVanillaClient().fileEditor.watch.subscribe({ rootPath: projectPath }, {
+      onData: (e) => {
+        if (e.type !== 'changed') return
+        const changedRoot = e.root
+        const changedRel = e.relPath
+        const normalize = (p: string) => p.replace(/\/+$/, '')
+        if (normalize(changedRoot) !== normalize(projectPath)) return
+        if (changedRel !== relPathRef.current) return
 
-      // Ignore echoes from our own in-flight save
-      if (savingRef.current !== null) return
+        // Ignore echoes from our own in-flight save
+        if (savingRef.current !== null) return
 
-      if (dirtyRef.current) {
-        setDiskChanged(true)
-        return
-      }
-      void reloadFromDisk()
+        if (dirtyRef.current) {
+          setDiskChanged(true)
+          return
+        }
+        void reloadFromDisk()
+      },
     })
 
-    return () => {
-      unsubscribe()
-      void window.api.fs.unwatch(projectPath)
-    }
+    return () => sub.unsubscribe()
   }, [projectPath, reloadFromDisk])
 
   const setContent = useCallback((next: string) => {

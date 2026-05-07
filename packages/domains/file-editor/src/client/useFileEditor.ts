@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 
@@ -52,7 +53,7 @@ export function useFileEditor(
             })
             continue
           }
-          const result = await window.api.fs.readFile(projectPath, filePath)
+          const result = await getTrpcVanillaClient().fileEditor.readFile.query({ rootPath: projectPath, filePath })
           if (result.tooLarge) {
             setOpenFiles((prev) => {
               if (prev.some((f) => f.path === filePath)) return prev
@@ -75,11 +76,8 @@ export function useFileEditor(
     })()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps -- mount only
 
-  // --- File watcher ---
-  useEffect(() => {
-    window.api.fs.watch(projectPath)
-    return () => { window.api.fs.unwatch(projectPath) }
-  }, [projectPath])
+  // File watcher lifecycle is now implicit: each .watch.subscribe below
+  // starts a watcher; teardown stops it (server-side refcounted).
 
   const reloadFile = useCallback(async (filePath: string) => {
     try {
@@ -93,7 +91,7 @@ export function useFileEditor(
         return
       }
 
-      const result = await window.api.fs.readFile(projectPath, filePath)
+      const result = await getTrpcVanillaClient().fileEditor.readFile.query({ rootPath: projectPath, filePath })
       if (result.tooLarge || result.content == null) return
       setOpenFiles((prev) =>
         prev.map((f) =>
@@ -119,9 +117,13 @@ export function useFileEditor(
   openFilesRef.current = openFiles
 
   useEffect(() => {
-    const unsubscribe = window.api.fs.onFileDeleted((rootPath, relPath) => {
-      const normalize = (p: string) => p.replace(/\/+$/, '')
-      if (normalize(rootPath) !== normalize(projectPathRef.current)) return
+    const sub = getTrpcVanillaClient().fileEditor.watch.subscribe({ rootPath: projectPath }, {
+      onData: (e) => {
+        if (e.type !== 'deleted') return
+        const rootPath = e.root
+        const relPath = e.relPath
+        const normalize = (p: string) => p.replace(/\/+$/, '')
+        if (normalize(rootPath) !== normalize(projectPathRef.current)) return
 
       const prefix = relPath + '/'
       const isMatch = (p: string) => p === relPath || p.startsWith(prefix)
@@ -164,15 +166,20 @@ export function useFileEditor(
       treeRefreshTimer.current = setTimeout(() => {
         setTreeRefreshKey((k) => k + 1)
       }, 500)
+      },
     })
-    return unsubscribe
-  }, [])
+    return () => sub.unsubscribe()
+  }, [projectPath])
 
   useEffect(() => {
-    const unsubscribe = window.api.fs.onFileChanged((rootPath, relPath) => {
-      // Filter: only process events for this editor's project
-      const normalize = (p: string) => p.replace(/\/+$/, '')
-      if (normalize(rootPath) !== normalize(projectPathRef.current)) return
+    const sub = getTrpcVanillaClient().fileEditor.watch.subscribe({ rootPath: projectPath }, {
+      onData: (e) => {
+        if (e.type !== 'changed') return
+        const rootPath = e.root
+        const relPath = e.relPath
+        // Filter: only process events for this editor's project
+        const normalize = (p: string) => p.replace(/\/+$/, '')
+        if (normalize(rootPath) !== normalize(projectPathRef.current)) return
 
       // Schedule tree refresh (debounced 500ms)
       if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
@@ -180,31 +187,32 @@ export function useFileEditor(
         setTreeRefreshKey((k) => k + 1)
       }, 500)
 
-      setOpenFiles((prev) => {
-        const fileIdx = prev.findIndex((f) => f.path === relPath)
-        if (fileIdx === -1) return prev
+        setOpenFiles((prev) => {
+          const fileIdx = prev.findIndex((f) => f.path === relPath)
+          if (fileIdx === -1) return prev
 
-        const file = prev[fileIdx]
-        const isDirty = file.content !== file.originalContent
+          const file = prev[fileIdx]
+          const isDirty = file.content !== file.originalContent
 
-        if (isDirty) {
-          // Mark as disk-changed, don't auto-reload
-          const next = [...prev]
-          next[fileIdx] = { ...file, diskChanged: true, deleted: false }
-          return next
-        }
+          if (isDirty) {
+            // Mark as disk-changed, don't auto-reload
+            const next = [...prev]
+            next[fileIdx] = { ...file, diskChanged: true, deleted: false }
+            return next
+          }
 
-        // Not dirty — schedule silent reload (async, outside setState)
-        reloadFile(relPath)
-        return prev
-      })
+          // Not dirty — schedule silent reload (async, outside setState)
+          reloadFile(relPath)
+          return prev
+        })
+      },
     })
 
     return () => {
-      unsubscribe()
+      sub.unsubscribe()
       if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
     }
-  }, [reloadFile])
+  }, [projectPath, reloadFile])
 
   // --- Open / close / save ---
   const openFile = useCallback(async (filePath: string, options?: OpenFileOptions) => {
@@ -234,7 +242,7 @@ export function useFileEditor(
         return
       }
 
-      const result = await window.api.fs.readFile(projectPath, filePath)
+      const result = await getTrpcVanillaClient().fileEditor.readFile.query({ rootPath: projectPath, filePath })
       if (result.tooLarge) {
         setOpenFiles((prev) => {
           if (prev.some((f) => f.path === filePath)) return prev
@@ -257,7 +265,7 @@ export function useFileEditor(
 
   const openFileForced = useCallback(async (filePath: string) => {
     try {
-      const result = await window.api.fs.readFile(projectPath, filePath, true)
+      const result = await getTrpcVanillaClient().fileEditor.readFile.query({ rootPath: projectPath, filePath, force: true })
       if (result.content == null) return
       setOpenFiles((prev) =>
         prev.map((f) =>
@@ -280,7 +288,7 @@ export function useFileEditor(
   const saveFile = useCallback(async (filePath: string) => {
     const file = openFiles.find((f) => f.path === filePath)
     if (!file || file.content == null || file.content === file.originalContent) return
-    await window.api.fs.writeFile(projectPath, filePath, file.content)
+    await getTrpcVanillaClient().fileEditor.writeFile.mutate({ rootPath: projectPath, filePath: filePath, content: file.content })
     setOpenFiles((prev) =>
       prev.map((f) =>
         f.path === filePath ? { ...f, originalContent: f.content, diskChanged: false, deleted: false } : f

@@ -551,6 +551,9 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1526,6 +1529,9 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../../domains/file-editor
       '@slayzone/history':
         specifier: workspace:*
         version: link:../../domains/history
