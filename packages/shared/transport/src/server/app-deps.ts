@@ -68,6 +68,7 @@ export type AppDeps = {
   authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>
 
   dialogShowOpenDialog: (options: unknown) => Promise<{ canceled: boolean; filePaths: string[] }>
+  windowClose: (windowId: number) => void
 
   // Browser view manager — heavy electron coupling, expose as opaque object
   // and call methods directly from procedures. All return types are unknown

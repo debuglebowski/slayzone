@@ -59,7 +59,7 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
   }, [])
 
   const handleClose = useCallback(() => {
-    window.api.window.close()
+    getTrpcVanillaClient().app.window.close.mutate()
   }, [])
 
   const project = data?.project ?? null

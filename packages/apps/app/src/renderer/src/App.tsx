@@ -693,12 +693,12 @@ function App(): React.JSX.Element {
   closeActiveTaskRef.current = () => {
     const activeTab = tabs[activeTabIndex]
     if (activeTab?.type === 'task') closeTab(activeTabIndex)
-    else void window.api.window.close()
+    else void getTrpcVanillaClient().app.window.close.mutate()
   }
   const closeCurrentHomeRef = useRef<() => void>(() => {})
   closeCurrentHomeRef.current = () => {
     const activeTab = tabs[activeTabIndex]
-    if (activeTab?.type === 'home') void window.api.window.close()
+    if (activeTab?.type === 'home') void getTrpcVanillaClient().app.window.close.mutate()
   }
 
   useEffect(() => { return window.api.app.onCloseActiveTask(() => closeActiveTaskRef.current()) }, [])

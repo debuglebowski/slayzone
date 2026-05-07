@@ -1960,7 +1960,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   type="button"
                   aria-label={isSecondaryWindow ? 'Reattach task' : 'Detach task to new window'}
                   onClick={() => {
-                    if (isSecondaryWindow) window.api.window.close()
+                    if (isSecondaryWindow) getTrpcVanillaClient().app.window.close.mutate()
                     else getTrpcVanillaClient().app.taskWindows.open.mutate({ taskId: task.id })
                   }}
                   className="shrink-0 flex items-center gap-1.5 rounded-full bg-muted/50 hover:bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"

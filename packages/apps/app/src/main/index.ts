@@ -1638,6 +1638,11 @@ app.whenReady().then(async () => {
       events: webviewEvents,
     },
     dialogShowOpenDialog: (options) => dialog.showOpenDialog(options as Electron.OpenDialogOptions),
+    windowClose: (windowId) => {
+      const wc = webContents.fromId(windowId)
+      const win = wc ? BrowserWindow.fromWebContents(wc) : null
+      if (win) win.close()
+    },
     authGithubSystemSignIn: async (input) => {
       try {
         if (!input?.convexUrl) return { ok: false, error: 'Convex URL is required' }
@@ -1987,11 +1992,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
   ipcMain.on('app:is-jira-integration-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_jira_integration') })
   ipcMain.on('app:is-loop-mode-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_loop_mode') })
 
-  // Window close
-  ipcMain.handle('window:close', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (win) win.close()
-  })
 
 
 

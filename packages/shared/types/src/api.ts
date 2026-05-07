@@ -151,9 +151,6 @@ export interface ElectronAPI {
     dataReady: () => void
     bootMark: (label: string) => void
   }
-  window: {
-    close: () => Promise<void>
-  }
   files: {
     getDropPaths: () => string[]
     getPastePaths: () => string[]

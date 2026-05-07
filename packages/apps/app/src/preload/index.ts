@@ -156,9 +156,6 @@ const api: ElectronAPI = {
       ? (label: string) => ipcRenderer.send('boot:mark', label)
       : () => {},
   },
-  window: {
-    close: () => ipcRenderer.invoke('window:close')
-  },
   files: {
     getDropPaths: () => {
       const paths = lastDropPaths
