@@ -1189,6 +1189,9 @@ importers:
 
   packages/domains/usage-analytics:
     dependencies:
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/types':
         specifier: workspace:*
         version: link:../../shared/types
@@ -1532,6 +1535,9 @@ importers:
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
+      '@slayzone/usage-analytics':
+        specifier: workspace:*
+        version: link:../../domains/usage-analytics
       '@tanstack/react-query':
         specifier: ^5.100.9
         version: 5.100.9(react@19.2.3)

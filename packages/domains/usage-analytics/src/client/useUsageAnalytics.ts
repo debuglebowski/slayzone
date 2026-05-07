@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { AnalyticsSummary, DateRange, ProviderOption } from '../shared/types'
 import { PROVIDER_USAGE_SUPPORT, ALL_PROVIDERS } from '../shared/types'
 
@@ -85,12 +86,12 @@ export function useUsageAnalytics() {
     if (!defaultLoaded) return
     let cancelled = false
 
-    window.api.usageAnalytics.query(range).then((cached) => {
+    getTrpcVanillaClient().usageAnalytics.query.query(range).then((cached) => {
       if (!cancelled) setRawData(cached)
     })
 
     setLoading(true)
-    window.api.usageAnalytics.refresh(range).then((fresh) => {
+    getTrpcVanillaClient().usageAnalytics.refresh.mutate(range).then((fresh) => {
       if (!cancelled) {
         setRawData(fresh)
         setLoading(false)
@@ -105,7 +106,7 @@ export function useUsageAnalytics() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await window.api.usageAnalytics.refresh(range)
+      const result = await getTrpcVanillaClient().usageAnalytics.refresh.mutate(range)
       setRawData(result)
     } finally {
       setLoading(false)

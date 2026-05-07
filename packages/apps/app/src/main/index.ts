@@ -137,7 +137,6 @@ import { startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchive
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/electron'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/electron'
 import { AutomationEngine, automationsEvents } from '@slayzone/automations/server'
-import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/electron'
 import { registerScreenshotHandlers } from './screenshot'
 import { registerClipboardHandlers } from './clipboard-handlers'
 import { setProcessManagerWindow, initProcessManager, createProcess, spawnProcess, updateProcess, stopProcess, killProcess, restartProcess, listForTask, listAllProcesses, killTaskProcesses, killAllProcesses } from './process-manager'
@@ -1328,7 +1327,6 @@ app.whenReady().then(async () => {
   automationsEvents.on('changed', () => notifyTasksChanged())
   automationEngine.start()
   powerMonitor.on('resume', () => automationEngine.runCatchup())
-  registerUsageAnalyticsHandlers(ipcMain, db)
   registerBackupHandlers(ipcMain, db)
   startAutoBackup(db)
   logBoot('domain IPC handlers registered')

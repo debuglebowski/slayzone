@@ -1079,12 +1079,4 @@ export interface ElectronAPI {
     setFileNote: (projectId: string, filePath: string, note: string) => Promise<void>
   }
 
-  usageAnalytics: {
-    query: (range: import('@slayzone/usage-analytics/shared').DateRange) => Promise<import('@slayzone/usage-analytics/shared').AnalyticsSummary>
-    refresh: (range: import('@slayzone/usage-analytics/shared').DateRange) => Promise<import('@slayzone/usage-analytics/shared').AnalyticsSummary>
-    taskCost: (taskId: string) => Promise<{
-      totalTokens: number
-      byProvider: Array<{ provider: string; model: string; totalTokens: number; sessions: number }>
-    }>
-  }
 }

@@ -9,13 +9,13 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/transport": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "lucide-react": "^0.562.0",

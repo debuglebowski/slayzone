@@ -22,6 +22,7 @@
     "@slayzone/projects": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
+    "@slayzone/usage-analytics": "workspace:*",
     "@tanstack/react-query": "^5.100.9",
     "@trpc/client": "^11.17.0",
     "@trpc/react-query": "^11.17.0",

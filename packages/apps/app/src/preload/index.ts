@@ -1050,11 +1050,6 @@ const api: ElectronAPI = {
     setFileNote: (projectId, filePath, note) => ipcRenderer.invoke('db:testPanel:setFileNote', projectId, filePath, note)
   },
 
-  usageAnalytics: {
-    query: (range) => ipcRenderer.invoke('usage-analytics:query', range),
-    refresh: (range) => ipcRenderer.invoke('usage-analytics:refresh', range),
-    taskCost: (taskId) => ipcRenderer.invoke('usage-analytics:task-cost', taskId)
-  }
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
