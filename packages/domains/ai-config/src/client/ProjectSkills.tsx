@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Check, AlertCircle, Circle, Trash2, Sparkles } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
@@ -55,8 +56,8 @@ export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger,
     setLoading(true)
     try {
       const [linked, local] = await Promise.all([
-        window.api.aiConfig.getProjectSkillsStatus(projectId, projectPath),
-        window.api.aiConfig.listItems({ scope: 'project', projectId, type })
+        getTrpcVanillaClient().aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
+        getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'project', projectId, type })
       ])
       setAllItems(linked)
       setLocalItems(local)
@@ -77,7 +78,7 @@ export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger,
   useEffect(() => { void load() }, [load])
 
   const handleRemove = async (itemId: string) => {
-    await window.api.aiConfig.removeProjectSelection(projectId, itemId)
+    await getTrpcVanillaClient().aiConfig.removeProjectSelection.mutate({ projectId, itemId })
     await load()
     onChanged?.()
   }
@@ -90,7 +91,7 @@ export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger,
 
   const handleCreate = async () => {
     const slug = 'new-skill'
-    const created = await window.api.aiConfig.createItem({
+    const created = await getTrpcVanillaClient().aiConfig.createItem.mutate({
       type: 'skill',
       scope: 'project',
       projectId,
@@ -103,14 +104,14 @@ export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger,
   }
 
   const handleUpdate = async (itemId: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await window.api.aiConfig.updateItem({ id: itemId, ...patch })
+    const updated = await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: itemId, ...patch })
     if (!updated) return
     setLocalItems(prev => prev.map(item => item.id === updated.id ? updated : item))
     onChanged?.()
   }
 
   const handleDelete = async (itemId: string) => {
-    await window.api.aiConfig.deleteItem(itemId)
+    await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: itemId })
     setLocalItems(prev => prev.filter(item => item.id !== itemId))
     setEditingId(null)
     onChanged?.()

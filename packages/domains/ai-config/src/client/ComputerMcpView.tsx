@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Plus, Trash2, Lock, Server } from 'lucide-react'
 import { Button, Input } from '@slayzone/ui'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
@@ -15,7 +16,7 @@ export function ComputerMcpView() {
   const loadConfigs = useCallback(async () => {
     setLoading(true)
     try {
-      setConfigs(await window.api.aiConfig.discoverComputerMcpConfigs())
+      setConfigs(await getTrpcVanillaClient().aiConfig.discoverComputerMcpConfigs.query())
     } finally {
       setLoading(false)
     }
@@ -25,7 +26,7 @@ export function ComputerMcpView() {
 
   const handleAddServer = useCallback(async (provider: CliProvider) => {
     if (!newServerKey.trim() || !newServerCommand.trim()) return
-    await window.api.aiConfig.writeComputerMcpServer({
+    await getTrpcVanillaClient().aiConfig.writeComputerMcpServer.mutate({
       provider,
       serverKey: newServerKey.trim(),
       config: {
@@ -41,7 +42,7 @@ export function ComputerMcpView() {
   }, [newServerKey, newServerCommand, newServerArgs, loadConfigs])
 
   const handleRemoveServer = useCallback(async (provider: CliProvider, serverKey: string) => {
-    await window.api.aiConfig.removeComputerMcpServer({ provider, serverKey })
+    await getTrpcVanillaClient().aiConfig.removeComputerMcpServer.mutate({ provider, serverKey })
     void loadConfigs()
   }, [loadConfigs])
 

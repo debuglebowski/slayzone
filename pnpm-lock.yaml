@@ -1541,6 +1541,9 @@ importers:
       '@slayzone/agent-turns':
         specifier: workspace:*
         version: link:../../domains/agent-turns
+      '@slayzone/ai-config':
+        specifier: workspace:*
+        version: link:../../domains/ai-config
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations

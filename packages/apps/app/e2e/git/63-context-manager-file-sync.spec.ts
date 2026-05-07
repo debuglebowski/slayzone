@@ -1,4 +1,5 @@
 import { test, expect, seed, goHome, projectBlob, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   closeTopDialog,
   openProjectContextSection,
@@ -67,7 +68,7 @@ function skillDocument(slug: string, body: string): string {
 
 async function setInstructionsContent(mainWindow: Page, projectId: string, content: string): Promise<void> {
   await mainWindow.evaluate(({ id, projectPath, next }) => {
-    return window.api.aiConfig.saveInstructionsContent(id, projectPath, next)
+    return getTrpcVanillaClient().aiConfig.saveInstructionsContent.mutate({ projectId: id, projectPath, content: next })
   }, { id: projectId, projectPath: TEST_PROJECT_PATH, next: content })
 }
 
@@ -106,31 +107,31 @@ test.describe.skip('Context manager file sync', () => {
 
     // Enable claude + codex providers
     await mainWindow.evaluate(({ id }) => {
-      return window.api.aiConfig.setProjectProviders(id, ['claude', 'codex'])
+      return getTrpcVanillaClient().aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
     }, { id: project.id })
 
     // Seed instructions content in DB
     await mainWindow.evaluate(({ id, projectPath, content }) => {
-      return window.api.aiConfig.saveInstructionsContent(id, projectPath, content)
+      return getTrpcVanillaClient().aiConfig.saveInstructionsContent.mutate({ projectId: id, projectPath, content })
     }, { id: project.id, projectPath: TEST_PROJECT_PATH, content: instructionsV1 })
 
     // Create and link a library skill
     await mainWindow.evaluate(async ({ slug, content }) => {
-      const existing = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+      const existing = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
       const match = existing.find((item) => item.slug === slug)
       if (match) {
-        await window.api.aiConfig.updateItem({ id: match.id, content })
+        await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
       } else {
-        await window.api.aiConfig.createItem({ type: 'skill', scope: 'library', slug, content })
+        await getTrpcVanillaClient().aiConfig.createItem.mutate({ type: 'skill', scope: 'library', slug, content })
       }
     }, { slug: skillSlug, content: skillDocument(skillSlug, skillContentV1) })
 
     // Link library skill to project
     await mainWindow.evaluate(async ({ projectId: pid, projectPath, slug }) => {
-      const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+      const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
       const item = items.find((i) => i.slug === slug)
       if (!item) throw new Error('Skill not found')
-      await window.api.aiConfig.loadLibraryItem({
+      await getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
         projectId: pid, projectPath, itemId: item.id, providers: ['claude', 'codex']
       })
     }, { projectId: project.id, projectPath: TEST_PROJECT_PATH, slug: skillSlug })
@@ -188,7 +189,7 @@ test.describe.skip('Context manager file sync', () => {
       await textarea.fill(instructionsV2)
       await expect.poll(async () => {
         const result = await mainWindow.evaluate(({ id, projectPath }) => {
-          return window.api.aiConfig.getRootInstructions(id, projectPath)
+          return getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
         }, { id: projectId, projectPath: TEST_PROJECT_PATH })
         return result.content
       }, { timeout: 5_000 }).toBe(instructionsV2)
@@ -211,7 +212,7 @@ test.describe.skip('Context manager file sync', () => {
       // Wait for debounced save (800ms) + processing
       await expect.poll(async () => {
         const result = await mainWindow.evaluate(({ id, projectPath }) => {
-          return window.api.aiConfig.getRootInstructions(id, projectPath)
+          return getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
         }, { id: projectId, projectPath: TEST_PROJECT_PATH })
         return result.content
       }, { timeout: 5_000 }).toBe(instructionsV2)
@@ -225,7 +226,7 @@ test.describe.skip('Context manager file sync', () => {
       await textarea.fill(instructionsV2)
       await expect.poll(async () => {
         const result = await mainWindow.evaluate(({ id, projectPath }) => {
-          return window.api.aiConfig.getRootInstructions(id, projectPath)
+          return getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
         }, { id: projectId, projectPath: TEST_PROJECT_PATH })
         return result.content
       }, { timeout: 5_000 }).toBe(instructionsV2)
@@ -250,7 +251,7 @@ test.describe.skip('Context manager file sync', () => {
       await textarea.fill(instructionsV2)
       await expect.poll(async () => {
         const result = await mainWindow.evaluate(({ id, projectPath }) => {
-          return window.api.aiConfig.getRootInstructions(id, projectPath)
+          return getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
         }, { id: projectId, projectPath: TEST_PROJECT_PATH })
         return result.content
       }, { timeout: 5_000 }).toBe(instructionsV2)
@@ -312,7 +313,7 @@ test.describe.skip('Context manager file sync', () => {
       // DB should also reflect pulled content
       await expect.poll(async () => {
         const result = await mainWindow.evaluate(({ id, projectPath }) => {
-          return window.api.aiConfig.getRootInstructions(id, projectPath)
+          return getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: id, projectPath })
         }, { id: projectId, projectPath: TEST_PROJECT_PATH })
         return result.content
       }).toBe(diskContent)
@@ -339,7 +340,7 @@ test.describe.skip('Context manager file sync', () => {
 
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+          const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
           const match = items.find((i) => i.slug === slug)
           return !!match?.content.includes(`name: ${slug}`) && !!match?.content.includes(expectedBody.trim())
         }, { slug: skillSlug, expectedBody: skillContentV2 })
@@ -358,7 +359,7 @@ test.describe.skip('Context manager file sync', () => {
       await content.fill(pendingContent)
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+          const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
           const match = items.find((i) => i.slug === slug)
           return !!match?.content.includes(`name: ${slug}`) && !!match?.content.includes(expectedBody.trim())
         }, { slug: skillSlug, expectedBody: pendingBody })
@@ -392,7 +393,7 @@ test.describe.skip('Context manager file sync', () => {
       await content.fill(pendingContent)
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+          const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
           const match = items.find((i) => i.slug === slug)
           return !!match?.content.includes(`name: ${slug}`) && !!match?.content.includes(expectedBody.trim())
         }, { slug: skillSlug, expectedBody: pendingBody })
@@ -471,7 +472,7 @@ test.describe.skip('Context manager file sync', () => {
       // Verify DB content updated with the raw skill document
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+          const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
           const match = items.find((i) => i.slug === slug)
           return !!match?.content.includes('name: modified') && !!match?.content.includes(expectedBody.trim())
         }, { slug: skillSlug, expectedBody: '# Modified externally\n' })
@@ -498,7 +499,7 @@ test.describe.skip('Context manager file sync', () => {
       // Verify slug updated in DB
       await expect.poll(async () => {
         return await mainWindow.evaluate(async (slug) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+          const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
           return items.some((i) => i.slug === slug)
         }, newSlug)
       }, { timeout: 5_000 }).toBe(true)
@@ -530,7 +531,7 @@ test.describe.skip('Context manager file sync', () => {
 
       await expect.poll(async () => {
         return await mainWindow.evaluate(async (slug) => {
-          const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+          const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
           const match = items.find((item) => item.slug === slug)
           if (!match) return null
           const metadata = JSON.parse(match.metadata_json) as {
@@ -558,10 +559,10 @@ test.describe.skip('Context manager file sync', () => {
       const resyncedBody = '# Re-synced after pull\n'
       const resyncedContent = skillDocument(skillSlug, resyncedBody)
       await mainWindow.evaluate(async ({ slug, content }) => {
-        const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+        const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const item = items.find((entry) => entry.slug === slug)
         if (!item) throw new Error('Skill not found for resync test')
-        await window.api.aiConfig.updateItem({ id: item.id, content })
+        await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content })
       }, { slug: skillSlug, content: resyncedContent })
 
       const dialog = await openProjectContextSection(mainWindow, projectAbbrev, 'skills')
@@ -598,7 +599,7 @@ test.describe.skip('Context manager file sync', () => {
 
       // 1. Set instructions via API
       await mainWindow.evaluate(({ id, projectPath, content }) => {
-        return window.api.aiConfig.saveInstructionsContent(id, projectPath, content)
+        return getTrpcVanillaClient().aiConfig.saveInstructionsContent.mutate({ projectId: id, projectPath, content })
       }, { id: projectId, projectPath: TEST_PROJECT_PATH, content: testContent })
 
       // 2. Push to all
@@ -663,7 +664,7 @@ test.describe.skip('Context manager file sync', () => {
       // Verify needsSync is false
       await expect.poll(async () => {
         return await mainWindow.evaluate(({ id, projectPath }) => {
-          return window.api.aiConfig.needsSync(id, projectPath)
+          return getTrpcVanillaClient().aiConfig.needsSync.query({ projectId: id, projectPath })
         }, { id: projectId, projectPath: TEST_PROJECT_PATH })
       }).toBe(false)
     })
@@ -697,7 +698,7 @@ test.describe.skip('Context manager file sync', () => {
 
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ id, projectPath, slug }) => {
-          const statuses = await window.api.aiConfig.getProjectSkillsStatus(id, projectPath)
+          const statuses = await getTrpcVanillaClient().aiConfig.getProjectSkillsStatus.query({ projectId: id, projectPath })
           const status = statuses.find((entry) => entry.item.slug === slug)
           return status?.providers.codex?.syncHealth ?? null
         }, { id: projectId, projectPath: TEST_PROJECT_PATH, slug: manageableUnmanagedSkillSlug })
@@ -708,21 +709,21 @@ test.describe.skip('Context manager file sync', () => {
 
     test('frontmatter-only DB metadata changes mark both linked providers stale', async ({ mainWindow }) => {
       await mainWindow.evaluate(async ({ id, projectPath, slug, initialContent, updatedContent }) => {
-        const existing = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+        const existing = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const match = existing.find((item) => item.slug === slug)
         const item = match
-          ? await window.api.aiConfig.updateItem({ id: match.id, content: initialContent })
-          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'library', slug, content: initialContent })
+          ? await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content: initialContent })
+          : await getTrpcVanillaClient().aiConfig.createItem.mutate({ type: 'skill', scope: 'library', slug, content: initialContent })
         if (!item) throw new Error('Could not create frontmatter mismatch skill')
 
-        await window.api.aiConfig.removeProjectSelection(id, item.id)
-        await window.api.aiConfig.loadLibraryItem({
+        await getTrpcVanillaClient().aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
+        await getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
           projectId: id,
           projectPath,
           itemId: item.id,
           providers: ['claude', 'codex']
         })
-        await window.api.aiConfig.updateItem({ id: item.id, content: updatedContent })
+        await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content: updatedContent })
       }, {
         id: projectId,
         projectPath: TEST_PROJECT_PATH,
@@ -738,7 +739,7 @@ test.describe.skip('Context manager file sync', () => {
       }).toBe(true)
       await expect.poll(async () => {
         return await mainWindow.evaluate(async ({ id, projectPath, slug }) => {
-          const statuses = await window.api.aiConfig.getProjectSkillsStatus(id, projectPath)
+          const statuses = await getTrpcVanillaClient().aiConfig.getProjectSkillsStatus.query({ projectId: id, projectPath })
           const skill = statuses.find((entry) => entry.item.slug === slug)
           return {
             claude: skill?.providers.claude?.syncHealth ?? null,
@@ -760,15 +761,15 @@ test.describe.skip('Context manager file sync', () => {
 
     test('row status uses linked providers only', async ({ mainWindow }) => {
       await mainWindow.evaluate(async ({ id, projectPath, slug, content }) => {
-        const existing = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+        const existing = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const match = existing.find((item) => item.slug === slug)
         const item = match
-          ? await window.api.aiConfig.updateItem({ id: match.id, content })
-          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'library', slug, content })
+          ? await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
+          : await getTrpcVanillaClient().aiConfig.createItem.mutate({ type: 'skill', scope: 'library', slug, content })
         if (!item) throw new Error('Could not create codex-only skill')
 
-        await window.api.aiConfig.removeProjectSelection(id, item.id)
-        await window.api.aiConfig.loadLibraryItem({
+        await getTrpcVanillaClient().aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
+        await getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
           projectId: id,
           projectPath,
           itemId: item.id,
@@ -799,15 +800,15 @@ test.describe.skip('Context manager file sync', () => {
 
     test('row status reflects unmanaged file on unlinked provider', async ({ mainWindow }) => {
       await mainWindow.evaluate(async ({ id, projectPath, slug, content }) => {
-        const existing = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+        const existing = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const match = existing.find((item) => item.slug === slug)
         const item = match
-          ? await window.api.aiConfig.updateItem({ id: match.id, content })
-          : await window.api.aiConfig.createItem({ type: 'skill', scope: 'library', slug, content })
+          ? await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
+          : await getTrpcVanillaClient().aiConfig.createItem.mutate({ type: 'skill', scope: 'library', slug, content })
         if (!item) throw new Error('Could not create codex-only skill with unmanaged claude')
 
-        await window.api.aiConfig.removeProjectSelection(id, item.id)
-        await window.api.aiConfig.loadLibraryItem({
+        await getTrpcVanillaClient().aiConfig.removeProjectSelection.mutate({ projectId: id, itemId: item.id })
+        await getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
           projectId: id,
           projectPath,
           itemId: item.id,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { ArrowLeft, ExternalLink, Plus, RefreshCw, Search, Settings2 } from 'lucide-react'
 import { Button, Input, cn, toast } from '@slayzone/ui'
 import type { SkillRegistry, SkillRegistryEntry } from '../shared'
@@ -34,7 +35,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const [previewEntry, setPreviewEntry] = useState<SkillRegistryEntry | null>(null)
 
   const loadRegistries = useCallback(async () => {
-    const regs = await window.api.aiConfig.marketplace.listRegistries()
+    const regs = await getTrpcVanillaClient().aiConfig.marketplace.listRegistries.query()
     setRegistries(regs)
   }, [refreshKey])
 
@@ -43,7 +44,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const loadEntries = useCallback(async () => {
     setLoading(true)
     try {
-      const rows = await window.api.aiConfig.marketplace.listEntries({
+      const rows = await getTrpcVanillaClient().aiConfig.marketplace.listEntries.query({
         registryId: effectiveRegistryId ?? undefined,
         search: search || undefined,
         projectId: projectId ?? undefined,
@@ -60,7 +61,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   }, [loadRegistries, loadEntries])
 
   useEffect(() => {
-    window.api.aiConfig.marketplace.ensureFresh().then(() => {
+    getTrpcVanillaClient().aiConfig.marketplace.ensureFresh.mutate().then(() => {
       setRefreshKey(k => k + 1)
     }).catch(() => {})
   }, [])
@@ -90,7 +91,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const handleAddToLibrary = useCallback(async (entryId: string) => {
     setInstalling(entryId)
     try {
-      await window.api.aiConfig.marketplace.installSkill({ entryId, scope: 'library' })
+      await getTrpcVanillaClient().aiConfig.marketplace.installSkill.mutate({ entryId, scope: 'library' })
       toast.success('Skill added to library')
       await loadEntries()
     } catch (err) {
@@ -104,8 +105,8 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
     if (!projectId || !projectPath) return
     setInstalling(entryId)
     try {
-      const item = await window.api.aiConfig.marketplace.installSkill({ entryId, scope: 'project', projectId })
-      try { await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id) } catch { /* sync self-heals on next Sync All */ }
+      const item = await getTrpcVanillaClient().aiConfig.marketplace.installSkill.mutate({ entryId, scope: 'project', projectId })
+      try { await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: (item as { id: string }).id }) } catch { /* sync self-heals on next Sync All */ }
       toast.success('Skill added to project')
       await loadEntries()
     } catch (err) {
@@ -118,7 +119,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const handleUpdate = useCallback(async (itemId: string, entryId: string) => {
     setInstalling(entryId)
     try {
-      await window.api.aiConfig.marketplace.updateSkill(itemId, entryId)
+      await getTrpcVanillaClient().aiConfig.marketplace.updateSkill.mutate({ itemId, entryId })
       toast.success('Skill updated')
       await loadEntries()
     } catch (err) {
@@ -130,7 +131,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
 
   const handleUninstall = useCallback(async (itemId: string) => {
     try {
-      await window.api.aiConfig.deleteItem(itemId)
+      await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: itemId })
       toast.success('Skill uninstalled')
       await loadEntries()
     } catch (err) {
@@ -141,7 +142,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const handleRefreshAll = useCallback(async () => {
     setRefreshingAll(true)
     try {
-      await window.api.aiConfig.marketplace.refreshAll()
+      await getTrpcVanillaClient().aiConfig.marketplace.refreshAll.mutate()
       await loadEntries()
       await loadRegistries()
       toast.success('Registries refreshed')
@@ -155,7 +156,7 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   const handleRefreshOne = useCallback(async (registryId: string) => {
     setRefreshingId(registryId)
     try {
-      await window.api.aiConfig.marketplace.refreshRegistry(registryId)
+      await getTrpcVanillaClient().aiConfig.marketplace.refreshRegistry.mutate({ registryId })
       await loadEntries()
       await loadRegistries()
     } catch (err) {
@@ -166,19 +167,19 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
   }, [loadEntries, loadRegistries])
 
   const handleToggleRegistry = useCallback(async (id: string, enabled: boolean) => {
-    await window.api.aiConfig.marketplace.toggleRegistry(id, enabled)
+    await getTrpcVanillaClient().aiConfig.marketplace.toggleRegistry.mutate({ registryId: id, enabled })
     await loadRegistries()
     await loadEntries()
   }, [loadRegistries, loadEntries])
 
   const handleRemoveRegistry = useCallback(async (id: string) => {
-    await window.api.aiConfig.marketplace.removeRegistry(id)
+    await getTrpcVanillaClient().aiConfig.marketplace.removeRegistry.mutate({ registryId: id })
     await loadRegistries()
     await loadEntries()
   }, [loadRegistries, loadEntries])
 
   const handleAddRegistry = useCallback(async (githubUrl: string, branch?: string, path?: string) => {
-    await window.api.aiConfig.marketplace.addRegistry({ githubUrl, branch, path })
+    await getTrpcVanillaClient().aiConfig.marketplace.addRegistry.mutate({ githubUrl, branch, path })
     await loadRegistries()
     await loadEntries()
   }, [loadRegistries, loadEntries])

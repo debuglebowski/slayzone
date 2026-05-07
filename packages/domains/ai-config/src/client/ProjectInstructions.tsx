@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { createPortal } from 'react-dom'
 import { File, FileText, Link2, RefreshCw, Unlink } from 'lucide-react'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn } from '@slayzone/ui'
@@ -91,8 +92,8 @@ export function ProjectInstructions({
     setLoading(true)
     try {
       const [result, variant] = await Promise.all([
-        window.api.aiConfig.getRootInstructions(projectId!, projectPath!),
-        window.api.aiConfig.getProjectInstructionVariant(projectId!),
+        getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: projectId!, projectPath: projectPath! }),
+        getTrpcVanillaClient().aiConfig.getProjectInstructionVariant.query({ projectId: projectId! }),
       ])
       setProviderHealth(result.providerHealth ?? {})
       setLinkedVariant(variant ?? null)
@@ -110,32 +111,32 @@ export function ProjectInstructions({
     relPath: !linkedVariant && selectedFile ? selectedFile.path : null,
     read: useCallback(async () => {
       if (!projectPath || !selectedProvider) return null
-      const r = await window.api.aiConfig.readProviderInstructions(projectPath, selectedProvider)
+      const r = await getTrpcVanillaClient().aiConfig.readProviderInstructions.query({ projectPath, provider: selectedProvider })
       return r.content
     }, [projectPath, selectedProvider]),
     save: useCallback(async (content: string) => {
       if (!projectId || !projectPath || !selectedProvider) return
-      const result = await window.api.aiConfig.pushProviderInstructions(projectId, projectPath, selectedProvider, content)
+      const result = await getTrpcVanillaClient().aiConfig.pushProviderInstructions.mutate({ projectId, projectPath, provider: selectedProvider, content })
       setProviderHealth(result.providerHealth ?? {})
     }, [projectId, projectPath, selectedProvider]),
   })
 
   const openPicker = useCallback(async () => {
-    const items = await window.api.aiConfig.listInstructionVariants()
+    const items = await getTrpcVanillaClient().aiConfig.listInstructionVariants.query()
     setVariants(items)
     setPickerOpen(true)
   }, [])
 
   const handleLink = useCallback(async (variantId: string) => {
     if (!projectId) return
-    await window.api.aiConfig.setProjectInstructionVariant(projectId, variantId, projectPath ?? undefined)
+    await getTrpcVanillaClient().aiConfig.setProjectInstructionVariant.mutate({ projectId, variantItemId: variantId, projectPath: projectPath ?? undefined })
     setPickerOpen(false)
     void load()
   }, [projectId, projectPath, load])
 
   const handleUnlink = useCallback(async () => {
     if (!projectId) return
-    await window.api.aiConfig.setProjectInstructionVariant(projectId, null)
+    await getTrpcVanillaClient().aiConfig.setProjectInstructionVariant.mutate({ projectId, variantItemId: null })
     void load()
   }, [projectId, load])
 

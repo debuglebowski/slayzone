@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { AlertCircle, Check, Circle, File, FilePlus, Link, RefreshCw } from 'lucide-react'
 import { Button, FileTree, Textarea, cn, fileTreeIndent } from '@slayzone/ui'
 import type { CliProvider, ContextTreeEntry } from '../shared'
@@ -59,7 +60,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
   const loadTree = useCallback(async () => {
     setLoadingTree(true)
     try {
-      const tree = await window.api.aiConfig.getContextTree(projectPath, projectId)
+      const tree = await getTrpcVanillaClient().aiConfig.getContextTree.query({ projectPath, projectId })
       setEntries(tree)
       const folders = new Set<string>()
       for (const entry of tree) {
@@ -101,7 +102,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
     setLoadingFile(true)
     setMessage('')
     try {
-      const content = await window.api.aiConfig.readContextFile(entry.path, projectPath)
+      const content = await getTrpcVanillaClient().aiConfig.readContextFile.query({ filePath: entry.path, projectPath })
       setSelectedPath(entry.path)
       setSelectedContent(content)
     } catch {

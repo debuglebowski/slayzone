@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { File, FilePlus, Save } from 'lucide-react'
 import { Button, Label, Textarea, cn } from '@slayzone/ui'
 import type { ContextFileInfo } from '../shared'
@@ -17,7 +18,7 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
   const [message, setMessage] = useState('')
 
   const discover = useCallback(async () => {
-    const discovered = await window.api.aiConfig.discoverContextFiles(projectPath ?? '')
+    const discovered = await getTrpcVanillaClient().aiConfig.discoverContextFiles.query({ projectPath: projectPath ?? '' })
     setFiles(discovered)
   }, [projectPath])
 
@@ -29,7 +30,7 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
     setLoading(true)
     setMessage('')
     try {
-      const text = await window.api.aiConfig.readContextFile(filePath, projectPath ?? '')
+      const text = await getTrpcVanillaClient().aiConfig.readContextFile.query({ filePath, projectPath: projectPath ?? '' })
       setContent(text)
       setOriginalContent(text)
       setSelectedPath(filePath)
@@ -43,7 +44,7 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
   const createFile = async (filePath: string) => {
     setMessage('')
     try {
-      await window.api.aiConfig.writeContextFile(filePath, '', projectPath ?? '')
+      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath, content: '', projectPath: projectPath ?? '' })
       await discover()
       setContent('')
       setOriginalContent('')
@@ -59,7 +60,7 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
     setSaving(true)
     setMessage('')
     try {
-      await window.api.aiConfig.writeContextFile(selectedPath, content, projectPath ?? '')
+      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath: selectedPath, content, projectPath: projectPath ?? '' })
       setOriginalContent(content)
       setMessage('Saved')
     } catch (err) {

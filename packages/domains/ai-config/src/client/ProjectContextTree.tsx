@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { File, FilePlus, Link, Unlink, RefreshCw, Save, Check, AlertCircle, Circle, Pencil, Trash2, RefreshCcw } from 'lucide-react'
 import { Button, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Textarea, FileTree, fileTreeIndent, cn } from '@slayzone/ui'
 import type { CliProvider, ContextTreeEntry } from '../shared'
@@ -81,7 +82,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
   const loadTree = useCallback(async () => {
     setLoading(true)
     try {
-      const tree = await window.api.aiConfig.getContextTree(projectPath, projectId)
+      const tree = await getTrpcVanillaClient().aiConfig.getContextTree.query({ projectPath, projectId })
       setEntries(tree)
       // Auto-expand all folders on first load
       const folders = new Set<string>()
@@ -114,11 +115,11 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
 
   const openFile = async (entry: ContextTreeEntry) => {
     if (!entry.exists) {
-      await window.api.aiConfig.writeContextFile(entry.path, '', projectPath)
+      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath: entry.path, content: '', projectPath })
       await loadTree()
     }
     try {
-      const text = await window.api.aiConfig.readContextFile(entry.path, projectPath)
+      const text = await getTrpcVanillaClient().aiConfig.readContextFile.query({ filePath: entry.path, projectPath })
       setContent(text)
       setOriginalContent(text)
       setSelectedPath(entry.path)
@@ -133,7 +134,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
     setSaving(true)
     setMessage('')
     try {
-      await window.api.aiConfig.writeContextFile(selectedPath, content, projectPath)
+      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath: selectedPath, content, projectPath })
       setOriginalContent(content)
       setMessage('Saved')
       await loadTree()
@@ -147,10 +148,10 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
   const handleSync = async (entry: ContextTreeEntry) => {
     if (!entry.linkedItemId) return
     try {
-      const updated = await window.api.aiConfig.syncLinkedFile(projectId, projectPath, entry.linkedItemId)
+      const updated = await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: entry.linkedItemId })
       setEntries((prev) => prev.map((e) => (e.path === updated.path ? updated : e)))
       if (selectedPath === entry.path) {
-        const text = await window.api.aiConfig.readContextFile(entry.path, projectPath)
+        const text = await getTrpcVanillaClient().aiConfig.readContextFile.query({ filePath: entry.path, projectPath })
         setContent(text)
         setOriginalContent(text)
       }
@@ -162,7 +163,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
 
   const handleUnlink = async (entry: ContextTreeEntry) => {
     if (!entry.linkedItemId) return
-    await window.api.aiConfig.unlinkFile(projectId, entry.linkedItemId)
+    await getTrpcVanillaClient().aiConfig.unlinkFile.mutate({ projectId, itemId: entry.linkedItemId })
     await loadTree()
   }
 
@@ -175,7 +176,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
     if (!renamingEntry || !renameValue.trim()) return
     const newPath = renameValue.startsWith('/') ? renameValue : `${projectPath}/${renameValue}`
     try {
-      await window.api.aiConfig.renameContextFile(renamingEntry.path, newPath, projectPath)
+      await getTrpcVanillaClient().aiConfig.renameContextFile.mutate({ oldPath: renamingEntry.path, newPath, projectPath })
       if (selectedPath === renamingEntry.path) setSelectedPath(newPath)
       await loadTree()
     } catch (err) {
@@ -187,7 +188,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
   }
 
   const handleDelete = async (entry: ContextTreeEntry) => {
-    await window.api.aiConfig.deleteContextFile(entry.path, projectPath, projectId)
+    await getTrpcVanillaClient().aiConfig.deleteContextFile.mutate({ filePath: entry.path, projectPath, projectId })
     if (selectedPath === entry.path) {
       setSelectedPath(null)
       setContent('')
@@ -200,7 +201,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
     if (!newFilePath.trim()) return
     const filePath = newFilePath.startsWith('/') ? newFilePath : `${projectPath}/${newFilePath}`
     try {
-      await window.api.aiConfig.writeContextFile(filePath, '', projectPath)
+      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath, content: '', projectPath })
       await loadTree()
       setCreatingFile(false)
       setNewFilePath('')
@@ -218,7 +219,7 @@ export function ProjectContextTree({ projectPath, projectId }: ProjectContextTre
     setSyncing(true)
     setMessage('')
     try {
-      const result = await window.api.aiConfig.syncAll({ projectId, projectPath })
+      const result = await getTrpcVanillaClient().aiConfig.syncAll.mutate({ projectId, projectPath })
       const parts: string[] = []
       if (result.written.length) parts.push(`${result.written.length} written`)
       if (result.conflicts.length) parts.push(`${result.conflicts.length} conflicts`)

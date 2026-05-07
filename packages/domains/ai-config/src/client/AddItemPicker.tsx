@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Library, Plus, Sparkles } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
@@ -48,7 +49,7 @@ export function AddItemPicker({
   useEffect(() => {
     if (!open || step !== 'library') return
     void (async () => {
-      const items = await window.api.aiConfig.listItems({ scope: 'library', type })
+      const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type })
       setLibraryItems(items)
     })()
   }, [open, step, type])
@@ -64,7 +65,7 @@ export function AddItemPicker({
     if (existingLinks.includes(item.id)) return
     setLoading(true)
     try {
-      await window.api.aiConfig.loadLibraryItem({
+      await getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
         projectId,
         projectPath,
         itemId: item.id,
@@ -80,14 +81,14 @@ export function AddItemPicker({
   const handleCreateLocal = async () => {
     setLoading(true)
     try {
-      const existingItems = await window.api.aiConfig.listItems({
+      const existingItems = await getTrpcVanillaClient().aiConfig.listItems.query({
         scope: 'project',
         projectId,
         type
       })
       const existingSlugs = new Set(existingItems.map((item) => item.slug))
       const slug = nextAvailableSlug('new-skill', existingSlugs)
-      await window.api.aiConfig.createItem({
+      await getTrpcVanillaClient().aiConfig.createItem.mutate({
         type,
         scope: 'project',
         projectId,

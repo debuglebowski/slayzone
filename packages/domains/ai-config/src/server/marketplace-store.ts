@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type {
   AddRegistryInput,
@@ -59,11 +58,12 @@ function rowToEntry(row: Record<string, unknown>): SkillRegistryEntry {
   }
 }
 
-export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): void {
+export function createMarketplaceOps(db: Database) {
+
   // Ensure built-in entries are seeded
   seedBuiltinEntries(db)
 
-  ipcMain.handle('ai-config:marketplace:list-registries', () => {
+  const listRegistries = () => {
     const rows = db.prepare(`
       SELECT r.*, COUNT(e.id) as entry_count
       FROM skill_registries r
@@ -72,9 +72,9 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       ORDER BY r.source_type ASC, r.name ASC
     `).all() as Record<string, unknown>[]
     return rows.map(rowToRegistry)
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:add-registry', async (_event, input: AddRegistryInput) => {
+  const addRegistry = async (input: AddRegistryInput) => {
     const parsed = parseGitHubUrl(input.githubUrl)
     if (!parsed) throw new Error('Invalid GitHub URL. Use "owner/repo" or a full GitHub URL.')
 
@@ -94,7 +94,7 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
 
     // Immediately fetch entries
     try {
-      await refreshRegistry(db, id)
+      await refreshRegistryImpl(db, id)
     } catch {
       // Don't fail — registry is created, fetch can be retried
     }
@@ -107,22 +107,22 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       GROUP BY r.id
     `).get(id) as Record<string, unknown>
     return rowToRegistry(row)
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:remove-registry', (_event, registryId: string) => {
+  const removeRegistry = (registryId: string) => {
     const registry = db.prepare('SELECT source_type FROM skill_registries WHERE id = ?').get(registryId) as { source_type: string } | undefined
     if (!registry) return false
     if (registry.source_type === 'builtin') throw new Error('Cannot remove built-in registries')
     db.prepare('DELETE FROM skill_registries WHERE id = ?').run(registryId)
     return true
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:toggle-registry', (_event, registryId: string, enabled: boolean) => {
+  const toggleRegistry = (registryId: string, enabled: boolean) => {
     db.prepare(`UPDATE skill_registries SET enabled = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(enabled ? 1 : 0, registryId)
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:ensure-fresh', async () => {
+  const ensureFresh = async () => {
     const STALE_MS = 24 * 60 * 60 * 1000
     const registries = db.prepare(
       'SELECT id, last_synced_at FROM skill_registries WHERE enabled = 1 AND source_type = \'github\''
@@ -132,38 +132,38 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       const lastSynced = reg.last_synced_at ? new Date(reg.last_synced_at + 'Z').getTime() : 0
       if (Date.now() - lastSynced > STALE_MS) {
         try {
-          await refreshRegistry(db, reg.id)
+          await refreshRegistryImpl(db, reg.id)
         } catch (err) {
           console.error(`[marketplace] Auto-refresh failed for ${reg.id}:`, err)
         }
       }
     }
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:refresh-registry', async (_event, registryId: string) => {
+  const refreshRegistry = async (registryId: string) => {
     try {
-      return await refreshRegistry(db, registryId)
+      return await refreshRegistryImpl(db, registryId)
     } catch (err) {
       console.error(`[marketplace] Failed to refresh registry ${registryId}:`, err)
       throw err
     }
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:refresh-all', async () => {
+  const refreshAll = async () => {
     const registries = db.prepare(
       'SELECT id FROM skill_registries WHERE enabled = 1'
     ).all() as { id: string }[]
 
     for (const r of registries) {
       try {
-        await refreshRegistry(db, r.id)
+        await refreshRegistryImpl(db, r.id)
       } catch (err) {
         console.error(`Failed to refresh registry ${r.id}:`, err)
       }
     }
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:list-entries', (_event, input?: ListEntriesInput) => {
+  const listEntries = (input?: ListEntriesInput) => {
     const where: string[] = ['1=1']
     const values: unknown[] = []
     const projectId = input?.projectId ?? null
@@ -199,9 +199,9 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     `).all(projectId, projectId, ...values) as Record<string, unknown>[]
 
     return rows.map(rowToEntry)
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:install-skill', (_event, input: InstallSkillInput) => {
+  const installSkill = (input: InstallSkillInput) => {
     const entry = db.prepare('SELECT * FROM skill_registry_entries WHERE id = ?').get(input.entryId) as Record<string, unknown> | undefined
     if (!entry) throw new Error('Registry entry not found')
 
@@ -254,9 +254,9 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     `).run(id, scope, projectId, entry.name as string, slug, persistedContent, metadataJson, now, now)
 
     return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(id)
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:check-updates', () => {
+  const checkUpdates = () => {
     const rows = db.prepare(`
       SELECT i.id as item_id, e.id as entry_id, i.slug,
         json_extract(i.metadata_json, '$.marketplace.installedVersion') as current_version,
@@ -274,9 +274,9 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       currentVersion: r.current_version,
       latestVersion: r.latest_version
     }))
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:unlink-skill', (_event, itemId: string) => {
+  const unlinkSkill = (itemId: string) => {
     const item = db.prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?').get(itemId) as { metadata_json: string } | undefined
     if (!item) throw new Error('Skill not found')
 
@@ -292,9 +292,9 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       .run(JSON.stringify(metadata), itemId)
 
     return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)
-  })
+  }
 
-  ipcMain.handle('ai-config:marketplace:update-skill', (_event, itemId: string, entryId: string) => {
+  const updateSkill = (itemId: string, entryId: string) => {
     const entry = db.prepare('SELECT * FROM skill_registry_entries WHERE id = ?').get(entryId) as Record<string, unknown> | undefined
     if (!entry) throw new Error('Registry entry not found')
 
@@ -322,10 +322,26 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     `).run(persistedContent, JSON.stringify(baseMetadata), now, itemId)
 
     return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)
-  })
+  }
+
+  return {
+    listRegistries,
+    addRegistry,
+    removeRegistry,
+    toggleRegistry,
+    ensureFresh,
+    refreshRegistry,
+    refreshAll,
+    listEntries,
+    installSkill,
+    checkUpdates,
+    unlinkSkill,
+    updateSkill
+  }
 }
 
-async function refreshRegistry(db: Database, registryId: string): Promise<SkillRegistryEntry[]> {
+
+async function refreshRegistryImpl(db: Database, registryId: string): Promise<SkillRegistryEntry[]> {
   const registry = db.prepare('SELECT * FROM skill_registries WHERE id = ?').get(registryId) as Record<string, unknown> | undefined
   if (!registry) throw new Error('Registry not found')
 

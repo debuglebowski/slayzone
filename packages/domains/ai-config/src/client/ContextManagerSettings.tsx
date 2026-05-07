@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   ArrowLeft, AlertTriangle, ChevronRight,
   Plus, Sparkles, Server, FileText, FolderTree, Settings2,
@@ -116,9 +117,9 @@ function OverviewPanel({
     void (async () => {
       try {
         const [instrContent, skills, providers] = await Promise.all([
-          window.api.aiConfig.getLibraryInstructions(),
-          window.api.aiConfig.listItems({ scope: 'library', type: 'skill' }),
-          window.api.aiConfig.listProviders()
+          getTrpcVanillaClient().aiConfig.getLibraryInstructions.query(),
+          getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' }),
+          getTrpcVanillaClient().aiConfig.listProviders.query()
         ])
         if (stale) return
         setData({
@@ -169,7 +170,7 @@ function ProvidersPanel() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const list = await window.api.aiConfig.listProviders()
+        const list = await getTrpcVanillaClient().aiConfig.listProviders.query()
         setProviders(list)
       } finally {
         setLoading(false)
@@ -184,7 +185,7 @@ function ProvidersPanel() {
   const handleToggle = async (provider: CliProviderInfo) => {
     if (provider.isDefault) return
     const newEnabled = !provider.enabled
-    await window.api.aiConfig.toggleProvider(provider.id, newEnabled)
+    await getTrpcVanillaClient().aiConfig.toggleProvider.mutate({ id: provider.id, enabled: newEnabled })
     setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, enabled: newEnabled } : p))
   }
 
@@ -296,7 +297,7 @@ function LegacyContextManager({ initialSection }: { initialSection: ContextManag
     if (!isItemSection) return
     setLoading(true)
     try {
-      const rows = await window.api.aiConfig.listItems({
+      const rows = await getTrpcVanillaClient().aiConfig.listItems.query({
         scope: 'library',
         type: 'skill'
       })
@@ -319,7 +320,7 @@ function LegacyContextManager({ initialSection }: { initialSection: ContextManag
     if (!isItemSection) return
     const existingSlugs = new Set(items.map((item) => item.slug))
     const slug = nextAvailableSlug('new-skill', existingSlugs)
-    const created = await window.api.aiConfig.createItem({
+    const created = await getTrpcVanillaClient().aiConfig.createItem.mutate({
       type: 'skill',
       scope: 'library',
       slug,
@@ -330,13 +331,13 @@ function LegacyContextManager({ initialSection }: { initialSection: ContextManag
   }
 
   const handleUpdate = async (itemId: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await window.api.aiConfig.updateItem({ id: itemId, ...patch })
+    const updated = await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: itemId, ...patch })
     if (!updated) return
     setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
   }
 
   const handleDelete = async (itemId: string) => {
-    await window.api.aiConfig.deleteItem(itemId)
+    await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: itemId })
     setItems((prev) => prev.filter((item) => item.id !== itemId))
     setEditingId(null)
   }

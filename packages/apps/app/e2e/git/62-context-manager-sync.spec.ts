@@ -1,4 +1,5 @@
 import { test, expect, seed, goHome, projectBlob, TEST_PROJECT_PATH, resetApp} from '../fixtures/electron'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   closeTopDialog,
   openUserContextManager,
@@ -42,7 +43,7 @@ function skillDocument(slug: string, body: string): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function upsertLibrarySkill(mainWindow: Page, content: string, electronApp?: any): Promise<void> {
   const skillExists = await mainWindow.evaluate(async (slug) => {
-    const skills = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+    const skills = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
     return skills.some((item) => item.slug === slug)
   }, skillSlug)
 
@@ -66,7 +67,7 @@ async function upsertLibrarySkill(mainWindow: Page, content: string, electronApp
 
   await expect.poll(async () => {
     return await mainWindow.evaluate(async ({ slug, expectedBody }) => {
-      const skills = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+      const skills = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
       const match = skills.find((item) => item.slug === slug)
       return !!match?.content.includes(`name: ${slug}`) && !!match?.content.includes(expectedBody.trim())
     }, { slug: skillSlug, expectedBody: content })
@@ -86,7 +87,7 @@ test.describe.skip('Context manager sync flow', () => {
     projectId = project.id
 
     await mainWindow.evaluate(({ id }) => {
-      return window.api.aiConfig.setProjectProviders(id, ['claude', 'codex'])
+      return getTrpcVanillaClient().aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
     }, { id: project.id })
 
     await s.refreshData()
@@ -112,7 +113,7 @@ test.describe.skip('Context manager sync flow', () => {
     await expect(dialog.getByText(`${slug}.md`, { exact: true })).toBeVisible({ timeout: 5_000 })
 
     const createdPath = await mainWindow.evaluate(async ({ candidate }) => {
-      const files = await window.api.aiConfig.getComputerFiles()
+      const files = await getTrpcVanillaClient().aiConfig.getComputerFiles.query()
       const match = files.find((entry) =>
         entry.category === 'skill' &&
         entry.name.endsWith(`/${candidate}.md`)
@@ -122,7 +123,7 @@ test.describe.skip('Context manager sync flow', () => {
 
     if (createdPath) {
       await mainWindow.evaluate(async ({ filePath }) => {
-        await window.api.aiConfig.deleteComputerFile(filePath)
+        await getTrpcVanillaClient().aiConfig.deleteComputerFile.mutate({ filePath })
       }, { filePath: createdPath })
     }
 
@@ -132,7 +133,7 @@ test.describe.skip('Context manager sync flow', () => {
   test('library body-only skill can be repaired from the UI by adding frontmatter', async ({ mainWindow, electronApp }) => {
     const slug = `e2e-body-only-invalid-${Date.now()}`
     await mainWindow.evaluate(async ({ targetSlug, content }) => {
-      await window.api.aiConfig.createItem({
+      await getTrpcVanillaClient().aiConfig.createItem.mutate({
         type: 'skill',
         scope: 'library',
         slug: targetSlug,
@@ -144,7 +145,7 @@ test.describe.skip('Context manager sync flow', () => {
     await dialog.getByTestId('context-overview-skills').click()
     await expect.poll(async () => {
       return await mainWindow.evaluate(async (targetSlug) => {
-        const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+        const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const match = items.find((item) => item.slug === targetSlug)
         if (!match) return null
         const metadata = JSON.parse(match.metadata_json) as {
@@ -168,7 +169,7 @@ test.describe.skip('Context manager sync flow', () => {
     await expect(dialog.getByTestId('context-item-editor-content')).toHaveValue(new RegExp(`^---\\nname: ${slug}\\n`), { timeout: 5_000 })
     await expect.poll(async () => {
       return await mainWindow.evaluate(async (targetSlug) => {
-        const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+        const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
         const match = items.find((item) => item.slug === targetSlug)
         if (!match) return null
         const metadata = JSON.parse(match.metadata_json) as {
@@ -180,9 +181,9 @@ test.describe.skip('Context manager sync flow', () => {
     await expect(dialog.getByText('Frontmatter is invalid')).toHaveCount(0)
 
     await mainWindow.evaluate(async (targetSlug) => {
-      const items = await window.api.aiConfig.listItems({ scope: 'library', type: 'skill' })
+      const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' })
       const match = items.find((item) => item.slug === targetSlug)
-      if (match) await window.api.aiConfig.deleteItem(match.id)
+      if (match) await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: match.id })
     }, slug)
 
     await closeTopDialog(mainWindow)
@@ -237,7 +238,7 @@ test.describe.skip('Context manager sync flow', () => {
 
   test('project MCP section shows provider columns when MCP entries exist', async ({ mainWindow }) => {
     await mainWindow.evaluate(({ id }) => {
-      return window.api.aiConfig.setProjectProviders(id, ['claude', 'codex'])
+      return getTrpcVanillaClient().aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
     }, { id: projectId })
 
     const projectDialog = await openProjectContextSection(mainWindow, projectAbbrev, 'mcp')
@@ -334,7 +335,7 @@ test.describe.skip('Context manager sync flow', () => {
 
     await expect.poll(async () => {
       return await mainWindow.evaluate(async ({ id, projectPath }) => {
-        return window.api.aiConfig.needsSync(id, projectPath)
+        return getTrpcVanillaClient().aiConfig.needsSync.query({ projectId: id, projectPath })
       }, { id: projectId, projectPath: TEST_PROJECT_PATH })
     }).toBe(false)
 
@@ -343,17 +344,17 @@ test.describe.skip('Context manager sync flow', () => {
 
   test('project-local skill can be synced to filesystem', async ({ mainWindow }) => {
     await mainWindow.evaluate(({ id }) => {
-      return window.api.aiConfig.setProjectProviders(id, ['claude', 'codex'])
+      return getTrpcVanillaClient().aiConfig.setProjectProviders.mutate({ projectId: id, providers: ['claude', 'codex'] })
     }, { id: projectId })
 
     const itemId = await mainWindow.evaluate(async ({ id, slug, content }) => {
-      const existing = await window.api.aiConfig.listItems({ scope: 'project', projectId: id, type: 'skill' })
+      const existing = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'project', projectId: id, type: 'skill' })
       const match = existing.find((item) => item.slug === slug)
       if (match) {
-        await window.api.aiConfig.updateItem({ id: match.id, content })
+        await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: match.id, content })
         return match.id
       }
-      const created = await window.api.aiConfig.createItem({
+      const created = await getTrpcVanillaClient().aiConfig.createItem.mutate({
         type: 'skill',
         scope: 'project',
         projectId: id,
@@ -364,8 +365,8 @@ test.describe.skip('Context manager sync flow', () => {
     }, { id: projectId, slug: localSkillSlug, content: localSkillContent })
 
     await mainWindow.evaluate(async ({ id, itemId, projectPath }) => {
-      await window.api.aiConfig.syncLinkedFile(id, projectPath, itemId, 'claude')
-      await window.api.aiConfig.syncLinkedFile(id, projectPath, itemId, 'codex')
+      await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId: id, projectPath, itemId, provider: 'claude' })
+      await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId: id, projectPath, itemId, provider: 'codex' })
     }, { id: projectId, itemId, projectPath: TEST_PROJECT_PATH })
 
     await expect.poll(() => fs.existsSync(localClaudeSkillPath()), { timeout: 15_000 }).toBe(true)

@@ -19,7 +19,7 @@ export function useSlayNudge({ projectId, projectPath }: UseSlayNudgeOptions) {
 
   useEffect(() => {
     if (!projectPath || dismissed) return
-    window.api.aiConfig.checkSlayConfigured(projectPath).then((configured) => {
+    getTrpcVanillaClient().aiConfig.checkSlayConfigured.query({ projectPath }).then((configured) => {
       setSlayConfigured(configured)
     })
   }, [projectPath, dismissed])
@@ -32,7 +32,7 @@ export function useSlayNudge({ projectId, projectPath }: UseSlayNudgeOptions) {
 
   const recheck = useCallback(() => {
     if (!projectPath) return
-    window.api.aiConfig.checkSlayConfigured(projectPath).then((configured) => {
+    getTrpcVanillaClient().aiConfig.checkSlayConfigured.query({ projectPath }).then((configured) => {
       setSlayConfigured(configured)
       if (configured) setDismissed(true)
     })

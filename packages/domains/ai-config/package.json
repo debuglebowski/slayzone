@@ -9,14 +9,12 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
     "test:skill-validation": "node --import tsx src/client/skill-validation.test.ts",
-    "test:handlers": "ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ../../shared/test-utils/loader.ts src/electron/handlers.context.test.ts",
-    "test:frontmatter": "pnpm run test:skill-validation && pnpm run test:handlers"
+    "test:frontmatter": "pnpm run test:skill-validation"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

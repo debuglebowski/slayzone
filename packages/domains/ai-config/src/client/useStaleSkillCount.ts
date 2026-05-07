@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 /**
  * Polls the stale-skill count for the active project.
@@ -17,8 +18,7 @@ export function useStaleSkillCount(
       return
     }
     const reqId = ++reqIdRef.current
-    window.api.aiConfig
-      .getProjectStaleSkillCount(projectId, projectPath)
+    getTrpcVanillaClient().aiConfig.getProjectStaleSkillCount.query({ projectId, projectPath })
       .then((n) => {
         if (reqId === reqIdRef.current) setCount(n)
       })

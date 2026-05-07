@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   ArrowLeft, ChevronRight,
   FileText, RefreshCw, Server, Settings2, Sparkles,
@@ -208,12 +209,12 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenContextManage
     void (async () => {
       try {
         const [skillsStatus, localItems, enabledProviders, instructions, contextTree, mcpConfigs] = await Promise.all([
-          window.api.aiConfig.getProjectSkillsStatus(projectId, projectPath),
-          window.api.aiConfig.listItems({ scope: 'project', projectId }),
-          window.api.aiConfig.getProjectProviders(projectId),
-          window.api.aiConfig.getRootInstructions(projectId, projectPath),
-          window.api.aiConfig.getContextTree(projectPath, projectId),
-          window.api.aiConfig.discoverMcpConfigs(projectPath)
+          getTrpcVanillaClient().aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
+          getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'project', projectId }),
+          getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId }),
+          getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId, projectPath }),
+          getTrpcVanillaClient().aiConfig.getContextTree.query({ projectPath, projectId }),
+          getTrpcVanillaClient().aiConfig.discoverMcpConfigs.query({ projectPath })
         ])
         if (stale) return
         setData({
@@ -238,7 +239,7 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenContextManage
     if (!data) return
     setSyncingMode('sync')
     try {
-      const result = await window.api.aiConfig.syncAll({
+      const result = await getTrpcVanillaClient().aiConfig.syncAll.mutate({
         projectId,
         projectPath
       })
@@ -256,7 +257,7 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenContextManage
   const handleResetAndSync = async () => {
     setSyncingMode('reset')
     try {
-      const result = await window.api.aiConfig.syncAll({
+      const result = await getTrpcVanillaClient().aiConfig.syncAll.mutate({
         projectId,
         projectPath,
         pruneUnmanaged: true

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import {
   PROVIDER_LABELS,
@@ -16,10 +17,10 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
   const [projectProviders, setProjectProviders] = useState<CliProvider[]>([])
 
   const fetchProviders = useCallback(async () => {
-    const list = await window.api.aiConfig.listProviders()
+    const list = await getTrpcVanillaClient().aiConfig.listProviders.query()
     setProviders(list)
     if (projectId) {
-      const pp = await window.api.aiConfig.getProjectProviders(projectId)
+      const pp = await getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId })
       setProjectProviders(pp)
     }
   }, [projectId])
@@ -33,7 +34,7 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
   }, [fetchProviders])
 
   const handleToggleComputer = useCallback(async (id: string, enabled: boolean) => {
-    await window.api.aiConfig.toggleProvider(id, enabled)
+    await getTrpcVanillaClient().aiConfig.toggleProvider.mutate({ id, enabled })
     setProviders(prev => prev.map(p => p.id === id ? { ...p, enabled } : p))
   }, [])
 
@@ -42,7 +43,7 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
     const next = projectProviders.includes(provider)
       ? projectProviders.filter(p => p !== provider)
       : [...projectProviders, provider]
-    await window.api.aiConfig.setProjectProviders(projectId, next)
+    await getTrpcVanillaClient().aiConfig.setProjectProviders.mutate({ projectId, providers: next })
     setProjectProviders(next)
   }, [projectId, projectProviders])
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { cn, Switch } from '@slayzone/ui'
 import type { CliProvider, CliProviderInfo } from '../shared'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
@@ -16,8 +17,8 @@ export function ProviderChips({ projectId, layout = 'panel', onChange }: Provide
   useEffect(() => {
     void (async () => {
       const [providers, projectProviders] = await Promise.all([
-        window.api.aiConfig.listProviders(),
-        window.api.aiConfig.getProjectProviders(projectId)
+        getTrpcVanillaClient().aiConfig.listProviders.query(),
+        getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId })
       ])
       setAllProviders(providers.filter(p => p.status === 'active'))
       setEnabled(projectProviders)
@@ -29,7 +30,7 @@ export function ProviderChips({ projectId, layout = 'panel', onChange }: Provide
       ? enabled.filter(p => p !== kind)
       : [...enabled, kind]
     setEnabled(next)
-    await window.api.aiConfig.setProjectProviders(projectId, next)
+    await getTrpcVanillaClient().aiConfig.setProjectProviders.mutate({ projectId, providers: next })
     onChange?.()
   }
 

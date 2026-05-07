@@ -45,37 +45,6 @@ export interface ChatSessionInfo {
   chatEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null
 }
 import type {
-  AiConfigItem,
-  AiConfigProjectSelection,
-  CliProvider,
-  CliProviderInfo,
-  ContextFileInfo,
-  ContextTreeEntry,
-  CreateAiConfigItemInput,
-  ListAiConfigItemsInput,
-  LoadLibraryItemInput,
-  McpConfigFileResult,
-  ProjectSkillStatus,
-  ProviderFileContent,
-  RootInstructionsResult,
-  SetAiConfigProjectSelectionInput,
-  SyncAllInput,
-  SyncConflict,
-  SyncResult,
-  UpdateAiConfigItemInput,
-  WriteMcpServerInput,
-  RemoveMcpServerInput,
-  WriteComputerMcpServerInput,
-  RemoveComputerMcpServerInput,
-  ComputerFileEntry,
-  SkillRegistry,
-  SkillRegistryEntry,
-  AddRegistryInput,
-  InstallSkillInput,
-  ListEntriesInput,
-  SkillUpdateInfo
-} from '@slayzone/ai-config/shared'
-import type {
   ConnectGithubInput,
   ConnectLinearInput,
   UpdateIntegrationConnectionInput,
@@ -567,77 +536,6 @@ export interface ElectronAPI {
   }
   telemetry: {
     onIpcEvent: (callback: (event: string, props: Record<string, unknown>) => void) => () => void
-  }
-  aiConfig: {
-    listItems: (input: ListAiConfigItemsInput) => Promise<AiConfigItem[]>
-    getItem: (id: string) => Promise<AiConfigItem | null>
-    createItem: (input: CreateAiConfigItemInput) => Promise<AiConfigItem>
-    updateItem: (input: UpdateAiConfigItemInput) => Promise<AiConfigItem | null>
-    deleteItem: (id: string) => Promise<boolean>
-    listProjectSelections: (projectId: string) => Promise<AiConfigProjectSelection[]>
-    setProjectSelection: (input: SetAiConfigProjectSelectionInput) => Promise<void>
-    removeProjectSelection: (projectId: string, itemId: string, provider?: string) => Promise<boolean>
-    discoverContextFiles: (projectPath: string) => Promise<ContextFileInfo[]>
-    readContextFile: (filePath: string, projectPath: string) => Promise<string>
-    writeContextFile: (filePath: string, content: string, projectPath: string) => Promise<void>
-    getContextTree: (projectPath: string, projectId: string) => Promise<ContextTreeEntry[]>
-    reconcileProjectSkills: (projectId: string, projectPath: string) => Promise<number>
-    loadLibraryItem: (input: LoadLibraryItemInput) => Promise<ContextTreeEntry>
-    syncLinkedFile: (projectId: string, projectPath: string, itemId: string, provider?: CliProvider) => Promise<ContextTreeEntry>
-    unlinkFile: (projectId: string, itemId: string) => Promise<boolean>
-    renameContextFile: (oldPath: string, newPath: string, projectPath: string) => Promise<void>
-    deleteContextFile: (filePath: string, projectPath: string, projectId: string) => Promise<void>
-    deleteComputerFile: (filePath: string) => Promise<void>
-    createComputerFile: (provider: string, category: 'skill', slug: string) => Promise<ComputerFileEntry>
-    writeComputerSkill: (provider: CliProvider, slug: string, content: string) => Promise<void>
-    discoverMcpConfigs: (projectPath: string) => Promise<McpConfigFileResult[]>
-    writeMcpServer: (input: WriteMcpServerInput) => Promise<void>
-    removeMcpServer: (input: RemoveMcpServerInput) => Promise<void>
-    discoverComputerMcpConfigs: () => Promise<McpConfigFileResult[]>
-    writeComputerMcpServer: (input: WriteComputerMcpServerInput) => Promise<void>
-    removeComputerMcpServer: (input: RemoveComputerMcpServerInput) => Promise<void>
-    listProviders: () => Promise<CliProviderInfo[]>
-    toggleProvider: (id: string, enabled: boolean) => Promise<void>
-    getProjectProviders: (projectId: string) => Promise<CliProvider[]>
-    setProjectProviders: (projectId: string, providers: CliProvider[]) => Promise<void>
-    needsSync: (projectId: string, projectPath: string) => Promise<boolean>
-    getProjectStaleSkillCount: (projectId: string, projectPath: string) => Promise<number>
-    syncAll: (input: SyncAllInput) => Promise<SyncResult>
-    checkSyncStatus: (projectId: string, projectPath: string) => Promise<SyncConflict[]>
-    getLibraryInstructions: (variantId?: string) => Promise<string>
-    saveLibraryInstructions: (content: string, variantId?: string) => Promise<void>
-    listInstructionVariants: () => Promise<AiConfigItem[]>
-    getProjectInstructionVariant: (projectId: string) => Promise<AiConfigItem | null>
-    setProjectInstructionVariant: (projectId: string, variantItemId: string | null, projectPath?: string) => Promise<void>
-    getRootInstructions: (projectId: string, projectPath: string) => Promise<RootInstructionsResult>
-    saveInstructionsContent: (projectId: string, projectPath: string, content: string) => Promise<RootInstructionsResult>
-    saveRootInstructions: (projectId: string, projectPath: string, content: string) => Promise<RootInstructionsResult>
-    readProviderInstructions: (projectPath: string, provider: CliProvider) => Promise<ProviderFileContent>
-    pushProviderInstructions: (projectId: string, projectPath: string, provider: CliProvider, content: string) => Promise<RootInstructionsResult>
-    pullProviderInstructions: (projectId: string, projectPath: string, provider: CliProvider) => Promise<RootInstructionsResult>
-    getProjectSkillsStatus: (projectId: string, projectPath: string) => Promise<ProjectSkillStatus[]>
-    readProviderSkill: (projectPath: string, provider: CliProvider, itemId: string) => Promise<ProviderFileContent>
-    getExpectedSkillContent: (projectPath: string, provider: CliProvider, itemId: string) => Promise<string>
-    pullProviderSkill: (projectId: string, projectPath: string, provider: CliProvider, itemId: string) => Promise<ProjectSkillStatus>
-    getComputerFiles: () => Promise<ComputerFileEntry[]>
-    checkSlayConfigured: (projectPath: string) => Promise<boolean>
-    setupSlay: (projectPath: string, projectId?: string) => Promise<{ ok: boolean; error?: string }>
-
-    // Marketplace
-    marketplace: {
-      listRegistries: () => Promise<SkillRegistry[]>
-      addRegistry: (input: AddRegistryInput) => Promise<SkillRegistry>
-      removeRegistry: (registryId: string) => Promise<boolean>
-      toggleRegistry: (registryId: string, enabled: boolean) => Promise<void>
-      refreshRegistry: (registryId: string) => Promise<SkillRegistryEntry[]>
-      refreshAll: () => Promise<void>
-      listEntries: (input?: ListEntriesInput) => Promise<SkillRegistryEntry[]>
-      installSkill: (input: InstallSkillInput) => Promise<AiConfigItem>
-      checkUpdates: () => Promise<SkillUpdateInfo[]>
-      updateSkill: (itemId: string, entryId: string) => Promise<AiConfigItem>
-      unlinkSkill: (itemId: string) => Promise<AiConfigItem>
-      ensureFresh: () => Promise<void>
-    }
   }
   screenshot: {
     captureView: (viewId: string) => Promise<{ success: boolean; path?: string }>

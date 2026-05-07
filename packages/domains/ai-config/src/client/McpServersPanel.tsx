@@ -373,7 +373,7 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
 
       if (keyChanged && editProviders) {
         for (const provider of editProviders) {
-          await window.api.aiConfig.removeMcpServer({
+          await getTrpcVanillaClient().aiConfig.removeMcpServer.mutate({
             projectPath,
             provider,
             serverKey: editTarget.originalKey
@@ -383,7 +383,7 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
 
       for (const [provider, enabled] of Object.entries(providers)) {
         if (!enabled) continue
-        await window.api.aiConfig.writeMcpServer({
+        await getTrpcVanillaClient().aiConfig.writeMcpServer.mutate({
           projectPath,
           provider: provider as McpTarget,
           serverKey: serverKey.trim(),
@@ -635,9 +635,9 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
     setLoading(true)
     try {
       const [results, custom, providers] = await Promise.all([
-        window.api.aiConfig.discoverMcpConfigs(projectPath),
+        getTrpcVanillaClient().aiConfig.discoverMcpConfigs.query({ projectPath }),
         loadCustomServers(),
-        window.api.aiConfig.getProjectProviders(projectId)
+        getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId })
       ])
       setConfigs(results)
       setCustomServers(custom)
@@ -728,7 +728,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
     if (!config) return
     for (const provider of enabledMcpTargets) {
       if (server.providers.includes(provider)) continue
-      await window.api.aiConfig.writeMcpServer({
+      await getTrpcVanillaClient().aiConfig.writeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key,
@@ -741,7 +741,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
   const disableServer = async (server: MergedServer) => {
     for (const provider of server.providers) {
       if (!writableProviders.has(provider)) continue
-      await window.api.aiConfig.removeMcpServer({
+      await getTrpcVanillaClient().aiConfig.removeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key

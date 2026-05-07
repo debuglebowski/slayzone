@@ -129,7 +129,7 @@ import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnost
 import { detectPreviousCrash, writeBootStub, writeCleanShutdownSentinel, scanCrashDumps } from './lifecycle/sentinel'
 import { acquireLockWithSelfHeal, lockOutcomeIsAcquired, type LockOutcome } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
-import { registerAiConfigHandlers } from '@slayzone/ai-config/electron'
+import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { registerIntegrationHandlers, ensureIntegrationSchema, ElectronStorageAdapter } from '@slayzone/integrations/electron'
 import { startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
 import { closeAllFileWatchers } from '@slayzone/file-editor/server'
@@ -1302,8 +1302,8 @@ app.whenReady().then(async () => {
   logBoot('files registered')
   // xterm-mode turn detection: every Enter press in a PTY = turn boundary.
   onPtyInputSubmit(initPtyTurnSubscriber(db))
-  registerAiConfigHandlers(ipcMain, db)
-  logBoot('ai-config handlers registered')
+  initAiConfigOps(db)
+  logBoot('ai-config ops initialized')
   setStorageAdapter(new ElectronStorageAdapter())
   const integrationHandles = registerIntegrationHandlers(ipcMain, db, { enableTestChannels: isPlaywright })
   logBoot('integration handlers registered')

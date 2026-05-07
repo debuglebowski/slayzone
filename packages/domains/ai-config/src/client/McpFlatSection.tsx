@@ -106,7 +106,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
     setLoading(true)
     try {
       const [results, customServersRaw] = await Promise.all([
-        window.api.aiConfig.discoverMcpConfigs(projectPath),
+        getTrpcVanillaClient().aiConfig.discoverMcpConfigs.query({ projectPath }),
         getTrpcVanillaClient().settings.get.query({ key: 'mcp_custom_servers' })
       ])
       setConfigs(results)
@@ -157,7 +157,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
       let removed = 0
       for (const provider of server.providers) {
         if (!writableProviders.has(provider)) continue
-        await window.api.aiConfig.removeMcpServer({ projectPath, provider, serverKey: server.key })
+        await getTrpcVanillaClient().aiConfig.removeMcpServer.mutate({ projectPath, provider, serverKey: server.key })
         removed += 1
       }
       if (expandedKey === server.key) setExpandedKey(null)
@@ -178,7 +178,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
       let synced = 0
       for (const provider of enabledProviders) {
         if (!writableProviders.has(provider)) continue
-        await window.api.aiConfig.writeMcpServer({
+        await getTrpcVanillaClient().aiConfig.writeMcpServer.mutate({
           projectPath,
           provider,
           serverKey: curated.id,
@@ -249,7 +249,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
     }
     setSyncingProvider({ serverKey: server.key, provider })
     try {
-      await window.api.aiConfig.writeMcpServer({
+      await getTrpcVanillaClient().aiConfig.writeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key,
@@ -289,7 +289,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
       for (const provider of mcpProviders) {
         if (!writableProviders.has(provider)) continue
         if (getProviderSyncHealth(server, provider) === 'synced') continue
-        await window.api.aiConfig.writeMcpServer({
+        await getTrpcVanillaClient().aiConfig.writeMcpServer.mutate({
           projectPath,
           provider,
           serverKey: server.key,
@@ -331,7 +331,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
       for (const provider of mcpProviders) {
         if (!customProviders[provider]) continue
         if (!writableProviders.has(provider)) continue
-        await window.api.aiConfig.writeMcpServer({
+        await getTrpcVanillaClient().aiConfig.writeMcpServer.mutate({
           projectPath,
           provider,
           serverKey: customKey.trim(),

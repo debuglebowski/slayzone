@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Sparkles } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@slayzone/ui'
 import type { AiConfigItem, CliProvider } from '../shared'
@@ -20,8 +21,8 @@ export function LibraryItemPicker({ projectId, projectPath, existingLinks, onLoa
   useEffect(() => {
     void (async () => {
       const [skills, providers] = await Promise.all([
-        window.api.aiConfig.listItems({ scope: 'library', type: 'skill' }),
-        window.api.aiConfig.getProjectProviders(projectId)
+        getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' }),
+        getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId })
       ])
       setItems(skills)
       setEnabledProviders(providers)
@@ -34,7 +35,7 @@ export function LibraryItemPicker({ projectId, projectPath, existingLinks, onLoa
     if (alreadyLinked(item.id)) return
     setLoading(true)
     try {
-      await window.api.aiConfig.loadLibraryItem({
+      await getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
         projectId,
         projectPath,
         itemId: item.id,

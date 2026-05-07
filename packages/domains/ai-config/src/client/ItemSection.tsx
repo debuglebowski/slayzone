@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   AlertTriangle, ChevronDown, ChevronRight,
   Plus, Loader2, X
@@ -101,7 +102,7 @@ function useSkillItem({
 
   const saveContent = useCallback(async (text: string) => {
     try {
-      await window.api.aiConfig.updateItem({ id: item.id, content: text })
+      await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content: text })
       setExpectedContents({})
       onChanged()
     } catch { /* silent */ }
@@ -121,7 +122,7 @@ function useSkillItem({
   const handleSlugSave = async () => {
     setSavingSlug(true)
     try {
-      await window.api.aiConfig.updateItem({ id: item.id, slug })
+      await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, slug })
       setSlugDirty(false)
       setExpectedContents({})
       onChanged()
@@ -134,7 +135,7 @@ function useSkillItem({
 
   const handleRevert = async () => {
     try {
-      await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id)
+      await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id })
       toast.success(`Reverted ${item.slug} to library`)
       onChanged()
     } catch (err) {
@@ -144,8 +145,8 @@ function useSkillItem({
 
   const loadDiskAndExpected = useCallback(async (provider: CliProvider) => {
     const [disk, expected] = await Promise.all([
-      window.api.aiConfig.readProviderSkill(projectPath, provider, item.id),
-      window.api.aiConfig.getExpectedSkillContent(projectPath, provider, item.id),
+      getTrpcVanillaClient().aiConfig.readProviderSkill.query({ projectPath, provider, itemId: item.id }),
+      getTrpcVanillaClient().aiConfig.getExpectedSkillContent.query({ projectPath, provider, itemId: item.id }),
     ])
     setDiskContents(prev => ({ ...prev, [provider]: disk.exists ? disk.content : '' }))
     setExpectedContents(prev => ({ ...prev, [provider]: expected }))
@@ -167,7 +168,7 @@ function useSkillItem({
   const handlePush = async (provider: CliProvider) => {
     setSyncingProvider(provider)
     try {
-      await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id, provider)
+      await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id, provider })
       const expected = expectedContents[provider]
       if (expected !== undefined) {
         setDiskContents(prev => ({ ...prev, [provider]: expected }))
@@ -181,7 +182,7 @@ function useSkillItem({
   const handlePull = async (provider: CliProvider) => {
     setPullingProvider(provider)
     try {
-      await window.api.aiConfig.pullProviderSkill(projectId, projectPath, provider, item.id)
+      await getTrpcVanillaClient().aiConfig.pullProviderSkill.mutate({ projectId, projectPath, provider, itemId: item.id })
       onChanged()
     } finally {
       setPullingProvider(null)
@@ -191,7 +192,7 @@ function useSkillItem({
   const handleSyncAll = async () => {
     setSyncingAll(true)
     try {
-      await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id)
+      await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id })
       const updated: Partial<Record<CliProvider, string>> = {}
       for (const { provider } of providerRows) {
         const expected = expectedContents[provider]
@@ -208,7 +209,7 @@ function useSkillItem({
     const nextContent = repairSkillFrontmatter(item.slug, content)
     setContent(nextContent)
     try {
-      await window.api.aiConfig.updateItem({ id: item.id, content: nextContent })
+      await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content: nextContent })
       setExpectedContents({})
       onChanged()
     } catch {
@@ -476,9 +477,9 @@ export function ItemSection({
 
   const handleRemove = async (itemId: string, isLocal: boolean) => {
     if (isLocal) {
-      await window.api.aiConfig.deleteItem(itemId)
+      await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: itemId })
     } else {
-      await window.api.aiConfig.removeProjectSelection(projectId, itemId)
+      await getTrpcVanillaClient().aiConfig.removeProjectSelection.mutate({ projectId, itemId })
     }
     onChanged()
   }
