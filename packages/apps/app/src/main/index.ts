@@ -1196,25 +1196,6 @@ app.whenReady().then(async () => {
   startArtifactWatcher(join(getDataRoot(), 'artifacts'))
   logBoot('artifact watcher started')
 
-  // Feedback handlers (lightweight, no domain package)
-  ipcMain.handle('db:feedback:listThreads', () => {
-    return db.prepare('SELECT id, title, discord_thread_id, created_at FROM feedback_threads ORDER BY created_at DESC').all()
-  })
-  ipcMain.handle('db:feedback:createThread', (_, input: { id: string; title: string; discord_thread_id: string | null }) => {
-    db.prepare('INSERT INTO feedback_threads (id, title, discord_thread_id) VALUES (?, ?, ?)').run(input.id, input.title, input.discord_thread_id)
-  })
-  ipcMain.handle('db:feedback:getMessages', (_, threadId: string) => {
-    return db.prepare('SELECT id, thread_id, content, created_at FROM feedback_messages WHERE thread_id = ? ORDER BY created_at ASC').all(threadId)
-  })
-  ipcMain.handle('db:feedback:addMessage', (_, input: { id: string; thread_id: string; content: string }) => {
-    db.prepare('INSERT INTO feedback_messages (id, thread_id, content) VALUES (?, ?, ?)').run(input.id, input.thread_id, input.content)
-  })
-  ipcMain.handle('db:feedback:updateThreadDiscordId', (_, threadId: string, discordThreadId: string) => {
-    db.prepare('UPDATE feedback_threads SET discord_thread_id = ? WHERE id = ?').run(discordThreadId, threadId)
-  })
-  ipcMain.handle('db:feedback:deleteThread', (_, threadId: string) => {
-    db.prepare('DELETE FROM feedback_threads WHERE id = ?').run(threadId)
-  })
 
   wireNativeThemeBridge()
   registerPtyHandlers(ipcMain, db)
@@ -1377,6 +1358,20 @@ app.whenReady().then(async () => {
       }
       return shell.openPath(absPath)
     },
+
+    // db:feedback
+    feedbackListThreads: () =>
+      db.prepare('SELECT id, title, discord_thread_id, created_at FROM feedback_threads ORDER BY created_at DESC').all(),
+    feedbackCreateThread: (input) =>
+      db.prepare('INSERT INTO feedback_threads (id, title, discord_thread_id) VALUES (?, ?, ?)').run(input.id, input.title, input.discord_thread_id),
+    feedbackGetMessages: (threadId) =>
+      db.prepare('SELECT id, thread_id, content, created_at FROM feedback_messages WHERE thread_id = ? ORDER BY created_at ASC').all(threadId),
+    feedbackAddMessage: (input) =>
+      db.prepare('INSERT INTO feedback_messages (id, thread_id, content) VALUES (?, ?, ?)').run(input.id, input.thread_id, input.content),
+    feedbackUpdateThreadDiscordId: (threadId, discordThreadId) =>
+      db.prepare('UPDATE feedback_threads SET discord_thread_id = ? WHERE id = ?').run(discordThreadId, threadId),
+    feedbackDeleteThread: (threadId) =>
+      db.prepare('DELETE FROM feedback_threads WHERE id = ?').run(threadId),
 
     // app metadata
     appGetVersion: () => app.getVersion(),

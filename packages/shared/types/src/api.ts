@@ -125,14 +125,6 @@ export interface PtyCreateOptions {
 
 // ElectronAPI interface - the IPC contract between renderer and main
 export interface ElectronAPI {
-  feedback: {
-    listThreads: () => Promise<Array<{ id: string; title: string; discord_thread_id: string | null; created_at: string }>>
-    createThread: (input: { id: string; title: string; discord_thread_id: string | null }) => Promise<void>
-    getMessages: (threadId: string) => Promise<Array<{ id: string; thread_id: string; content: string; created_at: string }>>
-    addMessage: (input: { id: string; thread_id: string; content: string }) => Promise<void>
-    updateThreadDiscordId: (threadId: string, discordThreadId: string) => Promise<void>
-    deleteThread: (threadId: string) => Promise<void>
-  }
   shortcuts: {
     changed: () => void
   }

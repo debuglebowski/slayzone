@@ -57,6 +57,14 @@ export type AppDeps = {
   appGetZoomFactor: () => number
   appCheckCliInstalled: () => { installed: boolean; path?: string; mode?: string; error?: string } | Promise<{ installed: boolean; path?: string; mode?: string; error?: string }>
   appInstallCli: () => Promise<{ ok: boolean; path?: string; error?: string }>
+
+  // db:feedback (6 ops — pure DB)
+  feedbackListThreads: () => unknown
+  feedbackCreateThread: (input: { id: string; title: string; discord_thread_id: string | null }) => void
+  feedbackGetMessages: (threadId: string) => unknown
+  feedbackAddMessage: (input: { id: string; thread_id: string; content: string }) => void
+  feedbackUpdateThreadDiscordId: (threadId: string, discordThreadId: string) => void
+  feedbackDeleteThread: (threadId: string) => void
 }
 
 let appDeps: AppDeps | null = null

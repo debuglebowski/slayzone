@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { useAction } from 'convex/react'
 import { MessageSquare, Plus, Send, ArrowLeft, Trash2 } from 'lucide-react'
 import {
@@ -67,12 +68,12 @@ export function FeedbackDialog(): React.JSX.Element {
   const selectedThread = threads.find((t) => t.id === selectedId) ?? null
 
   const loadThreads = useCallback(async () => {
-    const rows = await window.api.feedback.listThreads()
+    const rows = await getTrpcVanillaClient().app.feedback.listThreads.query() as FeedbackThread[]
     setThreads(rows)
   }, [])
 
   const loadMessages = useCallback(async (threadId: string) => {
-    const rows = await window.api.feedback.getMessages(threadId)
+    const rows = await getTrpcVanillaClient().app.feedback.getMessages.query({ threadId }) as FeedbackMessage[]
     setMessages(rows)
   }, [])
 
@@ -117,7 +118,7 @@ export function FeedbackDialog(): React.JSX.Element {
       if (thread.discord_thread_id) {
         await markDeleted({ threadId: thread.discord_thread_id }).catch(() => {})
       }
-      await window.api.feedback.deleteThread(thread.id)
+      await getTrpcVanillaClient().app.feedback.deleteThread.mutate({ threadId: thread.id })
       if (selectedId === thread.id) {
         setSelectedId(null)
         setMessages([])
@@ -146,12 +147,12 @@ export function FeedbackDialog(): React.JSX.Element {
           metadata: { appVersion: version }
         })
 
-        await window.api.feedback.createThread({
+        await getTrpcVanillaClient().app.feedback.createThread.mutate({
           id: threadId,
           title,
           discord_thread_id: result.threadId ?? null
         })
-        await window.api.feedback.addMessage({
+        await getTrpcVanillaClient().app.feedback.addMessage.mutate({
           id: crypto.randomUUID(),
           thread_id: threadId,
           content: text
@@ -168,10 +169,10 @@ export function FeedbackDialog(): React.JSX.Element {
         })
 
         if (result.threadId && !selectedThread.discord_thread_id) {
-          await window.api.feedback.updateThreadDiscordId(selectedThread.id, result.threadId)
+          await getTrpcVanillaClient().app.feedback.updateThreadDiscordId.mutate({ threadId: selectedThread.id, discordThreadId: result.threadId })
         }
 
-        await window.api.feedback.addMessage({
+        await getTrpcVanillaClient().app.feedback.addMessage.mutate({
           id: crypto.randomUUID(),
           thread_id: selectedThread.id,
           content: text

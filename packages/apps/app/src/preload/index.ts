@@ -26,14 +26,6 @@ window.addEventListener('paste', (e) => {
 
 // Custom APIs for renderer
 const api: ElectronAPI = {
-  feedback: {
-    listThreads: () => ipcRenderer.invoke('db:feedback:listThreads'),
-    createThread: (input) => ipcRenderer.invoke('db:feedback:createThread', input),
-    getMessages: (threadId) => ipcRenderer.invoke('db:feedback:getMessages', threadId),
-    addMessage: (input) => ipcRenderer.invoke('db:feedback:addMessage', input),
-    updateThreadDiscordId: (threadId, discordThreadId) => ipcRenderer.invoke('db:feedback:updateThreadDiscordId', threadId, discordThreadId),
-    deleteThread: (threadId) => ipcRenderer.invoke('db:feedback:deleteThread', threadId),
-  },
   shortcuts: {
     changed: () => ipcRenderer.send('shortcuts:changed'),
   },
