@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 interface UseSlayNudgeOptions {
   projectId: string | null
@@ -11,7 +12,7 @@ export function useSlayNudge({ projectId, projectPath }: UseSlayNudgeOptions) {
 
   useEffect(() => {
     if (!projectId) return
-    window.api.settings.get(`slay_nudge_dismissed:${projectId}`).then((val) => {
+    getTrpcVanillaClient().settings.get.query({ key: `slay_nudge_dismissed:${projectId}` }).then((val) => {
       setDismissed(val === '1')
     })
   }, [projectId])
@@ -26,7 +27,7 @@ export function useSlayNudge({ projectId, projectPath }: UseSlayNudgeOptions) {
   const dismiss = () => {
     if (!projectId) return
     setDismissed(true)
-    window.api.settings.set(`slay_nudge_dismissed:${projectId}`, '1')
+    getTrpcVanillaClient().settings.set.mutate({ key: `slay_nudge_dismissed:${projectId}`, value: '1' })
   }
 
   const recheck = useCallback(() => {

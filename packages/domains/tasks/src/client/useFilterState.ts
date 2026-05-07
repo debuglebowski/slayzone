@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useMemo } from 'react'
 import { create } from 'zustand'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { type FilterState, type ViewConfig, defaultFilterState, defaultCardProperties, defaultBoardConfig, defaultListConfig } from './FilterState'
 
 function getFilterKey(projectId: string): string {
@@ -84,7 +85,7 @@ function flushOne(projectId: string): void {
   const pending = pendingSaves.get(projectId)
   if (pending) {
     pendingSaves.delete(projectId)
-    window.api.settings.set(getFilterKey(projectId), JSON.stringify(pending))
+    getTrpcVanillaClient().settings.set.mutate({ key: getFilterKey(projectId), value: JSON.stringify(pending) })
   }
 }
 
@@ -96,7 +97,7 @@ export const useFilterStore = create<FilterStore>((set, get) => ({
     const s = get()
     if (s.loaded[projectId] || s.loading[projectId]) return
     set({ loading: { ...s.loading, [projectId]: true } })
-    window.api.settings.get(getFilterKey(projectId)).then((value) => {
+    getTrpcVanillaClient().settings.get.query({ key: getFilterKey(projectId) }).then((value) => {
       let next: FilterState = defaultFilterState
       if (value) {
         try { next = migrateFilterState(JSON.parse(value)) } catch { /* keep default */ }

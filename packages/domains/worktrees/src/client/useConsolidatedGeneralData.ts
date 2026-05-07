@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest } from '../shared/types'
 import {
@@ -249,7 +250,7 @@ export function useConsolidatedGeneralData(
   /** Resolve worktree path params (shared by direct create and ask-dialog flows) */
   const resolveWorktreeParams = useCallback(async () => {
     if (!projectPath) return null
-    const basePathTemplate = (await window.api.settings.get('worktree_base_path')) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+    const basePathTemplate = (await getTrpcVanillaClient().settings.get.query({ key: 'worktree_base_path' })) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
     const basePath = resolveWorktreeBasePathTemplate(basePathTemplate, projectPath)
     const branch = slugify(task.title) || `task-${task.id.slice(0, 8)}`
     const worktreePath = joinWorktreePath(basePath, branch)
@@ -315,7 +316,7 @@ export function useConsolidatedGeneralData(
     if (!projectPath) return
     setCreateError(null)
     try {
-      const basePathTemplate = (await window.api.settings.get('worktree_base_path')) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+      const basePathTemplate = (await getTrpcVanillaClient().settings.get.query({ key: 'worktree_base_path' })) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
       const basePath = resolveWorktreeBasePathTemplate(basePathTemplate, projectPath)
       // Use the branch name as the directory name
       const dirName = sourceBranch.replace(/\//g, '-')

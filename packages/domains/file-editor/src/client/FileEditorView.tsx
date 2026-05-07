@@ -227,8 +227,12 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
     if (!activeFilePath) return
     setFileViewModes(prev => ({ ...prev, [activeFilePath]: mode }))
   }, [activeFilePath])
+  const setBannerOpen = useCallback((open: boolean) => {
+    void getTrpcVanillaClient().settings.set.mutate({ key: 'editor_settings_banner_open', value: open ? '1' : '0' })
+    window.dispatchEvent(new Event('sz:settings-changed'))
+  }, [])
   const writeAppearance = useCallback((key: string, value: string) => {
-    void window.api.settings.set(key, value)
+    void getTrpcVanillaClient().settings.set.mutate({ key: key, value: value })
     window.dispatchEvent(new Event('sz:settings-changed'))
   }, [])
   const [sidebarMode, setSidebarMode] = useState<'tree' | 'search'>('tree')

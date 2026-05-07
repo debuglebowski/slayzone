@@ -117,7 +117,7 @@ import { handleTerminalStateChange } from '@slayzone/projects/server'
 import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/electron'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
-import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/electron'
+import { wireNativeThemeBridge } from '@slayzone/settings/electron'
 import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/electron'
 import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalModes } from '@slayzone/terminal/server'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
@@ -1195,7 +1195,6 @@ app.whenReady().then(async () => {
   const notifyTasksChanged = (): void => { mainWindow?.webContents.send('tasks:changed') }
   registerTaskHandlers(ipcMain, db, notifyTasksChanged)
   registerTaskTemplateHandlers(ipcMain, db)
-  registerSettingsHandlers(ipcMain, db)
   logBoot('core domain handlers registered')
 
   // Feedback handlers (lightweight, no domain package)
@@ -1218,7 +1217,7 @@ app.whenReady().then(async () => {
     db.prepare('DELETE FROM feedback_threads WHERE id = ?').run(threadId)
   })
 
-  registerThemeHandlers(ipcMain, db)
+  wireNativeThemeBridge()
   registerUsageHandlers(ipcMain, db)
   registerPtyHandlers(ipcMain, db)
   logBoot('pty handlers registered')

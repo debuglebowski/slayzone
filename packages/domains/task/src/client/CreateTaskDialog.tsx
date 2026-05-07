@@ -129,7 +129,7 @@ export function CreateTaskDialog({
   ): Promise<void> => {
     const isAutoCreateEnabledForProject = async (projectId: string): Promise<boolean> => {
       const [globalSetting, projects] = await Promise.all([
-        window.api.settings.get('auto_create_worktree_on_task_create'),
+        getTrpcVanillaClient().settings.get.query({ key: 'auto_create_worktree_on_task_create' }),
         getTrpcVanillaClient().projects.list.query()
       ])
       const project = projects.find((p) => p.id === projectId)

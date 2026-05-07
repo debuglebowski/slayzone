@@ -115,23 +115,8 @@ const api: ElectronAPI = {
     updateThreadDiscordId: (threadId, discordThreadId) => ipcRenderer.invoke('db:feedback:updateThreadDiscordId', threadId, discordThreadId),
     deleteThread: (threadId) => ipcRenderer.invoke('db:feedback:deleteThread', threadId),
   },
-  settings: {
-    get: (key) => ipcRenderer.invoke('db:settings:get', key),
-    set: (key, value) => ipcRenderer.invoke('db:settings:set', key, value),
-    getAll: () => ipcRenderer.invoke('db:settings:getAll')
-  },
   shortcuts: {
     changed: () => ipcRenderer.send('shortcuts:changed'),
-  },
-  theme: {
-    getEffective: () => ipcRenderer.invoke('theme:get-effective'),
-    getSource: () => ipcRenderer.invoke('theme:get-source'),
-    set: (theme: 'light' | 'dark' | 'system') => ipcRenderer.invoke('theme:set', theme),
-    onChange: (callback: (theme: 'light' | 'dark') => void) => {
-      const handler = (_event: unknown, theme: 'light' | 'dark') => callback(theme)
-      ipcRenderer.on('theme:changed', handler)
-      return () => ipcRenderer.removeListener('theme:changed', handler)
-    }
   },
   shell: {
     openExternal: (

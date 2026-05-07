@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   cn,
   Popover,
@@ -95,7 +96,7 @@ function useBoostStatus() {
   useEffect(() => {
     if (Date.now() >= PROMO_END.getTime()) return
 
-    window.api.settings.get('default_terminal_mode').then((mode) => {
+    getTrpcVanillaClient().settings.get.query({ key: 'default_terminal_mode' }).then((mode) => {
       if (!mode || !mode.toLowerCase().includes('claude')) return
       setVisible(true)
 

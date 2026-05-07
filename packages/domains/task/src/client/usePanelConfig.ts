@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { PanelConfig, PanelView, WebPanelDefinition } from '../shared/types'
 import { DEFAULT_PANEL_CONFIG, isPanelEnabled, orderIdToTaskId, orderIdToHomeId } from '../shared/types'
 import { mergePanelOrder, mergePredefinedWebPanels } from '../shared/panel-config'
@@ -7,7 +8,7 @@ const SETTINGS_KEY = 'panel_config'
 const CHANGE_EVENT = 'panel-config-changed'
 
 function loadConfig(): Promise<PanelConfig> {
-  return window.api.settings.get(SETTINGS_KEY).then(raw => {
+  return getTrpcVanillaClient().settings.get.query({ key: SETTINGS_KEY }).then(raw => {
     if (raw) {
       try {
         return mergePanelOrder(mergePredefinedWebPanels(JSON.parse(raw) as PanelConfig))
@@ -43,7 +44,7 @@ export function usePanelConfig(): {
 
   const updateConfig = useCallback(async (next: PanelConfig) => {
     setConfig(next)
-    await window.api.settings.set(SETTINGS_KEY, JSON.stringify(next))
+    await getTrpcVanillaClient().settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify(next) })
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT))
   }, [])
 

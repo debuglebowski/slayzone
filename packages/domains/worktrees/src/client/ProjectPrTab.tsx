@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   ExternalLink,
   GitPullRequest,
@@ -38,7 +39,7 @@ function usePrFilterState(projectId: string | null) {
     if (!key) return
     ;(async () => {
       try {
-        const value = await window.api.settings.get(key)
+        const value = await getTrpcVanillaClient().settings.get.query({ key: key })
         if (value) setFilter({ ...DEFAULT_FILTER, ...JSON.parse(value) })
       } catch { /* ignore */ }
     })()
@@ -50,7 +51,7 @@ function usePrFilterState(projectId: string | null) {
       if (key) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
-          window.api.settings.set(key, JSON.stringify(updated))
+          getTrpcVanillaClient().settings.set.mutate({ key: key, value: JSON.stringify(updated) })
         }, 500)
       }
       return updated

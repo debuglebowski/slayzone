@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
@@ -56,10 +57,10 @@ export function UserSettingsDialog({
 
   useEffect(() => {
     if (open) {
-      window.api.settings.get('default_terminal_mode').then(m => {
+      getTrpcVanillaClient().settings.get.query({ key: 'default_terminal_mode' }).then(m => {
         if (m) setDefaultTerminalMode(m as TerminalMode)
       })
-      window.api.settings.get('default_tab_display_mode').then(m => {
+      getTrpcVanillaClient().settings.get.query({ key: 'default_tab_display_mode' }).then(m => {
         if (m === 'chat' || m === 'xterm') setDefaultTabDisplayMode(m)
       })
     }
@@ -77,20 +78,20 @@ export function UserSettingsDialog({
   useEffect(() => {
     if (!providerSupportsChat && defaultTabDisplayMode === 'chat') {
       setDefaultTabDisplayMode('xterm')
-      window.api.settings.set('default_tab_display_mode', 'xterm')
+      getTrpcVanillaClient().settings.set.mutate({ key: 'default_tab_display_mode', value: 'xterm' })
       window.dispatchEvent(new CustomEvent('sz:settings-changed'))
     }
   }, [providerSupportsChat, defaultTabDisplayMode])
 
   const onDefaultTerminalModeChange = useCallback((mode: TerminalMode) => {
     setDefaultTerminalMode(mode)
-    window.api.settings.set('default_terminal_mode', mode)
+    getTrpcVanillaClient().settings.set.mutate({ key: 'default_terminal_mode', value: mode })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
   }, [])
 
   const onDefaultTabDisplayModeChange = useCallback((mode: DefaultDisplayMode) => {
     setDefaultTabDisplayMode(mode)
-    window.api.settings.set('default_tab_display_mode', mode)
+    getTrpcVanillaClient().settings.set.mutate({ key: 'default_tab_display_mode', value: mode })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
   }, [])
 

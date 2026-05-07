@@ -1,33 +1,31 @@
-import { nativeTheme, BrowserWindow } from 'electron'
-import type { IpcMain } from 'electron'
+import { nativeTheme } from 'electron'
 import type { Database } from 'better-sqlite3'
+import { settingsEvents } from '../server/events'
 
-export function registerThemeHandlers(ipcMain: IpcMain, db: Database): void {
+export function getEffectiveTheme(): 'dark' | 'light' {
+  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+}
 
-  // Get current effective theme (what's actually showing)
-  ipcMain.handle('theme:get-effective', () => {
-    return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-  })
+export function getThemeSource(): 'system' | 'light' | 'dark' {
+  return nativeTheme.themeSource as 'system' | 'light' | 'dark'
+}
 
-  // Get user's preference (light/dark/system)
-  ipcMain.handle('theme:get-source', () => {
-    return nativeTheme.themeSource
-  })
+export function setTheme(db: Database, theme: 'light' | 'dark' | 'system'): 'dark' | 'light' {
+  nativeTheme.themeSource = theme
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('theme', theme)
+  return getEffectiveTheme()
+}
 
-  // Set theme preference
-  ipcMain.handle('theme:set', (_, theme: 'light' | 'dark' | 'system') => {
-    nativeTheme.themeSource = theme
-    // Persist to database
-    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('theme', theme)
-    return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-  })
+let bridgeInstalled = false
 
-  // Listen for OS theme changes (only matters when themeSource is 'system')
+/**
+ * Wire nativeTheme OS-level events into settingsEvents. The renderer
+ * subscribes via tRPC `settings.onThemeChanged`. Idempotent.
+ */
+export function wireNativeThemeBridge(): void {
+  if (bridgeInstalled) return
+  bridgeInstalled = true
   nativeTheme.on('updated', () => {
-    const effective = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-    // Notify all windows
-    BrowserWindow.getAllWindows().forEach((win) => {
-      win.webContents.send('theme:changed', effective)
-    })
+    settingsEvents.emit('theme:changed', getEffectiveTheme())
   })
 }

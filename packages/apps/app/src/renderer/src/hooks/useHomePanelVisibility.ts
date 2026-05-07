@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
 
@@ -40,7 +41,7 @@ export function useHomePanelState(
   const flushSave = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (pendingRef.current) {
-      window.api.settings.set(getKey(projectId), JSON.stringify(pendingRef.current))
+      getTrpcVanillaClient().settings.set.mutate({ key: getKey(projectId), value: JSON.stringify(pendingRef.current) })
       pendingRef.current = null
     }
   }, [projectId])
@@ -48,7 +49,7 @@ export function useHomePanelState(
   // Load on mount / project change
   useEffect(() => {
     setState(DEFAULTS)
-    window.api.settings.get(getKey(projectId)).then((value) => {
+    getTrpcVanillaClient().settings.get.query({ key: getKey(projectId) }).then((value) => {
       if (value) {
         try { setState(parse(value)) } catch { /* use defaults */ }
       }
@@ -75,7 +76,7 @@ export function useHomePanelState(
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       pendingRef.current = null
-      window.api.settings.set(getKey(projectId), JSON.stringify(next))
+      getTrpcVanillaClient().settings.set.mutate({ key: getKey(projectId), value: JSON.stringify(next) })
     }, 500)
   }, [projectId])
 

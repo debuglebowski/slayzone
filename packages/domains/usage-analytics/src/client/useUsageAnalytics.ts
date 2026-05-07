@@ -27,7 +27,7 @@ export function useUsageAnalytics() {
   // Load enabled modes + default provider from settings on mount
   useEffect(() => {
     Promise.all([
-      window.api.settings.get('default_terminal_mode'),
+      getTrpcVanillaClient().settings.get.query({ key: 'default_terminal_mode' }),
       window.api.terminalModes.list()
     ]).then(([defaultMode, modes]) => {
       const options: ProviderOption[] = modes

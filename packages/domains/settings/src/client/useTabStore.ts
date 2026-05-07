@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
 import type { TaskStatus } from '@slayzone/task/shared'
@@ -319,9 +320,9 @@ export const useTabStore = create<TabState>()(
 
 // Eagerly load persisted state at module scope — runs before any component mounts,
 // eliminating race conditions between store hydration and React effects.
-export const tabStoreReady: Promise<void> = (typeof window !== 'undefined' && window.api?.settings
+export const tabStoreReady: Promise<void> = (typeof window !== 'undefined' && window.api?.app
   ? (performance.mark('sz:tabStore:start'),
-    window.api.settings.get('viewState')
+    getTrpcVanillaClient().settings.get.query({ key: 'viewState' })
   ).then((value) => {
     if (value) {
       try {
@@ -352,7 +353,7 @@ useTabStore.subscribe(
     if (!useTabStore.getState().isLoaded) return
     if (_debounceTimer) clearTimeout(_debounceTimer)
     _debounceTimer = setTimeout(() => {
-      window.api.settings.set('viewState', JSON.stringify(slice))
+      getTrpcVanillaClient().settings.set.mutate({ key: 'viewState', value: JSON.stringify(slice) })
     }, 500)
   },
   { equalityFn: shallow }

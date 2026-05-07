@@ -11,6 +11,7 @@
     "./client": "./src/client/index.ts"
   },
   "dependencies": {
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@posthog/react": "^1",
     "posthog-js": "^1"

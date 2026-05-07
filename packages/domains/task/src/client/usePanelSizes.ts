@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { PanelVisibility } from '../shared/types'
 
 export type PanelSize = number | 'auto'
@@ -67,7 +68,7 @@ export function resolveWidths(
 }
 
 function persist(sizes: PanelSizes): void {
-  window.api.settings.set(SETTINGS_KEY, JSON.stringify({ ...sizes, _v: STORAGE_VERSION }))
+  getTrpcVanillaClient().settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify({ ...sizes, _v: STORAGE_VERSION }) })
 }
 
 export function usePanelSizes(): [
@@ -80,7 +81,7 @@ export function usePanelSizes(): [
   const loaded = useRef(false)
 
   useEffect(() => {
-    window.api.settings.get(SETTINGS_KEY).then((stored) => {
+    getTrpcVanillaClient().settings.get.query({ key: SETTINGS_KEY }).then((stored) => {
       if (stored) {
         try {
           const parsed = JSON.parse(stored)

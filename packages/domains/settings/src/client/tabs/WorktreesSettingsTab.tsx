@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Plus, Trash2 } from 'lucide-react'
 import { Input, Label, Tooltip, TooltipTrigger, TooltipContent, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button } from '@slayzone/ui'
 import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
@@ -24,11 +25,11 @@ export function WorktreesSettingsTab() {
   const [presets, setPresets] = useState<CopyPreset[]>([])
 
   useEffect(() => {
-    window.api.settings.get('worktree_base_path').then(val => setWorktreeBasePath(val ?? ''))
-    window.api.settings.get('auto_create_worktree_on_task_create').then(val => setAutoCreateWorktreeOnTaskCreate(val === '1'))
-    window.api.settings.get('worktree_copy_behavior').then(val => setCopyBehavior((val as WorktreeCopyBehavior) ?? 'ask'))
-    window.api.settings.get('worktree_submodule_init').then(val => setSubmoduleInit((val as WorktreeSubmoduleInit) ?? 'auto'))
-    window.api.settings.get('worktree_copy_presets').then(val => {
+    getTrpcVanillaClient().settings.get.query({ key: 'worktree_base_path' }).then(val => setWorktreeBasePath(val ?? ''))
+    getTrpcVanillaClient().settings.get.query({ key: 'auto_create_worktree_on_task_create' }).then(val => setAutoCreateWorktreeOnTaskCreate(val === '1'))
+    getTrpcVanillaClient().settings.get.query({ key: 'worktree_copy_behavior' }).then(val => setCopyBehavior((val as WorktreeCopyBehavior) ?? 'ask'))
+    getTrpcVanillaClient().settings.get.query({ key: 'worktree_submodule_init' }).then(val => setSubmoduleInit((val as WorktreeSubmoduleInit) ?? 'auto'))
+    getTrpcVanillaClient().settings.get.query({ key: 'worktree_copy_presets' }).then(val => {
       const parsed = val ? JSON.parse(val) as CopyPreset[] : null
       setPresets(parsed && parsed.length > 0 ? parsed : FALLBACK_PRESETS)
     }).catch(() => setPresets(FALLBACK_PRESETS))
@@ -36,7 +37,7 @@ export function WorktreesSettingsTab() {
 
   const savePresets = useCallback((updated: CopyPreset[]) => {
     setPresets(updated)
-    window.api.settings.set('worktree_copy_presets', JSON.stringify(updated))
+    getTrpcVanillaClient().settings.set.mutate({ key: 'worktree_copy_presets', value: JSON.stringify(updated) })
   }, [])
 
   const addPreset = () => {
@@ -79,7 +80,7 @@ export function WorktreesSettingsTab() {
             value={worktreeBasePath}
             onChange={(e) => setWorktreeBasePath(e.target.value)}
             onBlur={() => {
-              window.api.settings.set('worktree_base_path', worktreeBasePath.trim())
+              getTrpcVanillaClient().settings.set.mutate({ key: 'worktree_base_path', value: worktreeBasePath.trim() })
             }}
           />
         </div>
@@ -92,10 +93,10 @@ export function WorktreesSettingsTab() {
               onChange={(e) => {
                 const enabled = e.target.checked
                 setAutoCreateWorktreeOnTaskCreate(enabled)
-                window.api.settings.set(
-                  'auto_create_worktree_on_task_create',
-                  enabled ? '1' : '0'
-                )
+                getTrpcVanillaClient().settings.set.mutate({
+                  key: 'auto_create_worktree_on_task_create',
+                  value: enabled ? '1' : '0',
+                })
               }}
             />
             <span>Create worktree for every new task</span>
@@ -119,7 +120,7 @@ export function WorktreesSettingsTab() {
             onValueChange={(value) => {
               const v = value as WorktreeCopyBehavior
               setCopyBehavior(v)
-              window.api.settings.set('worktree_copy_behavior', v)
+              getTrpcVanillaClient().settings.set.mutate({ key: 'worktree_copy_behavior', value: v })
             }}
           >
             <SelectTrigger className="max-w-sm">
@@ -145,7 +146,7 @@ export function WorktreesSettingsTab() {
             onValueChange={(value) => {
               const v = value as WorktreeSubmoduleInit
               setSubmoduleInit(v)
-              window.api.settings.set('worktree_submodule_init', v)
+              getTrpcVanillaClient().settings.set.mutate({ key: 'worktree_submodule_init', value: v })
             }}
           >
             <SelectTrigger className="max-w-sm">

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@slayzone/telemetry": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "framer-motion": "^12.29.0",
     "lucide-react": "^0.562.0"

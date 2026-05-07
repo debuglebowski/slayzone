@@ -46,7 +46,6 @@ export interface ChatSessionInfo {
   /** Resolved reasoning effort this session was spawned with. `null` = inherit. */
   chatEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null
 }
-import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import type { CreateWorktreeOpts, CreateWorktreeResult, CreateWorktreePhase, IgnoredFileNode, DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, ResolvedGraph, ForkGraphResult, GhPullRequest, GhPrTimelineEvent, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput, StashEntry, StashApplyResult, RepoEntry, ListProjectReposOpts } from '@slayzone/worktrees/shared'
 import type { MergeContext } from '@slayzone/task/shared'
 import type {
@@ -304,19 +303,8 @@ export interface ElectronAPI {
     updateThreadDiscordId: (threadId: string, discordThreadId: string) => Promise<void>
     deleteThread: (threadId: string) => Promise<void>
   }
-  settings: {
-    get: (key: string) => Promise<string | null>
-    set: (key: string, value: string) => Promise<void>
-    getAll: () => Promise<Record<string, string>>
-  }
   shortcuts: {
     changed: () => void
-  }
-  theme: {
-    getEffective: () => Promise<Theme>
-    getSource: () => Promise<ThemePreference>
-    set: (theme: ThemePreference) => Promise<Theme>
-    onChange: (callback: (theme: Theme) => void) => () => void
   }
   shell: {
     openExternal: (

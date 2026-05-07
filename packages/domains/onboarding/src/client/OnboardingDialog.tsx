@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Dialog, DialogContent } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
@@ -241,7 +242,7 @@ export function OnboardingDialog({
   }, [step, open])
 
   useEffect(() => {
-    window.api.settings.get('onboarding_completed').then((value) => {
+    getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' }).then((value) => {
       if (value !== 'true') {
         setAutoOpen(true)
       }
@@ -251,7 +252,7 @@ export function OnboardingDialog({
   const handleNext = (): void => {
     if (step === 2) {
       track('onboarding_provider_selected', { provider: selectedProvider })
-      window.api.settings.set('default_terminal_mode', selectedProvider)
+      getTrpcVanillaClient().settings.set.mutate({ key: 'default_terminal_mode', value: selectedProvider })
     }
     if (step < STEP_COUNT - 1) {
       setStep(step + 1)
@@ -271,7 +272,7 @@ export function OnboardingDialog({
 
   const finishOnboarding = useCallback((tier?: 'anonymous' | 'opted_in'): void => {
     if (tier) setTier(tier)
-    window.api.settings.set('onboarding_completed', 'true')
+    getTrpcVanillaClient().settings.set.mutate({ key: 'onboarding_completed', value: 'true' })
     setStep(0)
     setClosing(false)
     setAutoOpen(false)
@@ -471,7 +472,7 @@ export function OnboardingDialog({
                     onClick={() => {
                       setTier('anonymous')
                       track('onboarding_completed', { provider: selectedProvider, tier: 'anonymous' })
-                      window.api.settings.set('onboarding_completed', 'true')
+                      getTrpcVanillaClient().settings.set.mutate({ key: 'onboarding_completed', value: 'true' })
                       setStep(4)
                     }}
                   >
@@ -482,7 +483,7 @@ export function OnboardingDialog({
                     onClick={() => {
                       setTier('opted_in')
                       track('onboarding_completed', { provider: selectedProvider, tier: 'opted_in' })
-                      window.api.settings.set('onboarding_completed', 'true')
+                      getTrpcVanillaClient().settings.set.mutate({ key: 'onboarding_completed', value: 'true' })
                       setStep(4)
                     }}
                   >

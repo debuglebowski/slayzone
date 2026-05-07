@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { shallow } from 'zustand/shallow'
 import type { ConfigLevel } from '../shared'
@@ -140,9 +141,8 @@ export const useContextManagerStore = create<ContextManagerViewState>()(
 const DB_KEY = 'context_manager_view_state'
 
 export const contextManagerStoreReady: Promise<void> =
-  typeof window !== 'undefined' && window.api?.settings
-    ? window.api.settings
-        .get(DB_KEY)
+  typeof window !== 'undefined' && window.api?.app
+    ? getTrpcVanillaClient().settings.get.query({ key: DB_KEY })
         .then((value) => {
           if (value) {
             try {
@@ -186,7 +186,7 @@ useContextManagerStore.subscribe(
     if (!useContextManagerStore.getState().isLoaded) return
     if (_debounceTimer) clearTimeout(_debounceTimer)
     _debounceTimer = setTimeout(() => {
-      window.api.settings.set(DB_KEY, JSON.stringify(slice))
+      getTrpcVanillaClient().settings.set.mutate({ key: DB_KEY, value: JSON.stringify(slice) })
     }, 500)
   },
   { equalityFn: shallow }

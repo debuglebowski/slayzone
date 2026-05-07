@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Button, Label } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
@@ -10,7 +11,7 @@ export function AboutSettingsTab() {
   const [cliMessage, setCliMessage] = useState('')
 
   useEffect(() => {
-    window.api.settings.get('database_path').then(path => setDbPath(path ?? 'Default location (userData)'))
+    getTrpcVanillaClient().settings.get.query({ key: 'database_path' }).then(path => setDbPath(path ?? 'Default location (userData)'))
     window.api.app.cliStatus().then(status => {
       setCliInstalled(status.installed)
       if (status.path) setCliPath(status.path)

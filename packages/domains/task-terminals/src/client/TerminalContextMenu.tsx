@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -104,7 +105,7 @@ export function TerminalContextMenu({
 
   const updateFontSize = useCallback((size: number) => {
     const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, size))
-    void window.api.settings.set('terminal_font_size', String(clamped))
+    void getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_font_size', value: String(clamped) })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
   }, [])
 

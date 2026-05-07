@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Input, Label } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
@@ -7,8 +8,8 @@ export function McpSettingsTab() {
   const [actualPort, setActualPort] = useState('')
 
   useEffect(() => {
-    window.api.settings.get('mcp_preferred_port').then(val => setPreferredPort(val ?? ''))
-    window.api.settings.get('mcp_server_port').then(val => setActualPort(val ?? ''))
+    getTrpcVanillaClient().settings.get.query({ key: 'mcp_preferred_port' }).then(val => setPreferredPort(val ?? ''))
+    getTrpcVanillaClient().settings.get.query({ key: 'mcp_server_port' }).then(val => setActualPort(val ?? ''))
   }, [])
 
   return (
@@ -31,7 +32,7 @@ export function McpSettingsTab() {
             onBlur={() => {
               const port = parseInt(preferredPort, 10)
               if (preferredPort === '' || (port >= 1024 && port <= 65535)) {
-                window.api.settings.set('mcp_preferred_port', preferredPort === '' ? '' : String(port))
+                getTrpcVanillaClient().settings.set.mutate({ key: 'mcp_preferred_port', value: preferredPort === '' ? '' : String(port) })
               }
             }}
           />

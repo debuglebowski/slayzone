@@ -377,6 +377,9 @@ importers:
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../file-editor
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -637,6 +640,9 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1090,6 +1096,9 @@ importers:
       '@posthog/react':
         specifier: ^1
         version: 1.7.1(@types/react@19.2.8)(posthog-js@1.347.2)(react@19.2.3)
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1118,6 +1127,9 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1301,6 +1313,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1541,6 +1556,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../../domains/settings
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags

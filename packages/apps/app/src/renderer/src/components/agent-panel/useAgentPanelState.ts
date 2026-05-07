@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 export interface AgentPanelState {
   isOpen: boolean
@@ -26,7 +27,7 @@ export function useAgentPanelState(): [
   const [state, setState] = useState<AgentPanelState>(DEFAULT_STATE)
 
   useEffect(() => {
-    window.api.settings.get(SETTINGS_KEY).then((stored) => {
+    getTrpcVanillaClient().settings.get.query({ key: SETTINGS_KEY }).then((stored) => {
       if (stored) {
         try {
           setState({ ...DEFAULT_STATE, ...JSON.parse(stored) })
@@ -40,7 +41,7 @@ export function useAgentPanelState(): [
   const updateState = useCallback((updates: Partial<AgentPanelState>) => {
     setState((prev) => {
       const next = { ...prev, ...updates }
-      window.api.settings.set(SETTINGS_KEY, JSON.stringify(next))
+      getTrpcVanillaClient().settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify(next) })
       return next
     })
   }, [])

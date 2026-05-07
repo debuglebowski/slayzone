@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Label, Switch } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
@@ -35,7 +36,7 @@ export function LabsSettingsTab() {
               checked={state[f.key] ?? false}
               onCheckedChange={async (checked) => {
                 setState(prev => ({ ...prev, [f.key]: checked }))
-                await window.api.settings.set(f.key, checked ? '1' : '0')
+                await getTrpcVanillaClient().settings.set.mutate({ key: f.key, value: checked ? '1' : '0' })
               }}
             />
           </div>

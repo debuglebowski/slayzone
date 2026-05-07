@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { createPortal } from 'react-dom'
 import { ExternalLink, Pencil, Star, Search, Plus, Trash2 } from 'lucide-react'
 import { Button, cn, IconButton, Input, Label, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@slayzone/ui'
@@ -23,12 +24,12 @@ interface EditTarget {
 }
 
 async function loadCustomServers(): Promise<CustomMcpServer[]> {
-  const raw = await window.api.settings.get('mcp_custom_servers')
+  const raw = await getTrpcVanillaClient().settings.get.query({ key: 'mcp_custom_servers' })
   return raw ? (JSON.parse(raw) as CustomMcpServer[]) : []
 }
 
 async function saveCustomServers(servers: CustomMcpServer[]): Promise<void> {
-  await window.api.settings.set('mcp_custom_servers', JSON.stringify(servers))
+  await getTrpcVanillaClient().settings.set.mutate({ key: 'mcp_custom_servers', value: JSON.stringify(servers) })
 }
 
 function matchesSearch(query: string, ...fields: (string | undefined)[]) {
@@ -471,7 +472,7 @@ function ComputerMcpPanel() {
   }, [])
 
   useEffect(() => {
-    void window.api.settings.get('mcp_favorites').then((raw) => {
+    void getTrpcVanillaClient().settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
       if (raw) setFavorites(JSON.parse(raw) as string[])
     })
     void loadCustom()
@@ -482,7 +483,7 @@ function ComputerMcpPanel() {
       ? favorites.filter((f) => f !== id)
       : [...favorites, id]
     setFavorites(next)
-    await window.api.settings.set('mcp_favorites', JSON.stringify(next))
+    await getTrpcVanillaClient().settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
   }
 
   const deleteCustomServer = async (id: string) => {
@@ -654,7 +655,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
   )
 
   useEffect(() => {
-    void window.api.settings.get('mcp_favorites').then((raw) => {
+    void getTrpcVanillaClient().settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
       if (raw) setFavorites(JSON.parse(raw) as string[])
     })
   }, [])
@@ -669,7 +670,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
       ? favorites.filter((f) => f !== id)
       : [...favorites, id]
     setFavorites(next)
-    await window.api.settings.set('mcp_favorites', JSON.stringify(next))
+    await getTrpcVanillaClient().settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
   }
 
   const isFavorite = (id: string) => favorites.includes(id)

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronRight, Plus, GripVertical, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, Circle, Repeat, LayoutTemplate, Paperclip } from 'lucide-react'
 import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
 import { DescriptionDialog } from './DescriptionDialog'
@@ -636,8 +637,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Load dev server settings (re-read on settingsRevision change)
   useEffect(() => {
     Promise.all([
-      window.api.settings.get('dev_server_toast_enabled'),
-      window.api.settings.get('dev_server_auto_open_browser'),
+      getTrpcVanillaClient().settings.get.query({ key: 'dev_server_toast_enabled' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'dev_server_auto_open_browser' }),
     ]).then(([toast, autoOpen]) => {
       devServerToastEnabledRef.current = toast !== '0'
       devServerAutoOpenRef.current = autoOpen === '1'

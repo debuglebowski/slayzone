@@ -312,11 +312,11 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     Promise.all([
-      window.api.settings.get('onboarding_completed'),
-      window.api.settings.get('tutorial_prompted')
+      getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'tutorial_prompted' })
     ]).then(([onboarded, prompted]) => {
       if (onboarded === 'true' && !prompted) {
-        void window.api.settings.set('tutorial_prompted', 'true')
+        void getTrpcVanillaClient().settings.set.mutate({ key: 'tutorial_prompted', value: 'true' })
         toast('Want a quick tour?', { duration: 8000, action: { label: 'Take the tour', onClick: startTour } })
       }
     })
@@ -330,7 +330,7 @@ function App(): React.JSX.Element {
 
     let cancelled = false
 
-    window.api.settings.get('onboarding_completed').then((value) => {
+    getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' }).then((value) => {
       if (!cancelled && value !== 'true') {
         setShouldMountOnboarding(true)
       }
@@ -351,7 +351,7 @@ function App(): React.JSX.Element {
   const agentMode = agentPanelState.mode ?? 'claude-code'
   useEffect(() => {
     if (agentPanelState.mode) return
-    window.api.settings.get('default_terminal_mode').then(m => {
+    getTrpcVanillaClient().settings.get.query({ key: 'default_terminal_mode' }).then(m => {
       if (m) setAgentPanelState({ mode: m })
     })
   }, [agentPanelState.mode, setAgentPanelState])
@@ -519,8 +519,8 @@ function App(): React.JSX.Element {
 
   // Read settings on mount and whenever settings change
   useEffect(() => {
-    window.api.settings.get('project_color_tints_enabled').then((v) => setColorTintsEnabled(v !== '0'))
-    window.api.settings.get('show_context_manager').then((v) => setShowContextManager(v !== '0'))
+    getTrpcVanillaClient().settings.get.query({ key: 'project_color_tints_enabled' }).then((v) => setColorTintsEnabled(v !== '0'))
+    getTrpcVanillaClient().settings.get.query({ key: 'show_context_manager' }).then((v) => setShowContextManager(v !== '0'))
     window.api.app.isTestsPanelEnabled().then(setTestsPanelEnabled)
   }, [settingsRevision])
 
@@ -1510,9 +1510,9 @@ function App(): React.JSX.Element {
         {shouldMount('search', searchOpen) && <Suspense fallback={null}><SearchDialog open={searchOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeSearch() }} tasks={tasks} projects={projects} onSelectTask={openTask} onSelectProject={setSelectedProjectId} /></Suspense>}
         {shouldMount('onboarding', shouldMountOnboarding) && <Suspense fallback={null}><OnboardingDialog externalOpen={onboardingOpen} onExternalClose={async () => {
           useDialogStore.getState().closeOnboarding()
-          const [onboardingCompleted, prompted] = await Promise.all([window.api.settings.get('onboarding_completed'), window.api.settings.get('tutorial_prompted')])
+          const [onboardingCompleted, prompted] = await Promise.all([getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' }), getTrpcVanillaClient().settings.get.query({ key: 'tutorial_prompted' })])
           if (onboardingCompleted === 'true') markSetupGuideCompleted()
-          if (!prompted) { void window.api.settings.set('tutorial_prompted', 'true'); toast('Want a quick tour?', { duration: 8000, action: { label: 'Take the tour', onClick: startTour } }) }
+          if (!prompted) { void getTrpcVanillaClient().settings.set.mutate({ key: 'tutorial_prompted', value: 'true' }); toast('Want a quick tour?', { duration: 8000, action: { label: 'Take the tour', onClick: startTour } }) }
         }} /></Suspense>}
         <Suspense fallback={null}><CliInstallDialog /></Suspense>
         {shouldMount('tutorial', showAnimatedTour) && <Suspense fallback={null}><TutorialAnimationModal open={showAnimatedTour} onClose={() => useDialogStore.getState().closeAnimatedTour()} /></Suspense>}

@@ -39,6 +39,7 @@
     "@slayzone/task": "workspace:*",
     "@slayzone/tasks": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-virtual": "^3.13.22",
     "codemirror": "^6.0.1",

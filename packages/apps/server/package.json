@@ -1,0 +1,54 @@
+{
+  "name": "@slayzone/server",
+  "version": "0.28.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "slayzone-server": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@slayzone/agent-turns": "workspace:*",
+    "@slayzone/ai-config": "workspace:*",
+    "@slayzone/automations": "workspace:*",
+    "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/file-editor": "workspace:*",
+    "@slayzone/history": "workspace:*",
+    "@slayzone/integrations": "workspace:*",
+    "@slayzone/migrate": "workspace:*",
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/projects": "workspace:*",
+    "@slayzone/settings": "workspace:*",
+    "@slayzone/tags": "workspace:*",
+    "@slayzone/task": "workspace:*",
+    "@slayzone/task-artifacts": "workspace:*",
+    "@slayzone/task-terminals": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
+    "@slayzone/test-panel": "workspace:*",
+    "@slayzone/transport": "workspace:*",
+    "@slayzone/types": "workspace:*",
+    "@slayzone/usage-analytics": "workspace:*",
+    "@slayzone/worktrees": "workspace:*",
+    "better-sqlite3": "^12.8.0",
+    "express": "^5.2.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.1",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

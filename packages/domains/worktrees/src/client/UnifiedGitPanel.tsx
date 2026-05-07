@@ -1,4 +1,5 @@
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Check, X, SkipForward, AlertTriangle, RefreshCw, Plus, PanelLeftClose, PanelLeftOpen, AlignJustify, Columns2, WrapText } from 'lucide-react'
 import { Button, Checkbox, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tooltip, TooltipContent, TooltipTrigger, cn, useShortcutDisplay } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
@@ -139,8 +140,8 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
     let cancelled = false
     const load = () => {
       Promise.all([
-        window.api.settings.get('git_tab_order'),
-        window.api.settings.get('git_tab_visibility'),
+        getTrpcVanillaClient().settings.get.query({ key: 'git_tab_order' }),
+        getTrpcVanillaClient().settings.get.query({ key: 'git_tab_visibility' }),
       ]).then(([order, vis]) => {
         if (cancelled) return
         setTabOrder(normalizeGitTabOrder(order))
@@ -155,7 +156,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
 
   const { diffContinuousFlow, diffTreeCollapsed, diffSideBySide, diffWrap } = useAppearance()
   const setBoolSetting = useCallback((key: string, value: boolean) => {
-    window.api.settings.set(key, value ? '1' : '0')
+    getTrpcVanillaClient().settings.set.mutate({ key: key, value: value ? '1' : '0' })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
   }, [])
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { ChevronDown, ChevronRight, Loader2, Plus, Server, X, Search } from 'lucide-react'
 import { Button, cn, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, IconButton, Input, Label, toast } from '@slayzone/ui'
 import type { CliProvider, McpConfigFileResult, McpServerConfig, McpTarget, SyncHealth } from '../shared'
@@ -106,7 +107,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
     try {
       const [results, customServersRaw] = await Promise.all([
         window.api.aiConfig.discoverMcpConfigs(projectPath),
-        window.api.settings.get('mcp_custom_servers')
+        getTrpcVanillaClient().settings.get.query({ key: 'mcp_custom_servers' })
       ])
       setConfigs(results)
       setComputerCustomServerIds(parseComputerCustomServerIds(customServersRaw))

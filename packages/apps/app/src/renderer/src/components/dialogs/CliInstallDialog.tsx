@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { motion } from 'framer-motion'
 import { Terminal } from 'lucide-react'
 import { Button, Checkbox, Dialog, DialogContent } from '@slayzone/ui'
@@ -15,8 +16,8 @@ export function CliInstallDialog() {
     if (checked.current) return
     checked.current = true
     Promise.all([
-      window.api.settings.get('onboarding_completed'),
-      window.api.settings.get('cli_install_dismissed'),
+      getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'cli_install_dismissed' }),
       window.api.app.cliStatus()
     ]).then(([onboarded, dismissed, status]) => {
       if (onboarded === 'true' && dismissed !== 'true' && !status.installed) {
@@ -50,7 +51,7 @@ export function CliInstallDialog() {
   }
 
   const handleClose = () => {
-    if (dontAsk) window.api.settings.set('cli_install_dismissed', 'true')
+    if (dontAsk) getTrpcVanillaClient().settings.set.mutate({ key: 'cli_install_dismissed', value: 'true' })
     setOpen(false)
   }
 

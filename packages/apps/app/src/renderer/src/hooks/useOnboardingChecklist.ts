@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/settings'
 
 const CHECKLIST_SETTINGS_KEY = 'onboarding_checklist_state'
@@ -115,16 +116,16 @@ export function useOnboardingChecklist({
   const [persistedState, setPersistedState] = useState<PersistedChecklistStateV1>(DEFAULT_PERSISTED_STATE)
 
   const persistState = useCallback(async (state: PersistedChecklistStateV1): Promise<void> => {
-    await window.api.settings.set(CHECKLIST_SETTINGS_KEY, JSON.stringify(state))
+    await getTrpcVanillaClient().settings.set.mutate({ key: CHECKLIST_SETTINGS_KEY, value: JSON.stringify(state) })
   }, [])
 
   const loadLegacyState = useCallback(async (): Promise<PersistedChecklistStateV1> => {
     const [setupGuideRaw, takeTourRaw, joinCommunityRaw, followOnXRaw, dismissedRaw] = await Promise.all([
-      window.api.settings.get('onboarding_completed'),
-      window.api.settings.get('onboarding_tour_completed'),
-      window.api.settings.get('onboarding_joined_discord'),
-      window.api.settings.get('onboarding_followed_x'),
-      window.api.settings.get('onboarding_checklist_dismissed')
+      getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'onboarding_tour_completed' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'onboarding_joined_discord' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'onboarding_followed_x' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'onboarding_checklist_dismissed' })
     ])
 
     const dismissed = isTruthy(dismissedRaw)
@@ -159,7 +160,7 @@ export function useOnboardingChecklist({
     let isCancelled = false
 
     const loadState = async (): Promise<void> => {
-      const storedRaw = await window.api.settings.get(CHECKLIST_SETTINGS_KEY)
+      const storedRaw = await getTrpcVanillaClient().settings.get.query({ key: CHECKLIST_SETTINGS_KEY })
       const stored = parsePersistedChecklistState(storedRaw)
       if (stored) {
         if (!isCancelled) setPersistedState(stored)

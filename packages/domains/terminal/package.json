@@ -23,6 +23,7 @@
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",

@@ -5,6 +5,7 @@ import { diagnosticsRouter } from './routers/diagnostics'
 import { fileEditorRouter } from './routers/file-editor'
 import { historyRouter } from './routers/history'
 import { projectsRouter } from './routers/projects'
+import { settingsRouter } from './routers/settings'
 import { tagsRouter } from './routers/tags'
 import { taskTerminalsRouter } from './routers/task-terminals'
 import { testPanelRouter } from './routers/test-panel'
@@ -17,6 +18,7 @@ export const appRouter = router({
   fileEditor: fileEditorRouter,
   history: historyRouter,
   projects: projectsRouter,
+  settings: settingsRouter,
   tags: tagsRouter,
   taskTerminals: taskTerminalsRouter,
   testPanel: testPanelRouter,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { AlertTriangle, Circle, RefreshCw } from 'lucide-react'
 import {
   cn,
@@ -171,7 +172,7 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
   const [pinned, setPinned] = useState<PinnedBars | null>(null)
 
   useEffect(() => {
-    window.api.settings.get('usage_pinned_bars').then((raw) => {
+    getTrpcVanillaClient().settings.get.query({ key: 'usage_pinned_bars' }).then((raw) => {
       if (raw) {
         try {
           setPinned(JSON.parse(raw))
@@ -201,7 +202,7 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
         } else {
           next[provider] = [...arr, windowKey]
         }
-        window.api.settings.set('usage_pinned_bars', JSON.stringify(next))
+        getTrpcVanillaClient().settings.set.mutate({ key: 'usage_pinned_bars', value: JSON.stringify(next) })
         return next
       })
     },

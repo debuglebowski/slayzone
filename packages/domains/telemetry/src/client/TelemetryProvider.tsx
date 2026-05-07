@@ -1,4 +1,5 @@
 import { createContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { TelemetryTier } from '../shared/types'
 import { initTelemetry, setTelemetryTier as setTelemetryTierInternal, track, startHeartbeat, stopHeartbeat, startIpcTelemetryBridge, stopIpcTelemetryBridge, getPosthogInstance } from './telemetry'
 
@@ -25,7 +26,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     initializedRef.current = true
 
     performance.mark('sz:telemetry:start')
-    window.api.settings.get(SETTINGS_KEY).then(async (stored) => {
+    getTrpcVanillaClient().settings.get.query({ key: SETTINGS_KEY }).then(async (stored) => {
       const t: TelemetryTier = stored === 'opted_in' ? 'opted_in' : 'anonymous'
       setTier(t)
       await initTelemetry(t)
@@ -48,7 +49,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
   const changeTier = useCallback((newTier: TelemetryTier) => {
     setTier(newTier)
     setTelemetryTierInternal(newTier)
-    window.api.settings.set(SETTINGS_KEY, newTier)
+    getTrpcVanillaClient().settings.set.mutate({ key: SETTINGS_KEY, value: newTier })
   }, [])
 
   return (

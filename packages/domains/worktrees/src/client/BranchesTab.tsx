@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { RefreshCw, Loader2, SlidersHorizontal, Info, List, Layers } from 'lucide-react'
 import {
   IconButton, Switch, cn, toast,
@@ -54,12 +55,12 @@ export function useBranchGraph(
   // Load per-instance config (if saved), otherwise global defaults
   useEffect(() => {
     const load = async () => {
-      const instanceJson = configKey ? await window.api.settings.get(`commit_graph:${configKey}`) : null
+      const instanceJson = configKey ? await getTrpcVanillaClient().settings.get.query({ key: `commit_graph:${configKey}` }) : null
       if (instanceJson) {
         setConfig({ ...JSON.parse(instanceJson), baseBranch: '' })
         return
       }
-      const globalJson = await window.api.settings.get('commit_graph_config')
+      const globalJson = await getTrpcVanillaClient().settings.get.query({ key: 'commit_graph_config' })
       if (globalJson) {
         setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' })
       } else {
@@ -75,7 +76,7 @@ export function useBranchGraph(
       const next = typeof updater === 'function' ? updater(prev) : updater
       if (configKey) {
         const { baseBranch: _, ...persisted } = next
-        window.api.settings.set(`commit_graph:${configKey}`, JSON.stringify(persisted))
+        getTrpcVanillaClient().settings.set.mutate({ key: `commit_graph:${configKey}`, value: JSON.stringify(persisted) })
       }
       return next
     })
@@ -84,9 +85,9 @@ export function useBranchGraph(
   // Reset to global defaults (clear per-instance config)
   const resetConfig = useCallback(async () => {
     if (configKey) {
-      await window.api.settings.set(`commit_graph:${configKey}`, '')
+      await getTrpcVanillaClient().settings.set.mutate({ key: `commit_graph:${configKey}`, value: '' })
     }
-    const globalJson = await window.api.settings.get('commit_graph_config')
+    const globalJson = await getTrpcVanillaClient().settings.get.query({ key: 'commit_graph_config' })
     if (globalJson) {
       setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' })
     } else {

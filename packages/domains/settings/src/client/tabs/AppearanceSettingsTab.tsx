@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Info } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Switch, Tooltip, TooltipTrigger, TooltipContent, unifiedThemes, getThemeVariant } from '@slayzone/ui'
 import { useTheme } from '../ThemeContext'
@@ -65,24 +66,24 @@ export function AppearanceSettingsTab() {
   const [chatWidth, setChatWidth] = useState<'narrow' | 'wide'>('narrow')
 
   useEffect(() => {
-    window.api.settings.get('project_color_tints_enabled').then(val => setProjectColorTints(val !== '0'))
-    window.api.settings.get('show_context_manager').then(val => setShowContextManager(val !== '0'))
-    window.api.settings.get('terminal_font_size').then(val => setTerminalFontSize(val ?? '13'))
-    window.api.settings.get('editor_font_size').then(val => setEditorFontSize(val ?? '13'))
-    window.api.settings.get('reduce_motion').then(val => setReduceMotion(val === '1'))
-    window.api.settings.get('notes_font_family').then(val => setNotesFontFamily(val === 'mono' ? 'mono' : 'sans'))
+    getTrpcVanillaClient().settings.get.query({ key: 'project_color_tints_enabled' }).then(val => setProjectColorTints(val !== '0'))
+    getTrpcVanillaClient().settings.get.query({ key: 'show_context_manager' }).then(val => setShowContextManager(val !== '0'))
+    getTrpcVanillaClient().settings.get.query({ key: 'terminal_font_size' }).then(val => setTerminalFontSize(val ?? '13'))
+    getTrpcVanillaClient().settings.get.query({ key: 'editor_font_size' }).then(val => setEditorFontSize(val ?? '13'))
+    getTrpcVanillaClient().settings.get.query({ key: 'reduce_motion' }).then(val => setReduceMotion(val === '1'))
+    getTrpcVanillaClient().settings.get.query({ key: 'notes_font_family' }).then(val => setNotesFontFamily(val === 'mono' ? 'mono' : 'sans'))
     Promise.all([
-      window.api.settings.get('notes_readability'),
-      window.api.settings.get('notes_line_spacing'),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_readability' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_line_spacing' }),
     ]).then(([readability, legacy]) => {
       const value = readability || legacy
       setNotesReadability(value === 'compact' ? 'compact' : 'normal')
     })
-    window.api.settings.get('notes_width').then(val => setNotesWidth(val === 'wide' ? 'wide' : 'narrow'))
-    window.api.settings.get('notes_checked_highlight').then(val => setNotesCheckedHighlight(val === '1'))
-    window.api.settings.get('notes_show_toolbar').then(val => setNotesShowToolbar(val === '1'))
-    window.api.settings.get('notes_spellcheck').then(val => setNotesSpellcheck(val !== '0'))
-    window.api.settings.get('chat_width').then(val => setChatWidth(val === 'wide' ? 'wide' : 'narrow'))
+    getTrpcVanillaClient().settings.get.query({ key: 'notes_width' }).then(val => setNotesWidth(val === 'wide' ? 'wide' : 'narrow'))
+    getTrpcVanillaClient().settings.get.query({ key: 'notes_checked_highlight' }).then(val => setNotesCheckedHighlight(val === '1'))
+    getTrpcVanillaClient().settings.get.query({ key: 'notes_show_toolbar' }).then(val => setNotesShowToolbar(val === '1'))
+    getTrpcVanillaClient().settings.get.query({ key: 'notes_spellcheck' }).then(val => setNotesSpellcheck(val !== '0'))
+    getTrpcVanillaClient().settings.get.query({ key: 'chat_width' }).then(val => setChatWidth(val === 'wide' ? 'wide' : 'narrow'))
   }, [])
 
   return (
@@ -144,7 +145,7 @@ export function AppearanceSettingsTab() {
         <CardContent className="space-y-3">
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
             <SettingLabel tip="Text size in terminal panels">Font size</SettingLabel>
-            <Select value={terminalFontSize} onValueChange={(v) => { setTerminalFontSize(v); window.api.settings.set('terminal_font_size', v) }}>
+            <Select value={terminalFontSize} onValueChange={(v) => { setTerminalFontSize(v); getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_font_size', value: v }) }}>
               <SelectTrigger className="w-24">
                 <SelectValue />
               </SelectTrigger>
@@ -170,7 +171,7 @@ export function AppearanceSettingsTab() {
         <CardContent className="space-y-3">
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
             <SettingLabel tip="Text size in the code and notes editor">Font size</SettingLabel>
-            <Select value={editorFontSize} onValueChange={(v) => { setEditorFontSize(v); window.api.settings.set('editor_font_size', v) }}>
+            <Select value={editorFontSize} onValueChange={(v) => { setEditorFontSize(v); getTrpcVanillaClient().settings.set.mutate({ key: 'editor_font_size', value: v }) }}>
               <SelectTrigger className="w-24">
                 <SelectValue />
               </SelectTrigger>
@@ -187,7 +188,7 @@ export function AppearanceSettingsTab() {
           </div>
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
             <SettingLabel tip="Typeface used in the notes editor">Font family</SettingLabel>
-            <Select value={notesFontFamily} onValueChange={(v) => { setNotesFontFamily(v as 'sans' | 'mono'); window.api.settings.set('notes_font_family', v) }}>
+            <Select value={notesFontFamily} onValueChange={(v) => { setNotesFontFamily(v as 'sans' | 'mono'); getTrpcVanillaClient().settings.set.mutate({ key: 'notes_font_family', value: v }) }}>
               <SelectTrigger className="w-48">
                 <SelectValue />
               </SelectTrigger>
@@ -199,7 +200,7 @@ export function AppearanceSettingsTab() {
           </div>
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
             <SettingLabel tip="Vertical density of rendered markdown — text size, line height, and vertical padding">Readability</SettingLabel>
-            <Select value={notesReadability} onValueChange={(v) => { setNotesReadability(v as 'compact' | 'normal'); window.api.settings.set('notes_readability', v) }}>
+            <Select value={notesReadability} onValueChange={(v) => { setNotesReadability(v as 'compact' | 'normal'); getTrpcVanillaClient().settings.set.mutate({ key: 'notes_readability', value: v }) }}>
               <SelectTrigger className="w-48">
                 <SelectValue />
               </SelectTrigger>
@@ -211,7 +212,7 @@ export function AppearanceSettingsTab() {
           </div>
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
             <SettingLabel tip="Horizontal width of rendered markdown — column max-width and horizontal padding">Width</SettingLabel>
-            <Select value={notesWidth} onValueChange={(v) => { setNotesWidth(v as 'narrow' | 'wide'); window.api.settings.set('notes_width', v) }}>
+            <Select value={notesWidth} onValueChange={(v) => { setNotesWidth(v as 'narrow' | 'wide'); getTrpcVanillaClient().settings.set.mutate({ key: 'notes_width', value: v }) }}>
               <SelectTrigger className="w-48">
                 <SelectValue />
               </SelectTrigger>
@@ -227,7 +228,7 @@ export function AppearanceSettingsTab() {
               checked={notesCheckedHighlight}
               onCheckedChange={(checked) => {
                 setNotesCheckedHighlight(checked)
-                window.api.settings.set('notes_checked_highlight', checked ? '1' : '0')
+                getTrpcVanillaClient().settings.set.mutate({ key: 'notes_checked_highlight', value: checked ? '1' : '0' })
               }}
             />
           </div>
@@ -237,7 +238,7 @@ export function AppearanceSettingsTab() {
               checked={notesShowToolbar}
               onCheckedChange={(checked) => {
                 setNotesShowToolbar(checked)
-                window.api.settings.set('notes_show_toolbar', checked ? '1' : '0')
+                getTrpcVanillaClient().settings.set.mutate({ key: 'notes_show_toolbar', value: checked ? '1' : '0' })
               }}
             />
           </div>
@@ -247,7 +248,7 @@ export function AppearanceSettingsTab() {
               checked={notesSpellcheck}
               onCheckedChange={(checked) => {
                 setNotesSpellcheck(checked)
-                window.api.settings.set('notes_spellcheck', checked ? '1' : '0')
+                getTrpcVanillaClient().settings.set.mutate({ key: 'notes_spellcheck', value: checked ? '1' : '0' })
               }}
             />
           </div>
@@ -262,7 +263,7 @@ export function AppearanceSettingsTab() {
         <CardContent className="space-y-3">
           <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
             <SettingLabel tip="Horizontal width of agent chat — message column and composer max-width">Width</SettingLabel>
-            <Select value={chatWidth} onValueChange={(v) => { setChatWidth(v as 'narrow' | 'wide'); window.api.settings.set('chat_width', v) }}>
+            <Select value={chatWidth} onValueChange={(v) => { setChatWidth(v as 'narrow' | 'wide'); getTrpcVanillaClient().settings.set.mutate({ key: 'chat_width', value: v }) }}>
               <SelectTrigger className="w-48">
                 <SelectValue />
               </SelectTrigger>
@@ -287,7 +288,7 @@ export function AppearanceSettingsTab() {
               checked={projectColorTints}
               onCheckedChange={(checked) => {
                 setProjectColorTints(checked)
-                window.api.settings.set('project_color_tints_enabled', checked ? '1' : '0')
+                getTrpcVanillaClient().settings.set.mutate({ key: 'project_color_tints_enabled', value: checked ? '1' : '0' })
               }}
             />
           </div>
@@ -297,7 +298,7 @@ export function AppearanceSettingsTab() {
               checked={reduceMotion}
               onCheckedChange={(checked) => {
                 setReduceMotion(checked)
-                window.api.settings.set('reduce_motion', checked ? '1' : '0')
+                getTrpcVanillaClient().settings.set.mutate({ key: 'reduce_motion', value: checked ? '1' : '0' })
               }}
             />
           </div>
@@ -314,7 +315,7 @@ export function AppearanceSettingsTab() {
               checked={showContextManager}
               onCheckedChange={(checked) => {
                 setShowContextManager(checked)
-                window.api.settings.set('show_context_manager', checked ? '1' : '0')
+                getTrpcVanillaClient().settings.set.mutate({ key: 'show_context_manager', value: checked ? '1' : '0' })
               }}
             />
           </div>

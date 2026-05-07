@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { ReactNode } from 'react'
 import { AppearanceContext, appearanceDefaults } from '@slayzone/ui'
 import type { AppearanceSettings, BrowserDeviceDefaults } from '@slayzone/ui'
@@ -31,40 +32,42 @@ export function AppearanceProvider({
   useEffect(() => {
     performance.mark('sz:appearance:start')
     Promise.all([
-      window.api.settings.get('terminal_font_size'),
-      window.api.settings.get('editor_font_size'),
-      window.api.settings.get('reduce_motion'),
-      window.api.settings.get('project_color_tints_enabled'),
-      window.api.settings.get('editor_word_wrap'),
-      window.api.settings.get('editor_tab_size'),
-      window.api.settings.get('editor_indent_tabs'),
-      window.api.settings.get('editor_render_whitespace'),
-      window.api.settings.get('terminal_font_family'),
-      window.api.settings.get('terminal_scrollback'),
-      window.api.settings.get('diff_context_lines'),
-      window.api.settings.get('diff_ignore_whitespace'),
-      window.api.settings.get('diff_continuous_flow'),
-      window.api.settings.get('diff_tree_collapsed'),
-      window.api.settings.get('diff_side_by_side'),
-      window.api.settings.get('diff_wrap'),
-      window.api.settings.get('browser_default_zoom'),
-      window.api.settings.get('browser_default_url'),
-      window.api.settings.get('browser_default_devices'),
-      window.api.settings.get('notes_font_family'),
-      window.api.settings.get('notes_readability'),
-      window.api.settings.get('notes_line_spacing'),
-      window.api.settings.get('notes_width'),
-      window.api.settings.get('notes_checked_highlight'),
-      window.api.settings.get('notes_show_toolbar'),
-      window.api.settings.get('notes_spellcheck'),
-      window.api.settings.get('chat_width'),
-      window.api.settings.get('chat_show_tools'),
-      window.api.settings.get('chat_show_last_message_tools'),
-      window.api.settings.get('chat_file_edits_open_by_default'),
-      window.api.settings.get('chat_show_message_meta'),
-      window.api.settings.get('editor_markdown_view_mode'),
-      window.api.settings.get('editor_minimap_enabled'),
-      window.api.settings.get('editor_toc_enabled'),
+      getTrpcVanillaClient().settings.get.query({ key: 'terminal_font_size' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_font_size' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'reduce_motion' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'project_color_tints_enabled' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_word_wrap' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_tab_size' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_indent_tabs' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_render_whitespace' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'terminal_font_family' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'terminal_scrollback' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'diff_context_lines' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'diff_ignore_whitespace' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'diff_continuous_flow' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'diff_tree_collapsed' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'diff_side_by_side' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'diff_wrap' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'browser_default_zoom' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'browser_default_url' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'browser_default_devices' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_font_family' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_readability' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_line_spacing' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_width' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_checked_highlight' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_show_toolbar' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'notes_spellcheck' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'chat_width' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'chat_show_tools' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'chat_show_last_message_tools' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'chat_file_edits_open_by_default' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'chat_show_message_meta' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_markdown_view_mode' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_minimap_enabled' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_toc_enabled' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'assets_settings_banner_open' }),
+      getTrpcVanillaClient().settings.get.query({ key: 'editor_settings_banner_open' }),
     ]).then(([
       termSize, editorSize, reduceMotion, colorTints,
       wordWrap, tabSize, indentTabs, renderWs,
@@ -76,13 +79,14 @@ export function AppearanceProvider({
       chatWidth,
       chatShowTools, chatShowLastMessageTools, chatFileEditsOpenByDefault, chatShowMessageMeta,
       mdViewMode, minimapEnabled, tocEnabled,
+      _assetsSettingsBannerOpen, _editorSettingsBannerOpen,
     ]) => {
       // One-shot migration: notes_line_spacing → notes_readability
       let readabilityValue = notesReadability
       if (!readabilityValue && legacyNotesLineSpacing) {
         readabilityValue = legacyNotesLineSpacing
-        window.api.settings.set('notes_readability', legacyNotesLineSpacing)
-        window.api.settings.set('notes_line_spacing', '')
+        getTrpcVanillaClient().settings.set.mutate({ key: 'notes_readability', value: legacyNotesLineSpacing })
+        getTrpcVanillaClient().settings.set.mutate({ key: 'notes_line_spacing', value: '' })
       }
       const d = appearanceDefaults
       performance.mark('sz:appearance:end')
