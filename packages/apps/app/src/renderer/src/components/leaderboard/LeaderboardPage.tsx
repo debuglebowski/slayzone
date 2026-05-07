@@ -273,7 +273,7 @@ function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboard
                           disabled={!githubProfileUrl}
                           onClick={() => {
                             if (!githubProfileUrl) return
-                            void window.api.shell.openExternal(githubProfileUrl)
+                            void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: githubProfileUrl })
                           }}
                         >
                           <Github className="size-4" />

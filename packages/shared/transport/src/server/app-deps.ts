@@ -39,6 +39,24 @@ export type AppDeps = {
   // usage
   usageFetch: (force?: boolean) => Promise<ProviderUsage[]>
   usageTest: (config: UsageProviderConfig) => Promise<{ ok: boolean; windows?: UsageWindow[]; error?: string }>
+
+  // files
+  filesPathExists: (filePath: string) => Promise<boolean>
+  filesSaveTempImage: (base64: string, mimeType: string) => Promise<{ success: boolean; path?: string; error?: string }>
+
+  // shell
+  shellOpenExternal: (url: string, options?: { blockDesktopHandoff?: boolean; desktopHandoff?: { protocol?: string; hostScope?: string } }) => void
+  shellOpenPath: (absPath: string) => Promise<string>
+
+  // app metadata
+  appGetVersion: () => string
+  appGetTrpcPort: () => Promise<number>
+  appIsTestsPanelEnabled: () => boolean
+  appIsJiraIntegrationEnabled: () => boolean
+  appIsLoopModeEnabled: () => boolean
+  appGetZoomFactor: () => number
+  appCheckCliInstalled: () => { installed: boolean; path?: string; mode?: string; error?: string } | Promise<{ installed: boolean; path?: string; mode?: string; error?: string }>
+  appInstallCli: () => Promise<{ ok: boolean; path?: string; error?: string }>
 }
 
 let appDeps: AppDeps | null = null

@@ -691,10 +691,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (!project?.path) return
 
     const checkProjectPathExists = async (path: string): Promise<boolean> => {
-      const pathExists = window.api.files?.pathExists
-      if (typeof pathExists === 'function') return pathExists(path)
-      console.warn('window.api.files.pathExists is unavailable; skipping path validation')
-      return true
+      return getTrpcVanillaClient().app.files.pathExists.query({ filePath: path })
     }
 
     const handleFocus = (): void => {
@@ -707,10 +704,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Check project path exists when project changes
   useEffect(() => {
     if (!project?.path) { setProjectPathMissing(false); return }
-    const pathExists = window.api.files?.pathExists
-    if (typeof pathExists !== 'function') return
     let cancelled = false
-    pathExists(project.path).then((exists) => { if (!cancelled) setProjectPathMissing(!exists) })
+    getTrpcVanillaClient().app.files.pathExists.query({ filePath: project.path }).then((exists) => { if (!cancelled) setProjectPathMissing(!exists) })
     return () => { cancelled = true }
   }, [project?.path])
 
@@ -1939,7 +1934,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 <TooltipTrigger asChild>
                   <a
                     href="#"
-                    onClick={(e) => { e.preventDefault(); window.api.shell.openExternal(task.linear_url!) }}
+                    onClick={(e) => { e.preventDefault(); getTrpcVanillaClient().app.shell.openExternal.mutate({ url: task.linear_url! }) }}
                     className="shrink-0 rounded bg-indigo-500/10 px-1.5 py-0.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-500/20 dark:text-indigo-400"
                   >
                     Linear

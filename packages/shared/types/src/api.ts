@@ -136,17 +136,6 @@ export interface ElectronAPI {
   shortcuts: {
     changed: () => void
   }
-  shell: {
-    openExternal: (
-      url: string,
-      options?: {
-        // Legacy compatibility. Prefer desktopHandoff.
-        blockDesktopHandoff?: boolean
-        desktopHandoff?: DesktopHandoffPolicy
-      }
-    ) => Promise<void>
-    openPath: (absPath: string) => Promise<string>
-  }
   auth: {
     githubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<{
       ok: boolean
@@ -249,11 +238,6 @@ export interface ElectronAPI {
     close: () => Promise<void>
   }
   files: {
-    saveTempImage: (
-      base64: string,
-      mimeType: string
-    ) => Promise<{ success: boolean; path?: string; error?: string }>
-    pathExists: (path: string) => Promise<boolean>
     getDropPaths: () => string[]
     getPastePaths: () => string[]
   }

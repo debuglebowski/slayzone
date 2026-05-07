@@ -230,9 +230,8 @@ function App(): React.JSX.Element {
   const [projectPathMissing, setProjectPathMissing] = useState(false)
   const validateProjectPath = useCallback(async (project: Project | undefined) => {
     if (!project?.path) { setProjectPathMissing(false); return }
-    const fn = window.api.files?.pathExists
-    if (typeof fn !== 'function') return
-    setProjectPathMissing(!(await fn(project.path)))
+    const exists = await getTrpcVanillaClient().app.files.pathExists.query({ filePath: project.path })
+    setProjectPathMissing(!exists)
   }, [])
 
   // Project rename state
@@ -270,8 +269,8 @@ function App(): React.JSX.Element {
   const handleChecklistCheckLeaderboard = useCallback((): void => {
     useTabStore.getState().setActiveView('leaderboard')
   }, [])
-  const handleChecklistJoinCommunity = useCallback((): void => { void window.api.shell.openExternal(COMMUNITY_DISCORD_URL) }, [])
-  const handleChecklistFollowOnX = useCallback((): void => { void window.api.shell.openExternal(COMMUNITY_X_URL) }, [])
+  const handleChecklistJoinCommunity = useCallback((): void => { void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: COMMUNITY_DISCORD_URL }) }, [])
+  const handleChecklistFollowOnX = useCallback((): void => { void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: COMMUNITY_X_URL }) }, [])
 
   const hasCreatedTask = useMemo(() => tasks.some((task) => !task.is_temporary), [tasks])
   const {

@@ -1801,7 +1801,7 @@ export function IntegrationsTab({
                     <button
                       type="button"
                       className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      onClick={() => window.api.shell.openExternal(syncExternalUrl)}
+                      onClick={() => getTrpcVanillaClient().app.shell.openExternal.mutate({ url: syncExternalUrl })}
                     >
                       <ExternalLinkIcon className="size-3" />
                       Open in {syncSetupProvider === 'linear' ? 'Linear' : 'GitHub'}

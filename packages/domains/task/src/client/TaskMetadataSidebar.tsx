@@ -670,7 +670,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     if (!link.external_url) return
     setLinkLoading(link.id, 'open')
     try {
-      await window.api.shell.openExternal(link.external_url)
+      await getTrpcVanillaClient().app.shell.openExternal.mutate({ url: link.external_url })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     } finally {

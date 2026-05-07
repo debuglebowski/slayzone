@@ -23,9 +23,7 @@ export interface TaskDetailData {
 }
 
 async function checkProjectPathExists(path: string): Promise<boolean> {
-  const pathExists = window.api.files?.pathExists
-  if (typeof pathExists === 'function') return pathExists(path)
-  return true
+  return getTrpcVanillaClient().app.files.pathExists.query({ filePath: path })
 }
 
 export { fetchTaskDetail }

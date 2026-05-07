@@ -228,7 +228,7 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
                   </div>
                   <button
                     className="shrink-0 p-1 hover:bg-accent rounded"
-                    onClick={() => window.api.shell.openExternal(pr.url)}
+                    onClick={() => getTrpcVanillaClient().app.shell.openExternal.mutate({ url: pr.url })}
                     title="Open in browser"
                   >
                     <ExternalLink className="h-3 w-3 text-muted-foreground" />

@@ -445,11 +445,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         linkHandler: {
           activate: (event: MouseEvent, uri: string) => {
             if (event.metaKey && event.shiftKey) {
-              void window.api.shell.openExternal(uri)
+              void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: uri })
             } else if (event.metaKey && onOpenUrlRef.current) {
               onOpenUrlRef.current(uri)
             } else if (event.metaKey) {
-              void window.api.shell.openExternal(uri)
+              void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: uri })
             }
           },
           hover: (e: MouseEvent, text: string) => showTooltip(e, text, urlHint),
@@ -470,11 +470,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Cmd+Click → browser panel, Cmd+Shift+Click → external browser
       const linkProvider = new WebLinkProvider(terminal, (event, uri) => {
         if (event.metaKey && event.shiftKey) {
-          void window.api.shell.openExternal(uri)
+          void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: uri })
         } else if (event.metaKey && onOpenUrlRef.current) {
           onOpenUrlRef.current(uri)
         } else if (event.metaKey) {
-          void window.api.shell.openExternal(uri)
+          void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: uri })
         }
       }, (e, text) => showTooltip(e, text, urlHint), hideTooltip)
       terminal.registerLinkProvider(linkProvider)
@@ -1026,7 +1026,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (mimeType?.startsWith('image/') || file.type.startsWith('image/')) {
         // Image from clipboard (screenshot, browser copy) - save to temp
         const base64 = await fileToBase64(file)
-        const result = await window.api.files.saveTempImage(base64, mimeType || file.type)
+        const result = await getTrpcVanillaClient().app.files.saveTempImage.mutate({ base64, mimeType: mimeType || file.type })
         if (result.success && result.path) {
           return result.path
         }

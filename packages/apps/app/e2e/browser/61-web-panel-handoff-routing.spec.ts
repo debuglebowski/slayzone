@@ -1,4 +1,5 @@
 import { test, expect, seed, goHome, clickProject, resetApp} from '../fixtures/electron'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { testInvoke } from '../fixtures/browser-view'
 
@@ -195,9 +196,9 @@ test.describe.serial('Web panel handoff routing', () => {
   }) => {
     const result = await mainWindow.evaluate(async () => {
       try {
-        await window.api.shell.openExternal('http://127.0.0.1:38495/open', {
+        await getTrpcVanillaClient().app.shell.openExternal.mutate({ 'http://127.0.0.1:38495/open', {
           desktopHandoff: { protocol: 'figma', hostScope: 'figma.com' },
-        })
+        } })
         return { blocked: false, error: null }
       } catch (error) {
         return { blocked: true, error: error instanceof Error ? error.message : String(error) }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Play, Square, RotateCcw, Plus, Trash2, Cpu, Pencil, FileText, MoreHorizontal, CornerDownLeft, Info, Loader2, Globe } from 'lucide-react'
 import { cn, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { ProcessDialog } from './ProcessDialog'
@@ -187,7 +188,7 @@ function ProcessRow({
             onClick={(e) => {
               e.preventDefault()
               if (onOpenUrl) onOpenUrl(serverUrl)
-              else void window.api.shell.openExternal(serverUrl)
+              else void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: serverUrl })
             }}
             className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-sky-400 bg-sky-400/10 border-sky-400/20 hover:bg-sky-400/20 transition-colors"
             title={`Open ${serverUrl}`}

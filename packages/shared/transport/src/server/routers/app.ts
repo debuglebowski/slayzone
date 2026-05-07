@@ -90,4 +90,37 @@ export const appLevelRouter = router({
       getAppDeps().usageTest(input as never),
     ),
   }),
+
+  // Files
+  files: router({
+    pathExists: publicProcedure.input(z.object({ filePath: z.string() })).query(({ input }) =>
+      getAppDeps().filesPathExists(input.filePath),
+    ),
+    saveTempImage: publicProcedure
+      .input(z.object({ base64: z.string(), mimeType: z.string() }))
+      .mutation(({ input }) => getAppDeps().filesSaveTempImage(input.base64, input.mimeType)),
+  }),
+
+  // Shell
+  shell: router({
+    openExternal: publicProcedure.input(anyInput).mutation(({ input }) => {
+      const i = input as { url: string; options?: { blockDesktopHandoff?: boolean; desktopHandoff?: { protocol?: string; hostScope?: string } } }
+      return getAppDeps().shellOpenExternal(i.url, i.options)
+    }),
+    openPath: publicProcedure.input(z.object({ absPath: z.string() })).mutation(({ input }) =>
+      getAppDeps().shellOpenPath(input.absPath),
+    ),
+  }),
+
+  // App metadata
+  meta: router({
+    getVersion: publicProcedure.query(() => getAppDeps().appGetVersion()),
+    getTrpcPort: publicProcedure.query(() => getAppDeps().appGetTrpcPort()),
+    isTestsPanelEnabled: publicProcedure.query(() => getAppDeps().appIsTestsPanelEnabled()),
+    isJiraIntegrationEnabled: publicProcedure.query(() => getAppDeps().appIsJiraIntegrationEnabled()),
+    isLoopModeEnabled: publicProcedure.query(() => getAppDeps().appIsLoopModeEnabled()),
+    getZoomFactor: publicProcedure.query(() => getAppDeps().appGetZoomFactor()),
+    checkCliInstalled: publicProcedure.query(() => getAppDeps().appCheckCliInstalled()),
+    installCli: publicProcedure.mutation(() => getAppDeps().appInstallCli()),
+  }),
 })

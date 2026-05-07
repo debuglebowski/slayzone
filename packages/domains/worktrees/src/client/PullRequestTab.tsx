@@ -185,7 +185,7 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
           <a
             className="text-primary hover:underline truncate"
             href="#"
-            onClick={(e) => { e.preventDefault(); window.api.shell.openExternal(task.pr_url!) }}
+            onClick={(e) => { e.preventDefault(); getTrpcVanillaClient().app.shell.openExternal.mutate({ url: task.pr_url! }) }}
           >
             {task.pr_url}
           </a>
@@ -482,7 +482,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <IconButton aria-label="Open in browser" variant="ghost" className="h-6 w-6" onClick={() => window.api.shell.openExternal(pr.url)}>
+                  <IconButton aria-label="Open in browser" variant="ghost" className="h-6 w-6" onClick={() => getTrpcVanillaClient().app.shell.openExternal.mutate({ url: pr.url })}>
                     <ExternalLink className="h-3 w-3" />
                   </IconButton>
                 </TooltipTrigger>

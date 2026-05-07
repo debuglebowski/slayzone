@@ -131,7 +131,7 @@ function MarkdownFilePane({ filePath, projectPath, content, onChange, onSave, on
       return
     }
     if (/^(https?:|mailto:)/i.test(resolvedHref)) {
-      void window.api.shell.openExternal(resolvedHref)
+      void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: resolvedHref })
       return
     }
     if (resolvedHref.startsWith('slz-file://')) {
@@ -145,7 +145,7 @@ function MarkdownFilePane({ filePath, projectPath, content, onChange, onSave, on
           return
         }
       }
-      void window.api.shell.openPath(absPath)
+      void getTrpcVanillaClient().app.shell.openPath.mutate({ absPath })
     }
   }, [projectPath, onOpenFile])
 

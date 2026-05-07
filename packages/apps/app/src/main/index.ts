@@ -114,7 +114,7 @@ import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { buildBackupOps, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
 // Domain handlers
 import { handleTerminalStateChange } from '@slayzone/projects/server'
-import { configureTaskRuntimeAdapters, registerFilesHandlers, closeArtifactWatcher, startArtifactWatcher } from '@slayzone/task/electron'
+import { configureTaskRuntimeAdapters, pathExists, saveTempImage, closeArtifactWatcher, startArtifactWatcher } from '@slayzone/task/electron'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
@@ -1298,7 +1298,6 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('[chat-handlers] backfillChatModes failed:', err)
   }
-  registerFilesHandlers(ipcMain)
   logBoot('files registered')
   // xterm-mode turn detection: every Enter press in a PTY = turn boundary.
   onPtyInputSubmit(initPtyTurnSubscriber(db))
@@ -1343,6 +1342,64 @@ app.whenReady().then(async () => {
     testSetTaskParent: 'testSetTaskParent' in exportImportOps ? exportImportOps.testSetTaskParent : undefined,
     usageFetch: usageOps.fetch,
     usageTest: usageOps.test,
+
+    // files
+    filesPathExists: pathExists,
+    filesSaveTempImage: saveTempImage,
+
+    // shell — same logic as ipcMain.handle('shell:open-external', ...)
+    shellOpenExternal: (url: string, options?: { blockDesktopHandoff?: boolean; desktopHandoff?: { protocol?: string; hostScope?: string } }) => {
+      if (!/^https?:\/\//i.test(url) && !url.startsWith('mailto:')) {
+        throw new Error('Only http, https, and mailto URLs are allowed')
+      }
+      const desktopHandoffPolicy = (options?.desktopHandoff as DesktopHandoffPolicy | undefined) ?? (() => {
+        if (!options?.blockDesktopHandoff) return null
+        const protocol = normalizeDesktopProtocol(inferProtocolFromUrl(url))
+        if (!protocol) return null
+        const hostScope = normalizeDesktopHostScope(inferHostScopeFromUrl(url))
+        return hostScope ? { protocol, hostScope } : { protocol }
+      })()
+      const shouldBlockLoopbackDesktopHandoff =
+        desktopHandoffPolicy !== null &&
+        isLoopbackUrl(url) &&
+        !isLoopbackHost(normalizeDesktopHostScope(desktopHandoffPolicy.hostScope))
+      if (
+        desktopHandoffPolicy &&
+        (isEncodedDesktopHandoffUrl(url, desktopHandoffPolicy) || shouldBlockLoopbackDesktopHandoff)
+      ) {
+        throw new Error('Blocked external app handoff URL')
+      }
+      shell.openExternal(url)
+    },
+    shellOpenPath: async (absPath: string) => {
+      if (typeof absPath !== 'string' || !absPath.startsWith('/')) {
+        throw new Error('absolute path required')
+      }
+      return shell.openPath(absPath)
+    },
+
+    // app metadata
+    appGetVersion: () => app.getVersion(),
+    appGetTrpcPort: async () => {
+      const g = globalThis as Record<string, unknown>
+      if (typeof g.__trpcPort === 'number') return g.__trpcPort as number
+      return new Promise<number>((resolve) => {
+        const start = Date.now()
+        const check = (): void => {
+          const port = (globalThis as Record<string, unknown>).__trpcPort
+          if (typeof port === 'number') resolve(port)
+          else if (Date.now() - start > 5000) resolve(0)
+          else setTimeout(check, 50)
+        }
+        check()
+      })
+    },
+    appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
+    appIsJiraIntegrationEnabled: () => isLabEnabled('labs_jira_integration'),
+    appIsLoopModeEnabled: () => isLabEnabled('labs_loop_mode'),
+    appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
+    appCheckCliInstalled: () => checkCliInstalled(),
+    appInstallCli: () => installCli(getCliSrc()),
   })
   logBoot('app-level deps wired into tRPC')
 
@@ -1633,41 +1690,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
-
-  // Shell: open external URLs (restrict to safe schemes)
-  ipcMain.handle('shell:open-external', (_event, url: string, options?: {
-    blockDesktopHandoff?: boolean
-    desktopHandoff?: DesktopHandoffPolicy
-  }) => {
-    if (!/^https?:\/\//i.test(url) && !url.startsWith('mailto:')) {
-      throw new Error('Only http, https, and mailto URLs are allowed')
-    }
-    const desktopHandoffPolicy = options?.desktopHandoff ?? (() => {
-      if (!options?.blockDesktopHandoff) return null
-      const protocol = normalizeDesktopProtocol(inferProtocolFromUrl(url))
-      if (!protocol) return null
-      const hostScope = normalizeDesktopHostScope(inferHostScopeFromUrl(url))
-      return hostScope ? { protocol, hostScope } : { protocol }
-    })()
-    const shouldBlockLoopbackDesktopHandoff =
-      desktopHandoffPolicy !== null &&
-      isLoopbackUrl(url) &&
-      !isLoopbackHost(normalizeDesktopHostScope(desktopHandoffPolicy.hostScope))
-    if (
-      desktopHandoffPolicy &&
-      (isEncodedDesktopHandoffUrl(url, desktopHandoffPolicy) || shouldBlockLoopbackDesktopHandoff)
-    ) {
-      throw new Error('Blocked external app handoff URL')
-    }
-    shell.openExternal(url)
-  })
-
-  ipcMain.handle('shell:open-path', async (_event, absPath: string): Promise<string> => {
-    if (typeof absPath !== 'string' || !absPath.startsWith('/')) {
-      throw new Error('absolute path required')
-    }
-    return shell.openPath(absPath)
-  })
 
   ipcMain.handle('auth:github-system-sign-in', async (_event, input: {
     convexUrl: string

@@ -37,17 +37,6 @@ const api: ElectronAPI = {
   shortcuts: {
     changed: () => ipcRenderer.send('shortcuts:changed'),
   },
-  shell: {
-    openExternal: (
-      url: string,
-      options?: {
-        blockDesktopHandoff?: boolean
-        desktopHandoff?: import('@slayzone/task/shared').DesktopHandoffPolicy
-      }
-    ) =>
-      ipcRenderer.invoke('shell:open-external', url, options),
-    openPath: (absPath: string) => ipcRenderer.invoke('shell:open-path', absPath)
-  },
   auth: {
     githubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) =>
       ipcRenderer.invoke('auth:github-system-sign-in', input)
@@ -260,8 +249,6 @@ const api: ElectronAPI = {
     close: () => ipcRenderer.invoke('window:close')
   },
   files: {
-    saveTempImage: (base64, mimeType) => ipcRenderer.invoke('files:saveTempImage', base64, mimeType),
-    pathExists: (path) => ipcRenderer.invoke('files:pathExists', path),
     getDropPaths: () => {
       const paths = lastDropPaths
       lastDropPaths = []
