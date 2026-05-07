@@ -35,10 +35,10 @@ export function usePanelConfig(): {
 
     const onChanged = () => { void loadConfig().then(setConfig) }
     window.addEventListener(CHANGE_EVENT, onChanged)
-    const cleanupIpc = window.api?.app?.onSettingsChanged?.(onChanged)
+    const sub = getTrpcVanillaClient().app.notify.onSettingsChanged.subscribe(undefined, { onData: onChanged })
     return () => {
       window.removeEventListener(CHANGE_EVENT, onChanged)
-      cleanupIpc?.()
+      sub.unsubscribe()
     }
   }, [])
 

@@ -132,6 +132,7 @@ import { acquireLockWithSelfHeal, lockOutcomeIsAcquired, type LockOutcome } from
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { setAppDeps, setProcessesDeps, setPtyDeps, setChatDeps } from '@slayzone/transport/server'
+import { notifyEvents } from './notify-renderer'
 import { ElectronStorageAdapter } from '@slayzone/integrations/electron'
 import { initIntegrationOps, ensureIntegrationSchema, startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
 import { closeAllFileWatchers } from '@slayzone/file-editor/server'
@@ -1192,7 +1193,7 @@ app.whenReady().then(async () => {
   })
 
   // Register domain handlers (inject ipcMain and db)
-  const notifyTasksChanged = (): void => { mainWindow?.webContents.send('tasks:changed') }
+  const notifyTasksChanged = (): void => { notifyEvents.emit('tasks-changed') }
   // Task IPC migrated to tRPC `task.*` router (subscriptions cover changed events).
   startArtifactWatcher(join(getDataRoot(), 'artifacts'))
   logBoot('artifact watcher started')
@@ -1643,6 +1644,7 @@ app.whenReady().then(async () => {
       const win = wc ? BrowserWindow.fromWebContents(wc) : null
       if (win) win.close()
     },
+    notifyEvents,
     authGithubSystemSignIn: async (input) => {
       try {
         if (!input?.convexUrl) return { ok: false, error: 'Convex URL is required' }

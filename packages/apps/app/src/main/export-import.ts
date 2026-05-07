@@ -1,4 +1,5 @@
 import { app, dialog, BrowserWindow } from 'electron'
+import { notifyEvents } from './notify-renderer'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -442,8 +443,7 @@ async function handleImport(db: Database): Promise<ImportResult> {
     const result = importBundle(db, bundle)
 
     // Notify renderer to refresh
-    const mainWin = BrowserWindow.getAllWindows()[0]
-    if (mainWin) mainWin.webContents.send('tasks:changed')
+    notifyEvents.emit('tasks-changed')
 
     return result
   } catch (e) {

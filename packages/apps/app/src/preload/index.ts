@@ -69,16 +69,6 @@ const api: ElectronAPI = {
       ipcRenderer.on('app:new-temporary-task', handler)
       return () => ipcRenderer.removeListener('app:new-temporary-task', handler)
     },
-    onTasksChanged: (callback: () => void) => {
-      const handler = () => callback()
-      ipcRenderer.on('tasks:changed', handler)
-      return () => ipcRenderer.removeListener('tasks:changed', handler)
-    },
-    onSettingsChanged: (callback: () => void) => {
-      const handler = () => callback()
-      ipcRenderer.on('settings:changed', handler)
-      return () => ipcRenderer.removeListener('settings:changed', handler)
-    },
     onCloseTask: (callback: (taskId: string) => void) => {
       const handler = (_: unknown, taskId: string) => callback(taskId)
       ipcRenderer.on('app:close-task', handler)

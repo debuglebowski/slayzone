@@ -327,12 +327,14 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
       setGitTabVisibility(normalizeGitTabVisibility(gtv))
     })
 
-    const cleanupIpc = window.api?.app?.onSettingsChanged?.(() => {
-      getTrpcVanillaClient().settings.get.query({ key: 'panel_config' }).then(pc => {
-        if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
-      })
+    const sub = getTrpcVanillaClient().app.notify.onSettingsChanged.subscribe(undefined, {
+      onData: () => {
+        getTrpcVanillaClient().settings.get.query({ key: 'panel_config' }).then(pc => {
+          if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
+        })
+      },
     })
-    return () => { cleanupIpc?.() }
+    return () => sub.unsubscribe()
   }, [])
 
   useEffect(() => {

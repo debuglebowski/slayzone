@@ -162,6 +162,22 @@ export const appLevelRouter = router({
     }),
   }),
 
+  // Cross-domain notifications (tasks:changed / settings:changed)
+  notify: router({
+    onTasksChanged: publicProcedure.subscription(() => observable<void>((emit) => {
+      const handler = () => emit.next()
+      const ev = getAppDeps().notifyEvents
+      ev.on('tasks-changed', handler)
+      return () => ev.off('tasks-changed', handler)
+    })),
+    onSettingsChanged: publicProcedure.subscription(() => observable<void>((emit) => {
+      const handler = () => emit.next()
+      const ev = getAppDeps().notifyEvents
+      ev.on('settings-changed', handler)
+      return () => ev.off('settings-changed', handler)
+    })),
+  }),
+
   // Dialog
   dialog: router({
     showOpenDialog: publicProcedure.input(anyInput).mutation(({ input }) =>

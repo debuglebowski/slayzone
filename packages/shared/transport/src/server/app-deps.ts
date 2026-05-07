@@ -70,6 +70,12 @@ export type AppDeps = {
   dialogShowOpenDialog: (options: unknown) => Promise<{ canceled: boolean; filePaths: string[] }>
   windowClose: (windowId: number) => void
 
+  notifyEvents: EventEmitter & {
+    on(event: 'tasks-changed', listener: () => void): EventEmitter
+    on(event: 'settings-changed', listener: () => void): EventEmitter
+    off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+  }
+
   // Browser view manager — heavy electron coupling, expose as opaque object
   // and call methods directly from procedures. All return types are unknown
   // since the manager's public surface evolves; callers cast on the renderer.
