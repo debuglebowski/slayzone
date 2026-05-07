@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react'
 import { Button } from '@slayzone/ui'
+import { tryGetTrpcVanillaClient } from '@slayzone/transport/client'
 import { getDiagnosticsContext } from '@/lib/diagnosticsClient'
 
 interface Props {
@@ -24,13 +25,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: { componentStack?: string }): void {
-    window.api.diagnostics.recordClientError({
+    tryGetTrpcVanillaClient()?.diagnostics.recordClientError.mutate({
       type: 'error-boundary',
       message: error.message,
       stack: error.stack ?? null,
       componentStack: info.componentStack ?? null,
       snapshot: getDiagnosticsContext()
-    })
+    }).catch(() => {})
   }
 
   handleReset = (): void => {

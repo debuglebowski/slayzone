@@ -200,49 +200,6 @@ export interface ProcessInfo {
   processTitle: string | null
 }
 
-export interface DiagnosticsConfig {
-  enabled: boolean
-  verbose: boolean
-  includePtyOutput: boolean
-  retentionDays: number
-}
-
-export interface DiagnosticsExportRequest {
-  fromTsMs: number
-  toTsMs: number
-}
-
-export interface DiagnosticsExportResult {
-  success: boolean
-  canceled?: boolean
-  path?: string
-  eventCount?: number
-  error?: string
-}
-
-export interface ClientErrorEventInput {
-  type: 'window.error' | 'window.unhandledrejection' | 'error-boundary'
-  message: string
-  stack?: string | null
-  componentStack?: string | null
-  url?: string | null
-  line?: number | null
-  column?: number | null
-  snapshot?: Record<string, unknown> | null
-}
-
-export interface ClientDiagnosticEventInput {
-  event: string
-  level?: 'debug' | 'info' | 'warn' | 'error'
-  message?: string | null
-  traceId?: string | null
-  taskId?: string | null
-  projectId?: string | null
-  sessionId?: string | null
-  channel?: string | null
-  payload?: unknown
-}
-
 export type UpdateStatus =
   | { type: 'checking' }
   | { type: 'downloading'; percent: number }
@@ -824,13 +781,6 @@ export interface ElectronAPI {
     split: (tabId: string) => Promise<TerminalTab | null>
     moveToGroup: (tabId: string, targetGroupId: string | null) => Promise<TerminalTab | null>
     onChanged: (cb: (payload: { taskId: string; focusTabId?: string | null }) => void) => () => void
-  }
-  diagnostics: {
-    getConfig: () => Promise<DiagnosticsConfig>
-    setConfig: (config: Partial<DiagnosticsConfig>) => Promise<DiagnosticsConfig>
-    export: (request: DiagnosticsExportRequest) => Promise<DiagnosticsExportResult>
-    recordClientError: (input: ClientErrorEventInput) => Promise<void>
-    recordClientEvent: (input: ClientDiagnosticEventInput) => Promise<void>
   }
   telemetry: {
     onIpcEvent: (callback: (event: string, props: Record<string, unknown>) => void) => () => void

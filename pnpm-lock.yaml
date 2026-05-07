@@ -712,6 +712,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../diagnostics
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
@@ -1503,6 +1506,9 @@ importers:
 
   packages/shared/transport:
     dependencies:
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../../domains/diagnostics
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform

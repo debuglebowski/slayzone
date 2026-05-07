@@ -6,5 +6,5 @@ export {
   getDiagnosticsConfig,
   setIpcSuccessHook,
   type IpcSuccessHook,
-  type DiagnosticsEventRow
 } from './service'
+export type { DiagnosticsEventRow } from '../server'

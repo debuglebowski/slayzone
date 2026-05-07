@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { ThemeProvider, tabStoreReady, useTabStore } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
-import { TrpcProvider } from '@slayzone/transport/client'
+import { TrpcProvider, tryGetTrpcVanillaClient } from '@slayzone/transport/client'
 import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
@@ -19,7 +19,9 @@ const isFloatingAgent = params.get('floating') === 'agent'
 const taskWindowId = params.get('taskWindow')
 
 window.addEventListener('error', (event) => {
-  window.api.diagnostics.recordClientError({
+  // tRPC may not be initialized for very-early errors (before TrpcProvider mounts).
+  // Diagnostics is best-effort — drop if not ready.
+  tryGetTrpcVanillaClient()?.diagnostics.recordClientError.mutate({
     type: 'window.error',
     message: event.message || 'Unknown window error',
     stack: event.error?.stack ?? null,
@@ -27,19 +29,19 @@ window.addEventListener('error', (event) => {
     line: event.lineno ?? null,
     column: event.colno ?? null,
     snapshot: getDiagnosticsContext()
-  })
+  }).catch(() => {})
 })
 
 window.addEventListener('unhandledrejection', (event) => {
   const reason = event.reason
   const message = reason instanceof Error ? reason.message : String(reason ?? 'Unknown rejection')
   const stack = reason instanceof Error ? reason.stack : null
-  window.api.diagnostics.recordClientError({
+  tryGetTrpcVanillaClient()?.diagnostics.recordClientError.mutate({
     type: 'window.unhandledrejection',
     message,
     stack,
     snapshot: getDiagnosticsContext()
-  })
+  }).catch(() => {})
 })
 
 // Floating agent panel: minimal renderer — skip tab store, telemetry, convex, etc.

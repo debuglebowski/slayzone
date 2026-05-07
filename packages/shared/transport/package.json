@@ -14,6 +14,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/diagnostics": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/tags": "workspace:*",

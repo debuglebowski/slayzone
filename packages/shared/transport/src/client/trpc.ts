@@ -33,3 +33,8 @@ export function getTrpcVanillaClient(): TRPCClient<AppRouter> {
   }
   return _vanillaClient
 }
+
+/** Returns null if the client is not yet initialized (e.g. early-boot listeners). */
+export function tryGetTrpcVanillaClient(): TRPCClient<AppRouter> | null {
+  return _vanillaClient
+}

@@ -717,13 +717,6 @@ const api: ElectronAPI = {
       return () => { ipcRenderer.off('tabs:changed', handler) }
     }
   },
-  diagnostics: {
-    getConfig: () => ipcRenderer.invoke('diagnostics:getConfig'),
-    setConfig: (config) => ipcRenderer.invoke('diagnostics:setConfig', config),
-    export: (request) => ipcRenderer.invoke('diagnostics:export', request),
-    recordClientError: (input) => ipcRenderer.invoke('diagnostics:recordClientError', input),
-    recordClientEvent: (input) => ipcRenderer.invoke('diagnostics:recordClientEvent', input)
-  },
   telemetry: {
     onIpcEvent: (callback: (event: string, props: Record<string, unknown>) => void) => {
       const handler = (_: unknown, event: string, props: Record<string, unknown>) => callback(event, props)

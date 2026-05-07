@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
-import type { DiagnosticsConfig } from '@slayzone/types'
+import type { DiagnosticsConfig } from '@slayzone/diagnostics/shared'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function DiagnosticsSettingsTab() {
@@ -12,7 +13,7 @@ export function DiagnosticsSettingsTab() {
   const mountedRef = useRef(true)
 
   useEffect(() => {
-    window.api.diagnostics.getConfig().then(config => {
+    getTrpcVanillaClient().diagnostics.getConfig.query().then(config => {
       if (!mountedRef.current) return
       setDiagnosticsConfig(config)
       setRetentionDaysInput(String(config.retentionDays))
@@ -21,7 +22,7 @@ export function DiagnosticsSettingsTab() {
   }, [])
 
   const updateDiagnosticsConfig = async (partial: Partial<DiagnosticsConfig>) => {
-    const next = await window.api.diagnostics.setConfig(partial)
+    const next = await getTrpcVanillaClient().diagnostics.setConfig.mutate(partial)
     setDiagnosticsConfig(next)
     setRetentionDaysInput(String(next.retentionDays))
     return next
@@ -38,17 +39,29 @@ export function DiagnosticsSettingsTab() {
         '24h': now - 24 * 60 * 60 * 1000,
         '7d': now - 7 * 24 * 60 * 60 * 1000
       }
-      const result = await window.api.diagnostics.export({
+      const appVersion = await window.api.app.getVersion()
+      const bundle = await getTrpcVanillaClient().diagnostics.exportBundle.query({
         fromTsMs: fromByRange[exportRange],
-        toTsMs: now
+        toTsMs: now,
+        appVersion,
+        platform: navigator.platform || 'unknown',
       })
-      if (result.success) {
-        setDiagnosticsMessage(`Exported ${result.eventCount ?? 0} events`)
-      } else if (result.canceled) {
-        setDiagnosticsMessage('Export canceled')
-      } else {
-        setDiagnosticsMessage(result.error ?? 'Export failed')
+      if (!bundle) {
+        setDiagnosticsMessage('Export failed: diagnostics DB not available')
+        return
       }
+      // Browser-native download — replaces the Electron save-file dialog.
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const fileName = `slayzone-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setDiagnosticsMessage(`Exported ${bundle.events.length} events to ${fileName}`)
     } finally {
       setExportingDiagnostics(false)
     }
