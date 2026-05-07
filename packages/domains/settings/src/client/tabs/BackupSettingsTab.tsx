@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { FolderOpen, Trash2, RotateCcw, Download, Loader2, Pencil, Check, X } from 'lucide-react'
 import {
   Button,
@@ -73,8 +74,8 @@ export function BackupSettingsTab() {
 
   const loadData = useCallback(async () => {
     const [b, s] = await Promise.all([
-      window.api.backup.list(),
-      window.api.backup.getSettings()
+      getTrpcVanillaClient().app.backup.list.query(),
+      getTrpcVanillaClient().app.backup.getSettings.query()
     ])
     setBackups(b)
     setSettings(s)
@@ -85,7 +86,7 @@ export function BackupSettingsTab() {
   const handleCreate = async () => {
     setCreating(true)
     try {
-      const backup = await window.api.backup.create()
+      const backup = await getTrpcVanillaClient().app.backup.create.mutate()
       toast.success(`Backup created (${formatBytes(backup.sizeBytes)})`)
       loadData()
     } catch (err: any) {
@@ -98,7 +99,7 @@ export function BackupSettingsTab() {
   const handleDelete = async () => {
     if (!deleteTarget) return
     try {
-      await window.api.backup.delete(deleteTarget.filename)
+      await getTrpcVanillaClient().app.backup.delete.mutate({ filename: deleteTarget.filename })
       toast.success('Backup deleted')
       loadData()
     } catch (err: any) {
@@ -111,9 +112,9 @@ export function BackupSettingsTab() {
     if (!restoreTarget) return
     try {
       if (createSafetyBackup) {
-        await window.api.backup.create()
+        await getTrpcVanillaClient().app.backup.create.mutate()
       }
-      await window.api.backup.restore(restoreTarget.filename)
+      await getTrpcVanillaClient().app.backup.restore.mutate({ filename: restoreTarget.filename })
     } catch (err: any) {
       toast.error(`Restore failed: ${err.message}`)
     }
@@ -122,7 +123,7 @@ export function BackupSettingsTab() {
 
   const updateSettings = async (partial: Partial<BackupSettings>) => {
     try {
-      const updated = await window.api.backup.setSettings(partial)
+      const updated = await getTrpcVanillaClient().app.backup.setSettings.mutate(partial)
       setSettings(updated)
     } catch (err: any) {
       toast.error(`Failed to save settings: ${err.message}`)
@@ -141,7 +142,7 @@ export function BackupSettingsTab() {
           {creating ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4" />}
           Create Backup
         </Button>
-        <Button variant="ghost" onClick={() => window.api.backup.revealInFinder()}>
+        <Button variant="ghost" onClick={() => getTrpcVanillaClient().app.backup.revealInFinder.mutate()}>
           <FolderOpen className="mr-2 size-4" />
           Open Folder
         </Button>
@@ -224,7 +225,7 @@ export function BackupSettingsTab() {
                       onSubmit={async (e) => {
                         e.preventDefault()
                         if (editingName.trim()) {
-                          await window.api.backup.rename(backup.filename, editingName.trim())
+                          await getTrpcVanillaClient().app.backup.rename.mutate({ filename: backup.filename, name: editingName.trim() })
                           loadData()
                         }
                         setEditingFilename(null)

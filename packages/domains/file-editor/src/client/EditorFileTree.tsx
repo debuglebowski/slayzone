@@ -167,7 +167,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   const [clipboard, setClipboard] = useState<{ paths: string[]; mode: 'copy' | 'cut' } | null>(null)
   const [osHasFiles, setOsHasFiles] = useState(false)
   const refreshOsClipboard = useCallback(() => {
-    window.api.clipboard.hasFiles().then(setOsHasFiles).catch(() => setOsHasFiles(false))
+    getTrpcVanillaClient().app.clipboard.hasFiles.query().then(setOsHasFiles).catch(() => setOsHasFiles(false))
   }, [])
 
   // --- Git status ---
@@ -446,7 +446,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
 
   const writeOsClipboard = useCallback((relPaths: string[]) => {
     const absolute = relPaths.map((p) => `${projectPath}/${p}`)
-    void window.api.clipboard.writeFilePaths(absolute)
+    void getTrpcVanillaClient().app.clipboard.writeFilePaths.mutate({ paths: absolute })
   }, [projectPath])
 
   const handleCopy = useCallback((paths: string[]) => {
@@ -478,7 +478,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     let internalUsed = false
     if (clipboard) {
       // Verify OS clipboard still matches our internal state (cut paths weren't overwritten externally).
-      const osPaths = await window.api.clipboard.readFilePaths()
+      const osPaths = await getTrpcVanillaClient().app.clipboard.readFilePaths.query()
       const osRelative = osPaths
         .filter((p) => p === projectPath || p.startsWith(projectPrefix))
         .map((p) => p === projectPath ? '' : p.slice(projectPrefix.length))
@@ -509,7 +509,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     }
 
     if (!internalUsed) {
-      const osPaths = await window.api.clipboard.readFilePaths()
+      const osPaths = await getTrpcVanillaClient().app.clipboard.readFilePaths.query()
       for (const abs of osPaths) {
         try {
           if (abs === projectPath || abs.startsWith(projectPrefix)) {

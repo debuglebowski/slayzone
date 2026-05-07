@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
 import { api } from 'convex/_generated/api'
@@ -143,7 +144,7 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
   useEffect(() => {
     if (!isAuthenticated) return
     const sync = (): void => {
-      window.api.leaderboard?.getLocalStats()
+      getTrpcVanillaClient().app.leaderboard.getLocalStats.query()
         .then((stats) => { if (stats.days.length > 0) syncDailyStats({ days: stats.days }) })
         .catch(() => {})
     }

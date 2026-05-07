@@ -1,5 +1,4 @@
 import { clipboard } from 'electron'
-import type { IpcMain } from 'electron'
 import { existsSync } from 'fs'
 
 const PLIST_HEADER = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<array>\n'
@@ -113,10 +112,3 @@ export function hasFilePaths(): boolean {
     .some((s) => (s.startsWith('/') && existsSync(s)) || s.startsWith('file://'))
 }
 
-export function registerClipboardHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('clipboard:writeFilePaths', (_e, paths: string[]) => {
-    writeFilePaths(paths)
-  })
-  ipcMain.handle('clipboard:readFilePaths', () => readFilePaths())
-  ipcMain.handle('clipboard:hasFiles', () => hasFilePaths())
-}

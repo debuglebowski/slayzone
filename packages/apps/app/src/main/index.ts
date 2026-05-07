@@ -111,14 +111,14 @@ import { getDatabase, closeDatabase, getDiagnosticsDatabase, closeDiagnosticsDat
 import { runMigrations, LATEST_MIGRATION_VERSION } from './db/migrations'
 import { normalizeProjectStatusData } from './db/status-normalization'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
-import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
+import { buildBackupOps, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
 // Domain handlers
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import { configureTaskRuntimeAdapters, registerFilesHandlers, closeArtifactWatcher, startArtifactWatcher } from '@slayzone/task/electron'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
-import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/electron'
+import { registerPtyHandlers, buildUsageOps, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/electron'
 import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalModes } from '@slayzone/terminal/server'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import { attachFloatingAgent, setupFloatingAgent } from './floating-agent'
@@ -130,16 +130,17 @@ import { detectPreviousCrash, writeBootStub, writeCleanShutdownSentinel, scanCra
 import { acquireLockWithSelfHeal, lockOutcomeIsAcquired, type LockOutcome } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
+import { setAppDeps } from '@slayzone/transport/server'
 import { ElectronStorageAdapter } from '@slayzone/integrations/electron'
 import { initIntegrationOps, ensureIntegrationSchema, startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
 import { closeAllFileWatchers } from '@slayzone/file-editor/server'
 import { AutomationEngine, automationsEvents } from '@slayzone/automations/server'
-import { registerScreenshotHandlers } from './screenshot'
-import { registerClipboardHandlers } from './clipboard-handlers'
+import { captureBrowserViewScreenshot } from './screenshot'
+import { writeFilePaths, readFilePaths, hasFilePaths } from './clipboard-handlers'
 import { setProcessManagerWindow, initProcessManager, createProcess, spawnProcess, updateProcess, stopProcess, killProcess, restartProcess, listForTask, listAllProcesses, killTaskProcesses, killAllProcesses } from './process-manager'
 import { createStatsPoller } from './pid-stats'
-import { registerExportImportHandlers } from './export-import'
-import { registerLeaderboardHandlers } from './leaderboard'
+import { buildExportImportOps } from './export-import'
+import { getLocalLeaderboardStats } from './leaderboard'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
 
@@ -1216,7 +1217,6 @@ app.whenReady().then(async () => {
   })
 
   wireNativeThemeBridge()
-  registerUsageHandlers(ipcMain, db)
   registerPtyHandlers(ipcMain, db)
   logBoot('pty handlers registered')
   setupFloatingAgent(() => currentOverrides)
@@ -1307,11 +1307,6 @@ app.whenReady().then(async () => {
   setStorageAdapter(new ElectronStorageAdapter())
   const integrationHandles = initIntegrationOps(db, { enableTestChannels: isPlaywright })
   logBoot('integration ops initialized')
-  registerClipboardHandlers(ipcMain)
-  registerScreenshotHandlers(browserViewManager)
-  registerExportImportHandlers(ipcMain, db, isPlaywright)
-  registerLeaderboardHandlers(ipcMain, db)
-  logBoot('misc handlers registered (file-editor/clipboard/screenshot/export/leaderboard)')
   const automationEngine = new AutomationEngine(db)
   // Each automation 'changed' emit also re-fetches tasks (engine mutations
   // touch task rows). Renderer subscription `automations.onChanged` handles
@@ -1319,9 +1314,37 @@ app.whenReady().then(async () => {
   automationsEvents.on('changed', () => notifyTasksChanged())
   automationEngine.start()
   powerMonitor.on('resume', () => automationEngine.runCatchup())
-  registerBackupHandlers(ipcMain, db)
   startAutoBackup(db)
-  logBoot('domain IPC handlers registered')
+
+  // Wire app-level dependencies into the tRPC router
+  const backupOps = buildBackupOps(db)
+  const exportImportOps = buildExportImportOps(db, isPlaywright)
+  const usageOps = buildUsageOps(db)
+  setAppDeps({
+    backupList: backupOps.list,
+    backupCreate: backupOps.create,
+    backupRename: backupOps.rename,
+    backupDelete: backupOps.delete,
+    backupRestore: backupOps.restore,
+    backupGetSettings: backupOps.getSettings,
+    backupSetSettings: backupOps.setSettings,
+    backupRevealInFinder: backupOps.revealInFinder,
+    clipboardWriteFilePaths: writeFilePaths,
+    clipboardReadFilePaths: readFilePaths,
+    clipboardHasFiles: hasFilePaths,
+    screenshotCaptureView: (viewId: string) => captureBrowserViewScreenshot(browserViewManager, viewId),
+    leaderboardGetLocalStats: () => getLocalLeaderboardStats(db),
+    exportAll: exportImportOps.exportAll,
+    exportProject: exportImportOps.exportProject,
+    importBundle: exportImportOps.importBundle,
+    testExportAllToPath: 'testExportAllToPath' in exportImportOps ? exportImportOps.testExportAllToPath : undefined,
+    testExportProjectToPath: 'testExportProjectToPath' in exportImportOps ? exportImportOps.testExportProjectToPath : undefined,
+    testImportFromPath: 'testImportFromPath' in exportImportOps ? exportImportOps.testImportFromPath : undefined,
+    testSetTaskParent: 'testSetTaskParent' in exportImportOps ? exportImportOps.testSetTaskParent : undefined,
+    usageFetch: usageOps.fetch,
+    usageTest: usageOps.test,
+  })
+  logBoot('app-level deps wired into tRPC')
 
   // Start MCP server off the boot critical path. The dynamic import resolves
   // a heavy module graph (~70ms sync work even though it returns a Promise),

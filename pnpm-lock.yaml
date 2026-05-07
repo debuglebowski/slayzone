@@ -1580,9 +1580,15 @@ importers:
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../../domains/terminal
       '@slayzone/test-panel':
         specifier: workspace:*
         version: link:../../domains/test-panel
+      '@slayzone/types':
+        specifier: workspace:*
+        version: link:../types
       '@slayzone/usage-analytics':
         specifier: workspace:*
         version: link:../../domains/usage-analytics

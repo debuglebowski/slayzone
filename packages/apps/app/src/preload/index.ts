@@ -273,11 +273,6 @@ const api: ElectronAPI = {
       return paths
     }
   },
-  clipboard: {
-    writeFilePaths: (paths) => ipcRenderer.invoke('clipboard:writeFilePaths', paths),
-    readFilePaths: () => ipcRenderer.invoke('clipboard:readFilePaths'),
-    hasFiles: () => ipcRenderer.invoke('clipboard:hasFiles')
-  },
   pty: {
     create: (opts) => ipcRenderer.invoke('pty:create', opts),
     testExecutionContext: (context) => ipcRenderer.invoke('pty:testExecutionContext', context),
@@ -492,16 +487,6 @@ const api: ElectronAPI = {
       return () => ipcRenderer.removeListener('telemetry:ipc-event', handler)
     }
   },
-  leaderboard: {
-    getLocalStats: () => ipcRenderer.invoke('leaderboard:get-local-stats')
-  },
-  usage: {
-    fetch: (force?: boolean) => ipcRenderer.invoke('usage:fetch', force),
-    test: (config: any) => ipcRenderer.invoke('usage:test', config)
-  },
-  screenshot: {
-    captureView: (viewId: string) => ipcRenderer.invoke('screenshot:captureView', viewId)
-  },
   webview: {
     registerShortcuts: (webviewId) =>
       ipcRenderer.invoke('webview:register-shortcuts', webviewId),
@@ -590,11 +575,6 @@ const api: ElectronAPI = {
       return () => ipcRenderer.removeListener('browser:event', handler)
     },
   },
-  exportImport: {
-    exportAll: () => ipcRenderer.invoke('export-import:export-all'),
-    exportProject: (projectId) => ipcRenderer.invoke('export-import:export-project', projectId),
-    import: () => ipcRenderer.invoke('export-import:import')
-  },
   processes: {
     create: (projectId, taskId, label, command, cwd, autoRestart) =>
       ipcRenderer.invoke('processes:create', projectId, taskId, label, command, cwd, autoRestart),
@@ -628,17 +608,6 @@ const api: ElectronAPI = {
       return () => ipcRenderer.removeListener('processes:title', handler)
     }
   },
-  backup: {
-    list: () => ipcRenderer.invoke('backup:list'),
-    create: (name?: string) => ipcRenderer.invoke('backup:create', name),
-    rename: (filename: string, name: string) => ipcRenderer.invoke('backup:rename', filename, name),
-    delete: (filename: string) => ipcRenderer.invoke('backup:delete', filename),
-    restore: (filename: string) => ipcRenderer.invoke('backup:restore', filename),
-    getSettings: () => ipcRenderer.invoke('backup:getSettings'),
-    setSettings: (settings: Partial<import('@slayzone/types').BackupSettings>) => ipcRenderer.invoke('backup:setSettings', settings),
-    revealInFinder: () => ipcRenderer.invoke('backup:revealInFinder')
-  },
-
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

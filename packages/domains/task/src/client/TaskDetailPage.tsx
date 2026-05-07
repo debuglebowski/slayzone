@@ -977,7 +977,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Screenshot: capture browser view and inject path into terminal
   const handleScreenshot = useCallback(async (viewId: string) => {
-    const result = await window.api.screenshot.captureView(viewId)
+    const result = await getTrpcVanillaClient().app.screenshot.captureView.mutate({ viewId })
     if (!result.success || !result.path) return
     track('screenshot_captured')
     const escaped = result.path.includes(' ') ? `"${result.path}"` : result.path

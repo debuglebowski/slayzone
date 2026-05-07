@@ -1,4 +1,3 @@
-import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type { LocalLeaderboardStats } from '@slayzone/types'
 import { refreshUsageData, queryDailyTotals } from '@slayzone/usage-analytics/server'
@@ -27,24 +26,22 @@ function getTodayCompletedTasks(db: Database): number {
   ), 0)
 }
 
-export function registerLeaderboardHandlers(ipcMain: IpcMain, db: Database): void {
-  ipcMain.handle('leaderboard:get-local-stats', async (): Promise<LocalLeaderboardStats> => {
-    const today = new Date().toISOString().slice(0, 10)
-    const todayCompletedTasks = getTodayCompletedTasks(db)
-    const tokenDays = await getDailyTokens(db)
+export async function getLocalLeaderboardStats(db: Database): Promise<LocalLeaderboardStats> {
+  const today = new Date().toISOString().slice(0, 10)
+  const todayCompletedTasks = getTodayCompletedTasks(db)
+  const tokenDays = await getDailyTokens(db)
 
-    const days = tokenDays
-      .map((d) => ({
-        date: d.date,
-        totalTokens: d.totalTokens,
-        totalCompletedTasks: d.date === today ? todayCompletedTasks : 0
-      }))
-      .filter((d) => d.date === today || d.totalTokens > 0)
+  const days = tokenDays
+    .map((d) => ({
+      date: d.date,
+      totalTokens: d.totalTokens,
+      totalCompletedTasks: d.date === today ? todayCompletedTasks : 0
+    }))
+    .filter((d) => d.date === today || d.totalTokens > 0)
 
-    if (!days.find((d) => d.date === today)) {
-      days.push({ date: today, totalTokens: 0, totalCompletedTasks: todayCompletedTasks })
-    }
+  if (!days.find((d) => d.date === today)) {
+    days.push({ date: today, totalTokens: 0, totalCompletedTasks: todayCompletedTasks })
+  }
 
-    return { days }
-  })
+  return { days }
 }

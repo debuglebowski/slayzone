@@ -1,4 +1,3 @@
-import type { IpcMain } from 'electron'
 import { net } from 'electron'
 import { execFile, spawn } from 'child_process'
 import { readFile } from 'fs/promises'
@@ -481,8 +480,8 @@ function fetchProvider(p: ProviderMeta, fetcher: () => Promise<ProviderUsage>, t
 
 // ── Handler ──────────────────────────────────────────────────────────
 
-export function registerUsageHandlers(ipcMain: IpcMain, db: Database.Database): void {
-  ipcMain.handle('usage:fetch', async (_e, force?: boolean): Promise<ProviderUsage[]> => {
+export function buildUsageOps(db: Database.Database) {
+  const fetchUsage = async (force?: boolean): Promise<ProviderUsage[]> => {
     const now = Date.now()
 
     // Hard floor: never refetch within 10s (blocks spam-clicking)
@@ -550,9 +549,9 @@ export function registerUsageHandlers(ipcMain: IpcMain, db: Database.Database): 
     })
 
     return inflight
-  })
-
-  ipcMain.handle('usage:test', async (_e, config: UsageProviderConfig) => {
-    return testUsageConfig(config)
-  })
+  }
+  return {
+    fetch: fetchUsage,
+    test: async (config: UsageProviderConfig) => testUsageConfig(config),
+  }
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { ProviderUsage } from '@slayzone/terminal/shared'
 
 const POLL_INTERVAL = 5 * 60_000
@@ -9,7 +10,7 @@ export function useUsage() {
 
   const refresh = useCallback(async (force?: boolean) => {
     try {
-      const result = await window.api.usage.fetch(force)
+      const result = await getTrpcVanillaClient().app.usage.fetch.query({ force })
       setData(result)
     } catch {
       // silent — stale data is fine

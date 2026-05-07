@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { AlertTriangle, CheckCheck, Github, Lock, LogOut, RefreshCw, Sparkles } from 'lucide-react'
 import { Button, IconButton, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@slayzone/ui'
 import { useMutation, useQuery } from 'convex/react'
@@ -179,7 +180,7 @@ function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboard
   async function syncStats(): Promise<void> {
     setSyncing(true)
     try {
-      const stats = await window.api.leaderboard?.getLocalStats()
+      const stats = await getTrpcVanillaClient().app.leaderboard.getLocalStats.query()
       if (stats?.days.length) await syncDailyStats({ days: stats.days })
     } catch { /* best-effort */ } finally {
       setSyncing(false)

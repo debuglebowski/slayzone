@@ -36,7 +36,7 @@ export function DataSettingsTab() {
             variant="outline"
             disabled={!exportProjectId}
             onClick={async () => {
-              const result = await window.api.exportImport.exportProject(exportProjectId)
+              const result = await getTrpcVanillaClient().app.exportImport.exportProject.mutate({ projectId: exportProjectId })
               if (result.canceled) return
               if (result.success) {
                 toast.success(`Exported to ${result.path}`)
@@ -53,7 +53,7 @@ export function DataSettingsTab() {
         <Button
           variant="outline"
           onClick={async () => {
-            const result = await window.api.exportImport.import()
+            const result = await getTrpcVanillaClient().app.exportImport.import.mutate()
             if (result.canceled) return
             if (result.success) {
               toast.success(`Imported ${result.projectCount} project(s), ${result.taskCount} task(s)`)

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type ComponentProps } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { ChevronRight, Copy, HelpCircle, Plus, RefreshCw, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger, IconButton, Input, Label, Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue, Switch, Tooltip, TooltipTrigger, TooltipContent, toast } from '@slayzone/ui'
 import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
@@ -62,7 +63,7 @@ function UsageConfigSection({
     setTesting(true)
     setTestResult(null)
     try {
-      const res = await window.api.usage.test(config)
+      const res = await getTrpcVanillaClient().app.usage.test.mutate(config)
       setTestResult(res)
       if (res.ok) toast.success(`Found ${res.windows?.length ?? 0} usage window(s)`)
       else toast.error(res.error ?? 'Test failed')

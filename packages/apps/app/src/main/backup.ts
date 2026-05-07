@@ -1,5 +1,4 @@
 import { app, shell } from 'electron'
-import type { IpcMain } from 'electron'
 import type Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
@@ -227,40 +226,20 @@ export async function createPreMigrationBackup(
   }
 }
 
-export function registerBackupHandlers(ipcMain: IpcMain, db: Database.Database): void {
+export function buildBackupOps(db: Database.Database) {
   _db = db
-
-  ipcMain.handle('backup:list', () => {
-    return listBackups()
-  })
-
-  ipcMain.handle('backup:create', async (_, name?: string) => {
-    return createBackup(db, 'manual', name)
-  })
-
-  ipcMain.handle('backup:rename', (_, filename: string, name: string) => {
-    setBackupName(filename, name)
-  })
-
-  ipcMain.handle('backup:delete', (_, filename: string) => {
-    deleteBackup(filename)
-  })
-
-  ipcMain.handle('backup:restore', (_, filename: string) => {
-    restoreBackup(filename)
-  })
-
-  ipcMain.handle('backup:getSettings', () => {
-    return getBackupSettings(db)
-  })
-
-  ipcMain.handle('backup:setSettings', (_, partial: Partial<BackupSettings>) => {
-    const updated = setBackupSettings(db, partial)
-    startAutoBackup(db)
-    return updated
-  })
-
-  ipcMain.handle('backup:revealInFinder', () => {
-    shell.openPath(getBackupsDir())
-  })
+  return {
+    list: () => listBackups(),
+    create: async (name?: string) => createBackup(db, 'manual', name),
+    rename: (filename: string, name: string) => setBackupName(filename, name),
+    delete: (filename: string) => deleteBackup(filename),
+    restore: (filename: string) => restoreBackup(filename),
+    getSettings: () => getBackupSettings(db),
+    setSettings: (partial: Partial<BackupSettings>) => {
+      const updated = setBackupSettings(db, partial)
+      startAutoBackup(db)
+      return updated
+    },
+    revealInFinder: () => { shell.openPath(getBackupsDir()) },
+  }
 }

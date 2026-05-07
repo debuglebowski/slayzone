@@ -7,9 +7,6 @@ import type {
   SessionInfo,
   PromptInfo,
   BufferSinceResult,
-  ProviderUsage,
-  UsageWindow,
-  UsageProviderConfig,
   ValidationResult,
   TerminalModeInfo,
   CreateTerminalModeInput,
@@ -260,11 +257,6 @@ export interface ElectronAPI {
     getDropPaths: () => string[]
     getPastePaths: () => string[]
   }
-  clipboard: {
-    writeFilePaths: (paths: string[]) => Promise<void>
-    readFilePaths: () => Promise<string[]>
-    hasFiles: () => Promise<boolean>
-  }
   pty: {
     create: (opts: PtyCreateOptions) => Promise<{ success: boolean; error?: string }>
     testExecutionContext: (context: ExecutionContext) => Promise<{ success: boolean; error?: string }>
@@ -485,16 +477,6 @@ export interface ElectronAPI {
   telemetry: {
     onIpcEvent: (callback: (event: string, props: Record<string, unknown>) => void) => () => void
   }
-  screenshot: {
-    captureView: (viewId: string) => Promise<{ success: boolean; path?: string }>
-  }
-  leaderboard: {
-    getLocalStats: () => Promise<LocalLeaderboardStats>
-  }
-  usage: {
-    fetch: (force?: boolean) => Promise<ProviderUsage[]>
-    test: (config: UsageProviderConfig) => Promise<{ ok: boolean; windows?: UsageWindow[]; error?: string }>
-  }
   webview: {
     registerShortcuts: (webviewId: number) => Promise<void>
     setKeyboardPassthrough: (webviewId: number, enabled: boolean) => Promise<void>
@@ -608,11 +590,6 @@ export interface ElectronAPI {
       [key: string]: unknown
     }) => void) => () => void
   }
-  exportImport: {
-    exportAll: () => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>
-    exportProject: (projectId: string) => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>
-    import: () => Promise<{ success: boolean; canceled?: boolean; projectCount?: number; taskCount?: number; importedProjects?: Array<{ id: string; name: string }>; error?: string }>
-  }
   processes: {
     create: (projectId: string | null, taskId: string | null, label: string, command: string, cwd: string, autoRestart: boolean) => Promise<string>
     spawn: (projectId: string | null, taskId: string | null, label: string, command: string, cwd: string, autoRestart: boolean) => Promise<string>
@@ -627,15 +604,5 @@ export interface ElectronAPI {
     onStatus: (cb: (processId: string, status: ProcessStatus) => void) => () => void
     onStats: (cb: (stats: Record<string, ProcessStats>) => void) => () => void
     onTitle: (cb: (processId: string, title: string | null) => void) => () => void
-  }
-  backup: {
-    list: () => Promise<BackupInfo[]>
-    create: (name?: string) => Promise<BackupInfo>
-    rename: (filename: string, name: string) => Promise<void>
-    delete: (filename: string) => Promise<void>
-    restore: (filename: string) => Promise<void>
-    getSettings: () => Promise<BackupSettings>
-    setSettings: (settings: Partial<BackupSettings>) => Promise<BackupSettings>
-    revealInFinder: () => Promise<void>
   }
 }

@@ -1,4 +1,4 @@
-import { app, dialog, BrowserWindow, type IpcMain } from 'electron'
+import { app, dialog, BrowserWindow } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -451,14 +451,16 @@ async function handleImport(db: Database): Promise<ImportResult> {
   }
 }
 
-export function registerExportImportHandlers(ipcMain: IpcMain, db: Database, isTest = false): void {
-  ipcMain.handle('export-import:export-all', () => handleExportAll(db))
-  ipcMain.handle('export-import:export-project', (_, projectId: string) => handleExportProject(db, projectId))
-  ipcMain.handle('export-import:import', () => handleImport(db))
-
-  // Test-only handlers that bypass native file dialogs
-  if (isTest) {
-    ipcMain.handle('export-import:test:export-all-to-path', (_, filePath: string) => {
+export function buildExportImportOps(db: Database, isTest = false) {
+  const base = {
+    exportAll: () => handleExportAll(db),
+    exportProject: (projectId: string) => handleExportProject(db, projectId),
+    importBundle: () => handleImport(db),
+  }
+  if (!isTest) return base
+  return {
+    ...base,
+    testExportAllToPath: (filePath: string) => {
       try {
         const bundle = exportAll(db)
         fs.writeFileSync(filePath, JSON.stringify(bundle, null, 2), 'utf8')
@@ -466,9 +468,8 @@ export function registerExportImportHandlers(ipcMain: IpcMain, db: Database, isT
       } catch (e) {
         return { success: false, error: String(e) }
       }
-    })
-
-    ipcMain.handle('export-import:test:export-project-to-path', (_, projectId: string, filePath: string) => {
+    },
+    testExportProjectToPath: (projectId: string, filePath: string) => {
       try {
         const bundle = exportProject(db, projectId)
         fs.writeFileSync(filePath, JSON.stringify(bundle, null, 2), 'utf8')
@@ -476,9 +477,8 @@ export function registerExportImportHandlers(ipcMain: IpcMain, db: Database, isT
       } catch (e) {
         return { success: false, error: String(e) }
       }
-    })
-
-    ipcMain.handle('export-import:test:import-from-path', (_, filePath: string) => {
+    },
+    testImportFromPath: (filePath: string) => {
       try {
         const raw = fs.readFileSync(filePath, 'utf8')
         const bundle = JSON.parse(raw) as SlayExportBundle
@@ -492,26 +492,19 @@ export function registerExportImportHandlers(ipcMain: IpcMain, db: Database, isT
       } catch (e) {
         return { success: false, error: String(e) }
       }
-    })
-
-    // Test-only: set parent_id directly. Allows tests to simulate stale
-    // (orphan) FKs by temporarily disabling FK checks for this single
-    // statement. Must not be exposed outside isTest mode.
-    ipcMain.handle(
-      'export-import:test:set-task-parent',
-      (_, taskId: string, parentId: string | null) => {
+    },
+    testSetTaskParent: (taskId: string, parentId: string | null) => {
+      try {
+        db.pragma('foreign_keys = OFF')
         try {
-          db.pragma('foreign_keys = OFF')
-          try {
-            db.prepare('UPDATE tasks SET parent_id = ? WHERE id = ?').run(parentId, taskId)
-          } finally {
-            db.pragma('foreign_keys = ON')
-          }
-          return { success: true }
-        } catch (e) {
-          return { success: false, error: String(e) }
+          db.prepare('UPDATE tasks SET parent_id = ? WHERE id = ?').run(parentId, taskId)
+        } finally {
+          db.pragma('foreign_keys = ON')
         }
+        return { success: true }
+      } catch (e) {
+        return { success: false, error: String(e) }
       }
-    )
+    },
   }
 }
