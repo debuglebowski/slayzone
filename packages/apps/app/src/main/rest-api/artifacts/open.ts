@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { broadcastToWindows } from '../../broadcast-to-windows'
+import { menuEvents } from '../../menu-events'
 import type { RestApiDeps } from '../types'
 
 export function registerOpenArtifactRoute(app: Express, deps: RestApiDeps): void {
@@ -9,7 +9,7 @@ export function registerOpenArtifactRoute(app: Express, deps: RestApiDeps): void
     if (!row) { res.status(404).json({ error: 'Artifact not found' }); return }
     const taskId = row.task_id
     deps.notifyRenderer()
-    broadcastToWindows('app:open-artifact', { taskId, artifactId })
+    menuEvents.emit('open-artifact', { taskId, artifactId })
     res.json({ ok: true })
   })
 }

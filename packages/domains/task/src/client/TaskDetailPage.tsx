@@ -795,7 +795,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Cmd+Shift+U: sync detected session ID to DB (only when this task is active and banner is showing)
   useEffect(() => {
     if (!shortcutActive) return
-    return window.api.app.onSyncSessionId(() => { void handleUpdateSessionIdRef.current() })
+    const sub = getTrpcVanillaClient().app.menu.onSyncSessionId.subscribe(undefined, { onData: () => { void handleUpdateSessionIdRef.current() } })
+    return () => sub.unsubscribe()
   }, [shortcutActive])
 
   // Persist detected conversation IDs immediately for modes that need session discovery.
@@ -1038,10 +1039,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Cmd+Shift+S screenshot trigger from main process
   useEffect(() => {
     if (!shortcutActive) return
-    return window.api.app.onScreenshotTrigger(() => {
-      const viewId = browserPanelRef.current?.getActiveViewId()
-      if (viewId) void handleScreenshot(viewId)
+    const sub = getTrpcVanillaClient().app.menu.onScreenshotTrigger.subscribe(undefined, {
+      onData: () => {
+        const viewId = browserPanelRef.current?.getActiveViewId()
+        if (viewId) void handleScreenshot(viewId)
+      },
     })
+    return () => sub.unsubscribe()
   }, [shortcutActive, handleScreenshot])
 
   // Keep a ref so the onCloseCurrent handler always sees current browserTabs without re-subscribing
@@ -1093,7 +1097,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // or fall through to close the task tab if nothing to close
   useEffect(() => {
     if (!shortcutActive) return
-    return window.api.app.onCloseCurrent(async () => {
+    const sub = getTrpcVanillaClient().app.menu.onCloseCurrent.subscribe(undefined, { onData: async () => {
       const panel = lastFocusedPanelRef.current
       if (panel === 'terminal') {
         const closed = await terminalContainerRef.current?.closeActiveGroup() ?? true
@@ -1117,7 +1121,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
       // Nothing was closed — close the task tab
       onCloseTabRef.current?.(taskId)
-    })
+    } })
+    return () => sub.unsubscribe()
   }, [shortcutActive, setBrowserTabs])
 
   // Cmd+R browser reload is handled globally in App.tsx
@@ -1274,7 +1279,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
     artifactsPanelRef.current?.selectArtifact(artifactId)
   }
-  useEffect(() => window.api.app.onOpenArtifact((tid, aid) => openArtifactRef.current(tid, aid)), [])
+  useEffect(() => {
+    const sub = getTrpcVanillaClient().app.menu.onOpenArtifact.subscribe(undefined, {
+      onData: ({ taskId: tid, artifactId: aid }) => openArtifactRef.current(tid, aid),
+    })
+    return () => sub.unsubscribe()
+  }, [])
 
   const handleQuickOpenFile = useCallback((filePath: string, options?: OpenFileOptions) => {
     if (fileEditorRef.current) {
@@ -1668,37 +1678,41 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // CLI: open browser panel when requested by main process (slay tasks browser --panel=visible)
   useEffect(() => {
     if (!isActive || !task) return
-    return window.api.app.onBrowserEnsurePanelOpen((taskId, url, tabId) => {
-      if (taskId !== task.id) return
-      if (tabId) {
-        // CLI targeted an existing tab — open panel and switch to that tab.
-        // The navigate route will load `url` into the targeted tab's webContents.
-        handlePanelToggle('browser', true)
-        const tabs = browserTabsRef.current
-        if (tabs.tabs.some(t => t.id === tabId) && tabs.activeTabId !== tabId) {
-          handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
+    const sub = getTrpcVanillaClient().app.menu.onBrowserEnsurePanelOpen.subscribe(undefined, {
+      onData: ({ taskId, url, tabId }) => {
+        if (taskId !== task.id) return
+        if (tabId) {
+          handlePanelToggle('browser', true)
+          const tabs = browserTabsRef.current
+          if (tabs.tabs.some(t => t.id === tabId) && tabs.activeTabId !== tabId) {
+            handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
+          }
+        } else if (url) {
+          openDevServerInBrowser(url)
+        } else {
+          handlePanelToggle('browser', true)
         }
-      } else if (url) {
-        openDevServerInBrowser(url)
-      } else {
-        handlePanelToggle('browser', true)
-      }
+      },
     })
+    return () => sub.unsubscribe()
   }, [isActive, task?.id, openDevServerInBrowser, handlePanelToggle, handleBrowserTabsChange])
 
   // CLI: create a new browser tab with a server-supplied tabId (slay tasks browser new)
   useEffect(() => {
     if (!isActive || !task) return
-    return window.api.app.onBrowserCreateTab(({ taskId, tabId, url, background }) => {
-      if (taskId !== task.id) return
-      handlePanelToggle('browser', true)
-      const tabUrl = url ?? 'about:blank'
-      const newTab = { id: tabId, url: tabUrl, title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl }
-      const current = browserTabsRef.current
-      if (current.tabs.some(t => t.id === tabId)) return
-      const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
-      handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
+    const sub = getTrpcVanillaClient().app.menu.onBrowserCreateTab.subscribe(undefined, {
+      onData: ({ taskId, tabId, url, background }) => {
+        if (taskId !== task.id) return
+        handlePanelToggle('browser', true)
+        const tabUrl = url ?? 'about:blank'
+        const newTab = { id: tabId, url: tabUrl, title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl }
+        const current = browserTabsRef.current
+        if (current.tabs.some(t => t.id === tabId)) return
+        const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
+        handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
+      },
     })
+    return () => sub.unsubscribe()
   }, [isActive, task?.id, handlePanelToggle, handleBrowserTabsChange])
 
   const handleTagsChange = (newTagIds: string[]): void => {

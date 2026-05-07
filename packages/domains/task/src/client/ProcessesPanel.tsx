@@ -318,10 +318,12 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
   }, [])
 
   useEffect(() => {
-    const unsub = window.api.app.onCloseTask((closedTaskId) => {
-      if (taskId && closedTaskId === taskId) getTrpcVanillaClient().processes.killTask.mutate({ taskId })
+    const sub = getTrpcVanillaClient().app.menu.onCloseTask.subscribe(undefined, {
+      onData: (closedTaskId) => {
+        if (taskId && (closedTaskId as string) === taskId) getTrpcVanillaClient().processes.killTask.mutate({ taskId })
+      },
     })
-    return unsub
+    return () => sub.unsubscribe()
   }, [taskId])
 
   useEffect(() => {

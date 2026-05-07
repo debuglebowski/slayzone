@@ -33,13 +33,16 @@ export function useBrowserViewBounds(
       if (!cancelled) setAppZoomFactor(factor)
     })
 
-    const unsubscribe = window.api.app.onZoomFactorChanged((factor) => {
-      setAppZoomFactor((current) => {
-        if (Math.abs(current - factor) < 0.0001) return current
-        lastBoundsRef.current = null
-        return factor
-      })
+    const sub = getTrpcVanillaClient().app.menu.onZoomFactorChanged.subscribe(undefined, {
+      onData: (factor) => {
+        setAppZoomFactor((current) => {
+          if (Math.abs(current - (factor as number)) < 0.0001) return current
+          lastBoundsRef.current = null
+          return factor as number
+        })
+      },
     })
+    const unsubscribe = () => sub.unsubscribe()
 
     return () => {
       cancelled = true

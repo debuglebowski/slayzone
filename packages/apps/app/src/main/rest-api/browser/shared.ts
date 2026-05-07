@@ -1,6 +1,6 @@
 import type { Response } from 'express'
 import { getBrowserWebContents, listBrowserTabs, waitForBrowserRegistration } from '../../browser-registry'
-import { broadcastToWindows } from '../../broadcast-to-windows'
+import { menuEvents } from '../../menu-events'
 
 export const BROWSER_JS_TIMEOUT = 10_000
 export const ALLOWED_NAVIGATE_SCHEMES = ['http:', 'https:', 'file:']
@@ -25,7 +25,7 @@ export async function ensureBrowserWc(
   if (wc) return { wc, autoOpened: false, tabId: tabId ?? null }
 
   if (panel === 'visible') {
-    broadcastToWindows('browser:ensure-panel-open', taskId, url, tabId)
+    menuEvents.emit('browser-ensure-panel-open', { taskId, url, tabId })
     try {
       const resolved = await waitForBrowserRegistration(taskId, { tabId })
       return { wc: resolved, autoOpened: !!url, tabId: tabId ?? null }

@@ -76,6 +76,30 @@ export type AppDeps = {
     off(event: string, listener: (...args: unknown[]) => void): EventEmitter
   }
 
+  // Native-menu / app shortcut events dispatched to renderer
+  menuEvents: EventEmitter & {
+    on(event: 'go-home', listener: () => void): EventEmitter
+    on(event: 'toggle-agent-panel', listener: () => void): EventEmitter
+    on(event: 'toggle-agent-status-panel', listener: () => void): EventEmitter
+    on(event: 'open-settings', listener: () => void): EventEmitter
+    on(event: 'open-project-settings', listener: () => void): EventEmitter
+    on(event: 'new-temporary-task', listener: () => void): EventEmitter
+    on(event: 'open-task', listener: (taskId: string) => void): EventEmitter
+    on(event: 'close-task', listener: (taskId: string) => void): EventEmitter
+    on(event: 'open-artifact', listener: (payload: { taskId: string; artifactId: string }) => void): EventEmitter
+    on(event: 'screenshot-trigger', listener: () => void): EventEmitter
+    on(event: 'close-current-focus', listener: () => void): EventEmitter
+    on(event: 'close-active-task', listener: () => void): EventEmitter
+    on(event: 'sync-session-id', listener: () => void): EventEmitter
+    on(event: 'reload-browser', listener: () => void): EventEmitter
+    on(event: 'reload-app', listener: () => void): EventEmitter
+    on(event: 'zoom-factor-changed', listener: (factor: number) => void): EventEmitter
+    on(event: 'update-status', listener: (status: unknown) => void): EventEmitter
+    on(event: 'browser-ensure-panel-open', listener: (payload: { taskId: string; url?: string; tabId?: string }) => void): EventEmitter
+    on(event: 'browser-create-tab', listener: (payload: { taskId: string; tabId: string; url?: string; background?: boolean }) => void): EventEmitter
+    off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+  }
+
   // Browser view manager — heavy electron coupling, expose as opaque object
   // and call methods directly from procedures. All return types are unknown
   // since the manager's public surface evolves; callers cast on the renderer.

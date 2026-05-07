@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { requestForceRespawn } from '@slayzone/terminal/electron'
-import { broadcastToWindows } from '../../broadcast-to-windows'
+import { menuEvents } from '../../menu-events'
 import type { RestApiDeps } from '../types'
 
 const FORCE_RESPAWN_TIMEOUT_MS = 3_000
@@ -20,7 +20,7 @@ export function registerPtyRespawnRoute(app: Express, deps: RestApiDeps): void {
     // Open the task tab so its TaskDetailPage mounts and attaches the
     // onForceRespawn listener. requestForceRespawn retries until acked or
     // times out, so race with mount is handled.
-    broadcastToWindows('app:open-task', taskId)
+    menuEvents.emit('open-task', taskId)
     const result = await requestForceRespawn(taskId, FORCE_RESPAWN_TIMEOUT_MS)
     if (result === 'ok') { res.json({ ok: true }); return }
     if (result === 'no-window') { res.status(503).json({ error: 'No window available' }); return }

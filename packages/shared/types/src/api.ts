@@ -127,25 +127,6 @@ export interface ElectronAPI {
     isLoopModeEnabledSync: boolean
     isPlaywright: boolean
     windowId: number
-    onGoHome: (callback: () => void) => () => void
-    onToggleAgentPanel: (callback: () => void) => () => void
-    onToggleAgentStatusPanel: (callback: () => void) => () => void
-    onOpenSettings: (callback: () => void) => () => void
-    onOpenProjectSettings: (callback: () => void) => () => void
-    onNewTemporaryTask: (callback: () => void) => () => void
-    onCloseTask: (callback: (taskId: string) => void) => () => void
-    onBrowserEnsurePanelOpen: (callback: (taskId: string, url?: string, tabId?: string) => void) => () => void
-    onBrowserCreateTab: (callback: (payload: { taskId: string; tabId: string; url?: string; background?: boolean }) => void) => () => void
-    onOpenTask: (callback: (taskId: string) => void) => () => void
-    onOpenArtifact: (callback: (taskId: string, artifactId: string) => void) => () => void
-    onScreenshotTrigger: (callback: () => void) => () => void
-    onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
-    onCloseCurrent: (callback: () => void) => () => void
-    onSyncSessionId: (callback: () => void) => () => void
-    onReloadBrowser: (callback: () => void) => () => void
-    onReloadApp: (callback: () => void) => () => void
-    onZoomFactorChanged: (callback: (factor: number) => void) => () => void
-    onCloseActiveTask: (callback: () => void) => () => void
     dataReady: () => void
     bootMark: (label: string) => void
   }

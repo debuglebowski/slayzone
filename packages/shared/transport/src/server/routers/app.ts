@@ -162,6 +162,105 @@ export const appLevelRouter = router({
     }),
   }),
 
+  // Native-menu / app shortcut events (one-way main→renderer dispatches)
+  menu: router({
+    onGoHome: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('go-home', h)
+      return () => getAppDeps().menuEvents.off('go-home', h)
+    })),
+    onToggleAgentPanel: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('toggle-agent-panel', h)
+      return () => getAppDeps().menuEvents.off('toggle-agent-panel', h)
+    })),
+    onToggleAgentStatusPanel: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('toggle-agent-status-panel', h)
+      return () => getAppDeps().menuEvents.off('toggle-agent-status-panel', h)
+    })),
+    onOpenSettings: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('open-settings', h)
+      return () => getAppDeps().menuEvents.off('open-settings', h)
+    })),
+    onOpenProjectSettings: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('open-project-settings', h)
+      return () => getAppDeps().menuEvents.off('open-project-settings', h)
+    })),
+    onNewTemporaryTask: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('new-temporary-task', h)
+      return () => getAppDeps().menuEvents.off('new-temporary-task', h)
+    })),
+    onOpenTask: publicProcedure.subscription(() => observable<string>((emit) => {
+      const h = (taskId: string) => emit.next(taskId)
+      getAppDeps().menuEvents.on('open-task', h)
+      return () => getAppDeps().menuEvents.off('open-task', h)
+    })),
+    onCloseTask: publicProcedure.subscription(() => observable<string>((emit) => {
+      const h = (taskId: string) => emit.next(taskId)
+      getAppDeps().menuEvents.on('close-task', h)
+      return () => getAppDeps().menuEvents.off('close-task', h)
+    })),
+    onOpenArtifact: publicProcedure.subscription(() => observable<{ taskId: string; artifactId: string }>((emit) => {
+      const h = (payload: { taskId: string; artifactId: string }) => emit.next(payload)
+      getAppDeps().menuEvents.on('open-artifact', h)
+      return () => getAppDeps().menuEvents.off('open-artifact', h)
+    })),
+    onScreenshotTrigger: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('screenshot-trigger', h)
+      return () => getAppDeps().menuEvents.off('screenshot-trigger', h)
+    })),
+    onCloseCurrent: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('close-current-focus', h)
+      return () => getAppDeps().menuEvents.off('close-current-focus', h)
+    })),
+    onCloseActiveTask: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('close-active-task', h)
+      return () => getAppDeps().menuEvents.off('close-active-task', h)
+    })),
+    onSyncSessionId: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('sync-session-id', h)
+      return () => getAppDeps().menuEvents.off('sync-session-id', h)
+    })),
+    onReloadBrowser: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('reload-browser', h)
+      return () => getAppDeps().menuEvents.off('reload-browser', h)
+    })),
+    onReloadApp: publicProcedure.subscription(() => observable<void>((emit) => {
+      const h = () => emit.next()
+      getAppDeps().menuEvents.on('reload-app', h)
+      return () => getAppDeps().menuEvents.off('reload-app', h)
+    })),
+    onZoomFactorChanged: publicProcedure.subscription(() => observable<number>((emit) => {
+      const h = (f: number) => emit.next(f)
+      getAppDeps().menuEvents.on('zoom-factor-changed', h)
+      return () => getAppDeps().menuEvents.off('zoom-factor-changed', h)
+    })),
+    onUpdateStatus: publicProcedure.subscription(() => observable<unknown>((emit) => {
+      const h = (s: unknown) => emit.next(s)
+      getAppDeps().menuEvents.on('update-status', h)
+      return () => getAppDeps().menuEvents.off('update-status', h)
+    })),
+    onBrowserEnsurePanelOpen: publicProcedure.subscription(() => observable<{ taskId: string; url?: string; tabId?: string }>((emit) => {
+      const h = (payload: { taskId: string; url?: string; tabId?: string }) => emit.next(payload)
+      getAppDeps().menuEvents.on('browser-ensure-panel-open', h)
+      return () => getAppDeps().menuEvents.off('browser-ensure-panel-open', h)
+    })),
+    onBrowserCreateTab: publicProcedure.subscription(() => observable<{ taskId: string; tabId: string; url?: string; background?: boolean }>((emit) => {
+      const h = (payload: { taskId: string; tabId: string; url?: string; background?: boolean }) => emit.next(payload)
+      getAppDeps().menuEvents.on('browser-create-tab', h)
+      return () => getAppDeps().menuEvents.off('browser-create-tab', h)
+    })),
+  }),
+
   // Cross-domain notifications (tasks:changed / settings:changed)
   notify: router({
     onTasksChanged: publicProcedure.subscription(() => observable<void>((emit) => {

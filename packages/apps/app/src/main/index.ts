@@ -133,6 +133,7 @@ import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
 import { setAppDeps, setProcessesDeps, setPtyDeps, setChatDeps } from '@slayzone/transport/server'
 import { notifyEvents } from './notify-renderer'
+import { menuEvents } from './menu-events'
 import { ElectronStorageAdapter } from '@slayzone/integrations/electron'
 import { initIntegrationOps, ensureIntegrationSchema, startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
 import { closeAllFileWatchers } from '@slayzone/file-editor/server'
@@ -509,7 +510,7 @@ function handleOAuthDeepLink(url: string): void {
   // slayzone://task/<id> — open task in app
   if (parsed.hostname === 'task' && normalizedPath.length > 1) {
     const taskId = normalizedPath.slice(1)
-    mainWindow?.webContents.send('app:open-task', taskId)
+    menuEvents.emit('open-task', taskId)
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.show()
@@ -572,15 +573,15 @@ app.on('open-url', (event, url) => {
 })
 
 function emitOpenSettings(): void {
-  mainWindow?.webContents.send('app:open-settings')
+  menuEvents.emit('open-settings')
 }
 
 function emitOpenProjectSettings(): void {
-  mainWindow?.webContents.send('app:open-project-settings')
+  menuEvents.emit('open-project-settings')
 }
 
 function emitNewTemporaryTask(): void {
-  mainWindow?.webContents.send('app:new-temporary-task')
+  menuEvents.emit('new-temporary-task')
 }
 
 function getCliSrc(): string {
@@ -753,7 +754,7 @@ function createMainWindow(): void {
 
     if (matchesElectronInput(ei, getEffectiveKeys('go-home', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:go-home')
+      menuEvents.emit('go-home')
       return
     }
 
@@ -772,27 +773,27 @@ function createMainWindow(): void {
 
     if (matchesElectronInput(ei, getEffectiveKeys('terminal-screenshot', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:screenshot-trigger')
+      menuEvents.emit('screenshot-trigger')
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('reload-browser', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:reload-browser')
+      menuEvents.emit('reload-browser')
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('reload-app', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:reload-app')
+      menuEvents.emit('reload-app')
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('agent-panel', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:toggle-agent-panel')
+      menuEvents.emit('toggle-agent-panel')
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('agent-status-panel', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:toggle-agent-status-panel')
+      menuEvents.emit('toggle-agent-status-panel')
     }
   })
 
@@ -1039,7 +1040,7 @@ app.whenReady().then(async () => {
           {
             label: 'Sync Detected Session ID',
             accelerator: getMenuAccelerator('sync-session-id', overrides),
-            click: () => mainWindow?.webContents.send('app:sync-session-id')
+            click: () => menuEvents.emit('sync-session-id')
           }
         ]
       },
@@ -1064,13 +1065,13 @@ app.whenReady().then(async () => {
             label: 'Reload Browser',
             accelerator: 'CmdOrCtrl+R',
             registerAccelerator: false,
-            click: () => mainWindow?.webContents.send('app:reload-browser')
+            click: () => menuEvents.emit('reload-browser')
           },
           {
             label: 'Reload App',
             accelerator: 'CmdOrCtrl+Shift+R',
             registerAccelerator: false,
-            click: () => mainWindow?.webContents.send('app:reload-app')
+            click: () => menuEvents.emit('reload-app')
           },
           { role: 'toggleDevTools' },
           { type: 'separator' },
@@ -1111,13 +1112,13 @@ app.whenReady().then(async () => {
                 focused.close()
                 return
               }
-              mainWindow?.webContents.send('app:close-current-focus')
+              menuEvents.emit('close-current-focus')
             }
           },
           {
             label: 'Close Task',
             accelerator: getMenuAccelerator('close-task', overrides),
-            click: () => mainWindow?.webContents.send('app:close-active-task')
+            click: () => menuEvents.emit('close-active-task')
           },
           { type: 'separator' },
           { role: 'front' },
@@ -1645,6 +1646,7 @@ app.whenReady().then(async () => {
       if (win) win.close()
     },
     notifyEvents,
+    menuEvents: menuEvents as never,
     authGithubSystemSignIn: async (input) => {
       try {
         if (!input?.convexUrl) return { ok: false, error: 'Convex URL is required' }
@@ -2106,7 +2108,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       browserViewManager.reset()
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.zoomLevel = 0
-        mainWindow.webContents.send('app:zoom-factor-changed', mainWindow.webContents.zoomFactor)
+        menuEvents.emit('zoom-factor-changed', mainWindow.webContents.zoomFactor)
       }
 
       // 6. Clear oauth state

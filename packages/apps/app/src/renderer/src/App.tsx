@@ -701,50 +701,63 @@ function App(): React.JSX.Element {
     if (activeTab?.type === 'home') void getTrpcVanillaClient().app.window.close.mutate()
   }
 
-  useEffect(() => { return window.api.app.onCloseActiveTask(() => closeActiveTaskRef.current()) }, [])
-  useEffect(() => { return window.api.app.onCloseCurrent(() => closeCurrentHomeRef.current()) }, [])
-  useEffect(() => { return window.api.app.onCloseTask((taskId) => { useTabStore.getState().closeTabByTaskId(taskId) }) }, [])
-  useEffect(() => { return window.api.app.onOpenTask((taskId) => { openTaskRef.current(taskId) }) }, [])
+  useEffect(() => { const s = getTrpcVanillaClient().app.menu.onCloseActiveTask.subscribe(undefined, { onData: () => closeActiveTaskRef.current() }); return () => s.unsubscribe() }, [])
+  useEffect(() => { const s = getTrpcVanillaClient().app.menu.onCloseCurrent.subscribe(undefined, { onData: () => closeCurrentHomeRef.current() }); return () => s.unsubscribe() }, [])
+  useEffect(() => { const s = getTrpcVanillaClient().app.menu.onCloseTask.subscribe(undefined, { onData: (taskId) => { useTabStore.getState().closeTabByTaskId(taskId as string) } }); return () => s.unsubscribe() }, [])
+  useEffect(() => { const s = getTrpcVanillaClient().app.menu.onOpenTask.subscribe(undefined, { onData: (taskId) => { openTaskRef.current(taskId as string) } }); return () => s.unsubscribe() }, [])
   useEffect(() => {
-    return window.api.app.onGoHome(() => {
-      const homeIndex = useTabStore.getState().tabs.findIndex((tab) => tab.type === 'home')
-      if (homeIndex >= 0) setActiveTabIndex(homeIndex)
+    const s = getTrpcVanillaClient().app.menu.onGoHome.subscribe(undefined, {
+      onData: () => {
+        const homeIndex = useTabStore.getState().tabs.findIndex((tab) => tab.type === 'home')
+        if (homeIndex >= 0) setActiveTabIndex(homeIndex)
+      },
     })
+    return () => s.unsubscribe()
   }, [])
   useEffect(() => {
-    return window.api.app.onToggleAgentPanel(() => {
-      if (selectedProjectId) setAgentPanelState({ isOpen: !agentPanelState.isOpen })
+    const s = getTrpcVanillaClient().app.menu.onToggleAgentPanel.subscribe(undefined, {
+      onData: () => { if (selectedProjectId) setAgentPanelState({ isOpen: !agentPanelState.isOpen }) },
     })
+    return () => s.unsubscribe()
   }, [selectedProjectId, agentPanelState.isOpen])
   useEffect(() => {
-    return window.api.app.onToggleAgentStatusPanel(() => {
-      setAgentStatusState({ isLocked: !agentStatusState.isLocked })
+    const s = getTrpcVanillaClient().app.menu.onToggleAgentStatusPanel.subscribe(undefined, {
+      onData: () => setAgentStatusState({ isLocked: !agentStatusState.isLocked }),
     })
+    return () => s.unsubscribe()
   }, [agentStatusState.isLocked])
   useEffect(() => {
-    return window.api.app.onOpenSettings(() => {
-      setSettingsInitialTab('appearance'); setSettingsInitialAiConfigSection(null); setSettingsOpen(true)
+    const s = getTrpcVanillaClient().app.menu.onOpenSettings.subscribe(undefined, {
+      onData: () => { setSettingsInitialTab('appearance'); setSettingsInitialAiConfigSection(null); setSettingsOpen(true) },
     })
+    return () => s.unsubscribe()
   }, [])
   useEffect(() => {
-    return window.api.app.onOpenProjectSettings(() => {
-      if (!selectedProjectId) return
-      const project = projects.find((p) => p.id === selectedProjectId)
-      if (!project) return
-      setProjectSettingsInitialTab('general'); setProjectSettingsOnboardingProvider(null); setEditingProject(project)
+    const s = getTrpcVanillaClient().app.menu.onOpenProjectSettings.subscribe(undefined, {
+      onData: () => {
+        if (!selectedProjectId) return
+        const project = projects.find((p) => p.id === selectedProjectId)
+        if (!project) return
+        setProjectSettingsInitialTab('general'); setProjectSettingsOnboardingProvider(null); setEditingProject(project)
+      },
     })
+    return () => s.unsubscribe()
   }, [selectedProjectId, projects])
 
   useEffect(() => {
-    return window.api.app.onUpdateStatus((status) => {
-      switch (status.type) {
-        case 'checking': toast.loading('Checking for updates...', { id: 'update-check' }); break
-        case 'downloading': toast.loading(`Downloading update... ${status.percent}%`, { id: 'update-check' }); break
-        case 'downloaded': toast.dismiss('update-check'); setUpdateVersion(status.version); setUpdateToastDismissed(false); break
-        case 'not-available': toast.success('You\'re on the latest version', { id: 'update-check' }); break
-        case 'error': toast.dismiss('update-check'); toast.error(`Update failed: ${status.message}`, { duration: 8000 }); break
-      }
+    const s = getTrpcVanillaClient().app.menu.onUpdateStatus.subscribe(undefined, {
+      onData: (raw) => {
+        const status = raw as { type: string; percent?: number; version?: string; message?: string }
+        switch (status.type) {
+          case 'checking': toast.loading('Checking for updates...', { id: 'update-check' }); break
+          case 'downloading': toast.loading(`Downloading update... ${status.percent}%`, { id: 'update-check' }); break
+          case 'downloaded': toast.dismiss('update-check'); setUpdateVersion(status.version!); setUpdateToastDismissed(false); break
+          case 'not-available': toast.success('You\'re on the latest version', { id: 'update-check' }); break
+          case 'error': toast.dismiss('update-check'); toast.error(`Update failed: ${status.message}`, { duration: 8000 }); break
+        }
+      },
     })
+    return () => s.unsubscribe()
   }, [])
 
   useGuardedHotkeys('mod+1,mod+2,mod+3,mod+4,mod+5,mod+6,mod+7,mod+8,mod+9', (e) => {
@@ -869,25 +882,27 @@ function App(): React.JSX.Element {
 
   // Cmd+R: reload the active browser view (WebContentsView or webview fallback)
   useEffect(() => {
-    return window.api.app.onReloadBrowser(() => {
-      // Find visible WebContentsView placeholder and reload via IPC
-      const placeholder = document.querySelector('[data-browser-panel][data-view-id]') as HTMLElement | null
-      const viewId = placeholder?.dataset.viewId
-      if (viewId) {
-        void getTrpcVanillaClient().app.browser.reload.mutate({ viewId })
-        return
-      }
-      // Fallback: webview (multi-device grid)
-      const webview = document.querySelector('[data-browser-panel] webview') as any
-      if (webview?.reload) webview.reload()
+    const sub = getTrpcVanillaClient().app.menu.onReloadBrowser.subscribe(undefined, {
+      onData: () => {
+        const placeholder = document.querySelector('[data-browser-panel][data-view-id]') as HTMLElement | null
+        const viewId = placeholder?.dataset.viewId
+        if (viewId) {
+          void getTrpcVanillaClient().app.browser.reload.mutate({ viewId })
+          return
+        }
+        const webview = document.querySelector('[data-browser-panel] webview') as any
+        if (webview?.reload) webview.reload()
+      },
     })
+    return () => sub.unsubscribe()
   }, [])
 
   // Cmd+Shift+R: reload the app
   useEffect(() => {
-    return window.api.app.onReloadApp?.(() => {
-      window.location.reload()
+    const sub = getTrpcVanillaClient().app.menu.onReloadApp.subscribe(undefined, {
+      onData: () => window.location.reload(),
     })
+    return () => sub.unsubscribe()
   }, [])
 
   // Keep app zoom on an explicit IPC path instead of relying on Electron's default zoom roles.
@@ -1048,7 +1063,10 @@ function App(): React.JSX.Element {
     }
   }, [openTask])
 
-  useEffect(() => { return window.api.app.onNewTemporaryTask(() => { handleCreateScratchTerminal() }) }, [handleCreateScratchTerminal])
+  useEffect(() => {
+    const sub = getTrpcVanillaClient().app.menu.onNewTemporaryTask.subscribe(undefined, { onData: () => handleCreateScratchTerminal() })
+    return () => sub.unsubscribe()
+  }, [handleCreateScratchTerminal])
 
   // Task handlers
   const handleTaskCreated = (task: Task): void => { setTasks((prev) => [task, ...prev]); useDialogStore.getState().closeCreateTask() }
