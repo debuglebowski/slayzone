@@ -1529,11 +1529,80 @@ app.whenReady().then(async () => {
       registerBrowserTab,
       unregisterBrowserTab,
       setActiveBrowserTab,
-      registerShortcuts: () => {},
-      setKeyboardPassthrough: () => {},
-      setDesktopHandoffPolicy: () => false,
-      openDevToolsBottom: async () => false,
-      openDevToolsDetached: async () => false,
+      registerShortcuts: (webviewId: number) => {
+        if (registeredWebviews.has(webviewId)) return
+        const wc = webContents.fromId(webviewId)
+        if (!wc) return
+        registeredWebviews.add(webviewId)
+        wc.on('before-input-event', (e, input) => {
+          if (keyboardPassthroughWebviews.has(webviewId)) return
+          if (input.type !== 'keyDown') return
+          if (!(input.control || input.meta)) return
+          if (/^[1-9tadl]$/i.test(input.key)) {
+            e.preventDefault()
+            webviewEvents.emit('shortcut', { webviewId, key: input.key.toLowerCase(), shift: Boolean(input.shift) })
+          }
+        })
+        wc.on('destroyed', () => {
+          registeredWebviews.delete(webviewId)
+          keyboardPassthroughWebviews.delete(webviewId)
+        })
+      },
+      setKeyboardPassthrough: (webviewId: number, enabled: boolean) => {
+        if (enabled) keyboardPassthroughWebviews.add(webviewId)
+        else keyboardPassthroughWebviews.delete(webviewId)
+      },
+      setDesktopHandoffPolicy: (webviewId: number, policy: unknown) => {
+        const wc = webContents.fromId(webviewId)
+        if (!wc || wc.isDestroyed() || wc.getType() !== 'webview') return false
+        if (policy === null) {
+          webviewDesktopHandoffPolicy.delete(webviewId)
+          return true
+        }
+        const p = policy as DesktopHandoffPolicy
+        const protocol = normalizeDesktopProtocol(p.protocol)
+        if (!protocol) {
+          webviewDesktopHandoffPolicy.delete(webviewId)
+          return false
+        }
+        const hostScope = normalizeDesktopHostScope(p.hostScope) ?? undefined
+        webviewDesktopHandoffPolicy.set(webviewId, hostScope ? { protocol, hostScope } : { protocol })
+        if (!webviewDesktopHandoffPolicyCleanupRegistered.has(webviewId)) {
+          webviewDesktopHandoffPolicyCleanupRegistered.add(webviewId)
+          wc.once('destroyed', () => {
+            webviewDesktopHandoffPolicy.delete(webviewId)
+            webviewDesktopHandoffPolicyCleanupRegistered.delete(webviewId)
+          })
+        }
+        return true
+      },
+      openDevToolsBottom: async (webviewId: number, options?: { probe?: boolean }) => {
+        const wc = webContents.fromId(webviewId)
+        if (!wc || wc.isDestroyed()) return false
+        const variants: Array<{ mode: 'bottom' | 'right' | 'undocked' | 'detach'; activate: boolean }> = [
+          { mode: 'bottom', activate: false }, { mode: 'bottom', activate: true },
+          { mode: 'right', activate: false }, { mode: 'right', activate: true },
+          { mode: 'undocked', activate: false }, { mode: 'undocked', activate: true },
+          { mode: 'detach', activate: false }, { mode: 'detach', activate: true },
+        ]
+        const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+        for (const v of variants) {
+          try { if (wc.isDevToolsOpened()) { wc.closeDevTools(); await wait(50) } } catch {}
+          await wait(50)
+          try { wc.openDevTools({ mode: v.mode, activate: v.activate }); await wait(150) } catch {}
+          if (!options?.probe && wc.isDevToolsOpened()) return true
+        }
+        return wc.isDevToolsOpened()
+      },
+      openDevToolsDetached: async (webviewId: number) => {
+        const wc = webContents.fromId(webviewId)
+        if (!wc || wc.isDestroyed()) return false
+        try {
+          if (wc.isDevToolsOpened()) wc.closeDevTools()
+          wc.openDevTools({ mode: 'detach', activate: true })
+          return wc.isDevToolsOpened()
+        } catch { return false }
+      },
       closeDevTools: async (webviewId: number) => {
         const wc = webContents.fromId(webviewId)
         if (!wc || wc.isDestroyed()) return false
@@ -1545,6 +1614,20 @@ app.whenReady().then(async () => {
         if (!wc || wc.isDestroyed()) return false
         return wc.isDevToolsOpened()
       },
+      enableDeviceEmulation: (webviewId: number, params) => {
+        const wc = webContents.fromId(webviewId)
+        if (!wc) return false
+        wc.enableDeviceEmulation({
+          screenPosition: params.screenPosition,
+          screenSize: params.screenSize,
+          viewSize: params.viewSize,
+          deviceScaleFactor: params.deviceScaleFactor,
+          viewPosition: { x: 0, y: 0 },
+          scale: 1,
+        })
+        if (params.userAgent) wc.setUserAgent(params.userAgent)
+        return true
+      },
       disableDeviceEmulation: (webviewId: number) => {
         const wc = webContents.fromId(webviewId)
         if (!wc) return false
@@ -1552,6 +1635,7 @@ app.whenReady().then(async () => {
         wc.setUserAgent(_chromeUa)
         return true
       },
+      events: webviewEvents,
     },
     dialogShowOpenDialog: (options) => dialog.showOpenDialog(options as Electron.OpenDialogOptions),
     authGithubSystemSignIn: async (input) => {
@@ -1911,241 +1995,13 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
 
 
-  // Webview shortcut interception
-  const registeredWebviews = new Set<number>()
-  const keyboardPassthroughWebviews = new Set<number>()
+  // Webview shortcut interception (state lifted to module scope below)
 
-  ipcMain.handle('webview:register-shortcuts', (event, webviewId: number) => {
-    if (registeredWebviews.has(webviewId)) return
 
-    const wc = webContents.fromId(webviewId)
-    if (!wc) return
 
-    registeredWebviews.add(webviewId)
-
-    wc.on('before-input-event', (e, input) => {
-      if (keyboardPassthroughWebviews.has(webviewId)) return
-      if (input.type !== 'keyDown') return
-      if (!(input.control || input.meta)) return
-
-      // Cmd/Ctrl+1-9 for tab switching, T/A/D/L reserved for panel actions
-      if (/^[1-9tadl]$/i.test(input.key)) {
-        e.preventDefault()
-        event.sender.send('webview:shortcut', {
-          key: input.key.toLowerCase(),
-          shift: Boolean(input.shift),
-          webviewId
-        })
-      }
-    })
-
-    wc.on('destroyed', () => {
-      registeredWebviews.delete(webviewId)
-      keyboardPassthroughWebviews.delete(webviewId)
-    })
-  })
-
-  ipcMain.handle('webview:set-keyboard-passthrough', (_event, webviewId: number, enabled: boolean) => {
-    if (enabled) keyboardPassthroughWebviews.add(webviewId)
-    else keyboardPassthroughWebviews.delete(webviewId)
-  })
-
-  ipcMain.handle('webview:set-desktop-handoff-policy', (_, webviewId: number, policy: DesktopHandoffPolicy | null) => {
-    const wc = webContents.fromId(webviewId)
-    if (!wc || wc.isDestroyed() || wc.getType() !== 'webview') return false
-
-    if (policy === null) {
-      webviewDesktopHandoffPolicy.delete(webviewId)
-      return true
-    }
-    const protocol = normalizeDesktopProtocol(policy.protocol)
-    if (!protocol) {
-      webviewDesktopHandoffPolicy.delete(webviewId)
-      return false
-    }
-    const hostScope = normalizeDesktopHostScope(policy.hostScope) ?? undefined
-    webviewDesktopHandoffPolicy.set(webviewId, hostScope ? { protocol, hostScope } : { protocol })
-
-    if (!webviewDesktopHandoffPolicyCleanupRegistered.has(webviewId)) {
-      webviewDesktopHandoffPolicyCleanupRegistered.add(webviewId)
-      wc.once('destroyed', () => {
-        webviewDesktopHandoffPolicy.delete(webviewId)
-        webviewDesktopHandoffPolicyCleanupRegistered.delete(webviewId)
-      })
-    }
-    return true
-  })
-
-  ipcMain.handle('webview:open-devtools-bottom', async (_, webviewId: number, options?: { probe?: boolean }) => {
-    const wc = webContents.fromId(webviewId)
-    if (!wc || wc.isDestroyed()) {
-      console.warn('[webview:open-devtools-bottom] missing/destroyed webContents', { webviewId })
-      return false
-    }
-
-    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-    const waitForEvent = (event: 'devtools-opened' | 'devtools-closed', timeoutMs = 500) =>
-      new Promise<boolean>((resolve) => {
-        const emitter = wc as unknown as NodeJS.EventEmitter
-        let settled = false
-        const handler = () => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          resolve(true)
-        }
-        const timer = setTimeout(() => {
-          if (settled) return
-          settled = true
-          emitter.removeListener(event, handler)
-          resolve(false)
-        }, timeoutMs)
-        emitter.once(event, handler)
-      })
-
-    const attempts: Array<{
-      mode: 'bottom' | 'right' | 'undocked' | 'detach'
-      activate: boolean
-      before: boolean
-      after: boolean
-      openedEvent: boolean
-      elapsedMs: number
-      error?: string
-    }> = []
-
-    const variants: Array<{ mode: 'bottom' | 'right' | 'undocked' | 'detach'; activate: boolean }> = [
-      { mode: 'bottom', activate: false },
-      { mode: 'bottom', activate: true },
-      { mode: 'right', activate: false },
-      { mode: 'right', activate: true },
-      { mode: 'undocked', activate: false },
-      { mode: 'undocked', activate: true },
-      { mode: 'detach', activate: false },
-      { mode: 'detach', activate: true },
-    ]
-
-    for (const variant of variants) {
-      try {
-        if (wc.isDevToolsOpened()) {
-          wc.closeDevTools()
-          await waitForEvent('devtools-closed', 300)
-        }
-      } catch {
-        // continue probing
-      }
-      await wait(50)
-
-      const before = wc.isDevToolsOpened()
-      let error: string | undefined
-      const startedAt = Date.now()
-      let openedEvent = false
-      try {
-        const openedPromise = waitForEvent('devtools-opened', 700)
-        wc.openDevTools({ mode: variant.mode, activate: variant.activate })
-        openedEvent = await openedPromise
-      } catch (err) {
-        error = err instanceof Error ? err.message : String(err)
-      }
-      await wait(80)
-      const after = wc.isDevToolsOpened()
-      const elapsedMs = Date.now() - startedAt
-
-      attempts.push({
-        mode: variant.mode,
-        activate: variant.activate,
-        before,
-        after,
-        openedEvent,
-        elapsedMs,
-        ...(error ? { error } : {})
-      })
-
-      if (!options?.probe && after) {
-        console.log('[webview:open-devtools-bottom] selected variant', { webviewId, mode: variant.mode, activate: variant.activate, openedEvent, elapsedMs })
-        return true
-      }
-    }
-
-    if (options?.probe) {
-      return {
-        ok: true,
-        webviewId,
-        type: wc.getType(),
-        attempts
-      }
-    }
-
-    console.warn('[webview:open-devtools-bottom] failed to open', { webviewId, attempts })
-    return wc.isDevToolsOpened()
-  })
-
-  ipcMain.handle('webview:open-devtools-detached', async (_, webviewId: number) => {
-    const wc = webContents.fromId(webviewId)
-    if (!wc || wc.isDestroyed()) {
-      console.warn('[webview:open-devtools-detached] missing/destroyed webContents', { webviewId })
-      return false
-    }
-
-    const emitter = wc as unknown as NodeJS.EventEmitter
-    const waitForOpened = (timeoutMs = 1000) =>
-      new Promise<boolean>((resolve) => {
-        let settled = false
-        const handler = () => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          resolve(true)
-        }
-        const timer = setTimeout(() => {
-          if (settled) return
-          settled = true
-          emitter.removeListener('devtools-opened', handler)
-          resolve(false)
-        }, timeoutMs)
-        emitter.once('devtools-opened', handler)
-      })
-
-    try {
-      if (wc.isDevToolsOpened()) wc.closeDevTools()
-      const openedPromise = waitForOpened()
-      wc.openDevTools({ mode: 'detach', activate: true })
-      const opened = await openedPromise
-      if (opened) return true
-      return wc.isDevToolsOpened()
-    } catch (err) {
-      console.warn('[webview:open-devtools-detached] failed', { webviewId, err: err instanceof Error ? err.message : String(err) })
-      return false
-    }
-  })
 
   // Inline DevTools IPC handlers removed — DevTools now docked natively via browser-view-manager
 
-  // Webview device emulation
-  ipcMain.handle(
-    'webview:enable-device-emulation',
-    (_, webviewId: number, params: {
-      screenSize: { width: number; height: number }
-      viewSize: { width: number; height: number }
-      deviceScaleFactor: number
-      screenPosition: 'mobile' | 'desktop'
-      userAgent?: string
-    }) => {
-      const wc = webContents.fromId(webviewId)
-      if (!wc) return false
-      wc.enableDeviceEmulation({
-        screenPosition: params.screenPosition,
-        screenSize: params.screenSize,
-        viewSize: params.viewSize,
-        deviceScaleFactor: params.deviceScaleFactor,
-        viewPosition: { x: 0, y: 0 },
-        scale: 1,
-      })
-      if (params.userAgent) {
-        wc.setUserAgent(params.userAgent)
-      }
-      return true
-    }
-  )
 
 
   // --- Browser View Manager (WebContentsView) ---
@@ -2341,6 +2197,14 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 // 'webview' type: the webview guest pages.
 // 'window' type: popup windows created by webviews with allowpopups="true".
 // Both need guards because allowpopups popups are type 'window', not 'webview'.
+// Webview shortcut state (lifted to module scope so setAppDeps wiring sees it).
+const registeredWebviews = new Set<number>()
+const keyboardPassthroughWebviews = new Set<number>()
+const webviewEvents = new (require('node:events').EventEmitter)() as import('node:events').EventEmitter & {
+  on(event: 'shortcut', listener: (payload: { webviewId: number; key: string; shift: boolean }) => void): import('node:events').EventEmitter
+  off(event: string, listener: (...args: unknown[]) => void): import('node:events').EventEmitter
+}
+
 let _chromeUa = ''
 let _chromiumVersion = ''
 const _uaPlatform = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux'

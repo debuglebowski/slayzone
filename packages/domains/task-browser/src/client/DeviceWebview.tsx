@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { DeviceEmulation } from '../shared'
 
 interface WebviewElement extends HTMLElement {
@@ -86,13 +87,13 @@ export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigge
     prevEmulationRef.current = cur
 
     const wcId = wv.getWebContentsId()
-    window.api.webview?.enableDeviceEmulation(wcId, {
+    getTrpcVanillaClient().app.webview.enableDeviceEmulation.mutate({ webviewId: wcId, params: {
       screenSize: { width: preset.width, height: preset.height },
       viewSize: { width: 0, height: 0 },
       deviceScaleFactor: preset.deviceScaleFactor,
       screenPosition: preset.mobile ? 'mobile' : 'desktop',
       userAgent: preset.userAgent,
-    }).then(() => {
+    } }).then(() => {
       if (preset.userAgent !== prevUa) wv.reload()
     })
   }, [preset, webviewReady])
@@ -131,7 +132,7 @@ export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigge
       if (wv) {
         try {
           const wcId = wv.getWebContentsId()
-          window.api.webview?.disableDeviceEmulation(wcId)
+          getTrpcVanillaClient().app.webview.disableDeviceEmulation.mutate({ webviewId: wcId })
         } catch { /* webview may be destroyed */ }
       }
     }

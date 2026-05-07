@@ -453,8 +453,17 @@ export const appLevelRouter = router({
     isDevToolsOpened: publicProcedure.input(z.object({ webviewId: z.number() })).query(({ input }) =>
       getAppDeps().webview.isDevToolsOpened(input.webviewId),
     ),
+    enableDeviceEmulation: publicProcedure.input(z.object({ webviewId: z.number(), params: anyInput })).mutation(({ input }) =>
+      getAppDeps().webview.enableDeviceEmulation(input.webviewId, input.params as never),
+    ),
     disableDeviceEmulation: publicProcedure.input(z.object({ webviewId: z.number() })).mutation(({ input }) =>
       getAppDeps().webview.disableDeviceEmulation(input.webviewId),
     ),
+    onShortcut: publicProcedure.subscription(() => observable<{ webviewId: number; key: string; shift: boolean }>((emit) => {
+      const handler = (payload: { webviewId: number; key: string; shift: boolean }) => emit.next(payload)
+      const ev = getAppDeps().webview.events
+      ev.on('shortcut', handler)
+      return () => ev.off('shortcut', handler)
+    })),
   }),
 })

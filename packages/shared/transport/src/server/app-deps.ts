@@ -171,7 +171,12 @@ export type AppDeps = {
     openDevToolsDetached: (webviewId: number) => Promise<boolean>
     closeDevTools: (webviewId: number) => Promise<boolean>
     isDevToolsOpened: (webviewId: number) => boolean
+    enableDeviceEmulation: (webviewId: number, params: { screenSize: { width: number; height: number }; viewSize: { width: number; height: number }; deviceScaleFactor: number; screenPosition: 'mobile' | 'desktop'; userAgent?: string }) => boolean
     disableDeviceEmulation: (webviewId: number) => boolean
+    events: EventEmitter & {
+      on(event: 'shortcut', listener: (payload: { webviewId: number; key: string; shift: boolean }) => void): EventEmitter
+      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+    }
   }
 
   // db:feedback (6 ops — pure DB)

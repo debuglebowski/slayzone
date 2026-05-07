@@ -285,32 +285,6 @@ const api: ElectronAPI = {
       return () => ipcRenderer.removeListener('telemetry:ipc-event', handler)
     }
   },
-  webview: {
-    registerShortcuts: (webviewId) =>
-      ipcRenderer.invoke('webview:register-shortcuts', webviewId),
-    setKeyboardPassthrough: (webviewId, enabled) =>
-      ipcRenderer.invoke('webview:set-keyboard-passthrough', webviewId, enabled),
-    setDesktopHandoffPolicy: (webviewId, policy) =>
-      ipcRenderer.invoke('webview:set-desktop-handoff-policy', webviewId, policy),
-    onShortcut: (callback) => {
-      const handler = (_event: unknown, payload: { key: string; shift?: boolean; webviewId?: number }) =>
-        callback(payload)
-      ipcRenderer.on('webview:shortcut', handler)
-      return () => ipcRenderer.removeListener('webview:shortcut', handler)
-    },
-    openDevToolsBottom: (webviewId) =>
-      ipcRenderer.invoke('webview:open-devtools-bottom', webviewId),
-    openDevToolsDetached: (webviewId) =>
-      ipcRenderer.invoke('webview:open-devtools-detached', webviewId),
-    closeDevTools: (webviewId) =>
-      ipcRenderer.invoke('webview:close-devtools', webviewId),
-    isDevToolsOpened: (webviewId) =>
-      ipcRenderer.invoke('webview:is-devtools-opened', webviewId),
-    enableDeviceEmulation: (webviewId, params) =>
-      ipcRenderer.invoke('webview:enable-device-emulation', webviewId, params),
-    disableDeviceEmulation: (webviewId) =>
-      ipcRenderer.invoke('webview:disable-device-emulation', webviewId),
-  },
   browser: {
     // Subscription-style methods kept as IPC — backed by webContents.send from
     // browser-view-manager. Migration would require routing events through tRPC subs.

@@ -1,5 +1,4 @@
 import type { ExecutionContext } from '@slayzone/projects/shared'
-import type { DesktopHandoffPolicy } from '@slayzone/task/shared'
 import type {
   TerminalMode,
   TerminalState,
@@ -210,27 +209,6 @@ export interface ElectronAPI {
   }
   telemetry: {
     onIpcEvent: (callback: (event: string, props: Record<string, unknown>) => void) => () => void
-  }
-  webview: {
-    registerShortcuts: (webviewId: number) => Promise<void>
-    setKeyboardPassthrough: (webviewId: number, enabled: boolean) => Promise<void>
-    setDesktopHandoffPolicy: (webviewId: number, policy: DesktopHandoffPolicy | null) => Promise<boolean>
-    onShortcut: (callback: (payload: { key: string; shift?: boolean; webviewId?: number }) => void) => () => void
-    openDevToolsBottom: (webviewId: number) => Promise<boolean>
-    openDevToolsDetached: (webviewId: number) => Promise<boolean>
-    closeDevTools: (webviewId: number) => Promise<boolean>
-    isDevToolsOpened: (webviewId: number) => Promise<boolean>
-    enableDeviceEmulation: (
-      webviewId: number,
-      params: {
-        screenSize: { width: number; height: number }
-        viewSize: { width: number; height: number }
-        deviceScaleFactor: number
-        screenPosition: 'mobile' | 'desktop'
-        userAgent?: string
-      }
-    ) => Promise<boolean>
-    disableDeviceEmulation: (webviewId: number) => Promise<boolean>
   }
   browser: {
     // Subscription-style methods kept as IPC (driven by webContents.send from manager).
