@@ -11,6 +11,7 @@ import { CreateTagDialog } from '@slayzone/tags/client'
 import type { Project } from '@slayzone/projects/shared'
 import { getDefaultStatus } from '@slayzone/projects/shared'
 import { track } from '@slayzone/telemetry/client'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   createTaskSchema,
   type CreateTaskFormData,
@@ -155,7 +156,7 @@ export function CreateTaskDialog({
       templateId: selectedTemplateId === '__none__' ? undefined : selectedTemplateId
     })
     if (data.tagIds.length > 0) {
-      await window.api.taskTags.setTagsForTask(task.id, data.tagIds)
+      await getTrpcVanillaClient().tags.setForTask.mutate({ taskId: task.id, tagIds: data.tagIds })
     }
     if (shouldAutoCreateWorktree && !task.worktree_path) {
       window.alert('Task created, but worktree auto-create failed. You can add one from the Git panel.')

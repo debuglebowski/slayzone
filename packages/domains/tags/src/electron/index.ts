@@ -1,1 +1,0 @@
-export { registerTagHandlers } from './handlers'

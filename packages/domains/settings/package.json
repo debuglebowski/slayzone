@@ -30,6 +30,7 @@
     "@slayzone/tags": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "lucide-react": "^0.562.0",
     "zustand": "^5.0.0"
   },

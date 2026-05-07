@@ -45,6 +45,7 @@
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@types/archiver": "^7.0.0",

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 export interface UseTaskTagIdsReturn {
   tagIds: string[]
@@ -15,8 +16,8 @@ export function useTaskTagIds(
   useEffect(() => {
     if (!taskId) return
     const refresh = (): void => {
-      window.api.taskTags
-        .getTagsForTask(taskId)
+      getTrpcVanillaClient()
+        .tags.getForTask.query({ taskId })
         .then(tags => setTagIds(tags.map(t => t.id)))
         .catch(() => {})
     }

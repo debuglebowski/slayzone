@@ -4,6 +4,7 @@ import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { PanelVisibility } from '@slayzone/task/shared'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibility = {
   terminal: true, browser: false, diff: false, settings: true, editor: false, artifacts: false, processes: false,
@@ -33,8 +34,8 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
   // Task fetch is critical — let it throw. Secondary data uses defaults on failure.
   const [loadedTask, loadedTags, loadedTaskTags, projects, loadedSubTasks] = await Promise.all([
     window.api.db.getTask(taskId),
-    window.api.tags.getTags().catch(() => [] as Tag[]),
-    window.api.taskTags.getTagsForTask(taskId).catch(() => [] as Tag[]),
+    getTrpcVanillaClient().tags.list.query().catch(() => [] as Tag[]),
+    getTrpcVanillaClient().tags.getForTask.query({ taskId }).catch(() => [] as Tag[]),
     window.api.db.getProjects().catch(() => [] as Project[]),
     window.api.db.getSubTasks(taskId).catch(() => [] as Task[]),
   ])

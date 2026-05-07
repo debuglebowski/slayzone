@@ -9,7 +9,6 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
@@ -18,6 +17,7 @@
   "dependencies": {
     "@slayzone/history": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "lucide-react": "^0.562.0"
   },

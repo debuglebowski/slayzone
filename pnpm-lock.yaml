@@ -432,6 +432,9 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -727,6 +730,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/types':
         specifier: workspace:*
         version: link:../../shared/types
@@ -764,6 +770,9 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -855,6 +864,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1488,6 +1500,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
+      '@slayzone/tags':
+        specifier: workspace:*
+        version: link:../../domains/tags
       '@tanstack/react-query':
         specifier: ^5.100.9
         version: 5.100.9(react@19.2.3)

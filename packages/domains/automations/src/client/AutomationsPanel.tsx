@@ -3,6 +3,7 @@ import { Button } from '@slayzone/ui'
 import { Plus, Zap } from 'lucide-react'
 import type { Automation, CreateAutomationInput, UpdateAutomationInput } from '@slayzone/automations/shared'
 import type { Tag } from '@slayzone/tags/shared'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { AutomationCard } from './AutomationCard'
 import { AutomationDialog } from './AutomationDialog'
 
@@ -19,7 +20,7 @@ export function AutomationsPanel({ projectId }: AutomationsPanelProps) {
   const loadData = useCallback(() => {
     if (!projectId) return
     window.api.automations.getByProject(projectId).then(setAutomations)
-    window.api.tags.getTags().then((all) => setTags(all.filter((t: Tag) => t.project_id === projectId)))
+    getTrpcVanillaClient().tags.list.query().then((all) => setTags(all.filter((t: Tag) => t.project_id === projectId)))
   }, [projectId])
 
   useEffect(() => {

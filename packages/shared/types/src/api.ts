@@ -1,7 +1,7 @@
 import type { Project, CreateProjectInput, UpdateProjectInput, ExecutionContext } from '@slayzone/projects/shared'
 import type { Task, CreateTaskInput, UpdateTaskInput, DesktopHandoffPolicy, TaskTemplate, CreateTaskTemplateInput, UpdateTaskTemplateInput, TaskArtifact, CreateArtifactInput, UpdateArtifactInput, ArtifactFolder, CreateArtifactFolderInput, UpdateArtifactFolderInput } from '@slayzone/task/shared'
 import type { ArtifactVersion, VersionRef, DiffResult, PruneReport } from '@slayzone/task-artifacts/shared'
-import type { Tag, CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
+import type { Tag } from '@slayzone/tags/shared'
 import type { AgentTurnRange } from '@slayzone/agent-turns/shared'
 import type {
   TerminalMode,
@@ -298,21 +298,9 @@ export interface ElectronAPI {
     unarchiveTask: (id: string) => Promise<Task>
     reorderTasks: (taskIds: string[]) => Promise<void>
   }
-  tags: {
-    getTags: () => Promise<Tag[]>
-    createTag: (data: CreateTagInput) => Promise<Tag>
-    updateTag: (data: UpdateTagInput) => Promise<Tag>
-    deleteTag: (id: string) => Promise<boolean>
-    reorderTags: (tagIds: string[]) => Promise<void>
-  }
   agentTurns: {
     list: (worktreePath: string) => Promise<AgentTurnRange[]>
     onChanged: (callback: (worktreePath: string) => void) => () => void
-  }
-  taskTags: {
-    getAll: () => Promise<Record<string, string[]>>
-    getTagsForTask: (taskId: string) => Promise<Tag[]>
-    setTagsForTask: (taskId: string, tagIds: string[]) => Promise<void>
   }
   artifacts: {
     getByTask: (taskId: string) => Promise<TaskArtifact[]>

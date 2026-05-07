@@ -53,13 +53,6 @@ const api: ElectronAPI = {
     unarchiveTask: (id) => ipcRenderer.invoke('db:tasks:unarchive', id),
     reorderTasks: (taskIds) => ipcRenderer.invoke('db:tasks:reorder', taskIds)
   },
-  tags: {
-    getTags: () => ipcRenderer.invoke('db:tags:getAll'),
-    createTag: (data) => ipcRenderer.invoke('db:tags:create', data),
-    updateTag: (data) => ipcRenderer.invoke('db:tags:update', data),
-    deleteTag: (id) => ipcRenderer.invoke('db:tags:delete', id),
-    reorderTags: (tagIds) => ipcRenderer.invoke('db:tags:reorder', tagIds)
-  },
   agentTurns: {
     list: (worktreePath) => ipcRenderer.invoke('agent-turns:list', worktreePath),
     onChanged: (callback) => {
@@ -67,11 +60,6 @@ const api: ElectronAPI = {
       ipcRenderer.on('agent-turns:changed', handler)
       return () => ipcRenderer.removeListener('agent-turns:changed', handler)
     }
-  },
-  taskTags: {
-    getAll: () => ipcRenderer.invoke('db:taskTags:getAll'),
-    getTagsForTask: (taskId) => ipcRenderer.invoke('db:taskTags:getForTask', taskId),
-    setTagsForTask: (taskId, tagIds) => ipcRenderer.invoke('db:taskTags:setForTask', taskId, tagIds)
   },
   artifacts: {
     getByTask: (taskId) => ipcRenderer.invoke('db:artifacts:getByTask', taskId),

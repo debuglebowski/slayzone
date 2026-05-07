@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Button, Label } from '@slayzone/ui'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { ChevronUp, ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react'
 
@@ -16,7 +17,7 @@ export function TagsSettingsTab({ projectId }: TagsSettingsTabProps) {
   useEffect(() => {
     let cancelled = false
     const refresh = () => {
-      window.api.tags.getTags().then((next) => { if (!cancelled) setAllTags(next) })
+      getTrpcVanillaClient().tags.list.query().then((next) => { if (!cancelled) setAllTags(next) })
     }
     refresh()
     const onCreated = () => refresh()
@@ -37,7 +38,7 @@ export function TagsSettingsTab({ projectId }: TagsSettingsTabProps) {
 
 
   const handleDeleteTag = async (id: string) => {
-    await window.api.tags.deleteTag(id)
+    await getTrpcVanillaClient().tags.delete.mutate({ id })
     setAllTags(allTags.filter((t) => t.id !== id))
   }
 
@@ -49,7 +50,7 @@ export function TagsSettingsTab({ projectId }: TagsSettingsTabProps) {
     reordered[index] = reordered[swapIndex]
     reordered[swapIndex] = tmp
     const reorderedIds = reordered.map((t) => t.id)
-    await window.api.tags.reorderTags(reorderedIds)
+    await getTrpcVanillaClient().tags.reorder.mutate({ tagIds: reorderedIds })
     const updatedAll = allTags.map((t) => {
       const idx = reorderedIds.indexOf(t.id)
       return idx >= 0 ? { ...t, sort_order: idx } : t

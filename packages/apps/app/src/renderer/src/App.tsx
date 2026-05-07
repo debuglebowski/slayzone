@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
@@ -556,7 +557,7 @@ function App(): React.JSX.Element {
   )
 
   const handleTaskTagsChange = async (taskId: string, tagIds: string[]) => {
-    await window.api.taskTags.setTagsForTask(taskId, tagIds)
+    await getTrpcVanillaClient().tags.setForTask.mutate({ taskId, tagIds })
     setTaskTags((prev) => { const next = new Map(prev); next.set(taskId, tagIds); return next })
   }
 

@@ -1,8 +1,9 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createWSClient, wsLink } from '@trpc/client'
+import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'
-import { trpc } from './trpc'
+import type { AppRouter } from '../server/router'
+import { trpc, setTrpcVanillaClient } from './trpc'
 
 export type TrpcProviderProps = {
   url: string
@@ -11,13 +12,15 @@ export type TrpcProviderProps = {
 
 export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
   const [queryClient] = useState(() => new QueryClient())
-  const [{ wsClient, trpcClient }] = useState(() => {
+  const [{ wsClient, trpcClient, vanillaClient }] = useState(() => {
     const ws = createWSClient({ url })
+    const links = [wsLink({ client: ws, transformer: superjson })]
+    const vanilla = createTRPCClient<AppRouter>({ links })
+    setTrpcVanillaClient(vanilla)
     return {
       wsClient: ws,
-      trpcClient: trpc.createClient({
-        links: [wsLink({ client: ws, transformer: superjson })],
-      }),
+      trpcClient: trpc.createClient({ links }),
+      vanillaClient: vanilla,
     }
   })
 
@@ -26,6 +29,9 @@ export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
       wsClient.close()
     }
   }, [wsClient])
+
+  // Reference vanillaClient to keep it alive across renders.
+  void vanillaClient
 
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>

@@ -6,6 +6,7 @@ import {
   Button, Input, Label
 } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 interface CreateTagDialogProps {
   open: boolean
@@ -45,22 +46,23 @@ export function CreateTagDialog({ open, onOpenChange, projectId, tag, existingTa
 
   const handleSubmit = async () => {
     if (!name.trim()) return
+    const trpc = getTrpcVanillaClient()
     if (isEditing) {
-      const updated = await window.api.tags.updateTag({
+      const updated = await trpc.tags.update.mutate({
         id: tag.id,
         name: name.trim(),
         color: selected.bg,
-        textColor: selected.text
+        textColor: selected.text,
       })
       onUpdated?.(updated)
       window.dispatchEvent(new CustomEvent('slayzone:tag-updated', { detail: updated }))
     } else {
       if (!projectId) return
-      const created = await window.api.tags.createTag({
+      const created = await trpc.tags.create.mutate({
         name: name.trim(),
         color: selected.bg,
         textColor: selected.text,
-        projectId
+        projectId,
       })
       track('tag_created')
       onCreated(created)

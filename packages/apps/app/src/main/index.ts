@@ -118,7 +118,6 @@ import { handleTerminalStateChange } from '@slayzone/projects/server'
 import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/electron'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
-import { registerTagHandlers } from '@slayzone/tags/electron'
 import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/electron'
 import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/electron'
 import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalModes } from '@slayzone/terminal/server'
@@ -1204,7 +1203,6 @@ app.whenReady().then(async () => {
   registerProjectHandlers(ipcMain, db)
   registerTaskHandlers(ipcMain, db, notifyTasksChanged)
   registerTaskTemplateHandlers(ipcMain, db)
-  registerTagHandlers(ipcMain, db)
   registerHistoryHandlers(ipcMain, db)
   registerSettingsHandlers(ipcMain, db)
   logBoot('core domain handlers registered')

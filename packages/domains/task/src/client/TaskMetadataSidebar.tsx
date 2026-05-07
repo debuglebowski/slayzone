@@ -8,6 +8,7 @@ import { isCompletedStatus, isTerminalStatus } from '@slayzone/projects/shared'
 import { TaskProgressPopover } from './TaskProgressPopover'
 import type { Tag } from '@slayzone/tags/shared'
 import { TagSelector } from '@slayzone/tags/client'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { ExternalLink, TaskSyncStatus } from '@slayzone/integrations/shared'
 import {
   Select,
@@ -202,7 +203,7 @@ export function TaskMetadataSidebar({
   const handleTagToggle = async (tagId: string, checked: boolean): Promise<void> => {
     if (checked) track('tag_assigned')
     const newTagIds = checked ? [...taskTagIds, tagId] : taskTagIds.filter((id) => id !== tagId)
-    await window.api.taskTags.setTagsForTask(task.id, newTagIds)
+    await getTrpcVanillaClient().tags.setForTask.mutate({ taskId: task.id, tagIds: newTagIds })
     onTagsChange(newTagIds)
   }
 
