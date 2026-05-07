@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useImperativeHandle, forwardRef } from 'react'
-import { AlignCenter, Code, Columns2, Eye, FileCode, Files, Maximize2, RefreshCw, Rows2, Rows3, Search, Settings2, Type } from 'lucide-react'
+import { Code, Columns2, Eye, FileCode, Files, RefreshCw, Search, SlidersHorizontal } from 'lucide-react'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import {
   AlertDialog,
@@ -11,7 +11,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
+  Label,
   PulseGrid,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -22,7 +29,7 @@ import {
   getThemeEditorColors,
   useAppearance,
 } from '@slayzone/ui'
-import { MarkdownSettingsBanner, RichTextEditor, getEditorViewDOM, type Editor as MilkdownEditor } from '@slayzone/editor'
+import { MarkdownSettingsPopover, RichTextEditor, getEditorViewDOM, type Editor as MilkdownEditor } from '@slayzone/editor'
 import { useTheme } from '@slayzone/settings/client'
 import type { EditorOpenFilesState, MarkdownViewMode, OpenFileOptions } from '@slayzone/file-editor/shared'
 import { useFileEditor } from './useFileEditor'
@@ -33,7 +40,6 @@ import { MarkdownSplitView } from './MarkdownSplitView'
 import { SearchPanel } from './SearchPanel'
 import { EditorToc } from './EditorToc'
 import type { MarkdownHeading } from './markdown-headings'
-import { MarkdownEditorToggles } from './MarkdownEditorToggles'
 
 const MARKDOWN_FILE_TEXT_EXTENSIONS = new Set([
   'md', 'mdx', 'markdown', 'txt', 'rst',
@@ -210,7 +216,8 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
   const [fileViewModes, setFileViewModes] = useState<Record<string, MarkdownViewMode>>(
     initialEditorState?.fileViewModes ?? {}
   )
-  const { editorMarkdownViewMode, notesReadability, notesWidth, notesFontFamily, editorSettingsBannerOpen, editorMinimapEnabled, editorTocEnabled } = useAppearance()
+  const { editorMarkdownViewMode, notesReadability, notesWidth, notesFontFamily, editorMinimapEnabled, editorTocEnabled } = useAppearance()
+  const [displayOpen, setDisplayOpen] = useState(false)
   const [tocWidth, setTocWidth] = useState(initialEditorState?.tocWidth ?? 220)
   const cmViewRef = useRef<CMEditorView | null>(null)
   const richPaneRef = useRef<MarkdownFilePaneHandle | null>(null)
@@ -219,10 +226,6 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
     if (!activeFilePath) return
     setFileViewModes(prev => ({ ...prev, [activeFilePath]: mode }))
   }, [activeFilePath])
-  const setBannerOpen = useCallback((open: boolean) => {
-    void window.api.settings.set('editor_settings_banner_open', open ? '1' : '0')
-    window.dispatchEvent(new Event('sz:settings-changed'))
-  }, [])
   const writeAppearance = useCallback((key: string, value: string) => {
     void window.api.settings.set(key, value)
     window.dispatchEvent(new Event('sz:settings-changed'))
@@ -531,126 +534,71 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
               treeVisible={treeVisible}
               onToggleTree={() => setTreeVisible((v) => !v)}
             />
-            {isMarkdown && activeFile?.content != null && !activeFile?.deleted && viewMode === 'rich' && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    aria-pressed={editorSettingsBannerOpen}
-                    className={cn(
-                      'flex items-center justify-center size-7 rounded-md transition-colors shrink-0 mr-2',
-                      editorSettingsBannerOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    )}
-                    onClick={() => setBannerOpen(!editorSettingsBannerOpen)}
-                  >
-                    <Settings2 className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Markdown settings</TooltipContent>
-              </Tooltip>
+            {isMarkdown && activeFile?.content != null && !activeFile?.deleted && (
+              <MarkdownSettingsPopover
+                open={displayOpen}
+                onOpenChange={setDisplayOpen}
+                trigger={
+                  <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 mr-2 text-xs font-medium text-muted-foreground">
+                    <SlidersHorizontal className="size-3.5" />
+                    Display
+                  </Button>
+                }
+              >
+                <div className="grid grid-cols-3 rounded-md border border-border/50 p-0.5 gap-0.5">
+                  {([
+                    { mode: 'rich' as const, icon: Eye, label: 'Rich' },
+                    { mode: 'split' as const, icon: Columns2, label: 'Split' },
+                    { mode: 'code' as const, icon: Code, label: 'Code' },
+                  ]).map(({ mode, icon: Icon, label }) => {
+                    const active = viewMode === mode
+                    return (
+                      <button
+                        key={mode}
+                        className={cn(
+                          'flex flex-col items-center justify-center gap-1 py-3 text-[10px] font-medium rounded transition-colors',
+                          active ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                        )}
+                        onClick={() => setViewModeForFile(mode)}
+                      >
+                        <Icon className="size-5" />
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="space-y-3">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-3 block">Editor</span>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="md-toc" className="text-sm cursor-pointer">Outline</Label>
+                    <Switch id="md-toc" checked={editorTocEnabled} onCheckedChange={(v) => writeAppearance('editor_toc_enabled', v ? '1' : '0')} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="md-minimap" className={cn('text-sm cursor-pointer', viewMode === 'rich' && 'text-muted-foreground/50')}>Minimap{viewMode === 'rich' ? ' (not in rich mode)' : ''}</Label>
+                    <Switch id="md-minimap" checked={editorMinimapEnabled && viewMode !== 'rich'} disabled={viewMode === 'rich'} onCheckedChange={(v) => writeAppearance('editor_minimap_enabled', v ? '1' : '0')} />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-3 block">Layout</span>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="md-compact" className="text-sm cursor-pointer">Compact</Label>
+                    <Switch id="md-compact" checked={notesReadability === 'compact'} onCheckedChange={(v) => writeAppearance('notes_readability', v ? 'compact' : 'normal')} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="md-wide" className="text-sm cursor-pointer">Wide</Label>
+                    <Switch id="md-wide" checked={notesWidth === 'wide'} onCheckedChange={(v) => writeAppearance('notes_width', v ? 'wide' : 'narrow')} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="md-mono" className="text-sm cursor-pointer">Use mono font</Label>
+                    <Switch id="md-mono" checked={notesFontFamily === 'mono'} onCheckedChange={(v) => writeAppearance('notes_font_family', v ? 'mono' : 'sans')} />
+                  </div>
+                </div>
+              </MarkdownSettingsPopover>
             )}
           </div>
         </TooltipProvider>
-        {isMarkdown && activeFile?.content != null && !activeFile?.deleted && (
-          <MarkdownSettingsBanner open={editorSettingsBannerOpen} onOpenChange={setBannerOpen}>
-            <MarkdownEditorToggles
-              tocEnabled={editorTocEnabled}
-              minimapEnabled={editorMinimapEnabled}
-              minimapDisabled={viewMode === 'rich'}
-              minimapDisabledLabel="Minimap (not in rich mode)"
-              onToggleToc={() => writeAppearance('editor_toc_enabled', editorTocEnabled ? '0' : '1')}
-              onToggleMinimap={() => writeAppearance('editor_minimap_enabled', editorMinimapEnabled ? '0' : '1')}
-            />
-            <div className="flex items-center bg-surface-1 border border-border rounded-md p-0.5 gap-0.5">
-              {([
-                { mode: 'rich' as const, icon: Eye, title: 'Rich text' },
-                { mode: 'split' as const, icon: Columns2, title: 'Split view' },
-                { mode: 'code' as const, icon: Code, title: 'Source code' },
-              ]).map(({ mode, icon: Icon, title }) => (
-                <Tooltip key={mode}>
-                  <TooltipTrigger asChild>
-                    <button
-                      aria-pressed={viewMode === mode}
-                      className={cn(
-                        'flex items-center justify-center size-6 rounded transition-colors',
-                        viewMode === mode ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                      )}
-                      onClick={() => setViewModeForFile(mode)}
-                    >
-                      <Icon className="size-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">{title}</TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-            <div className="flex items-center bg-surface-1 border border-border rounded-md p-0.5 gap-0.5">
-              {([
-                { value: 'compact' as const, icon: Rows2, title: 'Compact' },
-                { value: 'normal' as const, icon: Rows3, title: 'Normal' },
-              ]).map(({ value, icon: Icon, title }) => (
-                <Tooltip key={value}>
-                  <TooltipTrigger asChild>
-                    <button
-                      aria-pressed={notesReadability === value}
-                      className={cn(
-                        'flex items-center justify-center size-6 rounded transition-colors',
-                        notesReadability === value ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                      )}
-                      onClick={() => writeAppearance('notes_readability', value)}
-                    >
-                      <Icon className="size-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">{title}</TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-            <div className="flex items-center bg-surface-1 border border-border rounded-md p-0.5 gap-0.5">
-              {([
-                { value: 'narrow' as const, icon: AlignCenter, title: 'Narrow' },
-                { value: 'wide' as const, icon: Maximize2, title: 'Wide' },
-              ]).map(({ value, icon: Icon, title }) => (
-                <Tooltip key={value}>
-                  <TooltipTrigger asChild>
-                    <button
-                      aria-pressed={notesWidth === value}
-                      className={cn(
-                        'flex items-center justify-center size-6 rounded transition-colors',
-                        notesWidth === value ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                      )}
-                      onClick={() => writeAppearance('notes_width', value)}
-                    >
-                      <Icon className="size-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">{title}</TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-            <div className="flex items-center bg-surface-1 border border-border rounded-md p-0.5 gap-0.5">
-              {([
-                { value: 'sans' as const, icon: Type, title: 'Sans' },
-                { value: 'mono' as const, icon: Code, title: 'Mono' },
-              ]).map(({ value, icon: Icon, title }) => (
-                <Tooltip key={value}>
-                  <TooltipTrigger asChild>
-                    <button
-                      aria-pressed={notesFontFamily === value}
-                      className={cn(
-                        'flex items-center justify-center size-6 rounded transition-colors',
-                        notesFontFamily === value ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                      )}
-                      onClick={() => writeAppearance('notes_font_family', value)}
-                    >
-                      <Icon className="size-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">{title}</TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-          </MarkdownSettingsBanner>
-        )}
 
         {activeFile?.deleted && (
           <div className="shrink-0 flex items-center gap-3 px-3 py-2 bg-destructive/10 border-b border-destructive/30 text-xs">

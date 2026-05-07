@@ -65,8 +65,6 @@ export function AppearanceProvider({
       window.api.settings.get('editor_markdown_view_mode'),
       window.api.settings.get('editor_minimap_enabled'),
       window.api.settings.get('editor_toc_enabled'),
-      window.api.settings.get('assets_settings_banner_open'),
-      window.api.settings.get('editor_settings_banner_open'),
     ]).then(([
       termSize, editorSize, reduceMotion, colorTints,
       wordWrap, tabSize, indentTabs, renderWs,
@@ -78,7 +76,6 @@ export function AppearanceProvider({
       chatWidth,
       chatShowTools, chatShowLastMessageTools, chatFileEditsOpenByDefault, chatShowMessageMeta,
       mdViewMode, minimapEnabled, tocEnabled,
-      artifactsBannerOpen, editorBannerOpen,
     ]) => {
       // One-shot migration: notes_line_spacing → notes_readability
       let readabilityValue = notesReadability
@@ -123,8 +120,6 @@ export function AppearanceProvider({
         editorMarkdownViewMode: (mdViewMode === 'split' || mdViewMode === 'code') ? mdViewMode : 'rich',
         editorMinimapEnabled: minimapEnabled === '1',
         editorTocEnabled: tocEnabled === '1',
-        artifactsSettingsBannerOpen: artifactsBannerOpen === '1',
-        editorSettingsBannerOpen: editorBannerOpen === '1',
       })
     })
   }, [settingsRevision, localRevision])

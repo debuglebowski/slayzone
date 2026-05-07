@@ -47,9 +47,6 @@ export interface AppearanceSettings {
   editorMarkdownViewMode: 'rich' | 'split' | 'code'
   editorMinimapEnabled: boolean
   editorTocEnabled: boolean
-  // Markdown settings banner open state (per consumer)
-  artifactsSettingsBannerOpen: boolean
-  editorSettingsBannerOpen: boolean
 }
 
 export const appearanceDefaults: AppearanceSettings = {
@@ -86,8 +83,6 @@ export const appearanceDefaults: AppearanceSettings = {
   editorMarkdownViewMode: 'rich',
   editorMinimapEnabled: false,
   editorTocEnabled: false,
-  artifactsSettingsBannerOpen: false,
-  editorSettingsBannerOpen: false,
 }
 
 export const AppearanceContext = createContext<AppearanceSettings>(appearanceDefaults)

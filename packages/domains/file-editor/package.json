@@ -14,8 +14,7 @@
     "./client/useWatchedFile": "./src/client/useWatchedFile.ts",
     "./client/SearchableCodeView": "./src/client/SearchableCodeView.tsx",
     "./client/EditorToc": "./src/client/EditorToc.tsx",
-    "./client/markdown-headings": "./src/client/markdown-headings.ts",
-    "./client/MarkdownEditorToggles": "./src/client/MarkdownEditorToggles.tsx"
+    "./client/markdown-headings": "./src/client/markdown-headings.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

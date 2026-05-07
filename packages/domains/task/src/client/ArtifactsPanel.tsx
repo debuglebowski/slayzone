@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type CSSProperties, type DragEvent } from 'react'
-import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ImageDown, FileCode, Archive, Rows2, Rows3, Maximize2, AlignCenter, History, Scissors, ClipboardPaste, CopyPlus, Settings2, Type } from 'lucide-react'
+import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ImageDown, FileCode, Archive, History, Scissors, ClipboardPaste, CopyPlus, SlidersHorizontal } from 'lucide-react'
 import {
-  cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button, Input,
+  cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button, Input, Label, Switch,
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent,
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -11,17 +11,16 @@ import {
   PulseGrid,
 } from '@slayzone/ui'
 import type { ArtifactVersion, DiffResult } from '@slayzone/task-artifacts/shared'
-import { RichTextEditor, MarkdownSettingsBanner } from '@slayzone/editor'
+import { RichTextEditor, MarkdownSettingsPopover } from '@slayzone/editor'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode, canExportAsPdf, canExportAsPng, canExportAsHtml } from '@slayzone/task/shared'
-import { Markdown, MermaidBlock } from '@slayzone/markdown/client'
+import { Markdown, MermaidBlock, SvgPanZoomView } from '@slayzone/markdown/client'
 import { useAppearance, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
 import { useTheme } from '@slayzone/settings/client'
 import { SearchableCodeView, type SearchableCodeViewHandle } from '@slayzone/file-editor/client/SearchableCodeView'
 import { EditorToc } from '@slayzone/file-editor/client/EditorToc'
 import { type MarkdownHeading } from '@slayzone/file-editor/client/markdown-headings'
-import { MarkdownEditorToggles } from '@slayzone/file-editor/client/MarkdownEditorToggles'
 import { useArtifacts } from './useArtifacts'
 import { ArtifactFindBar } from './ArtifactFindBar'
 import { ArtifactSearchPanel } from './ArtifactSearchPanel'
@@ -60,7 +59,9 @@ function getArtifactIcon(artifact: TaskArtifact): typeof FileText {
 }
 
 function hasZoom(mode: RenderMode): boolean {
-  return mode === 'image' || mode === 'svg-preview' || mode === 'mermaid-preview'
+  // svg-preview + mermaid-preview own their internal pan/zoom (svg-pan-zoom),
+  // so external zoom UI would conflict.
+  return mode === 'image'
 }
 
 // --- Image viewer ---
@@ -77,14 +78,14 @@ function ImageViewer({ artifactId, contentVersion, zoomLevel, onZoom, getFilePat
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (!e.metaKey && !e.ctrlKey) return
     e.preventDefault()
-    onZoom(z => Math.min(4, Math.max(0.25, z + (e.deltaY > 0 ? -0.1 : 0.1))))
+    onZoom(z => Math.min(4, Math.max(0.25, z * Math.exp(-e.deltaY * 0.01))))
   }, [onZoom])
 
   if (!src) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
 
   return (
     <div className={cn("flex-1 p-4 overflow-auto bg-muted/20", zoomLevel <= 1 && "flex items-center justify-center")} onWheel={handleWheel}>
-      <img src={src} style={zoomLevel !== 1 ? { transform: `scale(${zoomLevel})`, transformOrigin: 'top left' } : undefined} className={zoomLevel <= 1 ? "max-w-full max-h-full object-contain" : ""} alt="" />
+      <img src={src} style={zoomLevel !== 1 ? { zoom: zoomLevel } : undefined} className={zoomLevel <= 1 ? "max-w-full max-h-full object-contain" : ""} alt="" />
     </div>
   )
 }
@@ -356,7 +357,7 @@ function ArtifactContentEditor({ artifact, viewMode, zoomLevel, onZoom, readCont
     }
 
     if (hasPreview && viewMode === 'preview') {
-      return <div className="flex-1 flex flex-col overflow-hidden"><ArtifactPreview renderMode={renderMode} content={content ?? ''} artifactId={artifact.id} contentVersion={previewVersion} getFilePath={getFilePath} zoomLevel={zoomLevel} onZoom={onZoom} /></div>
+      return <div className="flex-1 flex flex-col overflow-hidden"><ArtifactPreview renderMode={renderMode} content={content ?? ''} artifactId={artifact.id} contentVersion={previewVersion} getFilePath={getFilePath} /></div>
     }
 
     if (hasPreview && viewMode === 'split') {
@@ -379,7 +380,7 @@ function ArtifactContentEditor({ artifact, viewMode, zoomLevel, onZoom, readCont
             />
           </div>
           <div className="flex-1 flex flex-col border-l border-border overflow-hidden min-w-0">
-            <ArtifactPreview renderMode={renderMode} content={content ?? ''} artifactId={artifact.id} contentVersion={previewVersion} getFilePath={getFilePath} zoomLevel={zoomLevel} onZoom={onZoom} />
+            <ArtifactPreview renderMode={renderMode} content={content ?? ''} artifactId={artifact.id} contentVersion={previewVersion} getFilePath={getFilePath} />
           </div>
         </div>
       )
@@ -442,21 +443,11 @@ function ArtifactContentEditor({ artifact, viewMode, zoomLevel, onZoom, readCont
 
 // --- Preview pane ---
 
-function ArtifactPreview({ renderMode, content, artifactId, contentVersion, getFilePath, zoomLevel = 1, onZoom }: { renderMode: RenderMode; content: string; artifactId: string; contentVersion: number; getFilePath: (id: string) => Promise<string | null>; zoomLevel?: number; onZoom?: (fn: (z: number) => number) => void }) {
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (!e.metaKey && !e.ctrlKey) return
-    e.preventDefault()
-    onZoom?.(z => Math.min(4, Math.max(0.25, z + (e.deltaY > 0 ? -0.1 : 0.1))))
-  }, [onZoom])
-
+function ArtifactPreview({ renderMode, content, artifactId, contentVersion, getFilePath }: { renderMode: RenderMode; content: string; artifactId: string; contentVersion: number; getFilePath: (id: string) => Promise<string | null> }) {
   if (renderMode === 'html-preview') return <HtmlPreviewFrame artifactId={artifactId} contentVersion={contentVersion} getFilePath={getFilePath} />
-
-  const zoomStyle = zoomLevel !== 1 ? { transform: `scale(${zoomLevel})`, transformOrigin: 'top left' } : undefined
-
-  if (renderMode === 'svg-preview') return <div className="flex-1 p-4 overflow-auto" onWheel={handleWheel}><div style={zoomStyle} dangerouslySetInnerHTML={{ __html: content }} /></div>
-  // mermaid-preview: MermaidBlock owns its own zoom/pan controls, so skip the
-  // outer wheel-zoom wrapper to avoid two stacked zoom systems.
-  if (renderMode === 'mermaid-preview' && content.trim()) return <div className="flex-1 p-4 overflow-auto"><MermaidBlock code={content} /></div>
+  // svg-preview + mermaid-preview share the same svg-pan-zoom-driven viewer.
+  if (renderMode === 'svg-preview') return <div className="flex-1 min-h-0 overflow-hidden bg-muted/30 relative"><SvgPanZoomView svg={content} className="absolute inset-0" /></div>
+  if (renderMode === 'mermaid-preview' && content.trim()) return <MermaidBlock code={content} fill />
   return null
 }
 
@@ -506,11 +497,8 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     })
   }, [selectedId])
 
-  const { editorMarkdownViewMode, notesReadability, notesWidth, notesFontFamily, artifactsSettingsBannerOpen, editorMinimapEnabled, editorTocEnabled } = useAppearance()
-  const setBannerOpen = useCallback((open: boolean) => {
-    void window.api.settings.set('assets_settings_banner_open', open ? '1' : '0')
-    window.dispatchEvent(new Event('sz:settings-changed'))
-  }, [])
+  const { editorMarkdownViewMode, notesReadability, notesWidth, notesFontFamily, editorMinimapEnabled, editorTocEnabled } = useAppearance()
+  const [displayOpen, setDisplayOpen] = useState(false)
   const artifactDefaultViewMode = editorMarkdownViewMode === 'code' ? 'raw' : editorMarkdownViewMode === 'split' ? 'split' : 'preview'
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
   const [zoomLevel, setZoomLevel] = useState(1)
@@ -1372,22 +1360,91 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                     <button type="button" className="size-6 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setZoomLevel(z => Math.min(4, z + 0.25))}><ZoomIn className="size-3.5" /></button>
                   </div>
                 )}
-                {selectedRenderMode === 'markdown' && viewMode === 'preview' && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        aria-pressed={artifactsSettingsBannerOpen}
-                        className={cn(
-                          'flex items-center justify-center size-7 rounded-md transition-colors shrink-0',
-                          artifactsSettingsBannerOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                        )}
-                        onClick={() => setBannerOpen(!artifactsSettingsBannerOpen)}
-                      >
-                        <Settings2 className="size-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Markdown settings</TooltipContent>
-                  </Tooltip>
+                {selectedArtifact && selectedRenderMode === 'markdown' && (
+                  <MarkdownSettingsPopover
+                    open={displayOpen}
+                    onOpenChange={setDisplayOpen}
+                    trigger={
+                      <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs font-medium text-muted-foreground">
+                        <SlidersHorizontal className="size-3.5" />
+                        Display
+                      </Button>
+                    }
+                  >
+                    <div className="grid grid-cols-3 rounded-md border border-border/50 p-0.5 gap-0.5">
+                      {([
+                        { mode: 'preview' as const, icon: Eye, label: 'Preview' },
+                        { mode: 'split' as const, icon: Columns2, label: 'Split' },
+                        { mode: 'raw' as const, icon: Code2, label: 'Raw' },
+                      ]).map(({ mode, icon: Icon, label }) => {
+                        const active = viewMode === mode
+                        return (
+                          <button
+                            key={mode}
+                            className={cn(
+                              'flex flex-col items-center justify-center gap-1 py-3 text-[10px] font-medium rounded transition-colors',
+                              active ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                            )}
+                            onClick={() => { setViewMode(mode); updateArtifact({ id: selectedArtifact.id, viewMode: mode }) }}
+                          >
+                            <Icon className="size-5" />
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <div className="space-y-3">
+                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-3 block">Editor</span>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="art-toc" className="text-sm cursor-pointer">Outline</Label>
+                        <Switch id="art-toc" checked={editorTocEnabled} onCheckedChange={(v) => {
+                          void window.api.settings.set('editor_toc_enabled', v ? '1' : '0')
+                          window.dispatchEvent(new Event('sz:settings-changed'))
+                        }} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="art-minimap" className={cn('text-sm cursor-pointer', viewMode === 'preview' && 'text-muted-foreground/50')}>Minimap{viewMode === 'preview' ? ' (not in preview)' : ''}</Label>
+                        <Switch id="art-minimap" checked={editorMinimapEnabled && viewMode !== 'preview'} disabled={viewMode === 'preview'} onCheckedChange={(v) => {
+                          void window.api.settings.set('editor_minimap_enabled', v ? '1' : '0')
+                          window.dispatchEvent(new Event('sz:settings-changed'))
+                        }} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-3 block">Layout</span>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="art-compact" className="text-sm cursor-pointer">
+                          Compact
+                          {selectedArtifact.readability_override && <span className="ml-1.5 text-xs text-muted-foreground/70">(override)</span>}
+                        </Label>
+                        <Switch id="art-compact" checked={effectiveReadability === 'compact'} onCheckedChange={(v) => {
+                          const next: 'compact' | 'normal' = v ? 'compact' : 'normal'
+                          const override = next === notesReadability ? null : next
+                          updateArtifact({ id: selectedArtifact.id, readabilityOverride: override })
+                        }} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="art-wide" className="text-sm cursor-pointer">
+                          Wide
+                          {selectedArtifact.width_override && <span className="ml-1.5 text-xs text-muted-foreground/70">(override)</span>}
+                        </Label>
+                        <Switch id="art-wide" checked={effectiveWidth === 'wide'} onCheckedChange={(v) => {
+                          const next: 'narrow' | 'wide' = v ? 'wide' : 'narrow'
+                          const override = next === notesWidth ? null : next
+                          updateArtifact({ id: selectedArtifact.id, widthOverride: override })
+                        }} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="art-mono" className="text-sm cursor-pointer">Use mono font</Label>
+                        <Switch id="art-mono" checked={notesFontFamily === 'mono'} onCheckedChange={(v) => {
+                          void window.api.settings.set('notes_font_family', v ? 'mono' : 'sans')
+                          window.dispatchEvent(new Event('sz:settings-changed'))
+                        }} />
+                      </div>
+                    </div>
+                  </MarkdownSettingsPopover>
                 )}
                 <Select
                   value={selectedArtifact.render_mode ?? '__auto__'}
@@ -1576,128 +1633,6 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
             />
           )}
           {(isResizing || sidebarDragging) && <div className="absolute inset-0 z-10" />}
-          {selectedArtifact && selectedRenderMode === 'markdown' && (
-            <MarkdownSettingsBanner open={artifactsSettingsBannerOpen} onOpenChange={setBannerOpen}>
-              <MarkdownEditorToggles
-                tocEnabled={editorTocEnabled}
-                minimapEnabled={editorMinimapEnabled}
-                minimapDisabled={viewMode === 'preview'}
-                minimapDisabledLabel="Minimap (not in preview)"
-                onToggleToc={() => {
-                  void window.api.settings.set('editor_toc_enabled', editorTocEnabled ? '0' : '1')
-                  window.dispatchEvent(new Event('sz:settings-changed'))
-                }}
-                onToggleMinimap={() => {
-                  void window.api.settings.set('editor_minimap_enabled', editorMinimapEnabled ? '0' : '1')
-                  window.dispatchEvent(new Event('sz:settings-changed'))
-                }}
-              />
-              <div className="flex items-center bg-surface-1 border border-border rounded-md p-0.5 gap-0.5">
-                {([
-                  { mode: 'preview' as const, icon: Eye, title: 'Preview' },
-                  { mode: 'split' as const, icon: Columns2, title: 'Split view' },
-                  { mode: 'raw' as const, icon: Code2, title: 'Raw' },
-                ]).map(({ mode, icon: Icon, title }) => (
-                  <Tooltip key={mode}>
-                    <TooltipTrigger asChild>
-                      <button
-                        aria-pressed={viewMode === mode}
-                        className={cn(
-                          'flex items-center justify-center size-6 rounded transition-colors',
-                          viewMode === mode ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => { setViewMode(mode); updateArtifact({ id: selectedArtifact.id, viewMode: mode }) }}
-                      >
-                        <Icon className="size-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{title}</TooltipContent>
-                  </Tooltip>
-                ))}
-              </div>
-              <div className="flex items-center bg-surface-1 border border-border rounded-md p-0.5 gap-0.5">
-                {([
-                  { value: 'compact' as const, icon: Rows2, title: 'Compact' },
-                  { value: 'normal' as const, icon: Rows3, title: 'Normal' },
-                ]).map(({ value, icon: Icon, title }) => {
-                  const active = effectiveReadability === value
-                  return (
-                    <Tooltip key={value}>
-                      <TooltipTrigger asChild>
-                        <button
-                          aria-pressed={active}
-                          className={cn(
-                            'flex items-center justify-center size-6 rounded transition-colors',
-                            active ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                          )}
-                          onClick={() => {
-                            const override = value === notesReadability ? null : value
-                            updateArtifact({ id: selectedArtifact.id, readabilityOverride: override })
-                          }}
-                        >
-                          <Icon className="size-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">{`${title}${selectedArtifact.readability_override ? ' (override)' : ''}`}</TooltipContent>
-                    </Tooltip>
-                  )
-                })}
-              </div>
-              <div className="flex items-center bg-surface-1 border border-border rounded-md p-0.5 gap-0.5">
-                {([
-                  { value: 'narrow' as const, icon: AlignCenter, title: 'Narrow' },
-                  { value: 'wide' as const, icon: Maximize2, title: 'Wide' },
-                ]).map(({ value, icon: Icon, title }) => {
-                  const active = effectiveWidth === value
-                  return (
-                    <Tooltip key={value}>
-                      <TooltipTrigger asChild>
-                        <button
-                          aria-pressed={active}
-                          className={cn(
-                            'flex items-center justify-center size-6 rounded transition-colors',
-                            active ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                          )}
-                          onClick={() => {
-                            const override = value === notesWidth ? null : value
-                            updateArtifact({ id: selectedArtifact.id, widthOverride: override })
-                          }}
-                        >
-                          <Icon className="size-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">{`${title}${selectedArtifact.width_override ? ' (override)' : ''}`}</TooltipContent>
-                    </Tooltip>
-                  )
-                })}
-              </div>
-              <div className="flex items-center bg-surface-1 border border-border rounded-md p-0.5 gap-0.5">
-                {([
-                  { value: 'sans' as const, icon: Type, title: 'Sans' },
-                  { value: 'mono' as const, icon: Code, title: 'Mono' },
-                ]).map(({ value, icon: Icon, title }) => (
-                  <Tooltip key={value}>
-                    <TooltipTrigger asChild>
-                      <button
-                        aria-pressed={notesFontFamily === value}
-                        className={cn(
-                          'flex items-center justify-center size-6 rounded transition-colors',
-                          notesFontFamily === value ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => {
-                          void window.api.settings.set('notes_font_family', value)
-                          window.dispatchEvent(new Event('sz:settings-changed'))
-                        }}
-                      >
-                        <Icon className="size-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{title}</TooltipContent>
-                  </Tooltip>
-                ))}
-              </div>
-            </MarkdownSettingsBanner>
-          )}
           {findOpen && selectedArtifact && selectedRenderMode && !isBinaryRenderMode(selectedRenderMode) && (
             <ArtifactFindBar
               query={findQuery}
