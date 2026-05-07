@@ -279,58 +279,7 @@ export interface ElectronAPI {
     setActiveBrowserTab: (taskId: string, tabId: string | null) => Promise<void>
   }
   browser: {
-    // Lifecycle
-    createView: (opts: {
-      taskId: string
-      tabId: string
-      partition?: string
-      url: string
-      bounds: { x: number; y: number; width: number; height: number }
-      kind?: 'browser-tab' | 'web-panel'
-      desktopHandoffPolicy?: DesktopHandoffPolicy | null
-    }) => Promise<string>
-    destroyView: (viewId: string) => Promise<void>
-    destroyAllForTask: (taskId: string) => Promise<void>
-    reparentToCurrentWindow: (viewId: string) => Promise<{ ok: boolean }>
-    listViews: () => Promise<Array<{
-      viewId: string
-      taskId: string
-      tabId: string
-      kind: 'browser-tab' | 'web-panel'
-      visible: boolean
-      nativelyAttached: boolean
-      currentWindowId: number | null
-      url: string
-      partition: string
-    }>>
-
-    // Bounds & visibility
-    setBounds: (viewId: string, bounds: { x: number; y: number; width: number; height: number }) => Promise<void>
-    setVisible: (viewId: string, visible: boolean) => Promise<void>
-    hideAll: () => Promise<void>
-    showAll: () => Promise<void>
-    setHandoffPolicy: (viewId: string, policy: DesktopHandoffPolicy | null) => Promise<void>
-
-    // Navigation
-    navigate: (viewId: string, url: string) => Promise<void>
-    goBack: (viewId: string) => Promise<void>
-    goForward: (viewId: string) => Promise<void>
-    reload: (viewId: string, ignoreCache?: boolean) => Promise<void>
-    stop: (viewId: string) => Promise<void>
-
-    // Content
-    executeJs: (viewId: string, code: string) => Promise<unknown>
-    insertCss: (viewId: string, css: string) => Promise<string>
-    removeCss: (viewId: string, key: string) => Promise<void>
-    setZoom: (viewId: string, factor: number) => Promise<void>
-    focus: (viewId: string) => Promise<void>
-    findInPage: (viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => Promise<number | null>
-    stopFindInPage: (viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection') => Promise<void>
-    getWebContentsId: (viewId: string) => Promise<number | null>
-    setKeyboardPassthrough: (viewId: string, enabled: boolean) => Promise<void>
-    sendInputEvent: (viewId: string, input: { type: 'keyDown' | 'keyUp' | 'char'; keyCode: string; modifiers?: string[] }) => Promise<void>
-
-    // Events (M→R)
+    // Subscription-style methods kept as IPC (driven by webContents.send from manager).
     onBrowserViewShortcut: (cb: (payload: {
       viewId: string
       key: string
@@ -340,27 +289,8 @@ export interface ElectronAPI {
       control: boolean
       kind?: string
     }) => void) => () => void
-
     onBrowserViewFocused: (cb: (payload: { viewId: string }) => void) => () => void
-
-    // DevTools
-    openDevTools: (viewId: string, mode: 'bottom' | 'right' | 'undocked' | 'detach') => Promise<void>
-    closeDevTools: (viewId: string) => Promise<void>
-    isDevToolsOpen: (viewId: string) => Promise<boolean>
-
-    // Chrome extensions (R→M)
-    getExtensions: () => Promise<{ id: string; name: string; version?: string; icon?: string; manifestVersion?: number }[]>
-    loadExtension: () => Promise<{ id: string; name: string } | { error: string } | null>
-    removeExtension: (extensionId: string) => Promise<void>
-    discoverBrowserExtensions: () => Promise<{
-      name: string
-      extensions: { id: string; name: string; version: string; path: string; alreadyImported: boolean; manifestVersion?: number }[]
-    }[]>
-    importExtension: (path: string) => Promise<{ id: string; name: string } | { error: string }>
-    activateExtension: (extensionId: string) => Promise<boolean>
     onCreateTaskFromLink: (cb: (intent: BrowserCreateTaskFromLinkIntent) => void) => () => void
-
-    // Events (M→R)
     onEvent: (cb: (event: {
       viewId: string
       type: string

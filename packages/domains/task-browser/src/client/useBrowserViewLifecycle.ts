@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 interface DesktopHandoffPolicy {
   protocol: string
@@ -31,7 +32,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
       if (!mountedRef.current || currentTabIdRef.current !== tabId) return
 
       try {
-        const id = await window.api.browser.createView({
+        const id = await getTrpcVanillaClient().app.browser.createView.mutate({
           taskId,
           tabId,
           partition,
@@ -39,7 +40,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
           bounds: { x: 0, y: 0, width: 1, height: 1 },
           kind,
           desktopHandoffPolicy,
-        })
+        }) as string | null
 
         if (!id) {
           // Manager returned null (window not ready) — retry
@@ -49,7 +50,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
         }
 
         if (!mountedRef.current || currentTabIdRef.current !== tabId) {
-          void window.api.browser.destroyView(id)
+          void getTrpcVanillaClient().app.browser.destroyView.mutate({ viewId: id })
           return
         }
 
@@ -68,7 +69,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
       mountedRef.current = false
       if (retryTimer) clearTimeout(retryTimer)
       if (createdViewId) {
-        void window.api.browser.destroyView(createdViewId)
+        void getTrpcVanillaClient().app.browser.destroyView.mutate({ viewId: createdViewId })
       }
       setViewId(null)
     }

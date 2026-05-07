@@ -1,4 +1,5 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
 
 export interface BrowserTabPlaceholderHandle {
@@ -61,7 +62,7 @@ export const BrowserTabPlaceholder = forwardRef<BrowserTabPlaceholderHandle, Bro
       if (!taskId || !viewId) return
       let cancelled = false
       void (async () => {
-        const wcId = await window.api.browser.getWebContentsId(viewId)
+        const wcId = await getTrpcVanillaClient().app.browser.getWebContentsId.query({ viewId }) as number | null
         if (cancelled || wcId == null) return
         await window.api.webview.registerBrowserTab(taskId, tabId, wcId)
       })()

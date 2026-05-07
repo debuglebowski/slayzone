@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { useBrowserViewLifecycle } from './useBrowserViewLifecycle'
 import { useBrowserViewBounds } from './useBrowserViewBounds'
 import { useBrowserViewEvents, type BrowserViewState, type LoadError } from './useBrowserViewEvents'
@@ -48,15 +49,15 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   useEffect(() => {
     if (!viewId || desktopHandoffPolicy === prevPolicyRef.current) return
     prevPolicyRef.current = desktopHandoffPolicy
-    void window.api.browser.setHandoffPolicy(viewId, desktopHandoffPolicy ?? null)
+    void getTrpcVanillaClient().app.browser.setHandoffPolicy.mutate({ viewId, policy: desktopHandoffPolicy ?? null })
   }, [viewId, desktopHandoffPolicy])
 
   // Multi-window: ensure WCV is parented to THIS window. Called on mount + on window focus
   // so the view follows whichever window currently renders the BrowserPanel.
   useEffect(() => {
     if (!viewId) return
-    void window.api.browser.reparentToCurrentWindow(viewId)
-    const onFocus = () => { void window.api.browser.reparentToCurrentWindow(viewId) }
+    void getTrpcVanillaClient().app.browser.reparentToCurrentWindow.mutate({ viewId })
+    const onFocus = () => { void getTrpcVanillaClient().app.browser.reparentToCurrentWindow.mutate({ viewId }) }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [viewId])
@@ -74,16 +75,16 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   }, [viewId])
 
   const actions: BrowserViewActions = useMemo(() => ({
-    navigate: (u: string) => { if (viewId) void window.api.browser.navigate(viewId, u) },
-    goBack: () => { if (viewId) void window.api.browser.goBack(viewId) },
-    goForward: () => { if (viewId) void window.api.browser.goForward(viewId) },
-    reload: (ignoreCache?: boolean) => { if (viewId) void window.api.browser.reload(viewId, ignoreCache) },
-    stop: () => { if (viewId) void window.api.browser.stop(viewId) },
-    executeJs: (code: string) => viewId ? window.api.browser.executeJs(viewId, code) : Promise.resolve(undefined),
-    insertCss: (css: string) => viewId ? window.api.browser.insertCss(viewId, css) : Promise.resolve(''),
-    removeCss: (key: string) => { if (viewId) void window.api.browser.removeCss(viewId, key) },
-    setZoom: (factor: number) => { if (viewId) void window.api.browser.setZoom(viewId, factor) },
-    focus: () => { if (viewId) void window.api.browser.focus(viewId) },
+    navigate: (u: string) => { if (viewId) void getTrpcVanillaClient().app.browser.navigate.mutate({ viewId, url: u }) },
+    goBack: () => { if (viewId) void getTrpcVanillaClient().app.browser.goBack.mutate({ viewId }) },
+    goForward: () => { if (viewId) void getTrpcVanillaClient().app.browser.goForward.mutate({ viewId }) },
+    reload: (ignoreCache?: boolean) => { if (viewId) void getTrpcVanillaClient().app.browser.reload.mutate({ viewId, ignoreCache }) },
+    stop: () => { if (viewId) void getTrpcVanillaClient().app.browser.stop.mutate({ viewId }) },
+    executeJs: (code: string) => viewId ? getTrpcVanillaClient().app.browser.executeJs.mutate({ viewId, code }) : Promise.resolve(undefined),
+    insertCss: (css: string) => viewId ? (getTrpcVanillaClient().app.browser.insertCss.mutate({ viewId, css }) as Promise<string>) : Promise.resolve(''),
+    removeCss: (key: string) => { if (viewId) void getTrpcVanillaClient().app.browser.removeCss.mutate({ viewId, key }) },
+    setZoom: (factor: number) => { if (viewId) void getTrpcVanillaClient().app.browser.setZoom.mutate({ viewId, factor }) },
+    focus: () => { if (viewId) void getTrpcVanillaClient().app.browser.focus.mutate({ viewId }) },
   }), [viewId])
 
   return { viewId, state, actions, placeholderRef, hiddenByOverlay }

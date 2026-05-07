@@ -50,7 +50,7 @@ export function useBrowserViewBounds(
   // Sync visibility changes
   useEffect(() => {
     if (!viewId) return
-    void window.api.browser.setVisible(viewId, effectivelyVisible)
+    void getTrpcVanillaClient().app.browser.setVisible.mutate({ viewId, visible: effectivelyVisible })
   }, [viewId, effectivelyVisible])
 
   // Track whether we've hidden this view due to a dialog overlay
@@ -87,11 +87,11 @@ export function useBrowserViewBounds(
       if (overlaps && !hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = true
         setHiddenByOverlay(true)
-        void window.api.browser.setVisible(vid, false)
+        void getTrpcVanillaClient().app.browser.setVisible.mutate({ viewId: vid, visible: false })
       } else if (!overlaps && hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = false
         setHiddenByOverlay(false)
-        void window.api.browser.setVisible(vid, true)
+        void getTrpcVanillaClient().app.browser.setVisible.mutate({ viewId: vid, visible: true })
       }
 
       // Only sync bounds when not hidden by overlay
@@ -109,7 +109,7 @@ export function useBrowserViewBounds(
         if (!last || last.x !== x || last.y !== y || last.width !== width || last.height !== height) {
           lastBoundsRef.current = { x, y, width, height }
           if (width > 0 && height > 0) {
-            void window.api.browser.setBounds(vid, { x, y, width, height })
+            void getTrpcVanillaClient().app.browser.setBounds.mutate({ viewId: vid, bounds: { x, y, width, height } })
           }
         }
       }
@@ -143,7 +143,7 @@ export function useBrowserViewBounds(
   const handleMouseDown = useCallback(() => {
     const vid = viewIdRef.current
     if (vid) {
-      void window.api.browser.focus(vid)
+      void getTrpcVanillaClient().app.browser.focus.mutate({ viewId: vid })
     }
   }, [])
 

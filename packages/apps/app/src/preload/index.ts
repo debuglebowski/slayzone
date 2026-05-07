@@ -385,31 +385,8 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('webview:set-active-browser-tab', taskId, tabId),
   },
   browser: {
-    createView: (opts) => ipcRenderer.invoke('browser:create-view', opts),
-    reparentToCurrentWindow: (viewId: string) => ipcRenderer.invoke('browser:reparent-to-current-window', viewId),
-    destroyView: (viewId) => ipcRenderer.invoke('browser:destroy-view', viewId),
-    destroyAllForTask: (taskId) => ipcRenderer.invoke('browser:destroy-all-for-task', taskId),
-    listViews: () => ipcRenderer.invoke('browser:list-views'),
-    setBounds: (viewId, bounds) => ipcRenderer.invoke('browser:set-bounds', viewId, bounds),
-    setVisible: (viewId, visible) => ipcRenderer.invoke('browser:set-visible', viewId, visible),
-    hideAll: () => ipcRenderer.invoke('browser:hide-all'),
-    showAll: () => ipcRenderer.invoke('browser:show-all'),
-    setHandoffPolicy: (viewId, policy) => ipcRenderer.invoke('browser:set-handoff-policy', viewId, policy),
-    navigate: (viewId, url) => ipcRenderer.invoke('browser:navigate', viewId, url),
-    goBack: (viewId) => ipcRenderer.invoke('browser:go-back', viewId),
-    goForward: (viewId) => ipcRenderer.invoke('browser:go-forward', viewId),
-    reload: (viewId, ignoreCache) => ipcRenderer.invoke('browser:reload', viewId, ignoreCache),
-    stop: (viewId) => ipcRenderer.invoke('browser:stop', viewId),
-    executeJs: (viewId, code) => ipcRenderer.invoke('browser:execute-js', viewId, code),
-    insertCss: (viewId, css) => ipcRenderer.invoke('browser:insert-css', viewId, css),
-    removeCss: (viewId, key) => ipcRenderer.invoke('browser:remove-css', viewId, key),
-    setZoom: (viewId, factor) => ipcRenderer.invoke('browser:set-zoom', viewId, factor),
-    focus: (viewId) => ipcRenderer.invoke('browser:focus', viewId),
-    findInPage: (viewId, text, options) => ipcRenderer.invoke('browser:find-in-page', viewId, text, options),
-    stopFindInPage: (viewId, action) => ipcRenderer.invoke('browser:stop-find-in-page', viewId, action),
-    getWebContentsId: (viewId) => ipcRenderer.invoke('browser:get-web-contents-id', viewId),
-    setKeyboardPassthrough: (viewId, enabled) => ipcRenderer.invoke('browser:set-keyboard-passthrough', viewId, enabled),
-    sendInputEvent: (viewId, input) => ipcRenderer.invoke('browser:send-input-event', viewId, input),
+    // Subscription-style methods kept as IPC — backed by webContents.send from
+    // browser-view-manager. Migration would require routing events through tRPC subs.
     onBrowserViewShortcut: (cb) => {
       const handler = (_event: unknown, data: { viewId: string; key: string; shift: boolean; alt: boolean; meta: boolean; control: boolean; kind?: string }) => cb(data)
       ipcRenderer.on('browser-view:shortcut', handler)
@@ -420,15 +397,6 @@ const api: ElectronAPI = {
       ipcRenderer.on('browser-view:focused', handler)
       return () => ipcRenderer.removeListener('browser-view:focused', handler)
     },
-    openDevTools: (viewId, mode) => ipcRenderer.invoke('browser:open-devtools', viewId, mode),
-    closeDevTools: (viewId) => ipcRenderer.invoke('browser:close-devtools', viewId),
-    isDevToolsOpen: (viewId) => ipcRenderer.invoke('browser:is-devtools-open', viewId),
-    getExtensions: () => ipcRenderer.invoke('browser:get-extensions'),
-    loadExtension: () => ipcRenderer.invoke('browser:load-extension'),
-    removeExtension: (extensionId) => ipcRenderer.invoke('browser:remove-extension', extensionId),
-    discoverBrowserExtensions: () => ipcRenderer.invoke('browser:discover-browser-extensions'),
-    importExtension: (path) => ipcRenderer.invoke('browser:import-extension', path),
-    activateExtension: (extensionId) => ipcRenderer.invoke('browser:activate-extension', extensionId),
     onCreateTaskFromLink: (cb) => {
       const handler = (_event: unknown, intent: BrowserCreateTaskFromLinkIntent) => cb(intent)
       ipcRenderer.on('browser:create-task-from-link', handler)

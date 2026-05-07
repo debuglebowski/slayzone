@@ -869,7 +869,7 @@ function App(): React.JSX.Element {
       const placeholder = document.querySelector('[data-browser-panel][data-view-id]') as HTMLElement | null
       const viewId = placeholder?.dataset.viewId
       if (viewId) {
-        void window.api.browser.reload(viewId)
+        void getTrpcVanillaClient().app.browser.reload.mutate({ viewId })
         return
       }
       // Fallback: webview (multi-device grid)

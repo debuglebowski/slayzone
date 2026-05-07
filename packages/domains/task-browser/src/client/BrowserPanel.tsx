@@ -566,7 +566,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Sync keyboard passthrough to main process
   useEffect(() => {
     if (!activeViewId) return
-    void window.api.browser.setKeyboardPassthrough(activeViewId, captureShortcuts)
+    void getTrpcVanillaClient().app.browser.setKeyboardPassthrough.mutate({ viewId: activeViewId, enabled: captureShortcuts })
   }, [activeViewId, captureShortcuts])
 
   // Fetch URLs from other tasks in the same project when dropdown opens
@@ -664,8 +664,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     setExtensionsError(null)
     try {
       const [installed, discovered] = await Promise.all([
-        window.api.browser.getExtensions(),
-        window.api.browser.discoverBrowserExtensions(),
+        getTrpcVanillaClient().app.browser.getExtensions.query() as Promise<InstalledBrowserExtension[]>,
+        getTrpcVanillaClient().app.browser.discoverBrowserExtensions.query() as Promise<Array<{ name: string; extensions: Array<{ id: string; name: string; version: string; path: string; alreadyImported: boolean; manifestVersion?: number }> }>>,
       ])
       const installedIds = new Set(installed.map(extension => extension.id))
       setExtensions(installed)
@@ -698,18 +698,18 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   const handleActivateExtension = useCallback((extensionId: string) => {
     setExtensionsManagerOpen(false)
     requestAnimationFrame(() => {
-      void window.api.browser.activateExtension(extensionId)
+      void getTrpcVanillaClient().app.browser.activateExtension.mutate({ extensionId })
     })
   }, [])
 
   const handleImportExtension = useCallback(async (path: string, name: string) => {
     try {
-      const result = await window.api.browser.importExtension(path)
-      if ('id' in result) {
+      const result = await getTrpcVanillaClient().app.browser.importExtension.mutate({ extPath: path }) as { id?: string; name?: string; error?: string } | null
+      if (result && 'id' in result) {
         await refreshExtensions()
         return
       }
-      setExtensionsError(result.error)
+      if (result?.error) setExtensionsError(result.error)
     } catch (error) {
       const message = error instanceof Error ? error.message : `Failed to import ${name}`
       setExtensionsError(message)
@@ -718,12 +718,12 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   const handleLoadExtension = useCallback(async () => {
     try {
-      const result = await window.api.browser.loadExtension()
+      const result = await getTrpcVanillaClient().app.browser.loadExtension.mutate() as { id?: string; name?: string; error?: string } | null
       if (result && 'id' in result) {
         await refreshExtensions()
         return
       }
-      if (result && 'error' in result) {
+      if (result && 'error' in result && result.error) {
         setExtensionsError(result.error)
       }
     } catch (error) {
@@ -734,7 +734,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   const handleRemoveExtension = useCallback(async (extensionId: string) => {
     try {
-      await window.api.browser.removeExtension(extensionId)
+      await getTrpcVanillaClient().app.browser.removeExtension.mutate({ extensionId })
       await refreshExtensions()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to remove extension'
@@ -831,7 +831,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       const handle = ref.current
       if (!handle?.viewId) continue
       const shouldBeVisible = tabId === tabs.activeTabId && isActive !== false && !extensionsManagerOpen
-      void window.api.browser.setVisible(handle.viewId, shouldBeVisible)
+      void getTrpcVanillaClient().app.browser.setVisible.mutate({ viewId: handle.viewId, visible: shouldBeVisible })
     }
   }, [tabs.activeTabId, isActive, extensionsManagerOpen])
 
@@ -919,12 +919,12 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Only fires when browser scope is active (panel or WebContentsView focused).
   useShortcutAction('browser-scroll-top', () => {
     if (!activeViewId) return false // decline — let event propagate
-    void window.api.browser.sendInputEvent(activeViewId, { type: 'keyDown', keyCode: 'Up', modifiers: ['meta'] })
+    void getTrpcVanillaClient().app.browser.sendInputEvent.mutate({ viewId: activeViewId, input: { type: 'keyDown', keyCode: 'Up', modifiers: ['meta'] } })
     return undefined
   })
   useShortcutAction('browser-scroll-bottom', () => {
     if (!activeViewId) return false
-    void window.api.browser.sendInputEvent(activeViewId, { type: 'keyDown', keyCode: 'Down', modifiers: ['meta'] })
+    void getTrpcVanillaClient().app.browser.sendInputEvent.mutate({ viewId: activeViewId, input: { type: 'keyDown', keyCode: 'Down', modifiers: ['meta'] } })
     return undefined
   })
 
@@ -994,12 +994,12 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
     void (async () => {
       try {
-        const isOpen = await window.api.browser.isDevToolsOpen(activeViewId)
+        const isOpen = await getTrpcVanillaClient().app.browser.isDevToolsOpen.query({ viewId: activeViewId })
         if (isOpen) {
-          await window.api.browser.closeDevTools(activeViewId)
+          await getTrpcVanillaClient().app.browser.closeDevTools.mutate({ viewId: activeViewId })
           setDevToolsOpen(false)
         } else {
-          await window.api.browser.openDevTools(activeViewId, 'bottom')
+          await getTrpcVanillaClient().app.browser.openDevTools.mutate({ viewId: activeViewId, mode: 'bottom' })
           setDevToolsOpen(true)
         }
       } catch {
@@ -1075,7 +1075,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     setFindText('')
     setFindResult(null)
     if (activeViewId) {
-      void window.api.browser.stopFindInPage(activeViewId, 'clearSelection')
+      void getTrpcVanillaClient().app.browser.stopFindInPage.mutate({ viewId: activeViewId, action: 'clearSelection' })
     }
   }, [activeViewId])
 
@@ -1089,16 +1089,16 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   const findNext = useCallback((forward: boolean) => {
     if (!activeViewId || !findText) return
-    void window.api.browser.findInPage(activeViewId, findText, { forward, findNext: true })
+    void getTrpcVanillaClient().app.browser.findInPage.mutate({ viewId: activeViewId, text: findText, options: { forward, findNext: true } })
   }, [activeViewId, findText])
 
   const handleFindTextChange = useCallback((text: string) => {
     setFindText(text)
     if (!activeViewId) return
     if (text) {
-      void window.api.browser.findInPage(activeViewId, text, { forward: true })
+      void getTrpcVanillaClient().app.browser.findInPage.mutate({ viewId: activeViewId, text, options: { forward: true } })
     } else {
-      void window.api.browser.stopFindInPage(activeViewId, 'clearSelection')
+      void getTrpcVanillaClient().app.browser.stopFindInPage.mutate({ viewId: activeViewId, action: 'clearSelection' })
       setFindResult(null)
     }
   }, [activeViewId])

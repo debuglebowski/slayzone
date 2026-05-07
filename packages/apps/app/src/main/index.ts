@@ -16,7 +16,7 @@ import { electronApp, is } from '@electron-toolkit/utils'
 import { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import { installChromeWebStore } from 'electron-chrome-web-store'
 import { registerBrowserTab, unregisterBrowserTab, setActiveBrowserTab, clearBrowserRegistry } from './browser-registry'
-import { BrowserViewManager, type CreateViewOpts, type ViewBounds } from './browser-view-manager'
+import { BrowserViewManager } from './browser-view-manager'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   inferHostScopeFromUrl,
@@ -1371,6 +1371,168 @@ app.whenReady().then(async () => {
       const display = screen.getDisplayMatching(cb)
       return display.scaleFactor
     },
+    browser: {
+      createView: (opts) => browserViewManager.createView(opts as never),
+      destroyView: (viewId) => browserViewManager.destroyView(viewId),
+      destroyAllForTask: (taskId) => browserViewManager.destroyAllForTask(taskId),
+      setBounds: (viewId, bounds) => browserViewManager.setBounds(viewId, bounds as never),
+      setVisible: (viewId, visible) => browserViewManager.setVisible(viewId, visible),
+      hideAll: () => browserViewManager.hideAll(),
+      showAll: () => browserViewManager.showAll(),
+      setHandoffPolicy: (viewId, policy) => browserViewManager.setHandoffPolicy(viewId, policy as never),
+      navigate: (viewId, url) => browserViewManager.navigate(viewId, url),
+      goBack: (viewId) => browserViewManager.goBack(viewId),
+      goForward: (viewId) => browserViewManager.goForward(viewId),
+      reload: (viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
+      stop: (viewId) => browserViewManager.stop(viewId),
+      executeJs: (viewId, code) => browserViewManager.executeJs(viewId, code),
+      insertCss: (viewId, css) => browserViewManager.insertCss(viewId, css),
+      removeCss: (viewId, key) => browserViewManager.removeCss(viewId, key),
+      setZoom: (viewId, factor) => browserViewManager.setZoom(viewId, factor),
+      focus: (viewId) => browserViewManager.focus(viewId),
+      findInPage: (viewId, text, options) => browserViewManager.findInPage(viewId, text, options as never),
+      stopFindInPage: (viewId, action) => browserViewManager.stopFindInPage(viewId, action),
+      setKeyboardPassthrough: (viewId, enabled) => browserViewManager.setKeyboardPassthrough(viewId, enabled),
+      sendInputEvent: (viewId, input) => browserViewManager.sendInputEvent(viewId, input as never),
+      openDevTools: (viewId, mode) => browserViewManager.openDevTools(viewId, mode),
+      closeDevTools: (viewId) => browserViewManager.closeDevTools(viewId),
+      isDevToolsOpen: (viewId) => browserViewManager.isDevToolsOpen(viewId),
+      getUrl: (viewId) => browserViewManager.getUrl(viewId),
+      getBounds: (viewId) => browserViewManager.getBounds(viewId),
+      getZoomFactor: (viewId) => browserViewManager.getZoomFactor(viewId),
+      getActualNativeBounds: (viewId) => browserViewManager.getActualNativeBounds(viewId),
+      getViewVisible: (viewId) => browserViewManager.getViewVisible(viewId),
+      getViewsForTask: (taskId) => browserViewManager.getViewsForTask(taskId),
+      getAllViewIds: () => browserViewManager.getAllViewIds(),
+      listViews: () => browserViewManager.listViews(),
+      getNativeChildViewCount: () => browserViewManager.getNativeChildViewCount(),
+      isAllHidden: () => browserViewManager.isAllHidden(),
+      isFocused: (viewId) => browserViewManager.isFocused(viewId),
+      isViewNativelyVisible: (viewId) => browserViewManager.isViewNativelyVisible(viewId),
+      getPartition: (viewId) => browserViewManager.getPartition(viewId),
+      getWebContentsId: (viewId) => browserViewManager.getWebContentsId(viewId),
+      activateExtension: (extensionId) => {
+        try {
+          const ext = browserSession.getExtension(extensionId)
+          if (!ext) return false
+          const activeWc = browserViewManager.getActiveWebContents()
+          if (!activeWc) return false
+          const api = (chromeExtensions as unknown as { api: { browserAction?: { activate?: (a: unknown, b: unknown) => void } } }).api
+          if (api?.browserAction?.activate) {
+            api.browserAction.activate({ type: 'click' }, { extensionId, tabId: activeWc.id })
+            return true
+          }
+          const ctx = (chromeExtensions as unknown as { ctx: { router?: { invoke: (...args: unknown[]) => void } } }).ctx
+          if (ctx?.router) {
+            ctx.router.invoke(activeWc, 'browserAction.activate', { eventType: 'click', extensionId })
+            return true
+          }
+          return false
+        } catch (err) {
+          console.warn('[browser:activate-extension] Failed:', err)
+          return false
+        }
+      },
+      getExtensions: () => browserSession.getAllExtensions().map(ext => ({
+        id: ext.id, name: ext.name, version: ext.manifest.version,
+        manifestVersion: typeof ext.manifest.manifest_version === 'number' ? ext.manifest.manifest_version : undefined,
+        icon: ext.manifest.icons ? `crx://extension-icon/${ext.id}/${Object.values(ext.manifest.icons).pop()}` : undefined,
+      })),
+      loadExtension: async () => {
+        if (!mainWindow) return null
+        const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: 'Select Chrome Extension Directory' })
+        if (result.canceled || !result.filePaths[0]) return null
+        try {
+          const ext = await browserSession.loadExtension(result.filePaths[0])
+          saveExtensionPaths()
+          return { id: ext.id, name: ext.name }
+        } catch (err) {
+          return { error: String(err) }
+        }
+      },
+      removeExtension: (extensionId) => {
+        browserSession.removeExtension(extensionId)
+        saveExtensionPaths()
+        return undefined
+      },
+      discoverBrowserExtensions: async () => {
+        const appSupport = join(homedir(), 'Library', 'Application Support')
+        const knownBrowsers = [
+          { name: 'Chrome', dir: 'Google/Chrome/Default/Extensions' },
+          { name: 'Arc', dir: 'Arc/User Data/Default/Extensions' },
+          { name: 'Brave', dir: 'BraveSoftware/Brave-Browser/Default/Extensions' },
+          { name: 'Edge', dir: 'Microsoft Edge/Default/Extensions' },
+          { name: 'Chromium', dir: 'Chromium/Default/Extensions' },
+          { name: 'Vivaldi', dir: 'Vivaldi/Default/Extensions' },
+        ]
+        const alreadyLoaded = new Set(browserSession.getAllExtensions().map(e => e.id))
+        const results: { name: string; extensions: { id: string; name: string; version: string; path: string; alreadyImported: boolean; manifestVersion?: number }[] }[] = []
+        for (const browser of knownBrowsers) {
+          const extDir = join(appSupport, browser.dir)
+          let entries: string[]
+          try { entries = await fsp.readdir(extDir) } catch { continue }
+          const extensions: typeof results[0]['extensions'] = []
+          for (const id of entries) {
+            if (id === 'Temp' || id.startsWith('.')) continue
+            const idDir = join(extDir, id)
+            let versions: string[]
+            try { versions = await fsp.readdir(idDir) } catch { continue }
+            const ver = versions.sort().pop()
+            if (!ver) continue
+            const extPath = join(idDir, ver)
+            try {
+              const manifest = JSON.parse(await fsp.readFile(join(extPath, 'manifest.json'), 'utf-8'))
+              let name: string = manifest.name || id
+              if (name.startsWith('__MSG_')) {
+                const key = name.slice(6, -2)
+                for (const lang of ['en', 'en_US', 'en_GB']) {
+                  try {
+                    const msgs = JSON.parse(await fsp.readFile(join(extPath, '_locales', lang, 'messages.json'), 'utf-8'))
+                    if (msgs[key]?.message) { name = msgs[key].message; break }
+                  } catch { /* try next lang */ }
+                }
+              }
+              extensions.push({
+                id, name, version: manifest.version || '?', path: extPath,
+                alreadyImported: alreadyLoaded.has(id),
+                manifestVersion: typeof manifest.manifest_version === 'number' ? manifest.manifest_version : undefined,
+              })
+            } catch { /* skip */ }
+          }
+          if (extensions.length > 0) results.push({ name: browser.name, extensions })
+        }
+        return results
+      },
+      importExtension: async (extPath: string) => {
+        try {
+          const ext = await browserSession.loadExtension(extPath)
+          saveExtensionPaths()
+          return { id: ext.id, name: ext.name }
+        } catch (err) {
+          return { error: String(err) }
+        }
+      },
+      reparentToCurrentWindow: (viewId) => {
+        const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+        if (win) browserViewManager.reparentView(viewId, win)
+      },
+    },
+    webview: {
+      registerBrowserTab,
+      unregisterBrowserTab,
+      setActiveBrowserTab,
+      // Other webview methods stay as IPC for now — closure-scoped state
+      // (registeredWebviews/keyboardPassthroughWebviews/policies) lives in
+      // inline handlers; refactor would require a webview-shortcuts module.
+      registerShortcuts: () => {},
+      setKeyboardPassthrough: () => {},
+      setDesktopHandoffPolicy: () => false,
+      openDevToolsBottom: async () => false,
+      openDevToolsDetached: async () => false,
+      closeDevTools: async () => false,
+      isDevToolsOpened: () => false,
+      disableDeviceEmulation: () => false,
+    },
     authGithubSystemSignIn: async (input) => {
       try {
         if (!input?.convexUrl) return { ok: false, error: 'Convex URL is required' }
@@ -2023,41 +2185,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     }
   })
 
-  // Lifecycle
-  ipcMain.handle('browser:create-view', (_, opts: CreateViewOpts) => browserViewManager.createView(opts))
-  ipcMain.handle('browser:reparent-to-current-window', (event, viewId: string) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win || win.isDestroyed()) return { ok: false }
-    const ok = browserViewManager.reparentView(viewId, win)
-    return { ok }
-  })
-  ipcMain.handle('browser:destroy-view', (_, viewId: string) => browserViewManager.destroyView(viewId))
-  ipcMain.handle('browser:destroy-all-for-task', (_, taskId: string) => browserViewManager.destroyAllForTask(taskId))
-
-  // Bounds & visibility
-  ipcMain.handle('browser:set-bounds', (_, viewId: string, bounds: ViewBounds) => browserViewManager.setBounds(viewId, bounds))
-  ipcMain.handle('browser:set-visible', (_, viewId: string, visible: boolean) => browserViewManager.setVisible(viewId, visible))
-  ipcMain.handle('browser:hide-all', () => browserViewManager.hideAll())
-  ipcMain.handle('browser:show-all', () => browserViewManager.showAll())
-  ipcMain.handle('browser:set-handoff-policy', (_, viewId: string, policy: DesktopHandoffPolicy | null) => browserViewManager.setHandoffPolicy(viewId, policy))
-
-  // Navigation
-  ipcMain.handle('browser:navigate', (_, viewId: string, url: string) => browserViewManager.navigate(viewId, url))
-  ipcMain.handle('browser:go-back', (_, viewId: string) => browserViewManager.goBack(viewId))
-  ipcMain.handle('browser:go-forward', (_, viewId: string) => browserViewManager.goForward(viewId))
-  ipcMain.handle('browser:reload', (_, viewId: string, ignoreCache?: boolean) => browserViewManager.reload(viewId, ignoreCache))
-  ipcMain.handle('browser:stop', (_, viewId: string) => browserViewManager.stop(viewId))
-
-  // Content
-  ipcMain.handle('browser:execute-js', (_, viewId: string, code: string) => browserViewManager.executeJs(viewId, code))
-  ipcMain.handle('browser:insert-css', (_, viewId: string, css: string) => browserViewManager.insertCss(viewId, css))
-  ipcMain.handle('browser:remove-css', (_, viewId: string, key: string) => browserViewManager.removeCss(viewId, key))
-  ipcMain.handle('browser:set-zoom', (_, viewId: string, factor: number) => browserViewManager.setZoom(viewId, factor))
-  ipcMain.handle('browser:focus', (_, viewId: string) => browserViewManager.focus(viewId))
-  ipcMain.handle('browser:find-in-page', (_, viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => browserViewManager.findInPage(viewId, text, options))
-  ipcMain.handle('browser:stop-find-in-page', (_, viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection') => browserViewManager.stopFindInPage(viewId, action))
-  ipcMain.handle('browser:set-keyboard-passthrough', (_, viewId: string, enabled: boolean) => browserViewManager.setKeyboardPassthrough(viewId, enabled))
-  ipcMain.handle('browser:send-input-event', (_, viewId: string, input: Electron.KeyboardInputEvent) => browserViewManager.sendInputEvent(viewId, input))
   ipcMain.on('browser:request-create-task-from-link', (event, payload: { url?: unknown; linkText?: unknown }) => {
     const url = typeof payload?.url === 'string' ? payload.url : ''
     if (!/^https?:\/\//i.test(url)) return
@@ -2070,141 +2197,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     void shell.openExternal(url)
   })
 
-  // DevTools
-  ipcMain.handle('browser:open-devtools', (_, viewId: string, mode: 'bottom' | 'right' | 'undocked' | 'detach') => browserViewManager.openDevTools(viewId, mode))
-  ipcMain.handle('browser:close-devtools', (_, viewId: string) => browserViewManager.closeDevTools(viewId))
-  ipcMain.handle('browser:is-devtools-open', (_, viewId: string) => browserViewManager.isDevToolsOpen(viewId))
-
-  // Chrome extension management
-  ipcMain.handle('browser:get-extensions', () => {
-    return browserSession.getAllExtensions().map(ext => ({
-      id: ext.id,
-      name: ext.name,
-      version: ext.manifest.version,
-      manifestVersion: typeof ext.manifest.manifest_version === 'number' ? ext.manifest.manifest_version : undefined,
-      icon: ext.manifest.icons
-        ? `crx://extension-icon/${ext.id}/${Object.values(ext.manifest.icons).pop()}`
-        : undefined,
-    }))
-  })
-  ipcMain.handle('browser:load-extension', async () => {
-    if (!mainWindow) return null
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openDirectory'],
-      title: 'Select Chrome Extension Directory',
-    })
-    if (result.canceled || !result.filePaths[0]) return null
-    try {
-      const ext = await browserSession.loadExtension(result.filePaths[0])
-      saveExtensionPaths()
-      return { id: ext.id, name: ext.name }
-    } catch (err) {
-      return { error: String(err) }
-    }
-  })
-  ipcMain.handle('browser:remove-extension', (_, extensionId: string) => {
-    browserSession.removeExtension(extensionId)
-    saveExtensionPaths()
-  })
-  ipcMain.handle('browser:discover-browser-extensions', async () => {
-    const appSupport = join(homedir(), 'Library', 'Application Support')
-    const knownBrowsers = [
-      { name: 'Chrome', dir: 'Google/Chrome/Default/Extensions' },
-      { name: 'Arc', dir: 'Arc/User Data/Default/Extensions' },
-      { name: 'Brave', dir: 'BraveSoftware/Brave-Browser/Default/Extensions' },
-      { name: 'Edge', dir: 'Microsoft Edge/Default/Extensions' },
-      { name: 'Chromium', dir: 'Chromium/Default/Extensions' },
-      { name: 'Vivaldi', dir: 'Vivaldi/Default/Extensions' },
-    ]
-    const alreadyLoaded = new Set(browserSession.getAllExtensions().map(e => e.id))
-    const results: { name: string; extensions: { id: string; name: string; version: string; path: string; alreadyImported: boolean; manifestVersion?: number }[] }[] = []
-
-    for (const browser of knownBrowsers) {
-      const extDir = join(appSupport, browser.dir)
-      let entries: string[]
-      try { entries = await fsp.readdir(extDir) } catch { continue }
-
-      const extensions: typeof results[0]['extensions'] = []
-      for (const id of entries) {
-        if (id === 'Temp' || id.startsWith('.')) continue
-        const idDir = join(extDir, id)
-        let versions: string[]
-        try { versions = await fsp.readdir(idDir) } catch { continue }
-        const ver = versions.sort().pop()
-        if (!ver) continue
-        const extPath = join(idDir, ver)
-        try {
-          const manifest = JSON.parse(await fsp.readFile(join(extPath, 'manifest.json'), 'utf-8'))
-          let name: string = manifest.name || id
-          if (name.startsWith('__MSG_')) {
-            const key = name.slice(6, -2)
-            for (const lang of ['en', 'en_US', 'en_GB']) {
-              try {
-                const msgs = JSON.parse(await fsp.readFile(join(extPath, '_locales', lang, 'messages.json'), 'utf-8'))
-                if (msgs[key]?.message) { name = msgs[key].message; break }
-              } catch { /* try next lang */ }
-            }
-          }
-          extensions.push({
-            id,
-            name,
-            version: manifest.version || '?',
-            path: extPath,
-            alreadyImported: alreadyLoaded.has(id),
-            manifestVersion: typeof manifest.manifest_version === 'number' ? manifest.manifest_version : undefined,
-          })
-        } catch { /* skip unreadable extensions */ }
-      }
-      if (extensions.length > 0) {
-        results.push({ name: browser.name, extensions })
-      }
-    }
-    return results
-  })
-  ipcMain.handle('browser:import-extension', async (_, extPath: string) => {
-    try {
-      const ext = await browserSession.loadExtension(extPath)
-      saveExtensionPaths()
-      return { id: ext.id, name: ext.name }
-    } catch (err) {
-      return { error: String(err) }
-    }
-  })
-  ipcMain.handle('browser:activate-extension', (_, extensionId: string) => {
-    // Trigger the extension's browser action by accessing the library's internal API.
-    // The public API doesn't expose activate(), so we reach into the context's router.
-    try {
-      const ext = browserSession.getExtension(extensionId)
-      if (!ext) return false
-      const activeWc = browserViewManager.getActiveWebContents()
-      if (!activeWc) return false
-      // Access internal browser action API through the context
-      const api = (chromeExtensions as any).api
-      if (api?.browserAction?.activate) {
-        api.browserAction.activate({ type: 'click' }, { extensionId, tabId: activeWc.id })
-        return true
-      }
-      // Fallback: invoke via the internal handle system
-      const ctx = (chromeExtensions as any).ctx
-      if (ctx?.router) {
-        ctx.router.invoke(activeWc, 'browserAction.activate', { eventType: 'click', extensionId })
-        return true
-      }
-      return false
-    } catch (err) {
-      console.warn('[browser:activate-extension] Failed:', err)
-      return false
-    }
-  })
-
-  // Non-test handle: needed by CLI browser registry
-  ipcMain.handle('browser:get-web-contents-id', (_, viewId: string) => browserViewManager.getWebContentsId(viewId))
 
   // Test-only handles
   if (isPlaywright) {
-    ipcMain.handle('browser:get-url', (_, viewId: string) => browserViewManager.getUrl(viewId))
-    ipcMain.handle('browser:get-bounds', (_, viewId: string) => browserViewManager.getBounds(viewId))
-    ipcMain.handle('browser:get-zoom-factor', (_, viewId: string) => browserViewManager.getZoomFactor(viewId))
     ipcMain.handle(
       'browser:test-dispatch-mouse-click',
       (_event, viewId: string, point: { x?: unknown; y?: unknown }, modifiers?: unknown) => {
@@ -2242,16 +2237,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         return browserViewManager.runLinkContextMenuAction(viewId, { linkURL, linkText }, action)
       }
     )
-    ipcMain.handle('browser:get-all-view-ids', () => browserViewManager.getAllViewIds())
-    ipcMain.handle('browser:get-views-for-task', (_, taskId: string) => browserViewManager.getViewsForTask(taskId))
-    ipcMain.handle('browser:list-views', () => browserViewManager.listViews())
-    ipcMain.handle('browser:is-focused', (_, viewId: string) => browserViewManager.isFocused(viewId))
-    ipcMain.handle('browser:get-actual-native-bounds', (_, viewId: string) => browserViewManager.getActualNativeBounds(viewId))
-    ipcMain.handle('browser:is-all-hidden', () => browserViewManager.isAllHidden())
-    ipcMain.handle('browser:get-view-visible', (_, viewId: string) => browserViewManager.getViewVisible(viewId))
-    ipcMain.handle('browser:is-view-natively-visible', (_, viewId: string) => browserViewManager.isViewNativelyVisible(viewId))
-    ipcMain.handle('browser:get-partition', (_, viewId: string) => browserViewManager.getPartition(viewId))
-    ipcMain.handle('browser:get-native-child-view-count', () => browserViewManager.getNativeChildViewCount())
   }
 
   initProcessManager(db)
