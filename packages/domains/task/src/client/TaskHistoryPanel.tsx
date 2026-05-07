@@ -16,6 +16,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import type { ActivityEvent, ActivityEventCursor, AutomationActionRun } from '@slayzone/history/shared'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
 
 interface TaskHistoryPanelProps {
@@ -145,7 +146,7 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
     setNextCursor(null)
     setExpandedRunIds({})
     setActionRunsByRunId({})
-    window.api.history.listForTask(taskId, { limit: TASK_HISTORY_PAGE_SIZE }).then((result) => {
+    getTrpcVanillaClient().history.listForTask.query({ taskId, options: { limit: TASK_HISTORY_PAGE_SIZE } }).then((result) => {
       if (!active) return
       setEvents(result.events)
       setNextCursor(result.nextCursor)
@@ -157,7 +158,7 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
   async function toggleAutomationDetails(runId: string): Promise<void> {
     setExpandedRunIds((prev) => ({ ...prev, [runId]: !prev[runId] }))
     if (actionRunsByRunId[runId]) return
-    const runs = await window.api.history.getAutomationActionRuns(runId)
+    const runs = await getTrpcVanillaClient().history.getAutomationActionRuns.query({ runId })
     setActionRunsByRunId((prev) => ({ ...prev, [runId]: runs }))
   }
 
@@ -166,9 +167,9 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
 
     setLoadingMore(true)
     try {
-      const result = await window.api.history.listForTask(taskId, {
-        limit: TASK_HISTORY_PAGE_SIZE,
-        before: nextCursor,
+      const result = await getTrpcVanillaClient().history.listForTask.query({
+        taskId,
+        options: { limit: TASK_HISTORY_PAGE_SIZE, before: nextCursor },
       })
       setEvents((prev) => [...prev, ...result.events])
       setNextCursor(result.nextCursor)

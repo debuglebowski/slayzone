@@ -1,1 +1,0 @@
-export { registerHistoryHandlers } from './handlers'

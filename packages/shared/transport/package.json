@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/history": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/tags": "workspace:*",

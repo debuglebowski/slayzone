@@ -137,7 +137,6 @@ import { registerAiConfigHandlers } from '@slayzone/ai-config/electron'
 import { registerIntegrationHandlers, ensureIntegrationSchema, ElectronStorageAdapter } from '@slayzone/integrations/electron'
 import { startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/electron'
-import { registerHistoryHandlers } from '@slayzone/history/electron'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/electron'
 import { registerAutomationHandlers } from '@slayzone/automations/electron'
 import { AutomationEngine } from '@slayzone/automations/server'
@@ -1201,7 +1200,6 @@ app.whenReady().then(async () => {
   const notifyTasksChanged = (): void => { mainWindow?.webContents.send('tasks:changed') }
   registerTaskHandlers(ipcMain, db, notifyTasksChanged)
   registerTaskTemplateHandlers(ipcMain, db)
-  registerHistoryHandlers(ipcMain, db)
   registerSettingsHandlers(ipcMain, db)
   logBoot('core domain handlers registered')
 
