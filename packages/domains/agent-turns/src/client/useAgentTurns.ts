@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { AgentTurnRange } from '../shared/types'
 
 /**
  * Returns all turns for the given worktree path, oldest first. Re-fetches
- * when `agent-turns:changed` IPC fires for the same path, OR when the
- * optional `refreshKey` changes identity (used to retrigger after working
- * tree state changes — server-side filter prunes turns whose files no
- * longer appear in `git status`).
+ * when the `agent-turns.onChanged` tRPC subscription emits for the same
+ * path, OR when the optional `refreshKey` changes identity (used to
+ * retrigger after working tree state changes — server-side filter prunes
+ * turns whose files no longer appear in `git status`).
  */
 export function useAgentTurns(
   worktreePath: string | null | undefined,
@@ -19,7 +20,7 @@ export function useAgentTurns(
       setTurns([])
       return
     }
-    const list = await window.api.agentTurns.list(worktreePath)
+    const list = await getTrpcVanillaClient().agentTurns.list.query({ worktreePath })
     setTurns(list)
   }, [worktreePath])
 
@@ -31,14 +32,16 @@ export function useAgentTurns(
     if (!worktreePath) return
     const norm = (p: string) => p.replace(/\/+$/, '')
     const target = norm(worktreePath)
-    const off = window.api.agentTurns.onChanged((changedPath) => {
-      // Strict equality after trailing-slash normalization. Avoids false
-      // positives from suffix-match when two worktree paths share a tail.
-      if (norm(changedPath) === target) {
-        void reload()
-      }
+    const sub = getTrpcVanillaClient().agentTurns.onChanged.subscribe(undefined, {
+      onData: (changedPath) => {
+        // Strict equality after trailing-slash normalization. Avoids false
+        // positives from suffix-match when two worktree paths share a tail.
+        if (norm(changedPath) === target) {
+          void reload()
+        }
+      },
     })
-    return () => off()
+    return () => sub.unsubscribe()
   }, [worktreePath, reload])
 
   return turns

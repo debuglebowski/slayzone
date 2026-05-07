@@ -349,6 +349,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       electron:
         specifier: ^41.0.0
         version: 41.0.3
@@ -1502,6 +1505,9 @@ importers:
 
   packages/shared/transport:
     dependencies:
+      '@slayzone/agent-turns':
+        specifier: workspace:*
+        version: link:../../domains/agent-turns
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics

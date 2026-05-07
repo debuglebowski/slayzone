@@ -2,7 +2,6 @@ import type { Project, ExecutionContext } from '@slayzone/projects/shared'
 import type { Task, CreateTaskInput, UpdateTaskInput, DesktopHandoffPolicy, TaskTemplate, CreateTaskTemplateInput, UpdateTaskTemplateInput, TaskArtifact, CreateArtifactInput, UpdateArtifactInput, ArtifactFolder, CreateArtifactFolderInput, UpdateArtifactFolderInput } from '@slayzone/task/shared'
 import type { ArtifactVersion, VersionRef, DiffResult, PruneReport } from '@slayzone/task-artifacts/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import type { AgentTurnRange } from '@slayzone/agent-turns/shared'
 import type {
   TerminalMode,
   TerminalState,
@@ -245,10 +244,6 @@ export interface ElectronAPI {
     archiveTasks: (ids: string[]) => Promise<void>
     unarchiveTask: (id: string) => Promise<Task>
     reorderTasks: (taskIds: string[]) => Promise<void>
-  }
-  agentTurns: {
-    list: (worktreePath: string) => Promise<AgentTurnRange[]>
-    onChanged: (callback: (worktreePath: string) => void) => () => void
   }
   artifacts: {
     getByTask: (taskId: string) => Promise<TaskArtifact[]>

@@ -126,7 +126,6 @@ import { attachTaskWindows, setupTaskWindows } from './task-windows'
 import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/electron'
 import { registerWorktreeHandlers } from '@slayzone/worktrees/electron'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
-import { registerAgentTurnsHandlers } from '@slayzone/agent-turns/electron'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
 import { wireDomainEvents } from './glue'
 import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics, setIpcSuccessHook } from '@slayzone/diagnostics/electron'
@@ -1309,8 +1308,7 @@ app.whenReady().then(async () => {
   }
   registerFilesHandlers(ipcMain)
   registerWorktreeHandlers(ipcMain, db)
-  registerAgentTurnsHandlers(ipcMain, db)
-  logBoot('files+worktree+agent-turns registered')
+  logBoot('files+worktree registered')
   wireDomainEvents()
   // xterm-mode turn detection: every Enter press in a PTY = turn boundary.
   onPtyInputSubmit(initPtyTurnSubscriber(db))

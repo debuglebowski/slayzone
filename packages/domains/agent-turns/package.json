@@ -9,14 +9,14 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@slayzone/terminal": "workspace:*"
+    "@slayzone/terminal": "workspace:*",
+    "@slayzone/transport": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",
