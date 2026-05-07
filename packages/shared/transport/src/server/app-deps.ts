@@ -118,6 +118,24 @@ export type AppDeps = {
     importExtension: (extPath: string) => unknown
     reparentToCurrentWindow: (viewId: string) => unknown
   }
+  floatingAgent: {
+    setEnabled: (enabled: boolean) => unknown
+    setSessionId: (sessionId: string | null) => unknown
+    setPanelOpen: (isOpen: boolean) => unknown
+    toggleCollapse: () => unknown
+    resetSize: () => unknown
+    detach: () => unknown
+    reattach: () => unknown
+    getState: () => unknown
+    getSession: () => unknown
+    getConfig: () => unknown
+    events: EventEmitter & {
+      on(event: 'state', listener: (payload: unknown) => void): EventEmitter
+      on(event: 'session-changed', listener: () => void): EventEmitter
+      on(event: 'collapse-changed', listener: (collapsed: boolean) => void): EventEmitter
+      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+    }
+  }
   webview: {
     registerBrowserTab: (taskId: string, tabId: string, webContentsId: number) => void
     unregisterBrowserTab: (taskId: string, tabId: string) => void

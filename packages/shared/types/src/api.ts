@@ -159,21 +159,6 @@ export interface ElectronAPI {
     dataReady: () => void
     bootMark: (label: string) => void
   }
-  floatingAgent: {
-    setEnabled: (enabled: boolean) => Promise<{ kind: string }>
-    setSessionId: (sessionId: string | null) => Promise<{ kind: string }>
-    setPanelOpen: (isOpen: boolean) => Promise<{ kind: string }>
-    toggleCollapse: () => Promise<{ kind: string; collapsed: boolean }>
-    resetSize: () => Promise<{ kind: string }>
-    detach: () => Promise<{ kind: string; sessionId: string | null; mode: 'auto' | 'manual' | null; hasCustomSize: boolean }>
-    reattach: () => Promise<{ kind: string; sessionId: string | null; mode: 'auto' | 'manual' | null; hasCustomSize: boolean }>
-    getState: () => Promise<{ kind: string; sessionId: string | null; mode: 'auto' | 'manual' | null; hasCustomSize: boolean }>
-    getSession: () => Promise<{ sessionId: string; cwd: string; mode: string } | null>
-    getConfig: () => Promise<{ style: string; position: string }>
-    onState: (callback: (state: { kind: string; sessionId: string | null; mode: 'auto' | 'manual' | null; hasCustomSize: boolean }) => void) => () => void
-    onSessionChanged: (callback: () => void) => () => void
-    onCollapseChanged: (callback: (collapsed: boolean) => void) => () => void
-  }
   taskWindow: {
     open: (taskId: string) => Promise<{ ok: boolean; focused?: boolean }>
     close: (taskId: string) => Promise<{ ok: boolean; closed: number }>

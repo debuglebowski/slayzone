@@ -606,24 +606,29 @@ function App(): React.JSX.Element {
   // Floating agent panel: push context to main-process state machine.
   // All detach/reattach decisions happen in main; renderer just keeps ctx in sync.
   useEffect(() => {
-    window.api.floatingAgent.setSessionId(agentSessionId)
+    getTrpcVanillaClient().app.floatingAgent.setSessionId.mutate({ sessionId: agentSessionId })
   }, [agentSessionId])
   useEffect(() => {
-    window.api.floatingAgent.setPanelOpen(agentPanelState.isOpen)
+    getTrpcVanillaClient().app.floatingAgent.setPanelOpen.mutate({ isOpen: agentPanelState.isOpen })
   }, [agentPanelState.isOpen])
   useEffect(() => {
-    window.api.floatingAgent.setEnabled(agentPanelState.floatingEnabled)
+    getTrpcVanillaClient().app.floatingAgent.setEnabled.mutate({ enabled: agentPanelState.floatingEnabled })
   }, [agentPanelState.floatingEnabled])
 
   // Subscribe to floating-agent state for menu label + sidebar visibility.
   const [floatingAgentState, setFloatingAgentState] = useState<{ kind: 'attached' | 'detached' | 'disabled'; mode: 'auto' | 'manual' | null }>({ kind: 'attached', mode: null })
   useEffect(() => {
-    window.api.floatingAgent.getState().then((s) => {
-      setFloatingAgentState({ kind: s.kind as 'attached' | 'detached' | 'disabled', mode: s.mode })
+    getTrpcVanillaClient().app.floatingAgent.getState.query().then((s) => {
+      const st = s as { kind: string; mode: 'auto' | 'manual' | null }
+      setFloatingAgentState({ kind: st.kind as 'attached' | 'detached' | 'disabled', mode: st.mode })
     })
-    return window.api.floatingAgent.onState((s) => {
-      setFloatingAgentState({ kind: s.kind as 'attached' | 'detached' | 'disabled', mode: s.mode })
+    const sub = getTrpcVanillaClient().app.floatingAgent.onState.subscribe(undefined, {
+      onData: (s) => {
+        const st = s as { kind: string; mode: 'auto' | 'manual' | null }
+        setFloatingAgentState({ kind: st.kind as 'attached' | 'detached' | 'disabled', mode: st.mode })
+      },
     })
+    return () => sub.unsubscribe()
   }, [])
   // Hide sidebar panel when manually detached (auto mode keeps panel visible to avoid layout flash).
   const hideSidebarPanel = floatingAgentState.kind === 'detached' && floatingAgentState.mode === 'manual'
@@ -1466,8 +1471,8 @@ function App(): React.JSX.Element {
                   floatingEnabled={agentPanelState.floatingEnabled}
                   onToggleFloating={() => setAgentPanelState({ floatingEnabled: !agentPanelState.floatingEnabled })}
                   floatingState={floatingAgentState.kind}
-                  onDetach={() => window.api.floatingAgent.detach()}
-                  onReattach={() => window.api.floatingAgent.reattach()} />
+                  onDetach={() => getTrpcVanillaClient().app.floatingAgent.detach.mutate()}
+                  onReattach={() => getTrpcVanillaClient().app.floatingAgent.reattach.mutate()} />
               </div>
             )}
             {agentStatusState.isLocked && (

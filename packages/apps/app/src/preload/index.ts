@@ -155,33 +155,6 @@ const api: ElectronAPI = {
       ? (label: string) => ipcRenderer.send('boot:mark', label)
       : () => {},
   },
-  floatingAgent: {
-    setEnabled: (enabled: boolean) => ipcRenderer.invoke('floating-agent:set-enabled', enabled),
-    setSessionId: (sessionId: string | null) => ipcRenderer.invoke('floating-agent:set-session-id', sessionId),
-    setPanelOpen: (isOpen: boolean) => ipcRenderer.invoke('floating-agent:set-panel-open', isOpen),
-    toggleCollapse: () => ipcRenderer.invoke('floating-agent:toggle-collapse'),
-    resetSize: () => ipcRenderer.invoke('floating-agent:reset-size'),
-    detach: () => ipcRenderer.invoke('floating-agent:detach'),
-    reattach: () => ipcRenderer.invoke('floating-agent:reattach'),
-    getState: () => ipcRenderer.invoke('floating-agent:get-state'),
-    getSession: () => ipcRenderer.invoke('floating-agent:get-session'),
-    getConfig: () => ipcRenderer.invoke('floating-agent:get-config'),
-    onState: (callback: (state: { kind: string; sessionId: string | null; mode: 'auto' | 'manual' | null; hasCustomSize: boolean }) => void) => {
-      const handler = (_: unknown, state: { kind: string; sessionId: string | null; mode: 'auto' | 'manual' | null; hasCustomSize: boolean }) => callback(state)
-      ipcRenderer.on('floating-agent:state', handler)
-      return () => ipcRenderer.removeListener('floating-agent:state', handler)
-    },
-    onSessionChanged: (callback: () => void) => {
-      const handler = () => callback()
-      ipcRenderer.on('floating-agent:session-changed', handler)
-      return () => ipcRenderer.removeListener('floating-agent:session-changed', handler)
-    },
-    onCollapseChanged: (callback: (collapsed: boolean) => void) => {
-      const handler = (_: unknown, collapsed: boolean) => callback(collapsed)
-      ipcRenderer.on('floating-agent:collapse-changed', handler)
-      return () => ipcRenderer.removeListener('floating-agent:collapse-changed', handler)
-    },
-  },
   taskWindow: {
     open: (taskId: string) => ipcRenderer.invoke('task-window:open', taskId),
     close: (taskId: string) => ipcRenderer.invoke('task-window:close', taskId),

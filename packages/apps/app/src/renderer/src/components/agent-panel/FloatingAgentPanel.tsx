@@ -24,43 +24,59 @@ export function FloatingAgentPanel() {
   const { subscribeState, getState } = usePty()
 
   useEffect(() => {
-    window.api.floatingAgent.getSession().then((data) => {
-      if (data) setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
-    })
-    window.api.floatingAgent.getConfig().then((config) => {
-      if (config) setStyle(config.style as 'widget' | 'icon')
-    })
-    const unsub = window.api.floatingAgent.onSessionChanged(() => {
-      window.api.floatingAgent.getSession().then((data) => {
-        if (data) setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
-      })
-      window.api.floatingAgent.getConfig().then((config) => {
-        if (config) setStyle(config.style as 'widget' | 'icon')
-      })
-    })
-    return unsub
-  }, [])
-
-  useEffect(() => {
-    return window.api.floatingAgent.onCollapseChanged((c) => {
-      setCollapsed(c)
-      if (c) {
-        setShowTerminal(false)
-      } else {
-        setTimeout(() => setShowTerminal(true), 150)
+    getTrpcVanillaClient().app.floatingAgent.getSession.query().then((data) => {
+      if (data) {
+        const d = data as { sessionId: string; cwd: string; mode: string }
+        setSession({ sessionId: d.sessionId, cwd: d.cwd, mode: d.mode as TerminalMode })
       }
     })
+    getTrpcVanillaClient().app.floatingAgent.getConfig.query().then((config) => {
+      if (config) setStyle((config as { style: string }).style as 'widget' | 'icon')
+    })
+    const sub = getTrpcVanillaClient().app.floatingAgent.onSessionChanged.subscribe(undefined, {
+      onData: () => {
+        getTrpcVanillaClient().app.floatingAgent.getSession.query().then((data) => {
+          if (data) {
+            const d = data as { sessionId: string; cwd: string; mode: string }
+            setSession({ sessionId: d.sessionId, cwd: d.cwd, mode: d.mode as TerminalMode })
+          }
+        })
+        getTrpcVanillaClient().app.floatingAgent.getConfig.query().then((config) => {
+          if (config) setStyle((config as { style: string }).style as 'widget' | 'icon')
+        })
+      },
+    })
+    return () => sub.unsubscribe()
   }, [])
 
   useEffect(() => {
-    window.api.floatingAgent.getState().then((s) => {
-      setDetachMode(s.mode)
-      setHasCustomSize(s.hasCustomSize)
+    const sub = getTrpcVanillaClient().app.floatingAgent.onCollapseChanged.subscribe(undefined, {
+      onData: ({ collapsed: c }) => {
+        setCollapsed(c)
+        if (c) {
+          setShowTerminal(false)
+        } else {
+          setTimeout(() => setShowTerminal(true), 150)
+        }
+      },
     })
-    return window.api.floatingAgent.onState((s) => {
-      setDetachMode(s.mode)
-      setHasCustomSize(s.hasCustomSize)
+    return () => sub.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    getTrpcVanillaClient().app.floatingAgent.getState.query().then((s) => {
+      const st = s as { mode: 'auto' | 'manual' | null; hasCustomSize: boolean }
+      setDetachMode(st.mode)
+      setHasCustomSize(st.hasCustomSize)
     })
+    const sub = getTrpcVanillaClient().app.floatingAgent.onState.subscribe(undefined, {
+      onData: (s) => {
+        const st = s as { mode: 'auto' | 'manual' | null; hasCustomSize: boolean }
+        setDetachMode(st.mode)
+        setHasCustomSize(st.hasCustomSize)
+      },
+    })
+    return () => sub.unsubscribe()
   }, [])
 
   useEffect(() => {
@@ -79,15 +95,15 @@ export function FloatingAgentPanel() {
   }, [session, getState, subscribeState])
 
   const handleToggle = useCallback(() => {
-    window.api.floatingAgent.toggleCollapse()
+    getTrpcVanillaClient().app.floatingAgent.toggleCollapse.mutate()
   }, [])
 
   const handleResetSize = useCallback(() => {
-    window.api.floatingAgent.resetSize()
+    getTrpcVanillaClient().app.floatingAgent.resetSize.mutate()
   }, [])
 
   const handleClose = useCallback(() => {
-    window.api.floatingAgent.reattach()
+    getTrpcVanillaClient().app.floatingAgent.reattach.mutate()
   }, [])
 
   const showClose = detachMode === 'manual'

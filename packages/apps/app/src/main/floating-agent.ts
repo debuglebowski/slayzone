@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, screen, globalShortcut, app } from 'electron'
+import { BrowserWindow, screen, globalShortcut, app } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/electron'
@@ -91,7 +91,7 @@ function executeAction(action: Action): void {
         if (ok) {
           currentFloatingSession = readSessionMeta(action.sessionId)
           if (!floatingAgentWindow.isDestroyed()) {
-            floatingAgentWindow.webContents.send('floating-agent:session-changed')
+            floatingAgentEvents.emit('session-changed')
           }
         }
       }
@@ -162,7 +162,7 @@ function executeAction(action: Action): void {
 
     case 'send-collapse-changed':
       if (floatingAgentWindow && !floatingAgentWindow.isDestroyed()) {
-        floatingAgentWindow.webContents.send('floating-agent:collapse-changed', action.collapsed)
+        floatingAgentEvents.emit('collapse-changed', action.collapsed)
       }
       return
 
@@ -203,12 +203,10 @@ function broadcastState(): void {
     mode: state.kind === 'detached' ? state.mode : null,
     hasCustomSize: userHasResized
   }
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('floating-agent:state', payload)
-  }
-  if (floatingAgentWindow && !floatingAgentWindow.isDestroyed()) {
-    floatingAgentWindow.webContents.send('floating-agent:state', payload)
-  }
+  // Single emit — all renderers (main window + floating panel) subscribe via
+  // tRPC subs and dispatch to local state. Window-targeted dispatch is no
+  // longer needed since EventEmitter fans out to all subscribers.
+  floatingAgentEvents.emit('state', payload)
 }
 
 function readSessionMeta(sessionId: string): { sessionId: string; cwd: string; mode: string } {
@@ -392,53 +390,55 @@ function createFloatingAgentWindow(): BrowserWindow {
   return win
 }
 
-// --- IPC Handlers ---
+import { EventEmitter } from 'node:events'
 
-function setupFloatingAgentIpc(): void {
-  ipcMain.handle('floating-agent:set-enabled', (_event, enabled: boolean) => {
+export const floatingAgentEvents = new EventEmitter() as EventEmitter & {
+  on(event: 'state', listener: (payload: unknown) => void): EventEmitter
+  on(event: 'session-changed', listener: () => void): EventEmitter
+  on(event: 'collapse-changed', listener: (collapsed: boolean) => void): EventEmitter
+  off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+}
+
+// --- Public ops (formerly IPC handlers) ---
+
+export const floatingAgentOps = {
+  setEnabled: (enabled: boolean) => {
     ctx = { ...ctx, enabled }
     dispatch({ kind: 'user-set-enabled', enabled })
     return { kind: state.kind }
-  })
-
-  ipcMain.handle('floating-agent:set-session-id', (_event, sessionId: string | null) => {
+  },
+  setSessionId: (sessionId: string | null) => {
     const previous = ctx.sessionId
     ctx = { ...ctx, sessionId }
     if (previous !== sessionId) {
       dispatch({ kind: 'session-id-changed', sessionId })
     }
     return { kind: state.kind }
-  })
-
-  ipcMain.handle('floating-agent:set-panel-open', (_event, isOpen: boolean) => {
+  },
+  setPanelOpen: (isOpen: boolean) => {
     ctx = { ...ctx, panelOpen: isOpen }
     dispatch({ kind: 'panel-open-changed', isOpen })
     return { kind: state.kind }
-  })
-
-  ipcMain.handle('floating-agent:toggle-collapse', () => {
+  },
+  toggleCollapse: () => {
     dispatch({ kind: 'user-toggle-collapse' })
     return { kind: state.kind, collapsed: ctx.collapsed }
-  })
-
-  ipcMain.handle('floating-agent:reset-size', () => {
+  },
+  resetSize: () => {
     dispatch({ kind: 'user-reset-size' })
     return { kind: state.kind }
-  })
-
-  ipcMain.handle('floating-agent:detach', () => {
+  },
+  detach: () => {
     dispatch({ kind: 'user-detach' })
     return currentStatePayload()
-  })
-
-  ipcMain.handle('floating-agent:reattach', () => {
+  },
+  reattach: () => {
     dispatch({ kind: 'user-reattach' })
     return currentStatePayload()
-  })
-
-  ipcMain.handle('floating-agent:get-state', () => currentStatePayload())
-  ipcMain.handle('floating-agent:get-session', () => currentFloatingSession)
-  ipcMain.handle('floating-agent:get-config', () => currentConfig)
+  },
+  getState: () => currentStatePayload(),
+  getSession: () => currentFloatingSession,
+  getConfig: () => currentConfig,
 }
 
 function currentStatePayload(): { kind: string; sessionId: string | null; mode: 'auto' | 'manual' | null; hasCustomSize: boolean } {
@@ -461,7 +461,6 @@ export function attachFloatingAgent(win: BrowserWindow): void {
 
 export function setupFloatingAgent(overridesGetter?: () => Record<string, string | null>): void {
   if (overridesGetter) getShortcutOverrides = overridesGetter
-  setupFloatingAgentIpc()
 
   // did-resign-active = app-level signal, fires only when user leaves our
   // app entirely (ignores menu/tooltip transient blur). Detach trigger.

@@ -122,7 +122,7 @@ import { createPtyOps, ptyEvents, buildUsageOps, killAllPtys, killPtysByTaskId, 
 import { setDatabase } from '@slayzone/terminal/electron'
 import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalModes } from '@slayzone/terminal/server'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
-import { attachFloatingAgent, setupFloatingAgent } from './floating-agent'
+import { attachFloatingAgent, setupFloatingAgent, floatingAgentOps, floatingAgentEvents } from './floating-agent'
 import { attachTaskWindows, setupTaskWindows } from './task-windows'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
@@ -1516,6 +1516,10 @@ app.whenReady().then(async () => {
         const win = BrowserWindow.getFocusedWindow() ?? mainWindow
         if (win) browserViewManager.reparentView(viewId, win)
       },
+    },
+    floatingAgent: {
+      ...floatingAgentOps,
+      events: floatingAgentEvents,
     },
     webview: {
       registerBrowserTab,
