@@ -11,6 +11,7 @@
     "./server": "./src/server/index.ts",
     "./server/ops": "./src/server/ops/index.ts",
     "./electron": "./src/electron/index.ts",
+    "./electron/artifact-export": "./src/electron/artifact-export.ts",
     "./client": "./src/client/index.ts",
     "./client/TaskDetailPage": "./src/client/TaskDetailPage.tsx",
     "./client/TaskDetailDataLoader": "./src/client/TaskDetailDataLoader.tsx",

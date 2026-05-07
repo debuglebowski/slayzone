@@ -19,6 +19,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "lucide-react": "^0.562.0"
   },

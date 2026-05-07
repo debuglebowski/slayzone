@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { DragEndEvent } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
 import type { Task } from '@slayzone/task/shared'
@@ -22,15 +23,15 @@ export function useSubTasks(
   useEffect(() => {
     if (!parentId) return
     const refresh = (): void => {
-      window.api.db.getSubTasks(parentId).then(setSubTasks).catch(() => {})
+      getTrpcVanillaClient().task.getSubTasks.query({ parentId: parentId }).then(setSubTasks).catch(() => {})
     }
-    const cleanup = window.api?.app?.onTasksChanged?.(refresh)
+    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => refresh() }); const cleanup = () => _sub.unsubscribe()
     return () => { cleanup?.() }
   }, [parentId])
 
   const createSubTask = useCallback(async (params: { projectId: string; title: string; status: string }): Promise<Task | null> => {
     if (!parentId) return null
-    const sub = await window.api.db.createTask({
+    const sub = await getTrpcVanillaClient().task.create.mutate({
       projectId: params.projectId,
       title: params.title,
       parentId,
@@ -44,14 +45,14 @@ export function useSubTasks(
   }, [parentId])
 
   const updateSubTask = useCallback(async (subId: string, updates: Record<string, unknown>): Promise<void> => {
-    const updated = await window.api.db.updateTask({ id: subId, ...updates })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: subId, ...updates })
     if (updated) {
       setSubTasks(prev => prev.map(s => s.id === subId ? updated : s))
     }
   }, [])
 
   const deleteSubTask = useCallback(async (subId: string): Promise<void> => {
-    await window.api.db.deleteTask(subId)
+    await getTrpcVanillaClient().task.delete.mutate({ id: subId })
     setSubTasks(prev => prev.filter(s => s.id !== subId))
   }, [])
 
@@ -62,7 +63,7 @@ export function useSubTasks(
       const oldIndex = prev.findIndex(s => s.id === active.id)
       const newIndex = prev.findIndex(s => s.id === over.id)
       const reordered = arrayMove(prev, oldIndex, newIndex)
-      window.api.db.reorderTasks(reordered.map(t => t.id))
+      getTrpcVanillaClient().task.reorder.mutate({ taskIds: reordered.map(t => t.id) })
       return reordered
     })
   }, [])

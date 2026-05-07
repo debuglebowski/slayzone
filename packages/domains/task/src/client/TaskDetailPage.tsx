@@ -391,7 +391,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   useEffect(() => {
     if (!task?.is_temporary || !task.project_id) return
-    window.api.taskTemplates.getByProject(task.project_id).then(setTemplates)
+    getTrpcVanillaClient().task.templatesGetByProject.query({ projectId: task.project_id }).then(setTemplates)
   }, [task?.is_temporary, task?.project_id])
 
   // Description fullscreen dialog
@@ -576,7 +576,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const mainSessionId = task ? getMainSessionId(task.id) : ''
   const handleLoopConfigChange = useCallback((cfg: LoopConfig | null) => {
     if (!task) return
-    window.api.db.updateTask({ id: task.id, loopConfig: cfg }).then((updated) => {
+    getTrpcVanillaClient().task.update.mutate({ id: task.id, loopConfig: cfg }).then((updated) => {
       if (updated) onTaskUpdated(updated)
     })
   }, [task?.id, onTaskUpdated])
@@ -610,7 +610,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const handleGitTabChange = useCallback((tab: GitTabId) => {
     setGitDefaultTab(tab)
     gitTabSyncedRef.current = true
-    if (task?.id) void window.api.db.updateTask({ id: task.id, gitActiveTab: tab })
+    if (task?.id) void getTrpcVanillaClient().task.update.mutate({ id: task.id, gitActiveTab: tab })
   }, [task?.id])
   const fileEditorRef = useRef<FileEditorViewHandle>(null)
   const terminalContainerRef = useRef<TerminalContainerHandle>(null)
@@ -723,7 +723,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     (sessionId: string) => {
       if (!task) return
       if (window.api.app.isPlaywright) return
-      void window.api.db.updateTask({
+      void getTrpcVanillaClient().task.update.mutate({
         id: task.id,
         providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, sessionId)
       })
@@ -781,7 +781,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Update DB with detected session ID
   const handleUpdateSessionId = useCallback(async () => {
     if (!task || !detectedSessionId) return
-    const updated = await window.api.db.updateTask({
+    const updated = await getTrpcVanillaClient().task.update.mutate({
       id: task.id,
       providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, detectedSessionId)
     })
@@ -808,7 +808,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
     let cancelled = false
     void (async () => {
-      const updated = await window.api.db.updateTask({
+      const updated = await getTrpcVanillaClient().task.update.mutate({
         id: task.id,
         providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, detectedSessionId)
       })
@@ -828,7 +828,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const mainSessionId = getMainSessionId(task.id)
 
     // Clear the stale session ID from the database
-    const updated = await window.api.db.updateTask({
+    const updated = await getTrpcVanillaClient().task.update.mutate({
       id: task.id,
       providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, null)
     })
@@ -856,7 +856,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     resetTaskState(mainSessionId)
     await window.api.pty.kill(mainSessionId)
     // Clear session ID so new session starts fresh
-    const updated = await window.api.db.updateTask({
+    const updated = await getTrpcVanillaClient().task.update.mutate({
       id: task.id,
       providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, null)
     })
@@ -1142,7 +1142,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // Small delay to let any remaining PTY data be processed and ignored
       await new Promise((r) => setTimeout(r, 100))
       // Update mode and clear all conversation IDs (fresh start)
-      const updated = await window.api.db.updateTask({
+      const updated = await getTrpcVanillaClient().task.update.mutate({
         id: task.id,
         terminalMode: mode,
         providerConfig: clearAllConversationIds(task.provider_config)
@@ -1189,7 +1189,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         providerConfig: setProviderFlags(task.provider_config, task.terminal_mode, nextValue)
       }
 
-      const updated = await window.api.db.updateTask(update)
+      const updated = await getTrpcVanillaClient().task.update.mutate(update)
       onTaskUpdated(updated)
 
       const mainSessionId = `${task.id}:${task.id}`
@@ -1254,7 +1254,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
       // Persist to DB only for primary window — secondary's visibility is local-only
       if (isSecondaryWindow) return
-      const updated = await window.api.db.updateTask({
+      const updated = await getTrpcVanillaClient().task.update.mutate({
         id: task.id,
         panelVisibility: newVisibility
       })
@@ -1428,7 +1428,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       return
     }
 
-    const updated = await window.api.db.updateTask({
+    const updated = await getTrpcVanillaClient().task.update.mutate({
       id: task.id,
       title: titleValue
     })
@@ -1450,7 +1450,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (!task || !descriptionDirty.current) return
     descriptionDirty.current = false
 
-    const updated = await window.api.db.updateTask({
+    const updated = await getTrpcVanillaClient().task.update.mutate({
       id: task.id,
       description: descriptionValue || undefined,
     })
@@ -1494,7 +1494,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       markSkipCache(mainSessionId)
     }
 
-    const updated = await window.api.db.updateTask(updates)
+    const updated = await getTrpcVanillaClient().task.update.mutate(updates)
     handleTaskUpdate(updated)
 
     if (template.panel_visibility) setPanelVisibility(template.panel_visibility)
@@ -1522,7 +1522,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       markSkipCache(mainSessionId)
     }
 
-    const updated = await window.api.db.updateTask(data)
+    const updated = await getTrpcVanillaClient().task.update.mutate(data)
     handleTaskUpdate(updated)
 
     // Force terminal remount if effective cwd changed
@@ -1538,7 +1538,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     setBrowserTabs(tabs)
     if (!task) return
     // Persist to DB (debounced via the tab state itself)
-    await window.api.db.updateTask({
+    await getTrpcVanillaClient().task.update.mutate({
       id: task.id,
       browserTabs: tabs
     })
@@ -1555,7 +1555,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       clearTimeout(webPanelUrlTimerRef.current)
       webPanelUrlTimerRef.current = null
       if (taskIdRef.current && Object.keys(webPanelUrlsRef.current).length > 0) {
-        window.api.db.updateTask({
+        getTrpcVanillaClient().task.update.mutate({
           id: taskIdRef.current,
           webPanelUrls: { ...webPanelUrlsRef.current }
         })
@@ -1578,7 +1578,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const taskId = taskIdRef.current
     activeArtifactIdTimerRef.current = setTimeout(async () => {
       if (!taskId) return
-      await window.api.db.updateTask({ id: taskId, activeArtifactId: id })
+      await getTrpcVanillaClient().task.update.mutate({ id: taskId, activeArtifactId: id })
     }, 500)
   }, [])
 
@@ -1591,7 +1591,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       clearTimeout(editorStateTimerRef.current)
       editorStateTimerRef.current = null
       if (taskIdRef.current && editorStateRef.current) {
-        window.api.db.updateTask({
+        getTrpcVanillaClient().task.update.mutate({
           id: taskIdRef.current,
           editorOpenFiles: editorStateRef.current
         })
@@ -1621,7 +1621,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const id = taskIdRef.current
     const urlSnapshot = { ...webPanelUrlsRef.current }
     webPanelUrlTimerRef.current = setTimeout(async () => {
-      await window.api.db.updateTask({
+      await getTrpcVanillaClient().task.update.mutate({
         id,
         webPanelUrls: urlSnapshot
       })
@@ -1634,7 +1634,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const id = taskIdRef.current
     editorStateTimerRef.current = setTimeout(async () => {
       if (!id) return
-      await window.api.db.updateTask({
+      await getTrpcVanillaClient().task.update.mutate({
         id,
         editorOpenFiles: state
       })
@@ -1705,7 +1705,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const handleUnarchive = async (): Promise<void> => {
     if (!task) return
-    const restored = await window.api.db.unarchiveTask(task.id)
+    const restored = await getTrpcVanillaClient().task.unarchive.mutate({ id: task.id })
     handleTaskUpdate(restored)
   }
 
@@ -1714,7 +1714,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (onArchiveTask) {
       await onArchiveTask(task.id)
     } else {
-      await window.api.db.archiveTask(task.id)
+      await getTrpcVanillaClient().task.archive.mutate({ id: task.id })
     }
     handleTaskUpdate({ ...task, archived_at: new Date().toISOString() })
     setArchiveDialogOpen(false)
@@ -1768,7 +1768,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                         type="button"
                         className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm cursor-pointer hover:bg-accent', isCurrent && 'bg-accent font-medium')}
                         onClick={async () => {
-                          const updated = await window.api.db.updateTask({ id: task.id, status: opt.value })
+                          const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, status: opt.value })
                           handleTaskUpdate(updated)
                           setStatusPopoverOpen(false)
                         }}
@@ -1799,7 +1799,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     type="button"
                     className={cn('flex w-full items-center gap-2 rounded px-2 py-1 text-xs cursor-pointer hover:bg-accent', opt.value === task.priority && 'bg-accent font-medium')}
                     onClick={async () => {
-                      const updated = await window.api.db.updateTask({ id: task.id, priority: opt.value })
+                      const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, priority: opt.value })
                       handleTaskUpdate(updated)
                       setPriorityPopoverOpen(false)
                     }}
@@ -1900,7 +1900,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               isCurrent && 'bg-accent font-medium'
                             )}
                             onClick={async () => {
-                              const updated = await window.api.db.updateTask({ id: task.id, status: opt.value })
+                              const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, status: opt.value })
                               handleTaskUpdate(updated)
                               setStatusPopoverOpen(false)
                             }}
@@ -2226,7 +2226,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                   value={getProviderFlags(task.provider_config, 'ccs') || '__none__'}
                                   onValueChange={async (val) => {
                                     const profile = val === '__none__' ? '' : val
-                                    const updated = await window.api.db.updateTask({
+                                    const updated = await getTrpcVanillaClient().task.update.mutate({
                                       id: task.id,
                                       providerConfig: setProviderFlags(task.provider_config, 'ccs', profile)
                                     })

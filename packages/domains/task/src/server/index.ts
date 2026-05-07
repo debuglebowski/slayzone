@@ -41,3 +41,12 @@ export {
   deleteFolder,
   reorderFolders,
 } from './artifact-store'
+export { artifactWatcherEvents, startArtifactWatcher, closeArtifactWatcher } from './artifact-watcher'
+export {
+  listTemplatesByProject,
+  getTemplate,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
+  setDefaultTemplate,
+} from './template-store'

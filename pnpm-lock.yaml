@@ -967,6 +967,9 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1562,6 +1565,12 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../../domains/task
+      '@slayzone/task-artifacts':
+        specifier: workspace:*
+        version: link:../../domains/task-artifacts
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { ChevronRight, ListTree, Circle, ExternalLink, CircleDot, Signal, Gauge } from 'lucide-react'
 import {
   cn,
@@ -142,13 +143,13 @@ function paddingLeftForDepth(depth: number): number {
 
 function RowContextMenu({ task, onOpenChange, children }: { task: ManagerTask; onOpenChange?: (open: boolean) => void; children: React.ReactNode }): React.JSX.Element {
   const handleStatusChange = useCallback((status: string) => {
-    window.api.db.updateTask({ id: task.id, status }).catch(() => {})
+    getTrpcVanillaClient().task.update.mutate({ id: task.id, status }).catch(() => {})
   }, [task.id])
   const handlePriorityChange = useCallback((v: string) => {
-    window.api.db.updateTask({ id: task.id, priority: Number.parseInt(v, 10) }).catch(() => {})
+    getTrpcVanillaClient().task.update.mutate({ id: task.id, priority: Number.parseInt(v, 10) }).catch(() => {})
   }, [task.id])
   const handleProgressChange = useCallback((v: string) => {
-    window.api.db.updateTask({ id: task.id, progress: Number.parseInt(v, 10) }).catch(() => {})
+    getTrpcVanillaClient().task.update.mutate({ id: task.id, progress: Number.parseInt(v, 10) }).catch(() => {})
   }, [task.id])
   return (
     <ContextMenu onOpenChange={onOpenChange}>
@@ -360,15 +361,15 @@ export function ManagerSidebar({
   useEffect(() => {
     let cancelled = false
     const refresh = (): void => {
-      window.api.db
-        .getSubTasksRecursive(rootTaskId)
+      getTrpcVanillaClient()
+        .task.getSubTasksRecursive.query({ rootId: rootTaskId })
         .then((rows) => {
           if (!cancelled) setDescendants(rows as unknown as ManagerTask[])
         })
         .catch(() => {})
     }
     refresh()
-    const cleanup = window.api?.app?.onTasksChanged?.(refresh)
+    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => refresh() }); const cleanup = () => _sub.unsubscribe()
     return () => {
       cancelled = true
       cleanup?.()

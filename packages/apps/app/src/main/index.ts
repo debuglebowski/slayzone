@@ -114,7 +114,7 @@ import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
 // Domain handlers
 import { handleTerminalStateChange } from '@slayzone/projects/server'
-import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/electron'
+import { configureTaskRuntimeAdapters, registerFilesHandlers, closeArtifactWatcher, startArtifactWatcher } from '@slayzone/task/electron'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
@@ -1193,9 +1193,9 @@ app.whenReady().then(async () => {
 
   // Register domain handlers (inject ipcMain and db)
   const notifyTasksChanged = (): void => { mainWindow?.webContents.send('tasks:changed') }
-  registerTaskHandlers(ipcMain, db, notifyTasksChanged)
-  registerTaskTemplateHandlers(ipcMain, db)
-  logBoot('core domain handlers registered')
+  // Task IPC migrated to tRPC `task.*` router (subscriptions cover changed events).
+  startArtifactWatcher(join(getDataRoot(), 'artifacts'))
+  logBoot('artifact watcher started')
 
   // Feedback handlers (lightweight, no domain package)
   ipcMain.handle('db:feedback:listThreads', () => {

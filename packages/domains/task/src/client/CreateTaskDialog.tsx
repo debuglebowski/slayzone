@@ -97,7 +97,7 @@ export function CreateTaskDialog({
       setSelectedTemplateId('__none__')
       return
     }
-    window.api.taskTemplates.getByProject(selectedProjectId).then((list) => {
+    getTrpcVanillaClient().task.templatesGetByProject.query({ projectId: selectedProjectId }).then((list) => {
       setTemplates(list)
       const def = list.find((t) => t.is_default)
       setSelectedTemplateId(def?.id ?? '__none__')
@@ -146,7 +146,7 @@ export function CreateTaskDialog({
       shouldAutoCreateWorktree = false
     }
 
-    const task = await window.api.db.createTask({
+    const task = await getTrpcVanillaClient().task.create.mutate({
       projectId: data.projectId,
       title: data.title,
       description: data.description || undefined,

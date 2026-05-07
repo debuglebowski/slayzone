@@ -974,7 +974,7 @@ function App(): React.JSX.Element {
       const task = store._taskLookup.tasks.find((t) => t.id === tab.taskId)
       if (task?.is_temporary) {
         window.api.pty.kill(`${tab.taskId}:${tab.taskId}`)
-        window.api.db.deleteTask(tab.taskId)
+        getTrpcVanillaClient().task.delete.mutate({ id: tab.taskId })
         setTasks((prev) => prev.filter((t) => t.id !== tab.taskId))
       }
     }
@@ -999,15 +999,15 @@ function App(): React.JSX.Element {
     const project = projectsMap.get(task.project_id)
     const doneStatus = getDoneStatus(project?.columns_config)
     const prevStatus = task.status
-    await window.api.db.updateTask({ id: activeTab.taskId, status: doneStatus })
+    await getTrpcVanillaClient().task.update.mutate({ id: activeTab.taskId, status: doneStatus })
     updateTask({ ...task, status: doneStatus })
     closeTab(activeTabIndex)
     useDialogStore.getState().closeCompleteTaskDialog()
     if (prevStatus !== doneStatus) {
       pushUndo({
         label: `Completed "${task.title}"`,
-        undo: async () => { await window.api.db.updateTask({ id: task.id, status: prevStatus }); setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: prevStatus } : t))) },
-        redo: async () => { await window.api.db.updateTask({ id: task.id, status: doneStatus }); setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: doneStatus } : t))) }
+        undo: async () => { await getTrpcVanillaClient().task.update.mutate({ id: task.id, status: prevStatus }); setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: prevStatus } : t))) },
+        redo: async () => { await getTrpcVanillaClient().task.update.mutate({ id: task.id, status: doneStatus }); setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: doneStatus } : t))) }
       })
       toast(`Completed "${task.title}"`, { action: { label: 'Undo', onClick: () => void undo() } })
     }
@@ -1020,7 +1020,7 @@ function App(): React.JSX.Element {
     const existing = tasks.filter((t) => t.project_id === selectedProjectId).map((t) => t.title.match(/^Terminal (\d+)$/)).filter(Boolean).map((m) => parseInt(m![1], 10))
     const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
     const status = getDefaultStatus(selectedProject?.columns_config)
-    const task = await window.api.db.createTask({ projectId: selectedProjectId, title: `Terminal ${next}`, status, isTemporary: true })
+    const task = await getTrpcVanillaClient().task.create.mutate({ projectId: selectedProjectId, title: `Terminal ${next}`, status, isTemporary: true })
     track('temporary_task_created')
     setTasks((prev) => [task, ...prev])
     setTerminalFocusRequests((prev) => ({ ...prev, [task.id]: (prev[task.id] ?? 0) + 1 }))
@@ -1069,7 +1069,7 @@ function App(): React.JSX.Element {
 
   const handleConvertTask = useCallback(async (task: Task): Promise<Task> => {
     const project = useTabStore.getState()._taskLookup.projects.find((item) => item.id === task.project_id)
-    const converted = await window.api.db.updateTask({ id: task.id, title: 'Untitled task', status: getStatusByCategory('started', project?.columns_config) ?? getDefaultStatus(project?.columns_config), isTemporary: false })
+    const converted = await getTrpcVanillaClient().task.update.mutate({ id: task.id, title: 'Untitled task', status: getStatusByCategory('started', project?.columns_config) ?? getDefaultStatus(project?.columns_config), isTemporary: false })
     updateTask(converted); return converted
   }, [updateTask])
 
@@ -1192,7 +1192,7 @@ function App(): React.JSX.Element {
               projectColors={taskProjectColors} worktreeColors={taskWorktreeColors}
               taskProgress={taskProgress} doneTaskIds={doneTaskIds}
               onTabClick={(i) => setActiveTabIndex(toFullIndex(i))} onTabClose={(i) => closeTab(toFullIndex(i))} onTabReorder={(from, to) => reorderTabs(toFullIndex(from), toFullIndex(to))}
-              onTabRename={async (taskId, title) => { const t = await window.api.db.updateTask({ id: taskId, title }); updateTask(t) }}
+              onTabRename={async (taskId, title) => { const t = await getTrpcVanillaClient().task.update.mutate({ id: taskId, title }); updateTask(t) }}
               leftContent={(showContextManager || explodeMode) ? (
                 <>
                   {showContextManager && (
@@ -1392,7 +1392,7 @@ function App(): React.JSX.Element {
                                     <UnifiedGitPanel ref={homePanel.homeGitPanelRef} projectId={selectedProjectId} projectPath={projectPath} visible={isViewActive}
                                       defaultTab={homePanel.homeGitDefaultTab} onTabChange={homePanel.setHomeGitDefaultTab} tasks={tasks} filter={filter} projects={projects}
                                       onTaskClick={(t) => handleTaskClick(t, { metaKey: false })}
-                                      onUpdateTask={(data) => window.api.db.updateTask(data).then(t => { updateTask(t); return t })}
+                                      onUpdateTask={(data) => getTrpcVanillaClient().task.update.mutate(data).then(t => { updateTask(t); return t })}
                                       detectedRepos={homeDetectedRepos}
                                       selectedRepoName={homeSelectedProject?.selected_repo}
                                       isRepoStale={homeResolvedRepo.stale}

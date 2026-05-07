@@ -1,4 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Plus, Minus, Undo2, ChevronRight, GitMerge, CheckCircle2, FileDiff, UnfoldVertical, FoldVertical } from 'lucide-react'
 import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/react-virtual'
 import {
@@ -233,7 +234,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     const taskId = task.id
     const arr = [...collapsedFiles]
     saveTimerRef.current = setTimeout(() => {
-      void window.api.db.updateTask({ id: taskId, diffCollapsedFiles: arr })
+      void getTrpcVanillaClient().task.update.mutate({ id: taskId, diffCollapsedFiles: arr })
     }, 400)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [collapsedFiles, task?.id])

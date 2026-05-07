@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import { toast, type UndoableAction } from '@slayzone/ui'
 
@@ -79,7 +80,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
       undo.push({
         label: `Archived "${task.title}"`,
         undo: async () => {
-          const restored = await window.api.db.unarchiveTask(taskId)
+          const restored = await getTrpcVanillaClient().task.unarchive.mutate({ id: taskId })
           if (restored) updateTask(restored)
         },
         redo: () => rawArchive(taskId)
@@ -101,7 +102,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         label: `Archived ${archived.length} tasks`,
         undo: async () => {
           for (const id of taskIds) {
-            const restored = await window.api.db.unarchiveTask(id)
+            const restored = await getTrpcVanillaClient().task.unarchive.mutate({ id: id })
             if (restored) updateTask(restored)
           }
         },
@@ -123,7 +124,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
       undo.push({
         label: `Deleted "${task.title}"`,
         undo: async () => {
-          const restored = await window.api.db.restoreTask(taskId)
+          const restored = await getTrpcVanillaClient().task.restore.mutate({ id: taskId })
           if (restored) setTasks((prev) => [restored, ...prev])
         },
         redo: () => rawDelete(taskId)
@@ -186,7 +187,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         label: `Deleted ${removed.length} tasks`,
         undo: async () => {
           for (const id of taskIds) {
-            const restored = await window.api.db.restoreTask(id)
+            const restored = await getTrpcVanillaClient().task.restore.mutate({ id: id })
             if (restored) setTasks((prev) => [restored, ...prev])
           }
         },

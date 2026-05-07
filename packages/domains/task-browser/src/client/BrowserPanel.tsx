@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, createRef } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import { ArrowLeft, ArrowRight, RotateCw, X, Plus, Import, Smartphone, Monitor, Tablet, LayoutGrid, ChevronDown, ChevronUp, Crosshair, Camera, Bug, Sun, Moon, PaintbrushVertical, Keyboard, Puzzle, Trash2, Download, TriangleAlert } from 'lucide-react'
 import type { BrowserTabTheme } from '../shared'
@@ -572,8 +573,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   useEffect(() => {
     if (!importDropdownOpen || !taskId) return
     const promise = projectId
-      ? window.api.db.getTasksByProject(projectId)
-      : window.api.db.getTasks()
+      ? getTrpcVanillaClient().task.getByProject.query({ projectId: projectId })
+      : getTrpcVanillaClient().task.getAll.query()
     promise.then(tasks => {
       const entries: TaskUrlEntry[] = []
       for (const t of tasks) {

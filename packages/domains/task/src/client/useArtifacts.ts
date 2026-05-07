@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { TaskArtifact, RenderMode, CreateArtifactInput, UpdateArtifactInput, ArtifactFolder, UpdateArtifactFolderInput } from '@slayzone/task/shared'
 import type { ArtifactVersion, VersionRef, DiffResult, PruneReport } from '@slayzone/task-artifacts/shared'
 import { track } from '@slayzone/telemetry/client'
@@ -63,8 +64,8 @@ export function useArtifacts(taskId: string | null | undefined, initialSelectedI
     let firstLoad = true
     const load = (): void => {
       const p = Promise.all([
-        window.api.artifacts.getByTask(taskId).then(r => { if (!cancelled) setArtifacts(r) }).catch(() => {}),
-        window.api.artifactFolders.getByTask(taskId).then(r => { if (!cancelled) setFolders(r) }).catch(() => {}),
+        getTrpcVanillaClient().task.artifactsGetByTask.query({ taskId: taskId }).then(r => { if (!cancelled) setArtifacts(r) }).catch(() => {}),
+        getTrpcVanillaClient().task.foldersGetByTask.query({ taskId: taskId }).then(r => { if (!cancelled) setFolders(r) }).catch(() => {}),
       ])
       if (firstLoad) {
         firstLoad = false
@@ -72,7 +73,7 @@ export function useArtifacts(taskId: string | null | undefined, initialSelectedI
       }
     }
     load()
-    const cleanup = window.api?.app?.onTasksChanged?.(load)
+    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => load() }); const cleanup = () => _sub.unsubscribe()
     return () => { cancelled = true; cleanup?.() }
   }, [taskId])
 
@@ -110,7 +111,7 @@ export function useArtifacts(taskId: string | null | undefined, initialSelectedI
   const createArtifact = useCallback(async (params: { title: string; folderId?: string | null; renderMode?: RenderMode; content?: string; language?: string | null }): Promise<TaskArtifact | null> => {
     if (!taskId) return null
     const data: CreateArtifactInput = { taskId, ...params }
-    const artifact = await window.api.artifacts.create(data)
+    const artifact = await getTrpcVanillaClient().task.artifactsCreate.mutate(data)
     if (artifact) {
       setArtifacts(prev => [...prev, artifact])
       setSelectedId(artifact.id)
@@ -120,46 +121,46 @@ export function useArtifacts(taskId: string | null | undefined, initialSelectedI
   }, [taskId])
 
   const updateArtifact = useCallback(async (data: UpdateArtifactInput): Promise<void> => {
-    const updated = await window.api.artifacts.update(data)
+    const updated = await getTrpcVanillaClient().task.artifactsUpdate.mutate(data)
     if (updated) {
       setArtifacts(prev => prev.map(a => a.id === data.id ? updated : a))
     }
   }, [])
 
   const deleteArtifact = useCallback(async (id: string): Promise<void> => {
-    await window.api.artifacts.delete(id)
+    await getTrpcVanillaClient().task.artifactsDelete.mutate({ id: id })
     setArtifacts(prev => prev.filter(a => a.id !== id))
     setSelectedId(prev => prev === id ? null : prev)
     track('asset_deleted')
   }, [])
 
   const renameArtifact = useCallback(async (id: string, newTitle: string): Promise<void> => {
-    const updated = await window.api.artifacts.update({ id, title: newTitle })
+    const updated = await getTrpcVanillaClient().task.artifactsUpdate.mutate({ id, title: newTitle })
     if (updated) {
       setArtifacts(prev => prev.map(a => a.id === id ? updated : a))
     }
   }, [])
 
   const moveArtifactToFolder = useCallback(async (artifactId: string, folderId: string | null): Promise<void> => {
-    const updated = await window.api.artifacts.update({ id: artifactId, folderId })
+    const updated = await getTrpcVanillaClient().task.artifactsUpdate.mutate({ id: artifactId, folderId })
     if (updated) {
       setArtifacts(prev => prev.map(a => a.id === artifactId ? updated : a))
     }
   }, [])
 
   const readContent = useCallback(async (id: string): Promise<string | null> => {
-    return window.api.artifacts.readContent(id)
+    return getTrpcVanillaClient().task.artifactsReadContent.query({ id: id })
   }, [])
 
   const saveContent = useCallback(async (id: string, content: string): Promise<void> => {
     // UI saves always mutate the latest version in place. The explicit
     // "Create version" action is the only UI path that creates new versions.
-    await window.api.artifacts.update({ id, content, mutateVersion: true })
+    await getTrpcVanillaClient().task.artifactsUpdate.mutate({ id, content, mutateVersion: true })
   }, [])
 
   const uploadArtifact = useCallback(async (sourcePath: string, title?: string): Promise<TaskArtifact | null> => {
     if (!taskId) return null
-    const artifact = await window.api.artifacts.upload({ taskId, sourcePath, title })
+    const artifact = await getTrpcVanillaClient().task.artifactsUpload.mutate({ taskId, sourcePath, title })
     if (artifact) {
       setArtifacts(prev => [...prev, artifact])
       setSelectedId(artifact.id)
@@ -169,41 +170,41 @@ export function useArtifacts(taskId: string | null | undefined, initialSelectedI
   }, [taskId])
 
   const getFilePath = useCallback(async (id: string): Promise<string | null> => {
-    return window.api.artifacts.getFilePath(id)
+    return getTrpcVanillaClient().task.artifactsGetFilePath.query({ id: id })
   }, [])
 
   const downloadFile = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadFile(id)
+    return getTrpcVanillaClient().task.artifactsDownloadFile.mutate({ id: id })
   }, [])
 
   const downloadFolder = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadFolder(id)
+    return getTrpcVanillaClient().task.artifactsDownloadFolder.mutate({ folderId: id })
   }, [])
 
   const downloadAsPdf = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadAsPdf(id)
+    return getTrpcVanillaClient().task.artifactsDownloadAsPdf.mutate({ id: id })
   }, [])
 
   const downloadAsPng = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadAsPng(id)
+    return getTrpcVanillaClient().task.artifactsDownloadAsPng.mutate({ id: id })
   }, [])
 
   const downloadAsHtml = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadAsHtml(id)
+    return getTrpcVanillaClient().task.artifactsDownloadAsHtml.mutate({ id: id })
   }, [])
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false
-    return window.api.artifacts.downloadAllAsZip(taskId)
+    return getTrpcVanillaClient().task.artifactsDownloadAllAsZip.mutate({ taskId: taskId })
   }, [taskId])
 
   const uploadDir = useCallback(async (dirPath: string, parentFolderId?: string | null): Promise<void> => {
     if (!taskId) return
-    await window.api.artifacts.uploadDir({ taskId, dirPath, parentFolderId: parentFolderId ?? null })
+    await getTrpcVanillaClient().task.artifactsUploadDir.mutate({ taskId, dirPath, parentFolderId: parentFolderId ?? null })
     // Reload everything after bulk operation
     const [newArtifacts, newFolders] = await Promise.all([
-      window.api.artifacts.getByTask(taskId),
-      window.api.artifactFolders.getByTask(taskId),
+      getTrpcVanillaClient().task.artifactsGetByTask.query({ taskId: taskId }),
+      getTrpcVanillaClient().task.foldersGetByTask.query({ taskId: taskId }),
     ])
     setArtifacts(newArtifacts)
     setFolders(newFolders)
@@ -212,34 +213,34 @@ export function useArtifacts(taskId: string | null | undefined, initialSelectedI
   // --- Versions ---
 
   const listVersions = useCallback(async (artifactId: string, opts?: { limit?: number; offset?: number }): Promise<ArtifactVersion[]> => {
-    return window.api.artifacts.versions.list({ artifactId, ...opts })
+    return getTrpcVanillaClient().task.versionsList.query({ artifactId, ...opts })
   }, [])
 
   const readVersion = useCallback(async (artifactId: string, versionRef: VersionRef): Promise<string> => {
-    return window.api.artifacts.versions.read({ artifactId, versionRef })
+    return getTrpcVanillaClient().task.versionsRead.query({ artifactId, versionRef })
   }, [])
 
   const createVersion = useCallback(async (artifactId: string, name?: string | null): Promise<ArtifactVersion> => {
-    return window.api.artifacts.versions.create({ artifactId, name })
+    return getTrpcVanillaClient().task.versionsCreate.mutate({ artifactId, name })
   }, [])
 
   const renameVersion = useCallback(async (artifactId: string, versionRef: VersionRef, newName: string | null): Promise<ArtifactVersion> => {
-    return window.api.artifacts.versions.rename({ artifactId, versionRef, newName })
+    return getTrpcVanillaClient().task.versionsRename.mutate({ artifactId, versionRef, newName })
   }, [])
 
   const diffVersions = useCallback(async (artifactId: string, a: VersionRef, b?: VersionRef): Promise<DiffResult> => {
-    return window.api.artifacts.versions.diff({ artifactId, a, b })
+    return getTrpcVanillaClient().task.versionsDiff.query({ artifactId, a, b })
   }, [])
 
   const pruneVersions = useCallback(async (artifactId: string, opts: { keepLast?: number; keepNamed?: boolean; keepCurrent?: boolean; dryRun?: boolean }): Promise<PruneReport> => {
-    return window.api.artifacts.versions.prune({ artifactId, ...opts })
+    return getTrpcVanillaClient().task.versionsPrune.mutate({ artifactId, ...opts })
   }, [])
 
   const setCurrentVersion = useCallback(async (artifactId: string, versionRef: VersionRef): Promise<ArtifactVersion> => {
-    const v = await window.api.artifacts.versions.setCurrent({ artifactId, versionRef })
+    const v = await getTrpcVanillaClient().task.versionsSetCurrent.mutate({ artifactId, versionRef })
     // Refresh artifact rows so current_version_id in local state matches DB.
     if (taskId) {
-      const refreshed = await window.api.artifacts.getByTask(taskId)
+      const refreshed = await getTrpcVanillaClient().task.artifactsGetByTask.query({ taskId: taskId })
       setArtifacts(refreshed)
     }
     return v
@@ -249,7 +250,7 @@ export function useArtifacts(taskId: string | null | undefined, initialSelectedI
 
   const createFolder = useCallback(async (params: { name: string; parentId?: string | null }): Promise<ArtifactFolder | null> => {
     if (!taskId) return null
-    const folder = await window.api.artifactFolders.create({ taskId, ...params })
+    const folder = await getTrpcVanillaClient().task.foldersCreate.mutate({ taskId, ...params })
     if (folder) {
       setFolders(prev => [...prev, folder])
     }
@@ -257,21 +258,21 @@ export function useArtifacts(taskId: string | null | undefined, initialSelectedI
   }, [taskId])
 
   const updateFolder = useCallback(async (data: UpdateArtifactFolderInput): Promise<void> => {
-    const updated = await window.api.artifactFolders.update(data)
+    const updated = await getTrpcVanillaClient().task.foldersUpdate.mutate(data)
     if (updated) {
       setFolders(prev => prev.map(f => f.id === data.id ? updated : f))
     }
   }, [])
 
   const deleteFolder = useCallback(async (id: string): Promise<void> => {
-    await window.api.artifactFolders.delete(id)
+    await getTrpcVanillaClient().task.foldersDelete.mutate({ id: id })
     setFolders(prev => prev.filter(f => f.id !== id))
     // Artifacts in deleted folder get folder_id = NULL (DB handles it), refresh local state
     setArtifacts(prev => prev.map(a => a.folder_id === id ? { ...a, folder_id: null } : a))
   }, [])
 
   const renameFolder = useCallback(async (id: string, newName: string): Promise<void> => {
-    const updated = await window.api.artifactFolders.update({ id, name: newName })
+    const updated = await getTrpcVanillaClient().task.foldersUpdate.mutate({ id, name: newName })
     if (updated) {
       setFolders(prev => prev.map(f => f.id === id ? updated : f))
     }

@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 
 /**
@@ -30,7 +31,7 @@ export function useSnoozeWakeUp(tasks: Task[]): void {
     const timer = setTimeout(async () => {
       // Clear the snooze — this triggers tasks:changed → re-render
       try {
-        await window.api.db.updateTask({ id: nearest.id, snoozedUntil: null })
+        await getTrpcVanillaClient().task.update.mutate({ id: nearest.id, snoozedUntil: null })
       } catch { /* task may have been deleted */ }
 
       // Desktop notification

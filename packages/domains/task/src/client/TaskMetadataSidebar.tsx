@@ -94,8 +94,8 @@ export function TaskMetadataSidebar({
   useEffect(() => {
     const loadData = async () => {
       const [tasks, currentBlockers, allProjects] = await Promise.all([
-        window.api.db.getTasks(),
-        window.api.taskDependencies.getBlockers(task.id),
+        getTrpcVanillaClient().task.getAll.query(),
+        getTrpcVanillaClient().task.getBlockers.query({ taskId: task.id }),
         getTrpcVanillaClient().projects.list.query()
       ])
       setAllTasks(tasks.filter((t) => t.id !== task.id))
@@ -107,7 +107,7 @@ export function TaskMetadataSidebar({
   }, [task.id])
 
   const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
-    await window.api.taskDependencies.addBlocker(task.id, blockerTaskId)
+    await getTrpcVanillaClient().task.addBlocker.mutate({ taskId: task.id, blockerTaskId: blockerTaskId })
     const blockerTask = allTasks.find((t) => t.id === blockerTaskId)
     if (blockerTask) {
       setBlockers([...blockers, blockerTask])
@@ -116,25 +116,25 @@ export function TaskMetadataSidebar({
   }
 
   const handleRemoveBlocker = async (blockerTaskId: string): Promise<void> => {
-    await window.api.taskDependencies.removeBlocker(task.id, blockerTaskId)
+    await getTrpcVanillaClient().task.removeBlocker.mutate({ taskId: task.id, blockerTaskId: blockerTaskId })
     setBlockers(blockers.filter((b) => b.id !== blockerTaskId))
   }
 
   const handleSetBlocked = async (): Promise<void> => {
     track('task_blocked', {})
-    const updated = await window.api.db.updateTask({ id: task.id, isBlocked: true })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, isBlocked: true })
     onUpdate(updated)
   }
 
   const handleUnblock = async (): Promise<void> => {
     track('task_unblocked')
-    const updated = await window.api.db.updateTask({ id: task.id, isBlocked: false, blockedComment: null })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, isBlocked: false, blockedComment: null })
     onUpdate(updated)
   }
 
   const handleSetBlockedWithComment = async (): Promise<void> => {
     track('task_blocked', { hasComment: 'true' })
-    const updated = await window.api.db.updateTask({
+    const updated = await getTrpcVanillaClient().task.update.mutate({
       id: task.id,
       isBlocked: true,
       blockedComment: blockedComment.trim() || null
@@ -157,44 +157,44 @@ export function TaskMetadataSidebar({
     if (isTerminalStatus(status, selectedProject?.columns_config)) {
       track('task_completed', { provider: task.terminal_mode ?? 'terminal', had_worktree: Boolean(task.worktree_path) })
     }
-    const updated = await window.api.db.updateTask({ id: task.id, status })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, status })
     onUpdate(updated)
   }
 
   const handleProjectChange = async (projectId: string): Promise<void> => {
     track('task_moved_to_project')
-    const updated = await window.api.db.updateTask({ id: task.id, projectId })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, projectId })
     onUpdate(updated)
   }
 
   const handlePriorityChange = async (priority: number): Promise<void> => {
     track('task_priority_changed', { priority: String(priority) })
-    const updated = await window.api.db.updateTask({ id: task.id, priority })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, priority })
     onUpdate(updated)
   }
 
   const handleDueDateChange = async (date: Date | undefined): Promise<void> => {
     track('due_date_set')
     const dueDate = date ? format(date, 'yyyy-MM-dd') : null
-    const updated = await window.api.db.updateTask({ id: task.id, dueDate })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, dueDate })
     onUpdate(updated)
   }
 
   const handleSnooze = async (until: string): Promise<void> => {
     track('task_snoozed')
-    const updated = await window.api.db.updateTask({ id: task.id, snoozedUntil: until })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, snoozedUntil: until })
     onUpdate(updated)
   }
 
   const handleUnsnooze = async (): Promise<void> => {
     track('task_unsnoozed')
-    const updated = await window.api.db.updateTask({ id: task.id, snoozedUntil: null })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, snoozedUntil: null })
     onUpdate(updated)
   }
 
   const handleProgressChange = async (progress: number): Promise<void> => {
     track('task_progress_changed', { value: String(progress) })
-    const updated = await window.api.db.updateTask({ id: task.id, progress })
+    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, progress })
     onUpdate(updated)
   }
 
@@ -449,7 +449,7 @@ export function TaskMetadataSidebar({
             <span className="flex-1 whitespace-pre-wrap">{task.blocked_comment}</span>
             <button
               onClick={async () => {
-                const updated = await window.api.db.updateTask({ id: task.id, blockedComment: null })
+                const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, blockedComment: null })
                 onUpdate(updated)
               }}
               className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground"
@@ -688,7 +688,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
         const message = `${PROVIDER_LABELS[link.provider]} synced: ${result.pulled} pulled, ${result.pushed} pushed${errSuffix}`
         if (result.errors.length > 0) toast.error(message)
         else toast.success(message)
-        const refreshedTask = await window.api.db.getTask(taskId)
+        const refreshedTask = await getTrpcVanillaClient().task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
         return
       }
@@ -701,7 +701,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
       if (result.pulled) toast.success(message)
       else toast(message)
       if (result.pulled) {
-        const refreshedTask = await window.api.db.getTask(taskId)
+        const refreshedTask = await getTrpcVanillaClient().task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
       }
     } catch (error) {
@@ -723,7 +723,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
         else if (result.errors.length > 0) toast.error(message)
         else toast(message)
         if (result.pulled > 0) {
-          const refreshedTask = await window.api.db.getTask(taskId)
+          const refreshedTask = await getTrpcVanillaClient().task.get.query({ id: taskId })
           if (refreshedTask) onUpdate(refreshedTask)
         }
         return
@@ -737,7 +737,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
       if (result.pushed) toast.success(message)
       else toast(message)
       if (result.pushed) {
-        const refreshedTask = await window.api.db.getTask(taskId)
+        const refreshedTask = await getTrpcVanillaClient().task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
       }
     } catch (error) {

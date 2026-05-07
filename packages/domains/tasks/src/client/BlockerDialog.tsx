@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   Dialog,
   DialogContent,
@@ -33,8 +34,8 @@ export function BlockerDialog({ taskId, projects, onClose }: BlockerDialogProps)
   useEffect(() => {
     if (!open || !taskId) return
     Promise.all([
-      window.api.db.getTasks(),
-      window.api.taskDependencies.getBlockers(taskId)
+      getTrpcVanillaClient().task.getAll.query(),
+      getTrpcVanillaClient().task.getBlockers.query({ taskId: taskId })
     ]).then(([tasks, currentBlockers]) => {
       setAllTasks(tasks.filter((t) => t.id !== taskId))
       setBlockers(currentBlockers)
@@ -44,7 +45,7 @@ export function BlockerDialog({ taskId, projects, onClose }: BlockerDialogProps)
 
   const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
     if (!taskId) return
-    await window.api.taskDependencies.addBlocker(taskId, blockerTaskId)
+    await getTrpcVanillaClient().task.addBlocker.mutate({ taskId: taskId, blockerTaskId: blockerTaskId })
     onClose()
     window.dispatchEvent(new CustomEvent('slayzone:blocked-changed'))
   }

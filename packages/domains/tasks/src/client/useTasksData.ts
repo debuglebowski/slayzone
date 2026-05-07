@@ -63,7 +63,7 @@ export function useTasksData(): UseTasksDataReturn {
         performance.mark('sz:loadBoardData:start')
         window.api.app.bootMark?.('loadBoardData start')
       }
-      window.api.db.loadBoardData().then((data) => {
+      getTrpcVanillaClient().task.loadBoardData.query().then((data) => {
         setTasks(data.tasks as Task[])
         setProjects(data.projects as Project[])
         setTags(data.tags as Tag[])
@@ -83,7 +83,7 @@ export function useTasksData(): UseTasksDataReturn {
     }
     loadData()
     ;(window as any).__slayzone_refreshData = loadData
-    const cleanup = window.api?.app?.onTasksChanged?.(loadData)
+    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => loadData() }); const cleanup = () => _sub.unsubscribe()
     const handleTagCreated = (e: Event) => {
       const tag = (e as CustomEvent).detail as Tag
       setTags((prev) => prev.some((t) => t.id === tag.id) ? prev : [...prev, tag])
@@ -93,7 +93,7 @@ export function useTasksData(): UseTasksDataReturn {
       setTags((prev) => prev.map((t) => t.id === tag.id ? tag : t))
     }
     const handleBlockedChanged = () => {
-      window.api.taskDependencies.getAllBlockedTaskIds().then(ids => setBlockedTaskIds(new Set(ids)))
+      getTrpcVanillaClient().task.getAllBlockedTaskIds.query().then(ids => setBlockedTaskIds(new Set(ids)))
     }
     window.addEventListener('slayzone:tag-created', handleTagCreated)
     window.addEventListener('slayzone:tag-updated', handleTagUpdated)
@@ -165,8 +165,8 @@ export function useTasksData(): UseTasksDataReturn {
         : { id: taskId, priority: parseInt(newColumnId.slice(1), 10) }
 
     Promise.all([
-      window.api.db.updateTask(updatePayload),
-      window.api.db.reorderTasks(newColumnTaskIds)
+      getTrpcVanillaClient().task.update.mutate(updatePayload),
+      getTrpcVanillaClient().task.reorder.mutate({ taskIds: newColumnTaskIds })
     ]).catch(() => {
       setTasks(snapshot)
     })
@@ -220,8 +220,8 @@ export function useTasksData(): UseTasksDataReturn {
         : { priority: parseInt(newColumnId.slice(1), 10) }
 
     Promise.all([
-      window.api.db.updateTasks({ ids: taskIds, updates: updatePayload }),
-      window.api.db.reorderTasks(newColumnTaskIds)
+      getTrpcVanillaClient().task.updateMany.mutate({ ids: taskIds, updates: updatePayload }),
+      getTrpcVanillaClient().task.reorder.mutate({ taskIds: newColumnTaskIds })
     ]).catch(() => {
       setTasks(snapshot)
     })
@@ -242,7 +242,7 @@ export function useTasksData(): UseTasksDataReturn {
       })
     })
 
-    window.api.db.reorderTasks(taskIds).catch(() => {
+    getTrpcVanillaClient().task.reorder.mutate({ taskIds: taskIds }).catch(() => {
       setTasks(snapshot)
     })
   }, [])
@@ -251,20 +251,20 @@ export function useTasksData(): UseTasksDataReturn {
   const archiveTask = useCallback(async (taskId: string) => {
     const now = new Date().toISOString()
     setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, archived_at: now } : t))
-    await window.api.db.archiveTask(taskId)
+    await getTrpcVanillaClient().task.archive.mutate({ id: taskId })
   }, [])
 
   // Archive multiple tasks
   const archiveTasks = useCallback(async (taskIds: string[]) => {
     const now = new Date().toISOString()
     setTasks((prev) => prev.map((t) => taskIds.includes(t.id) ? { ...t, archived_at: now } : t))
-    await window.api.db.archiveTasks(taskIds)
+    await getTrpcVanillaClient().task.archiveMany.mutate({ ids: taskIds })
   }, [])
 
   // Delete task
   const deleteTask = useCallback(async (taskId: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== taskId))
-    await window.api.db.deleteTask(taskId)
+    await getTrpcVanillaClient().task.delete.mutate({ id: taskId })
   }, [])
 
   // Bulk delete
@@ -277,7 +277,7 @@ export function useTasksData(): UseTasksDataReturn {
       return prev.filter((t) => !idSet.has(t.id))
     })
     try {
-      await window.api.db.deleteTasks(taskIds)
+      await getTrpcVanillaClient().task.deleteMany.mutate({ ids: taskIds })
     } catch {
       setTasks(snapshot)
     }
@@ -303,7 +303,7 @@ export function useTasksData(): UseTasksDataReturn {
     }
 
     try {
-      await window.api.db.updateTask({
+      await getTrpcVanillaClient().task.update.mutate({
         id: taskId,
         status: updates.status,
         priority: updates.priority,
@@ -346,7 +346,7 @@ export function useTasksData(): UseTasksDataReturn {
     }
 
     try {
-      await window.api.db.updateTasks({
+      await getTrpcVanillaClient().task.updateMany.mutate({
         ids: taskIds,
         updates: {
           status: updates.status,
@@ -373,7 +373,7 @@ export function useTasksData(): UseTasksDataReturn {
 
   // Clear all dependency blockers (used when dragging out of __blocked__ col)
   const clearBlockers = useCallback(async (taskId: string) => {
-    await window.api.taskDependencies.setBlockers(taskId, [])
+    await getTrpcVanillaClient().task.setBlockers.mutate({ taskId: taskId, blockerTaskIds: [] })
     setBlockedTaskIds(prev => {
       const next = new Set(prev)
       next.delete(taskId)

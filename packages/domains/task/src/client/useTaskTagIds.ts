@@ -21,7 +21,7 @@ export function useTaskTagIds(
         .then(tags => setTagIds(tags.map(t => t.id)))
         .catch(() => {})
     }
-    const cleanup = window.api?.app?.onTasksChanged?.(refresh)
+    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => refresh() }); const cleanup = () => _sub.unsubscribe()
     return () => { cleanup?.() }
   }, [taskId])
 

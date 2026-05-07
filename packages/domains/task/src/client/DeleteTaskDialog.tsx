@@ -1,4 +1,5 @@
 import type { Task } from '@slayzone/task/shared'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,7 +31,7 @@ export function DeleteTaskDialog({
     if (onDeleteTask) {
       await onDeleteTask(task.id)
     } else {
-      await window.api.db.deleteTask(task.id)
+      await getTrpcVanillaClient().task.delete.mutate({ id: task.id })
     }
     onDeleted()
   }

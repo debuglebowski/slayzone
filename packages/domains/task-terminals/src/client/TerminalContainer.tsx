@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { usePty } from '@slayzone/terminal'
 import { Terminal as TerminalView } from '@slayzone/terminal/client/LazyTerminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
@@ -114,7 +115,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     setManagerMode((v) => {
       const next = !v
       if (v) setManagerSelectedTask(null)
-      window.api.db.updateTask({ id: taskId, managerMode: next }).catch(() => {})
+      getTrpcVanillaClient().task.update.mutate({ id: taskId, managerMode: next }).catch(() => {})
       return next
     })
   }, [taskId])
@@ -135,12 +136,12 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     let cancelled = false
     setSubtaskInfo({ loaded: false, has: false })
     const refresh = (): void => {
-      window.api.db.getSubTasks(taskId)
+      getTrpcVanillaClient().task.getSubTasks.query({ parentId: taskId })
         .then((rows) => { if (!cancelled) setSubtaskInfo({ loaded: true, has: rows.length > 0 }) })
         .catch(() => {})
     }
     refresh()
-    const cleanup = window.api?.app?.onTasksChanged?.(refresh)
+    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => refresh() }); const cleanup = () => _sub.unsubscribe()
     return () => { cancelled = true; cleanup?.() }
   }, [taskId])
   const hasSubtasks = subtaskInfo.has
@@ -150,7 +151,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     if (subtaskInfo.loaded && !subtaskInfo.has && managerMode) {
       setManagerMode(false)
       setManagerSelectedTask(null)
-      window.api.db.updateTask({ id: taskId, managerMode: false }).catch(() => {})
+      getTrpcVanillaClient().task.update.mutate({ id: taskId, managerMode: false }).catch(() => {})
     }
   }, [subtaskInfo, managerMode, taskId])
 

@@ -1,5 +1,5 @@
-export { configureTaskRuntimeAdapters, registerTaskHandlers, updateTask } from './handlers'
-export { registerTaskTemplateHandlers } from './template-handlers'
+export { configureTaskRuntimeAdapters, updateTask } from '../server/ops/shared'
+export type { TaskRuntimeAdapters, DiagnosticEventPayload, DiagnosticLevel } from '../server/ops/shared'
 export { registerFilesHandlers } from './files'
 export { buildPdfHtml, buildMermaidPdfHtml, buildPngHtml, escapeHtml, PDF_CSS, renderToPdf, renderToPng } from './artifact-export'
-export { startArtifactWatcher, closeArtifactWatcher } from './artifact-watcher'
+export { startArtifactWatcher, closeArtifactWatcher } from '../server/artifact-watcher'

@@ -33,11 +33,11 @@ export { fetchTaskDetail }
 async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
   // Task fetch is critical — let it throw. Secondary data uses defaults on failure.
   const [loadedTask, loadedTags, loadedTaskTags, projects, loadedSubTasks] = await Promise.all([
-    window.api.db.getTask(taskId),
+    getTrpcVanillaClient().task.get.query({ id: taskId }),
     getTrpcVanillaClient().tags.list.query().catch(() => [] as Tag[]),
     getTrpcVanillaClient().tags.getForTask.query({ taskId }).catch(() => [] as Tag[]),
     getTrpcVanillaClient().projects.list.query().catch(() => [] as Project[]),
-    window.api.db.getSubTasks(taskId).catch(() => [] as Task[]),
+    getTrpcVanillaClient().task.getSubTasks.query({ parentId: taskId }).catch(() => [] as Task[]),
   ])
 
   if (!loadedTask) return null
@@ -52,7 +52,7 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
   // Resolve parent task
   let parentTask: Task | null = null
   if (loadedTask.parent_id) {
-    parentTask = await window.api.db.getTask(loadedTask.parent_id)
+    parentTask = await getTrpcVanillaClient().task.get.query({ id: loadedTask.parent_id })
   }
 
   // Resolve panel visibility
@@ -67,7 +67,7 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
   if (loadedTask.browser_tabs) {
     browserTabs = loadedTask.browser_tabs
   } else {
-    const allTasks = await window.api.db.getTasks()
+    const allTasks = await getTrpcVanillaClient().task.getAll.query()
     let firstUrl = 'about:blank'
     for (const t of allTasks) {
       if (t.id === loadedTask.id) continue

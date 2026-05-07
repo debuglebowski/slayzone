@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   ArrowLeft,
   ChevronRight,
@@ -860,7 +861,7 @@ export function IntegrationsTab({
     const provider = syncSetupProvider
     if (!provider) return []
 
-    const tasks = await window.api.db.getTasksByProject(project.id)
+    const tasks = await getTrpcVanillaClient().task.getByProject.query({ projectId: project.id })
     const taskIds = tasks.map(t => t.id)
 
     // Single batch call: returns link + status for all tasks

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Pin } from 'lucide-react'
 import type { Task, PanelVisibility } from '@slayzone/task/shared'
 import { TaskDetailPage } from '@slayzone/task/client/TaskDetailPage'
@@ -127,11 +128,11 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
                 onBack={handleClose}
                 onTaskUpdated={handleTaskUpdated}
                 onArchiveTask={async (id) => {
-                  await window.api.db.archiveTask(id)
+                  await getTrpcVanillaClient().task.archive.mutate({ id: id })
                   handleClose()
                 }}
                 onDeleteTask={async (id) => {
-                  await window.api.db.deleteTask(id)
+                  await getTrpcVanillaClient().task.delete.mutate({ id: id })
                   handleClose()
                 }}
                 onNavigateToTask={(id) => { window.api.taskWindow.open(id) }}

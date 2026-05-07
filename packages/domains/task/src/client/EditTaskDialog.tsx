@@ -92,7 +92,7 @@ export function EditTaskDialog({
   }, [task, projectStatusOptions, selectedProject, form])
 
   const onSubmit = async (data: UpdateTaskFormData): Promise<void> => {
-    const updated = await window.api.db.updateTask({
+    const updated = await getTrpcVanillaClient().task.update.mutate({
       id: data.id,
       title: data.title,
       description: data.description,

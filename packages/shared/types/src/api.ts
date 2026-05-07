@@ -1,7 +1,5 @@
 import type { Project, ExecutionContext } from '@slayzone/projects/shared'
-import type { Task, CreateTaskInput, UpdateTaskInput, DesktopHandoffPolicy, TaskTemplate, CreateTaskTemplateInput, UpdateTaskTemplateInput, TaskArtifact, CreateArtifactInput, UpdateArtifactInput, ArtifactFolder, CreateArtifactFolderInput, UpdateArtifactFolderInput } from '@slayzone/task/shared'
-import type { ArtifactVersion, VersionRef, DiffResult, PruneReport } from '@slayzone/task-artifacts/shared'
-import type { Tag } from '@slayzone/tags/shared'
+import type { DesktopHandoffPolicy } from '@slayzone/task/shared'
 import type {
   TerminalMode,
   TerminalState,
@@ -215,86 +213,6 @@ export interface PtyCreateOptions {
 
 // ElectronAPI interface - the IPC contract between renderer and main
 export interface ElectronAPI {
-  db: {
-    // Tasks
-    getTasks: () => Promise<Task[]>
-    loadBoardData: () => Promise<{
-      tasks: Task[]
-      projects: Project[]
-      tags: Tag[]
-      taskTags: Record<string, string[]>
-      blockedTaskIds: string[]
-    }>
-    getTasksByProject: (projectId: string) => Promise<Task[]>
-    getTask: (id: string) => Promise<Task | null>
-    getSubTasks: (parentId: string) => Promise<Task[]>
-    getSubTasksRecursive: (rootId: string) => Promise<Task[]>
-    createTask: (data: CreateTaskInput) => Promise<Task>
-    updateTask: (data: UpdateTaskInput) => Promise<Task>
-    updateTasks: (data: { ids: string[]; updates: Omit<Partial<UpdateTaskInput>, 'id'> }) => Promise<Task[]>
-    deleteTask: (id: string) => Promise<boolean>
-    deleteTasks: (ids: string[]) => Promise<{ deletedIds: string[]; blockedIds: string[] }>
-    restoreTask: (id: string) => Promise<Task>
-    archiveTask: (id: string) => Promise<Task>
-    archiveTasks: (ids: string[]) => Promise<void>
-    unarchiveTask: (id: string) => Promise<Task>
-    reorderTasks: (taskIds: string[]) => Promise<void>
-  }
-  artifacts: {
-    getByTask: (taskId: string) => Promise<TaskArtifact[]>
-    get: (id: string) => Promise<TaskArtifact | null>
-    create: (data: CreateArtifactInput) => Promise<TaskArtifact>
-    update: (data: UpdateArtifactInput & { mutateVersion?: boolean }) => Promise<TaskArtifact | null>
-    delete: (id: string) => Promise<boolean>
-    reorder: (data: string[] | { folderId: string | null; artifactIds: string[] }) => Promise<void>
-    readContent: (id: string) => Promise<string | null>
-    getFilePath: (id: string) => Promise<string | null>
-    getMtime: (id: string) => Promise<number | null>
-    onContentChanged: (callback: (artifactId: string) => void) => () => void
-    upload: (data: { taskId: string; sourcePath: string; title?: string }) => Promise<TaskArtifact>
-    uploadBlob: (data: { taskId: string; title: string; bytes: Uint8Array; folderId?: string | null }) => Promise<TaskArtifact | null>
-    pasteFiles: (data: { sourcePaths: string[]; destTaskId: string; destFolderId: string | null }) => Promise<TaskArtifact[]>
-    cleanupTask: (taskId: string) => Promise<void>
-    uploadDir: (data: { taskId: string; dirPath: string; parentFolderId: string | null }) => Promise<{ folders: ArtifactFolder[]; artifacts: TaskArtifact[] }>
-    downloadFile: (id: string) => Promise<boolean>
-    downloadFolder: (id: string) => Promise<boolean>
-    downloadAsPdf: (id: string) => Promise<boolean>
-    downloadAsPng: (id: string) => Promise<boolean>
-    downloadAsHtml: (id: string) => Promise<boolean>
-    downloadAllAsZip: (taskId: string) => Promise<boolean>
-    versions: {
-      list: (data: { artifactId: string; limit?: number; offset?: number }) => Promise<ArtifactVersion[]>
-      read: (data: { artifactId: string; versionRef: VersionRef }) => Promise<string>
-      create: (data: { artifactId: string; name?: string | null }) => Promise<ArtifactVersion>
-      rename: (data: { artifactId: string; versionRef: VersionRef; newName: string | null }) => Promise<ArtifactVersion>
-      diff: (data: { artifactId: string; a: VersionRef; b?: VersionRef }) => Promise<DiffResult>
-      prune: (data: { artifactId: string; keepLast?: number; keepNamed?: boolean; keepCurrent?: boolean; dryRun?: boolean }) => Promise<PruneReport>
-      setCurrent: (data: { artifactId: string; versionRef: VersionRef }) => Promise<ArtifactVersion>
-    }
-  }
-  artifactFolders: {
-    getByTask: (taskId: string) => Promise<ArtifactFolder[]>
-    create: (data: CreateArtifactFolderInput) => Promise<ArtifactFolder>
-    update: (data: UpdateArtifactFolderInput) => Promise<ArtifactFolder | null>
-    delete: (id: string) => Promise<boolean>
-    reorder: (data: { parentId: string | null; folderIds: string[] }) => Promise<void>
-  }
-  taskTemplates: {
-    getByProject: (projectId: string) => Promise<TaskTemplate[]>
-    get: (id: string) => Promise<TaskTemplate | null>
-    create: (data: CreateTaskTemplateInput) => Promise<TaskTemplate>
-    update: (data: UpdateTaskTemplateInput) => Promise<TaskTemplate | null>
-    delete: (id: string) => Promise<boolean>
-    setDefault: (projectId: string, templateId: string | null) => Promise<void>
-  }
-  taskDependencies: {
-    getAllBlockedTaskIds: () => Promise<string[]>
-    getBlockers: (taskId: string) => Promise<Task[]>
-    getBlocking: (taskId: string) => Promise<Task[]>
-    addBlocker: (taskId: string, blockerTaskId: string) => Promise<void>
-    removeBlocker: (taskId: string, blockerTaskId: string) => Promise<void>
-    setBlockers: (taskId: string, blockerTaskIds: string[]) => Promise<void>
-  }
   feedback: {
     listThreads: () => Promise<Array<{ id: string; title: string; discord_thread_id: string | null; created_at: string }>>
     createThread: (input: { id: string; title: string; discord_thread_id: string | null }) => Promise<void>

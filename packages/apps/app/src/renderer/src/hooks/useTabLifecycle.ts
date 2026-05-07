@@ -64,7 +64,7 @@ export function useTabLifecycle({
           const tabsList = await getTrpcVanillaClient().taskTerminals.list.query({ taskId: tab.taskId }).catch(() => null)
           const mainTab = tabsList?.find((t) => t.isMain)
           if (mainTab?.displayMode === 'chat') return
-          await window.api.db.deleteTask(tab.taskId).catch(() => {})
+          await getTrpcVanillaClient().task.delete.mutate({ id: tab.taskId }).catch(() => {})
           setTasks((prev) => prev.filter((task) => task.id !== tab.taskId))
           useTabStore.getState().closeTabByTaskId(tab.taskId)
         })()
