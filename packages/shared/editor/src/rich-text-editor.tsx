@@ -14,6 +14,7 @@ import { listItemMovePlugin } from './milkdown-list-move'
 import { escapeBlurPlugin } from './milkdown-escape-blur'
 import { taskListPlugin } from './milkdown-task-list'
 import { htmlRenderPlugin } from './milkdown-html-render'
+import { mermaidRenderPlugin } from './milkdown-mermaid-render'
 import { remarkFrontmatterPlugin, frontmatterSchema, frontmatterView } from './milkdown-frontmatter'
 import { createArtifactLinkPlugin, insertArtifactLinkAtCursor, type ArtifactMentionState } from './milkdown-artifact-link'
 import { extractImageFilesFromDataTransfer } from './use-image-paste-drop'
@@ -308,6 +309,7 @@ export function RichTextEditor({
       .use(listItemMovePlugin)
       .use(escapeBlurPlugin)
       .use(taskListPlugin)
+      .use(mermaidRenderPlugin)
       .use(toggleTaskListCommand)
       .use(formatStatePlugin)
       .use(blurHandlerPlugin)

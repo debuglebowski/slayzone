@@ -22,6 +22,7 @@
     "@milkdown/prose": "^7.19.2",
     "@milkdown/transformer": "^7.19.2",
     "@milkdown/utils": "^7.19.2",
+    "@slayzone/markdown": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "dompurify": "^3.3.1",
     "remark-frontmatter": "^5.0.0",
@@ -29,7 +30,8 @@
     "unist-util-visit": "^5.0.0"
   },
   "peerDependencies": {
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",

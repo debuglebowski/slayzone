@@ -559,6 +559,69 @@
   line-height: 1.6;
 }
 
+/* ---- Mermaid code blocks (rich-text editor only) ---- */
+.mk-doc .mk-mermaid {
+  position: relative;
+  margin-top: var(--mk-pre-mt);
+  margin-bottom: var(--mk-pre-mb);
+}
+.mk-doc .mk-mermaid-toolbar {
+  display: inline-flex;
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+  overflow: hidden;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.mk-doc .mk-mermaid:hover .mk-mermaid-toolbar,
+.mk-doc .mk-mermaid[data-mode="raw"] .mk-mermaid-toolbar {
+  opacity: 1;
+}
+.mk-doc .mk-mermaid-seg {
+  padding: 2px 8px;
+  background: transparent;
+  border: 0;
+  color: var(--color-foreground);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.mk-doc .mk-mermaid-seg + .mk-mermaid-seg {
+  border-left: 1px solid var(--color-border);
+}
+.mk-doc .mk-mermaid-seg[data-active="true"] {
+  background: var(--color-accent);
+  color: var(--color-accent-foreground);
+}
+.mk-doc .mk-mermaid-seg:hover:not([data-active="true"]) {
+  background: var(--color-muted);
+}
+.mk-doc .mk-mermaid-preview {
+  margin: 0;
+}
+.mk-doc .mk-mermaid-preview > div {
+  margin: 0;
+}
+.mk-doc .mk-mermaid[data-mode="preview"] .mk-mermaid-source {
+  position: absolute;
+  left: -99999px;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.mk-doc .mk-mermaid[data-mode="raw"] .mk-mermaid-preview {
+  display: none;
+}
+.mk-doc .mk-mermaid-source {
+  margin: 0;
+}
+
 /* ---- Blockquote, hr ---- */
 .mk-doc blockquote {
   margin-top: var(--mk-quote-mt);
