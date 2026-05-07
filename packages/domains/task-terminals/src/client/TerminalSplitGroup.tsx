@@ -148,6 +148,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           taskId={pane.taskId}
           mode={pane.tab.mode}
           cwd={pane.cwd}
+          isActive={isActive}
           providerFlagsOverride={pane.providerFlags ?? null}
           permissionNotice={pane.permissionNotice ?? null}
           onSetDisplayMode={pane.onSetDisplayMode}

@@ -64,6 +64,7 @@ export interface ChatPanelProps {
   taskId: string
   mode: string
   cwd: string
+  isActive?: boolean
   providerFlagsOverride?: string | null
   permissionNotice?: string | null
   onSetDisplayMode?: (target: TabDisplayMode) => void
@@ -80,7 +81,7 @@ const SUGGESTED_PROMPTS = [
 ]
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function ChatPanel(props, ref) {
-  const { tabId, taskId, mode, cwd, providerFlagsOverride, permissionNotice: overrideNotice, onSetDisplayMode, onOpenUrl, onOpenFile } = props
+  const { tabId, taskId, mode, cwd, isActive = true, providerFlagsOverride, permissionNotice: overrideNotice, onSetDisplayMode, onOpenUrl, onOpenFile } = props
   const { state, timeline, inFlight, hydrating, permissionMode, permissionRequests, sendMessage, sendToolResult, respondPermission, abortAndPop, reset: resetTimeline } = useChatSession({
     tabId,
     taskId,
@@ -145,6 +146,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
   }))
+
+  // Auto-focus composer when this task tab becomes active (mount-while-active
+  // or inactive→active transition). Tab content stays mounted with display:none
+  // when inactive, so a mount-only autoFocus would miss tab switches.
+  useEffect(() => {
+    if (isActive) textareaRef.current?.focus()
+  }, [isActive])
 
   const { uploadFiles: uploadImageFiles, getFilePath: getArtifactFilePath } = useArtifactUpload(taskId)
 
