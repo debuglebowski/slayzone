@@ -221,7 +221,7 @@ function App(): React.JSX.Element {
   )
   const handleHomeRepoChange = useCallback((repoName: string) => {
     if (!homeSelectedProject) return
-    window.api.db.updateProject({ id: homeSelectedProject.id, selectedRepo: repoName }).then((updated) => {
+    getTrpcVanillaClient().projects.update.mutate({ id: homeSelectedProject.id, selectedRepo: repoName }).then((updated) => {
       updateProject(updated)
     })
   }, [homeSelectedProject?.id, updateProject])
@@ -1109,7 +1109,7 @@ function App(): React.JSX.Element {
     if (!trimmed) { const p = projects.find((p) => p.id === selectedProjectId); if (p) setProjectNameValue(p.name); return }
     const project = projects.find((p) => p.id === selectedProjectId)
     if (project && trimmed !== project.name) {
-      try { const updated = await window.api.db.updateProject({ id: selectedProjectId, name: trimmed, color: project.color }); updateProject(updated) }
+      try { const updated = await getTrpcVanillaClient().projects.update.mutate({ id: selectedProjectId, name: trimmed, color: project.color }); updateProject(updated) }
       catch { if (project) setProjectNameValue(project.name) }
     }
   }
@@ -1124,7 +1124,7 @@ function App(): React.JSX.Element {
     if (!project) return
     const result = await window.api.dialog.showOpenDialog({ title: 'Select Project Directory', defaultPath: project.path || undefined, properties: ['openDirectory'] })
     if (result.canceled || !result.filePaths[0]) return
-    const updated = await window.api.db.updateProject({ id: project.id, path: result.filePaths[0] })
+    const updated = await getTrpcVanillaClient().projects.update.mutate({ id: project.id, path: result.filePaths[0] })
     updateProject(updated); validateProjectPath(updated)
   }, [selectedProjectId, projects, updateProject, validateProjectPath])
 

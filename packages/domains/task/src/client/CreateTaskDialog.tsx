@@ -82,7 +82,7 @@ export function CreateTaskDialog({
 
   useEffect(() => {
     if (!open) return
-    window.api.db.getProjects().then((list) => setProjects(list))
+    getTrpcVanillaClient().projects.list.query().then((list) => setProjects(list))
   }, [open])
 
   const selectedProjectId = form.watch('projectId')
@@ -130,7 +130,7 @@ export function CreateTaskDialog({
     const isAutoCreateEnabledForProject = async (projectId: string): Promise<boolean> => {
       const [globalSetting, projects] = await Promise.all([
         window.api.settings.get('auto_create_worktree_on_task_create'),
-        window.api.db.getProjects()
+        getTrpcVanillaClient().projects.list.query()
       ])
       const project = projects.find((p) => p.id === projectId)
       const override = project?.auto_create_worktree_on_task_create

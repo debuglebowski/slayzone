@@ -9,7 +9,6 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
     "./client/useDetectedRepos": "./src/client/useDetectedRepos.ts"
   },
@@ -22,6 +21,7 @@
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/workflow": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "lucide-react": "^0.562.0"

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { Button, IconButton, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, toast } from '@slayzone/ui'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function DataSettingsTab() {
@@ -9,7 +10,7 @@ export function DataSettingsTab() {
   const [importedProjects, setImportedProjects] = useState<Array<{ id: string; name: string; path: string }>>([])
 
   useEffect(() => {
-    window.api.db.getProjects().then(setProjects)
+    getTrpcVanillaClient().projects.list.query().then(setProjects)
   }, [])
 
   return (
@@ -112,7 +113,7 @@ export function DataSettingsTab() {
               onClick={async () => {
                 for (const p of importedProjects) {
                   if (p.path.trim()) {
-                    await window.api.db.updateProject({ id: p.id, path: p.path.trim() })
+                    await getTrpcVanillaClient().projects.update.mutate({ id: p.id, path: p.path.trim() })
                   }
                 }
                 const saved = importedProjects.filter((p) => p.path.trim()).length

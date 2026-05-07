@@ -36,7 +36,7 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
     window.api.db.getTask(taskId),
     getTrpcVanillaClient().tags.list.query().catch(() => [] as Tag[]),
     getTrpcVanillaClient().tags.getForTask.query({ taskId }).catch(() => [] as Tag[]),
-    window.api.db.getProjects().catch(() => [] as Project[]),
+    getTrpcVanillaClient().projects.list.query().catch(() => [] as Project[]),
     window.api.db.getSubTasks(taskId).catch(() => [] as Task[]),
   ])
 

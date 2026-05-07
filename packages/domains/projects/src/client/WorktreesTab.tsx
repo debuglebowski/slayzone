@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { AlertTriangle } from 'lucide-react'
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import type { Project, WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
@@ -44,7 +45,7 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
     e.preventDefault()
     setLoading(true)
     try {
-      const updated = await window.api.db.updateProject({
+      const updated = await getTrpcVanillaClient().projects.update.mutate({
         id: project.id,
         autoCreateWorktreeOnTaskCreate:
           autoCreateOverride === 'inherit'

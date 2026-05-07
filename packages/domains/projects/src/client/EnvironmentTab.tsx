@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
@@ -60,7 +61,7 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
           ? { type: 'ssh' as const, target: execSshTarget.trim(), ...(execWorkdir.trim() ? { workdir: execWorkdir.trim() } : {}), ...(execShell.trim() ? { shell: execShell.trim() } : {}) }
           : null
 
-      const updated = await window.api.db.updateProject({
+      const updated = await getTrpcVanillaClient().projects.update.mutate({
         id: project.id,
         executionContext
       })

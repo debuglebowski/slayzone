@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Lock, LockOpen, Timer, Clock, AlertTriangle } from 'lucide-react'
 import {
   Button,
@@ -111,7 +112,7 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
       schedule: scheduleEnabled ? { from: scheduleFrom, to: scheduleTo } : null,
       disable_unlock_early: disableUnlockEarly,
     }
-    const updated = await window.api.db.updateProject({ id: project.id, lockConfig })
+    const updated = await getTrpcVanillaClient().projects.update.mutate({ id: project.id, lockConfig })
     onUpdated(updated as unknown as Project)
     setOpen(false)
   }

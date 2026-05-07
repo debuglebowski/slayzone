@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
@@ -76,7 +77,7 @@ export function EditTaskDialog({
 
   useEffect(() => {
     if (!open) return
-    window.api.db.getProjects().then((list) => setProjects(list))
+    getTrpcVanillaClient().projects.list.query().then((list) => setProjects(list))
   }, [open])
 
   const selectedProject = projects.find((project) => project.id === task?.project_id)

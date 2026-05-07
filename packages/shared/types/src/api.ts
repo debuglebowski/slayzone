@@ -1,4 +1,4 @@
-import type { Project, CreateProjectInput, UpdateProjectInput, ExecutionContext } from '@slayzone/projects/shared'
+import type { Project, ExecutionContext } from '@slayzone/projects/shared'
 import type { Task, CreateTaskInput, UpdateTaskInput, DesktopHandoffPolicy, TaskTemplate, CreateTaskTemplateInput, UpdateTaskTemplateInput, TaskArtifact, CreateArtifactInput, UpdateArtifactInput, ArtifactFolder, CreateArtifactFolderInput, UpdateArtifactFolderInput } from '@slayzone/task/shared'
 import type { ArtifactVersion, VersionRef, DiffResult, PruneReport } from '@slayzone/task-artifacts/shared'
 import type { Tag } from '@slayzone/tags/shared'
@@ -266,14 +266,6 @@ export interface PtyCreateOptions {
 // ElectronAPI interface - the IPC contract between renderer and main
 export interface ElectronAPI {
   db: {
-    // Projects
-    getProjects: () => Promise<Project[]>
-    createProject: (data: CreateProjectInput) => Promise<Project>
-    updateProject: (data: UpdateProjectInput) => Promise<Project>
-    deleteProject: (id: string) => Promise<boolean>
-    reorderProjects: (projectIds: string[]) => Promise<void>
-    uploadProjectIcon: (projectId: string, sourcePath: string) => Promise<Project>
-
     // Tasks
     getTasks: () => Promise<Task[]>
     loadBoardData: () => Promise<{

@@ -96,7 +96,7 @@ export function TaskMetadataSidebar({
       const [tasks, currentBlockers, allProjects] = await Promise.all([
         window.api.db.getTasks(),
         window.api.taskDependencies.getBlockers(task.id),
-        window.api.db.getProjects()
+        getTrpcVanillaClient().projects.list.query()
       ])
       setAllTasks(tasks.filter((t) => t.id !== task.id))
       setBlockers(currentBlockers)

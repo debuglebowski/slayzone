@@ -36,6 +36,15 @@ vi.mock('./project-settings-shared', () => ({
   )
 }))
 
+const mockUpdateProject = vi.fn()
+vi.mock('@slayzone/transport/client', () => ({
+  getTrpcVanillaClient: () => ({
+    projects: {
+      update: { mutate: (...args: unknown[]) => mockUpdateProject(...args) },
+    },
+  }),
+}))
+
 import { TasksGeneralTab } from './TasksGeneralTab'
 
 const TEST_COLUMNS = [
@@ -67,11 +76,8 @@ function makeProject(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mockResolveColumns.mockReturnValue(TEST_COLUMNS)
-  ;(window as any).api = {
-    db: {
-      updateProject: vi.fn().mockResolvedValue(makeProject())
-    }
-  }
+  mockUpdateProject.mockReset()
+  mockUpdateProject.mockResolvedValue(makeProject())
 })
 
 afterEach(cleanup)
@@ -128,7 +134,7 @@ describe('TasksGeneralTab', () => {
       fireEvent.submit(screen.getByRole('button', { name: /save/i }).closest('form')!)
     })
 
-    expect(window.api.db.updateProject).toHaveBeenCalledWith({
+    expect(mockUpdateProject).toHaveBeenCalledWith({
       id: 'proj-1',
       taskAutomationConfig: { on_terminal_active: 'in_progress', on_terminal_idle: 'done' }
     })
@@ -142,7 +148,7 @@ describe('TasksGeneralTab', () => {
       fireEvent.submit(screen.getByRole('button', { name: /save/i }).closest('form')!)
     })
 
-    expect(window.api.db.updateProject).toHaveBeenCalledWith({
+    expect(mockUpdateProject).toHaveBeenCalledWith({
       id: 'proj-1',
       taskAutomationConfig: null
     })
@@ -150,7 +156,7 @@ describe('TasksGeneralTab', () => {
 
   it('calls onUpdated with returned project after save', async () => {
     const returned = makeProject({ name: 'Updated' })
-    ;(window.api.db.updateProject as any).mockResolvedValue(returned)
+    mockUpdateProject.mockResolvedValue(returned)
     const onUpdated = vi.fn()
     render(<TasksGeneralTab project={makeProject()} onUpdated={onUpdated} />)
 

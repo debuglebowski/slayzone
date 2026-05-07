@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { FolderOpen, Upload } from 'lucide-react'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
@@ -57,7 +58,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     if (result.canceled || !result.filePaths[0]) return
     setIconBusy(true)
     try {
-      const updated = await window.api.db.uploadProjectIcon(project.id, result.filePaths[0])
+      const updated = await getTrpcVanillaClient().projects.uploadIcon.mutate({ projectId: project.id, sourcePath: result.filePaths[0] })
       setIconImagePath(updated.icon_image_path)
       setIconCacheKey(updated.updated_at)
       onChanged(updated)
@@ -69,7 +70,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const handleRemoveIcon = async () => {
     setIconBusy(true)
     try {
-      const updated = await window.api.db.updateProject({ id: project.id, iconImagePath: null })
+      const updated = await getTrpcVanillaClient().projects.update.mutate({ id: project.id, iconImagePath: null })
       setIconImagePath(null)
       setIconCacheKey(updated.updated_at)
       onChanged(updated)
@@ -85,7 +86,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setLoading(true)
     try {
       const trimmedLetters = iconLetters.trim()
-      const updated = await window.api.db.updateProject({
+      const updated = await getTrpcVanillaClient().projects.update.mutate({
         id: project.id,
         name: name.trim(),
         color,

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   Plus,
   Trash2,
@@ -109,7 +110,7 @@ export function ColumnsTab({ project, onUpdated, lockedByProvider }: ColumnsTabP
       return
     }
 
-    const updated = await window.api.db.updateProject({
+    const updated = await getTrpcVanillaClient().projects.update.mutate({
       id: project.id,
       columnsConfig: normalized
     })

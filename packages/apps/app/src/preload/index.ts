@@ -27,14 +27,6 @@ window.addEventListener('paste', (e) => {
 // Custom APIs for renderer
 const api: ElectronAPI = {
   db: {
-    // Projects
-    getProjects: () => ipcRenderer.invoke('db:projects:getAll'),
-    createProject: (data) => ipcRenderer.invoke('db:projects:create', data),
-    updateProject: (data) => ipcRenderer.invoke('db:projects:update', data),
-    deleteProject: (id) => ipcRenderer.invoke('db:projects:delete', id),
-    reorderProjects: (projectIds) => ipcRenderer.invoke('db:projects:reorder', projectIds),
-    uploadProjectIcon: (projectId, sourcePath) => ipcRenderer.invoke('db:projects:uploadIcon', projectId, sourcePath),
-
     // Tasks
     getTasks: () => ipcRenderer.invoke('db:tasks:getAll'),
     loadBoardData: () => ipcRenderer.invoke('db:loadBoardData'),

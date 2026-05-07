@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { GroupKey } from './kanban'
 
 function hasTaskIdentity(task: Task | null | undefined): task is Task {
@@ -399,7 +400,7 @@ export function useTasksData(): UseTasksDataReturn {
       return [...reordered, ...rest]
     })
 
-    window.api.db.reorderProjects(projectIds).catch(() => {
+    getTrpcVanillaClient().projects.reorder.mutate({ projectIds }).catch(() => {
       setProjects(snapshot)
     })
   }, [])

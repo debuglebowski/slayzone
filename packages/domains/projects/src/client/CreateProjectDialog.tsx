@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
@@ -71,7 +72,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
 
     setLoading(true)
     try {
-      const project = await window.api.db.createProject({
+      const project = await getTrpcVanillaClient().projects.create.mutate({
         name: name.trim(),
         color,
         path: path || undefined

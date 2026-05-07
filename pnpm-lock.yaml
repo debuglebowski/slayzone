@@ -672,6 +672,9 @@ importers:
       '@slayzone/test-panel':
         specifier: workspace:*
         version: link:../test-panel
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1042,6 +1045,9 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1500,6 +1506,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
+      '@slayzone/projects':
+        specifier: workspace:*
+        version: link:../../domains/projects
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags

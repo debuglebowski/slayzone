@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Button, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import type { Project, TaskAutomationConfig } from '@slayzone/projects/shared'
 import { resolveColumns } from '@slayzone/workflow'
@@ -34,7 +35,7 @@ export function TasksGeneralTab({ project, onUpdated }: TasksGeneralTabProps) {
         on_terminal_idle: onIdle === 'none' ? null : onIdle
       }
       const hasValue = config.on_terminal_active || config.on_terminal_idle
-      const updated = await window.api.db.updateProject({
+      const updated = await getTrpcVanillaClient().projects.update.mutate({
         id: project.id,
         taskAutomationConfig: hasValue ? config : null
       })

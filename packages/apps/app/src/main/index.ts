@@ -113,7 +113,6 @@ import { normalizeProjectStatusData } from './db/status-normalization'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
 // Domain handlers
-import { registerProjectHandlers } from '@slayzone/projects/electron'
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/electron'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
@@ -1200,7 +1199,6 @@ app.whenReady().then(async () => {
 
   // Register domain handlers (inject ipcMain and db)
   const notifyTasksChanged = (): void => { mainWindow?.webContents.send('tasks:changed') }
-  registerProjectHandlers(ipcMain, db)
   registerTaskHandlers(ipcMain, db, notifyTasksChanged)
   registerTaskTemplateHandlers(ipcMain, db)
   registerHistoryHandlers(ipcMain, db)

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import type { Project } from '@slayzone/projects/shared'
 import {
   Select,
@@ -22,7 +23,7 @@ export function ProjectSelect({
   const [projects, setProjects] = useState<Project[]>([])
 
   useEffect(() => {
-    window.api.db.getProjects().then(setProjects)
+    getTrpcVanillaClient().projects.list.query().then(setProjects)
   }, [])
 
   return (
