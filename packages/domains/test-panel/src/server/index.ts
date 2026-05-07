@@ -1,1 +1,20 @@
 export { scanTestFiles } from './scanner'
+export {
+  listCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  reorderCategories,
+  listProfiles,
+  saveProfile,
+  deleteProfile,
+  applyProfile,
+  listLabels,
+  createLabel,
+  updateLabel,
+  deleteLabel,
+  listFileLabels,
+  listFileNotes,
+  setFileNote,
+  toggleFileLabel,
+} from './test-panel-store'

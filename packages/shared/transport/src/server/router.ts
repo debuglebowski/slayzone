@@ -6,6 +6,7 @@ import { historyRouter } from './routers/history'
 import { projectsRouter } from './routers/projects'
 import { tagsRouter } from './routers/tags'
 import { taskTerminalsRouter } from './routers/task-terminals'
+import { testPanelRouter } from './routers/test-panel'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
 
 export const appRouter = router({
@@ -16,6 +17,7 @@ export const appRouter = router({
   projects: projectsRouter,
   tags: tagsRouter,
   taskTerminals: taskTerminalsRouter,
+  testPanel: testPanelRouter,
   usageAnalytics: usageAnalyticsRouter,
 })
 

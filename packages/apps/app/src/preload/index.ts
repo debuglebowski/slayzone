@@ -1029,26 +1029,6 @@ const api: ElectronAPI = {
     setSettings: (settings: Partial<import('@slayzone/types').BackupSettings>) => ipcRenderer.invoke('backup:setSettings', settings),
     revealInFinder: () => ipcRenderer.invoke('backup:revealInFinder')
   },
-  testPanel: {
-    getCategories: (projectId) => ipcRenderer.invoke('db:testPanel:getCategories', projectId),
-    createCategory: (data) => ipcRenderer.invoke('db:testPanel:createCategory', data),
-    updateCategory: (data) => ipcRenderer.invoke('db:testPanel:updateCategory', data),
-    deleteCategory: (id) => ipcRenderer.invoke('db:testPanel:deleteCategory', id),
-    reorderCategories: (ids) => ipcRenderer.invoke('db:testPanel:reorderCategories', ids),
-    getProfiles: () => ipcRenderer.invoke('db:testPanel:getProfiles'),
-    saveProfile: (profile) => ipcRenderer.invoke('db:testPanel:saveProfile', profile),
-    deleteProfile: (id) => ipcRenderer.invoke('db:testPanel:deleteProfile', id),
-    applyProfile: (projectId, profileId) => ipcRenderer.invoke('db:testPanel:applyProfile', projectId, profileId),
-    scanFiles: (projectPath, projectId) => ipcRenderer.invoke('db:testPanel:scanFiles', projectPath, projectId),
-    getLabels: (projectId) => ipcRenderer.invoke('db:testPanel:getLabels', projectId),
-    createLabel: (data) => ipcRenderer.invoke('db:testPanel:createLabel', data),
-    updateLabel: (data) => ipcRenderer.invoke('db:testPanel:updateLabel', data),
-    deleteLabel: (id) => ipcRenderer.invoke('db:testPanel:deleteLabel', id),
-    getFileLabels: (projectId) => ipcRenderer.invoke('db:testPanel:getFileLabels', projectId),
-    toggleFileLabel: (projectId, filePath, labelId) => ipcRenderer.invoke('db:testPanel:toggleFileLabel', projectId, filePath, labelId),
-    getFileNotes: (projectId) => ipcRenderer.invoke('db:testPanel:getFileNotes', projectId),
-    setFileNote: (projectId, filePath, note) => ipcRenderer.invoke('db:testPanel:setFileNote', projectId, filePath, note)
-  },
 
 }
 

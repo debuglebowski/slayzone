@@ -9,13 +9,13 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "picomatch": "^4.0.0"
   },
@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/picomatch": "^4.0.2",
     "@types/react": "^19.2.7",
     "lucide-react": "^0.562.0",
     "typescript": "^5.9.3"

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { Settings, RefreshCw, ChevronRight } from 'lucide-react'
 import { Button, Card, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@slayzone/ui'
 import type { TestCategory, ScanResult, TestLabel, TestFileLabel, TestFileNote } from '../shared/types'
@@ -78,9 +79,9 @@ export function TestPanel({ projectId, projectPath, groupBy, onOpenSettings }: T
     if (!projectId) return
     const id = ++requestIdRef.current
     const [lbls, fls, fns] = await Promise.all([
-      window.api.testPanel.getLabels(projectId),
-      window.api.testPanel.getFileLabels(projectId),
-      window.api.testPanel.getFileNotes(projectId)
+      getTrpcVanillaClient().testPanel.getLabels.query({ projectId: projectId }),
+      getTrpcVanillaClient().testPanel.getFileLabels.query({ projectId: projectId }),
+      getTrpcVanillaClient().testPanel.getFileNotes.query({ projectId: projectId })
     ])
     if (requestIdRef.current === id) {
       setLabels(lbls)
@@ -95,11 +96,11 @@ export function TestPanel({ projectId, projectPath, groupBy, onOpenSettings }: T
     setLoading(true)
     try {
       const [cats, scan, lbls, fls, fns] = await Promise.all([
-        window.api.testPanel.getCategories(projectId),
-        window.api.testPanel.scanFiles(projectPath, projectId),
-        window.api.testPanel.getLabels(projectId),
-        window.api.testPanel.getFileLabels(projectId),
-        window.api.testPanel.getFileNotes(projectId)
+        getTrpcVanillaClient().testPanel.getCategories.query({ projectId: projectId }),
+        getTrpcVanillaClient().testPanel.scanFiles.query({ projectPath, projectId }),
+        getTrpcVanillaClient().testPanel.getLabels.query({ projectId: projectId }),
+        getTrpcVanillaClient().testPanel.getFileLabels.query({ projectId: projectId }),
+        getTrpcVanillaClient().testPanel.getFileNotes.query({ projectId: projectId })
       ])
       if (requestIdRef.current === id) {
         setCategories(cats)
@@ -126,13 +127,13 @@ export function TestPanel({ projectId, projectPath, groupBy, onOpenSettings }: T
 
   const handleToggleLabel = async (filePath: string, labelId: string) => {
     if (!projectId) return
-    await window.api.testPanel.toggleFileLabel(projectId, filePath, labelId)
+    await getTrpcVanillaClient().testPanel.toggleFileLabel.mutate({ projectId, filePath, labelId })
     reloadLabels()
   }
 
   const handleSetNote = async (filePath: string, note: string) => {
     if (!projectId) return
-    await window.api.testPanel.setFileNote(projectId, filePath, note)
+    await getTrpcVanillaClient().testPanel.setFileNote.mutate({ projectId, filePath, note })
     reloadLabels()
   }
 

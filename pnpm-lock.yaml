@@ -1161,6 +1161,9 @@ importers:
 
   packages/domains/test-panel:
     dependencies:
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1177,6 +1180,9 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      '@types/picomatch':
+        specifier: ^4.0.2
+        version: 4.0.3
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.8
@@ -1535,6 +1541,9 @@ importers:
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
+      '@slayzone/test-panel':
+        specifier: workspace:*
+        version: link:../../domains/test-panel
       '@slayzone/usage-analytics':
         specifier: workspace:*
         version: link:../../domains/usage-analytics
@@ -4453,6 +4462,9 @@ packages:
 
   '@types/node@24.12.0':
     resolution: {integrity: sha512-GYDxsZi3ChgmckRT9HPU0WEhKLP08ev/Yfcq2AstjrDASOYCSXeyjDsHg4v5t4jOj7cyDX3vmprafKlWIG9MXQ==}
+
+  '@types/picomatch@4.0.3':
+    resolution: {integrity: sha512-iG0T6+nYJ9FAPmx9SsUlnwcq1ZVRuCXcVEvWnntoPlrOpwtSTKNDC9uVAxTsC3PUvJ+99n4RpAcNgBbHX3JSnQ==}
 
   '@types/plist@3.0.5':
     resolution: {integrity: sha512-E6OCaRmAe4WDmWNsL/9RMqdkkzDCY1etutkflWk4c+AcjDU07Pcz1fQwTX0TQz+Pxqn9i4L1TU3UFpjnrcDgxA==}
@@ -11513,6 +11525,8 @@ snapshots:
   '@types/node@24.12.0':
     dependencies:
       undici-types: 7.16.0
+
+  '@types/picomatch@4.0.3': {}
 
   '@types/plist@3.0.5':
     dependencies:

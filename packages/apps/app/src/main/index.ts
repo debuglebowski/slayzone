@@ -135,7 +135,6 @@ import { registerAiConfigHandlers } from '@slayzone/ai-config/electron'
 import { registerIntegrationHandlers, ensureIntegrationSchema, ElectronStorageAdapter } from '@slayzone/integrations/electron'
 import { startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/electron'
-import { registerTestPanelHandlers } from '@slayzone/test-panel/electron'
 import { AutomationEngine, automationsEvents } from '@slayzone/automations/server'
 import { registerScreenshotHandlers } from './screenshot'
 import { registerClipboardHandlers } from './clipboard-handlers'
@@ -1318,8 +1317,7 @@ app.whenReady().then(async () => {
   registerScreenshotHandlers(browserViewManager)
   registerExportImportHandlers(ipcMain, db, isPlaywright)
   registerLeaderboardHandlers(ipcMain, db)
-  registerTestPanelHandlers(ipcMain, db)
-  logBoot('misc handlers registered (file-editor/clipboard/screenshot/export/leaderboard/tests)')
+  logBoot('misc handlers registered (file-editor/clipboard/screenshot/export/leaderboard)')
   const automationEngine = new AutomationEngine(db)
   // Each automation 'changed' emit also re-fetches tasks (engine mutations
   // touch task rows). Renderer subscription `automations.onChanged` handles

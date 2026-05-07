@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import {
   Input,
   Button,
@@ -53,9 +54,9 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
 
   const reload = useCallback(async () => {
     const [cats, lbls, profs] = await Promise.all([
-      window.api.testPanel.getCategories(projectId),
-      window.api.testPanel.getLabels(projectId),
-      window.api.testPanel.getProfiles()
+      getTrpcVanillaClient().testPanel.getCategories.query({ projectId: projectId }),
+      getTrpcVanillaClient().testPanel.getLabels.query({ projectId: projectId }),
+      getTrpcVanillaClient().testPanel.getProfiles.query()
     ])
     setCategories(cats)
     setLabels(lbls)
@@ -68,7 +69,7 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
 
   const handleProfileChange = async (value: string) => {
     if (value !== CUSTOM_VALUE && value !== '') {
-      await window.api.testPanel.applyProfile(projectId, value)
+      await getTrpcVanillaClient().testPanel.applyProfile.mutate({ projectId, profileId: value })
       reload()
     }
   }
@@ -79,7 +80,7 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
       name: 'New Category',
       pattern: '**/*.test.ts'
     }
-    await window.api.testPanel.createCategory(input)
+    await getTrpcVanillaClient().testPanel.createCategory.mutate(input)
     reload()
   }
 
@@ -90,12 +91,12 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
 
   const updateCategory = async (id: string, field: string, value: string | number) => {
     if (!categoryIdsRef.current.has(id)) return
-    await window.api.testPanel.updateCategory({ id, [field]: value })
+    await getTrpcVanillaClient().testPanel.updateCategory.mutate({ id, [field]: value })
     reload()
   }
 
   const deleteCategory = async (id: string) => {
-    await window.api.testPanel.deleteCategory(id)
+    await getTrpcVanillaClient().testPanel.deleteCategory.mutate({ id: id })
     reload()
   }
 
@@ -108,28 +109,28 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
       name: name.trim(),
       categories: categories.map((c) => ({ name: c.name, pattern: c.pattern, color: c.color }))
     }
-    await window.api.testPanel.saveProfile(profile)
-    setProfiles(await window.api.testPanel.getProfiles())
+    await getTrpcVanillaClient().testPanel.saveProfile.mutate(profile)
+    setProfiles(await getTrpcVanillaClient().testPanel.getProfiles.query())
     setSavePopoverOpen(false)
   }
 
   const deleteProfile = async (id: string) => {
-    await window.api.testPanel.deleteProfile(id)
-    setProfiles(await window.api.testPanel.getProfiles())
+    await getTrpcVanillaClient().testPanel.deleteProfile.mutate({ id: id })
+    setProfiles(await getTrpcVanillaClient().testPanel.getProfiles.query())
   }
 
   const addLabel = async () => {
-    await window.api.testPanel.createLabel({ project_id: projectId, name: 'New Label' })
+    await getTrpcVanillaClient().testPanel.createLabel.mutate({ project_id: projectId, name: 'New Label' })
     reload()
   }
 
   const updateLabel = async (id: string, field: string, value: string | number) => {
-    await window.api.testPanel.updateLabel({ id, [field]: value })
+    await getTrpcVanillaClient().testPanel.updateLabel.mutate({ id, [field]: value })
     reload()
   }
 
   const deleteLabel = async (id: string) => {
-    await window.api.testPanel.deleteLabel(id)
+    await getTrpcVanillaClient().testPanel.deleteLabel.mutate({ id: id })
     reload()
   }
 
