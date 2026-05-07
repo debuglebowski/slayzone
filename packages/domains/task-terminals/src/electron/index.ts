@@ -1,1 +1,0 @@
-export { registerTerminalTabsHandlers } from './handlers'

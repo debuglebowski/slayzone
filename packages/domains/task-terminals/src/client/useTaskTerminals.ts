@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { TabDisplayMode, TerminalTab, TerminalGroup } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { usePty } from '@slayzone/terminal'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 interface UseTaskTerminalsResult {
   tabs: TerminalTab[]
@@ -60,8 +61,9 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
   useEffect(() => {
     const loadTabs = async () => {
       try {
-        await window.api.tabs.ensureMain(taskId, defaultMode)
-        const loadedTabs = await window.api.tabs.list(taskId)
+        const trpc = getTrpcVanillaClient()
+        await trpc.taskTerminals.ensureMain.mutate({ taskId, mode: defaultMode })
+        const loadedTabs = await trpc.taskTerminals.list.query({ taskId })
         setTabs(loadedTabs)
         // Set active to main group if current active doesn't exist
         const loadedGroups = computeGroups(loadedTabs)
@@ -79,24 +81,28 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
   // Re-fetch when an external actor (CLI via REST, other window) mutates tabs.
   // Optionally focus the new tab's group if `focusTabId` is provided.
   useEffect(() => {
-    return window.api.tabs.onChanged(async ({ taskId: changedTaskId, focusTabId }) => {
-      if (changedTaskId !== taskId) return
-      try {
-        const loadedTabs = await window.api.tabs.list(taskId)
-        setTabs(loadedTabs)
-        if (focusTabId) {
-          const target = loadedTabs.find(t => t.id === focusTabId)
-          if (target) setActiveGroupId(target.groupId)
+    const trpc = getTrpcVanillaClient()
+    const sub = trpc.taskTerminals.onChanged.subscribe(undefined, {
+      onData: async ({ taskId: changedTaskId, focusTabId }) => {
+        if (changedTaskId !== taskId) return
+        try {
+          const loadedTabs = await trpc.taskTerminals.list.query({ taskId })
+          setTabs(loadedTabs)
+          if (focusTabId) {
+            const target = loadedTabs.find(t => t.id === focusTabId)
+            if (target) setActiveGroupId(target.groupId)
+          }
+        } catch (err) {
+          console.error('[useTaskTerminals] Failed to refresh tabs:', err)
         }
-      } catch (err) {
-        console.error('[useTaskTerminals] Failed to refresh tabs:', err)
-      }
+      },
     })
+    return () => sub.unsubscribe()
   }, [taskId])
 
   // Create a new group with one terminal
   const createTab = useCallback(async (mode?: TerminalMode): Promise<TerminalTab> => {
-    const newTab = await window.api.tabs.create({ taskId, mode: mode || 'terminal' })
+    const newTab = await getTrpcVanillaClient().taskTerminals.create.mutate({ taskId, mode: mode || 'terminal' })
     setTabs(prev => [...prev, newTab])
     setActiveGroupId(newTab.groupId)
     return newTab
@@ -104,7 +110,7 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
 
   // Split: add a new pane to the same group as the target tab
   const splitTab = useCallback(async (tabId: string): Promise<TerminalTab | null> => {
-    const newTab = await window.api.tabs.split(tabId)
+    const newTab = await getTrpcVanillaClient().taskTerminals.split.mutate({ tabId })
     if (newTab) {
       setTabs(prev => [...prev, newTab])
     }
@@ -115,7 +121,7 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
     if (closingTabIdsRef.current.has(tabId)) return false
     closingTabIdsRef.current.add(tabId)
     try {
-      const success = await window.api.tabs.delete(tabId)
+      const success = await getTrpcVanillaClient().taskTerminals.delete.mutate({ tabId })
       if (success) {
         const sessionId = `${taskId}:${tabId}`
         if (!skipKill) {
@@ -182,14 +188,14 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
 
   // Move a pane to a different group (null = new standalone group)
   const movePane = useCallback(async (tabId: string, targetGroupId: string | null): Promise<void> => {
-    const updated = await window.api.tabs.moveToGroup(tabId, targetGroupId)
+    const updated = await getTrpcVanillaClient().taskTerminals.moveToGroup.mutate({ tabId, targetGroupId })
     if (updated) {
       setTabs(prev => prev.map(t => t.id === tabId ? updated : t))
     }
   }, [])
 
   const renameTab = useCallback(async (tabId: string, label: string | null): Promise<void> => {
-    const updated = await window.api.tabs.update({ id: tabId, label })
+    const updated = await getTrpcVanillaClient().taskTerminals.update.mutate({ id: tabId, label })
     if (updated) {
       setTabs(prev => prev.map(t => t.id === tabId ? updated : t))
     }
@@ -205,7 +211,7 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
       // reacting to the PTY exit below (e.g. temp-task auto-close) sees the
       // new mode in the DB and can distinguish "user toggled mode" from
       // "user terminated the session".
-      const updated = await window.api.tabs.update({ id: tabId, displayMode })
+      const updated = await getTrpcVanillaClient().taskTerminals.update.mutate({ id: tabId, displayMode })
 
       // Kill the OLD transport BEFORE flipping client state. If we flipped
       // first, React would mount the new transport (e.g. ChatPanel →

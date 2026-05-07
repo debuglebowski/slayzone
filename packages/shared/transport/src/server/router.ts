@@ -5,6 +5,7 @@ import { diagnosticsRouter } from './routers/diagnostics'
 import { historyRouter } from './routers/history'
 import { projectsRouter } from './routers/projects'
 import { tagsRouter } from './routers/tags'
+import { taskTerminalsRouter } from './routers/task-terminals'
 
 export const appRouter = router({
   agentTurns: agentTurnsRouter,
@@ -13,6 +14,7 @@ export const appRouter = router({
   history: historyRouter,
   projects: projectsRouter,
   tags: tagsRouter,
+  taskTerminals: taskTerminalsRouter,
 })
 
 export type AppRouter = typeof appRouter

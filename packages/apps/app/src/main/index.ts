@@ -123,7 +123,6 @@ import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalMod
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import { attachFloatingAgent, setupFloatingAgent } from './floating-agent'
 import { attachTaskWindows, setupTaskWindows } from './task-windows'
-import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/electron'
 import { registerWorktreeHandlers } from '@slayzone/worktrees/electron'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
@@ -1291,8 +1290,7 @@ app.whenReady().then(async () => {
   }
 
   setOnTaskReachedTerminalHandler(electronOnTaskReachedTerminal)
-  registerTerminalTabsHandlers(ipcMain, db)
-  logBoot('terminal-tabs handlers registered')
+  logBoot('task-terminals handlers migrated to tRPC')
   registerChatHandlers(ipcMain, db, { onChatEvent: initChatTurnSubscriber(db) })
   // One-shot: backfill `chatMode` for tasks that pre-date the chat-mode UI so
   // upgraded users keep their current `--allow-dangerously-skip-permissions`

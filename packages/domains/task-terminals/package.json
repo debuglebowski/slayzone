@@ -9,7 +9,6 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
@@ -20,6 +19,7 @@
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "fzf": "^0.5.2",

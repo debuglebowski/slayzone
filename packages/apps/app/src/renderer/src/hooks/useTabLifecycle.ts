@@ -4,6 +4,7 @@ import type { Project } from '@slayzone/projects/shared'
 import { useTabStore, type Tab } from '@slayzone/settings'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { track } from '@slayzone/telemetry/client'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 type PtyContext = {
   subscribeExit: (sessionId: string, cb: (exitCode: number) => void) => () => void
@@ -60,7 +61,7 @@ export function useTabLifecycle({
           // Skip auto-close when the PTY exit was triggered by a display-mode
           // switch (terminal → chat). setTabDisplayMode persists displayMode
           // before killing the PTY, so the row already reflects the new mode.
-          const tabsList = await window.api.tabs.list(tab.taskId).catch(() => null)
+          const tabsList = await getTrpcVanillaClient().taskTerminals.list.query({ taskId: tab.taskId }).catch(() => null)
           const mainTab = tabsList?.find((t) => t.isMain)
           if (mainTab?.displayMode === 'chat') return
           await window.api.db.deleteTask(tab.taskId).catch(() => {})

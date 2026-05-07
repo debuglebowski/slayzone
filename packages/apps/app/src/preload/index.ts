@@ -691,20 +691,6 @@ const api: ElectronAPI = {
       return () => { ipcRenderer.off('git:diff-watch-failed', handler) }
     }
   },
-  tabs: {
-    list: (taskId) => ipcRenderer.invoke('tabs:list', taskId),
-    create: (input) => ipcRenderer.invoke('tabs:create', input),
-    update: (input) => ipcRenderer.invoke('tabs:update', input),
-    delete: (tabId) => ipcRenderer.invoke('tabs:delete', tabId),
-    ensureMain: (taskId, mode) => ipcRenderer.invoke('tabs:ensureMain', taskId, mode),
-    split: (tabId) => ipcRenderer.invoke('tabs:split', tabId),
-    moveToGroup: (tabId, targetGroupId) => ipcRenderer.invoke('tabs:moveToGroup', tabId, targetGroupId),
-    onChanged: (cb) => {
-      const handler = (_: unknown, payload: { taskId: string; focusTabId?: string | null }) => cb(payload)
-      ipcRenderer.on('tabs:changed', handler)
-      return () => { ipcRenderer.off('tabs:changed', handler) }
-    }
-  },
   telemetry: {
     onIpcEvent: (callback: (event: string, props: Record<string, unknown>) => void) => {
       const handler = (_: unknown, event: string, props: Record<string, unknown>) => callback(event, props)

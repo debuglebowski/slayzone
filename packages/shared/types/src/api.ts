@@ -46,7 +46,6 @@ export interface ChatSessionInfo {
   /** Resolved reasoning effort this session was spawned with. `null` = inherit. */
   chatEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null
 }
-import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '@slayzone/task-terminals/shared'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import type { CreateWorktreeOpts, CreateWorktreeResult, CreateWorktreePhase, IgnoredFileNode, DetectedWorktree, MergeResult, MergeWithAIResult, GitDiffSnapshot, GitSyncResult, ConflictFileContent, ConflictAnalysis, RebaseProgress, CommitInfo, AheadBehind, StatusSummary, BranchListResult, DeleteBranchResult, PruneResult, DiffStatsSummary, WorktreeMetadata, RebaseOntoResult, DagCommit, ResolvedGraph, ForkGraphResult, GhPullRequest, GhPrTimelineEvent, CreatePrInput, CreatePrResult, MergePrInput, EditPrCommentInput, StashEntry, StashApplyResult, RepoEntry, ListProjectReposOpts } from '@slayzone/worktrees/shared'
 import type { MergeContext } from '@slayzone/task/shared'
@@ -760,16 +759,6 @@ export interface ElectronAPI {
     watchStop: (worktreePath: string) => Promise<void>
     onDiffChanged: (cb: (worktreePath: string) => void) => () => void
     onDiffWatchFailed: (cb: (worktreePath: string) => void) => () => void
-  }
-  tabs: {
-    list: (taskId: string) => Promise<TerminalTab[]>
-    create: (input: CreateTerminalTabInput) => Promise<TerminalTab>
-    update: (input: UpdateTerminalTabInput) => Promise<TerminalTab | null>
-    delete: (tabId: string) => Promise<boolean>
-    ensureMain: (taskId: string, mode: TerminalMode) => Promise<TerminalTab>
-    split: (tabId: string) => Promise<TerminalTab | null>
-    moveToGroup: (tabId: string, targetGroupId: string | null) => Promise<TerminalTab | null>
-    onChanged: (cb: (payload: { taskId: string; focusTabId?: string | null }) => void) => () => void
   }
   telemetry: {
     onIpcEvent: (callback: (event: string, props: Record<string, unknown>) => void) => () => void
