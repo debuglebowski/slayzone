@@ -520,7 +520,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     getTrpcVanillaClient().settings.get.query({ key: 'project_color_tints_enabled' }).then((v) => setColorTintsEnabled(v !== '0'))
     getTrpcVanillaClient().settings.get.query({ key: 'show_context_manager' }).then((v) => setShowContextManager(v !== '0'))
-    window.api.app.isTestsPanelEnabled().then(setTestsPanelEnabled)
+    getTrpcVanillaClient().app.meta.isTestsPanelEnabled.query().then(setTestsPanelEnabled)
   }, [settingsRevision])
 
   // Close context manager when hidden

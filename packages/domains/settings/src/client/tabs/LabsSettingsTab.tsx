@@ -4,9 +4,9 @@ import { Label, Switch } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 const LABS_FEATURES = [
-  { key: 'labs_tests_panel', label: 'Tests Panel', description: 'Show test runner panel in the home tab', loader: () => window.api.app.isTestsPanelEnabled() },
-  { key: 'labs_jira_integration', label: 'Jira Integration', description: 'Sync tasks with Jira Cloud issues', loader: () => window.api.app.isJiraIntegrationEnabled() },
-  { key: 'labs_loop_mode', label: 'Loop Command', description: 'Repeat a prompt until acceptance criteria are met', loader: () => window.api.app.isLoopModeEnabled() },
+  { key: 'labs_tests_panel', label: 'Tests Panel', description: 'Show test runner panel in the home tab', loader: () => getTrpcVanillaClient().app.meta.isTestsPanelEnabled.query() },
+  { key: 'labs_jira_integration', label: 'Jira Integration', description: 'Sync tasks with Jira Cloud issues', loader: () => getTrpcVanillaClient().app.meta.isJiraIntegrationEnabled.query() },
+  { key: 'labs_loop_mode', label: 'Loop Command', description: 'Repeat a prompt until acceptance criteria are met', loader: () => getTrpcVanillaClient().app.meta.isLoopModeEnabled.query() },
 ] as const
 
 export function LabsSettingsTab() {

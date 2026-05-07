@@ -1737,7 +1737,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     if (typeof label === 'string') logBoot(`renderer: ${label}`)
   })
 
-  ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:get-trpc-port', async () => {
     const g = globalThis as Record<string, unknown>
     if (typeof g.__trpcPort === 'number') return g.__trpcPort as number
@@ -1752,19 +1751,13 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       check()
     })
   })
-  ipcMain.handle('app:is-tests-panel-enabled', () => isLabEnabled('labs_tests_panel'))
   ipcMain.on('app:is-tests-panel-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_tests_panel') })
-  ipcMain.handle('app:is-jira-integration-enabled', () => isLabEnabled('labs_jira_integration'))
   ipcMain.on('app:is-jira-integration-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_jira_integration') })
-  ipcMain.handle('app:is-loop-mode-enabled', () => isLabEnabled('labs_loop_mode'))
   ipcMain.on('app:is-loop-mode-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_loop_mode') })
   ipcMain.handle('app:get-protocol-client-status', () => protocolClientStatus)
-  ipcMain.handle('app:get-zoom-factor', () => mainWindow?.webContents.zoomFactor ?? 1)
   ipcMain.handle('app:adjust-zoom', (_event, command: AppZoomCommand) => applyAppZoom(command))
   ipcMain.handle('app:restart-for-update', () => restartForUpdate())
   ipcMain.handle('app:check-for-updates', () => checkForUpdates())
-  ipcMain.handle('app:cli-status', () => checkCliInstalled())
-  ipcMain.handle('app:install-cli', () => installCli(getCliSrc()))
 
   // Window close
   ipcMain.handle('window:close', (event) => {

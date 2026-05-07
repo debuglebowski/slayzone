@@ -46,7 +46,7 @@ function CliInstallStep({ onNext }: { onNext: () => void }): React.JSX.Element {
   const [installed, setInstalled] = useState<boolean | null>(null)
 
   useEffect(() => {
-    window.api.app.cliStatus().then((status) => {
+    getTrpcVanillaClient().app.meta.checkCliInstalled.query().then((status) => {
       setInstalled(status.installed)
     })
   }, [])
@@ -55,7 +55,7 @@ function CliInstallStep({ onNext }: { onNext: () => void }): React.JSX.Element {
     setInstalling(true)
     setMessage('')
     try {
-      const result = await window.api.app.installCli()
+      const result = await getTrpcVanillaClient().app.meta.installCli.mutate()
       if (result.ok) {
         setInstalled(true)
         let msg = 'Installed successfully.'

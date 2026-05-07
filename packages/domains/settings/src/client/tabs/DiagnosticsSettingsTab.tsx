@@ -39,7 +39,7 @@ export function DiagnosticsSettingsTab() {
         '24h': now - 24 * 60 * 60 * 1000,
         '7d': now - 7 * 24 * 60 * 60 * 1000
       }
-      const appVersion = await window.api.app.getVersion()
+      const appVersion = await getTrpcVanillaClient().app.meta.getVersion.query()
       const bundle = await getTrpcVanillaClient().diagnostics.exportBundle.query({
         fromTsMs: fromByRange[exportRange],
         toTsMs: now,

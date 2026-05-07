@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { useEffect, useState, useRef } from 'react'
 import logo from '@/assets/logo-solid.svg'
 
@@ -18,7 +19,7 @@ export function LoadingScreen({ onDone }: { onDone?: () => void }): React.JSX.El
   onDoneRef.current = onDone
 
   useEffect(() => {
-    window.api.app.getVersion().then(setVersion)
+    getTrpcVanillaClient().app.meta.getVersion.query().then(setVersion)
   }, [])
 
   useEffect(() => {

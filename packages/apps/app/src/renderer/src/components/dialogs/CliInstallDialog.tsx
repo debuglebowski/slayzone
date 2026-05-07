@@ -18,7 +18,7 @@ export function CliInstallDialog() {
     Promise.all([
       getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' }),
       getTrpcVanillaClient().settings.get.query({ key: 'cli_install_dismissed' }),
-      window.api.app.cliStatus()
+      getTrpcVanillaClient().app.meta.checkCliInstalled.query()
     ]).then(([onboarded, dismissed, status]) => {
       if (onboarded === 'true' && dismissed !== 'true' && !status.installed) {
         setOpen(true)
@@ -30,7 +30,7 @@ export function CliInstallDialog() {
     setInstalling(true)
     setMessage('')
     try {
-      const result = await window.api.app.installCli()
+      const result = await getTrpcVanillaClient().app.meta.installCli.mutate()
       if (result.ok) {
         setInstalled(true)
         let msg = 'Installed successfully.'

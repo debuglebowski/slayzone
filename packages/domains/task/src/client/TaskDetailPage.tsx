@@ -571,7 +571,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [loopDialogOpen, setLoopDialogOpen] = useState(false)
   const loopConfigured = task?.loop_config != null && !!(task.loop_config.prompt.trim() && task.loop_config.criteriaPattern.trim())
   useEffect(() => {
-    window.api.app.isLoopModeEnabled().then(setLoopModeAvailable)
+    getTrpcVanillaClient().app.meta.isLoopModeEnabled.query().then(setLoopModeAvailable)
   }, [])
   const mainSessionId = task ? getMainSessionId(task.id) : ''
   const handleLoopConfigChange = useCallback((cfg: LoopConfig | null) => {

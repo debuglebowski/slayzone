@@ -12,7 +12,7 @@ export function AboutSettingsTab() {
 
   useEffect(() => {
     getTrpcVanillaClient().settings.get.query({ key: 'database_path' }).then(path => setDbPath(path ?? 'Default location (userData)'))
-    window.api.app.cliStatus().then(status => {
+    getTrpcVanillaClient().app.meta.checkCliInstalled.query().then(status => {
       setCliInstalled(status.installed)
       if (status.path) setCliPath(status.path)
     })
@@ -22,7 +22,7 @@ export function AboutSettingsTab() {
     setCliInstalling(true)
     setCliMessage('')
     try {
-      const result = await window.api.app.installCli()
+      const result = await getTrpcVanillaClient().app.meta.installCli.mutate()
       if (result.ok) {
         setCliInstalled(true)
         if (result.path) setCliPath(result.path)

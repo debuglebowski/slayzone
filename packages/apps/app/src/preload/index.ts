@@ -38,15 +38,10 @@ const api: ElectronAPI = {
   },
   app: {
     getProtocolClientStatus: () => ipcRenderer.invoke('app:get-protocol-client-status'),
-    getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getTrpcPort: () => ipcRenderer.invoke('app:get-trpc-port') as Promise<number>,
-    isTestsPanelEnabled: () => ipcRenderer.invoke('app:is-tests-panel-enabled'),
     isTestsPanelEnabledSync: ipcRenderer.sendSync('app:is-tests-panel-enabled-sync') as boolean,
-    isJiraIntegrationEnabled: () => ipcRenderer.invoke('app:is-jira-integration-enabled'),
     isJiraIntegrationEnabledSync: ipcRenderer.sendSync('app:is-jira-integration-enabled-sync') as boolean,
-    isLoopModeEnabled: () => ipcRenderer.invoke('app:is-loop-mode-enabled'),
     isLoopModeEnabledSync: ipcRenderer.sendSync('app:is-loop-mode-enabled-sync') as boolean,
-    getZoomFactor: () => ipcRenderer.invoke('app:get-zoom-factor'),
     adjustZoom: (command: 'in' | 'out' | 'reset') => ipcRenderer.invoke('app:adjust-zoom', command) as Promise<number>,
     isPlaywright: process.env.PLAYWRIGHT === '1',
     onGoHome: (callback: () => void) => {
@@ -167,8 +162,6 @@ const api: ElectronAPI = {
       : () => {},
     restartForUpdate: () => ipcRenderer.invoke('app:restart-for-update'),
     checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
-    cliStatus: () => ipcRenderer.invoke('app:cli-status'),
-    installCli: () => ipcRenderer.invoke('app:install-cli')
   },
   floatingAgent: {
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('floating-agent:set-enabled', enabled),

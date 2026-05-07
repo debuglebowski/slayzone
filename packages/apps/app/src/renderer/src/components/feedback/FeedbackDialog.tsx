@@ -136,7 +136,7 @@ export function FeedbackDialog(): React.JSX.Element {
 
     setSending(true)
     try {
-      const version = await window.api.app.getVersion()
+      const version = await getTrpcVanillaClient().app.meta.getVersion.query()
 
       if (composingNew || !selectedThread) {
         const threadId = crypto.randomUUID()

@@ -152,15 +152,10 @@ export interface ElectronAPI {
       registered: boolean
       reason: 'registered' | 'dev-skipped' | 'registration-failed'
     }>
-    getVersion: () => Promise<string>
     getTrpcPort: () => Promise<number>
-    isTestsPanelEnabled: () => Promise<boolean>
     isTestsPanelEnabledSync: boolean
-    isJiraIntegrationEnabled: () => Promise<boolean>
     isJiraIntegrationEnabledSync: boolean
-    isLoopModeEnabled: () => Promise<boolean>
     isLoopModeEnabledSync: boolean
-    getZoomFactor: () => Promise<number>
     adjustZoom: (command: 'in' | 'out' | 'reset') => Promise<number>
     isPlaywright: boolean
     onGoHome: (callback: () => void) => () => void
@@ -188,8 +183,6 @@ export interface ElectronAPI {
     bootMark: (label: string) => void
     restartForUpdate: () => Promise<void>
     checkForUpdates: () => Promise<void>
-    cliStatus: () => Promise<{ installed: boolean; path?: string }>
-    installCli: () => Promise<{ ok: boolean; path?: string; permissionDenied?: boolean; elevationCancelled?: boolean; error?: string; pathNotInPATH?: boolean }>
   }
   floatingAgent: {
     setEnabled: (enabled: boolean) => Promise<{ kind: string }>

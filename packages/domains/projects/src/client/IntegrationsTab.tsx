@@ -202,7 +202,7 @@ export function IntegrationsTab({
     if (open) {
       setSelectedIntegrationEntry(null)
       setSelectedIntegrationMode(null)
-      window.api.app.isJiraIntegrationEnabled().then(setJiraEnabled)
+      getTrpcVanillaClient().app.meta.isJiraIntegrationEnabled.query().then(setJiraEnabled)
     }
   }, [open, project.id])
 

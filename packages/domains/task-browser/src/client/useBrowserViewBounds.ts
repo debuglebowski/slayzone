@@ -1,4 +1,5 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 interface UseBrowserViewBoundsOpts {
   visible: boolean
@@ -28,7 +29,7 @@ export function useBrowserViewBounds(
   useEffect(() => {
     let cancelled = false
 
-    void window.api.app.getZoomFactor().then((factor) => {
+    void getTrpcVanillaClient().app.meta.getZoomFactor.query().then((factor) => {
       if (!cancelled) setAppZoomFactor(factor)
     })
 

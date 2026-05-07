@@ -57,7 +57,7 @@ export type AppDeps = {
   appIsLoopModeEnabled: () => boolean
   appGetZoomFactor: () => number
   appCheckCliInstalled: () => { installed: boolean; path?: string; mode?: string; error?: string } | Promise<{ installed: boolean; path?: string; mode?: string; error?: string }>
-  appInstallCli: () => Promise<{ ok: boolean; path?: string; error?: string }>
+  appInstallCli: () => Promise<{ ok: boolean; path?: string; error?: string; pathNotInPATH?: boolean; elevationCancelled?: boolean; permissionDenied?: boolean }>
 
   // db:feedback (6 ops — pure DB)
   feedbackListThreads: () => unknown

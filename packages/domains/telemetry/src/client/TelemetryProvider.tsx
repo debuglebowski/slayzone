@@ -36,7 +36,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
 
       const ph = await getPosthogInstance()
       if (ph) {
-        window.api.app.getVersion().then((version) => {
+        getTrpcVanillaClient().app.meta.getVersion.query().then((version) => {
           ph.register({ app_version: version })
           track('app_opened', { version })
         })

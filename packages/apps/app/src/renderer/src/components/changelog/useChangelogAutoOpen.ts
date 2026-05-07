@@ -12,7 +12,7 @@ export function useChangelogAutoOpen(): [boolean, string | null, () => void] {
     let cancelled = false
     async function check() {
       const [currentVersion, lastSeen] = await Promise.all([
-        window.api.app.getVersion(),
+        getTrpcVanillaClient().app.meta.getVersion.query(),
         getTrpcVanillaClient().settings.get.query({ key: SETTINGS_KEY }),
       ])
       if (cancelled) return
@@ -34,7 +34,7 @@ export function useChangelogAutoOpen(): [boolean, string | null, () => void] {
 
   const dismiss = () => {
     setShouldOpen(false)
-    window.api.app.getVersion().then((v) => getTrpcVanillaClient().settings.set.mutate({ key: SETTINGS_KEY, value: v }))
+    getTrpcVanillaClient().app.meta.getVersion.query().then((v) => getTrpcVanillaClient().settings.set.mutate({ key: SETTINGS_KEY, value: v }))
   }
 
   return [shouldOpen, lastSeenVersion, dismiss]
