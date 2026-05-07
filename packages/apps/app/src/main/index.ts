@@ -1529,17 +1529,29 @@ app.whenReady().then(async () => {
       registerBrowserTab,
       unregisterBrowserTab,
       setActiveBrowserTab,
-      // Other webview methods stay as IPC for now — closure-scoped state
-      // (registeredWebviews/keyboardPassthroughWebviews/policies) lives in
-      // inline handlers; refactor would require a webview-shortcuts module.
       registerShortcuts: () => {},
       setKeyboardPassthrough: () => {},
       setDesktopHandoffPolicy: () => false,
       openDevToolsBottom: async () => false,
       openDevToolsDetached: async () => false,
-      closeDevTools: async () => false,
-      isDevToolsOpened: () => false,
-      disableDeviceEmulation: () => false,
+      closeDevTools: async (webviewId: number) => {
+        const wc = webContents.fromId(webviewId)
+        if (!wc || wc.isDestroyed()) return false
+        if (wc.isDevToolsOpened()) wc.closeDevTools()
+        return true
+      },
+      isDevToolsOpened: (webviewId: number) => {
+        const wc = webContents.fromId(webviewId)
+        if (!wc || wc.isDestroyed()) return false
+        return wc.isDevToolsOpened()
+      },
+      disableDeviceEmulation: (webviewId: number) => {
+        const wc = webContents.fromId(webviewId)
+        if (!wc) return false
+        wc.disableDeviceEmulation()
+        wc.setUserAgent(_chromeUa)
+        return true
+      },
     },
     authGithubSystemSignIn: async (input) => {
       try {
@@ -2081,17 +2093,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     return wc.isDevToolsOpened()
   })
 
-  ipcMain.handle('webview:close-devtools', (_, webviewId: number) => {
-    const wc = webContents.fromId(webviewId)
-    if (!wc || wc.isDestroyed()) {
-      console.warn('[webview:close-devtools] missing/destroyed webContents', { webviewId })
-      return false
-    }
-    if (wc.isDevToolsOpened()) wc.closeDevTools()
-    console.log('[webview:close-devtools]', { webviewId, opened: wc.isDevToolsOpened() })
-    return true
-  })
-
   ipcMain.handle('webview:open-devtools-detached', async (_, webviewId: number) => {
     const wc = webContents.fromId(webviewId)
     if (!wc || wc.isDestroyed()) {
@@ -2133,12 +2134,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
   // Inline DevTools IPC handlers removed — DevTools now docked natively via browser-view-manager
 
-  ipcMain.handle('webview:is-devtools-opened', (_, webviewId: number) => {
-    const wc = webContents.fromId(webviewId)
-    if (!wc || wc.isDestroyed()) return false
-    return wc.isDevToolsOpened()
-  })
-
   // Webview device emulation
   ipcMain.handle(
     'webview:enable-device-emulation',
@@ -2166,13 +2161,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     }
   )
 
-  ipcMain.handle('webview:disable-device-emulation', (_, webviewId: number) => {
-    const wc = webContents.fromId(webviewId)
-    if (!wc) return false
-    wc.disableDeviceEmulation()
-    wc.setUserAgent(_chromeUa)
-    return true
-  })
 
   // --- Browser View Manager (WebContentsView) ---
   // Wire handoff policy mirror so main-process hardening listeners see WCV policies
