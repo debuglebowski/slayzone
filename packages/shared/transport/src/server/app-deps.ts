@@ -81,7 +81,7 @@ export function getAppDeps(): AppDeps {
 
 // Pty deps
 import type { TerminalState } from '@slayzone/terminal/shared'
-import type { createPtyOps } from '@slayzone/terminal/electron'
+import type { createPtyOps, createChatOps, createChatQueueOps } from '@slayzone/terminal/electron'
 
 export type PtyDeps = {
   ops: ReturnType<typeof createPtyOps>
@@ -105,6 +105,29 @@ export function setPtyDeps(deps: PtyDeps): void { ptyDeps = deps }
 export function getPtyDeps(): PtyDeps {
   if (!ptyDeps) throw new Error('ptyDeps not initialized')
   return ptyDeps
+}
+
+// Chat deps
+export type ChatDeps = {
+  ops: ReturnType<typeof createChatOps>
+  queueOps: ReturnType<typeof createChatQueueOps>
+  events: EventEmitter & {
+    on(event: 'event', listener: (tabId: string, agentEvent: unknown, seq: number) => void): EventEmitter
+    on(event: 'exit', listener: (tabId: string, sessionId: string, code: number | null, signal: string | null) => void): EventEmitter
+    off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+  }
+  queueEvents: EventEmitter & {
+    on(event: 'queue-changed', listener: (tabId: string) => void): EventEmitter
+    on(event: 'queue-drained', listener: (tabId: string, original: string) => void): EventEmitter
+    off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+  }
+}
+
+let chatDeps: ChatDeps | null = null
+export function setChatDeps(deps: ChatDeps): void { chatDeps = deps }
+export function getChatDeps(): ChatDeps {
+  if (!chatDeps) throw new Error('chatDeps not initialized')
+  return chatDeps
 }
 
 // Processes deps — lifecycle managed separately because EventEmitter must be live

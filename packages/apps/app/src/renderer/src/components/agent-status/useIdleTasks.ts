@@ -89,7 +89,7 @@ export function useIdleTasks(
   const refresh = useCallback(async () => {
     const [ptys, chats] = await Promise.all([
       getTrpcVanillaClient().pty.list.query(),
-      window.api.chat.list()
+      getTrpcVanillaClient().pty.chatList.query()
     ])
     setRows([...ptys.map(ptyToRow), ...chats.map(chatToRow)])
   }, [])
@@ -137,7 +137,7 @@ export function useActiveSessionTaskIds(): Set<string> {
   const refresh = useCallback(async () => {
     const [ptys, chats] = await Promise.all([
       getTrpcVanillaClient().pty.list.query(),
-      window.api.chat.list()
+      getTrpcVanillaClient().pty.chatList.query()
     ])
     const set = new Set<string>()
     for (const p of ptys) set.add(p.taskId)

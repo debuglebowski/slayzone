@@ -9,6 +9,7 @@ import { historyRouter } from './routers/history'
 import { integrationsRouter } from './routers/integrations'
 import { processesRouter } from './routers/processes'
 import { ptyRouter } from './routers/pty'
+import { chatRouter } from './routers/chat'
 import { projectsRouter } from './routers/projects'
 import { settingsRouter } from './routers/settings'
 import { tagsRouter } from './routers/tags'
@@ -29,6 +30,7 @@ export const appRouter = router({
   integrations: integrationsRouter,
   processes: processesRouter,
   pty: ptyRouter,
+  chat: chatRouter,
   projects: projectsRouter,
   settings: settingsRouter,
   tags: tagsRouter,

@@ -1,5 +1,5 @@
-import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
+import { EventEmitter } from 'node:events'
 import {
   sendUserMessage,
   getSessionInfo,
@@ -21,17 +21,14 @@ import type { QueuedChatMessage } from '../shared/types'
  * stays importable from non-electron test contexts. In production wires
  * `chat:queue-changed` (refetch trigger) + `chat:queue-drained` (analytics).
  */
-function broadcast(channel: 'chat:queue-changed' | 'chat:queue-drained', ...args: unknown[]): void {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { BrowserWindow } = require('electron') as typeof import('electron')
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (w.isDestroyed()) continue
-      w.webContents.send(channel, ...args)
-    }
-  } catch {
-    /* non-electron context */
-  }
+export const chatQueueEvents = new EventEmitter() as EventEmitter & {
+  on(event: 'queue-changed', listener: (tabId: string) => void): EventEmitter
+  on(event: 'queue-drained', listener: (tabId: string, original: string) => void): EventEmitter
+  off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+}
+
+function broadcast(channel: 'queue-changed' | 'queue-drained', ...args: unknown[]): void {
+  chatQueueEvents.emit(channel, ...args)
 }
 
 /**
@@ -63,47 +60,36 @@ export function drainChatQueue(db: Database, tabId: string): void {
     }
     return
   }
-  broadcast('chat:queue-changed', tabId)
+  broadcast('queue-changed', tabId)
   // `original` carries the raw `/cmd` token so the renderer's usage hook
   // bumps autocomplete tiebreak counts for the real input — not the
   // post-transform expansion.
-  broadcast('chat:queue-drained', tabId, head.original)
+  broadcast('queue-drained', tabId, head.original)
 }
 
-export function registerChatQueueHandlers(ipcMain: IpcMain, db: Database): void {
+export function createChatQueueOps(db: Database) {
   // Wire drain into the transport so state transitions can pull from queue.
   registerChatQueueDrainer((tabId) => drainChatQueue(db, tabId))
-
-  ipcMain.handle('chat:queue:list', (_, tabId: string): QueuedChatMessage[] => {
-    return listChatQueue(db, tabId)
-  })
-
-  ipcMain.handle(
-    'chat:queue:push',
-    (_, tabId: string, send: string, original: string): QueuedChatMessage => {
+  return {
+    list: (tabId: string): QueuedChatMessage[] => listChatQueue(db, tabId),
+    push: (tabId: string, send: string, original: string): QueuedChatMessage => {
       const msg = pushChatQueue(db, tabId, send, original)
-      broadcast('chat:queue-changed', tabId)
-      // Belt-and-suspenders drain: if the session is already idle when push
-      // lands (renderer's inFlight mirror lags the transport), no fresh
-      // state transition is coming — kick the drainer so the queue doesn't
-      // sit. drainChatQueue itself gates on idle so this is safe.
+      broadcast('queue-changed', tabId)
       drainChatQueue(db, tabId)
       return msg
-    }
-  )
-
-  ipcMain.handle('chat:queue:remove', (_, id: string): boolean => {
-    const row = db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id) as
-      | { tab_id: string }
-      | undefined
-    const removed = removeChatQueueItem(db, id)
-    if (removed && row) broadcast('chat:queue-changed', row.tab_id)
-    return removed
-  })
-
-  ipcMain.handle('chat:queue:clear', (_, tabId: string): number => {
-    const cleared = clearChatQueue(db, tabId)
-    if (cleared > 0) broadcast('chat:queue-changed', tabId)
-    return cleared
-  })
+    },
+    remove: (id: string): boolean => {
+      const row = db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id) as
+        | { tab_id: string }
+        | undefined
+      const removed = removeChatQueueItem(db, id)
+      if (removed && row) broadcast('queue-changed', row.tab_id)
+      return removed
+    },
+    clear: (tabId: string): number => {
+      const cleared = clearChatQueue(db, tabId)
+      if (cleared > 0) broadcast('queue-changed', tabId)
+      return cleared
+    },
+  }
 }

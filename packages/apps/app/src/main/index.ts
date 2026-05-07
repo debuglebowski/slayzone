@@ -118,7 +118,7 @@ import { configureTaskRuntimeAdapters, pathExists, saveTempImage, closeArtifactW
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
-import { createPtyOps, ptyEvents, buildUsageOps, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/electron'
+import { createPtyOps, ptyEvents, buildUsageOps, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, createChatOps, createChatQueueOps, chatEvents, chatQueueEvents, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/electron'
 import { setDatabase } from '@slayzone/terminal/electron'
 import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalModes } from '@slayzone/terminal/server'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
@@ -131,7 +131,7 @@ import { detectPreviousCrash, writeBootStub, writeCleanShutdownSentinel, scanCra
 import { acquireLockWithSelfHeal, lockOutcomeIsAcquired, type LockOutcome } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
-import { setAppDeps, setProcessesDeps, setPtyDeps } from '@slayzone/transport/server'
+import { setAppDeps, setProcessesDeps, setPtyDeps, setChatDeps } from '@slayzone/transport/server'
 import { ElectronStorageAdapter } from '@slayzone/integrations/electron'
 import { initIntegrationOps, ensureIntegrationSchema, startSyncPoller, pushTaskAfterEdit, pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders, startDiscoveryPoller, resetSyncFlags, setStorageAdapter } from '@slayzone/integrations/server'
 import { closeAllFileWatchers } from '@slayzone/file-editor/server'
@@ -1224,7 +1224,12 @@ app.whenReady().then(async () => {
 
   setOnTaskReachedTerminalHandler(electronOnTaskReachedTerminal)
   logBoot('task-terminals handlers migrated to tRPC')
-  registerChatHandlers(ipcMain, db, { onChatEvent: initChatTurnSubscriber(db) })
+  setChatDeps({
+    ops: createChatOps(db, { onChatEvent: initChatTurnSubscriber(db) }),
+    queueOps: createChatQueueOps(db),
+    events: chatEvents,
+    queueEvents: chatQueueEvents,
+  })
   // One-shot: backfill `chatMode` for tasks that pre-date the chat-mode UI so
   // upgraded users keep their current `--allow-dangerously-skip-permissions`
   // behavior instead of suddenly hitting denials.

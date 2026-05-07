@@ -46,37 +46,27 @@ export interface TransportDeps {
   persistEvent: (tabId: string, seq: number, event: AgentEvent) => void
 }
 
-/**
- * Default broadcast uses Electron's BrowserWindow. We require it lazily so that
- * non-electron test runs can import this module without pulling in `electron`.
- */
-function electronBroadcast(channel: 'chat:event' | 'chat:exit' | 'pty:state-change'): (...args: unknown[]) => void {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { BrowserWindow } = require('electron') as typeof import('electron')
-    return (...args: unknown[]) => {
-      for (const w of BrowserWindow.getAllWindows()) {
-        if (w.isDestroyed()) continue
-        w.webContents.send(channel, ...args)
-      }
-    }
-  } catch {
-    // Non-electron context (tests run under tsx). No-op broadcast.
-    return () => {}
-  }
+import { EventEmitter } from 'node:events'
+
+/** Unified chat event emitter — replaces window.webContents.send broadcasts. */
+export const chatEvents = new EventEmitter() as EventEmitter & {
+  on(event: 'event', listener: (tabId: string, agentEvent: AgentEvent, seq: number) => void): EventEmitter
+  on(event: 'exit', listener: (tabId: string, sessionId: string, code: number | null, signal: NodeJS.Signals | null) => void): EventEmitter
+  on(event: 'state-change', listener: (sessionId: string, newState: ChatTerminalState, oldState: ChatTerminalState) => void): EventEmitter
+  off(event: string, listener: (...args: unknown[]) => void): EventEmitter
 }
 
 const defaultDeps: TransportDeps = {
   spawn: realSpawn,
   whichBinary: realWhichBinary,
   broadcastEvent: (tabId, event, seq) => {
-    electronBroadcast('chat:event')(tabId, event, seq)
+    chatEvents.emit('event', tabId, event, seq)
   },
   broadcastExit: (tabId, sessionId, code, signal) => {
-    electronBroadcast('chat:exit')(tabId, sessionId, code, signal)
+    chatEvents.emit('exit', tabId, sessionId, code, signal)
   },
   broadcastStateChange: (sessionId, newState, oldState) => {
-    electronBroadcast('pty:state-change')(sessionId, newState, oldState)
+    chatEvents.emit('state-change', sessionId, newState, oldState)
   },
   persistEvent: () => {
     // No-op default: persistence is wired in main via configureTransport().

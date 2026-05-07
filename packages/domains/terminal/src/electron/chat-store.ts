@@ -1,9 +1,8 @@
-import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import {
   createChat,
   sendUserMessage,
-  sendToolResult,
+  sendToolResult as sendToolResultImpl,
   sendControlRequest,
   respondToPermissionRequest,
   updateSessionChatMode,
@@ -24,7 +23,6 @@ import {
   getNextSeqForTab,
   clearChatEventsForTab,
 } from '../server/chat-events-store'
-import { registerChatQueueHandlers } from './chat-queue-handlers'
 import { clearChatQueue } from '../server/chat-queue-store'
 import { notifyGlobalStateListeners } from './pty-manager'
 import { parseShellArgs } from '../server/adapters/flag-parser'
@@ -33,11 +31,11 @@ import { getEnrichedPath } from '../server/shell-env'
 import { supportsChatMode } from '../server/agents/registry'
 import { getAutoModeEligibility, type AutoModeEligibility } from '../server/auto-mode-eligibility'
 import { resolveAccountDefaultModel } from '../server/account-default-model'
-import { listSkills } from '../server/skills'
-import { listCommands } from '../server/commands'
-import { listAgents } from '../server/agents-registry'
+import { listSkills as listSkillsImpl } from '../server/skills'
+import { listCommands as listCommandsImpl } from '../server/commands'
+import { listAgents as listAgentsImpl } from '../server/agents-registry'
 import { listProjectFiles } from '../server/files-scan'
-import { bumpAutocompleteUsage, getAutocompleteUsage, type UsageMap } from '../server/autocomplete-usage-store'
+import { bumpAutocompleteUsage as bumpAutocompleteUsageImpl, getAutocompleteUsage as getAutocompleteUsageImpl, type UsageMap } from '../server/autocomplete-usage-store'
 import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '../shared/types'
 import type { AgentEvent } from '../shared/agent-events'
 import {
@@ -404,7 +402,8 @@ async function buildCreateOpts(
   }
 }
 
-export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatHandlerOpts = {}): void {
+export function createChatOps(db: Database, opts: ChatHandlerOpts = {}) {
+
   // Wire SQLite persistence into the transport. Default deps had a no-op
   // persistEvent; configureTransport keeps spawn/whichBinary/broadcast* untouched.
   configureTransport({
@@ -441,28 +440,23 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
     },
   })
 
-  registerChatQueueHandlers(ipcMain, db)
+  const supports = (mode: string) : boolean => supportsChatMode(mode)
 
-  ipcMain.handle('chat:supports', (_, mode: string): boolean => supportsChatMode(mode))
-
-  ipcMain.handle('chat:create', async (_, opts: ChatCreateOpts): Promise<ChatSessionInfo> => {
+  const create = async (opts: ChatCreateOpts) : Promise<ChatSessionInfo> => {
     return createChat(await buildCreateOpts(db, opts, { fresh: false }))
-  })
+  }
 
-  ipcMain.handle('chat:send', (_, tabId: string, text: string): boolean => {
+  const send = (tabId: string, text: string) : boolean => {
     return sendUserMessage(tabId, text)
-  })
+  }
 
   // Inline tool-answer flows (e.g. AskUserQuestion). Resolves the pending
   // tool_use_id with a tool_result content block so the SDK's turn machinery
   // sees a normal completion. Returns false when the adapter lacks a
   // structured-input channel — renderer falls back to chat:send.
-  ipcMain.handle(
-    'chat:sendToolResult',
-    (_, tabId: string, args: { toolUseId: string; content: string; isError?: boolean }): boolean => {
-      return sendToolResult(tabId, args)
+  const sendToolResult = (tabId: string, args: { toolUseId: string; content: string; isError?: boolean }) : boolean => {
+      return sendToolResultImpl(tabId, args)
     }
-  )
 
   // Reply to an inbound permission_request from the CLI (subtype:'can_use_tool',
   // surfaces under `--permission-prompt-tool stdio`). The renderer collected
@@ -470,21 +464,16 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
   // CLI unblocks the tool. AskUserQuestion uses `behavior:'allow'` with
   // `updatedInput.answers` populated; other tools the renderer decides
   // independently.
-  ipcMain.handle(
-    'chat:respondPermission',
-    (
-      _,
-      tabId: string,
+  const respondPermission = (tabId: string,
       args: {
         requestId: string
         decision:
           | { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] }
           | { behavior: 'deny'; message: string; interrupt?: boolean }
       }
-    ): boolean => {
+    ) : boolean => {
       return respondToPermissionRequest(tabId, args)
     }
-  )
 
   // Interrupt = stop the current turn but keep the session. Fast path: live
   // `interrupt` control_request preserves the warm subprocess + conversation
@@ -493,7 +482,7 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
   // transport's exit handler swallows the dying child's process-exit
   // broadcast on the fallback path so the renderer doesn't flash "Session
   // ended". Mirrors `chat:setMode`.
-  ipcMain.handle('chat:interrupt', async (_, opts: ChatCreateOpts): Promise<ChatSessionInfo> => {
+  const interrupt = async (opts: ChatCreateOpts) : Promise<ChatSessionInfo> => {
     // Persist interrupted marker FIRST so replay sees the turn boundary
     // regardless of which path resolves.
     recordInterrupted(opts.tabId)
@@ -514,14 +503,14 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
     // Fallback: kill + respawn.
     removeSession(opts.tabId)
     return createChat(await buildCreateOpts(db, opts, { fresh: false }))
-  })
+  }
 
   // Stop-button / Esc path. Same kill+respawn as `chat:interrupt`, but if no
   // assistant progress arrived since the trailing user-message we cancel that
   // user-message instead of leaving an `interrupted` marker — Claude CLI parity
   // for "abort an unanswered turn and edit the prompt". Authoritative verdict
   // (`popped`) flows back to the caller so the renderer can restore the input.
-  ipcMain.handle('chat:abortAndPop', async (_, opts: ChatCreateOpts): Promise<{
+  const abortAndPop = async (opts: ChatCreateOpts) : Promise<{
     popped: boolean
     text: string | null
   }> => {
@@ -537,13 +526,13 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
     removeSession(opts.tabId)
     await createChat(await buildCreateOpts(db, opts, { fresh: false }))
     return { popped: result.popped, text: result.text }
-  })
+  }
 
-  ipcMain.handle('chat:kill', (_, tabId: string): void => {
+  const kill = (tabId: string) : void => {
     killChat(tabId)
-  })
+  }
 
-  ipcMain.handle('chat:remove', (_, tabId: string): void => {
+  const remove = (tabId: string) : void => {
     removeSession(tabId)
     // Tab is gone — drop persisted history + queue. (FK ON DELETE CASCADE
     // also clears them when the terminal_tabs row itself is deleted, but
@@ -558,7 +547,7 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
     } catch (err) {
       console.error('[chat-handlers] clearChatQueue failed:', err)
     }
-  })
+  }
 
   // Reset = atomic kill+wipe+spawn-fresh in a single IPC. Doing this client-side
   // (kill → remove → create across multiple awaits) opened a race window where the
@@ -567,7 +556,7 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
   // window: SIGTERM is sent + the session is removed from the map sync'ly, so any
   // exit event the OS later delivers is swallowed by the identity guard in
   // chat-transport-manager's child.on('exit') handler.
-  ipcMain.handle('chat:reset', async (_, opts: ChatCreateOpts): Promise<ChatSessionInfo> => {
+  const reset = async (opts: ChatCreateOpts) : Promise<ChatSessionInfo> => {
     removeSession(opts.tabId)
     try {
       clearChatEventsForTab(db, opts.tabId)
@@ -585,44 +574,33 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
       console.error('[chat-handlers] clearChatConversationId failed:', err)
     }
     return createChat(await buildCreateOpts(db, opts, { fresh: true }))
-  })
+  }
 
-  ipcMain.handle('chat:getBufferSince', (_, tabId: string, afterSeq: number) => {
+  const getBufferSince = (tabId: string, afterSeq: number) => {
     return getEventBufferSince(tabId, afterSeq)
-  })
+  }
 
-  ipcMain.handle('chat:getInfo', (_, tabId: string) => getSessionInfo(tabId))
+  const getInfo = (tabId: string) => getSessionInfo(tabId)
 
-  ipcMain.handle(
-    'chat:inspectPermissions',
-    (_, taskId: string, mode: string): ReturnType<typeof inspectPermissionFlags> => {
+  const inspectPermissions = (taskId: string, mode: string) : ReturnType<typeof inspectPermissionFlags> => {
       const providerCfg = readProviderConfig(db, taskId, mode)
       const flagsString =
         providerCfg.flags ?? readTaskModeDefaultFlags(db, mode) ?? ''
       return inspectPermissionFlags(parseShellArgs(flagsString))
     }
-  )
 
-  ipcMain.handle(
-    'chat:getMode',
-    async (_, taskId: string, mode: string): Promise<ChatMode> => {
+  const getMode = async (taskId: string, mode: string) : Promise<ChatMode> => {
       const cfg = readProviderConfig(db, taskId, mode)
       const stored = cfg.chatMode ?? DEFAULT_CHAT_MODE_NEW_TASK
       // Hide stale `auto` from UI when capability is gone — pill would otherwise
       // show violet, and the next mode change would attempt a forbidden flag.
       return resolveSafeChatMode(stored)
     }
-  )
 
-  ipcMain.handle(
-    'chat:getAutoEligibility',
-    (): Promise<AutoModeEligibility> => getAutoModeEligibility()
-  )
+  const getAutoEligibility = () : Promise<AutoModeEligibility> => getAutoModeEligibility()
 
 
-  ipcMain.handle(
-    'chat:setMode',
-    async (_, opts: ChatCreateOpts & { chatMode: ChatMode }): Promise<ChatSessionInfo> => {
+  const setMode = async (opts: ChatCreateOpts & { chatMode: ChatMode }) : Promise<ChatSessionInfo> => {
       // Server-side guard: ignore `auto` when capability is missing. Renderer
       // already filters in the pill, but a stale renderer or a direct IPC call
       // shouldn't be able to persist a forbidden mode.
@@ -670,11 +648,8 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
       // downgrade) instead of its optimistic guess.
       return created
     }
-  )
 
-  ipcMain.handle(
-    'chat:getModel',
-    async (_, taskId: string, mode: string): Promise<ChatModel> => {
+  const getModel = async (taskId: string, mode: string) : Promise<ChatModel> => {
       const cfg = readProviderConfig(db, taskId, mode)
       const stored = cfg.chatModel
       if (isChatModel(stored)) return stored
@@ -683,11 +658,8 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
       // Max accounts → opus, etc. Hard fallback DEFAULT_CHAT_MODEL.
       return resolveAccountDefaultModel()
     }
-  )
 
-  ipcMain.handle(
-    'chat:setModel',
-    async (_, opts: ChatCreateOpts & { chatModel: ChatModel }): Promise<ChatSessionInfo> => {
+  const setModel = async (opts: ChatCreateOpts & { chatModel: ChatModel }) : Promise<ChatSessionInfo> => {
       if (!isChatModel(opts.chatModel)) {
         throw new Error(`Invalid chat model: ${String(opts.chatModel)}`)
       }
@@ -722,20 +694,14 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
       writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
       return created
     }
-  )
 
-  ipcMain.handle(
-    'chat:getEffort',
-    (_, taskId: string, mode: string): ChatEffort | null => {
+  const getEffort = (taskId: string, mode: string) : ChatEffort | null => {
       const cfg = readProviderConfig(db, taskId, mode)
       const stored = cfg.chatEffort ?? null
       return isChatEffort(stored) ? stored : null
     }
-  )
 
-  ipcMain.handle(
-    'chat:setEffort',
-    async (_, opts: ChatCreateOpts & { chatEffort: ChatEffort }): Promise<ChatSessionInfo> => {
+  const setEffort = async (opts: ChatCreateOpts & { chatEffort: ChatEffort }) : Promise<ChatSessionInfo> => {
       if (!isChatEffort(opts.chatEffort)) {
         throw new Error(`Invalid chat effort: ${String(opts.chatEffort)}`)
       }
@@ -749,50 +715,69 @@ export function registerChatHandlers(ipcMain: IpcMain, db: Database, opts: ChatH
       writeChatEffort(db, opts.taskId, opts.mode, opts.chatEffort)
       return created
     }
-  )
 
-  ipcMain.handle('chat:listSkills', async (_, cwd: string): Promise<SkillInfo[]> => {
-    return listSkills(cwd)
-  })
+  const listSkills = async (cwd: string) : Promise<SkillInfo[]> => {
+    return listSkillsImpl(cwd)
+  }
 
-  ipcMain.handle('chat:listCommands', async (_, cwd: string): Promise<CommandInfo[]> => {
-    return listCommands(cwd)
-  })
+  const listCommands = async (cwd: string) : Promise<CommandInfo[]> => {
+    return listCommandsImpl(cwd)
+  }
 
-  ipcMain.handle('chat:listAgents', async (_, cwd: string): Promise<AgentInfo[]> => {
-    return listAgents(cwd)
-  })
+  const listAgents = async (cwd: string) : Promise<AgentInfo[]> => {
+    return listAgentsImpl(cwd)
+  }
 
-  ipcMain.handle(
-    'chat:listFiles',
-    async (_, cwd: string, query: string, limit?: number): Promise<FileMatch[]> => {
+  const listFiles = async (cwd: string, query: string, limit?: number) : Promise<FileMatch[]> => {
       return listProjectFiles(cwd, query, limit ?? 50)
     }
-  )
 
-  ipcMain.handle(
-    'chat:bumpAutocompleteUsage',
-    (_, source: string, name: string): void => {
+  const bumpAutocompleteUsage = (source: string, name: string) : void => {
       try {
-        bumpAutocompleteUsage(db, source, name)
+        bumpAutocompleteUsageImpl(db, source, name)
       } catch (err) {
         console.error('[chat-handlers] bumpAutocompleteUsage failed:', err)
       }
     }
-  )
 
-  ipcMain.handle(
-    'chat:getAutocompleteUsage',
-    (): UsageMap => {
+  const getAutocompleteUsage = () : UsageMap => {
       try {
-        return getAutocompleteUsage(db)
+        return getAutocompleteUsageImpl(db)
       } catch (err) {
         console.error('[chat-handlers] getAutocompleteUsage failed:', err)
         return {}
       }
     }
-  )
+  return {
+    supports,
+    create,
+    send,
+    sendToolResult,
+    respondPermission,
+    interrupt,
+    abortAndPop,
+    kill,
+    remove,
+    reset,
+    getBufferSince,
+    getInfo,
+    inspectPermissions,
+    getMode,
+    getAutoEligibility,
+    setMode,
+    getModel,
+    setModel,
+    getEffort,
+    setEffort,
+    listSkills,
+    listCommands,
+    listAgents,
+    listFiles,
+    bumpAutocompleteUsage,
+    getAutocompleteUsage
+  }
 }
+
 
 /** Call on app quit to reap child processes. */
 export function shutdownChatTransports(): void {

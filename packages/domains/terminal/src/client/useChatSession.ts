@@ -75,8 +75,35 @@ interface ChatApi {
 }
 
 function getChatApi(): ChatApi {
-  const api = (window as unknown as { api: { chat: ChatApi } }).api
-  return api.chat
+  // tRPC-backed shim — replaces window.api.chat after migration.
+  // Imported lazily to avoid circular dep on terminal package.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getTrpcVanillaClient } = require('@slayzone/transport/client') as typeof import('@slayzone/transport/client')
+  return {
+    create: (opts) => getTrpcVanillaClient().chat.create.mutate(opts),
+    reset: (opts) => getTrpcVanillaClient().chat.reset.mutate(opts),
+    send: (tabId, text) => getTrpcVanillaClient().chat.send.mutate({ tabId, text }) as Promise<boolean>,
+    sendToolResult: (tabId, args) => getTrpcVanillaClient().chat.sendToolResult.mutate({ tabId, args }) as Promise<boolean>,
+    respondPermission: (tabId, args) => getTrpcVanillaClient().chat.respondPermission.mutate({ tabId, args }) as Promise<boolean>,
+    interrupt: (opts) => getTrpcVanillaClient().chat.interrupt.mutate(opts),
+    abortAndPop: (opts) => getTrpcVanillaClient().chat.abortAndPop.mutate(opts) as Promise<{ popped: boolean; text: string | null }>,
+    kill: (tabId) => getTrpcVanillaClient().chat.kill.mutate({ tabId }) as Promise<void>,
+    remove: (tabId) => getTrpcVanillaClient().chat.remove.mutate({ tabId }) as Promise<void>,
+    getBufferSince: (tabId, afterSeq) => getTrpcVanillaClient().chat.getBufferSince.query({ tabId, afterSeq }) as Promise<Array<{ seq: number; event: AgentEvent }>>,
+    inspectPermissions: (taskId, mode) => getTrpcVanillaClient().chat.inspectPermissions.query({ taskId, mode }) as Promise<{ ok: boolean; hasSkipPerms: boolean; hasPermissionMode: boolean; permissionModeValue: string | null }>,
+    onEvent: (cb) => {
+      const sub = getTrpcVanillaClient().chat.onEvent.subscribe(undefined, {
+        onData: ({ tabId, event, seq }) => cb(tabId, event as AgentEvent, seq),
+      })
+      return () => sub.unsubscribe()
+    },
+    onExit: (cb) => {
+      const sub = getTrpcVanillaClient().chat.onExit.subscribe(undefined, {
+        onData: ({ tabId, sessionId, code, signal }) => cb(tabId, sessionId, code, signal),
+      })
+      return () => sub.unsubscribe()
+    },
+  }
 }
 
 export interface UseChatSessionResult {

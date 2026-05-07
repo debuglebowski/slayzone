@@ -168,7 +168,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Note: Only update existing state, don't create state for unknown tasks
   // State is created when Terminal component subscribes
   useEffect(() => {
-    const unsubData = ((cb) => { const s = getTrpcVanillaClient().pty.onData.subscribe(undefined, { onData: ({ sessionId, data, seq }) => cb(sessionId, data, seq) }); return () => s.unsubscribe() })((sessionId, data, seq) => {
+    const unsubData = ((cb) => { const s = getTrpcVanillaClient().pty.onData.subscribe(undefined, { onData: ({ sessionId, data, seq }) => cb(sessionId, data, seq) }); return () => s.unsubscribe() })((sessionId: string, data: string, seq: number) => {
       const state = statesRef.current.get(sessionId)
       if (!state) return
 
@@ -183,7 +183,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     })
 
-    const unsubExit = ((cb) => { const s = getTrpcVanillaClient().pty.onExit.subscribe(undefined, { onData: ({ sessionId, exitCode }) => cb(sessionId, exitCode) }); return () => s.unsubscribe() })(async (sessionId, exitCode) => {
+    const unsubExit = ((cb) => { const s = getTrpcVanillaClient().pty.onExit.subscribe(undefined, { onData: ({ sessionId, exitCode }) => cb(sessionId, exitCode ?? -1) }); return () => s.unsubscribe() })(async (sessionId: string, exitCode: number) => {
       const state = statesRef.current.get(sessionId)
 
       if (state) {
@@ -222,7 +222,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       refreshActiveTaskIds()
     })
 
-    const unsubSessionNotFound = ((cb) => { const s = getTrpcVanillaClient().pty.onSessionNotFound.subscribe(undefined, { onData: ({ sessionId }) => cb(sessionId) }); return () => s.unsubscribe() })((sessionId) => {
+    const unsubSessionNotFound = ((cb) => { const s = getTrpcVanillaClient().pty.onSessionNotFound.subscribe(undefined, { onData: ({ sessionId }) => cb(sessionId) }); return () => s.unsubscribe() })((sessionId: string) => {
       const state = statesRef.current.get(sessionId)
       if (!state) return // Ignore for unknown tasks
 
@@ -234,7 +234,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     })
 
-    const unsubStateChange = ((cb) => { const s = getTrpcVanillaClient().pty.onStateChange.subscribe(undefined, { onData: ({ sessionId, newState, oldState }) => cb(sessionId, newState, oldState) }); return () => s.unsubscribe() })((sessionId, newState, oldState) => {
+    const unsubStateChange = ((cb) => { const s = getTrpcVanillaClient().pty.onStateChange.subscribe(undefined, { onData: ({ sessionId, newState, oldState }) => cb(sessionId, newState as TerminalState, oldState as TerminalState) }); return () => s.unsubscribe() })((sessionId: string, newState: TerminalState, oldState: TerminalState) => {
       // Bootstrap state entry if missing — chat sessions may emit before any component subscribes.
       // The entry is cheap; without it, early transitions are lost and `getState` stays 'starting'.
       const state = getOrCreateState(sessionId)
@@ -262,7 +262,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     })
 
-    const unsubPrompt = ((cb) => { const s = getTrpcVanillaClient().pty.onPrompt.subscribe(undefined, { onData: ({ sessionId, prompt }) => cb(sessionId, prompt) }); return () => s.unsubscribe() })((sessionId, prompt) => {
+    const unsubPrompt = ((cb) => { const s = getTrpcVanillaClient().pty.onPrompt.subscribe(undefined, { onData: ({ sessionId, prompt }) => cb(sessionId, prompt as PromptInfo) }); return () => s.unsubscribe() })((sessionId: string, prompt: PromptInfo) => {
       const state = statesRef.current.get(sessionId)
       if (!state) return // Ignore prompts for unknown tasks
 
@@ -277,21 +277,21 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     })
 
-    const unsubSessionDetected = ((cb) => { const s = getTrpcVanillaClient().pty.onSessionDetected.subscribe(undefined, { onData: ({ sessionId, conversationId }) => cb(sessionId, conversationId) }); return () => s.unsubscribe() })((sessionId, conversationId) => {
+    const unsubSessionDetected = ((cb) => { const s = getTrpcVanillaClient().pty.onSessionDetected.subscribe(undefined, { onData: ({ sessionId, conversationId }) => cb(sessionId, conversationId) }); return () => s.unsubscribe() })((sessionId: string, conversationId: string) => {
       const subs = sessionDetectedSubsRef.current.get(sessionId)
       if (subs) {
         subs.forEach((cb) => cb(conversationId))
       }
     })
 
-    const unsubDevServer = ((cb) => { const s = getTrpcVanillaClient().pty.onDevServerDetected.subscribe(undefined, { onData: ({ sessionId, info }) => cb(sessionId, info) }); return () => s.unsubscribe() })((sessionId, url) => {
+    const unsubDevServer = ((cb) => { const s = getTrpcVanillaClient().pty.onDevServerDetected.subscribe(undefined, { onData: ({ sessionId, info }) => cb(sessionId, info) }); return () => s.unsubscribe() })((sessionId: string, url: unknown) => {
       const subs = devServerSubsRef.current.get(sessionId)
       if (subs) {
-        subs.forEach((cb) => cb(url))
+        subs.forEach((cb) => cb(url as string))
       }
     })
 
-    const unsubTitleChange = ((cb) => { const s = getTrpcVanillaClient().pty.onTitleChange.subscribe(undefined, { onData: ({ sessionId, title }) => cb(sessionId, title) }); return () => s.unsubscribe() })((sessionId, title) => {
+    const unsubTitleChange = ((cb) => { const s = getTrpcVanillaClient().pty.onTitleChange.subscribe(undefined, { onData: ({ sessionId, title }) => cb(sessionId, title) }); return () => s.unsubscribe() })((sessionId: string, title: string) => {
       const subs = titleSubsRef.current.get(sessionId)
       if (subs) {
         subs.forEach((cb) => cb(title))

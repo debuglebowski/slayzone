@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { QueuedChatMessage } from '@slayzone/terminal/shared'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 
 /**
  * Subscribe to the backend-persisted chat queue for one tab. The queue is
  * a single source of truth in SQLite (table `chat_queue`); this hook is
  * purely a subscriber + thin RPC facade.
- *
- * Fetches initial state on mount + on `tabId` change, refetches on
- * `chat:queue-changed` broadcasts (push, remove, clear, drain). The drain
- * callback is exposed separately so the consumer can bump autocomplete
- * usage counts with the raw `original` token after a drain dispatches.
  */
 export interface UseChatQueueResult {
   items: QueuedChatMessage[]
@@ -25,41 +21,44 @@ export function useChatQueue(
   const [items, setItems] = useState<QueuedChatMessage[]>([])
 
   const refetch = useCallback(async () => {
-    const list = await window.api.chatQueue.list(tabId)
-    setItems(list)
+    const list = await getTrpcVanillaClient().chat.queue.list.query({ tabId })
+    setItems(list as QueuedChatMessage[])
   }, [tabId])
 
   useEffect(() => {
     void refetch()
-    const off = window.api.chatQueue.onChanged((changedTabId) => {
-      if (changedTabId === tabId) void refetch()
+    const sub = getTrpcVanillaClient().chat.onQueueChanged.subscribe(undefined, {
+      onData: ({ tabId: changedTabId }) => {
+        if (changedTabId === tabId) void refetch()
+      },
     })
-    return off
+    return () => sub.unsubscribe()
   }, [tabId, refetch])
 
   const onDrainedRef = useRef(onDrained)
   onDrainedRef.current = onDrained
   useEffect(() => {
-    const off = window.api.chatQueue.onDrained((drainedTabId, original) => {
-      if (drainedTabId === tabId) onDrainedRef.current?.(original)
+    const sub = getTrpcVanillaClient().chat.onQueueDrained.subscribe(undefined, {
+      onData: ({ tabId: drainedTabId, original }) => {
+        if (drainedTabId === tabId) onDrainedRef.current?.(original)
+      },
     })
-    return off
+    return () => sub.unsubscribe()
   }, [tabId])
 
   const push = useCallback(
     async (send: string, original: string) => {
-      await window.api.chatQueue.push(tabId, send, original)
-      // No optimistic update — onChanged fires post-insert and triggers refetch.
+      await getTrpcVanillaClient().chat.queue.push.mutate({ tabId, send, original })
     },
     [tabId]
   )
 
   const remove = useCallback(async (id: string) => {
-    await window.api.chatQueue.remove(id)
+    await getTrpcVanillaClient().chat.queue.remove.mutate({ id })
   }, [])
 
   const clear = useCallback(async () => {
-    await window.api.chatQueue.clear(tabId)
+    await getTrpcVanillaClient().chat.queue.clear.mutate({ tabId })
   }, [tabId])
 
   return { items, push, remove, clear }

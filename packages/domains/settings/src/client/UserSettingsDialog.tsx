@@ -68,7 +68,7 @@ export function UserSettingsDialog({
 
   useEffect(() => {
     let cancelled = false
-    window.api.chat.supports(defaultTerminalMode).then(supported => {
+    getTrpcVanillaClient().chat.supports.query({ mode: defaultTerminalMode }).then(supported => {
       if (cancelled) return
       setProviderSupportsChat(supported)
     })

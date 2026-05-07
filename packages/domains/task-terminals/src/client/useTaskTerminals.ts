@@ -131,7 +131,7 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
         // a no-op when no session exists. Without this, a chat-mode tab's claude
         // subprocess + in-memory session map entry leak until app shutdown.
         try {
-          await window.api.chat?.remove(tabId)
+          await getTrpcVanillaClient().chat.remove.mutate({ tabId })
         } catch {
           /* ignore — chat session may not exist */
         }
@@ -221,7 +221,7 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
         if (tab.displayMode === 'xterm') {
           await getTrpcVanillaClient().pty.kill.mutate({ sessionId })
         } else {
-          await window.api.chat.remove(tabId)
+          await getTrpcVanillaClient().chat.remove.mutate({ tabId })
         }
       } catch {
         /* ignore */

@@ -362,12 +362,12 @@ function App(): React.JSX.Element {
   const { idleTasks: rawIdleTasks } = useIdleTasks(tasks, null, columnsByProjectId)
   const activeAgentTaskIds = useActiveSessionTaskIds()
   const shutdownAgentForTask = useCallback(async (taskId: string) => {
-    const [ptys, chats] = await Promise.all([getTrpcVanillaClient().pty.list.query(), window.api.chat.list()])
+    const [ptys, chats] = await Promise.all([getTrpcVanillaClient().pty.list.query(), getTrpcVanillaClient().pty.chatList.query()])
     const ptyKills = ptys.filter((p) => p.taskId === taskId).map((p) => getTrpcVanillaClient().pty.kill.mutate({ sessionId: p.sessionId }))
     const chatKills = chats.filter((c) => c.taskId === taskId).map((c) => {
       const idx = c.sessionId.indexOf(':')
       const tabId = idx >= 0 ? c.sessionId.slice(idx + 1) : c.sessionId
-      return window.api.chat.kill(tabId)
+      return getTrpcVanillaClient().chat.kill.mutate({ tabId })
     })
     await Promise.all([...ptyKills, ...chatKills])
   }, [])
