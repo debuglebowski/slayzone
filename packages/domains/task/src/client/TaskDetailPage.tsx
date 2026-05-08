@@ -211,7 +211,7 @@ function SortableSubTask(props: {
   const dragHandle = (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span {...attributes} {...listeners} className="absolute -left-4 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground">
+        <span {...attributes} {...listeners} className="shrink-0 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground touch-none" onClick={(e) => e.stopPropagation()}>
           <GripVertical className="size-3" />
         </span>
       </TooltipTrigger>
