@@ -29,14 +29,24 @@ function getDbPath(dev: boolean): string {
 
 type SqlParams = Record<string, string | number | bigint | null | Uint8Array>
 
+// Phase 3: unified server. Single port hosts MCP + tRPC + REST.
+// SLAYZONE_MCP_PORT env retained as override for split mode + back-compat.
+// settings.slayzone_server_port is canonical; settings.mcp_server_port is read
+// as a fallback for cross-version dev (older app + newer CLI or vice versa).
 export function getMcpPort(): number | null {
   if (process.env.SLAYZONE_MCP_PORT) return parseInt(process.env.SLAYZONE_MCP_PORT, 10) || null
   try {
     const db = openDb()
-    const row = db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1`)
+    const rowNew = db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'slayzone_server_port' LIMIT 1`)
     db.close()
-    const port = parseInt(row[0]?.value ?? '', 10)
-    return (port > 0 && port <= 65535) ? port : null
+    const portNew = parseInt(rowNew[0]?.value ?? '', 10)
+    if (portNew > 0 && portNew <= 65535) return portNew
+    // Back-compat fallback
+    const db2 = openDb()
+    const rowOld = db2.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1`)
+    db2.close()
+    const portOld = parseInt(rowOld[0]?.value ?? '', 10)
+    return (portOld > 0 && portOld <= 65535) ? portOld : null
   } catch {
     return null
   }
@@ -49,10 +59,13 @@ function getAlternateMcpPort(): number | null {
   if (!fs.existsSync(altPath)) return null
   try {
     const altDb = new DatabaseSync(altPath)
-    const row = altDb.prepare(`SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1`).get() as { value: string } | undefined
+    const rowNew = altDb.prepare(`SELECT value FROM settings WHERE key = 'slayzone_server_port' LIMIT 1`).get() as { value: string } | undefined
+    const portNew = parseInt(rowNew?.value ?? '', 10)
+    if (portNew > 0 && portNew <= 65535) { altDb.close(); return portNew }
+    const rowOld = altDb.prepare(`SELECT value FROM settings WHERE key = 'mcp_server_port' LIMIT 1`).get() as { value: string } | undefined
     altDb.close()
-    const port = parseInt(row?.value ?? '', 10)
-    return (port > 0 && port <= 65535) ? port : null
+    const portOld = parseInt(rowOld?.value ?? '', 10)
+    return (portOld > 0 && portOld <= 65535) ? portOld : null
   } catch {
     return null
   }

@@ -66,8 +66,6 @@ export function AppearanceProvider({
       getTrpcVanillaClient().settings.get.query({ key: 'editor_markdown_view_mode' }),
       getTrpcVanillaClient().settings.get.query({ key: 'editor_minimap_enabled' }),
       getTrpcVanillaClient().settings.get.query({ key: 'editor_toc_enabled' }),
-      getTrpcVanillaClient().settings.get.query({ key: 'assets_settings_banner_open' }),
-      getTrpcVanillaClient().settings.get.query({ key: 'editor_settings_banner_open' }),
     ]).then(([
       termSize, editorSize, reduceMotion, colorTints,
       wordWrap, tabSize, indentTabs, renderWs,
@@ -79,7 +77,6 @@ export function AppearanceProvider({
       chatWidth,
       chatShowTools, chatShowLastMessageTools, chatFileEditsOpenByDefault, chatShowMessageMeta,
       mdViewMode, minimapEnabled, tocEnabled,
-      _assetsSettingsBannerOpen, _editorSettingsBannerOpen,
     ]) => {
       // One-shot migration: notes_line_spacing → notes_readability
       let readabilityValue = notesReadability
