@@ -3,7 +3,7 @@
  * Run with: pnpm dlx tsx packages/domains/terminal/src/client/chat-timeline.test.ts
  */
 import type { AgentEvent } from '../shared/agent-events'
-import { initialState, reducer, isInFlight, deriveLoadingLabel } from './chat-timeline'
+import { initialState, reducer, isInFlight, isAwaitingUserQuestion, deriveLoadingLabel } from './chat-timeline'
 
 let passed = 0
 let failed = 0
@@ -777,6 +777,41 @@ test('deriveLoadingLabel: text label sticky after stream-block-stop', () => {
   })
   s = reducer(s, { type: 'event', event: { kind: 'stream-block-stop', blockIndex: 0 } })
   expect(deriveLoadingLabel(s)).toBe('Writing…')
+})
+
+test('isAwaitingUserQuestion: false when idle', () => {
+  expect(isAwaitingUserQuestion(initialState())).toBe(false)
+})
+
+test('isAwaitingUserQuestion: true while AskUserQuestion is latest tool in turn', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'tool-call', id: 't', name: 'AskUserQuestion', input: { questions: [] } },
+  })
+  expect(isAwaitingUserQuestion(s)).toBe(true)
+})
+
+test('isAwaitingUserQuestion: false after user replies (user-text after tool)', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'tool-call', id: 't', name: 'AskUserQuestion', input: { questions: [] } },
+  })
+  s = reducer(s, { type: 'user-sent', text: 'my answer' })
+  expect(isAwaitingUserQuestion(s)).toBe(false)
+})
+
+test('isAwaitingUserQuestion: false when latest tool is not AskUserQuestion', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'tool-call', id: 't', name: 'Read', input: { file_path: '/a.ts' } },
+  })
+  expect(isAwaitingUserQuestion(s)).toBe(false)
 })
 
 test('deriveLoadingLabel: stops scanning at user-text boundary', () => {

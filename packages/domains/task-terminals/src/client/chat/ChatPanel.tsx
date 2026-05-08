@@ -42,7 +42,7 @@ import {
 } from '@slayzone/ui'
 import { ConfirmDisplayModeDialog } from '../ConfirmDisplayModeDialog'
 import type { TabDisplayMode } from '../../shared/types'
-import { useChatSession, BackgroundJobsBanner, PulseGrid, deriveLoadingLabel, type TimelineItem } from '@slayzone/terminal/client'
+import { useChatSession, BackgroundJobsBanner, PulseGrid, deriveLoadingLabel, isAwaitingUserQuestion, type TimelineItem } from '@slayzone/terminal/client'
 import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
 import { useAutocomplete } from './autocomplete/useAutocomplete'
@@ -834,7 +834,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                     </div>
                   )
                 })}
-                {inFlight && <TypingIndicator label={deriveLoadingLabel(state)} />}
+                {inFlight && !isAwaitingUserQuestion(state) && <TypingIndicator label={deriveLoadingLabel(state)} />}
               </div>
             )}
           </div>
