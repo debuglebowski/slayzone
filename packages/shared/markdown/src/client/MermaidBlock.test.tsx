@@ -12,10 +12,9 @@ vi.mock('mermaid', () => ({
   },
 }))
 
-const themeState: { theme: 'dark' | 'light' } = { theme: 'dark' }
-vi.mock('@slayzone/settings/client', () => ({
-  useTheme: () => ({ theme: themeState.theme }),
-}))
+function setHtmlTheme(theme: 'dark' | 'light') {
+  document.documentElement.classList.toggle('dark', theme === 'dark')
+}
 
 vi.mock('@slayzone/ui', () => ({
   IconButton: (props: { onClick?: () => void; 'aria-label': string; children?: React.ReactNode }) => (
@@ -32,7 +31,7 @@ afterEach(() => {
 beforeEach(() => {
   renderMock.mockReset()
   initializeMock.mockReset()
-  themeState.theme = 'dark'
+  setHtmlTheme('dark')
   // Reset module-level cache + inflight by re-importing? Cache lives in module
   // closure; tests use unique code strings per case to avoid cross-test pollution.
 })
@@ -55,11 +54,9 @@ describe('MermaidBlock', () => {
       </StrictMode>,
     )
     await waitFor(() => expect(container.querySelector('[data-testid="diagram-2"]')).not.toBeNull())
-    // Strict mode runs effects twice; cancelled flag must drop the duplicate render
-    // path. We expect no more than 2 render calls (one for each effect-mount), but
-    // critically only one set of controls in the DOM.
-    const controls = container.querySelectorAll('[aria-label="Reset"]')
-    expect(controls.length).toBe(1)
+    // StrictMode mounts effects twice; cancelled flag must drop duplicates so
+    // exactly one diagram lands in the DOM.
+    expect(container.querySelectorAll('[data-testid="diagram-2"]').length).toBe(1)
   })
 
   it('re-renders with new theme on theme switch', async () => {
@@ -69,7 +66,7 @@ describe('MermaidBlock', () => {
 
     renderMock.mockResolvedValueOnce({ svg: '<svg data-testid="diagram-3b"/>' })
     act(() => {
-      themeState.theme = 'light'
+      setHtmlTheme('light')
     })
     rerender(<MermaidBlock code="flowchart TD\nA-->B # case-3" />)
 

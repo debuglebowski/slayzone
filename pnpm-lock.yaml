@@ -1315,6 +1315,9 @@ importers:
       '@milkdown/utils':
         specifier: ^7.19.2
         version: 7.19.2
+      '@slayzone/markdown':
+        specifier: workspace:*
+        version: link:../markdown
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../ui
@@ -1324,6 +1327,9 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.3
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.3(react@19.2.3)
       remark-frontmatter:
         specifier: ^5.0.0
         version: 5.0.0
@@ -1362,9 +1368,6 @@ importers:
 
   packages/shared/markdown:
     dependencies:
-      '@slayzone/settings':
-        specifier: workspace:*
-        version: link:../../domains/settings
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../ui

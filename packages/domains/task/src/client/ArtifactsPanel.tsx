@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type CSSProperties, type DragEvent } from 'react'
-import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ImageDown, FileCode, Archive, History, Scissors, ClipboardPaste, CopyPlus, SlidersHorizontal } from 'lucide-react'
+import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ImageDown, FileCode, Archive, History, Scissors, ClipboardPaste, CopyPlus, SlidersHorizontal } from 'lucide-react'
 import {
   cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button, Input, Label, Switch,
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent,
@@ -15,7 +15,7 @@ import { RichTextEditor, MarkdownSettingsPopover } from '@slayzone/editor'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task/shared'
 import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode, canExportAsPdf, canExportAsPng, canExportAsHtml } from '@slayzone/task/shared'
-import { Markdown, MermaidBlock, SvgPanZoomView } from '@slayzone/markdown/client'
+import { Markdown, MermaidBlock, CanvasMediaView } from '@slayzone/markdown/client'
 import { useAppearance, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
 import { useTheme } from '@slayzone/settings/client'
 import { SearchableCodeView, type SearchableCodeViewHandle } from '@slayzone/file-editor/client/SearchableCodeView'
@@ -58,15 +58,10 @@ function getArtifactIcon(artifact: TaskArtifact): typeof FileText {
   return RENDER_MODE_ICONS[mode] ?? Code
 }
 
-function hasZoom(mode: RenderMode): boolean {
-  // svg-preview + mermaid-preview own their internal pan/zoom (svg-pan-zoom),
-  // so external zoom UI would conflict.
-  return mode === 'image'
-}
 
 // --- Image viewer ---
 
-function ImageViewer({ artifactId, contentVersion, zoomLevel, onZoom, getFilePath }: { artifactId: string; contentVersion: number; zoomLevel: number; onZoom: (fn: (z: number) => number) => void; getFilePath: (id: string) => Promise<string | null> }) {
+function ImageViewer({ artifactId, contentVersion, getFilePath }: { artifactId: string; contentVersion: number; getFilePath: (id: string) => Promise<string | null> }) {
   const [src, setSrc] = useState<string | null>(null)
 
   useEffect(() => {
@@ -75,17 +70,11 @@ function ImageViewer({ artifactId, contentVersion, zoomLevel, onZoom, getFilePat
     })
   }, [artifactId, contentVersion, getFilePath])
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (!e.metaKey && !e.ctrlKey) return
-    e.preventDefault()
-    onZoom(z => Math.min(4, Math.max(0.25, z * Math.exp(-e.deltaY * 0.01))))
-  }, [onZoom])
-
   if (!src) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
 
   return (
-    <div className={cn("flex-1 p-4 overflow-auto bg-muted/20", zoomLevel <= 1 && "flex items-center justify-center")} onWheel={handleWheel}>
-      <img src={src} style={zoomLevel !== 1 ? { zoom: zoomLevel } : undefined} className={zoomLevel <= 1 ? "max-w-full max-h-full object-contain" : ""} alt="" />
+    <div className="flex-1 relative bg-muted/20 overflow-hidden">
+      <CanvasMediaView source={{ kind: 'image', src }} className="absolute inset-0" />
     </div>
   )
 }
@@ -122,11 +111,9 @@ function formatRelativeDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function ArtifactContentEditor({ artifact, viewMode, zoomLevel, onZoom, readContent, saveContent, getFilePath, effectiveReadability, effectiveWidth, searchQuery, searchActiveIndex, searchMatchCase, searchRegex, onSearchMatchCountChange }: {
+function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, getFilePath, effectiveReadability, effectiveWidth, searchQuery, searchActiveIndex, searchMatchCase, searchRegex, onSearchMatchCountChange }: {
   artifact: TaskArtifact
   viewMode: 'preview' | 'split' | 'raw'
-  zoomLevel: number
-  onZoom: (fn: (z: number) => number) => void
   readContent: (id: string) => Promise<string | null>
   saveContent: (id: string, content: string) => Promise<void>
   getFilePath: (id: string) => Promise<string | null>
@@ -290,7 +277,7 @@ function ArtifactContentEditor({ artifact, viewMode, zoomLevel, onZoom, readCont
 
   const inner = ((): React.ReactElement => {
     if (loading) return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>
-    if (renderMode === 'image') return <ImageViewer artifactId={artifact.id} contentVersion={previewVersion} zoomLevel={zoomLevel} onZoom={onZoom} getFilePath={getFilePath} />
+    if (renderMode === 'image') return <ImageViewer artifactId={artifact.id} contentVersion={previewVersion} getFilePath={getFilePath} />
     if (renderMode === 'pdf') return <PdfViewer artifactId={artifact.id} contentVersion={previewVersion} getFilePath={getFilePath} />
 
     const hasPreview = renderMode === 'markdown' || renderMode === 'html-preview' || renderMode === 'svg-preview' || renderMode === 'mermaid-preview'
@@ -446,7 +433,11 @@ function ArtifactContentEditor({ artifact, viewMode, zoomLevel, onZoom, readCont
 function ArtifactPreview({ renderMode, content, artifactId, contentVersion, getFilePath }: { renderMode: RenderMode; content: string; artifactId: string; contentVersion: number; getFilePath: (id: string) => Promise<string | null> }) {
   if (renderMode === 'html-preview') return <HtmlPreviewFrame artifactId={artifactId} contentVersion={contentVersion} getFilePath={getFilePath} />
   // svg-preview + mermaid-preview share the same svg-pan-zoom-driven viewer.
-  if (renderMode === 'svg-preview') return <div className="flex-1 min-h-0 overflow-hidden bg-muted/30 relative"><SvgPanZoomView svg={content} className="absolute inset-0" /></div>
+  if (renderMode === 'svg-preview') return (
+    <div className="flex-1 min-h-0 overflow-hidden bg-muted/30 relative">
+      <CanvasMediaView source={{ kind: 'svg', svg: content }} className="absolute inset-0" />
+    </div>
+  )
   if (renderMode === 'mermaid-preview' && content.trim()) return <MermaidBlock code={content} fill />
   return null
 }
@@ -501,7 +492,6 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
   const [displayOpen, setDisplayOpen] = useState(false)
   const artifactDefaultViewMode = editorMarkdownViewMode === 'code' ? 'raw' : editorMarkdownViewMode === 'split' ? 'split' : 'preview'
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'raw'>('preview')
-  const [zoomLevel, setZoomLevel] = useState(1)
   const [dragOver, setDragOver] = useState(false)
   const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null)
   const dragArtifactIdsRef = useRef<string[]>([])
@@ -633,7 +623,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
   useEffect(() => {
     const artifact = artifacts.find(a => a.id === selectedId)
     setViewMode((artifact?.view_mode as 'preview' | 'split' | 'raw') ?? artifactDefaultViewMode)
-    setZoomLevel(1); setFindOpen(false); setFindQuery(''); setFindActiveIndex(0); setFindMatchCount(0); setFindMatchCase(false); setFindUseRegex(false)
+    setFindOpen(false); setFindQuery(''); setFindActiveIndex(0); setFindMatchCount(0); setFindMatchCase(false); setFindUseRegex(false)
   }, [selectedId])
 
   // Reset active index when the search parameters change so the first match is the target
@@ -1353,13 +1343,6 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
             <div className="flex-1" />
             {selectedArtifact && selectedRenderMode && (
               <div className="flex items-center gap-1.5">
-                {hasZoom(selectedRenderMode) && (
-                  <div className="flex items-center gap-1 bg-surface-3 rounded-lg p-1">
-                    <button type="button" className="size-6 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setZoomLevel(z => Math.max(0.25, z - 0.25))}><ZoomOut className="size-3.5" /></button>
-                    <button type="button" className="text-[10px] text-muted-foreground hover:text-foreground min-w-[3ch] text-center" onClick={() => setZoomLevel(1)}>{Math.round(zoomLevel * 100)}%</button>
-                    <button type="button" className="size-6 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground" onClick={() => setZoomLevel(z => Math.min(4, z + 0.25))}><ZoomIn className="size-3.5" /></button>
-                  </div>
-                )}
                 {selectedArtifact && selectedRenderMode === 'markdown' && (
                   <MarkdownSettingsPopover
                     open={displayOpen}
@@ -1654,8 +1637,6 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                 key={selectedArtifact.id}
                 artifact={selectedArtifact}
                 viewMode={viewMode}
-                zoomLevel={zoomLevel}
-                onZoom={(fn) => setZoomLevel(fn)}
                 readContent={readContent}
                 saveContent={saveContent}
                 getFilePath={getFilePath}
