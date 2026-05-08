@@ -19,6 +19,7 @@ import { SidebarResizeHandle } from './SidebarResizeHandle'
 import { TreeStatusFilter } from './TreeStatusFilter'
 import { TreeDisplaySettings } from './TreeDisplaySettings'
 import { getView } from './views/registry'
+import logo from '@/assets/logo.svg'
 
 interface AppSidebarProps {
   projects: Project[]
@@ -118,6 +119,17 @@ export function AppSidebar({
     >
       {sidebarView === 'tree' && (
         <div className="absolute top-0 left-0 right-0 h-11 flex items-center justify-end gap-1 pr-3 z-20">
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1 pointer-events-none select-none text-xs font-medium tracking-wide text-foreground">
+            <span>Slay</span>
+            <img
+              src={logo}
+              alt=""
+              aria-hidden
+              draggable={false}
+              className="h-4 w-auto"
+            />
+            <span>Zone</span>
+          </div>
           <TreeStatusFilter />
           <TreeDisplaySettings />
         </div>
