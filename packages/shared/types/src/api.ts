@@ -122,6 +122,9 @@ export interface ElectronAPI {
   }
   app: {
     getTrpcPort: () => Promise<number>
+    getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
+    relaunch: () => Promise<void>
+    setBootSettings: (payload: { server_mode?: 'local' | 'remote'; remote_server_url?: string }) => Promise<{ ok: true }>
     isTestsPanelEnabledSync: boolean
     isJiraIntegrationEnabledSync: boolean
     isLoopModeEnabledSync: boolean

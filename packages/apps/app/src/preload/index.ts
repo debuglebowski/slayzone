@@ -31,6 +31,10 @@ const api: ElectronAPI = {
   },
   app: {
     getTrpcPort: () => ipcRenderer.invoke('app:get-trpc-port') as Promise<number>,
+    getServerUrl: () => ipcRenderer.invoke('app:get-server-url') as Promise<{ mode: 'local' | 'remote'; url: string }>,
+    relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
+    setBootSettings: (payload: { server_mode?: 'local' | 'remote'; remote_server_url?: string }) =>
+      ipcRenderer.invoke('app:set-boot-settings', payload) as Promise<{ ok: true }>,
     isTestsPanelEnabledSync: ipcRenderer.sendSync('app:is-tests-panel-enabled-sync') as boolean,
     isJiraIntegrationEnabledSync: ipcRenderer.sendSync('app:is-jira-integration-enabled-sync') as boolean,
     isLoopModeEnabledSync: ipcRenderer.sendSync('app:is-loop-mode-enabled-sync') as boolean,

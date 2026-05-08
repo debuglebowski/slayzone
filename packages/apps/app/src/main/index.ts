@@ -115,6 +115,10 @@ import { buildBackupOps, startAutoBackup, stopAutoBackup, createPreMigrationBack
 // Domain handlers
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import { configureTaskRuntimeAdapters, pathExists, saveTempImage, closeArtifactWatcher, startArtifactWatcher } from '@slayzone/task/electron'
+import { taskEvents } from '@slayzone/task/server'
+import type { ServerHandle } from '@slayzone/server'
+import { startEmbeddedServerSupervised, type SupervisorHandle } from './embedded-server-supervisor'
+import { getSetting } from '@slayzone/settings/server'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
@@ -280,6 +284,8 @@ let linearSyncPoller: NodeJS.Timeout | null = null
 let discoveryPoller: NodeJS.Timeout | null = null
 let mcpCleanup: (() => void) | null = null
 let trpcCleanup: (() => void) | null = null
+let embeddedServerHandle: ServerHandle | null = null
+let embeddedServerSupervisor: SupervisorHandle | null = null
 type OAuthCallbackPayload = { code?: string; error?: string }
 const oauthCallbackQueue: OAuthCallbackPayload[] = []
 const oauthCallbackWaiters = new Set<(payload: OAuthCallbackPayload) => void>()
@@ -1675,60 +1681,106 @@ app.whenReady().then(async () => {
   })
   logBoot('app-level deps wired into tRPC')
 
-  // Start MCP server off the boot critical path. The dynamic import resolves
-  // a heavy module graph (~70ms sync work even though it returns a Promise),
-  // and nothing on first paint depends on the server being listening — the
-  // CLI discovers the port via settings and the renderer doesn't talk to it.
-  setImmediate(() => {
-    logBoot('mcp server import dispatched')
-    import('./mcp-server').then((mod) => {
-      mod.startMcpServer(db, { automationEngine })
-      mcpCleanup = () => mod.stopMcpServer()
-      logBoot('mcp server started')
-    }).catch((err) => {
-      console.error('[MCP] Failed to start server:', err)
+  // Start unified server off the boot critical path. One http.Server hosts
+  // Express (REST + MCP) + WSS at /trpc — replaces former separate
+  // mcp-server.ts and transport/ws-server.ts boots. Same code path as the
+  // standalone @slayzone/server CLI; embedded:true flag skips lockfile,
+  // banner, agent probe, and signal handlers (Electron owns those).
+  //
+  // Mode gate: in 'remote' mode the user has pointed the renderer at an
+  // external @slayzone/server instance, so skip embedded boot entirely.
+  // Settings + theme + tab store still live in the local SQLite either way.
+  const serverMode = (getSetting(db, 'server_mode') ?? 'local') as 'local' | 'remote'
+  if (serverMode === 'local') {
+    setImmediate(() => {
+      logBoot('embedded server import dispatched')
+      Promise.all([
+        import('@slayzone/server'),
+        import('./rest-api/extra'),
+      ]).then(([serverMod, extraMod]) => {
+        const buildStartOpts = (): import('@slayzone/server').StartServerOpts => {
+          const config = serverMod.parseConfig({ argv: [] })
+          return {
+            config,
+            embedded: true,
+            db,
+            notifyRenderer: notifyTasksChanged,
+            automationEngine,
+            menuEvents,
+            focusMainWindow: () => {
+              const win = BrowserWindow.getAllWindows().find((w) => !w.webContents.getURL().startsWith('data:'))
+              if (win) {
+                if (win.isMinimized()) win.restore()
+                win.show()
+                win.focus()
+              }
+            },
+            registerCoreRest: serverMod.registerCoreRest,
+            registerExtraRest: extraMod.registerExtraRest,
+            registerMcpTools: serverMod.registerMcpTools,
+            trpcDeps: { db, dataRoot: getDataRoot(), automationEngine },
+          }
+        }
+        embeddedServerSupervisor = startEmbeddedServerSupervised({
+          startServer: serverMod.startServer,
+          buildStartOpts,
+          onStarted: (handle) => {
+            embeddedServerHandle = handle
+            mcpCleanup = () => { /* unified — handle.stop covers MCP */ }
+            trpcCleanup = () => { /* unified — handle.stop covers tRPC */ }
+            logBoot(`embedded server started on port ${handle.port}`)
+          },
+          onPermanentFailure: ({ attempts, lastError }) => {
+            console.error(`[server] Embedded server failed after ${attempts} attempts:`, lastError)
+            const message = lastError instanceof Error ? lastError.message : String(lastError ?? 'unknown')
+            notifyEvents.emit('embedded-server-failed', { attempts, message })
+          },
+        })
+      }).catch((err) => {
+        console.error('[server] Failed to import embedded server module:', err)
+      })
     })
-  })
+  } else {
+    logBoot('embedded server skipped (server_mode=remote)')
+  }
 
-  setImmediate(() => {
-    logBoot('trpc server import dispatched')
-    import('@slayzone/transport/server').then((mod) => {
-      mod.startTrpcServer({ db, dataRoot: getDataRoot(), automationEngine })
-      trpcCleanup = () => mod.stopTrpcServer()
-      logBoot('trpc server started')
-    }).catch((err) => {
-      console.error('[tRPC] Failed to start server:', err)
-    })
-  })
+  // Integration pollers + provider push hooks operate on the local DB.
+  // In remote mode the local DB is just settings/theme/tab-store — the source
+  // of truth is the remote server, which runs its own pollers. Skip here.
+  if (serverMode === 'local') {
+    linearSyncPoller = startSyncPoller(db, notifyTasksChanged)
+    discoveryPoller = startDiscoveryPoller(db, notifyTasksChanged)
+    logBoot('integration pollers started (sync 10s, discovery 60s)')
+  } else {
+    logBoot('integration pollers skipped (server_mode=remote)')
+  }
 
-  linearSyncPoller = startSyncPoller(db, notifyTasksChanged)
-  discoveryPoller = startDiscoveryPoller(db, notifyTasksChanged)
-  logBoot('integration pollers started (sync 10s, discovery 60s)')
-
-  // Push to providers immediately after local task edits (skip in E2E — tests exercise push explicitly)
-  if (!isPlaywright) {
-    ipcMain.on('db:tasks:update:done', (_event, taskId: string) => {
+  // Push to providers immediately after local task edits (skip in E2E — tests exercise push explicitly).
+  // Subscribes to taskEvents (typed bus) — REST/MCP routes no longer fire the
+  // legacy ipcMain.emit('db:tasks:*:done') side-channel after the rest-api
+  // wholesale move into @slayzone/server.
+  if (!isPlaywright && serverMode === 'local') {
+    taskEvents.on('task:updated', ({ taskId }) => {
       void pushTaskAfterEdit(db, taskId, {
         pushGithubTask: integrationHandles.pushGithubTask
       })
     })
   }
 
-  if (!isPlaywright) {
+  if (!isPlaywright && serverMode === 'local') {
     // Push new tasks to providers (two_way sync)
-    ipcMain.on('db:tasks:create:done', (_event, taskId: string, projectId: string) => {
+    taskEvents.on('task:created', ({ taskId, projectId }) => {
       void pushNewTaskToProviders(db, taskId, projectId).then(() => {
-        // Only notify if a link was actually created
         const hasLink = db.prepare('SELECT 1 FROM external_links WHERE task_id = ? LIMIT 1').get(taskId)
         if (hasLink) notifyTasksChanged()
       })
     })
 
     // Archive/unarchive sync to providers
-    ipcMain.on('db:tasks:archive:done', (_event, taskId: string) => {
+    taskEvents.on('task:archived', ({ taskId }) => {
       void pushArchiveToProviders(db, taskId)
     })
-    ipcMain.on('db:tasks:unarchive:done', (_event, taskId: string) => {
+    taskEvents.on('task:unarchived', ({ taskId }) => {
       void pushUnarchiveToProviders(db, taskId)
     })
   }
@@ -1992,6 +2044,51 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       check()
     })
   })
+
+  // Returns the WS URL the renderer should connect to + the active mode.
+  // Local mode: waits for the embedded server's port (up to 5s) and returns
+  // ws://127.0.0.1:<port>/trpc. Remote mode: returns the user-configured URL.
+  ipcMain.handle('app:get-server-url', async () => {
+    const mode = ((getSetting(db, 'server_mode') ?? 'local') as 'local' | 'remote')
+    if (mode === 'remote') {
+      const url = (getSetting(db, 'remote_server_url') ?? '').trim()
+      return { mode, url }
+    }
+    const port = await new Promise<number>((resolve) => {
+      const g = globalThis as Record<string, unknown>
+      if (typeof g.__trpcPort === 'number') return resolve(g.__trpcPort as number)
+      const start = Date.now()
+      const check = (): void => {
+        const p = (globalThis as Record<string, unknown>).__trpcPort
+        if (typeof p === 'number') resolve(p)
+        else if (Date.now() - start > 5000) resolve(0)
+        else setTimeout(check, 25)
+      }
+      check()
+    })
+    return { mode, url: port > 0 ? `ws://127.0.0.1:${port}/trpc` : '' }
+  })
+
+  // Full process restart — used after Local↔Remote mode switch since the
+  // embedded-server start/skip decision happens at boot time.
+  ipcMain.handle('app:relaunch', () => {
+    app.relaunch()
+    app.exit(0)
+  })
+
+  // Narrow setter for the two server-mode settings keys. The RemoteConfigScreen
+  // renders pre-mount of TrpcProvider (renderer has no tRPC client yet when the
+  // configured remote URL is unreachable), so it cannot use settings.set.
+  ipcMain.handle('app:set-boot-settings', (_e, payload: { server_mode?: 'local' | 'remote'; remote_server_url?: string }) => {
+    const validMode = payload?.server_mode === 'local' || payload?.server_mode === 'remote'
+    if (validMode) {
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('server_mode', ?)").run(payload.server_mode!)
+    }
+    if (typeof payload?.remote_server_url === 'string') {
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('remote_server_url', ?)").run(payload.remote_server_url)
+    }
+    return { ok: true }
+  })
   ipcMain.on('preload:get-window-id', (event) => { event.returnValue = event.sender.id })
   ipcMain.on('app:is-tests-panel-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_tests_panel') })
   ipcMain.on('app:is-jira-integration-enabled-sync', (event) => { event.returnValue = isLabEnabled('labs_jira_integration') })
@@ -2090,13 +2187,13 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       if (linearSyncPoller) { clearInterval(linearSyncPoller); linearSyncPoller = null }
       if (discoveryPoller) { clearInterval(discoveryPoller); discoveryPoller = null }
 
-      // 3. Stop MCP + tRPC servers (restarted after table drop so ports persist)
-      mcpCleanup?.()
+      // 3. Stop unified embedded server (restarted after table drop so port persists)
+      if (embeddedServerSupervisor) { await embeddedServerSupervisor.stop(); embeddedServerSupervisor = null }
+      if (embeddedServerHandle) { await embeddedServerHandle.stop(); embeddedServerHandle = null }
       mcpCleanup = null
-      ;(globalThis as Record<string, unknown>).__mcpPort = undefined
-      trpcCleanup?.()
       trpcCleanup = null
-      ;(globalThis as Record<string, unknown>).__trpcPort = undefined
+      ;(globalThis as Record<string, unknown>).__slayzonePort = undefined
+      ;(globalThis as Record<string, unknown>).__slayzoneMcpPort = undefined
 
       // 4. Close file watchers
       closeAllFileWatchers()
@@ -2132,21 +2229,21 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       // 7b. Seed post-onboarding baseline so tests skip the onboarding wizard
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')").run()
 
-      // 8. Restart MCP + tRPC (after table drop so ports persist to fresh settings table)
-      const mcpMod = await import('./mcp-server')
-      mcpMod.startMcpServer(db, { automationEngine })
-      mcpCleanup = () => mcpMod.stopMcpServer()
-      const trpcMod = await import('@slayzone/transport/server')
-      trpcMod.startTrpcServer({ db, dataRoot: getDataRoot(), automationEngine })
-      trpcCleanup = () => trpcMod.stopTrpcServer()
-      // Wait for both servers to be listening
-      await new Promise<void>((resolve) => {
-        const check = () => {
-          const g = globalThis as Record<string, unknown>
-          if (g.__mcpPort && g.__trpcPort) resolve()
-          else setTimeout(check, 10)
-        }
-        check()
+      // 8. Restart unified server (after table drop so port persists to fresh settings table)
+      const serverMod = await import('@slayzone/server')
+      const extraMod = await import('./rest-api/extra')
+      const cfg = serverMod.parseConfig({ argv: [] })
+      embeddedServerHandle = await serverMod.startServer({
+        config: cfg,
+        embedded: true,
+        db,
+        notifyRenderer: notifyTasksChanged,
+        automationEngine,
+        menuEvents,
+        registerCoreRest: serverMod.registerCoreRest,
+        registerExtraRest: extraMod.registerExtraRest,
+        registerMcpTools: serverMod.registerMcpTools,
+        trpcDeps: { db, dataRoot: getDataRoot(), automationEngine },
       })
 
       // 9. Re-init process manager
@@ -2377,6 +2474,17 @@ app.on('will-quit', () => {
   if (discoveryPoller) {
     clearInterval(discoveryPoller)
     discoveryPoller = null
+  }
+  // Embedded server stop is best-effort fire-and-forget — will-quit can't await.
+  // Tear down the supervisor first so any in-flight retry timer is canceled
+  // and no new handle starts after we've decided to quit.
+  if (embeddedServerSupervisor) {
+    void embeddedServerSupervisor.stop()
+    embeddedServerSupervisor = null
+  }
+  if (embeddedServerHandle) {
+    void embeddedServerHandle.stop()
+    embeddedServerHandle = null
   }
   mcpCleanup?.()
   trpcCleanup?.()

@@ -261,7 +261,7 @@ export const appLevelRouter = router({
     })),
   }),
 
-  // Cross-domain notifications (tasks:changed / settings:changed)
+  // Cross-domain notifications (tasks:changed / settings:changed / embedded-server-failed)
   notify: router({
     onTasksChanged: publicProcedure.subscription(() => observable<void>((emit) => {
       const handler = () => emit.next()
@@ -274,6 +274,12 @@ export const appLevelRouter = router({
       const ev = getAppDeps().notifyEvents
       ev.on('settings-changed', handler)
       return () => ev.off('settings-changed', handler)
+    })),
+    onEmbeddedServerFailed: publicProcedure.subscription(() => observable<{ attempts: number; message: string }>((emit) => {
+      const handler = (payload: { attempts: number; message: string }) => emit.next(payload)
+      const ev = getAppDeps().notifyEvents
+      ev.on('embedded-server-failed', handler)
+      return () => ev.off('embedded-server-failed', handler)
     })),
   }),
 

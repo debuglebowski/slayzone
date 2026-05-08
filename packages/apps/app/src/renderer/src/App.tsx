@@ -288,6 +288,18 @@ function App(): React.JSX.Element {
   useEffect(() => { performance.mark('sz:app:mounted') }, [])
   useEffect(() => { return initShortcuts() }, [])
 
+  // Surface embedded-server permanent failure (supervisor gave up after N retries).
+  // Toast persists since the app is non-functional in local mode without the server —
+  // user needs to act (check port conflict, restart, or switch to remote mode).
+  useEffect(() => {
+    const sub = getTrpcVanillaClient().app.notify.onEmbeddedServerFailed.subscribe(undefined, {
+      onData: ({ attempts, message }) => {
+        toast.error(`Embedded server failed to start after ${attempts} attempts: ${message}. Try relaunching the app.`, { duration: Infinity })
+      },
+    })
+    return () => sub.unsubscribe()
+  }, [])
+
   // Idle-prefetch heavy chunks user will likely hit soon. Runs after first
   // paint settles. requestIdleCallback yields to main-thread work so this
   // never blocks user input. import() is cached → real usage hits warm chunk.

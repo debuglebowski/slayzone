@@ -18,6 +18,7 @@ import { AboutSettingsTab } from './tabs/AboutSettingsTab'
 import { WorktreesSettingsTab } from './tabs/WorktreesSettingsTab'
 import { BackupSettingsTab } from './tabs/BackupSettingsTab'
 import { LabsSettingsTab } from './tabs/LabsSettingsTab'
+import { ServerSettingsTab } from './tabs/ServerSettingsTab'
 import { SettingsTabIntro } from './tabs/SettingsTabIntro'
 
 function TelemetrySettingsTab() {
@@ -120,6 +121,7 @@ export function UserSettingsDialog({
     },
     { key: 'data', label: 'Import & Export' },
     { key: 'backup', label: 'Backup' },
+    { key: 'server', label: 'Server' },
     { key: 'labs', label: 'Labs' },
     { key: 'mcp', label: 'MCP' },
     { key: 'diagnostics', label: 'Diagnostics' },
@@ -179,6 +181,8 @@ export function UserSettingsDialog({
             {activeTab === 'data' && <DataSettingsTab />}
 
             {activeTab === 'backup' && <BackupSettingsTab />}
+
+            {activeTab === 'server' && <ServerSettingsTab />}
 
             {activeTab === 'labs' && <LabsSettingsTab />}
 

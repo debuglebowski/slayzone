@@ -73,6 +73,7 @@ export type AppDeps = {
   notifyEvents: EventEmitter & {
     on(event: 'tasks-changed', listener: () => void): EventEmitter
     on(event: 'settings-changed', listener: () => void): EventEmitter
+    on(event: 'embedded-server-failed', listener: (p: { attempts: number; message: string }) => void): EventEmitter
     off(event: string, listener: (...args: unknown[]) => void): EventEmitter
   }
 

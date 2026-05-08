@@ -9,6 +9,7 @@ import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
 import { FloatingAgentPanel } from './components/agent-panel/FloatingAgentPanel'
+import { RemoteConfigScreen } from './components/RemoteConfigScreen'
 import { SecondaryTaskWindow } from './components/SecondaryTaskWindow'
 import { getDiagnosticsContext } from './lib/diagnosticsClient'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
@@ -66,11 +67,22 @@ if (isFloatingAgent) {
   )
 } else {
   window.api.app.bootMark?.('renderer script entered')
-  // Wait for tab store + tRPC port discovery before rendering. Tab store
-  // hydrates from SQLite (prevents effect race wiping persisted tabs); tRPC
-  // port is needed to construct the WS URL passed to TrpcProvider.
-  Promise.all([tabStoreReady, window.api.app.getTrpcPort()]).then(([, trpcPort]) => {
+  // Wait for tab store + server URL discovery before rendering. Tab store
+  // hydrates from SQLite (prevents effect race wiping persisted tabs); server
+  // URL drives the TrpcProvider WS connection (local: embedded port; remote:
+  // user-configured URL).
+  Promise.all([tabStoreReady, window.api.app.getServerUrl()]).then(([, server]) => {
     window.api.app.bootMark?.('tabStoreReady resolved')
+
+    // Remote mode with no/empty URL → render config-recovery screen instead
+    // of mounting TrpcProvider against a broken URL (would WS-loop forever).
+    if (server.mode === 'remote' && !server.url) {
+      createRoot(document.getElementById('root')!).render(
+        <RemoteConfigScreen initialUrl="" />
+      )
+      return
+    }
+
     // Prefetch task details for open tabs — warms Suspense cache before React mounts.
     // Fire-and-forget: the cache's resolved-value tracking + notify ensures immediate
     // re-render when data arrives, eliminating the 250ms use() scheduling delay.
@@ -81,7 +93,9 @@ if (isFloatingAgent) {
     // Pass per-window id so server can scope panel ownership + primary-active
     // state. windowId is generated once per preload load (stable per window).
     const wid = window.api.app.windowId ?? ''
-    const trpcUrl = `ws://127.0.0.1:${trpcPort}/trpc${wid ? `?windowId=${wid}` : ''}`
+    const trpcUrl = wid
+      ? `${server.url}${server.url.includes('?') ? '&' : '?'}windowId=${wid}`
+      : server.url
     performance.mark('sz:reactMount')
     window.api.app.bootMark?.('reactMount')
     createRoot(document.getElementById('root')!).render(
