@@ -275,6 +275,10 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
       // Optimistic dispatch from the renderer (useChatSession.sendMessage). The
       // matching `user-message` event flowing back from main confirms in place
       // — see the dedup branch in applyEvent('user-message').
+      // Drift recovery: same rationale as the user-message branch — a fresh user
+      // turn-start while counters still say in-flight means the prior turn was
+      // orphaned. Heal so the new optimistic bump doesn't compound prior drift.
+      const healed = healOrphanedTurn(state, Date.now())
       const item: TimelineItem = {
         kind: 'user-text',
         text: action.text,
@@ -282,9 +286,9 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
         optimistic: true,
       }
       return {
-        ...state,
-        timeline: [...state.timeline, item],
-        userMessagesSent: state.userMessagesSent + 1,
+        ...healed,
+        timeline: [...healed.timeline, item],
+        userMessagesSent: healed.userMessagesSent + 1,
       }
     }
     case 'user-send-failed': {
@@ -313,8 +317,11 @@ function applyAction(state: ChatTimelineState, action: Action): ChatTimelineStat
       if (state.sessionId === null || state.sessionId !== action.sessionId) {
         return state
       }
+      // Process death mid-turn → balance counters + clear stream state so the
+      // typing indicator can't be stuck on. Mirrors the agent-event branch.
+      const healed = healOrphanedTurn(state, Date.now())
       return {
-        ...state,
+        ...healed,
         sessionEnded: true,
         exitCode: action.code,
         exitSignal: action.signal,
@@ -341,15 +348,21 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
           return { ...state, timeline: next }
         }
       }
+      // Drift recovery: a fresh (non-optimistic-confirming) user-message means a new
+      // turn starts here. If counters say we're still in-flight, the prior turn never
+      // produced its terminator (process crashed mid-turn, app force-quit, dropped event).
+      // Auto-insert synthetic `interrupted` to balance counters + clear stream state.
+      // Idempotent across replays — pure reducer math, no persistence needed.
+      const healed = healOrphanedTurn(state, ts)
       const item: TimelineItem = {
         kind: 'user-text',
         text: event.text,
         timestamp: ts,
       }
       return {
-        ...state,
-        timeline: [...state.timeline, item],
-        userMessagesSent: state.userMessagesSent + 1,
+        ...healed,
+        timeline: [...healed.timeline, item],
+        userMessagesSent: healed.userMessagesSent + 1,
       }
     }
     case 'interrupted': {
@@ -364,6 +377,10 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         ...state,
         timeline: [...state.timeline, item],
         resultCount: state.resultCount + 1,
+        // Defensive: clear any straggling stream state so the typing indicator
+        // can't read "Writing…" off a half-open block once the turn is gone.
+        openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
+        currentStreamMessageId: null,
       }
     }
     case 'user-message-popped': {
@@ -748,6 +765,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         timeline: nextTimeline,
         lastResult: item,
         resultCount: state.resultCount + 1,
+        // Defensive: a result terminates the turn. `stream-message-stop` should
+        // already have cleared these, but if the SDK closes a turn without one
+        // (rate-limit, error path, network drop after partial stream) the typing
+        // indicator would otherwise read "Writing…" off a stranded open block.
+        openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
+        currentStreamMessageId: null,
       }
     }
     case 'api-retry':
@@ -829,13 +852,18 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         ...state,
         timeline: [...state.timeline, { kind: 'stderr', text: event.text, timestamp: ts }],
       }
-    case 'process-exit':
+    case 'process-exit': {
+      // Process exited. If we were mid-turn, heal counters + clear stream state
+      // so inFlight drops and the typing indicator clears. Without this, a crash
+      // mid-stream leaves "Writing…" stuck forever even after the buffer replay.
+      const healed = healOrphanedTurn(state, ts)
       return {
-        ...state,
+        ...healed,
         sessionEnded: true,
         exitCode: event.code,
         exitSignal: event.signal,
       }
+    }
     case 'error':
       return {
         ...state,
@@ -868,6 +896,30 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
 /** Derive whether we're waiting for a response. True if user sent more messages than we've seen results for. */
 export function isInFlight(state: ChatTimelineState): boolean {
   return state.userMessagesSent > state.resultCount
+}
+
+/**
+ * Drift recovery: when a NEW user-turn boundary lands (user-sent / fresh
+ * user-message / process-exit) while counters still say in-flight, the prior
+ * turn was orphaned — its terminator (`result` / `interrupted` /
+ * `user-message-popped`) never reached the buffer (process killed, app crash,
+ * dropped event). Append a synthetic `interrupted` marker, balance counters,
+ * and clear stream state so `inFlight` drops and the typing indicator can't
+ * sit on a stranded open block.
+ *
+ * Pure reducer math — idempotent across replays, no persistence needed. Each
+ * replay re-derives the same heal points from the buffer's gaps.
+ */
+function healOrphanedTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
+  if (!isInFlight(state)) return state
+  const item: TimelineItem = { kind: 'interrupted', timestamp: ts }
+  return {
+    ...state,
+    timeline: [...state.timeline, item],
+    resultCount: state.userMessagesSent,
+    openBlocks: state.openBlocks.size > 0 ? new Map() : state.openBlocks,
+    currentStreamMessageId: null,
+  }
 }
 
 /**

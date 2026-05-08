@@ -131,12 +131,16 @@ test('inFlight: true after user-sent, false after result', () => {
   expect(isInFlight(s)).toBe(false)
 })
 
-test('inFlight: true if more user messages than results (two-turn interleave)', () => {
+test('inFlight: queued send + result completes one turn → still in flight if next dispatched', () => {
+  // Real flow: ChatPanel queues sends while inFlight; user-sent only dispatches when idle.
+  // After result the queue drainer kicks the next send → user-sent fires → inFlight true again.
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })
-  s = reducer(s, { type: 'user-sent', text: 'hi' })
-  s = reducer(s, { type: 'user-sent', text: 'hi' })
+  s = reducer(s, { type: 'user-sent', text: 'first' })
+  expect(isInFlight(s)).toBe(true)
   s = reducer(s, { type: 'event', event: ev.turnResult() })
+  expect(isInFlight(s)).toBe(false)
+  s = reducer(s, { type: 'user-sent', text: 'second' })
   expect(isInFlight(s)).toBe(true)
   s = reducer(s, { type: 'event', event: ev.turnResult() })
   expect(isInFlight(s)).toBe(false)
@@ -162,6 +166,107 @@ test('process-exit before any turn-init is dropped (sessionId still null)', () =
   let s = initialState()
   s = reducer(s, { type: 'process-exit', sessionId: 'sid-zombie', code: 0, signal: null })
   expect(s.sessionEnded).toBe(false)
+})
+
+// ---- drift recovery (orphaned-turn self-heal) -----------------------------
+
+test('drift recovery: replay w/ orphaned mid-buffer user-message self-heals', () => {
+  // Real bug: app crashed mid-turn at seq 3 → no result/interrupted persisted.
+  // User sent more turns later (135, 138, 177, 184) all completed cleanly.
+  // Without self-heal, replay leaves userMessagesSent=4 / resultCount=3 → stuck "Writing…".
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  // Turn 1: user-message, never terminated (mid-turn crash).
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'turn 1' } })
+  expect(isInFlight(s)).toBe(true)
+  // Turn 2: arrives next. Healer must close turn 1 before counting turn 2.
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'turn 2' } })
+  expect(isInFlight(s)).toBe(true)  // turn 2 still in flight
+  s = reducer(s, { type: 'event', event: ev.turnResult() })
+  expect(isInFlight(s)).toBe(false)
+  // Synthetic interrupted from heal must be visible between the two user-text rows.
+  const kinds = s.timeline.map((it) => it.kind)
+  const u1 = kinds.indexOf('user-text')
+  const interrupted = kinds.indexOf('interrupted', u1)
+  const u2 = kinds.indexOf('user-text', interrupted)
+  expect(u1 >= 0).toBe(true)
+  expect(interrupted > u1).toBe(true)
+  expect(u2 > interrupted).toBe(true)
+})
+
+test('drift recovery: process-exit mid-stream balances counters + clears openBlocks', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit('sid-A') })
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'hi' } })
+  s = reducer(s, { type: 'event', event: { kind: 'stream-message-start', messageId: 'm1' } })
+  s = reducer(s, { type: 'event', event: { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' } })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'partial' },
+  })
+  expect(isInFlight(s)).toBe(true)
+  expect(s.openBlocks.size).toBe(1)
+  // Process dies before stream-message-stop / result.
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'process-exit', code: null, signal: 'SIGKILL' },
+  })
+  expect(isInFlight(s)).toBe(false)
+  expect(s.openBlocks.size).toBe(0)
+  expect(s.currentStreamMessageId).toBe(null)
+  expect(s.sessionEnded).toBe(true)
+})
+
+test('drift recovery: result clears stranded openBlocks (missing stream-message-stop)', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'hi' } })
+  s = reducer(s, { type: 'event', event: { kind: 'stream-message-start', messageId: 'm1' } })
+  s = reducer(s, { type: 'event', event: { kind: 'stream-block-start', blockIndex: 0, blockType: 'text' } })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'stream-block-delta', blockIndex: 0, deltaType: 'text', text: 'response' },
+  })
+  expect(s.openBlocks.size).toBe(1)
+  // Result arrives without stream-message-stop (e.g. SDK closes stream abruptly).
+  s = reducer(s, { type: 'event', event: ev.turnResult() })
+  expect(s.openBlocks.size).toBe(0)
+  expect(s.currentStreamMessageId).toBe(null)
+  // inFlight is the gate that suppresses the indicator; label still falls back to
+  // tail-text per the sticky-label policy, but it's never read while !inFlight.
+  expect(isInFlight(s)).toBe(false)
+})
+
+test('drift recovery: optimistic user-sent over orphaned prior turn heals first', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'turn 1' } })
+  // Live path: user clicks send while inFlight stuck from drift.
+  s = reducer(s, { type: 'user-sent', text: 'turn 2' })
+  // Heal closed turn 1 (resultCount bumped to match userMessagesSent), then optimistic
+  // bumped userMessagesSent again. So drift = 1 (just for the new turn).
+  expect(s.userMessagesSent - s.resultCount).toBe(1)
+  const interrupted = s.timeline.filter((it) => it.kind === 'interrupted')
+  expect(interrupted.length).toBe(1)
+})
+
+test('drift recovery: idempotent — replay produces same state regardless of order', () => {
+  // Replay-determinism guard: the heal logic must not introduce divergence
+  // between live application and cold replay of the same buffer.
+  const events: AgentEvent[] = [
+    ev.turnInit(),
+    { kind: 'user-message', text: 'orphan' },  // never terminated
+    { kind: 'user-message', text: 'next' },     // triggers heal
+    ev.turnResult(),
+  ]
+  let live = initialState()
+  for (const e of events) live = reducer(live, { type: 'event', event: e })
+  let replay = initialState()
+  for (const e of events) replay = reducer(replay, { type: 'event', event: e })
+  const strip = (t: typeof live.timeline): unknown =>
+    JSON.stringify(t, (k, v) => (k === 'timestamp' ? 0 : v))
+  expect(strip(live.timeline)).toBe(strip(replay.timeline))
+  expect(isInFlight(live)).toBe(false)
 })
 
 test('replay determinism: live vs getBuffer yields identical timeline (timestamp-stripped)', () => {
