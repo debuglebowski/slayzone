@@ -4,7 +4,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
 
@@ -29,9 +28,6 @@ export function TreeDisplaySettings() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-          Display
-        </DropdownMenuLabel>
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault()

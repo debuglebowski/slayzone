@@ -6,7 +6,7 @@ export {
   SHORTCUT_DEFAULT_MIGRATIONS,
   type ShortcutDefinition,
 } from './definitions'
-export { toElectronAccelerator, matchesShortcut, matchesElectronInput, formatKeysForDisplay, withShortcut, type ElectronInput } from './accelerator'
+export { toElectronAccelerator, matchesShortcut, matchesElectronInput, formatKeysForDisplay, formatKeysVerbose, withShortcut, normalizeHotkeyString, type ElectronInput } from './accelerator'
 export { registry, ShortcutRegistry, type HandlerEntry } from './registry'
 export { scopeTracker, ScopeTracker } from './scope-tracker'
 export { getBlockedWebPanelKeys } from './blocked-keys'

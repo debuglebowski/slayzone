@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react'
+import { normalizeHotkeyString } from '@slayzone/shortcuts'
 
 const MODIFIER_KEYS = new Set(['Meta', 'Control', 'Shift', 'Alt'])
 const isMac = navigator.platform.startsWith('Mac')
@@ -17,7 +18,7 @@ function normalizeKeyEvent(e: KeyboardEvent): string | null {
   if (isMac && e.ctrlKey) parts.push('ctrl')
 
   parts.push(e.key.toLowerCase())
-  return parts.join('+')
+  return normalizeHotkeyString(parts.join('+'))
 }
 
 interface KeyRecorderProps {

@@ -7,7 +7,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
-  DropdownMenuLabel,
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
 
@@ -46,9 +45,6 @@ export function TreeStatusFilter() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="start" className="min-w-[200px]">
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-          Show statuses
-        </DropdownMenuLabel>
         {statusOptions.map((opt) => {
           const Icon = opt.icon
           return (

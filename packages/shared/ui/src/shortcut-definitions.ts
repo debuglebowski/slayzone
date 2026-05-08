@@ -4,6 +4,7 @@ export {
   toElectronAccelerator,
   matchesShortcut,
   formatKeysForDisplay,
+  formatKeysVerbose,
   withShortcut,
   detectPlatform,
   SCOPE_PRIORITY,

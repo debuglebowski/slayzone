@@ -2,9 +2,27 @@ import { detectPlatform, type Platform } from './platform'
 
 const DISPLAY_MAP_MAC: Record<string, string> = {
   mod: '⌘', shift: '⇧', alt: '⌥', ctrl: '⌃',
+  period: '.', comma: ',', slash: '/', backslash: '\\',
 }
 const DISPLAY_MAP_OTHER: Record<string, string> = {
   mod: 'Ctrl', shift: 'Shift', alt: 'Alt', ctrl: 'Ctrl',
+  period: '.', comma: ',', slash: '/', backslash: '\\',
+}
+
+/** Punctuation key names react-hotkeys-hook expects (matches e.code lowercased).
+ *  Maps the literal char → key name used in shortcut strings. */
+const PUNCT_TO_NAME: Record<string, string> = {
+  '.': 'period', ',': 'comma', '/': 'slash', '\\': 'backslash',
+}
+/** Reverse: name → literal char, for raw keydown matching against e.key. */
+const NAME_TO_PUNCT: Record<string, string> = Object.fromEntries(
+  Object.entries(PUNCT_TO_NAME).map(([k, v]) => [v, k])
+)
+
+/** Normalize punctuation chars in a hotkey string to the names react-hotkeys-hook expects.
+ *  Used by code that records new bindings; safe to apply repeatedly. */
+export function normalizeHotkeyString(keys: string): string {
+  return keys.split('+').map(part => PUNCT_TO_NAME[part] ?? part).join('+')
 }
 
 export function formatKeysForDisplay(keys: string | null, platform?: Platform): string | null {
@@ -25,6 +43,26 @@ export function withShortcut(label: string, keys: string | null): string {
   return keys ? `${label} (${keys})` : label
 }
 
+const VERBOSE_MAP_MAC: Record<string, string> = {
+  mod: 'Cmd', shift: 'Shift', alt: 'Opt', ctrl: 'Ctrl',
+  period: '.', comma: ',', slash: '/', backslash: '\\',
+}
+const VERBOSE_MAP_OTHER: Record<string, string> = {
+  mod: 'Ctrl', shift: 'Shift', alt: 'Alt', ctrl: 'Ctrl',
+  period: '.', comma: ',', slash: '/', backslash: '\\',
+}
+
+/** Verbose display: spelled-out modifiers joined with `+` (e.g. "Ctrl+.", "Cmd+Shift+."). */
+export function formatKeysVerbose(keys: string | null, platform?: Platform): string | null {
+  if (keys === null) return null
+  const map = (platform ?? detectPlatform()) === 'mac' ? VERBOSE_MAP_MAC : VERBOSE_MAP_OTHER
+  return keys.split('+').map(part => {
+    const mapped = map[part]
+    if (mapped) return mapped
+    return part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)
+  }).join('+')
+}
+
 export function toElectronAccelerator(keys: string | null): string | null {
   if (keys === null) return null
   return keys.split('+').map(part => {
@@ -32,6 +70,8 @@ export function toElectronAccelerator(keys: string | null): string | null {
     if (part === 'shift') return 'Shift'
     if (part === 'alt') return 'Alt'
     if (part === 'ctrl') return 'Ctrl'
+    const punct = NAME_TO_PUNCT[part]
+    if (punct) return punct
     return part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)
   }).join('+')
 }
@@ -67,7 +107,8 @@ export function matchesShortcut(e: KeyboardEvent, keys: string | null): boolean 
   if (wantAlt && isMac && e.code && key.length === 1) {
     return e.code.replace(/^Key/, '').toLowerCase() === key
   }
-  return e.key.toLowerCase() === key
+  const expectedKey = NAME_TO_PUNCT[key] ?? key
+  return e.key.toLowerCase() === expectedKey
 }
 
 /** Electron's before-input-event Input shape (subset we need). */
@@ -112,5 +153,6 @@ export function matchesElectronInput(input: ElectronInput, keys: string | null):
   if (wantAlt && isMac && input.code && key.length === 1) {
     return input.code.replace(/^Key/, '').toLowerCase() === key
   }
-  return input.key.toLowerCase() === key
+  const expectedKey = NAME_TO_PUNCT[key] ?? key
+  return input.key.toLowerCase() === expectedKey
 }

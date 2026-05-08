@@ -786,6 +786,8 @@ function App(): React.JSX.Element {
 
   useGuardedHotkeys(getKeys('zen-mode'), (e) => { e.preventDefault(); track('zen_mode_toggled'); trackShortcut(getKeys('zen-mode')); setZenMode(prev => !prev) }, { enableOnFormTags: true, enabled: !isRecording })
 
+  useGuardedHotkeys(getKeys('sidebar-auto-hide'), (e) => { e.preventDefault(); trackShortcut(getKeys('sidebar-auto-hide')); useTabStore.getState().setSidebarAutoHide(!useTabStore.getState().sidebarAutoHide) }, { enableOnFormTags: true, enabled: !isRecording })
+
   useGuardedHotkeys(getKeys('explode-mode'), (e) => {
     e.preventDefault()
     if (openTaskIds.length >= 2) { track('explode_mode_toggled'); trackShortcut(getKeys('explode-mode')); setExplodeMode(prev => !prev) }

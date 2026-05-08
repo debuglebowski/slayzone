@@ -3,12 +3,12 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   Tooltip,
   TooltipTrigger,
   TooltipContent,
   cn,
+  useShortcutDisplay,
 } from '@slayzone/ui'
 import { Check, PanelLeftClose } from 'lucide-react'
 import { viewRegistry, getView } from './views/registry'
@@ -30,6 +30,7 @@ export function SidebarViewSwitcher({
 }: SidebarViewSwitcherProps) {
   const view = getView(current)
   const Icon = view.icon
+  const autoHideShortcut = useShortcutDisplay('sidebar-auto-hide', 'verbose')
 
   const switcherTrigger = (
     <button
@@ -59,9 +60,6 @@ export function SidebarViewSwitcher({
         <DropdownMenuTrigger asChild>{switcherTrigger}</DropdownMenuTrigger>
       )}
       <DropdownMenuContent side="top" align="start" className="min-w-[200px]">
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-          View
-        </DropdownMenuLabel>
         {viewRegistry.map((v) => {
           const VIcon = v.icon
           const selected = v.id === current
@@ -78,9 +76,6 @@ export function SidebarViewSwitcher({
           )
         })}
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-          Settings
-        </DropdownMenuLabel>
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault()
@@ -91,6 +86,11 @@ export function SidebarViewSwitcher({
           <PanelLeftClose className="size-4" />
           <span>Auto-hide</span>
           {autoHide && <Check className="size-4 col-start-3" />}
+          {autoHideShortcut && (
+            <kbd className="col-start-4 rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
+              {autoHideShortcut}
+            </kbd>
+          )}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

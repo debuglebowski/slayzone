@@ -19,10 +19,11 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'search', label: 'Search', group: 'General', defaultKeys: 'mod+k', scope: 'global' },
   { id: 'complete-close-tab', label: 'Complete & Close Tab', group: 'General', defaultKeys: 'mod+shift+d', scope: 'global' },
   { id: 'zen-mode', label: 'Zen Mode', group: 'General', defaultKeys: 'mod+shift+j', scope: 'global' },
+  { id: 'sidebar-auto-hide', label: 'Sidebar Auto-Hide', group: 'General', defaultKeys: 'ctrl+period', scope: 'global' },
   { id: 'explode-mode', label: 'Explode Mode', group: 'General', defaultKeys: 'mod+shift+e', scope: 'global' },
   { id: 'exit-zen-explode', label: 'Exit Zen / Explode', group: 'General', defaultKeys: 'escape', scope: 'global' },
-  { id: 'agent-panel', label: 'Agent Panel', group: 'General', defaultKeys: 'mod+.', scope: 'global' },
-  { id: 'agent-status-panel', label: 'Agent Status Panel', group: 'General', defaultKeys: 'ctrl+.', scope: 'global' },
+  { id: 'agent-panel', label: 'Agent Panel', group: 'General', defaultKeys: 'mod+period', scope: 'global' },
+  { id: 'agent-status-panel', label: 'Agent Status Panel', group: 'General', defaultKeys: 'mod+shift+period', scope: 'global' },
   { id: 'global-settings', label: 'Global Settings', group: 'General', defaultKeys: 'mod+,', scope: 'global' },
   { id: 'project-settings', label: 'Project Settings', group: 'General', defaultKeys: 'mod+shift+,', scope: 'global' },
   { id: 'go-home', label: 'Go Home', group: 'General', defaultKeys: 'mod+§', scope: 'global', platform: 'mac' },
@@ -90,8 +91,12 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
  *  so users pick up the new default after a rebind. Append an entry on every
  *  default swap — pair with the new `defaultKeys` value above. */
 export const SHORTCUT_DEFAULT_MIGRATIONS: { id: string; oldDefault: string }[] = [
-  { id: 'zen-mode',        oldDefault: 'mod+j' },       // moved to mod+shift+j
-  { id: 'panel-settings',  oldDefault: 'mod+s' },       // moved to mod+j
+  { id: 'zen-mode',           oldDefault: 'mod+j' },         // moved to mod+shift+j
+  { id: 'panel-settings',     oldDefault: 'mod+s' },         // moved to mod+j
+  { id: 'agent-panel',        oldDefault: 'mod+.' },         // dot→period (react-hotkeys-hook v5 e.code matching)
+  { id: 'agent-status-panel', oldDefault: 'ctrl+.' },        // moved to mod+shift+period
+  { id: 'agent-status-panel', oldDefault: 'mod+shift+.' },   // dot→period
+  { id: 'sidebar-auto-hide',  oldDefault: 'ctrl+.' },        // dot→period
 ]
 
 /** Shortcut IDs that are driven by Electron native menu accelerators. */
