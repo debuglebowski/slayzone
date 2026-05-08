@@ -55,6 +55,14 @@ interface TabState {
   treeShowStatus: boolean
   treeShowPriority: boolean
   treeShowSubtasks: boolean
+  // Tree-view: when true, ignore status filter for sub-tasks — if a root task
+  // passes the filter, render its entire descendant subtree.
+  treeIncludeAllSubtasks: boolean
+  // Tree-view: strikethrough completed (done) task rows.
+  treeCrossOutDone: boolean
+  // Tree-view: show the global top header (TabBar). When false, right-side
+  // header buttons render at the bottom of the sidebar instead.
+  treeShowHeader: boolean
   // Tree-view: tasks always visible regardless of status filter / sessions.
   treePinnedTaskIds: string[]
   // projectId → taskId of last active task tab, or 'home' if home tab was last active
@@ -77,6 +85,9 @@ interface TabState {
   setTreeShowStatus: (show: boolean) => void
   setTreeShowPriority: (show: boolean) => void
   setTreeShowSubtasks: (show: boolean) => void
+  setTreeIncludeAllSubtasks: (include: boolean) => void
+  setTreeCrossOutDone: (cross: boolean) => void
+  setTreeShowHeader: (show: boolean) => void
   toggleTreePinnedTask: (taskId: string) => void
   setTabs: (tabs: Tab[]) => void
   reorderTabs: (from: number, to: number) => void
@@ -88,7 +99,7 @@ interface TabState {
   reopenClosedTab: () => void
 
   // Internal
-  _loadState: (state: { tabs: Tab[]; activeTabIndex: number; activeView?: ActiveView; selectedProjectId: string; projectScopedTabs?: boolean; sidebarView?: string; sidebarWidth?: number | null; sidebarAutoHide?: boolean; treeStatusFilter?: string[]; treeShowStatus?: boolean; treeShowPriority?: boolean; treeShowSubtasks?: boolean; treePinnedTaskIds?: string[]; projectLastActiveTab?: Record<string, string> }) => void
+  _loadState: (state: { tabs: Tab[]; activeTabIndex: number; activeView?: ActiveView; selectedProjectId: string; projectScopedTabs?: boolean; sidebarView?: string; sidebarWidth?: number | null; sidebarAutoHide?: boolean; treeStatusFilter?: string[]; treeShowStatus?: boolean; treeShowPriority?: boolean; treeShowSubtasks?: boolean; treeIncludeAllSubtasks?: boolean; treeCrossOutDone?: boolean; treeShowHeader?: boolean; treePinnedTaskIds?: string[]; projectLastActiveTab?: Record<string, string> }) => void
 }
 
 function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup): number {
@@ -129,6 +140,9 @@ export const useTabStore = create<TabState>()(
     treeShowStatus: false,
     treeShowPriority: true,
     treeShowSubtasks: true,
+    treeIncludeAllSubtasks: false,
+    treeCrossOutDone: false,
+    treeShowHeader: true,
     treePinnedTaskIds: [],
     projectLastActiveTab: {},
     _taskLookup: { tasks: [], projects: [] },
@@ -173,6 +187,12 @@ export const useTabStore = create<TabState>()(
     setTreeShowPriority: (show) => set({ treeShowPriority: show }),
 
     setTreeShowSubtasks: (show) => set({ treeShowSubtasks: show }),
+
+    setTreeIncludeAllSubtasks: (include) => set({ treeIncludeAllSubtasks: include }),
+
+    setTreeCrossOutDone: (cross) => set({ treeCrossOutDone: cross }),
+
+    setTreeShowHeader: (show) => set({ treeShowHeader: show }),
 
     toggleTreePinnedTask: (taskId) =>
       set((s) => ({
@@ -307,6 +327,9 @@ export const useTabStore = create<TabState>()(
         treeShowStatus: typeof state.treeShowStatus === 'boolean' ? state.treeShowStatus : false,
         treeShowPriority: typeof state.treeShowPriority === 'boolean' ? state.treeShowPriority : true,
         treeShowSubtasks: typeof state.treeShowSubtasks === 'boolean' ? state.treeShowSubtasks : true,
+        treeIncludeAllSubtasks: typeof state.treeIncludeAllSubtasks === 'boolean' ? state.treeIncludeAllSubtasks : false,
+        treeCrossOutDone: typeof state.treeCrossOutDone === 'boolean' ? state.treeCrossOutDone : false,
+        treeShowHeader: typeof state.treeShowHeader === 'boolean' ? state.treeShowHeader : true,
         treePinnedTaskIds: Array.isArray(state.treePinnedTaskIds) && state.treePinnedTaskIds.every((id) => typeof id === 'string')
           ? state.treePinnedTaskIds
           : [],
@@ -347,7 +370,7 @@ export const tabStoreReady: Promise<void> = (typeof window !== 'undefined' && wi
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 useTabStore.subscribe(
-  (state) => ({ tabs: state.tabs, activeTabIndex: state.activeTabIndex, activeView: state.activeView, selectedProjectId: state.selectedProjectId, projectScopedTabs: state.projectScopedTabs, sidebarView: state.sidebarView, sidebarWidth: state.sidebarWidth, sidebarAutoHide: state.sidebarAutoHide, treeStatusFilter: state.treeStatusFilter, treeShowStatus: state.treeShowStatus, treeShowPriority: state.treeShowPriority, treeShowSubtasks: state.treeShowSubtasks, treePinnedTaskIds: state.treePinnedTaskIds, projectLastActiveTab: state.projectLastActiveTab }),
+  (state) => ({ tabs: state.tabs, activeTabIndex: state.activeTabIndex, activeView: state.activeView, selectedProjectId: state.selectedProjectId, projectScopedTabs: state.projectScopedTabs, sidebarView: state.sidebarView, sidebarWidth: state.sidebarWidth, sidebarAutoHide: state.sidebarAutoHide, treeStatusFilter: state.treeStatusFilter, treeShowStatus: state.treeShowStatus, treeShowPriority: state.treeShowPriority, treeShowSubtasks: state.treeShowSubtasks, treeIncludeAllSubtasks: state.treeIncludeAllSubtasks, treeCrossOutDone: state.treeCrossOutDone, treeShowHeader: state.treeShowHeader, treePinnedTaskIds: state.treePinnedTaskIds, projectLastActiveTab: state.projectLastActiveTab }),
   (slice) => {
     if (!useTabStore.getState().isLoaded) return
     if (_debounceTimer) clearTimeout(_debounceTimer)

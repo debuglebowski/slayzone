@@ -78,6 +78,8 @@ export function TreeView({
   const treeShowStatus = useTabStore((s) => s.treeShowStatus)
   const treeShowPriority = useTabStore((s) => s.treeShowPriority)
   const treeShowSubtasks = useTabStore((s) => s.treeShowSubtasks)
+  const treeIncludeAllSubtasks = useTabStore((s) => s.treeIncludeAllSubtasks)
+  const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const pinnedSet = useMemo(() => new Set(treePinnedTaskIds), [treePinnedTaskIds])
   const passesFilter = useCallback(
@@ -88,9 +90,37 @@ export function TreeView({
   // A task is "visible" if it passes the filter OR if any descendant in the same
   // project does (so the hierarchy stays connected when only sub-tasks match).
   // Walk parents from each matching task up to the project root.
+  //
+  // When `treeIncludeAllSubtasks` is on (and sub-tasks are shown), the filter is
+  // applied at the root level only — any root that passes pulls its entire
+  // descendant subtree along, regardless of sub-task status.
   const visibleTaskIds = useMemo(() => {
     const taskById = new Map(tasks.map((t) => [t.id, t]))
     const set = new Set<string>()
+
+    if (treeShowSubtasks && treeIncludeAllSubtasks) {
+      const childrenOf = new Map<string, Task[]>()
+      for (const t of tasks) {
+        if (!t.parent_id) continue
+        const list = childrenOf.get(t.parent_id) ?? []
+        list.push(t)
+        childrenOf.set(t.parent_id, list)
+      }
+      for (const t of tasks) {
+        if (t.parent_id) continue
+        if (!passesFilter(t)) continue
+        const stack: Task[] = [t]
+        while (stack.length > 0) {
+          const cur = stack.pop()!
+          if (set.has(cur.id) || cur.archived_at) continue
+          set.add(cur.id)
+          const kids = childrenOf.get(cur.id)
+          if (kids) for (const k of kids) stack.push(k)
+        }
+      }
+      return set
+    }
+
     for (const t of tasks) {
       if (!passesFilter(t)) continue
       // When sub-tasks hidden, only top-level tasks are eligible.
@@ -103,7 +133,7 @@ export function TreeView({
       }
     }
     return set
-  }, [tasks, passesFilter, treeShowSubtasks])
+  }, [tasks, passesFilter, treeShowSubtasks, treeIncludeAllSubtasks])
 
   // Per-project filters (mirrors kanban). Live-updates when user changes
   // sortBy / groupBy in the kanban filter bar.
@@ -242,7 +272,14 @@ export function TreeView({
             alwaysShow
             tooltipSide="right"
           />
-          <span className="truncate flex-1">{task.title || 'Untitled'}</span>
+          <span
+            className={cn(
+              'truncate flex-1',
+              treeCrossOutDone && isDone && 'line-through text-muted-foreground/60'
+            )}
+          >
+            {task.title || 'Untitled'}
+          </span>
           {pinnedSet.has(task.id) && (
             <Pin
               aria-label="Pinned"

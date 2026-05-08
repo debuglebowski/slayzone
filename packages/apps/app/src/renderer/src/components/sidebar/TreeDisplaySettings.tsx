@@ -11,9 +11,15 @@ export function TreeDisplaySettings() {
   const treeShowStatus = useTabStore((s) => s.treeShowStatus)
   const treeShowPriority = useTabStore((s) => s.treeShowPriority)
   const treeShowSubtasks = useTabStore((s) => s.treeShowSubtasks)
+  const treeIncludeAllSubtasks = useTabStore((s) => s.treeIncludeAllSubtasks)
+  const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
+  const treeShowHeader = useTabStore((s) => s.treeShowHeader)
   const setTreeShowStatus = useTabStore((s) => s.setTreeShowStatus)
   const setTreeShowPriority = useTabStore((s) => s.setTreeShowPriority)
   const setTreeShowSubtasks = useTabStore((s) => s.setTreeShowSubtasks)
+  const setTreeIncludeAllSubtasks = useTabStore((s) => s.setTreeIncludeAllSubtasks)
+  const setTreeCrossOutDone = useTabStore((s) => s.setTreeCrossOutDone)
+  const setTreeShowHeader = useTabStore((s) => s.setTreeShowHeader)
 
   return (
     <DropdownMenu>
@@ -57,6 +63,38 @@ export function TreeDisplaySettings() {
         >
           <span className="col-start-2">Show sub-tasks</span>
           {treeShowSubtasks && <Check className="size-4 col-start-3" />}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!treeShowSubtasks}
+          onSelect={(e) => {
+            e.preventDefault()
+            if (!treeShowSubtasks) return
+            setTreeIncludeAllSubtasks(!treeIncludeAllSubtasks)
+          }}
+          className="cursor-pointer"
+        >
+          <span className="col-start-2">Show all sub-tasks</span>
+          {treeIncludeAllSubtasks && <Check className="size-4 col-start-3" />}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault()
+            setTreeCrossOutDone(!treeCrossOutDone)
+          }}
+          className="cursor-pointer"
+        >
+          <span className="col-start-2">Cross over completed tasks</span>
+          {treeCrossOutDone && <Check className="size-4 col-start-3" />}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault()
+            setTreeShowHeader(!treeShowHeader)
+          }}
+          className="cursor-pointer"
+        >
+          <span className="col-start-2">Show header</span>
+          {treeShowHeader && <Check className="size-4 col-start-3" />}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
