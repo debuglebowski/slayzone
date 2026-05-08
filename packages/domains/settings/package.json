@@ -28,6 +28,7 @@
     "@slayzone/ui": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/integrations": "workspace:*",
+    "@slayzone/migrate": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",

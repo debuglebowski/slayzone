@@ -41,6 +41,7 @@
     "@slayzone/icons": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/markdown": "workspace:*",
+    "@slayzone/migrate": "workspace:*",
     "@slayzone/onboarding": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",

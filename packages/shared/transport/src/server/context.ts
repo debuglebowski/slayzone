@@ -8,6 +8,9 @@ export interface AutomationEngineLike {
 export type TrpcServerDeps = {
   db: Database
   dataRoot: string
+  /** SlayZone application version reported by health/migrate procedures.
+   *  Embedded mode = Electron app version; standalone = `@slayzone/server` pkg version. */
+  slayzoneVersion?: string
   /** Optional — only present in Electron-main host. Standalone server pkg
    *  may run without an engine for now. */
   automationEngine?: AutomationEngineLike

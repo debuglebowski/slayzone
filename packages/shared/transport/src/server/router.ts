@@ -7,6 +7,7 @@ import { diagnosticsRouter } from './routers/diagnostics'
 import { fileEditorRouter } from './routers/file-editor'
 import { historyRouter } from './routers/history'
 import { integrationsRouter } from './routers/integrations'
+import { migrateRouter } from './routers/migrate'
 import { processesRouter } from './routers/processes'
 import { ptyRouter } from './routers/pty'
 import { chatRouter } from './routers/chat'
@@ -28,6 +29,7 @@ export const appRouter = router({
   fileEditor: fileEditorRouter,
   history: historyRouter,
   integrations: integrationsRouter,
+  migrate: migrateRouter,
   processes: processesRouter,
   pty: ptyRouter,
   chat: chatRouter,

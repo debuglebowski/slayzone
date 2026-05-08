@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Button, Input, Label, toast } from '@slayzone/ui'
 import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { SettingsTabIntro } from './SettingsTabIntro'
+import { MigrateToRemoteWizard } from '../MigrateToRemoteWizard'
 
 type Mode = 'local' | 'remote'
 type ProbeState = { kind: 'idle' } | { kind: 'probing' } | { kind: 'ok' } | { kind: 'fail'; reason: string }
@@ -24,6 +25,7 @@ export function ServerSettingsTab() {
   const [savedUrl, setSavedUrl] = useState('')
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' })
   const [saving, setSaving] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
 
   useEffect(() => {
     void Promise.all([
@@ -162,6 +164,20 @@ export function ServerSettingsTab() {
         </Button>
         {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
       </div>
+
+      {savedMode === 'local' && (
+        <div className="space-y-2 pt-4 border-t">
+          <Label className="text-base font-semibold">Migrate to remote</Label>
+          <p className="text-xs text-muted-foreground">
+            Move all local data (tasks, projects, artifacts) to a self-hosted server. One-way; reverse migration is not supported.
+          </p>
+          <Button variant="outline" onClick={() => setWizardOpen(true)}>
+            Migrate to remote server…
+          </Button>
+        </div>
+      )}
+
+      <MigrateToRemoteWizard open={wizardOpen} onOpenChange={setWizardOpen} />
     </div>
   )
 }

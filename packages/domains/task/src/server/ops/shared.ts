@@ -311,9 +311,12 @@ export async function maybeAutoCreateWorktree(
     return
   }
 
+  const envOverride = process.env.SLAYZONE_WORKTREE_ROOT
   const baseTemplate =
+    envOverride ||
     (db.prepare("SELECT value FROM settings WHERE key = 'worktree_base_path'")
-      .get() as { value: string } | undefined)?.value || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+      .get() as { value: string } | undefined)?.value ||
+    DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
   const basePath = resolveWorktreeBasePathTemplate(baseTemplate, repoPath)
   const branch = slugify(taskTitle) || `task-${taskId.slice(0, 8)}`
   const worktreePath = path.join(basePath, branch)

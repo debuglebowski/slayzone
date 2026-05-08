@@ -1718,7 +1718,7 @@ app.whenReady().then(async () => {
             registerCoreRest: serverMod.registerCoreRest,
             registerExtraRest: extraMod.registerExtraRest,
             registerMcpTools: serverMod.registerMcpTools,
-            trpcDeps: { db, dataRoot: getDataRoot(), automationEngine },
+            trpcDeps: { db, dataRoot: getDataRoot(), slayzoneVersion: app.getVersion(), automationEngine },
           }
         }
         embeddedServerSupervisor = startEmbeddedServerSupervised({
