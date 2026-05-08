@@ -3,8 +3,8 @@ import { dirname } from 'node:path'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { buildPdfHtml, buildMermaidPdfHtml, renderToPdf } from '@slayzone/task/electron'
 import { getEffectiveRenderMode, canExportAsPdf } from '@slayzone/task/shared'
-import { getArtifactFilePath } from './shared'
-import type { RestApiDeps } from '../types'
+import { getArtifactFilePath } from '@slayzone/server'
+import type { RestApiDeps } from '@slayzone/server'
 
 export function registerArtifactsExportPdfRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/artifacts/:id/export/pdf', async (req, res) => {

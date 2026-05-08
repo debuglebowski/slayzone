@@ -3,8 +3,8 @@ import { dirname } from 'node:path'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { buildPdfHtml, buildMermaidPdfHtml } from '@slayzone/task/electron'
 import { getEffectiveRenderMode, canExportAsHtml } from '@slayzone/task/shared'
-import { getArtifactFilePath } from './shared'
-import type { RestApiDeps } from '../types'
+import { getArtifactFilePath } from '@slayzone/server'
+import type { RestApiDeps } from '@slayzone/server'
 
 export function registerArtifactsExportHtmlRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/artifacts/:id/export/html', async (req, res) => {

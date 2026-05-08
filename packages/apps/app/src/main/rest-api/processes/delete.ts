@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { killProcess } from '../../process-manager'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
 export function registerProcessesDeleteRoute(app: Express, _deps: RestApiDeps): void {
   app.delete('/api/processes/:id', (req, res) => {

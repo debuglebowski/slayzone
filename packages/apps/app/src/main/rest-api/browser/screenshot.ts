@@ -1,12 +1,12 @@
 import type { Express } from 'express'
-import { app as electronApp } from 'electron'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync, readdirSync, unlinkSync, statSync } from 'node:fs'
 import { ensureBrowserWc } from './shared'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
-export function registerBrowserScreenshotRoute(app: Express, _deps: RestApiDeps): void {
+export function registerBrowserScreenshotRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/browser/screenshot', async (req, res) => {
     const { taskId, panel = 'hidden', tabId } = req.body ?? {}
     const bwc = await ensureBrowserWc(taskId, panel, res, undefined, tabId)
@@ -14,7 +14,7 @@ export function registerBrowserScreenshotRoute(app: Express, _deps: RestApiDeps)
     try {
       const image = await bwc.wc.capturePage()
       if (image.isEmpty()) { res.status(500).json({ error: 'Captured image is empty' }); return }
-      const dir = join(electronApp.getPath('temp'), 'slayzone', 'browser-screenshots')
+      const dir = join(deps.tempDir ?? tmpdir(), 'slayzone', 'browser-screenshots')
       mkdirSync(dir, { recursive: true })
       // Clean up screenshots older than 1 hour
       try {

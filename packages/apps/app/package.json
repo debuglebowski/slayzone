@@ -45,6 +45,7 @@
     "@slayzone/onboarding": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",
+    "@slayzone/server": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/shortcuts": "workspace:*",
     "@slayzone/suspense": "workspace:*",

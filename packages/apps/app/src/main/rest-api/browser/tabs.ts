@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { listBrowserTabs } from '../../browser-registry'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
 interface BrowserTabRow {
   id: string

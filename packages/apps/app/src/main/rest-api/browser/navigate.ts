@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { ensureBrowserWc, ALLOWED_NAVIGATE_SCHEMES } from './shared'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
 export function registerBrowserNavigateRoute(app: Express, _deps: RestApiDeps): void {
   app.post('/api/browser/navigate', async (req, res) => {

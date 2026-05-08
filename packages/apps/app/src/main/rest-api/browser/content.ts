@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { ensureBrowserWc, execJs } from './shared'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
 export function registerBrowserContentRoute(app: Express, _deps: RestApiDeps): void {
   app.get('/api/browser/content', async (req, res) => {

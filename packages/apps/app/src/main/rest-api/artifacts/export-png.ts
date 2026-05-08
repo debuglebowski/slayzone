@@ -3,8 +3,8 @@ import { dirname } from 'node:path'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { buildPngHtml, renderToPng } from '@slayzone/task/electron'
 import { getEffectiveRenderMode, canExportAsPng } from '@slayzone/task/shared'
-import { getArtifactFilePath } from './shared'
-import type { RestApiDeps } from '../types'
+import { getArtifactFilePath } from '@slayzone/server'
+import type { RestApiDeps } from '@slayzone/server'
 
 export function registerArtifactsExportPngRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/artifacts/:id/export/png', async (req, res) => {

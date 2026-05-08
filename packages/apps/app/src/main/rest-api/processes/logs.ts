@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { listAllProcesses } from '../../process-manager'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
 export function registerProcessesLogsRoute(app: Express, _deps: RestApiDeps): void {
   app.get('/api/processes/:id/logs', (req, res) => {

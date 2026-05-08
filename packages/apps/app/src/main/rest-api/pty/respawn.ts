@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { requestForceRespawn } from '@slayzone/terminal/electron'
 import { menuEvents } from '../../menu-events'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
 const FORCE_RESPAWN_TIMEOUT_MS = 3_000
 

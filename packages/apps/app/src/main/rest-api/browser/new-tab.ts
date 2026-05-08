@@ -2,7 +2,7 @@ import type { Express } from 'express'
 import { ALLOWED_NAVIGATE_SCHEMES } from './shared'
 import { menuEvents } from '../../menu-events'
 import { waitForBrowserRegistration } from '../../browser-registry'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
 interface BrowserTabRow { id: string; url?: string; title?: string }
 interface BrowserTabsState { tabs: BrowserTabRow[]; activeTabId: string | null }

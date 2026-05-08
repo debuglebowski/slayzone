@@ -1,6 +1,6 @@
 import type { Express } from 'express'
 import { getBuffer } from '@slayzone/terminal/electron'
-import type { RestApiDeps } from '../types'
+import type { RestApiDeps } from '@slayzone/server'
 
 export function registerPtyBufferRoute(app: Express, _deps: RestApiDeps): void {
   app.get('/api/pty/:id/buffer', (req, res) => {
