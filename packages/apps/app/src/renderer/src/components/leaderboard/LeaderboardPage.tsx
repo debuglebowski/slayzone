@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation as useTRPCMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { AlertTriangle, CheckCheck, Github, Lock, LogOut, RefreshCw, Sparkles } from 'lucide-react'
 import { Button, IconButton, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@slayzone/ui'
 import { useMutation, useQuery } from 'convex/react'
@@ -88,7 +89,9 @@ export function LeaderboardPage(): React.JSX.Element {
 }
 
 function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboardAuth> }): React.JSX.Element {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const openExternalMutation = useTRPCMutation(trpc.app.shell.openExternal.mutationOptions())
   const [period, setPeriod] = useState<Period>('all-time')
   const [authBusy, setAuthBusy] = useState(false)
 
@@ -156,7 +159,7 @@ function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboard
   useEffect(() => {
     if (!import.meta.env.DEV) return
     let cancelled = false
-    void trpcClient.app.meta.getProtocolClientStatus.query()
+    void queryClient.fetchQuery(trpc.app.meta.getProtocolClientStatus.queryOptions())
       .then((status) => {
         if (cancelled) return
         if (status.reason === 'dev-skipped') {
@@ -180,7 +183,7 @@ function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboard
   async function syncStats(): Promise<void> {
     setSyncing(true)
     try {
-      const stats = await trpcClient.app.leaderboard.getLocalStats.query()
+      const stats = await queryClient.fetchQuery(trpc.app.leaderboard.getLocalStats.queryOptions())
       if (stats?.days.length) await syncDailyStats({ days: stats.days })
     } catch { /* best-effort */ } finally {
       setSyncing(false)
@@ -273,7 +276,7 @@ function LeaderboardPageInner({ auth }: { auth: ReturnType<typeof useLeaderboard
                           disabled={!githubProfileUrl}
                           onClick={() => {
                             if (!githubProfileUrl) return
-                            void trpcClient.app.shell.openExternal.mutate({ url: githubProfileUrl })
+                            openExternalMutation.mutate({ url: githubProfileUrl })
                           }}
                         >
                           <Github className="size-4" />
