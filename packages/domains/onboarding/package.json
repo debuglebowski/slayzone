@@ -14,9 +14,11 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@tanstack/react-query": "^5.100.9",
     "framer-motion": "^12.29.0",
     "lucide-react": "^0.562.0"
   },

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import type { Automation, AutomationRun } from '@slayzone/automations/shared'
 import type { AutomationActionRun } from '@slayzone/history/shared'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 interface RunDetailEntry {
   key: string
@@ -207,6 +207,7 @@ export function AutomationCard({
   onRunManual,
   onLoadRuns,
 }: AutomationCardProps) {
+  const trpcClient = useTRPCClient()
   const [expanded, setExpanded] = useState(false)
   const [runs, setRuns] = useState<AutomationRun[]>([])
   const [runsLoaded, setRunsLoaded] = useState(false)
@@ -242,7 +243,7 @@ export function AutomationCard({
 
     setLoadingRunIds((prev) => ({ ...prev, [runId]: true }))
     try {
-      const actionRuns = await getTrpcVanillaClient().history.getAutomationActionRuns.query({ runId })
+      const actionRuns = await trpcClient.history.getAutomationActionRuns.query({ runId })
       setActionRunsByRunId((prev) => ({ ...prev, [runId]: actionRuns }))
     } finally {
       setLoadingRunIds((prev) => ({ ...prev, [runId]: false }))

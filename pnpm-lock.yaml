@@ -762,6 +762,9 @@ importers:
 
   packages/domains/onboarding:
     dependencies:
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -771,6 +774,9 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.9(react@19.2.3)
       framer-motion:
         specifier: ^12.29.0
         version: 12.29.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)

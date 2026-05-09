@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
+import { useSetting, useSetSettingMutation } from '@slayzone/settings/client'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Dialog, DialogContent } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
@@ -41,23 +43,20 @@ const CLI_FEATURES = [
 ]
 
 function CliInstallStep({ onNext }: { onNext: () => void }): React.JSX.Element {
-  const [installing, setInstalling] = useState(false)
+  const trpc = useTRPC()
   const [message, setMessage] = useState('')
-  const [installed, setInstalled] = useState<boolean | null>(null)
+  const [installedOverride, setInstalledOverride] = useState<boolean | null>(null)
 
-  useEffect(() => {
-    getTrpcVanillaClient().app.meta.checkCliInstalled.query().then((status) => {
-      setInstalled(status.installed)
-    })
-  }, [])
+  const { data: cliStatus, isLoading } = useQuery(trpc.app.meta.checkCliInstalled.queryOptions())
+  const installCli = useMutation(trpc.app.meta.installCli.mutationOptions())
+  const installed = installedOverride ?? cliStatus?.installed ?? null
 
   const handleInstall = async () => {
-    setInstalling(true)
     setMessage('')
     try {
-      const result = await getTrpcVanillaClient().app.meta.installCli.mutate()
+      const result = await installCli.mutateAsync()
       if (result.ok) {
-        setInstalled(true)
+        setInstalledOverride(true)
         let msg = 'Installed successfully.'
         if (result.pathNotInPATH) msg += " Note: the install directory is not in your PATH. Add it to use 'slay' from any terminal."
         setMessage(msg)
@@ -70,13 +69,13 @@ function CliInstallStep({ onNext }: { onNext: () => void }): React.JSX.Element {
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Install failed.')
-    } finally {
-      setInstalling(false)
     }
   }
 
+  const installing = installCli.isPending
+
   // Loading state while checking
-  if (installed === null) return <div />
+  if (isLoading || installed === null) return <div />
 
   return (
     <motion.div
@@ -241,18 +240,18 @@ export function OnboardingDialog({
     if (open) track('onboarding_step', { step, step_name: STEP_NAMES[step] })
   }, [step, open])
 
+  const onboardingCompleted = useSetting('onboarding_completed')
+  const setSetting = useSetSettingMutation()
   useEffect(() => {
-    getTrpcVanillaClient().settings.get.query({ key: 'onboarding_completed' }).then((value) => {
-      if (value !== 'true') {
-        setAutoOpen(true)
-      }
-    })
-  }, [])
+    if (onboardingCompleted !== undefined && onboardingCompleted !== 'true') {
+      setAutoOpen(true)
+    }
+  }, [onboardingCompleted])
 
   const handleNext = (): void => {
     if (step === 2) {
       track('onboarding_provider_selected', { provider: selectedProvider })
-      getTrpcVanillaClient().settings.set.mutate({ key: 'default_terminal_mode', value: selectedProvider })
+      setSetting.mutate({ key: 'default_terminal_mode', value: selectedProvider })
     }
     if (step < STEP_COUNT - 1) {
       setStep(step + 1)
@@ -272,12 +271,12 @@ export function OnboardingDialog({
 
   const finishOnboarding = useCallback((tier?: 'anonymous' | 'opted_in'): void => {
     if (tier) setTier(tier)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'onboarding_completed', value: 'true' })
+    setSetting.mutate({ key: 'onboarding_completed', value: 'true' })
     setStep(0)
     setClosing(false)
     setAutoOpen(false)
     onExternalClose?.()
-  }, [setTier, onExternalClose])
+  }, [setTier, onExternalClose, setSetting])
 
   const startClosing = useCallback((): void => {
     setClosing(true)
@@ -472,7 +471,7 @@ export function OnboardingDialog({
                     onClick={() => {
                       setTier('anonymous')
                       track('onboarding_completed', { provider: selectedProvider, tier: 'anonymous' })
-                      getTrpcVanillaClient().settings.set.mutate({ key: 'onboarding_completed', value: 'true' })
+                      setSetting.mutate({ key: 'onboarding_completed', value: 'true' })
                       setStep(4)
                     }}
                   >
@@ -483,7 +482,7 @@ export function OnboardingDialog({
                     onClick={() => {
                       setTier('opted_in')
                       track('onboarding_completed', { provider: selectedProvider, tier: 'opted_in' })
-                      getTrpcVanillaClient().settings.set.mutate({ key: 'onboarding_completed', value: 'true' })
+                      setSetting.mutate({ key: 'onboarding_completed', value: 'true' })
                       setStep(4)
                     }}
                   >

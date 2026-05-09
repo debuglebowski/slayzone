@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSubscription } from '@trpc/tanstack-react-query'
 import { Button } from '@slayzone/ui'
 import { Plus, Zap } from 'lucide-react'
 import type { Automation, CreateAutomationInput, UpdateAutomationInput } from '@slayzone/automations/shared'
 import type { Tag } from '@slayzone/tags/shared'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { AutomationCard } from './AutomationCard'
 import { AutomationDialog } from './AutomationDialog'
 
@@ -12,51 +14,55 @@ interface AutomationsPanelProps {
 }
 
 export function AutomationsPanel({ projectId }: AutomationsPanelProps) {
-  const [automations, setAutomations] = useState<Automation[]>([])
-  const [tags, setTags] = useState<Tag[]>([])
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+  const enabled = !!projectId
+
+  const { data: automations = [] } = useQuery(
+    trpc.automations.getByProject.queryOptions({ projectId }, { enabled }),
+  )
+  const { data: allTags = [] } = useQuery(
+    trpc.tags.list.queryOptions(undefined, { enabled }),
+  )
+  const tags: Tag[] = allTags.filter((t: Tag) => t.project_id === projectId)
+
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Automation | null>(null)
 
-  const loadData = useCallback(() => {
-    if (!projectId) return
-    const trpc = getTrpcVanillaClient()
-    trpc.automations.getByProject.query({ projectId }).then(setAutomations)
-    trpc.tags.list.query().then((all) => setTags(all.filter((t: Tag) => t.project_id === projectId)))
-  }, [projectId])
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: trpc.automations.getByProject.queryKey({ projectId }) })
 
-  useEffect(() => {
-    loadData()
-  }, [loadData])
+  // Server fires this when any automation changes — invalidate the project list.
+  useSubscription(
+    trpc.automations.onChanged.subscriptionOptions(undefined, {
+      onData: () => invalidate(),
+    }),
+  )
 
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().automations.onChanged.subscribe(undefined, {
-      onData: () => loadData(),
-    })
-    return () => sub.unsubscribe()
-  }, [loadData])
+  const updateAutomation = useMutation(trpc.automations.update.mutationOptions({ onSuccess: invalidate }))
+  const createAutomation = useMutation(trpc.automations.create.mutationOptions({ onSuccess: invalidate }))
+  const toggleAutomation = useMutation(trpc.automations.toggle.mutationOptions({ onSuccess: invalidate }))
+  const deleteAutomation = useMutation(trpc.automations.delete.mutationOptions({ onSuccess: invalidate }))
+  const runManual = useMutation(trpc.automations.runManual.mutationOptions({ onSuccess: invalidate }))
 
   const handleSave = async (data: CreateAutomationInput | UpdateAutomationInput) => {
-    const trpc = getTrpcVanillaClient()
     if ('id' in data) {
-      await trpc.automations.update.mutate(data)
+      await updateAutomation.mutateAsync(data)
     } else {
-      await trpc.automations.create.mutate(data)
+      await createAutomation.mutateAsync(data)
     }
-    loadData()
   }
 
   const handleToggle = async (id: string, enabled: boolean) => {
-    await getTrpcVanillaClient().automations.toggle.mutate({ id, enabled })
-    loadData()
+    await toggleAutomation.mutateAsync({ id, enabled })
   }
 
   const handleDelete = async (id: string) => {
-    await getTrpcVanillaClient().automations.delete.mutate({ id })
-    loadData()
+    await deleteAutomation.mutateAsync({ id })
   }
 
   const handleDuplicate = async (automation: Automation) => {
-    await getTrpcVanillaClient().automations.create.mutate({
+    await createAutomation.mutateAsync({
       project_id: automation.project_id,
       name: `${automation.name} (copy)`,
       description: automation.description ?? undefined,
@@ -64,16 +70,14 @@ export function AutomationsPanel({ projectId }: AutomationsPanelProps) {
       conditions: automation.conditions,
       actions: automation.actions,
     })
-    loadData()
   }
 
   const handleRunManual = async (id: string) => {
-    await getTrpcVanillaClient().automations.runManual.mutate({ id })
-    loadData()
+    await runManual.mutateAsync({ id })
   }
 
   const handleLoadRuns = (automationId: string) => {
-    return getTrpcVanillaClient().automations.getRuns.query({ automationId, limit: 10 })
+    return trpcClient.automations.getRuns.query({ automationId, limit: 10 })
   }
 
   const handleEdit = (automation: Automation) => {
