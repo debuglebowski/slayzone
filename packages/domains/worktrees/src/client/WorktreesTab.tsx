@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/settings/client'
 import {
   FolderGit2,
@@ -63,7 +64,11 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   visible,
   pollIntervalMs = 5000
 }, ref) {
+  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+  const removeWorktreeMutation = useMutation(trpc.worktrees.removeWorktree.mutationOptions())
+  const revealInFinderMutation = useMutation(trpc.worktrees.revealInFinder.mutationOptions())
   const {
     projectPath,
     tasks,
@@ -71,9 +76,14 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
     onUpdateTask
   } = useGitPanelContext()
 
-  const [worktrees, setWorktrees] = useState<DetectedWorktree[]>([])
+  const worktreesQuery = useQuery({
+    ...trpc.worktrees.detectWorktrees.queryOptions({ repoPath: projectPath ?? '' }),
+    enabled: visible && !!projectPath,
+    refetchInterval: visible && !!projectPath ? pollIntervalMs : false,
+  })
+  const worktrees: DetectedWorktree[] = worktreesQuery.data ?? []
+  const loading = visible && !!projectPath && worktreesQuery.isLoading
   const [dirtyStatuses, setDirtyStatuses] = useState<Record<string, boolean>>({})
-  const [loading, setLoading] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState<string | null>(null)
   const [assigningWorktree, setAssigningWorktree] = useState<DetectedWorktree | null>(null)
@@ -94,20 +104,8 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   }, [])
 
   const fetchWorktrees = useCallback(async () => {
-    if (!projectPath) return
-    try {
-      const detected = await trpcClient.worktrees.detectWorktrees.query({ repoPath: projectPath })
-      setWorktrees(detected)
-    } catch { /* polling error */ }
-  }, [projectPath])
-
-  useEffect(() => {
-    if (!visible || !projectPath) return
-    setLoading(true)
-    fetchWorktrees().finally(() => setLoading(false))
-    const timer = setInterval(fetchWorktrees, pollIntervalMs)
-    return () => clearInterval(timer)
-  }, [visible, projectPath, pollIntervalMs, fetchWorktrees])
+    await queryClient.invalidateQueries({ queryKey: trpc.worktrees.detectWorktrees.queryKey() })
+  }, [queryClient, trpc])
 
   // Optimized dirty status polling
   useEffect(() => {
@@ -198,7 +196,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   const handleRemoveWorktree = async (path: string) => {
     if (!projectPath) return
     try {
-      await trpcClient.worktrees.removeWorktree.mutate({ repoPath: projectPath, worktreePath: path })
+      await removeWorktreeMutation.mutateAsync({ repoPath: projectPath, worktreePath: path })
       const task = tasks.find(t => t.worktree_path === path)
       if (task && onUpdateTask) {
         await onUpdateTask({ id: task.id, worktreePath: null })
@@ -492,7 +490,8 @@ function WorktreeCard({
   onRemove: () => void
   onAssign: () => void
 }) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const revealInFinderMutation = useMutation(trpc.worktrees.revealInFinder.mutationOptions())
   const { tasks, activeTask } = useGitPanelContext()
   const displayTitle = node.isMain ? 'Main Repository' : (node.branch || 'detached HEAD')
   const isActive = activeTask?.worktree_path === node.path || (node.isMain && !activeTask?.worktree_path && activeTask)
@@ -601,7 +600,7 @@ function WorktreeCard({
                   </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => trpcClient.worktrees.revealInFinder.mutate({ path: node.path })}>
+                  <DropdownMenuItem onClick={() => revealInFinderMutation.mutate({ path: node.path })}>
                     <FolderSearch className="h-3.5 w-3.5 mr-2" /> Reveal in Finder
                   </DropdownMenuItem>
                   {!node.task && (
