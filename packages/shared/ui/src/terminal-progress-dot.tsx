@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { cn } from './utils'
-import { getTerminalStateStyle } from './terminal-state'
+import { getTerminalStateStyle, ATTENTION_STATE_STYLE } from './terminal-state'
 import { ProgressRing } from './progress-ring'
 import { Tooltip, TooltipTrigger, TooltipContent } from './tooltip'
 
@@ -13,6 +13,8 @@ export interface TerminalProgressDotProps {
   tooltipSide?: 'top' | 'right' | 'bottom' | 'left'
   /** Render bare blob without Tooltip wrapper. Default: false. */
   noTooltip?: boolean
+  /** Override style with a pulsing amber "needs attention" indicator. */
+  needsAttention?: boolean
   size?: number
   className?: string
 }
@@ -24,10 +26,12 @@ export function TerminalProgressDot({
   alwaysShow = false,
   tooltipSide,
   noTooltip = false,
+  needsAttention = false,
   size = 14,
   className,
 }: TerminalProgressDotProps): React.JSX.Element | null {
-  const stateStyle = getTerminalStateStyle(state)
+  const baseStyle = getTerminalStateStyle(state)
+  const stateStyle = needsAttention ? ATTENTION_STATE_STYLE : baseStyle
   const showProgress = !isDone && progress != null && progress > 0
   const showState = !!stateStyle || alwaysShow
   if (!showState && !showProgress) return null

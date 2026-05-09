@@ -274,6 +274,7 @@ export function TreeView({
             state={termState}
             progress={progress}
             isDone={isDone}
+            needsAttention={Boolean(task.needs_attention)}
             alwaysShow
             tooltipSide="right"
           />

@@ -492,6 +492,9 @@ export interface Task {
   linear_url: string | null
   // Orchestrator (subtask manager) sidebar toggle state, persisted per task
   manager_mode: boolean
+  // Set when an agent PTY for this task transitioned running → idle|error and the
+  // user has not yet focused the task. Cleared when the task tab gains focus.
+  needs_attention: boolean
   created_at: string
   updated_at: string
 }
@@ -594,4 +597,6 @@ export interface UpdateTaskInput {
   repoName?: string | null
   // Reparent: undefined = no change, null = detach to root, string = new parent id
   parentId?: string | null
+  // Attention flag (true = set, false = clear)
+  needsAttention?: boolean
 }

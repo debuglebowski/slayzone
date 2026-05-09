@@ -2461,6 +2461,15 @@ const migrations: Migration[] = [
         }
       }
     }
+  },
+  {
+    version: 130,
+    up: (db) => {
+      // Per-task "needs attention" flag. Set when a PTY for the task transitions
+      // running → idle | error and user has not yet focused the task. Cleared on
+      // tab focus. Orthogonal to TerminalState (which is in-memory + per-PTY).
+      db.exec(`ALTER TABLE tasks ADD COLUMN needs_attention INTEGER NOT NULL DEFAULT 0`)
+    }
   }
 ]
 

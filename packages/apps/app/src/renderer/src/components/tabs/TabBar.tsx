@@ -32,6 +32,7 @@ interface TabBarProps {
   worktreeColors?: Map<string, string>
   taskProgress?: Map<string, number>
   doneTaskIds?: Set<string>
+  attentionTaskIds?: Set<string>
   onTabClick: (index: number) => void
   onTabClose: (index: number) => void
   onTabReorder: (fromIndex: number, toIndex: number) => void
@@ -47,6 +48,7 @@ interface TabContentProps {
   isDragging?: boolean
   onClose?: () => void
   terminalState?: TerminalState
+  needsAttention?: boolean
   isSubTask?: boolean
   isTemporary?: boolean
   projectColor?: string
@@ -60,7 +62,7 @@ interface TabContentProps {
   inputRef?: React.RefObject<HTMLInputElement | null>
 }
 
-function TabContent({ title, isActive, isDragging, onClose, terminalState, isSubTask, isTemporary, projectColor, progress, isDone, isEditing, editValue, onEditChange, onEditSubmit, onEditCancel, inputRef }: TabContentProps): React.JSX.Element {
+function TabContent({ title, isActive, isDragging, onClose, terminalState, needsAttention, isSubTask, isTemporary, projectColor, progress, isDone, isEditing, editValue, onEditChange, onEditSubmit, onEditCancel, inputRef }: TabContentProps): React.JSX.Element {
   return (
     <div
       className={cn(
@@ -81,7 +83,7 @@ function TabContent({ title, isActive, isDragging, onClose, terminalState, isSub
       }}
     >
       {projectColor && <div className="pointer-events-none absolute inset-0 rounded-md opacity-0 transition-opacity group-hover:opacity-100 bg-black/10 dark:bg-white/10" />}
-      <TerminalProgressDot state={terminalState} progress={progress} isDone={isDone} tooltipSide="bottom" />
+      <TerminalProgressDot state={terminalState} progress={progress} isDone={isDone} needsAttention={needsAttention} tooltipSide="bottom" />
       {isSubTask && <span className="text-[10px] text-muted-foreground/60 shrink-0">SUB</span>}
       {isEditing ? (
         <input
@@ -125,6 +127,7 @@ interface SortableTabProps {
   onTabClick: (index: number) => void
   onTabClose: (index: number) => void
   terminalState?: TerminalState
+  needsAttention?: boolean
   projectColor?: string
   worktreeColor?: string
   progress?: number
@@ -146,6 +149,7 @@ function SortableTab({
   onTabClick,
   onTabClose,
   terminalState,
+  needsAttention,
   projectColor,
   worktreeColor,
   progress,
@@ -212,6 +216,7 @@ function SortableTab({
         isActive={isActive}
         onClose={() => onTabClose(index)}
         terminalState={terminalState}
+        needsAttention={needsAttention}
         isSubTask={tab.isSubTask}
         isTemporary={tab.isTemporary}
         projectColor={projectColor}
@@ -237,6 +242,7 @@ export function TabBar({
   worktreeColors,
   taskProgress,
   doneTaskIds,
+  attentionTaskIds,
   onTabClick,
   onTabClose,
   onTabReorder,
@@ -376,6 +382,7 @@ export function TabBar({
                   onTabClick={onTabClick}
                   onTabClose={onTabClose}
                   terminalState={terminalStates?.get(tab.taskId)}
+                  needsAttention={attentionTaskIds?.has(tab.taskId)}
                   projectColor={projectColors?.get(tab.taskId)}
                   worktreeColor={worktreeColors?.get(tab.taskId)}
                   progress={taskProgress?.get(tab.taskId)}
@@ -399,6 +406,7 @@ export function TabBar({
                 isActive={tabs.findIndex((t) => t.type === 'task' && t.taskId === activeTab.taskId) === activeIndex}
                 isDragging
                 terminalState={terminalStates?.get(activeTab.taskId)}
+                needsAttention={attentionTaskIds?.has(activeTab.taskId)}
                 isTemporary={activeTab.isTemporary}
                 projectColor={projectColors?.get(activeTab.taskId)}
                 progress={taskProgress?.get(activeTab.taskId)}

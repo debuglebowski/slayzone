@@ -253,15 +253,17 @@ function App(): React.JSX.Element {
   const { taskProjectColors, taskWorktreeColors, tabCycleOrder } = useTabColors(tabs, tasks, projects, colorTintsEnabled)
 
   // Per-tab task progress + completion state (mirrors Map-prop pattern above)
-  const { taskProgress, doneTaskIds } = useMemo(() => {
+  const { taskProgress, doneTaskIds, attentionTaskIds } = useMemo(() => {
     const progress = new Map<string, number>()
     const done = new Set<string>()
+    const attention = new Set<string>()
     const columnsByProject = new Map(projects.map((p) => [p.id, p.columns_config]))
     for (const task of tasks) {
       if (typeof task.progress === 'number' && task.progress > 0) progress.set(task.id, task.progress)
       if (isCompletedStatus(task.status, columnsByProject.get(task.project_id))) done.add(task.id)
+      if (task.needs_attention) attention.add(task.id)
     }
-    return { taskProgress: progress, doneTaskIds: done }
+    return { taskProgress: progress, doneTaskIds: done, attentionTaskIds: attention }
   }, [tasks, projects])
 
   // Onboarding
@@ -469,6 +471,14 @@ function App(): React.JSX.Element {
     const id = activeTab?.type === 'task' ? activeTab.taskId : null
     void window.api.taskWindow.setPrimaryActive(id)
   }, [activeTab])
+
+  // Clear needs_attention flag when user focuses a task tab.
+  useEffect(() => {
+    if (activeTab?.type !== 'task') return
+    const task = tasksMap.get(activeTab.taskId)
+    if (!task?.needs_attention) return
+    void window.api.db.updateTask({ id: activeTab.taskId, needsAttention: false }).catch(() => {})
+  }, [activeTab, tasksMap])
   useEffect(() => {
     if (activeTaskProjectId && activeTaskProjectId !== selectedProjectId) setSelectedProjectId(activeTaskProjectId)
   }, [activeTaskProjectId, selectedProjectId, setSelectedProjectId])
@@ -1206,7 +1216,7 @@ function App(): React.JSX.Element {
               hideTabs={explodeMode}
               tabs={visibleTabs} activeIndex={visibleActiveIndex} activeView={activeView} terminalStates={terminalStates}
               projectColors={taskProjectColors} worktreeColors={taskWorktreeColors}
-              taskProgress={taskProgress} doneTaskIds={doneTaskIds}
+              taskProgress={taskProgress} doneTaskIds={doneTaskIds} attentionTaskIds={attentionTaskIds}
               onTabClick={(i) => setActiveTabIndex(toFullIndex(i))} onTabClose={(i) => closeTab(toFullIndex(i))} onTabReorder={(from, to) => reorderTabs(toFullIndex(from), toFullIndex(to))}
               onTabRename={async (taskId, title) => { const t = await window.api.db.updateTask({ id: taskId, title }); updateTask(t) }}
               leftContent={(showContextManager || explodeMode) ? (
@@ -1273,7 +1283,7 @@ function App(): React.JSX.Element {
                   </TooltipTrigger><TooltipContent side="bottom" className="text-xs max-w-64">
                     {!selectedProjectId ? <p>Select a project first</p> : durationLocked ? <p>Project locked</p> : <div className="space-y-1"><p>{withShortcut('New temporary task', newTempTaskShortcut)}</p><p className="text-muted-foreground">Temporary tasks auto-delete on close.</p></div>}
                   </TooltipContent></Tooltip>
-                  <AgentStatusButton active={agentStatusState.isLocked} count={idleTasks.length} onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })} shortcutHint={agentStatusPanelShortcut} />
+                  <AgentStatusButton active={agentStatusState.isLocked} count={attentionTaskIds.size} onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })} shortcutHint={agentStatusPanelShortcut} />
                   <AgentPanelButton active={agentPanelState.isOpen} disabled={!selectedProjectId} onClick={() => setAgentPanelState({ isOpen: !agentPanelState.isOpen })} shortcutHint={agentPanelShortcut} />
                   <UpdateButton version={updateVersion} onRestart={() => window.api.app.restartForUpdate()} />
                 </div>

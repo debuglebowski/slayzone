@@ -113,7 +113,7 @@ import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { registerBackupHandlers, startAutoBackup, stopAutoBackup, createPreMigrationBackup } from './backup'
 // Domain handlers
 import { registerProjectHandlers, handleTerminalStateChange } from '@slayzone/projects/main'
-import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher } from '@slayzone/task/main'
+import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplateHandlers, registerFilesHandlers, closeArtifactWatcher, handleAttentionTransition } from '@slayzone/task/main'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/main'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { registerTagHandlers } from '@slayzone/tags/main'
@@ -1231,6 +1231,16 @@ app.whenReady().then(async () => {
   // Task automation: auto-move tasks on terminal state change
   onGlobalStateChange((sessionId, newState, oldState) => {
     handleTerminalStateChange(db, sessionId, newState, oldState, notifyTasksChanged, onTaskReachedTerminal)
+
+    // Attention flag: PTY just finished a turn (running → idle|error). Renderer
+    // clears the flag when the user focuses the task tab.
+    try {
+      if (handleAttentionTransition(db, sessionId, newState, oldState)) {
+        notifyTasksChanged()
+      }
+    } catch (err) {
+      console.error('[attention] failed to set needs_attention:', err)
+    }
   })
 
   // Expose test helpers for e2e
