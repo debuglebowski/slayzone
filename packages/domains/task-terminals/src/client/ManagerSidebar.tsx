@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { ChevronRight, ListTree, Circle, ExternalLink, CircleDot, Signal, Gauge } from 'lucide-react'
 import {
   cn,
@@ -143,16 +144,17 @@ function paddingLeftForDepth(depth: number): number {
 }
 
 function RowContextMenu({ task, onOpenChange, children }: { task: ManagerTask; onOpenChange?: (open: boolean) => void; children: React.ReactNode }): React.JSX.Element {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const updateMutation = useMutation(trpc.task.update.mutationOptions())
   const handleStatusChange = useCallback((status: string) => {
-    trpcClient.task.update.mutate({ id: task.id, status }).catch(() => {})
-  }, [task.id, trpcClient])
+    updateMutation.mutate({ id: task.id, status })
+  }, [task.id, updateMutation])
   const handlePriorityChange = useCallback((v: string) => {
-    trpcClient.task.update.mutate({ id: task.id, priority: Number.parseInt(v, 10) }).catch(() => {})
-  }, [task.id, trpcClient])
+    updateMutation.mutate({ id: task.id, priority: Number.parseInt(v, 10) })
+  }, [task.id, updateMutation])
   const handleProgressChange = useCallback((v: string) => {
-    trpcClient.task.update.mutate({ id: task.id, progress: Number.parseInt(v, 10) }).catch(() => {})
-  }, [task.id, trpcClient])
+    updateMutation.mutate({ id: task.id, progress: Number.parseInt(v, 10) })
+  }, [task.id, updateMutation])
   return (
     <ContextMenu onOpenChange={onOpenChange}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
@@ -359,14 +361,14 @@ export function ManagerSidebar({
   onResizingChange,
 }: ManagerSidebarProps): React.JSX.Element {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   const [descendants, setDescendants] = useState<ManagerTask[]>([])
 
   const refresh = useCallback((): void => {
-    trpcClient.task.getSubTasksRecursive.query({ rootId: rootTaskId })
+    queryClient.fetchQuery(trpc.task.getSubTasksRecursive.queryOptions({ rootId: rootTaskId }))
       .then((rows) => setDescendants(rows as unknown as ManagerTask[]))
       .catch(() => {})
-  }, [rootTaskId, trpcClient])
+  }, [rootTaskId, queryClient, trpc])
 
   useEffect(() => {
     refresh()
