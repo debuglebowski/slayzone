@@ -232,7 +232,12 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
   onUnlink: () => void
   onRefreshPr: () => Promise<void>
 }) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const addCommentMutation = useMutation(trpc.worktrees.addPrComment.mutationOptions())
+  const editCommentMutation = useMutation(trpc.worktrees.editPrComment.mutationOptions())
+  const mergePrMutation = useMutation(trpc.worktrees.mergePr.mutationOptions())
+  const linkedOpenExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
   const [comments, setComments] = useState<GhPrTimelineEvent[]>([])
   const [loadingComments, setLoadingComments] = useState(true)
   const [commentBody, setCommentBody] = useState('')
@@ -263,11 +268,11 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
 
   const fetchComments = useCallback(async () => {
     try {
-      const data = await trpcClient.worktrees.getPrComments.query({ repoPath: projectPath, prNumber: pr.number })
+      const data = await queryClient.fetchQuery(trpc.worktrees.getPrComments.queryOptions({ repoPath: projectPath, prNumber: pr.number }))
       setComments(data)
     } catch { /* ignore */ }
     setLoadingComments(false)
-  }, [projectPath, pr.number])
+  }, [projectPath, pr.number, queryClient, trpc])
 
   const refreshAll = useCallback(async () => {
     await Promise.all([onRefreshPr(), fetchComments()])
@@ -285,7 +290,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     if (!visible) return
     ;(async () => {
       try {
-        const user = await trpcClient.worktrees.getGhUser.query({ repoPath: projectPath })
+        const user = await queryClient.fetchQuery(trpc.worktrees.getGhUser.queryOptions({ repoPath: projectPath }))
         setGhUser(user)
       } catch { /* ignore */ }
     })()
@@ -311,7 +316,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     setSubmitting(true)
     setCommentError(null)
     try {
-      await trpcClient.worktrees.addPrComment.mutate({ repoPath: projectPath, prNumber: pr.number, body: commentBody.trim() })
+      await addCommentMutation.mutateAsync({ repoPath: projectPath, prNumber: pr.number, body: commentBody.trim() })
       setCommentBody('')
       if (textareaRef.current) textareaRef.current.style.height = 'auto'
       await fetchComments()
@@ -342,7 +347,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     if (!editingId || !editBody.trim()) return
     setEditSubmitting(true)
     try {
-      await trpcClient.worktrees.editPrComment.mutate({ repoPath: projectPath, commentId: editingId, body: editBody.trim() })
+      await editCommentMutation.mutateAsync({ repoPath: projectPath, commentId: editingId, body: editBody.trim() })
       setEditingId(null)
       setEditBody('')
       await fetchComments()
@@ -394,7 +399,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     setMerging(true)
     setMergeError(null)
     try {
-      await trpcClient.worktrees.mergePr.mutate({
+      await mergePrMutation.mutateAsync({
         repoPath: projectPath,
         prNumber: pr.number,
         strategy: mergeStrategy,
@@ -415,7 +420,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     setDiffLoading(true)
     setDiffError(null)
     try {
-      const raw = await trpcClient.worktrees.getPrDiff.query({ repoPath: projectPath, prNumber: pr.number })
+      const raw = await queryClient.fetchQuery(trpc.worktrees.getPrDiff.queryOptions({ repoPath: projectPath, prNumber: pr.number }))
       setDiffFiles(parseUnifiedDiff(raw))
     } catch (err) {
       setDiffError(err instanceof Error ? err.message : 'Failed to load diff')
@@ -476,7 +481,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <IconButton aria-label="Open in browser" variant="ghost" className="h-6 w-6" onClick={() => trpcClient.app.shell.openExternal.mutate({ url: pr.url })}>
+                  <IconButton aria-label="Open in browser" variant="ghost" className="h-6 w-6" onClick={() => linkedOpenExternalMutation.mutate({ url: pr.url })}>
                     <ExternalLink className="h-3 w-3" />
                   </IconButton>
                 </TooltipTrigger>

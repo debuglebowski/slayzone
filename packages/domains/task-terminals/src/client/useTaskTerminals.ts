@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import type { TabDisplayMode, TerminalTab, TerminalGroup } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal/shared'
@@ -54,6 +54,7 @@ function computeGroups(tabs: TerminalTab[]): TerminalGroup[] {
 export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): UseTaskTerminalsResult {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
+  const ensureMainMutation = useMutation(trpc.taskTerminals.ensureMain.mutationOptions())
   const trpcClient = useTRPCClient()
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeGroupId, setActiveGroupId] = useState<string>(taskId) // Main group id = taskId
@@ -66,7 +67,7 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
   useEffect(() => {
     const loadTabs = async () => {
       try {
-        await trpcClient.taskTerminals.ensureMain.mutate({ taskId, mode: defaultMode })
+        await ensureMainMutation.mutateAsync({ taskId, mode: defaultMode })
         const loadedTabs = await queryClient.fetchQuery(trpc.taskTerminals.list.queryOptions({ taskId }))
         setTabs(loadedTabs)
         const loadedGroups = computeGroups(loadedTabs)

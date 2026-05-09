@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 
 interface UseBrowserViewBoundsOpts {
   visible: boolean
@@ -15,7 +15,9 @@ export function useBrowserViewBounds(
 ): { placeholderRef: (el: HTMLDivElement | null) => void; hiddenByOverlay: boolean } {
   const { visible, hidden, isResizing } = opts
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
+  const setVisibleMutation = useMutation(trpc.app.browser.setVisible.mutationOptions())
+  const setBoundsMutation = useMutation(trpc.app.browser.setBounds.mutationOptions())
+  const focusMutation = useMutation(trpc.app.browser.focus.mutationOptions())
   const effectivelyVisible = visible && !hidden && !isResizing
   const zoomFactorQuery = useQuery({
     ...trpc.app.meta.getZoomFactor.queryOptions(),
@@ -53,7 +55,7 @@ export function useBrowserViewBounds(
   // Sync visibility changes
   useEffect(() => {
     if (!viewId) return
-    void trpcClient.app.browser.setVisible.mutate({ viewId, visible: effectivelyVisible })
+    setVisibleMutation.mutate({ viewId, visible: effectivelyVisible })
   }, [viewId, effectivelyVisible])
 
   // Track whether we've hidden this view due to a dialog overlay
@@ -90,11 +92,11 @@ export function useBrowserViewBounds(
       if (overlaps && !hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = true
         setHiddenByOverlay(true)
-        void trpcClient.app.browser.setVisible.mutate({ viewId: vid, visible: false })
+        setVisibleMutation.mutate({ viewId: vid, visible: false })
       } else if (!overlaps && hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = false
         setHiddenByOverlay(false)
-        void trpcClient.app.browser.setVisible.mutate({ viewId: vid, visible: true })
+        setVisibleMutation.mutate({ viewId: vid, visible: true })
       }
 
       // Only sync bounds when not hidden by overlay
@@ -112,7 +114,7 @@ export function useBrowserViewBounds(
         if (!last || last.x !== x || last.y !== y || last.width !== width || last.height !== height) {
           lastBoundsRef.current = { x, y, width, height }
           if (width > 0 && height > 0) {
-            void trpcClient.app.browser.setBounds.mutate({ viewId: vid, bounds: { x, y, width, height } })
+            setBoundsMutation.mutate({ viewId: vid, bounds: { x, y, width, height } })
           }
         }
       }
@@ -146,7 +148,7 @@ export function useBrowserViewBounds(
   const handleMouseDown = useCallback(() => {
     const vid = viewIdRef.current
     if (vid) {
-      void trpcClient.app.browser.focus.mutate({ viewId: vid })
+      focusMutation.mutate({ viewId: vid })
     }
   }, [])
 
