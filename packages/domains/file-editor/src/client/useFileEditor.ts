@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 
@@ -31,7 +31,7 @@ export function useFileEditor(
   initialEditorState?: EditorOpenFilesState | null
 ) {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   const writeFile = useMutation(trpc.fileEditor.writeFile.mutationOptions())
 
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
@@ -59,7 +59,7 @@ export function useFileEditor(
             })
             continue
           }
-          const result = await trpcClient.fileEditor.readFile.query({ rootPath: projectPath, filePath })
+          const result = await queryClient.fetchQuery(trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath }))
           if (result.tooLarge) {
             setOpenFiles((prev) => {
               if (prev.some((f) => f.path === filePath)) return prev
@@ -97,7 +97,7 @@ export function useFileEditor(
         return
       }
 
-      const result = await trpcClient.fileEditor.readFile.query({ rootPath: projectPath, filePath })
+      const result = await queryClient.fetchQuery(trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath }))
       if (result.tooLarge || result.content == null) return
       setOpenFiles((prev) =>
         prev.map((f) =>
@@ -114,7 +114,7 @@ export function useFileEditor(
     } catch {
       // File may have been deleted
     }
-  }, [projectPath, trpcClient])
+  }, [projectPath, queryClient, trpc])
 
   const projectPathRef = useRef(projectPath)
   projectPathRef.current = projectPath
@@ -250,7 +250,7 @@ export function useFileEditor(
         return
       }
 
-      const result = await trpcClient.fileEditor.readFile.query({ rootPath: projectPath, filePath })
+      const result = await queryClient.fetchQuery(trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath }))
       if (result.tooLarge) {
         setOpenFiles((prev) => {
           if (prev.some((f) => f.path === filePath)) return prev
@@ -269,11 +269,11 @@ export function useFileEditor(
     } finally {
       pendingOpen.current = null
     }
-  }, [projectPath, openFiles, trpcClient])
+  }, [projectPath, openFiles, queryClient, trpc])
 
   const openFileForced = useCallback(async (filePath: string) => {
     try {
-      const result = await trpcClient.fileEditor.readFile.query({ rootPath: projectPath, filePath, force: true })
+      const result = await queryClient.fetchQuery(trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath, force: true }))
       if (result.content == null) return
       setOpenFiles((prev) =>
         prev.map((f) =>
@@ -285,7 +285,7 @@ export function useFileEditor(
     } catch {
       // File read failed
     }
-  }, [projectPath, trpcClient])
+  }, [projectPath, queryClient, trpc])
 
   const updateContent = useCallback((filePath: string, content: string) => {
     setOpenFiles((prev) =>
