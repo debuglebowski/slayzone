@@ -10,7 +10,7 @@ import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
 import { buildCodeMirrorTheme } from './codemirror-theme'
-import type { ConflictFileContent, ConflictAnalysis } from '../shared/types'
+import type { ConflictAnalysis } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
 
 interface ConflictFileViewProps {
