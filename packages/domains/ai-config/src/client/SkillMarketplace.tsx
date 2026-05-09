@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { ArrowLeft, ExternalLink, Plus, RefreshCw, Search, Settings2 } from 'lucide-react'
 import { Button, Input, cn, toast } from '@slayzone/ui'
-import type { SkillRegistry, SkillRegistryEntry } from '../shared'
+import type { SkillRegistryEntry } from '../shared'
 import { SkillEntryCard } from './SkillEntryCard'
 import { SkillPreviewDialog } from './SkillPreviewDialog'
 import { AddRegistryDialog } from './AddRegistryDialog'
@@ -18,54 +19,44 @@ interface SkillMarketplaceProps {
 }
 
 export function SkillMarketplace({ projectId, projectPath }: SkillMarketplaceProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const hasProject = !!projectId && !!projectPath
   const [view, setView] = useState<View>('browse')
   const [browseMode, setBrowseMode] = useState<BrowseMode>('registries')
   const [activeRegistryId, setActiveRegistryId] = useState<string | null>(null)
-  const [entries, setEntries] = useState<SkillRegistryEntry[]>([])
-  const [registries, setRegistries] = useState<SkillRegistry[]>([])
   const [search, setSearch] = useState('')
   const [selectedRegistry, setSelectedRegistry] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshKey, setRefreshKey] = useState(0)
   const [installing, setInstalling] = useState<string | null>(null)
-  const [refreshingAll, setRefreshingAll] = useState(false)
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [previewEntry, setPreviewEntry] = useState<SkillRegistryEntry | null>(null)
 
-  const loadRegistries = useCallback(async () => {
-    const regs = await trpcClient.aiConfig.marketplace.listRegistries.query()
-    setRegistries(regs)
-  }, [refreshKey])
-
   const effectiveRegistryId = browseMode === 'registries' ? activeRegistryId : selectedRegistry
 
-  const loadEntries = useCallback(async () => {
-    setLoading(true)
-    try {
-      const rows = await trpcClient.aiConfig.marketplace.listEntries.query({
-        registryId: effectiveRegistryId ?? undefined,
-        search: search || undefined,
-        projectId: projectId ?? undefined,
-      })
-      setEntries(rows)
-    } finally {
-      setLoading(false)
-    }
-  }, [effectiveRegistryId, search, refreshKey])
+  const registriesQuery = useQuery(trpc.aiConfig.marketplace.listRegistries.queryOptions())
+  const entriesQuery = useQuery(trpc.aiConfig.marketplace.listEntries.queryOptions({
+    registryId: effectiveRegistryId ?? undefined,
+    search: search || undefined,
+    projectId: projectId ?? undefined,
+  }))
 
-  useEffect(() => {
-    loadRegistries()
-    loadEntries()
-  }, [loadRegistries, loadEntries])
+  const registries = registriesQuery.data ?? []
+  const entries = entriesQuery.data ?? []
+  const loading = entriesQuery.isLoading
 
+  const ensureFreshMutation = useMutation(trpc.aiConfig.marketplace.ensureFresh.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.marketplace.listRegistries.queryKey() })
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.marketplace.listEntries.queryKey() })
+    },
+  }))
+  const ensureFreshFiredRef = useRef(false)
   useEffect(() => {
-    trpcClient.aiConfig.marketplace.ensureFresh.mutate().then(() => {
-      setRefreshKey(k => k + 1)
-    }).catch(() => {})
-  }, [])
+    if (ensureFreshFiredRef.current) return
+    ensureFreshFiredRef.current = true
+    ensureFreshMutation.mutate(undefined, { onError: () => {} })
+  }, [ensureFreshMutation])
 
   // Handle external navigation (e.g. clicking marketplace badge in skill list)
   useEffect(() => {
@@ -89,107 +80,123 @@ export function SkillMarketplace({ projectId, projectPath }: SkillMarketplacePro
     }
   }, [loading, entries])
 
+  const invalidateMarketplace = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.marketplace.listEntries.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.marketplace.listRegistries.queryKey() })
+  }, [queryClient, trpc])
+
+  const installSkillMutation = useMutation(trpc.aiConfig.marketplace.installSkill.mutationOptions({
+    onSuccess: invalidateMarketplace,
+  }))
+  const syncLinkedFileMutation = useMutation(trpc.aiConfig.syncLinkedFile.mutationOptions())
+  const updateSkillMutation = useMutation(trpc.aiConfig.marketplace.updateSkill.mutationOptions({
+    onSuccess: invalidateMarketplace,
+  }))
+  const deleteItemMutation = useMutation(trpc.aiConfig.deleteItem.mutationOptions({
+    onSuccess: invalidateMarketplace,
+  }))
+  const refreshAllMutation = useMutation(trpc.aiConfig.marketplace.refreshAll.mutationOptions({
+    onSuccess: invalidateMarketplace,
+  }))
+  const refreshRegistryMutation = useMutation(trpc.aiConfig.marketplace.refreshRegistry.mutationOptions({
+    onSuccess: invalidateMarketplace,
+  }))
+  const toggleRegistryMutation = useMutation(trpc.aiConfig.marketplace.toggleRegistry.mutationOptions({
+    onSuccess: invalidateMarketplace,
+  }))
+  const removeRegistryMutation = useMutation(trpc.aiConfig.marketplace.removeRegistry.mutationOptions({
+    onSuccess: invalidateMarketplace,
+  }))
+  const addRegistryMutation = useMutation(trpc.aiConfig.marketplace.addRegistry.mutationOptions({
+    onSuccess: invalidateMarketplace,
+  }))
+
+  const refreshingAll = refreshAllMutation.isPending
+
   const handleAddToLibrary = useCallback(async (entryId: string) => {
     setInstalling(entryId)
     try {
-      await trpcClient.aiConfig.marketplace.installSkill.mutate({ entryId, scope: 'library' })
+      await installSkillMutation.mutateAsync({ entryId, scope: 'library' })
       toast.success('Skill added to library')
-      await loadEntries()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Install failed')
     } finally {
       setInstalling(null)
     }
-  }, [loadEntries])
+  }, [installSkillMutation])
 
   const handleAddToProject = useCallback(async (entryId: string) => {
     if (!projectId || !projectPath) return
     setInstalling(entryId)
     try {
-      const item = await trpcClient.aiConfig.marketplace.installSkill.mutate({ entryId, scope: 'project', projectId })
-      try { await trpcClient.aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: (item as { id: string }).id }) } catch { /* sync self-heals on next Sync All */ }
+      const item = await installSkillMutation.mutateAsync({ entryId, scope: 'project', projectId })
+      try {
+        await syncLinkedFileMutation.mutateAsync({ projectId, projectPath, itemId: (item as { id: string }).id })
+      } catch { /* sync self-heals on next Sync All */ }
       toast.success('Skill added to project')
-      await loadEntries()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Install failed')
     } finally {
       setInstalling(null)
     }
-  }, [loadEntries, projectId, projectPath])
+  }, [projectId, projectPath, installSkillMutation, syncLinkedFileMutation])
 
   const handleUpdate = useCallback(async (itemId: string, entryId: string) => {
     setInstalling(entryId)
     try {
-      await trpcClient.aiConfig.marketplace.updateSkill.mutate({ itemId, entryId })
+      await updateSkillMutation.mutateAsync({ itemId, entryId })
       toast.success('Skill updated')
-      await loadEntries()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Update failed')
     } finally {
       setInstalling(null)
     }
-  }, [loadEntries])
+  }, [updateSkillMutation])
 
   const handleUninstall = useCallback(async (itemId: string) => {
     try {
-      await trpcClient.aiConfig.deleteItem.mutate({ id: itemId })
+      await deleteItemMutation.mutateAsync({ id: itemId })
       toast.success('Skill uninstalled')
-      await loadEntries()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Uninstall failed')
     }
-  }, [loadEntries])
+  }, [deleteItemMutation])
 
   const handleRefreshAll = useCallback(async () => {
-    setRefreshingAll(true)
     try {
-      await trpcClient.aiConfig.marketplace.refreshAll.mutate()
-      await loadEntries()
-      await loadRegistries()
+      await refreshAllMutation.mutateAsync()
       toast.success('Registries refreshed')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Refresh failed')
-    } finally {
-      setRefreshingAll(false)
     }
-  }, [loadEntries, loadRegistries])
+  }, [refreshAllMutation])
 
   const handleRefreshOne = useCallback(async (registryId: string) => {
     setRefreshingId(registryId)
     try {
-      await trpcClient.aiConfig.marketplace.refreshRegistry.mutate({ registryId })
-      await loadEntries()
-      await loadRegistries()
+      await refreshRegistryMutation.mutateAsync({ registryId })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Refresh failed')
     } finally {
       setRefreshingId(null)
     }
-  }, [loadEntries, loadRegistries])
+  }, [refreshRegistryMutation])
 
   const handleToggleRegistry = useCallback(async (id: string, enabled: boolean) => {
-    await trpcClient.aiConfig.marketplace.toggleRegistry.mutate({ registryId: id, enabled })
-    await loadRegistries()
-    await loadEntries()
-  }, [loadRegistries, loadEntries])
+    await toggleRegistryMutation.mutateAsync({ registryId: id, enabled })
+  }, [toggleRegistryMutation])
 
   const handleRemoveRegistry = useCallback(async (id: string) => {
-    await trpcClient.aiConfig.marketplace.removeRegistry.mutate({ registryId: id })
-    await loadRegistries()
-    await loadEntries()
-  }, [loadRegistries, loadEntries])
+    await removeRegistryMutation.mutateAsync({ registryId: id })
+  }, [removeRegistryMutation])
 
   const handleAddRegistry = useCallback(async (githubUrl: string, branch?: string, path?: string) => {
-    await trpcClient.aiConfig.marketplace.addRegistry.mutate({ githubUrl, branch, path })
-    await loadRegistries()
-    await loadEntries()
-  }, [loadRegistries, loadEntries])
+    await addRegistryMutation.mutateAsync({ githubUrl, branch, path })
+  }, [addRegistryMutation])
 
   const handleDrillIn = useCallback((registryId: string) => {
     setActiveRegistryId(registryId)
     setSearch('')
-    setEntries([])
-    setLoading(true)
   }, [])
 
   const handleDrillOut = useCallback(() => {

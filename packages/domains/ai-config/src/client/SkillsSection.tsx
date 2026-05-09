@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { createPortal } from 'react-dom'
 import { Plus } from 'lucide-react'
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
@@ -11,7 +12,7 @@ import { AddItemPicker } from './AddItemPicker'
 import { SkillViewToggle, type SkillViewMode } from './SkillViewToggle'
 import { getSkillValidation } from './skill-validation'
 import { buildDefaultSkillContent } from '../shared'
-import type { AiConfigItem, AiConfigScope, CliProvider, ConfigLevel, ProjectSkillStatus, SyncHealth, SkillUpdateInfo, UpdateAiConfigItemInput } from '../shared'
+import type { AiConfigItem, AiConfigScope, ConfigLevel, ProjectSkillStatus, SyncHealth, SkillUpdateInfo } from '../shared'
 import { aggregateProviderSyncHealth } from './sync-view-model'
 import { useContextManagerStore } from './useContextManagerStore'
 
@@ -29,95 +30,146 @@ function nextAvailableSlug(base: string, existingSlugs: Set<string>): string {
 }
 
 export function SkillsSection({ level, projectId, projectPath }: SkillsSectionProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const scope: AiConfigScope = level === 'library' ? 'library' : 'project'
   const isProject = level === 'project' && !!projectId && !!projectPath
 
-  const [items, setItems] = useState<AiConfigItem[]>([])
-  const [linkedIds, setLinkedIds] = useState<string[]>([])
-  const [syncHealthMap, setSyncHealthMap] = useState<Map<string, SyncHealth>>(new Map())
-  const [statusMap, setStatusMap] = useState<Map<string, ProjectSkillStatus>>(new Map())
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [version, setVersion] = useState(0)
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
   const [showAddPicker, setShowAddPicker] = useState(false)
-  const [enabledProviders, setEnabledProviders] = useState<CliProvider[]>([])
   const viewMode = (useContextManagerStore((s) => s.skillViewMode[scope]) ?? 'list') as SkillViewMode
   const setSkillViewMode = useContextManagerStore((s) => s.setSkillViewMode)
   const skillGroupBy = useContextManagerStore((s) => s.skillGroupBy)
   const setSkillGroupBy = useContextManagerStore((s) => s.setSkillGroupBy)
-  const [updateMap, setUpdateMap] = useState<Map<string, SkillUpdateInfo>>(new Map())
 
-  const bumpVersion = useCallback(() => setVersion(v => v + 1), [])
-
-  const refreshSyncStatus = useCallback(async () => {
+  // Auto-create DB records for any new on-disk skill files (one-shot per project mount)
+  const reconcileMutation = useMutation(trpc.aiConfig.reconcileProjectSkills.mutationOptions())
+  const reconciledRef = useRef<string | null>(null)
+  useEffect(() => {
     if (!isProject || !projectId || !projectPath) return
-    const linked = await trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath })
-    const healthMap = new Map<string, SyncHealth>()
-    const newStatusMap = new Map<string, ProjectSkillStatus>()
+    const key = `${projectId}:${projectPath}`
+    if (reconciledRef.current === key) return
+    reconciledRef.current = key
+    reconcileMutation.mutate({ projectId, projectPath }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+      },
+    })
+  }, [isProject, projectId, projectPath, reconcileMutation, queryClient, trpc])
+
+  const itemsQuery = useQuery(
+    trpc.aiConfig.listItems.queryOptions({
+      scope,
+      projectId: isProject ? projectId! : undefined,
+      type: 'skill',
+    }),
+  )
+
+  const projectSkillsStatusQuery = useQuery({
+    ...trpc.aiConfig.getProjectSkillsStatus.queryOptions(
+      isProject && projectId && projectPath ? { projectId, projectPath } : { projectId: '', projectPath: '' },
+    ),
+    enabled: isProject && !!projectId && !!projectPath,
+  })
+
+  const providersQuery = useQuery({
+    ...trpc.aiConfig.getProjectProviders.queryOptions(isProject && projectId ? { projectId } : { projectId: '' }),
+    enabled: isProject && !!projectId,
+  })
+
+  const updatesQuery = useQuery(trpc.aiConfig.marketplace.checkUpdates.queryOptions())
+
+  const loadError = itemsQuery.isError ? 'Failed to load skills' : null
+
+  // Combine fetched skills with linked-from-library skills not yet in `items`
+  const items = useMemo<AiConfigItem[]>(() => {
+    const rows = [...(itemsQuery.data ?? [])]
+    const linked = projectSkillsStatusQuery.data ?? []
+    const ids = new Set(rows.map(r => r.id))
     for (const s of linked) {
-      healthMap.set(s.item.id, aggregateProviderSyncHealth(s.providers))
-      newStatusMap.set(s.item.id, s)
+      if (!ids.has(s.item.id)) rows.push(s.item)
     }
-    setSyncHealthMap(healthMap)
-    setStatusMap(newStatusMap)
-  }, [isProject, projectId, projectPath])
+    return rows
+  }, [itemsQuery.data, projectSkillsStatusQuery.data])
 
-  useEffect(() => {
-    let stale = false
-    void (async () => {
-      try {
-        if (isProject && projectId && projectPath) {
-          // Auto-create DB records for any new on-disk skill files
-          await trpcClient.aiConfig.reconcileProjectSkills.mutate({ projectId, projectPath })
-        }
-        const rows = await trpcClient.aiConfig.listItems.query({
-          scope,
-          projectId: isProject ? projectId : undefined,
-          type: 'skill',
-        })
-        const newLinkedIds: string[] = []
-        const healthMap = new Map<string, SyncHealth>()
-        const newStatusMap = new Map<string, ProjectSkillStatus>()
-        if (isProject && projectId && projectPath) {
-          const linked = await trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath })
-          const ids = new Set(rows.map(r => r.id))
-          for (const s of linked) {
-            newLinkedIds.push(s.item.id)
-            if (!ids.has(s.item.id)) rows.push(s.item)
-            healthMap.set(s.item.id, aggregateProviderSyncHealth(s.providers))
-            newStatusMap.set(s.item.id, s)
-          }
-        }
-        if (stale) return
-        setItems(rows)
-        setLinkedIds(newLinkedIds)
-        setSyncHealthMap(healthMap)
-        setStatusMap(newStatusMap)
-        setLoadError(null)
-      } catch {
-        if (stale) return
-        setLoadError('Failed to load skills')
-      }
-    })()
-    return () => { stale = true }
-  }, [scope, isProject, projectId, projectPath, version])
+  const linkedIds = useMemo<string[]>(
+    () => (projectSkillsStatusQuery.data ?? []).map(s => s.item.id),
+    [projectSkillsStatusQuery.data],
+  )
 
-  useEffect(() => {
-    if (!isProject || !projectId) return
-    void trpcClient.aiConfig.getProjectProviders.query({ projectId }).then(setEnabledProviders)
-  }, [isProject, projectId])
+  const syncHealthMap = useMemo<Map<string, SyncHealth>>(() => {
+    const m = new Map<string, SyncHealth>()
+    for (const s of projectSkillsStatusQuery.data ?? []) {
+      m.set(s.item.id, aggregateProviderSyncHealth(s.providers))
+    }
+    return m
+  }, [projectSkillsStatusQuery.data])
 
-  // Load marketplace update info
-  useEffect(() => {
-    trpcClient.aiConfig.marketplace.checkUpdates.query().then((updates) => {
-      const map = new Map<string, SkillUpdateInfo>()
-      for (const u of updates) map.set(u.itemId, u)
-      setUpdateMap(map)
-    }).catch(() => {})
-  }, [items])
+  const statusMap = useMemo<Map<string, ProjectSkillStatus>>(() => {
+    const m = new Map<string, ProjectSkillStatus>()
+    for (const s of projectSkillsStatusQuery.data ?? []) {
+      m.set(s.item.id, s)
+    }
+    return m
+  }, [projectSkillsStatusQuery.data])
 
-  // Consume one-shot library skill selection from the store (set by Go-to-library button).
+  const updateMap = useMemo<Map<string, SkillUpdateInfo>>(() => {
+    const m = new Map<string, SkillUpdateInfo>()
+    for (const u of updatesQuery.data ?? []) m.set(u.itemId, u)
+    return m
+  }, [updatesQuery.data])
+
+  const enabledProviders = providersQuery.data ?? []
+
+  const refreshSyncStatus = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectSkillsStatus.queryKey() })
+  }, [queryClient, trpc])
+
+  const updateItemMutation = useMutation(trpc.aiConfig.updateItem.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+      refreshSyncStatus()
+    },
+  }))
+  const deleteItemMutation = useMutation(trpc.aiConfig.deleteItem.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+    },
+  }))
+  const marketplaceUpdateMutation = useMutation(trpc.aiConfig.marketplace.updateSkill.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.marketplace.checkUpdates.queryKey() })
+    },
+  }))
+  const marketplaceUnlinkMutation = useMutation(trpc.aiConfig.marketplace.unlinkSkill.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+    },
+  }))
+  const removeProjectSelectionMutation = useMutation(trpc.aiConfig.removeProjectSelection.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectSkillsStatus.queryKey() })
+    },
+  }))
+  const syncAllMutation = useMutation(trpc.aiConfig.syncAll.mutationOptions({
+    onSuccess: () => refreshSyncStatus(),
+  }))
+  const pullProviderSkillMutation = useMutation(trpc.aiConfig.pullProviderSkill.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+      refreshSyncStatus()
+    },
+  }))
+  const createItemMutation = useMutation(trpc.aiConfig.createItem.mutationOptions({
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+      setSelectedSkillId(created.id)
+    },
+  }))
+
+  // Consume one-shot library skill selection from the store
   useEffect(() => {
     if (level !== 'library') return
     if (items.length === 0) return
@@ -131,77 +183,61 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
     setSkillViewMode(scope, mode)
   }, [setSkillViewMode, scope])
 
-  const handleUpdateItem = useCallback(async (id: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await trpcClient.aiConfig.updateItem.mutate({ id, ...patch })
-    if (updated) {
-      setItems(prev => prev.map(i => i.id === updated.id ? updated : i))
-      void refreshSyncStatus()
-    }
-  }, [refreshSyncStatus])
+  const handleUpdateItem = useCallback(async (id: string, patch: Parameters<typeof updateItemMutation.mutateAsync>[0] extends infer T ? Omit<T & { id: string }, 'id'> : never) => {
+    await updateItemMutation.mutateAsync({ id, ...patch })
+  }, [updateItemMutation])
 
   const handleDeleteItem = useCallback(async (id: string) => {
-    await trpcClient.aiConfig.deleteItem.mutate({ id })
-    setItems(prev => prev.filter(i => i.id !== id))
+    await deleteItemMutation.mutateAsync({ id })
     if (selectedSkillId === id) setSelectedSkillId(null)
-  }, [selectedSkillId])
+  }, [deleteItemMutation, selectedSkillId])
 
   const handleMarketplaceUpdate = useCallback(async (itemId: string) => {
     const info = updateMap.get(itemId)
     if (!info) return
-    const updated = await trpcClient.aiConfig.marketplace.updateSkill.mutate({ itemId, entryId: info.entryId }) as AiConfigItem | null
-    if (updated) setItems(prev => prev.map(i => i.id === updated.id ? updated : i))
-    setUpdateMap(prev => { const next = new Map(prev); next.delete(itemId); return next })
-  }, [updateMap])
+    await marketplaceUpdateMutation.mutateAsync({ itemId, entryId: info.entryId })
+  }, [updateMap, marketplaceUpdateMutation])
 
   const handleSyncSkillToDisk = useCallback(async (itemId: string) => {
     if (!isProject || !projectId || !projectPath) return
-    await trpcClient.aiConfig.syncAll.mutate({ projectId, projectPath, itemId })
-    await refreshSyncStatus()
-  }, [isProject, projectId, projectPath, refreshSyncStatus])
+    await syncAllMutation.mutateAsync({ projectId, projectPath, itemId })
+  }, [isProject, projectId, projectPath, syncAllMutation])
 
-  const handleSyncSkillProviderToDisk = useCallback(async (itemId: string, provider: CliProvider) => {
+  const handleSyncSkillProviderToDisk = useCallback(async (itemId: string, provider: typeof enabledProviders[number]) => {
     if (!isProject || !projectId || !projectPath) return
-    await trpcClient.aiConfig.syncAll.mutate({ projectId, projectPath, itemId, providers: [provider] })
-    await refreshSyncStatus()
-  }, [isProject, projectId, projectPath, refreshSyncStatus])
+    await syncAllMutation.mutateAsync({ projectId, projectPath, itemId, providers: [provider] })
+  }, [isProject, projectId, projectPath, syncAllMutation])
 
-  const handlePullSkillProviderFromDisk = useCallback(async (itemId: string, provider: CliProvider) => {
+  const handlePullSkillProviderFromDisk = useCallback(async (itemId: string, provider: typeof enabledProviders[number]) => {
     if (!isProject || !projectId || !projectPath) return
-    const updated = await trpcClient.aiConfig.pullProviderSkill.mutate({ projectId, projectPath, provider, itemId })
-    setItems(prev => prev.map(i => i.id === updated.item.id ? updated.item : i))
-    await refreshSyncStatus()
-  }, [isProject, projectId, projectPath, refreshSyncStatus])
+    await pullProviderSkillMutation.mutateAsync({ projectId, projectPath, provider, itemId })
+  }, [isProject, projectId, projectPath, pullProviderSkillMutation])
 
   const handleUnlink = useCallback(async (target: AiConfigItem) => {
     const hasMarketplace = (() => {
       try { return !!JSON.parse(target.metadata_json)?.marketplace } catch { return false }
     })()
     if (hasMarketplace) {
-      const updated = await trpcClient.aiConfig.marketplace.unlinkSkill.mutate({ itemId: target.id }) as AiConfigItem | null
-      if (updated) setItems(prev => prev.map(i => i.id === updated.id ? updated : i))
+      await marketplaceUnlinkMutation.mutateAsync({ itemId: target.id })
       return
     }
     if (isProject && projectId && target.scope === 'library') {
-      await trpcClient.aiConfig.removeProjectSelection.mutate({ projectId, itemId: target.id })
-      setItems(prev => prev.filter(i => i.id !== target.id))
-      setLinkedIds(prev => prev.filter(id => id !== target.id))
+      await removeProjectSelectionMutation.mutateAsync({ projectId, itemId: target.id })
       if (selectedSkillId === target.id) setSelectedSkillId(null)
     }
-  }, [isProject, projectId, selectedSkillId])
+  }, [isProject, projectId, selectedSkillId, marketplaceUnlinkMutation, removeProjectSelectionMutation])
 
-  const handleCreateSkill = useCallback(async () => {
+  const handleCreateSkill = useCallback(() => {
     const existingSlugs = new Set(items.map(i => i.slug))
     const slug = nextAvailableSlug('new-skill', existingSlugs)
-    const created = await trpcClient.aiConfig.createItem.mutate({
+    createItemMutation.mutate({
       type: 'skill',
       scope,
-      projectId: isProject ? projectId : undefined,
+      projectId: isProject ? projectId! : undefined,
       slug,
       content: buildDefaultSkillContent(slug),
     })
-    setItems(prev => [created, ...prev])
-    setSelectedSkillId(created.id)
-  }, [items, scope, isProject, projectId])
+  }, [items, scope, isProject, projectId, createItemMutation])
 
   const sortedItems = useMemo(() => [...items].sort((a, b) => a.slug.localeCompare(b.slug)), [items])
 
@@ -228,7 +264,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
     dragging.current = true
     const onMove = (ev: globalThis.MouseEvent) => {
       if (!dragging.current) return
-      const fromRight = window.innerWidth - ev.clientX - 12 // 12 = p-3 padding
+      const fromRight = window.innerWidth - ev.clientX - 12
       setSkillEditorWidth(Math.min(Math.max(fromRight, 300), window.innerWidth * 0.6))
     }
     const onUp = () => {
@@ -240,7 +276,6 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
     document.addEventListener('mouseup', onUp)
   }, [setSkillEditorWidth])
 
-  // Apply width to editor panel (null = 50% of available)
   useEffect(() => {
     if (editorTarget && selectedItem) {
       editorTarget.style.width = skillEditorWidth ? `${skillEditorWidth}px` : '50%'
@@ -344,7 +379,11 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
           projectPath={projectPath}
           enabledProviders={enabledProviders}
           existingLinks={linkedIds}
-          onAdded={() => { setShowAddPicker(false); bumpVersion() }}
+          onAdded={() => {
+            setShowAddPicker(false)
+            queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+            queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectSkillsStatus.queryKey() })
+          }}
         />
       )}
     </>

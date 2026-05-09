@@ -255,7 +255,6 @@ export function ContextManagerSettings({
   onOpenContextManager,
   initialSection
 }: ContextManagerSettingsProps) {
-  const trpcClient = useTRPCClient()
   const isProject = scope === 'project' && !!projectId && !!projectPath
   const activeProjectTab = projectTab ?? 'config'
 
