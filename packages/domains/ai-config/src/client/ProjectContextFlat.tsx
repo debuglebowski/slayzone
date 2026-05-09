@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
   ArrowLeft, ChevronRight,
   FileText, RefreshCw, Server, Settings2, Sparkles,
@@ -197,44 +198,37 @@ function ProjectOverviewPanel({
 // ---------------------------------------------------------------------------
 
 export function ProjectContextFlat({ projectId, projectPath, onOpenContextManager }: ProjectContextFlatProps) {
+  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const [data, setData] = useState<ContextData | null>(null)
-  const [version, setVersion] = useState(0)
+  const queryClient = useQueryClient()
+  const skillsStatusQuery = useQuery(trpc.aiConfig.getProjectSkillsStatus.queryOptions({ projectId, projectPath }))
+  const localItemsQuery = useQuery(trpc.aiConfig.listItems.queryOptions({ scope: 'project', projectId }))
+  const providersQuery = useQuery(trpc.aiConfig.getProjectProviders.queryOptions({ projectId }))
+  const instructionsQuery = useQuery(trpc.aiConfig.getRootInstructions.queryOptions({ projectId, projectPath }))
+  const contextTreeQuery = useQuery(trpc.aiConfig.getContextTree.queryOptions({ projectPath, projectId }))
+  const mcpConfigsQuery = useQuery(trpc.aiConfig.discoverMcpConfigs.queryOptions({ projectPath }))
+  const data: ContextData | null = (skillsStatusQuery.data && localItemsQuery.data && providersQuery.data && instructionsQuery.data && contextTreeQuery.data && mcpConfigsQuery.data) ? {
+    linkedSkills: skillsStatusQuery.data.filter(s => s.item.type === 'skill'),
+    localItems: localItemsQuery.data.filter(i => i.type !== 'root_instructions'),
+    enabledProviders: providersQuery.data,
+    instructions: {
+      ...instructionsQuery.data,
+      providerHealth: instructionsQuery.data.providerHealth ?? {}
+    },
+    contextTree: contextTreeQuery.data,
+    mcpConfigs: mcpConfigsQuery.data
+  } : null
   const [syncingMode, setSyncingMode] = useState<'sync' | 'reset' | null>(null)
   const [section, setSection] = useState<ProjectSection | null>(null)
 
-  const bumpVersion = useCallback(() => setVersion(v => v + 1), [])
-
-  useEffect(() => {
-    let stale = false
-    void (async () => {
-      try {
-        const [skillsStatus, localItems, enabledProviders, instructions, contextTree, mcpConfigs] = await Promise.all([
-          trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
-          trpcClient.aiConfig.listItems.query({ scope: 'project', projectId }),
-          trpcClient.aiConfig.getProjectProviders.query({ projectId }),
-          trpcClient.aiConfig.getRootInstructions.query({ projectId, projectPath }),
-          trpcClient.aiConfig.getContextTree.query({ projectPath, projectId }),
-          trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath })
-        ])
-        if (stale) return
-        setData({
-          linkedSkills: skillsStatus.filter(s => s.item.type === 'skill'),
-          localItems: localItems.filter(i => i.type !== 'root_instructions'),
-          enabledProviders,
-          instructions: {
-            ...instructions,
-            providerHealth: instructions.providerHealth ?? {}
-          },
-          contextTree,
-          mcpConfigs
-        })
-      } catch {
-        // silent
-      }
-    })()
-    return () => { stale = true }
-  }, [projectId, projectPath, version])
+  const bumpVersion = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectSkillsStatus.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectProviders.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getRootInstructions.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getContextTree.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.discoverMcpConfigs.queryKey() })
+  }, [queryClient, trpc])
 
   const handleSyncAll = async () => {
     if (!data) return
