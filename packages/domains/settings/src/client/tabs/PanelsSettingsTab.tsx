@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { ChevronRight, Cpu, FileCode, GitCompare, Globe, GripVertical, Paperclip, Plus, Settings2, SquareTerminal, Trash2 } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -13,6 +14,7 @@ import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/ter
 import { SettingsTabIntro } from './SettingsTabIntro'
 import { PanelBreadcrumb } from './PanelBreadcrumb'
 import type { DefaultDisplayMode } from '../UserSettingsDialog'
+import { useSettings, useSetSettingMutation } from '../queries'
 
 interface PanelsSettingsTabProps {
   activeTab: string
@@ -33,6 +35,17 @@ interface PanelRowDescriptor {
   onClick?: () => void
   webSubtitle?: string
 }
+
+const PANEL_SETTING_KEYS = [
+  'panel_config', 'terminal_font_family', 'terminal_scrollback',
+  'editor_word_wrap', 'editor_render_whitespace', 'editor_tab_size', 'editor_indent_tabs',
+  'diff_context_lines', 'diff_ignore_whitespace', 'diff_continuous_flow',
+  'diff_tree_collapsed', 'diff_side_by_side', 'diff_wrap',
+  'dev_server_toast_enabled', 'dev_server_auto_open_browser',
+  'browser_default_url', 'browser_default_zoom', 'browser_default_devices',
+  'commit_graph_config', 'editor_markdown_view_mode',
+  'git_tab_order', 'git_tab_visibility',
+] as const
 
 function buildPanelRowDescriptors(
   panelConfig: PanelConfig,
@@ -201,50 +214,86 @@ function SortablePanelRow({ id, descriptor }: { id: string; descriptor: PanelRow
 
 export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTerminalMode, onDefaultTerminalModeChange, defaultTabDisplayMode, onDefaultTabDisplayModeChange, providerSupportsChat }: PanelsSettingsTabProps) {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
-  const [panelConfig, setPanelConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG)
+  const queryClient = useQueryClient()
+  const setSetting = useSetSettingMutation()
+  const s = useSettings(PANEL_SETTING_KEYS)
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-  const [terminalFontFamily, setTerminalFontFamily] = useState('Menlo, Monaco, "Courier New", monospace')
-  const [terminalScrollback, setTerminalScrollback] = useState('5000')
-  
-  // Editor
-  const [editorWordWrap, setEditorWordWrap] = useState<'on' | 'off'>('off')
-  const [editorRenderWhitespace, setEditorRenderWhitespace] = useState<'none' | 'all'>('none')
-  const [editorTabSize, setEditorTabSize] = useState<'2' | '4'>('2')
-  const [editorIndentTabs, setEditorIndentTabs] = useState(false)
-  const [editorMarkdownViewMode, setEditorMarkdownViewMode] = useState<'rich' | 'split' | 'code'>('rich')
-  
-  // Diff
-  const [diffContextLines, setDiffContextLines] = useState<'0' | '3' | '5' | 'all'>('3')
-  const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(false)
-  const [diffContinuousFlow, setDiffContinuousFlow] = useState(false)
-  const [diffTreeCollapsed, setDiffTreeCollapsed] = useState(false)
-  const [diffSideBySide, setDiffSideBySide] = useState(false)
-  const [diffWrap, setDiffWrap] = useState(false)
 
-  // Commit graph defaults
-  const [graphCollapsed, setGraphCollapsed] = useState(false)
-  const [graphShowBranches, setGraphShowBranches] = useState(true)
-  const [graphBreakOnTags, setGraphBreakOnTags] = useState(true)
-  const [graphBreakOnMerges, setGraphBreakOnMerges] = useState(true)
+  // Derived from cache
+  const panelConfig = useMemo<PanelConfig>(() => {
+    if (!s.panel_config) return DEFAULT_PANEL_CONFIG
+    try {
+      return mergePanelOrder(mergePredefinedWebPanels(JSON.parse(s.panel_config) as PanelConfig))
+    } catch {
+      return DEFAULT_PANEL_CONFIG
+    }
+  }, [s.panel_config])
 
-  // Git sub-tab order + visibility
-  const [gitTabOrder, setGitTabOrder] = useState<GitTabId[]>(() => [...DEFAULT_GIT_TAB_ORDER])
-  const [gitTabVisibility, setGitTabVisibility] = useState<GitTabVisibility>({})
-  
-  // Browser
-  const [devServerToastEnabled, setDevServerToastEnabled] = useState(true)
-  const [devServerAutoOpenBrowser, setDevServerAutoOpenBrowser] = useState(false)
-  const [browserDefaultUrl, setBrowserDefaultUrl] = useState('')
-  const [browserDefaultZoom, setBrowserDefaultZoom] = useState('100')
-  const [browserDevices, setBrowserDevices] = useState({
-    desktop: { enabled: true, width: '1920', height: '1080' },
-    tablet: { enabled: true, width: '744', height: '1133' },
-    mobile: { enabled: true, width: '393', height: '852' },
-  })
+  const editorWordWrap: 'on' | 'off' = s.editor_word_wrap === 'on' ? 'on' : 'off'
+  const editorRenderWhitespace: 'none' | 'all' = s.editor_render_whitespace === 'all' ? 'all' : 'none'
+  const editorTabSize: '2' | '4' = s.editor_tab_size === '4' ? '4' : '2'
+  const editorIndentTabs = s.editor_indent_tabs === '1'
+  const editorMarkdownViewMode: 'rich' | 'split' | 'code' = s.editor_markdown_view_mode === 'split' || s.editor_markdown_view_mode === 'code' ? s.editor_markdown_view_mode : 'rich'
+
+  const diffContextLines: '0' | '3' | '5' | 'all' = (s.diff_context_lines === '0' || s.diff_context_lines === '5' || s.diff_context_lines === 'all') ? s.diff_context_lines : '3'
+  const diffIgnoreWhitespace = s.diff_ignore_whitespace === '1'
+  const diffContinuousFlow = s.diff_continuous_flow === '1'
+  const diffTreeCollapsed = s.diff_tree_collapsed === '1'
+  const diffSideBySide = s.diff_side_by_side === '1'
+  const diffWrap = s.diff_wrap === '1'
+
+  const devServerToastEnabled = s.dev_server_toast_enabled !== '0'
+  const devServerAutoOpenBrowser = s.dev_server_auto_open_browser === '1'
+
+  const graphConfig = useMemo(() => {
+    const defaults = { collapsed: false, showBranches: true, breakOnTags: true, breakOnMerges: true }
+    if (!s.commit_graph_config) return defaults
+    try {
+      const g = JSON.parse(s.commit_graph_config) as Partial<typeof defaults>
+      return { ...defaults, ...g }
+    } catch {
+      return defaults
+    }
+  }, [s.commit_graph_config])
+
+  const gitTabOrder = useMemo<GitTabId[]>(() => normalizeGitTabOrder(s.git_tab_order ?? null), [s.git_tab_order])
+  const gitTabVisibility = useMemo<GitTabVisibility>(() => normalizeGitTabVisibility(s.git_tab_visibility ?? null), [s.git_tab_visibility])
+
+  const browserDevices = useMemo(() => {
+    const fallback = {
+      desktop: { enabled: true, width: '1920', height: '1080' },
+      tablet: { enabled: true, width: '744', height: '1133' },
+      mobile: { enabled: true, width: '393', height: '852' },
+    }
+    if (!s.browser_default_devices) return fallback
+    try {
+      const d = JSON.parse(s.browser_default_devices)
+      return {
+        desktop: d.desktop ? { enabled: d.desktop.enabled !== false, width: String(d.desktop.width), height: String(d.desktop.height) } : fallback.desktop,
+        tablet: d.tablet ? { enabled: d.tablet.enabled !== false, width: String(d.tablet.width), height: String(d.tablet.height) } : fallback.tablet,
+        mobile: d.mobile ? { enabled: d.mobile.enabled !== false, width: String(d.mobile.width), height: String(d.mobile.height) } : fallback.mobile,
+      }
+    } catch {
+      return fallback
+    }
+  }, [s.browser_default_devices])
+
+  // Local drafts for text inputs with onBlur-write semantics
+  const [draftTermFontFamily, setDraftTermFontFamily] = useState<string | null>(null)
+  const [draftTermScrollback, setDraftTermScrollback] = useState<string | null>(null)
+  const [draftBrowserUrl, setDraftBrowserUrl] = useState<string | null>(null)
+  const [draftBrowserZoom, setDraftBrowserZoom] = useState<string | null>(null)
+  const [draftBrowserDevices, setDraftBrowserDevices] = useState<typeof browserDevices | null>(null)
+
+  const liveTermFontFamily = draftTermFontFamily ?? s.terminal_font_family ?? 'Menlo, Monaco, "Courier New", monospace'
+  const liveTermScrollback = draftTermScrollback ?? s.terminal_scrollback ?? '5000'
+  const liveBrowserUrl = draftBrowserUrl ?? s.browser_default_url ?? ''
+  const liveBrowserZoom = draftBrowserZoom ?? s.browser_default_zoom ?? '100'
+  const liveBrowserDevices = draftBrowserDevices ?? browserDevices
 
   // New panel state
   const [newPanelName, setNewPanelName] = useState('')
@@ -264,80 +313,10 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
   const [editPanelProtocolError, setEditPanelProtocolError] = useState('')
   const [editShortcutError, setEditShortcutError] = useState('')
 
-  useEffect(() => {
-    Promise.all([
-      trpcClient.settings.get.query({ key: 'panel_config' }),
-      trpcClient.settings.get.query({ key: 'terminal_font_family' }),
-      trpcClient.settings.get.query({ key: 'terminal_scrollback' }),
-      trpcClient.settings.get.query({ key: 'editor_word_wrap' }),
-      trpcClient.settings.get.query({ key: 'editor_render_whitespace' }),
-      trpcClient.settings.get.query({ key: 'editor_tab_size' }),
-      trpcClient.settings.get.query({ key: 'editor_indent_tabs' }),
-      trpcClient.settings.get.query({ key: 'diff_context_lines' }),
-      trpcClient.settings.get.query({ key: 'diff_ignore_whitespace' }),
-      trpcClient.settings.get.query({ key: 'diff_continuous_flow' }),
-      trpcClient.settings.get.query({ key: 'diff_tree_collapsed' }),
-      trpcClient.settings.get.query({ key: 'diff_side_by_side' }),
-      trpcClient.settings.get.query({ key: 'diff_wrap' }),
-      trpcClient.settings.get.query({ key: 'dev_server_toast_enabled' }),
-      trpcClient.settings.get.query({ key: 'dev_server_auto_open_browser' }),
-      trpcClient.settings.get.query({ key: 'browser_default_url' }),
-      trpcClient.settings.get.query({ key: 'browser_default_zoom' }),
-      trpcClient.settings.get.query({ key: 'browser_default_devices' }),
-      trpcClient.settings.get.query({ key: 'commit_graph_config' }),
-      trpcClient.settings.get.query({ key: 'editor_markdown_view_mode' }),
-      trpcClient.settings.get.query({ key: 'git_tab_order' }),
-      trpcClient.settings.get.query({ key: 'git_tab_visibility' }),
-    ]).then(([pc, tff, ts, eww, erw, ets, eit, dcl, diw, dcf, dtc, dsbs, dwr, dste, dsaob, bdu, bdz, bdd, cgc, emvm, gto, gtv]) => {
-      if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
-      if (tff) setTerminalFontFamily(tff)
-      if (ts) setTerminalScrollback(ts)
-      if (eww === 'on') setEditorWordWrap('on')
-      if (erw === 'all') setEditorRenderWhitespace('all')
-      if (ets === '4') setEditorTabSize('4')
-      if (eit === '1') setEditorIndentTabs(true)
-      if (dcl) setDiffContextLines(dcl as any)
-      if (diw === '1') setDiffIgnoreWhitespace(true)
-      if (dcf === '1') setDiffContinuousFlow(true)
-      if (dtc === '1') setDiffTreeCollapsed(true)
-      if (dsbs === '1') setDiffSideBySide(true)
-      if (dwr === '1') setDiffWrap(true)
-      if (dste === '0') setDevServerToastEnabled(false)
-      if (dsaob === '1') setDevServerAutoOpenBrowser(true)
-      if (bdu) setBrowserDefaultUrl(bdu)
-      if (bdz) setBrowserDefaultZoom(bdz)
-      if (bdd) {
-        try {
-          const d = JSON.parse(bdd)
-          setBrowserDevices({
-            desktop: d.desktop ? { enabled: d.desktop.enabled !== false, width: String(d.desktop.width), height: String(d.desktop.height) } : { enabled: true, width: '1920', height: '1080' },
-            tablet: d.tablet ? { enabled: d.tablet.enabled !== false, width: String(d.tablet.width), height: String(d.tablet.height) } : { enabled: true, width: '744', height: '1133' },
-            mobile: d.mobile ? { enabled: d.mobile.enabled !== false, width: String(d.mobile.width), height: String(d.mobile.height) } : { enabled: true, width: '393', height: '852' },
-          })
-        } catch { /* ignore */ }
-      }
-      if (cgc) {
-        try {
-          const g = JSON.parse(cgc)
-          if (g.collapsed !== undefined) setGraphCollapsed(g.collapsed)
-          if (g.showBranches !== undefined) setGraphShowBranches(g.showBranches)
-          if (g.breakOnTags !== undefined) setGraphBreakOnTags(g.breakOnTags)
-          if (g.breakOnMerges !== undefined) setGraphBreakOnMerges(g.breakOnMerges)
-        } catch { /* ignore */ }
-      }
-      if (emvm === 'split' || emvm === 'code') setEditorMarkdownViewMode(emvm)
-      setGitTabOrder(normalizeGitTabOrder(gto))
-      setGitTabVisibility(normalizeGitTabVisibility(gtv))
-    })
-
-  }, [])
-
   useSubscription(
     trpc.app.notify.onSettingsChanged.subscriptionOptions(undefined, {
       onData: () => {
-        trpcClient.settings.get.query({ key: 'panel_config' }).then(pc => {
-          if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
-        })
+        queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey() })
       },
     }),
   )
@@ -357,9 +336,8 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
     }
   }, [activeTab, panelConfig])
 
-  const savePanelConfig = async (next: PanelConfig) => {
-    setPanelConfig(next)
-    await trpcClient.settings.set.mutate({ key: 'panel_config', value: JSON.stringify(next) })
+  const savePanelConfig = (next: PanelConfig) => {
+    setSetting.mutate({ key: 'panel_config', value: JSON.stringify(next) })
     window.dispatchEvent(new CustomEvent('panel-config-changed'))
   }
 
@@ -376,7 +354,7 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
   const validateShortcut = (letter: string, excludeId?: string): string | null =>
     validatePanelShortcut(letter, panelConfig.webPanels, excludeId)
 
-  const handleAddCustomPanel = async () => {
+  const handleAddCustomPanel = () => {
     if (!newPanelName.trim() || !newPanelUrl.trim()) return
     const shortcutErr = validateShortcut(newPanelShortcut)
     if (shortcutErr) { setPanelShortcutError(shortcutErr); return }
@@ -400,19 +378,19 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
       handoffHostScope: newPanelBlockDesktopHandoff ? (inferHostScopeFromUrl(url) ?? undefined) : undefined,
     }
 
-    await savePanelConfig(mergePanelOrder({ ...panelConfig, webPanels: [...panelConfig.webPanels, newPanel] }))
+    savePanelConfig(mergePanelOrder({ ...panelConfig, webPanels: [...panelConfig.webPanels, newPanel] }))
     setNewPanelName(''); setNewPanelUrl(''); setNewPanelShortcut(''); setNewPanelBlockDesktopHandoff(false); setNewPanelHandoffProtocol('');
   }
 
-  const handleDeleteWebPanel = async (id: string) => {
+  const handleDeleteWebPanel = (id: string) => {
     const wp = panelConfig.webPanels.find(p => p.id === id)
     const next: PanelConfig = { ...panelConfig, webPanels: panelConfig.webPanels.filter(p => p.id !== id) }
     if (wp?.predefined) next.deletedPredefined = [...(panelConfig.deletedPredefined ?? []), id]
-    await savePanelConfig(next)
+    savePanelConfig(next)
     if (activeTab === `panels/${id}`) navigateTo('panels')
   }
 
-  const handleSaveEditPanel = async (panelId: string) => {
+  const handleSaveEditPanel = (panelId: string) => {
     if (!panelId || !editPanelName.trim() || !editPanelUrl.trim()) return
     const shortcutErr = editPanelShortcut ? validateShortcut(editPanelShortcut, panelId) : null
     if (shortcutErr) { setEditShortcutError(shortcutErr); return }
@@ -426,7 +404,7 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
     }
     setEditPanelProtocolError('')
 
-    await savePanelConfig({
+    savePanelConfig({
       ...panelConfig,
       webPanels: panelConfig.webPanels.map(wp =>
         wp.id === panelId
@@ -445,16 +423,21 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
   }
 
   const updateBrowserDevice = (slot: 'desktop' | 'tablet' | 'mobile', field: string, value: string | boolean) => {
-    setBrowserDevices(prev => {
-      const next = { ...prev, [slot]: { ...prev[slot], [field]: value } }
-      const persist = {
-        desktop: { enabled: next.desktop.enabled, width: parseInt(next.desktop.width, 10) || 1920, height: parseInt(next.desktop.height, 10) || 1080 },
-        tablet: { enabled: next.tablet.enabled, width: parseInt(next.tablet.width, 10) || 744, height: parseInt(next.tablet.height, 10) || 1133 },
-        mobile: { enabled: next.mobile.enabled, width: parseInt(next.mobile.width, 10) || 393, height: parseInt(next.mobile.height, 10) || 852 },
-      }
-      trpcClient.settings.set.mutate({ key: 'browser_default_devices', value: JSON.stringify(persist) })
-      return next
+    const next = { ...liveBrowserDevices, [slot]: { ...liveBrowserDevices[slot], [field]: value } }
+    setDraftBrowserDevices(next)
+    const persist = {
+      desktop: { enabled: next.desktop.enabled, width: parseInt(next.desktop.width, 10) || 1920, height: parseInt(next.desktop.height, 10) || 1080 },
+      tablet: { enabled: next.tablet.enabled, width: parseInt(next.tablet.width, 10) || 744, height: parseInt(next.tablet.height, 10) || 1133 },
+      mobile: { enabled: next.mobile.enabled, width: parseInt(next.mobile.width, 10) || 393, height: parseInt(next.mobile.height, 10) || 852 },
+    }
+    setSetting.mutate({ key: 'browser_default_devices', value: JSON.stringify(persist) }, {
+      onSuccess: () => setDraftBrowserDevices(null),
     })
+  }
+
+  const saveGraphConfig = (patch: Record<string, unknown>) => {
+    const next = { ...graphConfig, ...patch }
+    setSetting.mutate({ key: 'commit_graph_config', value: JSON.stringify(next) })
   }
 
   const panelDetailId = activeTab.startsWith('panels/') ? activeTab.slice(7) : null
@@ -577,11 +560,31 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Font family</span>
-            <Input value={terminalFontFamily} onChange={(e) => setTerminalFontFamily(e.target.value)} onBlur={() => trpcClient.settings.set.mutate({ key: 'terminal_font_family', value: terminalFontFamily.trim() })} />
+            <Input
+              value={liveTermFontFamily}
+              onChange={(e) => setDraftTermFontFamily(e.target.value)}
+              onBlur={() => {
+                if (draftTermFontFamily !== null) {
+                  setSetting.mutate({ key: 'terminal_font_family', value: draftTermFontFamily.trim() }, { onSuccess: () => setDraftTermFontFamily(null) })
+                }
+              }}
+            />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Scrollback</span>
-            <Input className="max-w-32" type="number" value={terminalScrollback} onChange={(e) => setTerminalScrollback(e.target.value)} onBlur={() => { const n = parseInt(terminalScrollback, 10); if (n >= 0) trpcClient.settings.set.mutate({ key: 'terminal_scrollback', value: String(n) }) }} />
+            <Input
+              className="max-w-32"
+              type="number"
+              value={liveTermScrollback}
+              onChange={(e) => setDraftTermScrollback(e.target.value)}
+              onBlur={() => {
+                if (draftTermScrollback !== null) {
+                  const n = parseInt(draftTermScrollback, 10)
+                  if (n >= 0) setSetting.mutate({ key: 'terminal_scrollback', value: String(n) }, { onSuccess: () => setDraftTermScrollback(null) })
+                  else setDraftTermScrollback(null)
+                }
+              }}
+            />
           </div>
         </div>
       )}
@@ -596,21 +599,41 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
           <div className="space-y-3">
             <Label className="text-sm font-medium">Dev server</Label>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={devServerToastEnabled} onChange={(e) => { setDevServerToastEnabled(e.target.checked); trpcClient.settings.set.mutate({ key: 'dev_server_toast_enabled', value: e.target.checked ? '1' : '0' }) }} />
+              <input type="checkbox" checked={devServerToastEnabled} onChange={(e) => setSetting.mutate({ key: 'dev_server_toast_enabled', value: e.target.checked ? '1' : '0' })} />
               <span>Show toast when detected</span>
             </label>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={devServerAutoOpenBrowser} onChange={(e) => { setDevServerAutoOpenBrowser(e.target.checked); trpcClient.settings.set.mutate({ key: 'dev_server_auto_open_browser', value: e.target.checked ? '1' : '0' }) }} />
+              <input type="checkbox" checked={devServerAutoOpenBrowser} onChange={(e) => setSetting.mutate({ key: 'dev_server_auto_open_browser', value: e.target.checked ? '1' : '0' })} />
               <span>Auto-open when detected</span>
             </label>
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Default URL</span>
-            <Input value={browserDefaultUrl} onChange={(e) => setBrowserDefaultUrl(e.target.value)} onBlur={() => trpcClient.settings.set.mutate({ key: 'browser_default_url', value: browserDefaultUrl.trim() })} />
+            <Input
+              value={liveBrowserUrl}
+              onChange={(e) => setDraftBrowserUrl(e.target.value)}
+              onBlur={() => {
+                if (draftBrowserUrl !== null) {
+                  setSetting.mutate({ key: 'browser_default_url', value: draftBrowserUrl.trim() }, { onSuccess: () => setDraftBrowserUrl(null) })
+                }
+              }}
+            />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Default zoom</span>
-            <Input className="max-w-24" type="number" value={browserDefaultZoom} onChange={(e) => setBrowserDefaultZoom(e.target.value)} onBlur={() => { const n = parseInt(browserDefaultZoom, 10); if (n >= 50 && n <= 200) trpcClient.settings.set.mutate({ key: 'browser_default_zoom', value: String(n) }) }} />
+            <Input
+              className="max-w-24"
+              type="number"
+              value={liveBrowserZoom}
+              onChange={(e) => setDraftBrowserZoom(e.target.value)}
+              onBlur={() => {
+                if (draftBrowserZoom !== null) {
+                  const n = parseInt(draftBrowserZoom, 10)
+                  if (n >= 50 && n <= 200) setSetting.mutate({ key: 'browser_default_zoom', value: String(n) }, { onSuccess: () => setDraftBrowserZoom(null) })
+                  else setDraftBrowserZoom(null)
+                }
+              }}
+            />
           </div>
           <div className="space-y-3">
             <Label className="text-sm font-medium">Device defaults</Label>
@@ -618,10 +641,10 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
               <div key={slot} className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
                 <span className="text-sm text-muted-foreground capitalize">{slot}</span>
                 <div className="flex items-center gap-2">
-                  <Switch checked={browserDevices[slot].enabled} onCheckedChange={(c) => updateBrowserDevice(slot, 'enabled', c)} />
-                  <Input className="max-w-20" type="number" value={browserDevices[slot].width} onChange={(e) => setBrowserDevices(prev => ({ ...prev, [slot]: { ...prev[slot], width: e.target.value } }))} onBlur={() => updateBrowserDevice(slot, 'width', browserDevices[slot].width)} />
+                  <Switch checked={liveBrowserDevices[slot].enabled} onCheckedChange={(c) => updateBrowserDevice(slot, 'enabled', c)} />
+                  <Input className="max-w-20" type="number" value={liveBrowserDevices[slot].width} onChange={(e) => setDraftBrowserDevices({ ...liveBrowserDevices, [slot]: { ...liveBrowserDevices[slot], width: e.target.value } })} onBlur={() => updateBrowserDevice(slot, 'width', liveBrowserDevices[slot].width)} />
                   <span className="text-xs">×</span>
-                  <Input className="max-w-20" type="number" value={browserDevices[slot].height} onChange={(e) => setBrowserDevices(prev => ({ ...prev, [slot]: { ...prev[slot], height: e.target.value } }))} onBlur={() => updateBrowserDevice(slot, 'height', browserDevices[slot].height)} />
+                  <Input className="max-w-20" type="number" value={liveBrowserDevices[slot].height} onChange={(e) => setDraftBrowserDevices({ ...liveBrowserDevices, [slot]: { ...liveBrowserDevices[slot], height: e.target.value } })} onBlur={() => updateBrowserDevice(slot, 'height', liveBrowserDevices[slot].height)} />
                 </div>
               </div>
             ))}
@@ -638,26 +661,26 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Word wrap</span>
-            <Switch checked={editorWordWrap === 'on'} onCheckedChange={(c) => { const v = c ? 'on' : 'off'; setEditorWordWrap(v); trpcClient.settings.set.mutate({ key: 'editor_word_wrap', value: v }) }} />
+            <Switch checked={editorWordWrap === 'on'} onCheckedChange={(c) => setSetting.mutate({ key: 'editor_word_wrap', value: c ? 'on' : 'off' })} />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Show whitespace</span>
-            <Switch checked={editorRenderWhitespace === 'all'} onCheckedChange={(c) => { const v = c ? 'all' : 'none'; setEditorRenderWhitespace(v); trpcClient.settings.set.mutate({ key: 'editor_render_whitespace', value: v }) }} />
+            <Switch checked={editorRenderWhitespace === 'all'} onCheckedChange={(c) => setSetting.mutate({ key: 'editor_render_whitespace', value: c ? 'all' : 'none' })} />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Tab size</span>
-            <Select value={editorTabSize} onValueChange={(v) => { setEditorTabSize(v as any); trpcClient.settings.set.mutate({ key: 'editor_tab_size', value: v }) }}>
+            <Select value={editorTabSize} onValueChange={(v) => setSetting.mutate({ key: 'editor_tab_size', value: v })}>
               <SelectTrigger className="max-w-24"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="2">2</SelectItem><SelectItem value="4">4</SelectItem></SelectContent>
             </Select>
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Indent with tabs</span>
-            <Switch checked={editorIndentTabs} onCheckedChange={(c) => { setEditorIndentTabs(c); trpcClient.settings.set.mutate({ key: 'editor_indent_tabs', value: c ? '1' : '0' }) }} />
+            <Switch checked={editorIndentTabs} onCheckedChange={(c) => setSetting.mutate({ key: 'editor_indent_tabs', value: c ? '1' : '0' })} />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Markdown default</span>
-            <Select value={editorMarkdownViewMode} onValueChange={(v) => { setEditorMarkdownViewMode(v as any); trpcClient.settings.set.mutate({ key: 'editor_markdown_view_mode', value: v }); window.dispatchEvent(new Event('sz:settings-changed')) }}>
+            <Select value={editorMarkdownViewMode} onValueChange={(v) => { setSetting.mutate({ key: 'editor_markdown_view_mode', value: v }); window.dispatchEvent(new Event('sz:settings-changed')) }}>
               <SelectTrigger className="max-w-32"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="rich">Rich text</SelectItem><SelectItem value="split">Split</SelectItem><SelectItem value="code">Source code</SelectItem></SelectContent>
             </Select>
@@ -674,43 +697,35 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Context lines</span>
-            <Select value={diffContextLines} onValueChange={(v) => { setDiffContextLines(v as any); trpcClient.settings.set.mutate({ key: 'diff_context_lines', value: v }) }}>
+            <Select value={diffContextLines} onValueChange={(v) => setSetting.mutate({ key: 'diff_context_lines', value: v })}>
               <SelectTrigger className="max-w-32"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="0">0</SelectItem><SelectItem value="3">3</SelectItem><SelectItem value="5">5</SelectItem><SelectItem value="all">All</SelectItem></SelectContent>
             </Select>
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Ignore whitespace</span>
-            <Switch checked={diffIgnoreWhitespace} onCheckedChange={(c) => { setDiffIgnoreWhitespace(c); trpcClient.settings.set.mutate({ key: 'diff_ignore_whitespace', value: c ? '1' : '0' }) }} />
+            <Switch checked={diffIgnoreWhitespace} onCheckedChange={(c) => setSetting.mutate({ key: 'diff_ignore_whitespace', value: c ? '1' : '0' })} />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Continuous flow</span>
-            <Switch checked={diffContinuousFlow} onCheckedChange={(c) => { setDiffContinuousFlow(c); trpcClient.settings.set.mutate({ key: 'diff_continuous_flow', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+            <Switch checked={diffContinuousFlow} onCheckedChange={(c) => { setSetting.mutate({ key: 'diff_continuous_flow', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Hide file tree</span>
-            <Switch checked={diffTreeCollapsed} onCheckedChange={(c) => { setDiffTreeCollapsed(c); trpcClient.settings.set.mutate({ key: 'diff_tree_collapsed', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+            <Switch checked={diffTreeCollapsed} onCheckedChange={(c) => { setSetting.mutate({ key: 'diff_tree_collapsed', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Side-by-side</span>
-            <Switch checked={diffSideBySide} onCheckedChange={(c) => { setDiffSideBySide(c); trpcClient.settings.set.mutate({ key: 'diff_side_by_side', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+            <Switch checked={diffSideBySide} onCheckedChange={(c) => { setSetting.mutate({ key: 'diff_side_by_side', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Wrap lines</span>
-            <Switch checked={diffWrap} onCheckedChange={(c) => { setDiffWrap(c); trpcClient.settings.set.mutate({ key: 'diff_wrap', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+            <Switch checked={diffWrap} onCheckedChange={(c) => { setSetting.mutate({ key: 'diff_wrap', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
           </div>
         </div>
       )}
 
       {activeTab === 'panels/git' && (() => {
-        const saveGraphConfig = (patch: Record<string, unknown>) => {
-          const next = { collapsed: graphCollapsed, showBranches: graphShowBranches, breakOnTags: graphBreakOnTags, breakOnMerges: graphBreakOnMerges, ...patch }
-          if ('collapsed' in patch) setGraphCollapsed(next.collapsed as boolean)
-          if ('showBranches' in patch) setGraphShowBranches(next.showBranches as boolean)
-          if ('breakOnTags' in patch) setGraphBreakOnTags(next.breakOnTags as boolean)
-          if ('breakOnMerges' in patch) setGraphBreakOnMerges(next.breakOnMerges as boolean)
-          trpcClient.settings.set.mutate({ key: 'commit_graph_config', value: JSON.stringify(next) })
-        }
         const handleGitTabDragEnd = (e: DragEndEvent) => {
           const { active, over } = e
           if (!over || active.id === over.id) return
@@ -718,14 +733,12 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
           const newIdx = gitTabOrder.indexOf(over.id as GitTabId)
           if (oldIdx < 0 || newIdx < 0) return
           const next = arrayMove(gitTabOrder, oldIdx, newIdx)
-          setGitTabOrder(next)
-          trpcClient.settings.set.mutate({ key: 'git_tab_order', value: JSON.stringify(next) })
+          setSetting.mutate({ key: 'git_tab_order', value: JSON.stringify(next) })
           window.dispatchEvent(new Event('sz:settings-changed'))
         }
         const toggleGitTab = (id: GitTabId, enabled: boolean) => {
           const next: GitTabVisibility = { ...gitTabVisibility, [id]: enabled }
-          setGitTabVisibility(next)
-          trpcClient.settings.set.mutate({ key: 'git_tab_visibility', value: JSON.stringify(next) })
+          setSetting.mutate({ key: 'git_tab_visibility', value: JSON.stringify(next) })
           window.dispatchEvent(new Event('sz:settings-changed'))
         }
         return (
@@ -768,30 +781,30 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
                 </div>
                 <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
                   <span className="text-sm text-muted-foreground">Context lines</span>
-                  <Select value={diffContextLines} onValueChange={(v) => { setDiffContextLines(v as any); trpcClient.settings.set.mutate({ key: 'diff_context_lines', value: v }) }}>
+                  <Select value={diffContextLines} onValueChange={(v) => setSetting.mutate({ key: 'diff_context_lines', value: v })}>
                     <SelectTrigger className="max-w-32"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectItem value="0">0</SelectItem><SelectItem value="3">3</SelectItem><SelectItem value="5">5</SelectItem><SelectItem value="all">All</SelectItem></SelectContent>
                   </Select>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Ignore whitespace</span>
-                  <Switch checked={diffIgnoreWhitespace} onCheckedChange={(c) => { setDiffIgnoreWhitespace(c); trpcClient.settings.set.mutate({ key: 'diff_ignore_whitespace', value: c ? '1' : '0' }) }} />
+                  <Switch checked={diffIgnoreWhitespace} onCheckedChange={(c) => setSetting.mutate({ key: 'diff_ignore_whitespace', value: c ? '1' : '0' })} />
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Continuous flow</span>
-                  <Switch checked={diffContinuousFlow} onCheckedChange={(c) => { setDiffContinuousFlow(c); trpcClient.settings.set.mutate({ key: 'diff_continuous_flow', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+                  <Switch checked={diffContinuousFlow} onCheckedChange={(c) => { setSetting.mutate({ key: 'diff_continuous_flow', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Hide file tree</span>
-                  <Switch checked={diffTreeCollapsed} onCheckedChange={(c) => { setDiffTreeCollapsed(c); trpcClient.settings.set.mutate({ key: 'diff_tree_collapsed', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+                  <Switch checked={diffTreeCollapsed} onCheckedChange={(c) => { setSetting.mutate({ key: 'diff_tree_collapsed', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Side-by-side</span>
-                  <Switch checked={diffSideBySide} onCheckedChange={(c) => { setDiffSideBySide(c); trpcClient.settings.set.mutate({ key: 'diff_side_by_side', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+                  <Switch checked={diffSideBySide} onCheckedChange={(c) => { setSetting.mutate({ key: 'diff_side_by_side', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Wrap lines</span>
-                  <Switch checked={diffWrap} onCheckedChange={(c) => { setDiffWrap(c); trpcClient.settings.set.mutate({ key: 'diff_wrap', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
+                  <Switch checked={diffWrap} onCheckedChange={(c) => { setSetting.mutate({ key: 'diff_wrap', value: c ? '1' : '0' }); window.dispatchEvent(new Event('sz:settings-changed')) }} />
                 </div>
               </div>
             </div>
@@ -809,7 +822,7 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
                     { value: false, label: 'All commits' },
                     { value: true, label: 'Collapsed' }
                   ] as const).map(({ value, label }) => {
-                    const isActive = graphCollapsed === value
+                    const isActive = graphConfig.collapsed === value
                     return (
                       <button
                         key={label}
@@ -831,16 +844,16 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
 
                 <div className="flex items-center justify-between">
                   <span className="text-sm">Show branches</span>
-                  <Switch checked={graphShowBranches} onCheckedChange={(c) => saveGraphConfig({ showBranches: c })} />
+                  <Switch checked={graphConfig.showBranches} onCheckedChange={(c) => saveGraphConfig({ showBranches: c })} />
                 </div>
-                {graphCollapsed && (<>
+                {graphConfig.collapsed && (<>
                   <div className="flex items-center justify-between">
                     <span className="text-sm">Break on tags</span>
-                    <Switch checked={graphBreakOnTags} onCheckedChange={(c) => saveGraphConfig({ breakOnTags: c })} />
+                    <Switch checked={graphConfig.breakOnTags} onCheckedChange={(c) => saveGraphConfig({ breakOnTags: c })} />
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm">Break on merges</span>
-                    <Switch checked={graphBreakOnMerges} onCheckedChange={(c) => saveGraphConfig({ breakOnMerges: c })} />
+                    <Switch checked={graphConfig.breakOnMerges} onCheckedChange={(c) => saveGraphConfig({ breakOnMerges: c })} />
                   </div>
                 </>)}
               </div>

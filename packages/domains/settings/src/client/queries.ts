@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 
 /**
@@ -9,6 +9,23 @@ export function useSetting(key: string): string | null | undefined {
   const trpc = useTRPC()
   const { data } = useQuery(trpc.settings.get.queryOptions({ key }))
   return data
+}
+
+/**
+ * Batch-read multiple settings keys in parallel via `useQueries`. Returns a record
+ * mapping each key to its stored string (or null/undefined while loading). Each key
+ * is its own query — invalidating one doesn't refetch the rest.
+ */
+export function useSettings<K extends readonly string[]>(keys: K): { [P in K[number]]: string | null | undefined } {
+  const trpc = useTRPC()
+  return useQueries({
+    queries: keys.map(key => trpc.settings.get.queryOptions({ key })),
+    combine: (results) => {
+      const out: Record<string, string | null | undefined> = {}
+      keys.forEach((k, i) => { out[k] = results[i].data })
+      return out as { [P in K[number]]: string | null | undefined }
+    },
+  })
 }
 
 /**
