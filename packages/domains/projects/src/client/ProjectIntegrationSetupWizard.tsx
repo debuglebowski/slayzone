@@ -115,6 +115,7 @@ export function ProjectIntegrationSetupWizard({
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
+  const fetchProviderStatusesMutation = useMutation(trpc.integrations.fetchProviderStatuses.mutationOptions())
   const [step, setStep] = useState(1)
   const [connections, setConnections] = useState<IntegrationConnectionPublic[]>([])
   const [teams, setTeams] = useState<LinearTeam[]>([])
@@ -320,7 +321,7 @@ export function ProjectIntegrationSetupWizard({
     if (!externalTeamId) return
 
     setLoadingStatuses(true)
-    void trpcClient.integrations.fetchProviderStatuses.mutate({
+    void fetchProviderStatusesMutation.mutateAsync({
       connectionId,
       provider,
       externalTeamId,
@@ -366,7 +367,7 @@ export function ProjectIntegrationSetupWizard({
     setPreviewLoading(true)
     setPreviewLoaded(false)
 
-    const request = trpcClient.integrations.listProviderIssues.query({
+    const request = queryClient.fetchQuery(trpc.integrations.listProviderIssues.queryOptions({
       connectionId,
       projectId: project.id,
       groupId: provider === 'linear' ? teamId : undefined,
@@ -374,7 +375,7 @@ export function ProjectIntegrationSetupWizard({
         ? (linearProjectId || undefined)
         : selectedGitHubProject?.id,
       limit: 50
-    })
+    }))
 
     void request
       .then((result) => {
