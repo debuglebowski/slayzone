@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Monitor, X } from 'lucide-react'
 import { IconButton, getTerminalStateStyle } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
@@ -18,15 +19,17 @@ interface TerminalStatusPopoverProps {
 }
 
 export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: TerminalStatusPopoverProps) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [ptys, setPtys] = useState<PtyInfo[]>([])
   const [stats, setStats] = useState<Record<string, { cpu: number; rss: number }>>({})
   const [open, setOpen] = useState(false)
   const [, tick] = useState(0)
 
   const refreshPtys = useCallback(async () => {
-    const list = await getTrpcVanillaClient().pty.list.query()
+    const list = await trpcClient.pty.list.query()
     setPtys(list)
-  }, [])
+  }, [trpcClient])
 
   // Refresh list when popover opens
   useEffect(() => {
@@ -41,10 +44,11 @@ export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: Te
   }, [open, refreshPtys])
 
   // Refresh on state-change events
-  useEffect(() => {
-    const s = getTrpcVanillaClient().pty.onStateChange.subscribe(undefined, { onData: () => refreshPtys() })
-    return () => s.unsubscribe()
-  }, [refreshPtys])
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: () => refreshPtys(),
+    }),
+  )
 
   // Subscribe to stats
   useEffect(() => {
@@ -58,7 +62,7 @@ export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: Te
   }, [refreshPtys])
 
   const handleTerminate = async (sessionId: string) => {
-    await getTrpcVanillaClient().pty.kill.mutate({ sessionId })
+    await trpcClient.pty.kill.mutate({ sessionId })
     refreshPtys()
   }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 interface UseSlayNudgeOptions {
   projectId: string | null
@@ -7,36 +7,37 @@ interface UseSlayNudgeOptions {
 }
 
 export function useSlayNudge({ projectId, projectPath }: UseSlayNudgeOptions) {
+  const trpcClient = useTRPCClient()
   const [dismissed, setDismissed] = useState(true)
   const [slayConfigured, setSlayConfigured] = useState(true)
 
   useEffect(() => {
     if (!projectId) return
-    getTrpcVanillaClient().settings.get.query({ key: `slay_nudge_dismissed:${projectId}` }).then((val) => {
+    trpcClient.settings.get.query({ key: `slay_nudge_dismissed:${projectId}` }).then((val) => {
       setDismissed(val === '1')
     })
-  }, [projectId])
+  }, [projectId, trpcClient])
 
   useEffect(() => {
     if (!projectPath || dismissed) return
-    getTrpcVanillaClient().aiConfig.checkSlayConfigured.query({ projectPath }).then((configured) => {
+    trpcClient.aiConfig.checkSlayConfigured.query({ projectPath }).then((configured) => {
       setSlayConfigured(configured)
     })
-  }, [projectPath, dismissed])
+  }, [projectPath, dismissed, trpcClient])
 
   const dismiss = () => {
     if (!projectId) return
     setDismissed(true)
-    getTrpcVanillaClient().settings.set.mutate({ key: `slay_nudge_dismissed:${projectId}`, value: '1' })
+    trpcClient.settings.set.mutate({ key: `slay_nudge_dismissed:${projectId}`, value: '1' })
   }
 
   const recheck = useCallback(() => {
     if (!projectPath) return
-    getTrpcVanillaClient().aiConfig.checkSlayConfigured.query({ projectPath }).then((configured) => {
+    trpcClient.aiConfig.checkSlayConfigured.query({ projectPath }).then((configured) => {
       setSlayConfigured(configured)
       if (configured) setDismissed(true)
     })
-  }, [projectPath])
+  }, [projectPath, trpcClient])
 
   return {
     showBanner: !dismissed && !slayConfigured,

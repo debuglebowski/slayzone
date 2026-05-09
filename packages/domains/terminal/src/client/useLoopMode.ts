@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { LoopConfig, CriteriaType, LoopStatus } from '@slayzone/terminal/shared'
 import { makeLoopController, stripAnsi, checkCriteria, isLoopActive } from '@slayzone/terminal/shared'
 import { usePty } from './PtyContext'
@@ -14,6 +14,7 @@ interface UseLoopModeOptions {
 }
 
 export function useLoopMode({ sessionId, onConfigChange }: UseLoopModeOptions) {
+  const trpcClient = useTRPCClient()
   const { subscribeState, subscribeExit, getLastSeq } = usePty()
 
   const [status, setStatus] = useState<LoopStatus>('idle')
@@ -29,9 +30,9 @@ export function useLoopMode({ sessionId, onConfigChange }: UseLoopModeOptions) {
     const controller = makeLoopController<number>(
       {
         markBoundary: () => getLastSeq(sessionId),
-        send: (prompt) => { getTrpcVanillaClient().pty.submit.mutate({ sessionId, text: prompt }) },
+        send: (prompt) => { trpcClient.pty.submit.mutate({ sessionId, text: prompt }) },
         readOutputSince: async (seq) => {
-          const result = await getTrpcVanillaClient().pty.getBufferSince.query({ sessionId, afterSeq: seq })
+          const result = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: seq })
           if (!result) return null
           return result.chunks.map(c => c.data).join('')
         },

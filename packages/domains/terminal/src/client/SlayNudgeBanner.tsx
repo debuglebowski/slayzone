@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Info, X, Check, Loader2 } from 'lucide-react'
 import {
   Button,
@@ -20,6 +20,7 @@ interface SlayNudgeBannerProps {
 type RunState = 'idle' | 'running' | 'done' | 'error'
 
 export function SlayNudgeBanner({ projectPath, projectId, onDismiss, onSetupComplete }: SlayNudgeBannerProps) {
+  const trpcClient = useTRPCClient()
   const [infoOpen, setInfoOpen] = useState(false)
   const [setupState, setSetupState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -27,7 +28,7 @@ export function SlayNudgeBanner({ projectPath, projectId, onDismiss, onSetupComp
   const runSetup = async () => {
     setSetupState('running')
     setError(null)
-    const result = await getTrpcVanillaClient().aiConfig.setupSlay.mutate({ projectPath, projectId })
+    const result = await trpcClient.aiConfig.setupSlay.mutate({ projectPath, projectId })
     if (result.ok) {
       setSetupState('done')
     } else {

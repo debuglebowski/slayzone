@@ -8,7 +8,8 @@ import {
   useMemo,
   type ReactNode
 } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
 import { disposeTerminal } from './terminal-cache'
 
@@ -97,6 +98,8 @@ const PtyContext = createContext<PtyContextValue | null>(null)
 const ActiveTaskIdsContext = createContext<Set<string>>(new Set())
 
 export function PtyProvider({ children }: { children: ReactNode }) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   // Per-sessionId state (metadata only - backend is source of truth for buffer)
   const statesRef = useRef<Map<string, PtyState>>(new Map())
 
@@ -167,148 +170,167 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Global listeners - survive all view changes
   // Note: Only update existing state, don't create state for unknown tasks
   // State is created when Terminal component subscribes
-  useEffect(() => {
-    const unsubData = ((cb) => { const s = getTrpcVanillaClient().pty.onData.subscribe(undefined, { onData: ({ sessionId, data, seq }) => cb(sessionId, data, seq) }); return () => s.unsubscribe() })((sessionId: string, data: string, seq: number) => {
-      const state = statesRef.current.get(sessionId)
-      if (!state) return
+  useSubscription(
+    trpc.pty.onData.subscriptionOptions(undefined, {
+      onData: ({ sessionId, data, seq }) => {
+        const state = statesRef.current.get(sessionId)
+        if (!state) return
 
-      // Drop out-of-order data (seq should be monotonically increasing)
-      if (seq <= state.lastSeq) return
-      state.lastSeq = seq
+        // Drop out-of-order data (seq should be monotonically increasing)
+        if (seq <= state.lastSeq) return
+        state.lastSeq = seq
 
-      // Notify subscribers
-      const subs = dataSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(data, seq))
-      }
-    })
+        // Notify subscribers
+        const subs = dataSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(data, seq))
+        }
+      },
+    }),
+  )
 
-    const unsubExit = ((cb) => { const s = getTrpcVanillaClient().pty.onExit.subscribe(undefined, { onData: ({ sessionId, exitCode }) => cb(sessionId, exitCode ?? -1) }); return () => s.unsubscribe() })(async (sessionId: string, exitCode: number) => {
-      const state = statesRef.current.get(sessionId)
+  useSubscription(
+    trpc.pty.onExit.subscriptionOptions(undefined, {
+      onData: async ({ sessionId, exitCode: rawExit }) => {
+        const exitCode = rawExit ?? -1
+        const state = statesRef.current.get(sessionId)
 
-      if (state) {
-        state.exitCode = exitCode
+        if (state) {
+          state.exitCode = exitCode
 
-        // Capture crash output before the 100ms backend cleanup window closes
-        // Only capture if process exited non-zero (likely a crash)
-        if (exitCode !== 0) {
-          try {
-            const raw = await getTrpcVanillaClient().pty.getBuffer.query({ sessionId })
-            if (raw && statesRef.current.get(sessionId)) {
-              statesRef.current.get(sessionId)!.crashOutput = raw
+          // Capture crash output before the 100ms backend cleanup window closes
+          // Only capture if process exited non-zero (likely a crash)
+          if (exitCode !== 0) {
+            try {
+              const raw = await trpcClient.pty.getBuffer.query({ sessionId })
+              if (raw && statesRef.current.get(sessionId)) {
+                statesRef.current.get(sessionId)!.crashOutput = raw
+              }
+            } catch {
+              // Best-effort; ignore errors
             }
-          } catch {
-            // Best-effort; ignore errors
           }
         }
 
-      }
+        applyExitEvent(sessionId, exitCode, state, stateSubsRef.current, exitSubsRef.current)
 
-      applyExitEvent(sessionId, exitCode, state, stateSubsRef.current, exitSubsRef.current)
+        // Free xterm.js instance + PtyContext state. Handles the case where Terminal
+        // component is unmounted (tab closed before PTY exits). If Terminal was still
+        // mounted, it already called these synchronously above — all no-ops here.
+        disposeTerminal(sessionId)
+        statesRef.current.delete(sessionId)
+        dataSubsRef.current.delete(sessionId)
+        exitSubsRef.current.delete(sessionId)
+        sessionInvalidSubsRef.current.delete(sessionId)
+        stateSubsRef.current.delete(sessionId)
+        promptSubsRef.current.delete(sessionId)
+        sessionDetectedSubsRef.current.delete(sessionId)
+        devServerSubsRef.current.delete(sessionId)
+        titleSubsRef.current.delete(sessionId)
+        refreshActiveTaskIds()
+      },
+    }),
+  )
 
-      // Free xterm.js instance + PtyContext state. Handles the case where Terminal
-      // component is unmounted (tab closed before PTY exits). If Terminal was still
-      // mounted, it already called these synchronously above — all no-ops here.
-      disposeTerminal(sessionId)
-      statesRef.current.delete(sessionId)
-      dataSubsRef.current.delete(sessionId)
-      exitSubsRef.current.delete(sessionId)
-      sessionInvalidSubsRef.current.delete(sessionId)
-      stateSubsRef.current.delete(sessionId)
-      promptSubsRef.current.delete(sessionId)
-      sessionDetectedSubsRef.current.delete(sessionId)
-      devServerSubsRef.current.delete(sessionId)
-      titleSubsRef.current.delete(sessionId)
-      refreshActiveTaskIds()
-    })
+  useSubscription(
+    trpc.pty.onSessionNotFound.subscriptionOptions(undefined, {
+      onData: ({ sessionId }) => {
+        const state = statesRef.current.get(sessionId)
+        if (!state) return // Ignore for unknown tasks
 
-    const unsubSessionNotFound = ((cb) => { const s = getTrpcVanillaClient().pty.onSessionNotFound.subscribe(undefined, { onData: ({ sessionId }) => cb(sessionId) }); return () => s.unsubscribe() })((sessionId: string) => {
-      const state = statesRef.current.get(sessionId)
-      if (!state) return // Ignore for unknown tasks
+        state.sessionInvalid = true
 
-      state.sessionInvalid = true
+        const subs = sessionInvalidSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb())
+        }
+      },
+    }),
+  )
 
-      const subs = sessionInvalidSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb())
-      }
-    })
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: ({ sessionId, newState, oldState }) => {
+        // Bootstrap state entry if missing — chat sessions may emit before any component subscribes.
+        // The entry is cheap; without it, early transitions are lost and `getState` stays 'starting'.
+        const state = getOrCreateState(sessionId)
 
-    const unsubStateChange = ((cb) => { const s = getTrpcVanillaClient().pty.onStateChange.subscribe(undefined, { onData: ({ sessionId, newState, oldState }) => cb(sessionId, newState as TerminalState, oldState as TerminalState) }); return () => s.unsubscribe() })((sessionId: string, newState: TerminalState, oldState: TerminalState) => {
-      // Bootstrap state entry if missing — chat sessions may emit before any component subscribes.
-      // The entry is cheap; without it, early transitions are lost and `getState` stays 'starting'.
-      const state = getOrCreateState(sessionId)
+        state.state = newState as TerminalState
 
-      state.state = newState as TerminalState
+        const subs = stateSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(newState as TerminalState, oldState as TerminalState))
+        }
 
-      const subs = stateSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(newState as TerminalState, oldState as TerminalState))
-      }
+        // Update active task tracking
+        const wasAlive = ALIVE_STATES.has(oldState as TerminalState)
+        const isAlive = ALIVE_STATES.has(newState as TerminalState)
+        if (wasAlive !== isAlive) refreshActiveTaskIds()
 
-      // Update active task tracking
-      const wasAlive = ALIVE_STATES.has(oldState as TerminalState)
-      const isAlive = ALIVE_STATES.has(newState as TerminalState)
-      if (wasAlive !== isAlive) refreshActiveTaskIds()
+        // Clear pending prompt when state leaves the alive set (e.g. dead/error)
+        if (ALIVE_STATES.has(oldState as TerminalState) && !ALIVE_STATES.has(newState as TerminalState)) {
+          state.pendingPrompt = undefined
+          setPendingPromptTaskIds((prev) => {
+            const next = new Set(prev)
+            next.delete(sessionId)
+            return next
+          })
+        }
+      },
+    }),
+  )
 
-      // Clear pending prompt when state leaves the alive set (e.g. dead/error)
-      if (ALIVE_STATES.has(oldState as TerminalState) && !ALIVE_STATES.has(newState as TerminalState)) {
-        state.pendingPrompt = undefined
-        setPendingPromptTaskIds((prev) => {
-          const next = new Set(prev)
-          next.delete(sessionId)
-          return next
-        })
-      }
-    })
+  useSubscription(
+    trpc.pty.onPrompt.subscriptionOptions(undefined, {
+      onData: ({ sessionId, prompt }) => {
+        const state = statesRef.current.get(sessionId)
+        if (!state) return // Ignore prompts for unknown tasks
 
-    const unsubPrompt = ((cb) => { const s = getTrpcVanillaClient().pty.onPrompt.subscribe(undefined, { onData: ({ sessionId, prompt }) => cb(sessionId, prompt as PromptInfo) }); return () => s.unsubscribe() })((sessionId: string, prompt: PromptInfo) => {
-      const state = statesRef.current.get(sessionId)
-      if (!state) return // Ignore prompts for unknown tasks
+        state.pendingPrompt = prompt as PromptInfo
 
-      state.pendingPrompt = prompt
+        // Update global tracking
+        setPendingPromptTaskIds((prev) => new Set(prev).add(sessionId))
 
-      // Update global tracking
-      setPendingPromptTaskIds((prev) => new Set(prev).add(sessionId))
+        const subs = promptSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(prompt as PromptInfo))
+        }
+      },
+    }),
+  )
 
-      const subs = promptSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(prompt))
-      }
-    })
+  useSubscription(
+    trpc.pty.onSessionDetected.subscriptionOptions(undefined, {
+      onData: ({ sessionId, conversationId }) => {
+        const subs = sessionDetectedSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(conversationId))
+        }
+      },
+    }),
+  )
 
-    const unsubSessionDetected = ((cb) => { const s = getTrpcVanillaClient().pty.onSessionDetected.subscribe(undefined, { onData: ({ sessionId, conversationId }) => cb(sessionId, conversationId) }); return () => s.unsubscribe() })((sessionId: string, conversationId: string) => {
-      const subs = sessionDetectedSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(conversationId))
-      }
-    })
+  useSubscription(
+    trpc.pty.onDevServerDetected.subscriptionOptions(undefined, {
+      onData: ({ sessionId, info }) => {
+        const subs = devServerSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(info as string))
+        }
+      },
+    }),
+  )
 
-    const unsubDevServer = ((cb) => { const s = getTrpcVanillaClient().pty.onDevServerDetected.subscribe(undefined, { onData: ({ sessionId, info }) => cb(sessionId, info) }); return () => s.unsubscribe() })((sessionId: string, url: unknown) => {
-      const subs = devServerSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(url as string))
-      }
-    })
-
-    const unsubTitleChange = ((cb) => { const s = getTrpcVanillaClient().pty.onTitleChange.subscribe(undefined, { onData: ({ sessionId, title }) => cb(sessionId, title) }); return () => s.unsubscribe() })((sessionId: string, title: string) => {
-      const subs = titleSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(title))
-      }
-    })
-
-    return () => {
-      unsubData()
-      unsubExit()
-      unsubSessionNotFound()
-      unsubStateChange()
-      unsubPrompt()
-      unsubSessionDetected()
-      unsubDevServer()
-      unsubTitleChange()
-    }
-  }, [getOrCreateState, refreshActiveTaskIds])
+  useSubscription(
+    trpc.pty.onTitleChange.subscriptionOptions(undefined, {
+      onData: ({ sessionId, title }) => {
+        const subs = titleSubsRef.current.get(sessionId)
+        if (subs) {
+          subs.forEach((cb) => cb(title))
+        }
+      },
+    }),
+  )
 
   const subscribe = useCallback((sessionId: string, cb: DataCallback): (() => void) => {
     // Ensure state exists so onData doesn't drop data

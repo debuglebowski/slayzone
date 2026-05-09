@@ -1,4 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
+import type { TRPCClient } from '@trpc/client'
+import type { AppRouter } from '@slayzone/transport/server'
 import type { AgentEvent } from '../shared/agent-events'
 import {
   initialState,
@@ -74,31 +77,27 @@ interface ChatApi {
   ) => () => void
 }
 
-function getChatApi(): ChatApi {
-  // tRPC-backed shim — replaces window.api.chat after migration.
-  // Imported lazily to avoid circular dep on terminal package.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getTrpcVanillaClient } = require('@slayzone/transport/client') as typeof import('@slayzone/transport/client')
+function getChatApi(trpcClient: TRPCClient<AppRouter>): ChatApi {
   return {
-    create: (opts) => getTrpcVanillaClient().chat.create.mutate(opts),
-    reset: (opts) => getTrpcVanillaClient().chat.reset.mutate(opts),
-    send: (tabId, text) => getTrpcVanillaClient().chat.send.mutate({ tabId, text }) as Promise<boolean>,
-    sendToolResult: (tabId, args) => getTrpcVanillaClient().chat.sendToolResult.mutate({ tabId, args }) as Promise<boolean>,
-    respondPermission: (tabId, args) => getTrpcVanillaClient().chat.respondPermission.mutate({ tabId, args }) as Promise<boolean>,
-    interrupt: (opts) => getTrpcVanillaClient().chat.interrupt.mutate(opts),
-    abortAndPop: (opts) => getTrpcVanillaClient().chat.abortAndPop.mutate(opts) as Promise<{ popped: boolean; text: string | null }>,
-    kill: (tabId) => getTrpcVanillaClient().chat.kill.mutate({ tabId }) as Promise<void>,
-    remove: (tabId) => getTrpcVanillaClient().chat.remove.mutate({ tabId }) as Promise<void>,
-    getBufferSince: (tabId, afterSeq) => getTrpcVanillaClient().chat.getBufferSince.query({ tabId, afterSeq }) as Promise<Array<{ seq: number; event: AgentEvent }>>,
-    inspectPermissions: (taskId, mode) => getTrpcVanillaClient().chat.inspectPermissions.query({ taskId, mode }) as Promise<{ ok: boolean; hasSkipPerms: boolean; hasPermissionMode: boolean; permissionModeValue: string | null }>,
+    create: (opts) => trpcClient.chat.create.mutate(opts),
+    reset: (opts) => trpcClient.chat.reset.mutate(opts),
+    send: (tabId, text) => trpcClient.chat.send.mutate({ tabId, text }) as Promise<boolean>,
+    sendToolResult: (tabId, args) => trpcClient.chat.sendToolResult.mutate({ tabId, args }) as Promise<boolean>,
+    respondPermission: (tabId, args) => trpcClient.chat.respondPermission.mutate({ tabId, args }) as Promise<boolean>,
+    interrupt: (opts) => trpcClient.chat.interrupt.mutate(opts),
+    abortAndPop: (opts) => trpcClient.chat.abortAndPop.mutate(opts) as Promise<{ popped: boolean; text: string | null }>,
+    kill: (tabId) => trpcClient.chat.kill.mutate({ tabId }) as Promise<void>,
+    remove: (tabId) => trpcClient.chat.remove.mutate({ tabId }) as Promise<void>,
+    getBufferSince: (tabId, afterSeq) => trpcClient.chat.getBufferSince.query({ tabId, afterSeq }) as Promise<Array<{ seq: number; event: AgentEvent }>>,
+    inspectPermissions: (taskId, mode) => trpcClient.chat.inspectPermissions.query({ taskId, mode }) as Promise<{ ok: boolean; hasSkipPerms: boolean; hasPermissionMode: boolean; permissionModeValue: string | null }>,
     onEvent: (cb) => {
-      const sub = getTrpcVanillaClient().chat.onEvent.subscribe(undefined, {
+      const sub = trpcClient.chat.onEvent.subscribe(undefined, {
         onData: ({ tabId, event, seq }) => cb(tabId, event as AgentEvent, seq),
       })
       return () => sub.unsubscribe()
     },
     onExit: (cb) => {
-      const sub = getTrpcVanillaClient().chat.onExit.subscribe(undefined, {
+      const sub = trpcClient.chat.onExit.subscribe(undefined, {
         onData: ({ tabId, sessionId, code, signal }) => cb(tabId, sessionId, code, signal),
       })
       return () => sub.unsubscribe()
@@ -181,6 +180,7 @@ export interface UseChatSessionOpts {
  * 4. On unmount: unsubscribe only. Session persists (main keeps buffer). Tab close triggers chat:remove via useTaskTerminals.
  */
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
+  const trpcClient = useTRPCClient()
   const [state, dispatch] = useReducer(reducer, undefined, initialState)
   const [hydrating, setHydrating] = useState(true)
   const lastSeqRef = useRef<number>(-1)
@@ -194,7 +194,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     const liveQueue: Array<{ event: AgentEvent; seq: number }> = []
     lastSeqRef.current = -1
     setHydrating(true)
-    const chat = getChatApi()
+    const chat = getChatApi(trpcClient)
 
     const applyLive = (event: AgentEvent, seq: number): void => {
       if (seq <= lastSeqRef.current) return
@@ -295,10 +295,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       offEvent()
       offExit()
     }
-  }, [opts.tabId, opts.taskId, opts.mode, opts.cwd, opts.providerFlagsOverride])
+  }, [opts.tabId, opts.taskId, opts.mode, opts.cwd, opts.providerFlagsOverride, trpcClient])
 
   const sendMessage = async (text: string): Promise<void> => {
-    const chat = getChatApi()
+    const chat = getChatApi(trpcClient)
     // Optimistic: paint the user-text immediately so the UI doesn't lag the IPC
     // roundtrip. Main still emits the canonical `user-message` event and the
     // reducer confirms-in-place (FIFO) when it arrives — single source of truth
@@ -318,7 +318,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     content: string
     isError?: boolean
   }): Promise<boolean> => {
-    const chat = getChatApi()
+    const chat = getChatApi(trpcClient)
     return chat.sendToolResult(opts.tabId, args)
   }
 
@@ -328,7 +328,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       | { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] }
       | { behavior: 'deny'; message: string; interrupt?: boolean }
   }): Promise<boolean> => {
-    const chat = getChatApi()
+    const chat = getChatApi(trpcClient)
     // Optimistic local clear so the renderer un-mounts the prompt UI as soon
     // as the user clicks. The CLI's tool_result will follow shortly and
     // confirm; the buffer-replay path also drops it via the tool-result
@@ -346,7 +346,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   }
 
   const interrupt = async (): Promise<void> => {
-    const chat = getChatApi()
+    const chat = getChatApi(trpcClient)
     // Main records an `interrupted` event into the session buffer before kill+respawn;
     // the broadcast flows back via `chat:event` and the reducer appends the timeline
     // marker. Single source of truth → replay sees the same boundary.
@@ -360,7 +360,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   }
 
   const abortAndPop = async (): Promise<{ popped: boolean; text: string | null }> => {
-    const chat = getChatApi()
+    const chat = getChatApi(trpcClient)
     // Main is authoritative: walks its own buffer to decide pop vs marker. The
     // synthetic event (`user-message-popped` or `interrupted`) flows back via
     // `chat:event`; reducer mutates the timeline. Return value tells the caller
@@ -375,7 +375,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   }
 
   const kill = async (): Promise<void> => {
-    const chat = getChatApi()
+    const chat = getChatApi(trpcClient)
     await chat.kill(opts.tabId)
   }
 

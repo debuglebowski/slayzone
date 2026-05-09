@@ -5,7 +5,7 @@
 // bundle and undo the boot-time split. The package's "./client/Terminal"
 // export exists only for the lazy wrapper itself.
 import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -155,6 +155,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   onOpenUrl,
   onOpenFile
 }, ref) {
+  const trpcClient = useTRPCClient()
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
 
@@ -224,7 +225,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [ptyState, setPtyState] = useState<TerminalState>(() => getState(sessionId))
 
   const clearBufferWithoutRestart = useCallback(async (): Promise<void> => {
-    const result = await getTrpcVanillaClient().pty.clearBuffer.mutate({ sessionId })
+    const result = await trpcClient.pty.clearBuffer.mutate({ sessionId })
     if (!result.success) return
 
     clearedSeqRef.current = result.clearedSeq
@@ -250,7 +251,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       e.preventDefault()
       e.stopPropagation()
       if (e.type === 'keydown') {
-        getTrpcVanillaClient().pty.write.mutate({ sessionId, data: KITTY_SHIFT_ENTER })
+        trpcClient.pty.write.mutate({ sessionId, data: KITTY_SHIFT_ENTER })
       }
       return false
     }
@@ -276,11 +277,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // bind \x1bb/\x1bf (Meta-b/f) for word nav. Match iTerm2 behavior.
     if (navigator.platform.startsWith('Mac') && e.altKey && !e.metaKey && !e.ctrlKey && e.type === 'keydown') {
       if (e.key === 'ArrowLeft') {
-        getTrpcVanillaClient().pty.write.mutate({ sessionId, data: '\x1bb' })
+        trpcClient.pty.write.mutate({ sessionId, data: '\x1bb' })
         return false
       }
       if (e.key === 'ArrowRight') {
-        getTrpcVanillaClient().pty.write.mutate({ sessionId, data: '\x1bf' })
+        trpcClient.pty.write.mutate({ sessionId, data: '\x1bf' })
         return false
       }
     }
@@ -335,7 +336,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           resetTaskState(sessionId)
           disposeTerminal(sessionId)
           // Kill old PTY (any data it sends will be ignored)
-          await getTrpcVanillaClient().pty.kill.mutate({ sessionId })
+          await trpcClient.pty.kill.mutate({ sessionId })
         } else {
           // Reattach existing terminal (container already has dimensions)
           containerRef.current.appendChild(cached.element)
@@ -360,12 +361,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           cached.fitAddon.fit()
           // Only resize PTY if dimensions actually changed (avoids spurious SIGWINCH)
           if (cached.terminal.cols !== prevCols || cached.terminal.rows !== prevRows) {
-            getTrpcVanillaClient().pty.resize.mutate({ sessionId, cols: cached.terminal.cols, rows: cached.terminal.rows })
+            trpcClient.pty.resize.mutate({ sessionId, cols: cached.terminal.cols, rows: cached.terminal.rows })
           }
           cached.terminal.write('\x1b[0m') // Reset ANSI state on reattach
 
           // Sync state from backend (fixes stuck loading spinner on reattach)
-          const actualState = await getTrpcVanillaClient().pty.getState.query({ sessionId })
+          const actualState = await trpcClient.pty.getState.query({ sessionId })
           if (signal.aborted) return // Don't setState if unmounted
           if (actualState) setPtyState(actualState)
 
@@ -374,7 +375,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // callback's write() is a no-op — this fills that gap.
           // Use lastRenderedSeqRef (tracks xterm writes) not getLastSeq
           // (tracks PtyContext receives — advances even when terminalRef is null).
-          const missed = await getTrpcVanillaClient().pty.getBufferSince.query({ sessionId, afterSeq: lastRenderedSeqRef.current })
+          const missed = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: lastRenderedSeqRef.current })
           if (signal.aborted) return
           if (missed && missed.chunks.length > 0) {
             cached.terminal.write('\x1b[0m')
@@ -390,7 +391,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             sendInput: async (text) => {
               cached.terminal.input(text)
             },
-            write: (data) => getTrpcVanillaClient().pty.write.mutate({ sessionId, data }),
+            write: (data) => trpcClient.pty.write.mutate({ sessionId, data }),
             focus: () => cached.terminal.focus(),
             clearBuffer: clearBufferWithoutRestart
           })
@@ -445,11 +446,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         linkHandler: {
           activate: (event: MouseEvent, uri: string) => {
             if (event.metaKey && event.shiftKey) {
-              void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: uri })
+              void trpcClient.app.shell.openExternal.mutate({ url: uri })
             } else if (event.metaKey && onOpenUrlRef.current) {
               onOpenUrlRef.current(uri)
             } else if (event.metaKey) {
-              void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: uri })
+              void trpcClient.app.shell.openExternal.mutate({ url: uri })
             }
           },
           hover: (e: MouseEvent, text: string) => showTooltip(e, text, urlHint),
@@ -470,11 +471,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Cmd+Click → browser panel, Cmd+Shift+Click → external browser
       const linkProvider = new WebLinkProvider(terminal, (event, uri) => {
         if (event.metaKey && event.shiftKey) {
-          void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: uri })
+          void trpcClient.app.shell.openExternal.mutate({ url: uri })
         } else if (event.metaKey && onOpenUrlRef.current) {
           onOpenUrlRef.current(uri)
         } else if (event.metaKey) {
-          void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: uri })
+          void trpcClient.app.shell.openExternal.mutate({ url: uri })
         }
       }, (e, text) => showTooltip(e, text, urlHint), hideTooltip)
       terminal.registerLinkProvider(linkProvider)
@@ -487,14 +488,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         const resolved = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
         const isInProject = resolved.startsWith(cwd + '/') || resolved === cwd
         if (!isInProject) {
-          void getTrpcVanillaClient().worktrees.revealInFinder.mutate({ path: resolved })
+          void trpcClient.worktrees.revealInFinder.mutate({ path: resolved })
         } else if (onOpenFileRef.current) {
           // Pass relative path to editor panel
           const relative = resolved.startsWith(cwd + '/') ? resolved.slice(cwd.length + 1) : filePath
           // Terminal file links use 1-based col; normalize to 0-based
           onOpenFileRef.current(relative, line != null ? { position: { line, col: col != null ? col - 1 : undefined } } : undefined)
         } else {
-          void getTrpcVanillaClient().worktrees.revealInFinder.mutate({ path: resolved })
+          void trpcClient.worktrees.revealInFinder.mutate({ path: resolved })
         }
       }, (e, text) => showTooltip(e, text, fileHint), hideTooltip))
 
@@ -536,19 +537,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       terminal.attachCustomKeyEventHandler(handleTerminalKeyEvent)
 
       // Check if PTY already exists (e.g., from idle hibernation)
-      const exists = await getTrpcVanillaClient().pty.exists.query({ sessionId })
+      const exists = await trpcClient.pty.exists.query({ sessionId })
       if (signal.aborted) return // Don't continue if unmounted
       let createCols = terminal.cols
       let createRows = terminal.rows
       if (exists) {
         // Sync state from main process (fixes stuck loading spinner)
-        const actualState = await getTrpcVanillaClient().pty.getState.query({ sessionId })
+        const actualState = await trpcClient.pty.getState.query({ sessionId })
         if (signal.aborted) return // Don't setState if unmounted
         if (actualState) setPtyState(actualState)
 
         // Restore from backend buffer (single source of truth)
         // Use getBufferSince with -1 to get all chunks
-        const result = await getTrpcVanillaClient().pty.getBufferSince.query({ sessionId, afterSeq: -1 })
+        const result = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: -1 })
         if (result && result.chunks.length > 0) {
           terminal.write('\x1b[0m') // Reset ANSI state before buffer replay
           for (const chunk of result.chunks) {
@@ -576,7 +577,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // Capture dims before async gap so PTY starts at correct size
         createCols = terminal.cols
         createRows = terminal.rows
-        const result = await getTrpcVanillaClient().pty.create.mutate({
+        const result = await trpcClient.pty.create.mutate({
           sessionId, cwd,
           conversationId: effectiveConversationId,
           existingConversationId: effectiveExistingConversationId,
@@ -604,7 +605,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           onFirstInputRef.current?.()
         }
         const filtered = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-        if (filtered) getTrpcVanillaClient().pty.write.mutate({ sessionId, data: filtered })
+        if (filtered) trpcClient.pty.write.mutate({ sessionId, data: filtered })
       })
 
       // Handle resize
@@ -624,7 +625,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             }
             if (nonEmpty > 10) terminal.write('\x1b[2J')
           }
-          getTrpcVanillaClient().pty.resize.mutate({ sessionId, cols, rows })
+          trpcClient.pty.resize.mutate({ sessionId, cols, rows })
         }, 150)
       })
 
@@ -635,7 +636,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (!exists && cols === createCols && rows === createRows) {
         // PTY was just created with these exact dims — skip redundant SIGWINCH
       } else {
-        getTrpcVanillaClient().pty.resize.mutate({ sessionId, cols, rows })
+        trpcClient.pty.resize.mutate({ sessionId, cols, rows })
       }
 
       // Inject text into terminal in a single write (avoids char-by-char IPC race)
@@ -646,7 +647,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // Expose API for programmatic input and focus
       onReadyRef.current?.({
         sendInput: injectText,
-        write: (data) => getTrpcVanillaClient().pty.write.mutate({ sessionId, data }),
+        write: (data) => trpcClient.pty.write.mutate({ sessionId, data }),
         focus: () => terminal.focus(),
         clearBuffer: clearBufferWithoutRestart
       })
@@ -793,7 +794,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const replay = async () => {
       setIsReplaying(true)
       try {
-        const missed = await getTrpcVanillaClient().pty.getBufferSince.query({ sessionId, afterSeq: lastRenderedSeqRef.current })
+        const missed = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: lastRenderedSeqRef.current })
         if (cancelled || !missed || missed.chunks.length === 0) return
         for (const chunk of missed.chunks) {
           const cutoff = clearedSeqRef.current
@@ -829,7 +830,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     return window.api.pty.onResizeNeeded((sid) => {
       if (sid !== sessionId || !fitAddonRef.current || !terminalRef.current) return
       fitAddonRef.current.fit()
-      getTrpcVanillaClient().pty.resize.mutate({ sessionId, cols: terminalRef.current.cols, rows: terminalRef.current.rows })
+      trpcClient.pty.resize.mutate({ sessionId, cols: terminalRef.current.cols, rows: terminalRef.current.rows })
     })
   }, [sessionId])
 
@@ -839,8 +840,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   useEffect(() => {
     if (isInitializing || initError || ptyState !== 'starting') return
     const timer = setTimeout(async () => {
-      const exists = await getTrpcVanillaClient().pty.exists.query({ sessionId })
-      const actual = await getTrpcVanillaClient().pty.getState.query({ sessionId })
+      const exists = await trpcClient.pty.exists.query({ sessionId })
+      const actual = await trpcClient.pty.getState.query({ sessionId })
       if (actual && actual !== 'starting' && actual !== 'dead') {
         setPtyState(actual)
         return
@@ -872,7 +873,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       t.brightBlack, t.brightRed, t.brightGreen, t.brightYellow,
       t.brightBlue, t.brightMagenta, t.brightCyan, t.brightWhite,
     ].filter((c): c is string => typeof c === 'string')
-    void getTrpcVanillaClient().pty.setTheme.mutate({
+    void trpcClient.pty.setTheme.mutate({
       foreground: t.foreground ?? '#ffffff',
       background: t.background ?? '#000000',
       cursor: t.cursor ?? '#ffffff',
@@ -957,7 +958,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         void navigator.clipboard.readText().then((text) => {
-          if (text) getTrpcVanillaClient().pty.write.mutate({ sessionId, data: text })
+          if (text) trpcClient.pty.write.mutate({ sessionId, data: text })
         })
       }
     }
@@ -1026,7 +1027,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (mimeType?.startsWith('image/') || file.type.startsWith('image/')) {
         // Image from clipboard (screenshot, browser copy) - save to temp
         const base64 = await fileToBase64(file)
-        const result = await getTrpcVanillaClient().app.files.saveTempImage.mutate({ base64, mimeType: mimeType || file.type })
+        const result = await trpcClient.app.files.saveTempImage.mutate({ base64, mimeType: mimeType || file.type })
         if (result.success && result.path) {
           return result.path
         }
@@ -1155,7 +1156,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     setDoctorLoading(true)
     setDoctorResults(null)
     try {
-      const results = await getTrpcVanillaClient().pty.validate.query({ mode })
+      const results = await trpcClient.pty.validate.query({ mode })
       setDoctorResults(results)
     } catch {
       setDoctorResults([{ check: 'Validation', ok: false, detail: 'Failed to run checks' }])
