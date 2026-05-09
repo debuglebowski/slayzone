@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useCallback, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { ChevronDown, ChevronRight, Loader2, Plus, Server, X, Search } from 'lucide-react'
 import { Button, cn, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, IconButton, Input, Label, toast } from '@slayzone/ui'
 import type { CliProvider, McpConfigFileResult, McpServerConfig, McpTarget, SyncHealth } from '../shared'
@@ -83,12 +84,21 @@ function parseComputerCustomServerIds(raw: string | null): Set<string> {
 }
 
 export function McpFlatSection({ projectPath, enabledProviders, onOpenContextManager, onChanged }: McpFlatSectionProps) {
-  const trpcClient = useTRPCClient()
-  const [configs, setConfigs] = useState<McpConfigFileResult[]>([])
-  const [computerCustomServerIds, setComputerCustomServerIds] = useState<Set<string>>(new Set())
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const configsQuery = useQuery(trpc.aiConfig.discoverMcpConfigs.queryOptions({ projectPath }))
+  const customServersQuery = useQuery(trpc.settings.get.queryOptions({ key: 'mcp_custom_servers' }))
+  const removeMcpServerMutation = useMutation(trpc.aiConfig.removeMcpServer.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.discoverMcpConfigs.queryKey() }),
+  }))
+  const writeMcpServerMutation = useMutation(trpc.aiConfig.writeMcpServer.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.discoverMcpConfigs.queryKey() }),
+  }))
+  const configs: McpConfigFileResult[] = configsQuery.data ?? []
+  const computerCustomServerIds = parseComputerCustomServerIds(customServersQuery.data ?? null)
   const [draftByServerKey, setDraftByServerKey] = useState<Record<string, McpServerConfig>>({})
   const [expandedProviderRows, setExpandedProviderRows] = useState<Record<string, Partial<Record<McpTarget, boolean>>>>({})
-  const [loading, setLoading] = useState(true)
+  const loading = configsQuery.isLoading || customServersQuery.isLoading
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [showCatalog, setShowCatalog] = useState(false)
   const [showCustomDialog, setShowCustomDialog] = useState(false)
@@ -104,20 +114,11 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
   const [addingCustom, setAddingCustom] = useState(false)
 
   const loadConfigs = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [results, customServersRaw] = await Promise.all([
-        trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath }),
-        trpcClient.settings.get.query({ key: 'mcp_custom_servers' })
-      ])
-      setConfigs(results)
-      setComputerCustomServerIds(parseComputerCustomServerIds(customServersRaw))
-    } finally {
-      setLoading(false)
-    }
-  }, [projectPath])
-
-  useEffect(() => { void loadConfigs() }, [loadConfigs])
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.discoverMcpConfigs.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey({ key: 'mcp_custom_servers' }) }),
+    ])
+  }, [queryClient, trpc])
 
   // Track which providers support writes
   const writableProviders = new Set(configs.filter(c => c.writable).map(c => c.provider))
@@ -158,7 +159,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
       let removed = 0
       for (const provider of server.providers) {
         if (!writableProviders.has(provider)) continue
-        await trpcClient.aiConfig.removeMcpServer.mutate({ projectPath, provider, serverKey: server.key })
+        await removeMcpServerMutation.mutateAsync({ projectPath, provider, serverKey: server.key })
         removed += 1
       }
       if (expandedKey === server.key) setExpandedKey(null)
@@ -179,7 +180,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
       let synced = 0
       for (const provider of enabledProviders) {
         if (!writableProviders.has(provider)) continue
-        await trpcClient.aiConfig.writeMcpServer.mutate({
+        await writeMcpServerMutation.mutateAsync({
           projectPath,
           provider,
           serverKey: curated.id,
@@ -250,7 +251,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
     }
     setSyncingProvider({ serverKey: server.key, provider })
     try {
-      await trpcClient.aiConfig.writeMcpServer.mutate({
+      await writeMcpServerMutation.mutateAsync({
         projectPath,
         provider,
         serverKey: server.key,
@@ -290,7 +291,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
       for (const provider of mcpProviders) {
         if (!writableProviders.has(provider)) continue
         if (getProviderSyncHealth(server, provider) === 'synced') continue
-        await trpcClient.aiConfig.writeMcpServer.mutate({
+        await writeMcpServerMutation.mutateAsync({
           projectPath,
           provider,
           serverKey: server.key,
@@ -332,7 +333,7 @@ export function McpFlatSection({ projectPath, enabledProviders, onOpenContextMan
       for (const provider of mcpProviders) {
         if (!customProviders[provider]) continue
         if (!writableProviders.has(provider)) continue
-        await trpcClient.aiConfig.writeMcpServer.mutate({
+        await writeMcpServerMutation.mutateAsync({
           projectPath,
           provider,
           serverKey: customKey.trim(),
