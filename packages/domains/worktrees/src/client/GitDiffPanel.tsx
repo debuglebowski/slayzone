@@ -1,5 +1,6 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Plus, Minus, Undo2, ChevronRight, GitMerge, CheckCircle2, FileDiff, UnfoldVertical, FoldVertical } from 'lucide-react'
 import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/react-virtual'
 import {
@@ -200,7 +201,10 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
   onCommitAndContinueMerge,
   onAbortMerge
 }, ref) {
+  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+  const updateTaskMutation = useMutation(trpc.task.update.mutationOptions())
   const isMergeMode = mergeState === 'uncommitted'
   const { diffContextLines, diffIgnoreWhitespace, diffContinuousFlow, diffTreeCollapsed, diffSideBySide, diffWrap } = useAppearance()
   const targetPath = useMemo(() => task?.worktree_path ?? projectPath, [task?.worktree_path, projectPath])
@@ -235,7 +239,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     const taskId = task.id
     const arr = [...collapsedFiles]
     saveTimerRef.current = setTimeout(() => {
-      void trpcClient.task.update.mutate({ id: taskId, diffCollapsedFiles: arr })
+      updateTaskMutation.mutate({ id: taskId, diffCollapsedFiles: arr })
     }, 400)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [collapsedFiles, task?.id])
@@ -429,7 +433,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
 
     const added = curr.filter((f) => !prevSet.has(f))
     for (const filePath of added) {
-      trpcClient.worktrees.getUntrackedFileDiff.query({ repoPath: targetPath, filePath: filePath }).then((patch) => {
+      queryClient.fetchQuery(trpc.worktrees.getUntrackedFileDiff.queryOptions({ repoPath: targetPath, filePath })).then((patch) => {
         const parsed = parseUnifiedDiff(patch)
         if (parsed.length > 0) {
           setUntrackedDiffs((old) => new Map(old).set(filePath, parsed[0]))

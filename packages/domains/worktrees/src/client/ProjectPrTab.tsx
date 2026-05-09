@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
+import { useSetting, useSetSettingMutation } from '@slayzone/settings/client'
 import {
   ExternalLink,
   GitPullRequest,
@@ -31,20 +33,21 @@ const DEFAULT_FILTER: PrFilterState = {
 }
 
 function usePrFilterState(projectId: string | null) {
-  const trpcClient = useTRPCClient()
+  const setSetting = useSetSettingMutation()
   const [filter, setFilter] = useState<PrFilterState>(DEFAULT_FILTER)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const key = projectId ? `pr-filter:${projectId}` : null
+  const stored = useSetting(key ?? '')
 
   useEffect(() => {
     if (!key) return
-    ;(async () => {
+    if (stored === undefined) return
+    if (stored) {
       try {
-        const value = await trpcClient.settings.get.query({ key: key })
-        if (value) setFilter({ ...DEFAULT_FILTER, ...JSON.parse(value) })
+        setFilter({ ...DEFAULT_FILTER, ...JSON.parse(stored) })
       } catch { /* ignore */ }
-    })()
-  }, [key, trpcClient])
+    }
+  }, [key, stored])
 
   const updateFilter = useCallback((next: Partial<PrFilterState>) => {
     setFilter(prev => {
@@ -52,43 +55,30 @@ function usePrFilterState(projectId: string | null) {
       if (key) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
-          trpcClient.settings.set.mutate({ key: key, value: JSON.stringify(updated) })
+          setSetting.mutate({ key, value: JSON.stringify(updated) })
         }, 500)
       }
       return updated
     })
-  }, [key, trpcClient])
+  }, [key, setSetting])
 
   return { filter, updateFilter }
 }
 
 export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: ProjectPrTabProps) {
-  const trpcClient = useTRPCClient()
-  const [prs, setPrs] = useState<GhPullRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
+  const trpc = useTRPC()
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
   // Extract projectId from path for persistence key
   const projectId = projectPath
   const { filter, updateFilter } = usePrFilterState(projectId)
 
-  useEffect(() => {
-    if (!visible || !projectPath) return
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const list = await trpcClient.worktrees.listOpenPrs.query({ repoPath: projectPath })
-        if (!cancelled) setPrs(list)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [visible, projectPath])
+  const prsQuery = useQuery({
+    ...trpc.worktrees.listOpenPrs.queryOptions({ repoPath: projectPath ?? '' }),
+    enabled: visible && !!projectPath,
+  })
+  const prs = prsQuery.data ?? []
+  const loading = !!projectPath && visible && prsQuery.isLoading
+  const error = prsQuery.error ? (prsQuery.error instanceof Error ? prsQuery.error.message : String(prsQuery.error)) : null
 
   // Build map of PR URL → task
   const prTaskMap = new Map<string, Task>()
@@ -230,7 +220,7 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
                   </div>
                   <button
                     className="shrink-0 p-1 hover:bg-accent rounded"
-                    onClick={() => trpcClient.app.shell.openExternal.mutate({ url: pr.url })}
+                    onClick={() => openExternalMutation.mutate({ url: pr.url })}
                     title="Open in browser"
                   >
                     <ExternalLink className="h-3 w-3 text-muted-foreground" />
