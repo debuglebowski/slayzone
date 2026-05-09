@@ -1,13 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import type { QueuedChatMessage } from '@slayzone/terminal/shared'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 
-/**
- * Subscribe to the backend-persisted chat queue for one tab. The queue is
- * a single source of truth in SQLite (table `chat_queue`); this hook is
- * purely a subscriber + thin RPC facade.
- */
 export interface UseChatQueueResult {
   items: QueuedChatMessage[]
   push: (send: string, original: string) => Promise<void>
@@ -20,22 +16,18 @@ export function useChatQueue(
   onDrained?: (original: string) => void
 ): UseChatQueueResult {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
-  const [items, setItems] = useState<QueuedChatMessage[]>([])
+  const queryClient = useQueryClient()
+  const queueQuery = useQuery(trpc.chat.queue.list.queryOptions({ tabId }))
+  const items: QueuedChatMessage[] = (queueQuery.data ?? []) as QueuedChatMessage[]
 
-  const refetch = useCallback(async () => {
-    const list = await trpcClient.chat.queue.list.query({ tabId })
-    setItems(list as QueuedChatMessage[])
-  }, [tabId, trpcClient])
-
-  useEffect(() => {
-    void refetch()
-  }, [refetch])
+  const invalidate = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: trpc.chat.queue.list.queryKey({ tabId }) })
+  }, [queryClient, trpc, tabId])
 
   useSubscription(
     trpc.chat.onQueueChanged.subscriptionOptions(undefined, {
       onData: ({ tabId: changedTabId }) => {
-        if (changedTabId === tabId) void refetch()
+        if (changedTabId === tabId) invalidate()
       },
     }),
   )
@@ -50,20 +42,24 @@ export function useChatQueue(
     }),
   )
 
+  const pushMutation = useMutation(trpc.chat.queue.push.mutationOptions({ onSuccess: invalidate }))
+  const removeMutation = useMutation(trpc.chat.queue.remove.mutationOptions({ onSuccess: invalidate }))
+  const clearMutation = useMutation(trpc.chat.queue.clear.mutationOptions({ onSuccess: invalidate }))
+
   const push = useCallback(
     async (send: string, original: string) => {
-      await trpcClient.chat.queue.push.mutate({ tabId, send, original })
+      await pushMutation.mutateAsync({ tabId, send, original })
     },
-    [tabId]
+    [tabId, pushMutation]
   )
 
   const remove = useCallback(async (id: string) => {
-    await trpcClient.chat.queue.remove.mutate({ id })
-  }, [])
+    await removeMutation.mutateAsync({ id })
+  }, [removeMutation])
 
   const clear = useCallback(async () => {
-    await trpcClient.chat.queue.clear.mutate({ tabId })
-  }, [tabId])
+    await clearMutation.mutateAsync({ tabId })
+  }, [tabId, clearMutation])
 
   return { items, push, remove, clear }
 }
