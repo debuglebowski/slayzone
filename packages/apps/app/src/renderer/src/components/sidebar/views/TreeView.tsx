@@ -85,7 +85,8 @@ export function TreeView({
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const pinnedSet = useMemo(() => new Set(treePinnedTaskIds), [treePinnedTaskIds])
   const passesFilter = useCallback(
-    (t: Task) => !t.archived_at && (statusFilter.has(t.status) || pinnedSet.has(t.id)),
+    (t: Task) =>
+      !t.archived_at && (statusFilter.has(t.status) || pinnedSet.has(t.id) || t.is_temporary),
     [statusFilter, pinnedSet]
   )
 
