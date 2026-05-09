@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useEffect, useRef, useCallback, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
+import { useSetting, useSetSettingMutation } from '@slayzone/settings/client'
 
 type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
 
@@ -32,7 +34,10 @@ function parse(value: string): HomePanelState {
 export function useHomePanelState(
   projectId: string
 ): [HomePanelState, (updater: (prev: HomePanelState) => HomePanelState) => void] {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const stored = useSetting(getKey(projectId))
+  const setSetting = useSetSettingMutation()
   const [state, setState] = useState<HomePanelState>(DEFAULTS)
   const stateRef = useRef(state)
   stateRef.current = state
@@ -42,20 +47,26 @@ export function useHomePanelState(
   const flushSave = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (pendingRef.current) {
-      trpcClient.settings.set.mutate({ key: getKey(projectId), value: JSON.stringify(pendingRef.current) })
+      setSetting.mutate({ key: getKey(projectId), value: JSON.stringify(pendingRef.current) })
       pendingRef.current = null
     }
-  }, [projectId, trpcClient])
+  }, [projectId, setSetting])
 
-  // Load on mount / project change
+  // Hydrate local state from cache
+  useEffect(() => {
+    if (stored === undefined) return // not loaded
+    if (stored) {
+      try { setState(parse(stored)) } catch { /* use defaults */ }
+    } else {
+      setState(DEFAULTS)
+    }
+  }, [stored])
+
+  // Reset on project change (separate from above, since useSetting key changes too)
   useEffect(() => {
     setState(DEFAULTS)
-    trpcClient.settings.get.query({ key: getKey(projectId) }).then((value) => {
-      if (value) {
-        try { setState(parse(value)) } catch { /* use defaults */ }
-      }
-    })
-  }, [projectId, trpcClient])
+    queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey({ key: getKey(projectId) }) })
+  }, [projectId, queryClient, trpc])
 
   // Flush pending save on project change / unmount
   useEffect(() => {
@@ -77,9 +88,9 @@ export function useHomePanelState(
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       pendingRef.current = null
-      trpcClient.settings.set.mutate({ key: getKey(projectId), value: JSON.stringify(next) })
+      setSetting.mutate({ key: getKey(projectId), value: JSON.stringify(next) })
     }, 500)
-  }, [projectId, trpcClient])
+  }, [projectId, setSetting])
 
   return [state, update]
 }

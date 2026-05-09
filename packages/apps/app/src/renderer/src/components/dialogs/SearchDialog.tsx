@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Command,
   CommandEmpty,
@@ -94,28 +95,16 @@ export function SearchDialog({
   onSelectTask,
   onSelectProject
 }: SearchDialogProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
   const fileContext = useDialogStore((s) => s.searchFileContext)
-  const [allFiles, setAllFiles] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<FilterKind>('all')
-  const cacheRef = useRef<{ path: string; files: string[] } | null>(null)
 
-  useEffect(() => {
-    if (!open || !fileContext) {
-      setAllFiles([])
-      return
-    }
-    const path = fileContext.projectPath
-    if (cacheRef.current?.path === path) {
-      setAllFiles(cacheRef.current.files)
-      return
-    }
-    trpcClient.fileEditor.listAllFiles.query({ rootPath: path }).then((list) => {
-      cacheRef.current = { path, files: list }
-      setAllFiles(list)
-    })
-  }, [open, fileContext, trpcClient])
+  const filesQuery = useQuery({
+    ...trpc.fileEditor.listAllFiles.queryOptions({ rootPath: fileContext?.projectPath ?? '' }),
+    enabled: open && !!fileContext,
+  })
+  const allFiles: string[] = filesQuery.data ?? []
 
   useEffect(() => {
     if (open) {

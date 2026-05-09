@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { Frame, X } from 'lucide-react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { usePty } from '@slayzone/terminal/client'
@@ -17,7 +17,6 @@ interface FloatingSession {
 
 export function FloatingAgentPanel() {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
 
   const sessionQuery = useQuery(trpc.app.floatingAgent.getSession.queryOptions())
@@ -79,14 +78,14 @@ export function FloatingAgentPanel() {
     if (contextState !== 'starting') {
       setTerminalState(contextState)
     } else {
-      trpcClient.pty.getState.query({ sessionId: session.sessionId }).then((backendState) => {
+      queryClient.fetchQuery(trpc.pty.getState.queryOptions({ sessionId: session.sessionId })).then((backendState) => {
         if (backendState) setTerminalState(backendState)
       })
     }
     return subscribeState(session.sessionId, (newState) => {
       setTerminalState(newState)
     })
-  }, [session, getState, subscribeState, trpcClient])
+  }, [session, getState, subscribeState, queryClient, trpc])
 
   const toggleCollapse = useMutation(trpc.app.floatingAgent.toggleCollapse.mutationOptions())
   const resetSize = useMutation(trpc.app.floatingAgent.resetSize.mutationOptions())

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   cn,
   Popover,
@@ -89,35 +90,34 @@ function formatCountdown(ms: number): string {
 }
 
 function useBoostStatus() {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const modeQuery = useQuery(trpc.settings.get.queryOptions({ key: 'default_terminal_mode' }))
+  const mode = modeQuery.data
   const [visible, setVisible] = useState(false)
   const [status, setStatus] = useState<BoostStatus>({ isBoosted: false, msUntilChange: 0, ptHour: 0, isWeekend: false })
   const timerRef = useRef<ReturnType<typeof setTimeout>>(null)
 
   useEffect(() => {
     if (Date.now() >= PROMO_END.getTime()) return
+    if (!mode || !mode.toLowerCase().includes('claude')) return
+    setVisible(true)
 
-    trpcClient.settings.get.query({ key: 'default_terminal_mode' }).then((mode) => {
-      if (!mode || !mode.toLowerCase().includes('claude')) return
-      setVisible(true)
-
-      const tick = () => {
-        const now = new Date()
-        if (now >= PROMO_END) {
-          setVisible(false)
-          return
-        }
-        const s = getBoostStatus(now)
-        setStatus(s)
-        timerRef.current = setTimeout(tick, Math.max(s.msUntilChange, 1000))
+    const tick = () => {
+      const now = new Date()
+      if (now >= PROMO_END) {
+        setVisible(false)
+        return
       }
-      tick()
-    })
+      const s = getBoostStatus(now)
+      setStatus(s)
+      timerRef.current = setTimeout(tick, Math.max(s.msUntilChange, 1000))
+    }
+    tick()
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [trpcClient])
+  }, [mode])
 
   return { visible, ...status }
 }

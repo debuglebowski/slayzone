@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation as useTRPCMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
 import { api } from 'convex/_generated/api'
@@ -52,7 +53,9 @@ function clearConvexAuthStorage(): void {
 }
 
 function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JSX.Element {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const githubSignInMutation = useTRPCMutation(trpc.app.auth.githubSystemSignIn.mutationOptions())
   const { isLoading, isAuthenticated } = useConvexAuth()
   const actions = useAuthActions()
   const [lastError, setLastError] = useState<string | null>(null)
@@ -86,7 +89,7 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
         try {
           setLastError(null)
           if (convexUrl) {
-            const signInResult = await trpcClient.app.auth.githubSystemSignIn.mutate({
+            const signInResult = await githubSignInMutation.mutateAsync({
               convexUrl,
               redirectTo: OAUTH_REDIRECT_URI
             }) as { ok: boolean; code?: string; verifier?: string; error?: string; cancelled?: boolean }
@@ -139,14 +142,14 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
   useEffect(() => {
     if (!isAuthenticated) return
     const sync = (): void => {
-      trpcClient.app.leaderboard.getLocalStats.query()
+      queryClient.fetchQuery(trpc.app.leaderboard.getLocalStats.queryOptions())
         .then((stats) => { if (stats.days.length > 0) syncDailyStats({ days: stats.days }) })
         .catch(() => {})
     }
     sync()
     const id = setInterval(sync, TWELVE_HOURS)
     return () => clearInterval(id)
-  }, [isAuthenticated, syncDailyStats])
+  }, [isAuthenticated, syncDailyStats, queryClient, trpc])
 
   return <LeaderboardAuthContext.Provider value={value}>{children}</LeaderboardAuthContext.Provider>
 }
