@@ -35,6 +35,7 @@ export {
   type StatusOption
 } from './task-status'
 export { UndoProvider, useUndo, type UndoableAction } from './use-undo'
+export { useStablePoll, type UseStablePollOptions, type UseStablePollResult } from './use-stable-poll'
 
 // Components
 export * from './alert-dialog'
