@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { useAction } from 'convex/react'
 import { MessageSquare, Plus, Send, ArrowLeft, Trash2 } from 'lucide-react'
 import {
@@ -54,11 +55,10 @@ function formatDate(iso: string): string {
 }
 
 export function FeedbackDialog(): React.JSX.Element {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [threads, setThreads] = useState<FeedbackThread[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<FeedbackMessage[]>([])
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
   const [composingNew, setComposingNew] = useState(false)
@@ -66,34 +66,48 @@ export function FeedbackDialog(): React.JSX.Element {
   const submit = useAction(api.feedback.submit)
   const markDeleted = useAction(api.feedback.markDeleted)
 
+  const threadsQuery = useQuery({
+    ...trpc.app.feedback.listThreads.queryOptions(),
+    enabled: open,
+  })
+  const threads: FeedbackThread[] = (threadsQuery.data ?? []) as FeedbackThread[]
+
+  const messagesQuery = useQuery({
+    ...trpc.app.feedback.getMessages.queryOptions({ threadId: selectedId ?? '' }),
+    enabled: !!selectedId,
+  })
+  const messages: FeedbackMessage[] = (messagesQuery.data ?? []) as FeedbackMessage[]
+
   const selectedThread = threads.find((t) => t.id === selectedId) ?? null
 
-  const loadThreads = useCallback(async () => {
-    const rows = await trpcClient.app.feedback.listThreads.query() as FeedbackThread[]
-    setThreads(rows)
-  }, [])
+  const deleteThreadMutation = useMutation(trpc.app.feedback.deleteThread.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.app.feedback.listThreads.queryKey() }),
+  }))
+  const createThreadMutation = useMutation(trpc.app.feedback.createThread.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.app.feedback.listThreads.queryKey() }),
+  }))
+  const addMessageMutation = useMutation(trpc.app.feedback.addMessage.mutationOptions({
+    onSuccess: (_data, vars) => {
+      const v = vars as { thread_id: string }
+      queryClient.invalidateQueries({ queryKey: trpc.app.feedback.getMessages.queryKey({ threadId: v.thread_id }) })
+    },
+  }))
+  const updateDiscordIdMutation = useMutation(trpc.app.feedback.updateThreadDiscordId.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.app.feedback.listThreads.queryKey() }),
+  }))
 
-  const loadMessages = useCallback(async (threadId: string) => {
-    const rows = await trpcClient.app.feedback.getMessages.query({ threadId }) as FeedbackMessage[]
-    setMessages(rows)
-  }, [])
-
+  // Reset state when dialog opens
   useEffect(() => {
     if (open) {
-      loadThreads()
       setSelectedId(null)
-      setMessages([])
       setComposingNew(false)
       setContent('')
     }
-  }, [open, loadThreads])
+  }, [open])
 
   useEffect(() => {
-    if (selectedId) {
-      loadMessages(selectedId)
-      setComposingNew(false)
-    }
-  }, [selectedId, loadMessages])
+    if (selectedId) setComposingNew(false)
+  }, [selectedId])
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -102,14 +116,12 @@ export function FeedbackDialog(): React.JSX.Element {
 
   const handleNewThread = useCallback(() => {
     setSelectedId(null)
-    setMessages([])
     setComposingNew(true)
     setContent('')
   }, [])
 
   const handleBack = useCallback(() => {
     setSelectedId(null)
-    setMessages([])
     setComposingNew(false)
     setContent('')
   }, [])
@@ -119,17 +131,15 @@ export function FeedbackDialog(): React.JSX.Element {
       if (thread.discord_thread_id) {
         await markDeleted({ threadId: thread.discord_thread_id }).catch(() => {})
       }
-      await trpcClient.app.feedback.deleteThread.mutate({ threadId: thread.id })
+      await deleteThreadMutation.mutateAsync({ threadId: thread.id })
       if (selectedId === thread.id) {
         setSelectedId(null)
-        setMessages([])
       }
-      await loadThreads()
       toast.success('Feedback deleted')
     } catch {
       toast.error('Failed to delete feedback')
     }
-  }, [selectedId, markDeleted, loadThreads])
+  }, [selectedId, markDeleted, deleteThreadMutation])
 
   const handleSend = useCallback(async () => {
     const text = content.trim()
@@ -137,7 +147,7 @@ export function FeedbackDialog(): React.JSX.Element {
 
     setSending(true)
     try {
-      const version = await trpcClient.app.meta.getVersion.query()
+      const version = await queryClient.fetchQuery(trpc.app.meta.getVersion.queryOptions())
 
       if (composingNew || !selectedThread) {
         const threadId = crypto.randomUUID()
@@ -148,19 +158,18 @@ export function FeedbackDialog(): React.JSX.Element {
           metadata: { appVersion: version }
         })
 
-        await trpcClient.app.feedback.createThread.mutate({
+        await createThreadMutation.mutateAsync({
           id: threadId,
           title,
           discord_thread_id: result.threadId ?? null
         })
-        await trpcClient.app.feedback.addMessage.mutate({
+        await addMessageMutation.mutateAsync({
           id: crypto.randomUUID(),
           thread_id: threadId,
           content: text
         })
 
         setComposingNew(false)
-        await loadThreads()
         setSelectedId(threadId)
       } else {
         const result = await submit({
@@ -170,17 +179,14 @@ export function FeedbackDialog(): React.JSX.Element {
         })
 
         if (result.threadId && !selectedThread.discord_thread_id) {
-          await trpcClient.app.feedback.updateThreadDiscordId.mutate({ threadId: selectedThread.id, discordThreadId: result.threadId })
+          await updateDiscordIdMutation.mutateAsync({ threadId: selectedThread.id, discordThreadId: result.threadId })
         }
 
-        await trpcClient.app.feedback.addMessage.mutate({
+        await addMessageMutation.mutateAsync({
           id: crypto.randomUUID(),
           thread_id: selectedThread.id,
           content: text
         })
-
-        await loadMessages(selectedThread.id)
-        await loadThreads()
       }
 
       setContent('')
@@ -190,7 +196,7 @@ export function FeedbackDialog(): React.JSX.Element {
     } finally {
       setSending(false)
     }
-  }, [content, composingNew, selectedThread, submit, loadThreads, loadMessages])
+  }, [content, composingNew, selectedThread, submit, queryClient, trpc, createThreadMutation, addMessageMutation, updateDiscordIdMutation])
 
   const showCompose = composingNew || selectedThread
 
