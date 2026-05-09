@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useEffect, useState, useCallback } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 interface UseSlayNudgeOptions {
   projectId: string | null
@@ -7,37 +8,40 @@ interface UseSlayNudgeOptions {
 }
 
 export function useSlayNudge({ projectId, projectPath }: UseSlayNudgeOptions) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [dismissed, setDismissed] = useState(true)
-  const [slayConfigured, setSlayConfigured] = useState(true)
 
-  useEffect(() => {
-    if (!projectId) return
-    trpcClient.settings.get.query({ key: `slay_nudge_dismissed:${projectId}` }).then((val) => {
-      setDismissed(val === '1')
-    })
-  }, [projectId, trpcClient])
+  const dismissedQuery = useQuery({
+    ...trpc.settings.get.queryOptions({ key: `slay_nudge_dismissed:${projectId ?? ''}` }),
+    enabled: !!projectId,
+  })
+  const slayConfiguredQuery = useQuery({
+    ...trpc.aiConfig.checkSlayConfigured.queryOptions({ projectPath: projectPath ?? '' }),
+    enabled: !!projectPath && !dismissed,
+  })
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 
+  // Hydrate dismissed from cache
   useEffect(() => {
-    if (!projectPath || dismissed) return
-    trpcClient.aiConfig.checkSlayConfigured.query({ projectPath }).then((configured) => {
-      setSlayConfigured(configured)
-    })
-  }, [projectPath, dismissed, trpcClient])
+    if (dismissedQuery.data !== undefined) {
+      setDismissed(dismissedQuery.data === '1')
+    }
+  }, [dismissedQuery.data])
+
+  const slayConfigured = slayConfiguredQuery.data ?? true
 
   const dismiss = () => {
     if (!projectId) return
     setDismissed(true)
-    trpcClient.settings.set.mutate({ key: `slay_nudge_dismissed:${projectId}`, value: '1' })
+    setSettingMutation.mutate({ key: `slay_nudge_dismissed:${projectId}`, value: '1' })
   }
 
-  const recheck = useCallback(() => {
+  const recheck = useCallback(async () => {
     if (!projectPath) return
-    trpcClient.aiConfig.checkSlayConfigured.query({ projectPath }).then((configured) => {
-      setSlayConfigured(configured)
-      if (configured) setDismissed(true)
-    })
-  }, [projectPath, trpcClient])
+    const configured = await queryClient.fetchQuery(trpc.aiConfig.checkSlayConfigured.queryOptions({ projectPath }))
+    if (configured) setDismissed(true)
+  }, [projectPath, queryClient, trpc])
 
   return {
     showBanner: !dismissed && !slayConfigured,
