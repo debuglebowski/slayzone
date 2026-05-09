@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
   ExternalLink,
   GitPullRequest,
@@ -71,52 +72,43 @@ interface PullRequestTabProps {
 }
 
 export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTaskUpdated }: PullRequestTabProps) {
-  const trpcClient = useTRPCClient()
-  const [ghInstalled, setGhInstalled] = useState<boolean | null>(null)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
+  const ghInstalledQuery = useQuery({
+    ...trpc.worktrees.checkGhInstalled.queryOptions(),
+    enabled: visible && !!projectPath,
+  })
+  const ghInstalled = ghInstalledQuery.data ?? null
   const [pr, setPr] = useState<GhPullRequest | null>(null)
-  const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
-
   const [error, setError] = useState<string | null>(null)
 
-  // Check gh + fetch PR if linked
+  // Fetch PR by URL when linked + gh installed
+  const prQuery = useQuery({
+    ...trpc.worktrees.getPrByUrl.queryOptions({ repoPath: projectPath ?? '', url: task.pr_url ?? '' }),
+    enabled: visible && !!projectPath && !!task.pr_url && ghInstalled === true,
+    refetchInterval: visible && !!task.pr_url && ghInstalled === true
+      ? (data) => (data?.state.data?.statusCheckRollup === 'PENDING' ? 10000 : 30000)
+      : false,
+  })
   useEffect(() => {
-    if (!visible || !projectPath) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const installed = await trpcClient.worktrees.checkGhInstalled.query()
-        if (cancelled) return
-        setGhInstalled(installed)
-        if (!installed) { setLoading(false); return }
+    if (prQuery.data) setPr(prQuery.data)
+  }, [prQuery.data])
 
-        if (task.pr_url) {
-          const data = await trpcClient.worktrees.getPrByUrl.query({ repoPath: projectPath, url: task.pr_url })
-          if (!cancelled) setPr(data)
-        }
-      } catch { /* ignore */ }
-      if (!cancelled) setLoading(false)
-    })()
-    return () => { cancelled = true }
-  }, [visible, projectPath, task.pr_url])
+  const loading = visible && !!projectPath && (ghInstalledQuery.isLoading || (!!task.pr_url && prQuery.isLoading))
 
-  // Single refresh function — used by poll, refresh button, and post-merge
+  // Single refresh function — used by refresh button, and post-merge
   const refreshPr = useCallback(async () => {
     if (!projectPath || !task.pr_url) return
     try {
-      const data = await trpcClient.worktrees.getPrByUrl.query({ repoPath: projectPath, url: task.pr_url })
+      const data = await queryClient.fetchQuery(trpc.worktrees.getPrByUrl.queryOptions({ repoPath: projectPath, url: task.pr_url }))
       if (data) setPr(data)
     } catch { /* ignore — background refresh */ }
-  }, [projectPath, task.pr_url])
+  }, [projectPath, task.pr_url, queryClient, trpc])
 
-  // Poll PR status when linked (faster when checks are pending)
-  useEffect(() => {
-    if (!visible || !projectPath || !task.pr_url || !ghInstalled) return
-    const interval = pr?.statusCheckRollup === 'PENDING' ? 10000 : 30000
-    const id = setInterval(refreshPr, interval)
-    return () => clearInterval(id)
-  }, [visible, projectPath, task.pr_url, ghInstalled, pr?.statusCheckRollup, refreshPr])
+  // Polling now handled by useQuery refetchInterval above
 
   const handleUnlink = useCallback(async () => {
     const updated = await onUpdateTask({ id: task.id, prUrl: null })
@@ -130,24 +122,24 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
       const updated = await onUpdateTask({ id: task.id, prUrl: url })
       onTaskUpdated(updated)
       if (projectPath) {
-        const data = await trpcClient.worktrees.getPrByUrl.query({ repoPath: projectPath, url: url })
+        const data = await queryClient.fetchQuery(trpc.worktrees.getPrByUrl.queryOptions({ repoPath: projectPath, url }))
         setPr(data)
       }
       setLinkOpen(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }, [task.id, projectPath, onUpdateTask, onTaskUpdated])
+  }, [task.id, projectPath, onUpdateTask, onTaskUpdated, queryClient, trpc])
 
   const handleCreated = useCallback(async (url: string) => {
     const updated = await onUpdateTask({ id: task.id, prUrl: url })
     onTaskUpdated(updated)
     if (projectPath) {
-      const data = await trpcClient.worktrees.getPrByUrl.query({ repoPath: projectPath, url: url })
+      const data = await queryClient.fetchQuery(trpc.worktrees.getPrByUrl.queryOptions({ repoPath: projectPath, url }))
       setPr(data)
     }
     setCreateOpen(false)
-  }, [task.id, projectPath, onUpdateTask, onTaskUpdated])
+  }, [task.id, projectPath, onUpdateTask, onTaskUpdated, queryClient, trpc])
 
   if (!projectPath) {
     return <EmptyMessage>Set a project path to use PR features</EmptyMessage>
@@ -186,7 +178,7 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
           <a
             className="text-primary hover:underline truncate"
             href="#"
-            onClick={(e) => { e.preventDefault(); trpcClient.app.shell.openExternal.mutate({ url: task.pr_url! }) }}
+            onClick={(e) => { e.preventDefault(); openExternalMutation.mutate({ url: task.pr_url! }) }}
           >
             {task.pr_url}
           </a>
@@ -1191,20 +1183,27 @@ export function CreatePrDialog({ open, onOpenChange, task, projectPath, onCreate
   projectPath: string
   onCreated: (url: string) => void
 }) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
   const targetPath = task.worktree_path ?? projectPath
   const [baseBranch, setBaseBranch] = useState(task.worktree_parent_branch ?? '')
   const [title, setTitle] = useState(task.title)
   const [body, setBody] = useState('')
-  const [draft, setDraft] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [draft, setDraft] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Resolve default branch when worktree_parent_branch is not set
+  const defaultBranchQuery = useQuery({
+    ...trpc.worktrees.getDefaultBranch.queryOptions({ path: projectPath }),
+    enabled: open && !task.worktree_parent_branch,
+  })
+  const createPrMutation = useMutation(trpc.worktrees.createPr.mutationOptions())
+
+  // Hydrate baseBranch from query when not on task
   useEffect(() => {
     if (!open || task.worktree_parent_branch) return
-    trpcClient.worktrees.getDefaultBranch.query({ path: projectPath }).then(setBaseBranch).catch(() => setBaseBranch('main'))
-  }, [open, projectPath, task.worktree_parent_branch])
+    if (defaultBranchQuery.data) setBaseBranch(defaultBranchQuery.data)
+    else if (defaultBranchQuery.isError) setBaseBranch('main')
+  }, [open, task.worktree_parent_branch, defaultBranchQuery.data, defaultBranchQuery.isError])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1212,7 +1211,7 @@ export function CreatePrDialog({ open, onOpenChange, task, projectPath, onCreate
     setCreating(true)
     setError(null)
     try {
-      const result = await trpcClient.worktrees.createPr.mutate({
+      const result = await createPrMutation.mutateAsync({
         repoPath: targetPath,
         title: title.trim(),
         body: body.trim(),
@@ -1287,26 +1286,14 @@ export function LinkPrDialog({ open, onOpenChange, projectPath, onLink, error }:
   onLink: (url: string) => void
   error: string | null
 }) {
-  const trpcClient = useTRPCClient()
-  const [prs, setPrs] = useState<GhPullRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setLoading(true)
-    setFetchError(null)
-    ;(async () => {
-      try {
-        const list = await trpcClient.worktrees.listOpenPrs.query({ repoPath: projectPath })
-        setPrs(list)
-      } catch (err) {
-        setFetchError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [projectPath, open])
+  const trpc = useTRPC()
+  const prsQuery = useQuery({
+    ...trpc.worktrees.listOpenPrs.queryOptions({ repoPath: projectPath }),
+    enabled: open,
+  })
+  const prs: GhPullRequest[] = prsQuery.data ?? []
+  const loading = open && prsQuery.isLoading
+  const fetchError = prsQuery.error ? (prsQuery.error instanceof Error ? prsQuery.error.message : String(prsQuery.error)) : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
