@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
   ArrowLeft,
   ChevronRight,
@@ -129,7 +130,9 @@ export function IntegrationsTab({
   integrationOnboardingProvider = null,
   onIntegrationOnboardingHandled
 }: IntegrationsTabProps) {
+  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   const [connections, setConnections] = useState<IntegrationConnectionPublic[]>([])
   const [githubConnections, setGithubConnections] = useState<IntegrationConnectionPublic[]>([])
   const [mapping, setMapping] = useState<IntegrationProjectMapping | null>(null)
@@ -203,7 +206,7 @@ export function IntegrationsTab({
     if (open) {
       setSelectedIntegrationEntry(null)
       setSelectedIntegrationMode(null)
-      trpcClient.app.meta.isJiraIntegrationEnabled.query().then(setJiraEnabled)
+      void queryClient.fetchQuery(trpc.app.meta.isJiraIntegrationEnabled.queryOptions()).then(setJiraEnabled)
     }
   }, [open, project.id])
 
@@ -225,12 +228,12 @@ export function IntegrationsTab({
       loadedGithubMapping,
       loadedGithubProjectConnectionId
     ] = await Promise.all([
-      trpcClient.integrations.listConnections.query({ provider: 'linear' }),
-      trpcClient.integrations.getProjectMapping.query({ projectId: project.id, provider: 'linear' }),
-      trpcClient.integrations.getProjectConnection.query({ projectId: project.id, provider: 'linear' }),
-      trpcClient.integrations.listConnections.query({ provider: 'github' }),
-      trpcClient.integrations.getProjectMapping.query({ projectId: project.id, provider: 'github' }),
-      trpcClient.integrations.getProjectConnection.query({ projectId: project.id, provider: 'github' })
+      queryClient.fetchQuery(trpc.integrations.listConnections.queryOptions({ provider: 'linear' })),
+      queryClient.fetchQuery(trpc.integrations.getProjectMapping.queryOptions({ projectId: project.id, provider: 'linear' })),
+      queryClient.fetchQuery(trpc.integrations.getProjectConnection.queryOptions({ projectId: project.id, provider: 'linear' })),
+      queryClient.fetchQuery(trpc.integrations.listConnections.queryOptions({ provider: 'github' })),
+      queryClient.fetchQuery(trpc.integrations.getProjectMapping.queryOptions({ projectId: project.id, provider: 'github' })),
+      queryClient.fetchQuery(trpc.integrations.getProjectConnection.queryOptions({ projectId: project.id, provider: 'github' }))
     ])
     setConnections(loadedConnections)
     setGithubConnections(loadedGithubConnections)
@@ -301,7 +304,7 @@ export function IntegrationsTab({
       }
       setLoadingGithubRepositories(true)
       try {
-        const repos = await trpcClient.integrations.listGithubRepositories.query({ connectionId })
+        const repos = await queryClient.fetchQuery(trpc.integrations.listGithubRepositories.queryOptions({ connectionId }))
         setGithubRepositories(repos)
         setGithubRepositoryFullName((current) => {
           if (current && repos.some((repo) => repo.fullName === current)) return current
@@ -339,7 +342,7 @@ export function IntegrationsTab({
     }
     setLoadingGithubSyncProjects(true)
     setSyncSettingsMessage('')
-    void trpcClient.integrations.listGithubProjects.query({ connectionId: githubProjectConnectionId })
+    void queryClient.fetchQuery(trpc.integrations.listGithubProjects.queryOptions({ connectionId: githubProjectConnectionId }))
       .then((projects) => {
         setGithubSyncProjects(projects)
         setGithubSyncProjectId((current) => {
@@ -370,7 +373,7 @@ export function IntegrationsTab({
     }
     setLoadingLinearSyncTeams(true)
     setSyncSettingsMessage('')
-    void trpcClient.integrations.listLinearTeams.query({ connectionId: linearProjectConnectionId })
+    void queryClient.fetchQuery(trpc.integrations.listLinearTeams.queryOptions({ connectionId: linearProjectConnectionId }))
       .then((result) => {
         const teams = Array.isArray(result) ? result : result.teams
         setLinearSyncTeams(teams)
@@ -401,7 +404,7 @@ export function IntegrationsTab({
     }
     setLoadingLinearSyncProjects(true)
     setSyncSettingsMessage('')
-    void trpcClient.integrations.listLinearProjects.query({ connectionId: linearProjectConnectionId, teamId: linearSyncTeamId })
+    void queryClient.fetchQuery(trpc.integrations.listLinearProjects.queryOptions({ connectionId: linearProjectConnectionId, teamId: linearSyncTeamId }))
       .then((projects) => {
         setLinearSyncProjects(projects)
         setLinearSyncProjectId((current) => {
@@ -432,7 +435,7 @@ export function IntegrationsTab({
     }
     setLoadingLinearImportTeams(true)
     setLinearImportSourceMessage('')
-    void trpcClient.integrations.listLinearTeams.query({ connectionId: linearProjectConnectionId })
+    void queryClient.fetchQuery(trpc.integrations.listLinearTeams.queryOptions({ connectionId: linearProjectConnectionId }))
       .then((result) => {
         const teams = Array.isArray(result) ? result : result.teams
         setLinearImportTeams(teams)
@@ -459,7 +462,7 @@ export function IntegrationsTab({
     }
     setLoadingLinearImportProjects(true)
     setLinearImportSourceMessage('')
-    void trpcClient.integrations.listLinearProjects.query({ connectionId: linearProjectConnectionId, teamId: linearImportTeamId })
+    void queryClient.fetchQuery(trpc.integrations.listLinearProjects.queryOptions({ connectionId: linearProjectConnectionId, teamId: linearImportTeamId }))
       .then((projects) => {
         setLinearImportProjects(projects)
         setLinearImportProjectId((current) => {
