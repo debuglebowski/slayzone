@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Check, AlertCircle, Circle, Trash2, Sparkles } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
-import type { AiConfigItem, AiConfigItemType, CliProvider, ProjectSkillStatus, SyncHealth, UpdateAiConfigItemInput } from '../shared'
+import type { AiConfigItemType, CliProvider, SyncHealth, UpdateAiConfigItemInput } from '../shared'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 import { LibraryItemPicker } from './LibraryItemPicker'
 import { ContextItemEditor } from './ContextItemEditor'
@@ -44,27 +45,57 @@ function StatusBadge({ provider, syncHealth }: {
 }
 
 export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger, openCreateTrigger, onChanged }: ProjectSkillsProps) {
-  const [allItems, setAllItems] = useState<ProjectSkillStatus[]>([])
-  const [localItems, setLocalItems] = useState<AiConfigItem[]>([])
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [showPicker, setShowPicker] = useState(false)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
 
+  const linkedQuery = useQuery(
+    trpc.aiConfig.getProjectSkillsStatus.queryOptions({ projectId, projectPath }),
+  )
+  const localQuery = useQuery(
+    trpc.aiConfig.listItems.queryOptions({ scope: 'project', projectId, type }),
+  )
+
+  const allItems = linkedQuery.data ?? []
+  const localItems = localQuery.data ?? []
+  const loading = linkedQuery.isLoading || localQuery.isLoading
   const skills = type ? allItems.filter(s => s.item.type === type) : allItems
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [linked, local] = await Promise.all([
-        getTrpcVanillaClient().aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
-        getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'project', projectId, type })
-      ])
-      setAllItems(linked)
-      setLocalItems(local)
-    } finally {
-      setLoading(false)
-    }
-  }, [projectId, projectPath, type])
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [showPicker, setShowPicker] = useState(false)
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectSkillsStatus.queryKey({ projectId, projectPath }) })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey({ scope: 'project', projectId, type }) })
+  }
+
+  const removeProjectSelection = useMutation(
+    trpc.aiConfig.removeProjectSelection.mutationOptions({
+      onSuccess: () => { invalidate(); onChanged?.() },
+    }),
+  )
+  const createItem = useMutation(
+    trpc.aiConfig.createItem.mutationOptions({
+      onSuccess: (created) => {
+        if (created) setEditingId(created.id)
+        invalidate()
+        onChanged?.()
+      },
+    }),
+  )
+  const updateItem = useMutation(
+    trpc.aiConfig.updateItem.mutationOptions({
+      onSuccess: () => { invalidate(); onChanged?.() },
+    }),
+  )
+  const deleteItem = useMutation(
+    trpc.aiConfig.deleteItem.mutationOptions({
+      onSuccess: () => {
+        setEditingId(null)
+        invalidate()
+        onChanged?.()
+      },
+    }),
+  )
 
   useEffect(() => {
     if (openPickerTrigger && openPickerTrigger > 0) setShowPicker(true)
@@ -72,49 +103,33 @@ export function ProjectSkills({ projectId, projectPath, type, openPickerTrigger,
 
   useEffect(() => {
     if (!openCreateTrigger || openCreateTrigger <= 0) return
-    void handleCreate()
-  }, [openCreateTrigger])
-
-  useEffect(() => { void load() }, [load])
-
-  const handleRemove = async (itemId: string) => {
-    await getTrpcVanillaClient().aiConfig.removeProjectSelection.mutate({ projectId, itemId })
-    await load()
-    onChanged?.()
-  }
-
-  const handleItemLoaded = async () => {
-    setShowPicker(false)
-    await load()
-    onChanged?.()
-  }
-
-  const handleCreate = async () => {
     const slug = 'new-skill'
-    const created = await getTrpcVanillaClient().aiConfig.createItem.mutate({
+    createItem.mutate({
       type: 'skill',
       scope: 'project',
       projectId,
       slug,
-      content: buildDefaultSkillContent(slug)
+      content: buildDefaultSkillContent(slug),
     })
-    setLocalItems(prev => [created, ...prev])
-    setEditingId(created.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openCreateTrigger])
+
+  const handleRemove = (itemId: string) => {
+    removeProjectSelection.mutate({ projectId, itemId })
+  }
+
+  const handleItemLoaded = () => {
+    setShowPicker(false)
+    invalidate()
     onChanged?.()
   }
 
-  const handleUpdate = async (itemId: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: itemId, ...patch })
-    if (!updated) return
-    setLocalItems(prev => prev.map(item => item.id === updated.id ? updated : item))
-    onChanged?.()
+  const handleUpdate = async (itemId: string, patch: Omit<UpdateAiConfigItemInput, 'id'>): Promise<void> => {
+    await updateItem.mutateAsync({ id: itemId, ...patch })
   }
 
-  const handleDelete = async (itemId: string) => {
-    await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: itemId })
-    setLocalItems(prev => prev.filter(item => item.id !== itemId))
-    setEditingId(null)
-    onChanged?.()
+  const handleDelete = async (itemId: string): Promise<void> => {
+    await deleteItem.mutateAsync({ id: itemId })
   }
 
   // Filter out root_instructions from local items

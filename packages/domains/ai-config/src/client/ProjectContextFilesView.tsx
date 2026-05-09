@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { AlertCircle, Check, Circle, File, FilePlus, Link, RefreshCw } from 'lucide-react'
 import { Button, FileTree, Textarea, cn, fileTreeIndent } from '@slayzone/ui'
 import type { CliProvider, ContextTreeEntry } from '../shared'
@@ -49,21 +50,29 @@ function ProviderBadge({ provider }: { provider?: CliProvider }) {
 const getRelativePath = (entry: ContextTreeEntry) => entry.relativePath
 
 export function ProjectContextFilesView({ projectPath, projectId }: ProjectContextFilesViewProps) {
-  const [entries, setEntries] = useState<ContextTreeEntry[]>([])
-  const [loadingTree, setLoadingTree] = useState(false)
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+
+  const treeQuery = useQuery(
+    trpc.aiConfig.getContextTree.queryOptions({ projectPath, projectId }),
+  )
+  const entries = treeQuery.data ?? []
+  const loadingTree = treeQuery.isFetching
+
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [selectedContent, setSelectedContent] = useState('')
   const [loadingFile, setLoadingFile] = useState(false)
   const [message, setMessage] = useState('')
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
 
-  const loadTree = useCallback(async () => {
-    setLoadingTree(true)
-    try {
-      const tree = await getTrpcVanillaClient().aiConfig.getContextTree.query({ projectPath, projectId })
-      setEntries(tree)
+  // Auto-expand all folders the first time we receive a non-empty tree.
+  useEffect(() => {
+    if (entries.length === 0) return
+    setExpandedFolders((prev) => {
+      if (prev.size > 0) return prev
       const folders = new Set<string>()
-      for (const entry of tree) {
+      for (const entry of entries) {
         const parts = entry.relativePath.split('/')
         let path = ''
         for (let i = 0; i < parts.length - 1; i++) {
@@ -71,17 +80,16 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
           folders.add(path)
         }
       }
-      setExpandedFolders((prev) => prev.size === 0 ? folders : prev)
-    } catch {
-      setMessage('Could not load context files')
-    } finally {
-      setLoadingTree(false)
-    }
-  }, [projectId, projectPath])
+      return folders
+    })
+  }, [entries])
 
+  // Surface any tree-load error in the same status line the imperative version used.
   useEffect(() => {
-    void loadTree()
-  }, [loadTree])
+    if (treeQuery.isError) setMessage('Could not load context files')
+  }, [treeQuery.isError])
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getContextTree.queryKey({ projectPath, projectId }) })
 
   const toggleFolder = useCallback((folderPath: string) => {
     setExpandedFolders((prev) => {
@@ -102,7 +110,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
     setLoadingFile(true)
     setMessage('')
     try {
-      const content = await getTrpcVanillaClient().aiConfig.readContextFile.query({ filePath: entry.path, projectPath })
+      const content = await trpcClient.aiConfig.readContextFile.query({ filePath: entry.path, projectPath })
       setSelectedPath(entry.path)
       setSelectedContent(content)
     } catch {
@@ -110,7 +118,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
     } finally {
       setLoadingFile(false)
     }
-  }, [projectPath])
+  }, [projectPath, trpcClient])
 
   const renderContextFile = useCallback((entry: ContextTreeEntry, { name, depth }: { name: string; depth: number }) => {
     const selected = selectedPath === entry.path
@@ -163,7 +171,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
       <div className="flex min-h-0 flex-col border-r p-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">Project context files</p>
-          <Button size="sm" variant="outline" onClick={() => void loadTree()} disabled={loadingTree}>
+          <Button size="sm" variant="outline" onClick={refresh} disabled={loadingTree}>
             <RefreshCw className={cn('mr-1 size-3', loadingTree && 'animate-spin')} />
             Refresh
           </Button>

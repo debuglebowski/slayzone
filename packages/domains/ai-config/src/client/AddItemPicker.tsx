@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Library, Plus, Sparkles } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
@@ -34,25 +35,32 @@ export function AddItemPicker({
   open, onOpenChange, type, projectId, projectPath,
   enabledProviders, existingLinks, onAdded
 }: AddItemPickerProps) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [step, setStep] = useState<Step>('choose')
-  const [libraryItems, setLibraryItems] = useState<AiConfigItem[]>([])
-  const [loading, setLoading] = useState(false)
 
   // Reset step when dialog opens
   useEffect(() => {
-    if (open) {
-      setStep('choose')
-    }
+    if (open) setStep('choose')
   }, [open])
 
-  // Fetch library items when entering library step
-  useEffect(() => {
-    if (!open || step !== 'library') return
-    void (async () => {
-      const items = await getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type })
-      setLibraryItems(items)
-    })()
-  }, [open, step, type])
+  const { data: libraryItems = [] } = useQuery(
+    trpc.aiConfig.listItems.queryOptions(
+      { scope: 'library', type },
+      { enabled: open && step === 'library' },
+    ),
+  )
+
+  const loadLibraryItem = useMutation(
+    trpc.aiConfig.loadLibraryItem.mutationOptions({
+      onSuccess: () => onAdded(),
+    }),
+  )
+  const createItem = useMutation(
+    trpc.aiConfig.createItem.mutationOptions({
+      onSuccess: () => onAdded(),
+    }),
+  )
 
   const compatibleProviders = useMemo(
     () => enabledProviders.filter((provider) => providerSupportsType(provider)),
@@ -60,46 +68,34 @@ export function AddItemPicker({
   )
   const canLinkFromLibrary = compatibleProviders.length > 0
 
+  const loading = loadLibraryItem.isPending || createItem.isPending
+
   const handleSelectLibrary = async (item: AiConfigItem) => {
     if (!canLinkFromLibrary) return
     if (existingLinks.includes(item.id)) return
-    setLoading(true)
-    try {
-      await getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
-        projectId,
-        projectPath,
-        itemId: item.id,
-        providers: compatibleProviders
-      })
-      onAdded()
-      onOpenChange(false)
-    } finally {
-      setLoading(false)
-    }
+    await loadLibraryItem.mutateAsync({
+      projectId,
+      projectPath,
+      itemId: item.id,
+      providers: compatibleProviders,
+    })
+    onOpenChange(false)
   }
 
   const handleCreateLocal = async () => {
-    setLoading(true)
-    try {
-      const existingItems = await getTrpcVanillaClient().aiConfig.listItems.query({
-        scope: 'project',
-        projectId,
-        type
-      })
-      const existingSlugs = new Set(existingItems.map((item) => item.slug))
-      const slug = nextAvailableSlug('new-skill', existingSlugs)
-      await getTrpcVanillaClient().aiConfig.createItem.mutate({
-        type,
-        scope: 'project',
-        projectId,
-        slug,
-        content: buildDefaultSkillContent(slug)
-      })
-      onAdded()
-      onOpenChange(false)
-    } finally {
-      setLoading(false)
-    }
+    const existingItems = await queryClient.fetchQuery(
+      trpc.aiConfig.listItems.queryOptions({ scope: 'project', projectId, type }),
+    )
+    const existingSlugs = new Set(existingItems.map((item: AiConfigItem) => item.slug))
+    const slug = nextAvailableSlug('new-skill', existingSlugs)
+    await createItem.mutateAsync({
+      type,
+      scope: 'project',
+      projectId,
+      slug,
+      content: buildDefaultSkillContent(slug),
+    })
+    onOpenChange(false)
   }
 
   return (

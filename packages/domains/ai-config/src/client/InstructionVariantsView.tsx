@@ -1,35 +1,62 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { createPortal } from 'react-dom'
 import { FileText, Plus, Save, Trash2 } from 'lucide-react'
 import { Button, Input, Label, Textarea, cn } from '@slayzone/ui'
 import type { AiConfigItem } from '../shared'
 
 export function InstructionVariantsView() {
-  const [variants, setVariants] = useState<AiConfigItem[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+
+  const variantsQuery = useQuery(trpc.aiConfig.listInstructionVariants.queryOptions())
+  const variants = variantsQuery.data ?? []
+  const loading = variantsQuery.isLoading
+
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editContent, setEditContent] = useState('')
   const [editName, setEditName] = useState('')
   const [originalContent, setOriginalContent] = useState('')
   const [originalName, setOriginalName] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [loading, setLoading] = useState(true)
 
   const sortedVariants = useMemo(() => [...variants].sort((a, b) => a.slug.localeCompare(b.slug)), [variants])
   const selected = variants.find((v) => v.id === selectedId) ?? null
   const dirty = selected ? (editContent !== originalContent || editName !== originalName) : false
 
-  const loadVariants = useCallback(async () => {
-    setLoading(true)
-    try {
-      const items = await getTrpcVanillaClient().aiConfig.listInstructionVariants.query()
-      setVariants(items)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listInstructionVariants.queryKey() })
 
-  useEffect(() => { void loadVariants() }, [loadVariants])
+  const createItem = useMutation(
+    trpc.aiConfig.createItem.mutationOptions({
+      onSuccess: (created) => {
+        if (created) selectVariant(created)
+        invalidate()
+      },
+    }),
+  )
+  const updateItem = useMutation(
+    trpc.aiConfig.updateItem.mutationOptions({
+      onSuccess: (updated) => {
+        if (updated) {
+          setOriginalContent(updated.content)
+          setOriginalName(updated.slug)
+        }
+        invalidate()
+      },
+    }),
+  )
+  const deleteItem = useMutation(
+    trpc.aiConfig.deleteItem.mutationOptions({
+      onSuccess: (_data, vars) => {
+        if (selectedId === vars.id) {
+          setSelectedId(null)
+          setEditContent('')
+          setEditName('')
+        }
+        invalidate()
+      },
+    }),
+  )
 
   const selectVariant = (variant: AiConfigItem) => {
     setSelectedId(variant.id)
@@ -39,46 +66,28 @@ export function InstructionVariantsView() {
     setOriginalName(variant.slug)
   }
 
-  const handleCreate = useCallback(async () => {
+  const handleCreate = () => {
     const slug = `variant-${Date.now()}`
-    const created = await getTrpcVanillaClient().aiConfig.createItem.mutate({
+    createItem.mutate({
       type: 'root_instructions',
       scope: 'library',
       slug,
       content: '',
     })
-    setVariants((prev) => [created, ...prev])
-    selectVariant(created)
-  }, [])
+  }
 
-  const handleSave = useCallback(async () => {
+  const handleSave = () => {
     if (!selectedId) return
-    setSaving(true)
-    try {
-      const updated = await getTrpcVanillaClient().aiConfig.updateItem.mutate({
-        id: selectedId,
-        slug: editName || undefined,
-        content: editContent,
-      })
-      if (updated) {
-        setVariants((prev) => prev.map((v) => (v.id === updated.id ? updated : v)))
-        setOriginalContent(updated.content)
-        setOriginalName(updated.slug)
-      }
-    } finally {
-      setSaving(false)
-    }
-  }, [selectedId, editContent, editName])
+    updateItem.mutate({
+      id: selectedId,
+      slug: editName || undefined,
+      content: editContent,
+    })
+  }
 
-  const handleDelete = useCallback(async (id: string) => {
-    await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id })
-    setVariants((prev) => prev.filter((v) => v.id !== id))
-    if (selectedId === id) {
-      setSelectedId(null)
-      setEditContent('')
-      setEditName('')
-    }
-  }, [selectedId])
+  const handleDelete = (id: string) => {
+    deleteItem.mutate({ id })
+  }
 
   // Resizable split
   const [splitWidth, setSplitWidth] = useState(350)
@@ -173,15 +182,15 @@ export function InstructionVariantsView() {
                 />
               </div>
               <div className="flex items-end gap-2 shrink-0 pb-px">
-                <Button size="sm" className="h-7 text-[11px]" onClick={handleSave} disabled={!dirty || saving}>
+                <Button size="sm" className="h-7 text-[11px]" onClick={handleSave} disabled={!dirty || updateItem.isPending}>
                   <Save className="size-3 mr-1" />
-                  {saving ? 'Saving...' : 'Save'}
+                  {updateItem.isPending ? 'Saving...' : 'Save'}
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   className="h-7 text-[11px] text-muted-foreground hover:text-destructive"
-                  onClick={() => void handleDelete(selected.id)}
+                  onClick={() => handleDelete(selected.id)}
                 >
                   <Trash2 className="size-3" />
                 </Button>

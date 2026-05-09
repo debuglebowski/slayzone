@@ -1,32 +1,33 @@
-import { useCallback, useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Plus, Trash2, Lock, Server } from 'lucide-react'
 import { Button, Input } from '@slayzone/ui'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
-import type { CliProvider, McpConfigFileResult } from '../shared'
+import type { CliProvider } from '../shared'
 
 export function ComputerMcpView() {
-  const [configs, setConfigs] = useState<McpConfigFileResult[]>([])
-  const [loading, setLoading] = useState(true)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const { data: configs = [], isLoading } = useQuery(trpc.aiConfig.discoverComputerMcpConfigs.queryOptions())
+
   const [addingTo, setAddingTo] = useState<CliProvider | null>(null)
   const [newServerKey, setNewServerKey] = useState('')
   const [newServerCommand, setNewServerCommand] = useState('')
   const [newServerArgs, setNewServerArgs] = useState('')
 
-  const loadConfigs = useCallback(async () => {
-    setLoading(true)
-    try {
-      setConfigs(await getTrpcVanillaClient().aiConfig.discoverComputerMcpConfigs.query())
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.discoverComputerMcpConfigs.queryKey() })
 
-  useEffect(() => { void loadConfigs() }, [loadConfigs])
+  const writeServer = useMutation(
+    trpc.aiConfig.writeComputerMcpServer.mutationOptions({ onSuccess: invalidate }),
+  )
+  const removeServer = useMutation(
+    trpc.aiConfig.removeComputerMcpServer.mutationOptions({ onSuccess: invalidate }),
+  )
 
-  const handleAddServer = useCallback(async (provider: CliProvider) => {
+  const handleAddServer = async (provider: CliProvider) => {
     if (!newServerKey.trim() || !newServerCommand.trim()) return
-    await getTrpcVanillaClient().aiConfig.writeComputerMcpServer.mutate({
+    await writeServer.mutateAsync({
       provider,
       serverKey: newServerKey.trim(),
       config: {
@@ -38,15 +39,13 @@ export function ComputerMcpView() {
     setNewServerKey('')
     setNewServerCommand('')
     setNewServerArgs('')
-    void loadConfigs()
-  }, [newServerKey, newServerCommand, newServerArgs, loadConfigs])
+  }
 
-  const handleRemoveServer = useCallback(async (provider: CliProvider, serverKey: string) => {
-    await getTrpcVanillaClient().aiConfig.removeComputerMcpServer.mutate({ provider, serverKey })
-    void loadConfigs()
-  }, [loadConfigs])
+  const handleRemoveServer = (provider: CliProvider, serverKey: string) => {
+    removeServer.mutate({ provider, serverKey })
+  }
 
-  if (loading) {
+  if (isLoading) {
     return <p className="text-xs text-muted-foreground">Loading computer MCP configs...</p>
   }
 

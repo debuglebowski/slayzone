@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useEffect } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import {
   PROVIDER_LABELS,
   PROVIDER_CAPABILITIES,
 } from '../shared/provider-registry'
-import type { CliProvider, CliProviderInfo } from '../shared'
+import type { CliProvider } from '../shared'
 
 interface ProviderSyncSectionProps {
   projectId: string | null
@@ -13,39 +14,62 @@ interface ProviderSyncSectionProps {
 }
 
 export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
-  const [providers, setProviders] = useState<CliProviderInfo[]>([])
-  const [projectProviders, setProjectProviders] = useState<CliProvider[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
 
-  const fetchProviders = useCallback(async () => {
-    const list = await getTrpcVanillaClient().aiConfig.listProviders.query()
-    setProviders(list)
-    if (projectId) {
-      const pp = await getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId })
-      setProjectProviders(pp)
-    }
-  }, [projectId])
+  const { data: providers = [] } = useQuery(trpc.aiConfig.listProviders.queryOptions())
+  const { data: projectProviders = [] } = useQuery(
+    trpc.aiConfig.getProjectProviders.queryOptions(
+      { projectId: projectId ?? '' },
+      { enabled: !!projectId },
+    ),
+  )
 
+  // Refetch on the legacy "settings changed" custom event so sibling tabs invalidate this view.
   useEffect(() => {
-    let stale = false
-    void fetchProviders().then(() => { if (stale) return })
-    const handler = () => { void fetchProviders() }
+    const handler = () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listProviders.queryKey() })
+      if (projectId) {
+        queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectProviders.queryKey({ projectId }) })
+      }
+    }
     window.addEventListener('sz:settings-changed', handler)
-    return () => { stale = true; window.removeEventListener('sz:settings-changed', handler) }
-  }, [fetchProviders])
+    return () => window.removeEventListener('sz:settings-changed', handler)
+  }, [queryClient, trpc, projectId])
 
-  const handleToggleComputer = useCallback(async (id: string, enabled: boolean) => {
-    await getTrpcVanillaClient().aiConfig.toggleProvider.mutate({ id, enabled })
-    setProviders(prev => prev.map(p => p.id === id ? { ...p, enabled } : p))
-  }, [])
+  const toggleProvider = useMutation(
+    trpc.aiConfig.toggleProvider.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listProviders.queryKey() }),
+    }),
+  )
+  const setProjectProviders = useMutation(
+    trpc.aiConfig.setProjectProviders.mutationOptions({
+      onMutate: ({ providers: next }) => {
+        if (!projectId) return undefined
+        const queryKey = trpc.aiConfig.getProjectProviders.queryKey({ projectId })
+        queryClient.cancelQueries({ queryKey })
+        const prev = queryClient.getQueryData<CliProvider[]>(queryKey)
+        queryClient.setQueryData(queryKey, next as CliProvider[])
+        return { prev }
+      },
+      onError: (_err, _vars, ctx) => {
+        if (!projectId || !ctx) return
+        queryClient.setQueryData(trpc.aiConfig.getProjectProviders.queryKey({ projectId }), ctx.prev)
+      },
+    }),
+  )
 
-  const handleToggleProject = useCallback(async (provider: CliProvider) => {
+  const handleToggleComputer = (id: string, enabled: boolean) => {
+    toggleProvider.mutate({ id, enabled })
+  }
+
+  const handleToggleProject = (provider: CliProvider) => {
     if (!projectId) return
     const next = projectProviders.includes(provider)
       ? projectProviders.filter(p => p !== provider)
       : [...projectProviders, provider]
-    await getTrpcVanillaClient().aiConfig.setProjectProviders.mutate({ projectId, providers: next })
-    setProjectProviders(next)
-  }, [projectId, projectProviders])
+    setProjectProviders.mutate({ projectId, providers: next })
+  }
 
   return (
     <div className="space-y-6 max-w-3xl">

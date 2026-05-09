@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 /**
  * Polls the stale-skill count for the active project.
@@ -9,33 +10,29 @@ export function useStaleSkillCount(
   projectId: string | null | undefined,
   projectPath: string | null | undefined
 ): { count: number; refresh: () => void } {
-  const [count, setCount] = useState(0)
-  const reqIdRef = useRef(0)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const enabled = !!projectId && !!projectPath
+  const { data: count = 0 } = useQuery({
+    ...trpc.aiConfig.getProjectStaleSkillCount.queryOptions(
+      { projectId: projectId ?? '', projectPath: projectPath ?? '' },
+      { enabled },
+    ),
+  })
 
-  const refresh = useCallback(() => {
-    if (!projectId || !projectPath) {
-      setCount(0)
-      return
-    }
-    const reqId = ++reqIdRef.current
-    getTrpcVanillaClient().aiConfig.getProjectStaleSkillCount.query({ projectId, projectPath })
-      .then((n) => {
-        if (reqId === reqIdRef.current) setCount(n)
-      })
-      .catch(() => {
-        if (reqId === reqIdRef.current) setCount(0)
-      })
-  }, [projectId, projectPath])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
+  const refresh = () => {
+    if (!enabled) return
+    queryClient.invalidateQueries({
+      queryKey: trpc.aiConfig.getProjectStaleSkillCount.queryKey({ projectId: projectId!, projectPath: projectPath! }),
+    })
+  }
 
   useEffect(() => {
     const onFocus = () => refresh()
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [refresh])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, projectPath])
 
   return { count, refresh }
 }

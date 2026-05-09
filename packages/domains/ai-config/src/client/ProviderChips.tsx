@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { cn, Switch } from '@slayzone/ui'
-import type { CliProvider, CliProviderInfo } from '../shared'
+import type { CliProvider } from '../shared'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 
 interface ProviderChipsProps {
@@ -11,27 +11,35 @@ interface ProviderChipsProps {
 }
 
 export function ProviderChips({ projectId, layout = 'panel', onChange }: ProviderChipsProps) {
-  const [allProviders, setAllProviders] = useState<CliProviderInfo[]>([])
-  const [enabled, setEnabled] = useState<CliProvider[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
 
-  useEffect(() => {
-    void (async () => {
-      const [providers, projectProviders] = await Promise.all([
-        getTrpcVanillaClient().aiConfig.listProviders.query(),
-        getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId })
-      ])
-      setAllProviders(providers.filter(p => p.status === 'active'))
-      setEnabled(projectProviders)
-    })()
-  }, [projectId])
+  const { data: providers = [] } = useQuery(trpc.aiConfig.listProviders.queryOptions())
+  const { data: enabled = [] } = useQuery(trpc.aiConfig.getProjectProviders.queryOptions({ projectId }))
+  const allProviders = providers.filter(p => p.status === 'active')
 
-  const toggle = async (kind: CliProvider) => {
+  const setProjectProviders = useMutation(
+    trpc.aiConfig.setProjectProviders.mutationOptions({
+      onMutate: ({ providers: next }) => {
+        const queryKey = trpc.aiConfig.getProjectProviders.queryKey({ projectId })
+        queryClient.cancelQueries({ queryKey })
+        const prev = queryClient.getQueryData<CliProvider[]>(queryKey)
+        queryClient.setQueryData(queryKey, next as CliProvider[])
+        return { prev }
+      },
+      onError: (_err, _vars, ctx) => {
+        if (!ctx) return
+        queryClient.setQueryData(trpc.aiConfig.getProjectProviders.queryKey({ projectId }), ctx.prev)
+      },
+      onSuccess: () => onChange?.(),
+    }),
+  )
+
+  const toggle = (kind: CliProvider) => {
     const next = enabled.includes(kind)
       ? enabled.filter(p => p !== kind)
       : [...enabled, kind]
-    setEnabled(next)
-    await getTrpcVanillaClient().aiConfig.setProjectProviders.mutate({ projectId, providers: next })
-    onChange?.()
+    setProjectProviders.mutate({ projectId, providers: next })
   }
 
   if (allProviders.length === 0) return null

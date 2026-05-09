@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Sparkles } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@slayzone/ui'
-import type { AiConfigItem, CliProvider } from '../shared'
+import type { AiConfigItem } from '../shared'
 
 interface LibraryItemPickerProps {
   projectId: string
@@ -14,39 +14,27 @@ interface LibraryItemPickerProps {
 }
 
 export function LibraryItemPicker({ projectId, projectPath, existingLinks, onLoaded, onClose }: LibraryItemPickerProps) {
-  const [items, setItems] = useState<AiConfigItem[]>([])
-  const [enabledProviders, setEnabledProviders] = useState<CliProvider[]>([])
-  const [loading, setLoading] = useState(false)
+  const trpc = useTRPC()
+  const { data: items = [] } = useQuery(trpc.aiConfig.listItems.queryOptions({ scope: 'library', type: 'skill' }))
+  const { data: enabledProviders = [] } = useQuery(trpc.aiConfig.getProjectProviders.queryOptions({ projectId }))
 
-  useEffect(() => {
-    void (async () => {
-      const [skills, providers] = await Promise.all([
-        getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' }),
-        getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId })
-      ])
-      setItems(skills)
-      setEnabledProviders(providers)
-    })()
-  }, [projectId])
+  const loadLibraryItem = useMutation(
+    trpc.aiConfig.loadLibraryItem.mutationOptions({
+      onSuccess: () => onLoaded(),
+      onError: (err) => console.error('Failed to load item:', err),
+    }),
+  )
 
   const alreadyLinked = (id: string) => existingLinks.includes(id)
 
-  const handleSelect = async (item: AiConfigItem) => {
+  const handleSelect = (item: AiConfigItem) => {
     if (alreadyLinked(item.id)) return
-    setLoading(true)
-    try {
-      await getTrpcVanillaClient().aiConfig.loadLibraryItem.mutate({
-        projectId,
-        projectPath,
-        itemId: item.id,
-        providers: enabledProviders
-      })
-      onLoaded()
-    } catch (err) {
-      console.error('Failed to load item:', err)
-    } finally {
-      setLoading(false)
-    }
+    loadLibraryItem.mutate({
+      projectId,
+      projectPath,
+      itemId: item.id,
+      providers: enabledProviders,
+    })
   }
 
   return (
@@ -62,7 +50,7 @@ export function LibraryItemPicker({ projectId, projectPath, existingLinks, onLoa
             return (
               <button
                 key={item.id}
-                disabled={linked || loading}
+                disabled={linked || loadLibraryItem.isPending}
                 onClick={() => handleSelect(item)}
                 className={cn(
                   'flex w-full items-start gap-3 border-b border-border/40 last:border-0 px-5 py-3 text-left transition-colors',

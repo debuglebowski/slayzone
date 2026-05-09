@@ -1,36 +1,43 @@
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useState, type ChangeEvent } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { File, FilePlus, Save } from 'lucide-react'
 import { Button, Label, Textarea, cn } from '@slayzone/ui'
-import type { ContextFileInfo } from '../shared'
 
 interface ContextFilesPanelProps {
   projectPath: string | null
 }
 
 export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
-  const [files, setFiles] = useState<ContextFileInfo[]>([])
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+
+  const { data: files = [] } = useQuery(
+    trpc.aiConfig.discoverContextFiles.queryOptions({ projectPath: projectPath ?? '' }),
+  )
+
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [content, setContent] = useState('')
   const [originalContent, setOriginalContent] = useState('')
   const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
-  const discover = useCallback(async () => {
-    const discovered = await getTrpcVanillaClient().aiConfig.discoverContextFiles.query({ projectPath: projectPath ?? '' })
-    setFiles(discovered)
-  }, [projectPath])
-
-  useEffect(() => {
-    void discover()
-  }, [discover])
+  const writeFile = useMutation(
+    trpc.aiConfig.writeContextFile.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: trpc.aiConfig.discoverContextFiles.queryKey({ projectPath: projectPath ?? '' }),
+        })
+      },
+    }),
+  )
 
   const openFile = async (filePath: string) => {
     setLoading(true)
     setMessage('')
     try {
-      const text = await getTrpcVanillaClient().aiConfig.readContextFile.query({ filePath, projectPath: projectPath ?? '' })
+      const text = await trpcClient.aiConfig.readContextFile.query({ filePath, projectPath: projectPath ?? '' })
       setContent(text)
       setOriginalContent(text)
       setSelectedPath(filePath)
@@ -44,8 +51,7 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
   const createFile = async (filePath: string) => {
     setMessage('')
     try {
-      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath, content: '', projectPath: projectPath ?? '' })
-      await discover()
+      await writeFile.mutateAsync({ filePath, content: '', projectPath: projectPath ?? '' })
       setContent('')
       setOriginalContent('')
       setSelectedPath(filePath)
@@ -57,16 +63,13 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
 
   const saveFile = async () => {
     if (!selectedPath) return
-    setSaving(true)
     setMessage('')
     try {
-      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath: selectedPath, content, projectPath: projectPath ?? '' })
+      await writeFile.mutateAsync({ filePath: selectedPath, content, projectPath: projectPath ?? '' })
       setOriginalContent(content)
       setMessage('Saved')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to save')
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -108,9 +111,9 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
             <Label className="text-xs font-mono">{selectedFile?.name ?? selectedPath}</Label>
             <div className="flex items-center gap-2">
               {message && <span className="text-[11px] text-muted-foreground">{message}</span>}
-              <Button size="sm" onClick={saveFile} disabled={!dirty || saving}>
+              <Button size="sm" onClick={saveFile} disabled={!dirty || writeFile.isPending}>
                 <Save className="mr-1 size-3" />
-                {saving ? 'Saving...' : 'Save'}
+                {writeFile.isPending ? 'Saving...' : 'Save'}
               </Button>
             </div>
           </div>
