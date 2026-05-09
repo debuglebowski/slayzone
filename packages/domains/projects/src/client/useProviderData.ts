@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useEffect, useState, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { ExternalGroup, ExternalScope } from '@slayzone/integrations/shared'
 
 export interface UseProviderDataResult {
@@ -18,99 +19,61 @@ export interface UseProviderDataResult {
 /**
  * Generic hook for loading provider groups (teams/repos/projects) and
  * scopes (Linear projects, GitHub ProjectV2, etc.) via adapter-dispatched IPC.
- *
- * Replaces per-provider useState + useEffect pairs for group/scope loading.
  */
 export function useProviderData(
   connectionId: string | null,
   options?: {
-    /** Pre-select a group on load */
     initialGroupId?: string | null
-    /** Pre-select a scope on load */
     initialScopeId?: string | null
   }
 ): UseProviderDataResult {
-  const trpcClient = useTRPCClient()
-  const [groups, setGroups] = useState<ExternalGroup[]>([])
-  const [scopes, setScopes] = useState<ExternalScope[]>([])
-  const [loadingGroups, setLoadingGroups] = useState(false)
-  const [loadingScopes, setLoadingScopes] = useState(false)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(options?.initialGroupId ?? null)
   const [selectedScopeId, setSelectedScopeId] = useState<string | null>(options?.initialScopeId ?? null)
-  const [error, setError] = useState<string | null>(null)
-  const [reloadCounter, setReloadCounter] = useState(0)
 
-  const reload = useCallback(() => setReloadCounter((c) => c + 1), [])
+  const groupsQuery = useQuery({
+    ...trpc.integrations.listProviderGroups.queryOptions({ connectionId: connectionId ?? '' }),
+    enabled: !!connectionId,
+  })
+  const scopesQuery = useQuery({
+    ...trpc.integrations.listProviderScopes.queryOptions({ connectionId: connectionId ?? '', groupId: selectedGroupId ?? '' }),
+    enabled: !!connectionId && !!selectedGroupId,
+  })
 
-  // Load groups when connection changes
+  const groups = groupsQuery.data ?? []
+  const scopes = scopesQuery.data ?? []
+  const loadingGroups = !!connectionId && groupsQuery.isLoading
+  const loadingScopes = !!connectionId && !!selectedGroupId && scopesQuery.isLoading
+  const error = (groupsQuery.error ?? scopesQuery.error) ? String((groupsQuery.error ?? scopesQuery.error)) : null
+
+  // Auto-select initial / first group when data arrives
   useEffect(() => {
-    if (!connectionId) {
-      setGroups([])
-      setScopes([])
-      setSelectedGroupId(null)
-      setSelectedScopeId(null)
-      return
+    if (!connectionId) { setSelectedGroupId(null); setSelectedScopeId(null); return }
+    if (!groupsQuery.data) return
+    if (options?.initialGroupId && groups.some((g) => g.id === options.initialGroupId)) {
+      setSelectedGroupId(options.initialGroupId)
+    } else if (!selectedGroupId || !groups.some((g) => g.id === selectedGroupId)) {
+      setSelectedGroupId(groups[0]?.id ?? null)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionId, groupsQuery.data])
 
-    let cancelled = false
-    setLoadingGroups(true)
-    setError(null)
-
-    trpcClient.integrations.listProviderGroups.query({ connectionId }).then(
-      (result) => {
-        if (cancelled) return
-        setGroups(result)
-        setLoadingGroups(false)
-        // Auto-select initial group if available
-        if (options?.initialGroupId && result.some((g) => g.id === options.initialGroupId)) {
-          setSelectedGroupId(options.initialGroupId)
-        } else if (!selectedGroupId || !result.some((g) => g.id === selectedGroupId)) {
-          setSelectedGroupId(result[0]?.id ?? null)
-        }
-      },
-      (err) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-        setLoadingGroups(false)
-      }
-    )
-
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, reloadCounter])
-
-  // Load scopes when group changes
+  // Auto-select initial / first scope when data arrives
   useEffect(() => {
-    if (!connectionId || !selectedGroupId) {
-      setScopes([])
-      setSelectedScopeId(null)
-      return
+    if (!scopesQuery.data) return
+    if (options?.initialScopeId && scopes.some((s) => s.id === options.initialScopeId)) {
+      setSelectedScopeId(options.initialScopeId)
+    } else if (!selectedScopeId || !scopes.some((s) => s.id === selectedScopeId)) {
+      setSelectedScopeId(scopes[0]?.id ?? null)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopesQuery.data])
 
-    let cancelled = false
-    setLoadingScopes(true)
-
-    trpcClient.integrations.listProviderScopes.query({ connectionId, groupId: selectedGroupId }).then(
-      (result) => {
-        if (cancelled) return
-        setScopes(result)
-        setLoadingScopes(false)
-        if (options?.initialScopeId && result.some((s) => s.id === options.initialScopeId)) {
-          setSelectedScopeId(options.initialScopeId)
-        } else if (!selectedScopeId || !result.some((s) => s.id === selectedScopeId)) {
-          setSelectedScopeId(result[0]?.id ?? null)
-        }
-      },
-      (err) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-        setLoadingScopes(false)
-      }
-    )
-
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, selectedGroupId, reloadCounter])
+  const reload = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: trpc.integrations.listProviderGroups.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.integrations.listProviderScopes.queryKey() })
+  }, [queryClient, trpc])
 
   return {
     groups,

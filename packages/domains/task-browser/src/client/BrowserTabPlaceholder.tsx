@@ -1,5 +1,6 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
 
 export interface BrowserTabPlaceholderHandle {
@@ -35,7 +36,10 @@ interface BrowserTabPlaceholderProps {
 
 export const BrowserTabPlaceholder = forwardRef<BrowserTabPlaceholderHandle, BrowserTabPlaceholderProps>(
   function BrowserTabPlaceholder({ tabId, taskId, url, partition, visible, hidden, isResizing, className, onStateChange, onOverlayChange }, ref) {
-    const trpcClient = useTRPCClient()
+    const trpc = useTRPC()
+    const queryClient = useQueryClient()
+    const registerMutation = useMutation(trpc.app.webview.registerBrowserTab.mutationOptions())
+    const unregisterMutation = useMutation(trpc.app.webview.unregisterBrowserTab.mutationOptions())
     const { viewId, state, actions, placeholderRef, hiddenByOverlay } = useBrowserView({
       tabId,
       taskId,
@@ -63,15 +67,15 @@ export const BrowserTabPlaceholder = forwardRef<BrowserTabPlaceholderHandle, Bro
       if (!taskId || !viewId) return
       let cancelled = false
       void (async () => {
-        const wcId = await trpcClient.app.browser.getWebContentsId.query({ viewId }) as number | null
+        const wcId = await queryClient.fetchQuery(trpc.app.browser.getWebContentsId.queryOptions({ viewId })) as number | null
         if (cancelled || wcId == null) return
-        await trpcClient.app.webview.registerBrowserTab.mutate({ taskId, tabId, webContentsId: wcId })
+        await registerMutation.mutateAsync({ taskId, tabId, webContentsId: wcId })
       })()
       return () => {
         cancelled = true
-        void trpcClient.app.webview.unregisterBrowserTab.mutate({ taskId, tabId })
+        unregisterMutation.mutate({ taskId, tabId })
       }
-    }, [taskId, tabId, viewId])
+    }, [taskId, tabId, viewId, queryClient, trpc, registerMutation, unregisterMutation])
 
     return (
       <div

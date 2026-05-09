@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 interface DesktopHandoffPolicy {
   protocol: string
@@ -17,7 +18,9 @@ interface UseBrowserViewLifecycleOpts {
 
 export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { viewId: string | null } {
   const { tabId, taskId, url, partition, kind, desktopHandoffPolicy } = opts
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const createViewMutation = useMutation(trpc.app.browser.createView.mutationOptions())
+  const destroyViewMutation = useMutation(trpc.app.browser.destroyView.mutationOptions())
   const [viewId, setViewId] = useState<string | null>(null)
   const mountedRef = useRef(true)
   const currentTabIdRef = useRef(tabId)
@@ -33,7 +36,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
       if (!mountedRef.current || currentTabIdRef.current !== tabId) return
 
       try {
-        const id = await trpcClient.app.browser.createView.mutate({
+        const id = await createViewMutation.mutateAsync({
           taskId,
           tabId,
           partition,
@@ -51,7 +54,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
         }
 
         if (!mountedRef.current || currentTabIdRef.current !== tabId) {
-          void trpcClient.app.browser.destroyView.mutate({ viewId: id })
+          destroyViewMutation.mutate({ viewId: id })
           return
         }
 
@@ -70,7 +73,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
       mountedRef.current = false
       if (retryTimer) clearTimeout(retryTimer)
       if (createdViewId) {
-        void trpcClient.app.browser.destroyView.mutate({ viewId: createdViewId })
+        destroyViewMutation.mutate({ viewId: createdViewId })
       }
       setViewId(null)
     }

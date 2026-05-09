@@ -1,4 +1,5 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 
@@ -16,7 +17,11 @@ export function useBrowserViewBounds(
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const effectivelyVisible = visible && !hidden && !isResizing
-  const [appZoomFactor, setAppZoomFactor] = useState(1)
+  const zoomFactorQuery = useQuery({
+    ...trpc.app.meta.getZoomFactor.queryOptions(),
+    initialData: 1,
+  })
+  const [appZoomFactor, setAppZoomFactor] = useState(zoomFactorQuery.data ?? 1)
 
   const elementRef = useRef<HTMLDivElement | null>(null)
   const rafRef = useRef<number>(0)
@@ -30,12 +35,8 @@ export function useBrowserViewBounds(
   appZoomFactorRef.current = appZoomFactor
 
   useEffect(() => {
-    let cancelled = false
-    void trpcClient.app.meta.getZoomFactor.query().then((factor) => {
-      if (!cancelled) setAppZoomFactor(factor)
-    })
-    return () => { cancelled = true }
-  }, [trpcClient])
+    if (zoomFactorQuery.data !== undefined) setAppZoomFactor(zoomFactorQuery.data)
+  }, [zoomFactorQuery.data])
 
   useSubscription(
     trpc.app.menu.onZoomFactorChanged.subscriptionOptions(undefined, {

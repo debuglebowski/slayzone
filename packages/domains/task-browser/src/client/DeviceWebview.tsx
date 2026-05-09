@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { DeviceEmulation } from '../shared'
 
 interface WebviewElement extends HTMLElement {
@@ -28,7 +29,9 @@ interface DeviceWebviewProps {
 }
 
 export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigger, forceReloadTrigger, onLayout }: DeviceWebviewProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const enableEmulationMutation = useMutation(trpc.app.webview.enableDeviceEmulation.mutationOptions())
+  const disableEmulationMutation = useMutation(trpc.app.webview.disableDeviceEmulation.mutationOptions())
   const webviewRef = useRef<WebviewElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [webviewReady, setWebviewReady] = useState(false)
@@ -88,7 +91,7 @@ export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigge
     prevEmulationRef.current = cur
 
     const wcId = wv.getWebContentsId()
-    trpcClient.app.webview.enableDeviceEmulation.mutate({ webviewId: wcId, params: {
+    enableEmulationMutation.mutateAsync({ webviewId: wcId, params: {
       screenSize: { width: preset.width, height: preset.height },
       viewSize: { width: 0, height: 0 },
       deviceScaleFactor: preset.deviceScaleFactor,
@@ -133,7 +136,7 @@ export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigge
       if (wv) {
         try {
           const wcId = wv.getWebContentsId()
-          trpcClient.app.webview.disableDeviceEmulation.mutate({ webviewId: wcId })
+          disableEmulationMutation.mutate({ webviewId: wcId })
         } catch { /* webview may be destroyed */ }
       }
     }

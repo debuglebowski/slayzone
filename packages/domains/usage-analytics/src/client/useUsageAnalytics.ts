@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { AnalyticsSummary, DateRange, ProviderOption } from '../shared/types'
 import { PROVIDER_USAGE_SUPPORT, ALL_PROVIDERS } from '../shared/types'
 
@@ -17,20 +18,19 @@ const EMPTY: AnalyticsSummary = {
 }
 
 export function useUsageAnalytics() {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [range, setRange] = useState<DateRange>('30d')
-  const [rawData, setRawData] = useState<AnalyticsSummary>(EMPTY)
-  const [loading, setLoading] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<string>(ALL_PROVIDERS)
-  const [defaultLoaded, setDefaultLoaded] = useState(false)
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([])
+  const [defaultLoaded, setDefaultLoaded] = useState(false)
 
-  // Load enabled modes + default provider from settings on mount
+  const defaultModeQuery = useQuery(trpc.settings.get.queryOptions({ key: 'default_terminal_mode' }))
+  const defaultMode = defaultModeQuery.data
+
   useEffect(() => {
-    Promise.all([
-      trpcClient.settings.get.query({ key: 'default_terminal_mode' }),
-      window.api.terminalModes.list()
-    ]).then(([defaultMode, modes]) => {
+    if (defaultModeQuery.isLoading) return
+    window.api.terminalModes.list().then((modes) => {
       const options: ProviderOption[] = modes
         .filter((m) => m.enabled && m.id !== 'terminal')
         .map((m) => ({
@@ -39,18 +39,38 @@ export function useUsageAnalytics() {
           hasUsageData: PROVIDER_USAGE_SUPPORT[m.id]?.supported ?? false
         }))
       setProviderOptions(options)
-
       if (defaultMode && options.some((o) => o.id === defaultMode)) {
         setSelectedProvider(defaultMode)
       }
       setDefaultLoaded(true)
     }).catch(() => setDefaultLoaded(true))
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultModeQuery.isLoading, defaultMode])
+
+  const cachedQuery = useQuery({
+    ...trpc.usageAnalytics.query.queryOptions(range),
+    enabled: defaultLoaded,
+  })
+
+  const refreshMutation = useMutation(trpc.usageAnalytics.refresh.mutationOptions({
+    onSuccess: (fresh) => {
+      queryClient.setQueryData(trpc.usageAnalytics.query.queryKey(range), fresh)
+    },
+  }))
+
+  // Trigger background refresh on range change after default loaded
+  useEffect(() => {
+    if (!defaultLoaded) return
+    refreshMutation.mutate(range)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, defaultLoaded])
+
+  const rawData = cachedQuery.data ?? EMPTY
+  const loading = refreshMutation.isPending
 
   const providerSupported = selectedProvider === ALL_PROVIDERS ||
     (PROVIDER_USAGE_SUPPORT[selectedProvider]?.supported ?? false)
 
-  // Filtered view
   const data = useMemo(() => {
     if (selectedProvider === ALL_PROVIDERS) return rawData
 
@@ -82,37 +102,9 @@ export function useUsageAnalytics() {
     }
   }, [rawData, selectedProvider])
 
-  // Show cached data instantly, then refresh in background
-  useEffect(() => {
-    if (!defaultLoaded) return
-    let cancelled = false
-
-    trpcClient.usageAnalytics.query.query(range).then((cached) => {
-      if (!cancelled) setRawData(cached)
-    })
-
-    setLoading(true)
-    trpcClient.usageAnalytics.refresh.mutate(range).then((fresh) => {
-      if (!cancelled) {
-        setRawData(fresh)
-        setLoading(false)
-      }
-    }).catch(() => {
-      if (!cancelled) setLoading(false)
-    })
-
-    return () => { cancelled = true }
-  }, [range, defaultLoaded])
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      const result = await trpcClient.usageAnalytics.refresh.mutate(range)
-      setRawData(result)
-    } finally {
-      setLoading(false)
-    }
-  }, [range])
+  const refresh = async () => {
+    await refreshMutation.mutateAsync(range)
+  }
 
   return {
     data,
