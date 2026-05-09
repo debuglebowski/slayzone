@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { ArrowDownToLineIcon, ArrowUpToLineIcon, CalendarIcon, Gauge, ListChecks, Loader2, MessageSquare, X, AlarmClock, SearchIcon } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
@@ -8,7 +9,7 @@ import { isCompletedStatus, isTerminalStatus } from '@slayzone/projects/shared'
 import { TaskProgressPopover } from './TaskProgressPopover'
 import type { Tag } from '@slayzone/tags/shared'
 import { TagSelector } from '@slayzone/tags/client'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import type { ExternalLink, TaskSyncStatus } from '@slayzone/integrations/shared'
 import {
   Select,
@@ -82,60 +83,57 @@ export function TaskMetadataSidebar({
   onTagsChange,
   onTagCreated
 }: TaskMetadataSidebarProps): React.JSX.Element {
-  const trpcClient = useTRPCClient()
-  const [allTasks, setAllTasks] = useState<Task[]>([])
-  const [blockers, setBlockers] = useState<Task[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [addBlockerSearch, setAddBlockerSearch] = useState('')
   const [blockerDialogOpen, setBlockerDialogOpen] = useState(false)
   const [commentDialogOpen, setCommentDialogOpen] = useState(false)
   const [blockedComment, setBlockedComment] = useState('')
 
-  // Load all tasks and current blockers
-  useEffect(() => {
-    const loadData = async () => {
-      const [tasks, currentBlockers, allProjects] = await Promise.all([
-        trpcClient.task.getAll.query(),
-        trpcClient.task.getBlockers.query({ taskId: task.id }),
-        trpcClient.projects.list.query()
-      ])
-      setAllTasks(tasks.filter((t) => t.id !== task.id))
-      setBlockers(currentBlockers)
-      setProjects(allProjects)
-      setAddBlockerSearch('')
-    }
-    loadData()
-  }, [task.id])
+  const allTasksQuery = useQuery(trpc.task.getAll.queryOptions())
+  const blockersQuery = useQuery(trpc.task.getBlockers.queryOptions({ taskId: task.id }))
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
 
-  const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
-    await trpcClient.task.addBlocker.mutate({ taskId: task.id, blockerTaskId: blockerTaskId })
-    const blockerTask = allTasks.find((t) => t.id === blockerTaskId)
-    if (blockerTask) {
-      setBlockers([...blockers, blockerTask])
-    }
+  const allTasks = (allTasksQuery.data ?? []).filter((t) => t.id !== task.id)
+  const blockers = blockersQuery.data ?? []
+  const projects = projectsQuery.data ?? []
+
+  // Reset search input when task changes
+  useEffect(() => { setAddBlockerSearch('') }, [task.id])
+
+  const updateTaskMutation = useMutation(trpc.task.update.mutationOptions())
+  const addBlockerMutation = useMutation(trpc.task.addBlocker.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.task.getBlockers.queryKey({ taskId: task.id }) }),
+  }))
+  const removeBlockerMutation = useMutation(trpc.task.removeBlocker.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.task.getBlockers.queryKey({ taskId: task.id }) }),
+  }))
+  const setTagsForTaskMutation = useMutation(trpc.tags.setForTask.mutationOptions())
+
+  const handleAddBlocker = useCallback(async (blockerTaskId: string): Promise<void> => {
+    await addBlockerMutation.mutateAsync({ taskId: task.id, blockerTaskId })
     setAddBlockerSearch('')
-  }
+  }, [task.id, addBlockerMutation])
 
-  const handleRemoveBlocker = async (blockerTaskId: string): Promise<void> => {
-    await trpcClient.task.removeBlocker.mutate({ taskId: task.id, blockerTaskId: blockerTaskId })
-    setBlockers(blockers.filter((b) => b.id !== blockerTaskId))
-  }
+  const handleRemoveBlocker = useCallback(async (blockerTaskId: string): Promise<void> => {
+    await removeBlockerMutation.mutateAsync({ taskId: task.id, blockerTaskId })
+  }, [task.id, removeBlockerMutation])
 
-  const handleSetBlocked = async (): Promise<void> => {
+  const handleSetBlocked = useCallback(async (): Promise<void> => {
     track('task_blocked', {})
-    const updated = await trpcClient.task.update.mutate({ id: task.id, isBlocked: true })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, isBlocked: true })
     onUpdate(updated)
-  }
+  }, [task.id, updateTaskMutation, onUpdate])
 
-  const handleUnblock = async (): Promise<void> => {
+  const handleUnblock = useCallback(async (): Promise<void> => {
     track('task_unblocked')
-    const updated = await trpcClient.task.update.mutate({ id: task.id, isBlocked: false, blockedComment: null })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, isBlocked: false, blockedComment: null })
     onUpdate(updated)
-  }
+  }, [task.id, updateTaskMutation, onUpdate])
 
-  const handleSetBlockedWithComment = async (): Promise<void> => {
+  const handleSetBlockedWithComment = useCallback(async (): Promise<void> => {
     track('task_blocked', { hasComment: 'true' })
-    const updated = await trpcClient.task.update.mutate({
+    const updated = await updateTaskMutation.mutateAsync({
       id: task.id,
       isBlocked: true,
       blockedComment: blockedComment.trim() || null
@@ -143,7 +141,7 @@ export function TaskMetadataSidebar({
     onUpdate(updated)
     setCommentDialogOpen(false)
     setBlockedComment('')
-  }
+  }, [task.id, blockedComment, updateTaskMutation, onUpdate])
 
   const columnsByProject = new Map(projects.map((project) => [project.id, project.columns_config]))
   const availableBlockers = allTasks.filter((t) => (
@@ -158,44 +156,44 @@ export function TaskMetadataSidebar({
     if (isTerminalStatus(status, selectedProject?.columns_config)) {
       track('task_completed', { provider: task.terminal_mode ?? 'terminal', had_worktree: Boolean(task.worktree_path) })
     }
-    const updated = await trpcClient.task.update.mutate({ id: task.id, status })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, status })
     onUpdate(updated)
   }
 
   const handleProjectChange = async (projectId: string): Promise<void> => {
     track('task_moved_to_project')
-    const updated = await trpcClient.task.update.mutate({ id: task.id, projectId })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, projectId })
     onUpdate(updated)
   }
 
   const handlePriorityChange = async (priority: number): Promise<void> => {
     track('task_priority_changed', { priority: String(priority) })
-    const updated = await trpcClient.task.update.mutate({ id: task.id, priority })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, priority })
     onUpdate(updated)
   }
 
   const handleDueDateChange = async (date: Date | undefined): Promise<void> => {
     track('due_date_set')
     const dueDate = date ? format(date, 'yyyy-MM-dd') : null
-    const updated = await trpcClient.task.update.mutate({ id: task.id, dueDate })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, dueDate })
     onUpdate(updated)
   }
 
   const handleSnooze = async (until: string): Promise<void> => {
     track('task_snoozed')
-    const updated = await trpcClient.task.update.mutate({ id: task.id, snoozedUntil: until })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, snoozedUntil: until })
     onUpdate(updated)
   }
 
   const handleUnsnooze = async (): Promise<void> => {
     track('task_unsnoozed')
-    const updated = await trpcClient.task.update.mutate({ id: task.id, snoozedUntil: null })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, snoozedUntil: null })
     onUpdate(updated)
   }
 
   const handleProgressChange = async (progress: number): Promise<void> => {
     track('task_progress_changed', { value: String(progress) })
-    const updated = await trpcClient.task.update.mutate({ id: task.id, progress })
+    const updated = await updateTaskMutation.mutateAsync({ id: task.id, progress })
     onUpdate(updated)
   }
 
@@ -204,7 +202,7 @@ export function TaskMetadataSidebar({
   const handleTagToggle = async (tagId: string, checked: boolean): Promise<void> => {
     if (checked) track('tag_assigned')
     const newTagIds = checked ? [...taskTagIds, tagId] : taskTagIds.filter((id) => id !== tagId)
-    await trpcClient.tags.setForTask.mutate({ taskId: task.id, tagIds: newTagIds })
+    await setTagsForTaskMutation.mutateAsync({ taskId: task.id, tagIds: newTagIds })
     onTagsChange(newTagIds)
   }
 
@@ -450,7 +448,7 @@ export function TaskMetadataSidebar({
             <span className="flex-1 whitespace-pre-wrap">{task.blocked_comment}</span>
             <button
               onClick={async () => {
-                const updated = await trpcClient.task.update.mutate({ id: task.id, blockedComment: null })
+                const updated = await updateTaskMutation.mutateAsync({ id: task.id, blockedComment: null })
                 onUpdate(updated)
               }}
               className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground"
@@ -602,59 +600,52 @@ function toUnknownSyncStatus(link: ExternalLink, taskId: string): TaskSyncStatus
 }
 
 export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
-  const trpcClient = useTRPCClient()
-  const [links, setLinks] = useState<ExternalLink[]>([])
-  const [syncStatusByLinkId, setSyncStatusByLinkId] = useState<Record<string, TaskSyncStatus>>({})
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [linkLoadingById, setLinkLoadingById] = useState<Record<string, 'open' | 'pull' | 'push' | undefined>>({})
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        const [linearLink, githubLink] = await Promise.all([
-          trpcClient.integrations.getLink.query({ taskId, provider: 'linear' }),
-          trpcClient.integrations.getLink.query({ taskId, provider: 'github' })
-        ])
+  const linearLinkQuery = useQuery(trpc.integrations.getLink.queryOptions({ taskId, provider: 'linear' }))
+  const githubLinkQuery = useQuery(trpc.integrations.getLink.queryOptions({ taskId, provider: 'github' }))
 
-        const loadedLinks = [linearLink, githubLink].filter((link): link is ExternalLink => Boolean(link))
-        if (cancelled) return
-        setLinks(loadedLinks)
+  const links: ExternalLink[] = [linearLinkQuery.data, githubLinkQuery.data].filter((link): link is ExternalLink => Boolean(link))
 
-        if (loadedLinks.length === 0) {
-          setSyncStatusByLinkId({})
-          return
-        }
+  const syncStatusQueries = [
+    useQuery({
+      ...trpc.integrations.getTaskSyncStatus.queryOptions({ taskId, provider: 'linear' }),
+      enabled: !!linearLinkQuery.data,
+    }),
+    useQuery({
+      ...trpc.integrations.getTaskSyncStatus.queryOptions({ taskId, provider: 'github' }),
+      enabled: !!githubLinkQuery.data,
+    }),
+  ]
 
-        const statusEntries = await Promise.all(loadedLinks.map(async (link) => {
-          try {
-            const status = await trpcClient.integrations.getTaskSyncStatus.query({ taskId, provider: link.provider })
-            return [link.id, status] as const
-          } catch {
-            return [link.id, toUnknownSyncStatus(link, taskId)] as const
-          }
-        }))
-
-        if (cancelled) return
-        setSyncStatusByLinkId(Object.fromEntries(statusEntries))
-      } catch {
-        if (cancelled) return
-        setLinks([])
-        setSyncStatusByLinkId({})
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [taskId])
-
-  const refreshLinkSyncStatus = async (link: ExternalLink) => {
-    try {
-      const status = await trpcClient.integrations.getTaskSyncStatus.query({ taskId, provider: link.provider })
-      setSyncStatusByLinkId((current) => ({ ...current, [link.id]: status }))
-    } catch {
-      setSyncStatusByLinkId((current) => ({ ...current, [link.id]: toUnknownSyncStatus(link, taskId) }))
-    }
+  const syncStatusByLinkId: Record<string, TaskSyncStatus> = {}
+  if (linearLinkQuery.data && syncStatusQueries[0].data) {
+    syncStatusByLinkId[linearLinkQuery.data.id] = syncStatusQueries[0].data
+  } else if (linearLinkQuery.data) {
+    syncStatusByLinkId[linearLinkQuery.data.id] = toUnknownSyncStatus(linearLinkQuery.data, taskId)
   }
+  if (githubLinkQuery.data && syncStatusQueries[1].data) {
+    syncStatusByLinkId[githubLinkQuery.data.id] = syncStatusQueries[1].data
+  } else if (githubLinkQuery.data) {
+    syncStatusByLinkId[githubLinkQuery.data.id] = toUnknownSyncStatus(githubLinkQuery.data, taskId)
+  }
+
+  const refreshLinkSyncStatus = (link: ExternalLink) => {
+    queryClient.invalidateQueries({ queryKey: trpc.integrations.getTaskSyncStatus.queryKey({ taskId, provider: link.provider }) })
+  }
+
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
+  const syncNowMutation = useMutation(trpc.integrations.syncNow.mutationOptions())
+  const pullTaskMutation = useMutation(trpc.integrations.pullTask.mutationOptions())
+  const pushTaskMutation = useMutation(trpc.integrations.pushTask.mutationOptions())
+  const taskGetMutation = useMutation({
+    mutationFn: async (input: { id: string }) => {
+      const r = await queryClient.fetchQuery(trpc.task.get.queryOptions(input))
+      return r
+    },
+  })
 
   const setLinkLoading = (linkId: string, action: 'open' | 'pull' | 'push' | null) => {
     setLinkLoadingById((current) => {
@@ -672,11 +663,11 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     if (!link.external_url) return
     setLinkLoading(link.id, 'open')
     try {
-      await trpcClient.app.shell.openExternal.mutate({ url: link.external_url })
+      await openExternalMutation.mutateAsync({ url: link.external_url })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     } finally {
-      await refreshLinkSyncStatus(link)
+      refreshLinkSyncStatus(link)
       setLinkLoading(link.id, null)
     }
   }
@@ -685,31 +676,28 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     setLinkLoading(link.id, 'pull')
     try {
       if (link.provider === 'linear') {
-        const result = await trpcClient.integrations.syncNow.mutate({ taskId })
+        const result = await syncNowMutation.mutateAsync({ taskId })
         const errSuffix = result.errors.length > 0 ? ` (${result.errors.length} errors)` : ''
         const message = `${PROVIDER_LABELS[link.provider]} synced: ${result.pulled} pulled, ${result.pushed} pushed${errSuffix}`
         if (result.errors.length > 0) toast.error(message)
         else toast.success(message)
-        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
+        const refreshedTask = await taskGetMutation.mutateAsync({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
         return
       }
 
-      const result = await trpcClient.integrations.pullTask.mutate({
-        taskId,
-        provider: 'github'
-      })
+      const result = await pullTaskMutation.mutateAsync({ taskId, provider: 'github' })
       const message = result.message ?? (result.pulled ? 'Pulled remote changes from GitHub' : 'No pull performed')
       if (result.pulled) toast.success(message)
       else toast(message)
       if (result.pulled) {
-        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
+        const refreshedTask = await taskGetMutation.mutateAsync({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     } finally {
-      await refreshLinkSyncStatus(link)
+      refreshLinkSyncStatus(link)
       setLinkLoading(link.id, null)
     }
   }
@@ -718,28 +706,25 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     setLinkLoading(link.id, 'push')
     try {
       if (link.provider === 'linear') {
-        const result = await trpcClient.integrations.syncNow.mutate({ taskId })
+        const result = await syncNowMutation.mutateAsync({ taskId })
         const errSuffix = result.errors.length > 0 ? ` (${result.errors.length} errors)` : ''
         const message = `${PROVIDER_LABELS[link.provider]} synced: ${result.pulled} pulled, ${result.pushed} pushed${errSuffix}`
         if (result.pushed > 0) toast.success(message)
         else if (result.errors.length > 0) toast.error(message)
         else toast(message)
         if (result.pulled > 0) {
-          const refreshedTask = await trpcClient.task.get.query({ id: taskId })
+          const refreshedTask = await taskGetMutation.mutateAsync({ id: taskId })
           if (refreshedTask) onUpdate(refreshedTask)
         }
         return
       }
 
-      const result = await trpcClient.integrations.pushTask.mutate({
-        taskId,
-        provider: 'github'
-      })
+      const result = await pushTaskMutation.mutateAsync({ taskId, provider: 'github' })
       const message = result.message ?? (result.pushed ? 'Pushed local changes to GitHub' : 'No push performed')
       if (result.pushed) toast.success(message)
       else toast(message)
       if (result.pushed) {
-        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
+        const refreshedTask = await taskGetMutation.mutateAsync({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
       }
     } catch (error) {
