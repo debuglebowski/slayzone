@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useMemo, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Dialog,
   DialogContent,
@@ -20,39 +21,41 @@ interface BlockerDialogProps {
 }
 
 export function BlockerDialog({ taskId, projects, onClose }: BlockerDialogProps): React.JSX.Element {
-  const [allTasks, setAllTasks] = useState<Task[]>([])
-  const [blockers, setBlockers] = useState<Task[]>([])
+  const trpc = useTRPC()
   const [search, setSearch] = useState('')
+
+  const open = taskId !== null
+  const enabled = open && !!taskId
+
+  const { data: allTasks = [] } = useQuery(
+    trpc.task.getAll.queryOptions(undefined, { enabled }),
+  )
+  const { data: blockers = [] } = useQuery(
+    trpc.task.getBlockers.queryOptions(
+      { taskId: taskId ?? '' },
+      { enabled },
+    ),
+  )
+
+  const addBlocker = useMutation(trpc.task.addBlocker.mutationOptions())
 
   const columnsByProject = useMemo(
     () => new Map((projects ?? []).map((p) => [p.id, p.columns_config])),
     [projects]
   )
 
-  const open = taskId !== null
-
-  useEffect(() => {
-    if (!open || !taskId) return
-    Promise.all([
-      getTrpcVanillaClient().task.getAll.query(),
-      getTrpcVanillaClient().task.getBlockers.query({ taskId: taskId })
-    ]).then(([tasks, currentBlockers]) => {
-      setAllTasks(tasks.filter((t) => t.id !== taskId))
-      setBlockers(currentBlockers)
-      setSearch('')
-    })
-  }, [open, taskId])
-
   const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
     if (!taskId) return
-    await getTrpcVanillaClient().task.addBlocker.mutate({ taskId: taskId, blockerTaskId: blockerTaskId })
+    await addBlocker.mutateAsync({ taskId, blockerTaskId })
     onClose()
     window.dispatchEvent(new CustomEvent('slayzone:blocked-changed'))
   }
 
-  const availableBlockers = allTasks.filter(
-    (t) => !isTerminalStatus(t.status, columnsByProject.get(t.project_id)) && !blockers.some((b) => b.id === t.id)
-  )
+  const availableBlockers = allTasks
+    .filter((t: Task) => t.id !== taskId)
+    .filter(
+      (t) => !isTerminalStatus(t.status, columnsByProject.get(t.project_id)) && !blockers.some((b) => b.id === t.id)
+    )
   const filteredAvailableBlockers = availableBlockers.filter((t) => {
     const q = search.trim().toLowerCase()
     return !q || t.title.toLowerCase().includes(q)
