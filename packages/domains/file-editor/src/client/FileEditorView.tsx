@@ -384,7 +384,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
 
   const handleRevealInFinder = useCallback((filePath: string) => {
     showInFinderMutation.mutate({ rootPath: projectPath, targetPath: filePath })
-  }, [projectPath, trpcClient])
+  }, [projectPath, showInFinderMutation])
 
   const handleFileDragOver = useCallback((e: React.DragEvent) => {
     // Skip internal tree drags — let the tree handle them

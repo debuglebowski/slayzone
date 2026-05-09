@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Play, Square, RotateCcw, Plus, Trash2, Cpu, Pencil, FileText, MoreHorizontal, CornerDownLeft, Info, Loader2, Globe } from 'lucide-react'
@@ -89,7 +90,8 @@ function ProcessRow({
   onOpenUrl?: (url: string) => void
   logEndRef: (el: HTMLDivElement | null) => void
 }) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
   const serverUrl = proc.status === 'running' ? proc.serverUrl ?? null : null
   return (
     <div className="rounded-lg border border-border bg-surface-3 overflow-hidden group/row">
@@ -190,7 +192,7 @@ function ProcessRow({
             onClick={(e) => {
               e.preventDefault()
               if (onOpenUrl) onOpenUrl(serverUrl)
-              else void trpcClient.app.shell.openExternal.mutate({ url: serverUrl })
+              else openExternalMutation.mutate({ url: serverUrl })
             }}
             className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-sky-400 bg-sky-400/10 border-sky-400/20 hover:bg-sky-400/20 transition-colors"
             title={`Open ${serverUrl}`}
@@ -256,6 +258,12 @@ function SectionHeader({ label }: { label: string }) {
 export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOpenUrl }: { taskId: string | null; projectId: string | null; cwd?: string | null; terminalSessionId?: string; onOpenUrl?: (url: string) => void }) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+  const killTaskMutation = useMutation(trpc.processes.killTask.mutationOptions())
+  const killMutation = useMutation(trpc.processes.kill.mutationOptions())
+  const stopMutation = useMutation(trpc.processes.stop.mutationOptions())
+  const restartMutation = useMutation(trpc.processes.restart.mutationOptions())
+  const writeMutation = useMutation(trpc.pty.write.mutationOptions())
   const [processes, setProcesses] = useState<ProcessEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
@@ -266,7 +274,7 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
 
   useEffect(() => {
     setLoading(true)
-    trpcClient.processes.listForTask.query({ taskId, projectId }).then((list) => {
+    queryClient.fetchQuery(trpc.processes.listForTask.queryOptions({ taskId, projectId })).then((list) => {
       const entries = (list as ProcessEntry[]).map(p => {
         if (p.serverUrl || p.status !== 'running') return p
         for (let i = p.logBuffer.length - 1; i >= 0; i--) {
@@ -320,7 +328,7 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
   useSubscription(
     trpc.app.menu.onCloseTask.subscriptionOptions(undefined, {
       onData: (closedTaskId) => {
-        if (taskId && (closedTaskId as string) === taskId) trpcClient.processes.killTask.mutate({ taskId })
+        if (taskId && (closedTaskId as string) === taskId) killTaskMutation.mutate({ taskId })
       },
     }),
   )
@@ -332,9 +340,9 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
   }, [processes, expandedLogs])
 
   const refreshList = useCallback(async () => {
-    const list = await trpcClient.processes.listForTask.query({ taskId, projectId })
+    const list = await queryClient.fetchQuery(trpc.processes.listForTask.queryOptions({ taskId, projectId }))
     setProcesses(list as ProcessEntry[])
-  }, [taskId, projectId])
+  }, [taskId, projectId, queryClient, trpc])
 
   const toggleLog = useCallback((id: string) => {
     setExpandedLogs(prev => {
@@ -346,23 +354,23 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
   }, [])
 
   const handleKill = useCallback(async (id: string) => {
-    await trpcClient.processes.kill.mutate({ processId: id })
+    await killMutation.mutateAsync({ processId: id })
     setProcesses(prev => prev.filter(p => p.id !== id))
     setExpandedLogs(prev => { const next = new Set(prev); next.delete(id); return next })
   }, [])
 
   const handleStop = useCallback(async (id: string) => {
-    await trpcClient.processes.stop.mutate({ processId: id })
+    await stopMutation.mutateAsync({ processId: id })
   }, [])
 
   const handleRestart = useCallback(async (id: string) => {
-    await trpcClient.processes.restart.mutate({ processId: id })
+    await restartMutation.mutateAsync({ processId: id })
   }, [])
 
   const handleInject = useCallback((proc: ProcessEntry) => {
     if (proc.logBuffer.length === 0) return
     const output = `\r\n--- ${proc.label} output ---\r\n${proc.logBuffer.join('\r\n')}\r\n---\r\n`
-    void trpcClient.pty.write.mutate({ sessionId: terminalSessionId ?? `${taskId}:${taskId}`, data: output })
+    writeMutation.mutate({ sessionId: terminalSessionId ?? `${taskId}:${taskId}`, data: output })
   }, [taskId, terminalSessionId])
 
   const openNewDialog = useCallback(() => {
