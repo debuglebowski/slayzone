@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Archive, FileText } from 'lucide-react'
 import { cn, PulseGrid } from '@slayzone/ui'
 import type { StashEntry } from '../shared/types'
@@ -29,6 +29,7 @@ function formatAge(createdAt: number): string {
 }
 
 export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function StashTab({ visible, pollIntervalMs = 5000, showAll }, ref) {
+  const trpcClient = useTRPCClient()
   const { projectPath, activeTask } = useGitPanelContext()
   const repoPath = activeTask?.worktree_path ?? projectPath
 
@@ -44,8 +45,8 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
     setLoading(true)
     try {
       const [list, branch] = await Promise.all([
-        getTrpcVanillaClient().worktrees.listStashes.query({ repoPath: repoPath }),
-        getTrpcVanillaClient().worktrees.getCurrentBranch.query({ path: repoPath }).catch(() => null)
+        trpcClient.worktrees.listStashes.query({ repoPath: repoPath }),
+        trpcClient.worktrees.getCurrentBranch.query({ path: repoPath }).catch(() => null)
       ])
       setStashes(list)
       setCurrentBranch(branch)
@@ -82,7 +83,7 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
     if (!repoPath || selected === null) { setDiff([]); return }
     let cancelled = false
     setDiffLoading(true)
-    getTrpcVanillaClient().worktrees.getStashDiff.query({ repoPath: repoPath, index: selected.index }).then((patch) => {
+    trpcClient.worktrees.getStashDiff.query({ repoPath: repoPath, index: selected.index }).then((patch) => {
       if (cancelled) return
       setDiff(parseUnifiedDiff(patch))
     }).finally(() => {

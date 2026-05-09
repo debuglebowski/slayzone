@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { GitBranch, GitMerge, GitPullRequest, FolderTree, FolderGit2, Link2, Loader2, AlertTriangle, ChevronDown, Trash2 } from 'lucide-react'
 import {
   Button, Tooltip, TooltipContent, TooltipTrigger,
@@ -198,6 +198,7 @@ function BranchPickerDialog({ open, onOpenChange, projectPath, onSelect }: {
   projectPath: string | null
   onSelect: (branch: string) => void
 }) {
+  const trpcClient = useTRPCClient()
   const [branches, setBranches] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
@@ -205,11 +206,11 @@ function BranchPickerDialog({ open, onOpenChange, projectPath, onSelect }: {
   useEffect(() => {
     if (!open || !projectPath) return
     setLoading(true)
-    getTrpcVanillaClient().worktrees.listBranches.query({ path: projectPath })
+    trpcClient.worktrees.listBranches.query({ path: projectPath })
       .then(setBranches)
       .catch(() => setBranches([]))
       .finally(() => setLoading(false))
-  }, [open, projectPath])
+  }, [open, projectPath, trpcClient])
 
   const filtered = branches.filter(b =>
     b.toLowerCase().includes(search.toLowerCase())

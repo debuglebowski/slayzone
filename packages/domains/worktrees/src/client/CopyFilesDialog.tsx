@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Loader2, Folder, File, ChevronRight } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -104,6 +104,7 @@ function NodeRow({
 }
 
 export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: CopyFilesDialogProps) {
+  const trpcClient = useTRPCClient()
   const [presets, setPresets] = useState<WorktreeCopyPreset[]>([])
   const [selectedPresetId, setSelectedPresetId] = useState<string>('')
   const [tree, setTree] = useState<IgnoredFileNode[]>([])
@@ -118,7 +119,7 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
     setTree([])
     setTreeLoaded(false)
 
-    getTrpcVanillaClient().settings.get.query({ key: 'worktree_copy_presets' }).then((raw) => {
+    trpcClient.settings.get.query({ key: 'worktree_copy_presets' }).then((raw) => {
       const parsed = raw ? JSON.parse(raw) as WorktreeCopyPreset[] : null
       const list = parsed && parsed.length > 0 ? parsed : DEFAULT_COPY_PRESETS
       setPresets(list)
@@ -129,7 +130,7 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
     })
 
     setLoading(true)
-    getTrpcVanillaClient().worktrees.getIgnoredFileTree.query({ repoPath: repoPath }).then(nodes => {
+    trpcClient.worktrees.getIgnoredFileTree.query({ repoPath: repoPath }).then(nodes => {
       setTree(nodes)
       setTreeLoaded(true)
       setLoading(false)

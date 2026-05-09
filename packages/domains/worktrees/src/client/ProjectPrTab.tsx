@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   ExternalLink,
   GitPullRequest,
@@ -31,6 +31,7 @@ const DEFAULT_FILTER: PrFilterState = {
 }
 
 function usePrFilterState(projectId: string | null) {
+  const trpcClient = useTRPCClient()
   const [filter, setFilter] = useState<PrFilterState>(DEFAULT_FILTER)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const key = projectId ? `pr-filter:${projectId}` : null
@@ -39,11 +40,11 @@ function usePrFilterState(projectId: string | null) {
     if (!key) return
     ;(async () => {
       try {
-        const value = await getTrpcVanillaClient().settings.get.query({ key: key })
+        const value = await trpcClient.settings.get.query({ key: key })
         if (value) setFilter({ ...DEFAULT_FILTER, ...JSON.parse(value) })
       } catch { /* ignore */ }
     })()
-  }, [key])
+  }, [key, trpcClient])
 
   const updateFilter = useCallback((next: Partial<PrFilterState>) => {
     setFilter(prev => {
@@ -51,17 +52,18 @@ function usePrFilterState(projectId: string | null) {
       if (key) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
-          getTrpcVanillaClient().settings.set.mutate({ key: key, value: JSON.stringify(updated) })
+          trpcClient.settings.set.mutate({ key: key, value: JSON.stringify(updated) })
         }, 500)
       }
       return updated
     })
-  }, [key])
+  }, [key, trpcClient])
 
   return { filter, updateFilter }
 }
 
 export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: ProjectPrTabProps) {
+  const trpcClient = useTRPCClient()
   const [prs, setPrs] = useState<GhPullRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -77,7 +79,7 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
       setLoading(true)
       setError(null)
       try {
-        const list = await getTrpcVanillaClient().worktrees.listOpenPrs.query({ repoPath: projectPath })
+        const list = await trpcClient.worktrees.listOpenPrs.query({ repoPath: projectPath })
         if (!cancelled) setPrs(list)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
@@ -228,7 +230,7 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
                   </div>
                   <button
                     className="shrink-0 p-1 hover:bg-accent rounded"
-                    onClick={() => getTrpcVanillaClient().app.shell.openExternal.mutate({ url: pr.url })}
+                    onClick={() => trpcClient.app.shell.openExternal.mutate({ url: pr.url })}
                     title="Open in browser"
                   >
                     <ExternalLink className="h-3 w-3 text-muted-foreground" />

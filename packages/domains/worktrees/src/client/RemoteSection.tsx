@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { ChevronDown, Loader2, Download, Upload } from 'lucide-react'
 import {
   Button,
@@ -30,6 +30,7 @@ interface RemoteSectionProps {
 }
 
 export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: RemoteSectionProps) {
+  const trpcClient = useTRPCClient()
   const [pushing, setPushing] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [pushMenuOpen, setPushMenuOpen] = useState(false)
@@ -40,7 +41,7 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
     setPushMenuOpen(false)
     setForcePushConfirmOpen(false)
     try {
-      const result = await getTrpcVanillaClient().worktrees.push.mutate({ path: targetPath, branch: branch ?? undefined, force: force })
+      const result = await trpcClient.worktrees.push.mutate({ path: targetPath, branch: branch ?? undefined, force: force })
       if (!result.success) {
         toast(result.error ?? 'Push failed')
       } else {
@@ -52,12 +53,12 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
     } finally {
       setPushing(false)
     }
-  }, [targetPath, branch, onSyncDone])
+  }, [targetPath, branch, onSyncDone, trpcClient])
 
   const handlePull = useCallback(async () => {
     setPulling(true)
     try {
-      const result = await getTrpcVanillaClient().worktrees.pull.mutate({ path: targetPath })
+      const result = await trpcClient.worktrees.pull.mutate({ path: targetPath })
       if (!result.success) {
         toast(result.error ?? 'Pull failed')
       } else {
@@ -69,7 +70,7 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
     } finally {
       setPulling(false)
     }
-  }, [targetPath, onSyncDone])
+  }, [targetPath, onSyncDone, trpcClient])
 
   const behind = upstreamAB?.behind ?? 0
   const ahead = upstreamAB?.ahead ?? 0

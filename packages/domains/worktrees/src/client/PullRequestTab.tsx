@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   ExternalLink,
   GitPullRequest,
@@ -71,6 +71,7 @@ interface PullRequestTabProps {
 }
 
 export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTaskUpdated }: PullRequestTabProps) {
+  const trpcClient = useTRPCClient()
   const [ghInstalled, setGhInstalled] = useState<boolean | null>(null)
   const [pr, setPr] = useState<GhPullRequest | null>(null)
   const [loading, setLoading] = useState(true)
@@ -85,13 +86,13 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
     let cancelled = false
     ;(async () => {
       try {
-        const installed = await getTrpcVanillaClient().worktrees.checkGhInstalled.query()
+        const installed = await trpcClient.worktrees.checkGhInstalled.query()
         if (cancelled) return
         setGhInstalled(installed)
         if (!installed) { setLoading(false); return }
 
         if (task.pr_url) {
-          const data = await getTrpcVanillaClient().worktrees.getPrByUrl.query({ repoPath: projectPath, url: task.pr_url })
+          const data = await trpcClient.worktrees.getPrByUrl.query({ repoPath: projectPath, url: task.pr_url })
           if (!cancelled) setPr(data)
         }
       } catch { /* ignore */ }
@@ -104,7 +105,7 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
   const refreshPr = useCallback(async () => {
     if (!projectPath || !task.pr_url) return
     try {
-      const data = await getTrpcVanillaClient().worktrees.getPrByUrl.query({ repoPath: projectPath, url: task.pr_url })
+      const data = await trpcClient.worktrees.getPrByUrl.query({ repoPath: projectPath, url: task.pr_url })
       if (data) setPr(data)
     } catch { /* ignore — background refresh */ }
   }, [projectPath, task.pr_url])
@@ -129,7 +130,7 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
       const updated = await onUpdateTask({ id: task.id, prUrl: url })
       onTaskUpdated(updated)
       if (projectPath) {
-        const data = await getTrpcVanillaClient().worktrees.getPrByUrl.query({ repoPath: projectPath, url: url })
+        const data = await trpcClient.worktrees.getPrByUrl.query({ repoPath: projectPath, url: url })
         setPr(data)
       }
       setLinkOpen(false)
@@ -142,7 +143,7 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
     const updated = await onUpdateTask({ id: task.id, prUrl: url })
     onTaskUpdated(updated)
     if (projectPath) {
-      const data = await getTrpcVanillaClient().worktrees.getPrByUrl.query({ repoPath: projectPath, url: url })
+      const data = await trpcClient.worktrees.getPrByUrl.query({ repoPath: projectPath, url: url })
       setPr(data)
     }
     setCreateOpen(false)
@@ -185,7 +186,7 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
           <a
             className="text-primary hover:underline truncate"
             href="#"
-            onClick={(e) => { e.preventDefault(); getTrpcVanillaClient().app.shell.openExternal.mutate({ url: task.pr_url! }) }}
+            onClick={(e) => { e.preventDefault(); trpcClient.app.shell.openExternal.mutate({ url: task.pr_url! }) }}
           >
             {task.pr_url}
           </a>
@@ -239,6 +240,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
   onUnlink: () => void
   onRefreshPr: () => Promise<void>
 }) {
+  const trpcClient = useTRPCClient()
   const [comments, setComments] = useState<GhPrTimelineEvent[]>([])
   const [loadingComments, setLoadingComments] = useState(true)
   const [commentBody, setCommentBody] = useState('')
@@ -269,7 +271,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
 
   const fetchComments = useCallback(async () => {
     try {
-      const data = await getTrpcVanillaClient().worktrees.getPrComments.query({ repoPath: projectPath, prNumber: pr.number })
+      const data = await trpcClient.worktrees.getPrComments.query({ repoPath: projectPath, prNumber: pr.number })
       setComments(data)
     } catch { /* ignore */ }
     setLoadingComments(false)
@@ -291,7 +293,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     if (!visible) return
     ;(async () => {
       try {
-        const user = await getTrpcVanillaClient().worktrees.getGhUser.query({ repoPath: projectPath })
+        const user = await trpcClient.worktrees.getGhUser.query({ repoPath: projectPath })
         setGhUser(user)
       } catch { /* ignore */ }
     })()
@@ -317,7 +319,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     setSubmitting(true)
     setCommentError(null)
     try {
-      await getTrpcVanillaClient().worktrees.addPrComment.mutate({ repoPath: projectPath, prNumber: pr.number, body: commentBody.trim() })
+      await trpcClient.worktrees.addPrComment.mutate({ repoPath: projectPath, prNumber: pr.number, body: commentBody.trim() })
       setCommentBody('')
       if (textareaRef.current) textareaRef.current.style.height = 'auto'
       await fetchComments()
@@ -348,7 +350,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     if (!editingId || !editBody.trim()) return
     setEditSubmitting(true)
     try {
-      await getTrpcVanillaClient().worktrees.editPrComment.mutate({ repoPath: projectPath, commentId: editingId, body: editBody.trim() })
+      await trpcClient.worktrees.editPrComment.mutate({ repoPath: projectPath, commentId: editingId, body: editBody.trim() })
       setEditingId(null)
       setEditBody('')
       await fetchComments()
@@ -400,7 +402,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     setMerging(true)
     setMergeError(null)
     try {
-      await getTrpcVanillaClient().worktrees.mergePr.mutate({
+      await trpcClient.worktrees.mergePr.mutate({
         repoPath: projectPath,
         prNumber: pr.number,
         strategy: mergeStrategy,
@@ -421,7 +423,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     setDiffLoading(true)
     setDiffError(null)
     try {
-      const raw = await getTrpcVanillaClient().worktrees.getPrDiff.query({ repoPath: projectPath, prNumber: pr.number })
+      const raw = await trpcClient.worktrees.getPrDiff.query({ repoPath: projectPath, prNumber: pr.number })
       setDiffFiles(parseUnifiedDiff(raw))
     } catch (err) {
       setDiffError(err instanceof Error ? err.message : 'Failed to load diff')
@@ -482,7 +484,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <IconButton aria-label="Open in browser" variant="ghost" className="h-6 w-6" onClick={() => getTrpcVanillaClient().app.shell.openExternal.mutate({ url: pr.url })}>
+                  <IconButton aria-label="Open in browser" variant="ghost" className="h-6 w-6" onClick={() => trpcClient.app.shell.openExternal.mutate({ url: pr.url })}>
                     <ExternalLink className="h-3 w-3" />
                   </IconButton>
                 </TooltipTrigger>
@@ -1189,6 +1191,7 @@ export function CreatePrDialog({ open, onOpenChange, task, projectPath, onCreate
   projectPath: string
   onCreated: (url: string) => void
 }) {
+  const trpcClient = useTRPCClient()
   const targetPath = task.worktree_path ?? projectPath
   const [baseBranch, setBaseBranch] = useState(task.worktree_parent_branch ?? '')
   const [title, setTitle] = useState(task.title)
@@ -1200,7 +1203,7 @@ export function CreatePrDialog({ open, onOpenChange, task, projectPath, onCreate
   // Resolve default branch when worktree_parent_branch is not set
   useEffect(() => {
     if (!open || task.worktree_parent_branch) return
-    getTrpcVanillaClient().worktrees.getDefaultBranch.query({ path: projectPath }).then(setBaseBranch).catch(() => setBaseBranch('main'))
+    trpcClient.worktrees.getDefaultBranch.query({ path: projectPath }).then(setBaseBranch).catch(() => setBaseBranch('main'))
   }, [open, projectPath, task.worktree_parent_branch])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1209,7 +1212,7 @@ export function CreatePrDialog({ open, onOpenChange, task, projectPath, onCreate
     setCreating(true)
     setError(null)
     try {
-      const result = await getTrpcVanillaClient().worktrees.createPr.mutate({
+      const result = await trpcClient.worktrees.createPr.mutate({
         repoPath: targetPath,
         title: title.trim(),
         body: body.trim(),
@@ -1284,6 +1287,7 @@ export function LinkPrDialog({ open, onOpenChange, projectPath, onLink, error }:
   onLink: (url: string) => void
   error: string | null
 }) {
+  const trpcClient = useTRPCClient()
   const [prs, setPrs] = useState<GhPullRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
@@ -1294,7 +1298,7 @@ export function LinkPrDialog({ open, onOpenChange, projectPath, onLink, error }:
     setFetchError(null)
     ;(async () => {
       try {
-        const list = await getTrpcVanillaClient().worktrees.listOpenPrs.query({ repoPath: projectPath })
+        const list = await trpcClient.worktrees.listOpenPrs.query({ repoPath: projectPath })
         setPrs(list)
       } catch (err) {
         setFetchError(err instanceof Error ? err.message : String(err))

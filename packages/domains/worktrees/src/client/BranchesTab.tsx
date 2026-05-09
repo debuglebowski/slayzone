@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { RefreshCw, Loader2, SlidersHorizontal, Info, List, Layers } from 'lucide-react'
 import {
   IconButton, Switch, cn, toast,
@@ -43,6 +43,7 @@ export function useBranchGraph(
   /** Unique key for persisting this instance's display config (e.g. 'task:123', 'project:/path') */
   configKey?: string,
 ): BranchGraphState {
+  const trpcClient = useTRPCClient()
   const [dagGraph, setDagGraph] = useState<ResolvedGraph | null>(null)
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
@@ -55,12 +56,12 @@ export function useBranchGraph(
   // Load per-instance config (if saved), otherwise global defaults
   useEffect(() => {
     const load = async () => {
-      const instanceJson = configKey ? await getTrpcVanillaClient().settings.get.query({ key: `commit_graph:${configKey}` }) : null
+      const instanceJson = configKey ? await trpcClient.settings.get.query({ key: `commit_graph:${configKey}` }) : null
       if (instanceJson) {
         setConfig({ ...JSON.parse(instanceJson), baseBranch: '' })
         return
       }
-      const globalJson = await getTrpcVanillaClient().settings.get.query({ key: 'commit_graph_config' })
+      const globalJson = await trpcClient.settings.get.query({ key: 'commit_graph_config' })
       if (globalJson) {
         setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' })
       } else {
@@ -76,7 +77,7 @@ export function useBranchGraph(
       const next = typeof updater === 'function' ? updater(prev) : updater
       if (configKey) {
         const { baseBranch: _, ...persisted } = next
-        getTrpcVanillaClient().settings.set.mutate({ key: `commit_graph:${configKey}`, value: JSON.stringify(persisted) })
+        trpcClient.settings.set.mutate({ key: `commit_graph:${configKey}`, value: JSON.stringify(persisted) })
       }
       return next
     })
@@ -85,9 +86,9 @@ export function useBranchGraph(
   // Reset to global defaults (clear per-instance config)
   const resetConfig = useCallback(async () => {
     if (configKey) {
-      await getTrpcVanillaClient().settings.set.mutate({ key: `commit_graph:${configKey}`, value: '' })
+      await trpcClient.settings.set.mutate({ key: `commit_graph:${configKey}`, value: '' })
     }
-    const globalJson = await getTrpcVanillaClient().settings.get.query({ key: 'commit_graph_config' })
+    const globalJson = await trpcClient.settings.get.query({ key: 'commit_graph_config' })
     if (globalJson) {
       setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' })
     } else {
@@ -103,7 +104,7 @@ export function useBranchGraph(
   const fetchData = useCallback(async () => {
     if (!projectPath) return
     try {
-      const branch = await getTrpcVanillaClient().worktrees.getCurrentBranch.query({ path: projectPath })
+      const branch = await trpcClient.worktrees.getCurrentBranch.query({ path: projectPath })
       if (branch) setCurrentBranch(branch)
 
       const baseBranch = config.baseBranch || defaultBaseBranch || branch || 'main'
@@ -111,12 +112,12 @@ export function useBranchGraph(
       const branchSet = new Set<string>([baseBranch])
 
       if (config.showBranches) {
-        const result = await getTrpcVanillaClient().worktrees.resolveChildBranches.query({ path: projectPath, baseBranch: baseBranch })
+        const result = await trpcClient.worktrees.resolveChildBranches.query({ path: projectPath, baseBranch: baseBranch })
         for (const child of result.children) branchSet.add(child)
         for (const merged of result.merged) branchSet.add(merged)
       }
 
-      const graph = await getTrpcVanillaClient().worktrees.getResolvedCommitDag.query({
+      const graph = await trpcClient.worktrees.getResolvedCommitDag.query({
         path: projectPath, limit: FETCH_LIMIT, branches: [...branchSet], baseBranch,
       })
       setDagGraph(graph)
@@ -143,7 +144,7 @@ export function useBranchGraph(
     if (!projectPath) return
     setFetching(true)
     try {
-      await getTrpcVanillaClient().worktrees.fetch.mutate({ path: projectPath })
+      await trpcClient.worktrees.fetch.mutate({ path: projectPath })
       await fetchData()
       toast('Fetched from remote')
     } catch {

@@ -1,5 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Plus, Minus, Undo2, ChevronRight, GitMerge, CheckCircle2, FileDiff, UnfoldVertical, FoldVertical } from 'lucide-react'
 import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/react-virtual'
 import {
@@ -200,6 +200,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
   onCommitAndContinueMerge,
   onAbortMerge
 }, ref) {
+  const trpcClient = useTRPCClient()
   const isMergeMode = mergeState === 'uncommitted'
   const { diffContextLines, diffIgnoreWhitespace, diffContinuousFlow, diffTreeCollapsed, diffSideBySide, diffWrap } = useAppearance()
   const targetPath = useMemo(() => task?.worktree_path ?? projectPath, [task?.worktree_path, projectPath])
@@ -234,7 +235,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     const taskId = task.id
     const arr = [...collapsedFiles]
     saveTimerRef.current = setTimeout(() => {
-      void getTrpcVanillaClient().task.update.mutate({ id: taskId, diffCollapsedFiles: arr })
+      void trpcClient.task.update.mutate({ id: taskId, diffCollapsedFiles: arr })
     }, 400)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [collapsedFiles, task?.id])
@@ -428,7 +429,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
 
     const added = curr.filter((f) => !prevSet.has(f))
     for (const filePath of added) {
-      getTrpcVanillaClient().worktrees.getUntrackedFileDiff.query({ repoPath: targetPath, filePath: filePath }).then((patch) => {
+      trpcClient.worktrees.getUntrackedFileDiff.query({ repoPath: targetPath, filePath: filePath }).then((patch) => {
         const parsed = parseUnifiedDiff(patch)
         if (parsed.length > 0) {
           setUntrackedDiffs((old) => new Map(old).set(filePath, parsed[0]))
@@ -581,9 +582,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     if (!targetPath) return
     try {
       if (action === 'stageAll') {
-        await getTrpcVanillaClient().worktrees.stageAll.mutate({ path: targetPath })
+        await trpcClient.worktrees.stageAll.mutate({ path: targetPath })
       } else {
-        await getTrpcVanillaClient().worktrees.unstageAll.mutate({ path: targetPath })
+        await trpcClient.worktrees.unstageAll.mutate({ path: targetPath })
       }
       await refreshRef.current()
     } catch {
@@ -595,9 +596,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     if (!targetPath) return
     try {
       if (source === 'unstaged') {
-        await getTrpcVanillaClient().worktrees.stageFile.mutate({ path: targetPath, filePath: filePath })
+        await trpcClient.worktrees.stageFile.mutate({ path: targetPath, filePath: filePath })
       } else {
-        await getTrpcVanillaClient().worktrees.unstageFile.mutate({ path: targetPath, filePath: filePath })
+        await trpcClient.worktrees.unstageFile.mutate({ path: targetPath, filePath: filePath })
       }
       await refreshRef.current()
     } catch {
@@ -608,7 +609,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
   const handleDiscardFile = useCallback(async (filePath: string, untracked?: boolean) => {
     if (!targetPath) return
     try {
-      await getTrpcVanillaClient().worktrees.discardFile.mutate({ path: targetPath, filePath, untracked })
+      await trpcClient.worktrees.discardFile.mutate({ path: targetPath, filePath, untracked })
       await refreshRef.current()
     } catch {
       // silently fail — next poll will correct state
@@ -619,9 +620,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     if (!targetPath) return
     try {
       if (source === 'unstaged') {
-        await getTrpcVanillaClient().worktrees.stageFile.mutate({ path: targetPath, filePath: folderPath })
+        await trpcClient.worktrees.stageFile.mutate({ path: targetPath, filePath: folderPath })
       } else {
-        await getTrpcVanillaClient().worktrees.unstageFile.mutate({ path: targetPath, filePath: folderPath })
+        await trpcClient.worktrees.unstageFile.mutate({ path: targetPath, filePath: folderPath })
       }
       await refreshRef.current()
     } catch {
@@ -633,7 +634,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     if (!targetPath || !commitMessage.trim() || stagedEntries.length === 0) return
     setCommitting(true)
     try {
-      await getTrpcVanillaClient().worktrees.commitFiles.mutate({ repoPath: targetPath, message: commitMessage.trim() })
+      await trpcClient.worktrees.commitFiles.mutate({ repoPath: targetPath, message: commitMessage.trim() })
       setCommitMessage('')
       await refreshRef.current()
     } catch (err) {

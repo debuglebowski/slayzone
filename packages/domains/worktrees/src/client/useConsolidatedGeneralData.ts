@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest } from '../shared/types'
 import {
@@ -92,6 +92,7 @@ export function useConsolidatedGeneralData(
   pollIntervalMs: number,
   onUpdateTask: (data: UpdateTaskInput) => Promise<Task>
 ): ConsolidatedGeneralData {
+  const trpcClient = useTRPCClient()
   const hasWorktree = !!task.worktree_path
   const targetPath = task.worktree_path ?? task.base_dir ?? projectPath
   const parentBranch = task.worktree_parent_branch
@@ -130,13 +131,13 @@ export function useConsolidatedGeneralData(
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return
     try {
-      const isRepo = await getTrpcVanillaClient().worktrees.isGitRepo.query({ path: projectPath })
+      const isRepo = await trpcClient.worktrees.isGitRepo.query({ path: projectPath })
       setIsGitRepo(isRepo)
       if (!isRepo) return
 
       const [branch, remote] = await Promise.all([
-        getTrpcVanillaClient().worktrees.getCurrentBranch.query({ path: projectPath }),
-        getTrpcVanillaClient().worktrees.getRemoteUrl.query({ path: projectPath })
+        trpcClient.worktrees.getCurrentBranch.query({ path: projectPath }),
+        trpcClient.worktrees.getRemoteUrl.query({ path: projectPath })
       ])
       setCurrentBranch(branch)
       setRemoteUrl(remote)
@@ -144,8 +145,8 @@ export function useConsolidatedGeneralData(
       if (targetPath) {
         const activeBranch = hasWorktree ? worktreeBranch : branch
         const [status, uab] = await Promise.all([
-          getTrpcVanillaClient().worktrees.getStatusSummary.query({ repoPath: targetPath }),
-          activeBranch ? getTrpcVanillaClient().worktrees.getAheadBehindUpstream.query({ path: targetPath, branch: activeBranch }) : Promise.resolve(null)
+          trpcClient.worktrees.getStatusSummary.query({ repoPath: targetPath }),
+          activeBranch ? trpcClient.worktrees.getAheadBehindUpstream.query({ path: targetPath, branch: activeBranch }) : Promise.resolve(null)
         ])
         setStatusSummary(status)
         setUpstreamAB(uab)
@@ -157,14 +158,14 @@ export function useConsolidatedGeneralData(
   const fetchBranchData = useCallback(async () => {
     if (!targetPath || !parentBranch) return
     try {
-      const branch = await getTrpcVanillaClient().worktrees.getCurrentBranch.query({ path: targetPath })
+      const branch = await trpcClient.worktrees.getCurrentBranch.query({ path: targetPath })
       setTaskBranch(branch)
       if (!branch) return
 
       const repoPath = projectPath || targetPath
 
       // Get fork point + counts for status display
-      const result = await getTrpcVanillaClient().worktrees.getResolvedForkGraph.query({
+      const result = await trpcClient.worktrees.getResolvedForkGraph.query({
         targetPath, repoPath, activeBranch: branch, compareBranch: parentBranch,
         activeBranchLabel: branch, compareBranchLabel: parentBranch,
       })
@@ -173,7 +174,7 @@ export function useConsolidatedGeneralData(
       setBaseCount(result?.baseCount ?? 0)
 
       if (result?.forkPoint) {
-        const stats = await getTrpcVanillaClient().worktrees.getDiffStats.query({ path: targetPath, ref: parentBranch })
+        const stats = await trpcClient.worktrees.getDiffStats.query({ path: targetPath, ref: parentBranch })
         setDiffStats(stats)
       } else {
         setDiffStats(null)
@@ -184,7 +185,7 @@ export function useConsolidatedGeneralData(
   // Worktree branch
   useEffect(() => {
     if (!task.worktree_path) { setWorktreeBranch(null); return }
-    getTrpcVanillaClient().worktrees.getCurrentBranch.query({ path: task.worktree_path }).then(setWorktreeBranch).catch(() => setWorktreeBranch(null))
+    trpcClient.worktrees.getCurrentBranch.query({ path: task.worktree_path }).then(setWorktreeBranch).catch(() => setWorktreeBranch(null))
   }, [task.worktree_path])
 
   // Poll general data
@@ -214,9 +215,9 @@ export function useConsolidatedGeneralData(
     const repoPath = projectPath || targetPath
     if (!repoPath) return
     if (task.pr_url) {
-      getTrpcVanillaClient().worktrees.getPrByUrl.query({ repoPath: repoPath, url: task.pr_url }).then(setPr).catch(() => setPr(null))
+      trpcClient.worktrees.getPrByUrl.query({ repoPath: repoPath, url: task.pr_url }).then(setPr).catch(() => setPr(null))
     } else if (activeBranch) {
-      getTrpcVanillaClient().worktrees.listOpenPrs.query({ repoPath: repoPath })
+      trpcClient.worktrees.listOpenPrs.query({ repoPath: repoPath })
         .then(prs => setPr(prs.find(p => p.headRefName === activeBranch) ?? null))
         .catch(() => setPr(null))
     }
@@ -225,7 +226,7 @@ export function useConsolidatedGeneralData(
   // Metadata — one-time per worktree path
   useEffect(() => {
     if (!task.worktree_path) return
-    getTrpcVanillaClient().worktrees.getWorktreeMetadata.query({ path: task.worktree_path })
+    trpcClient.worktrees.getWorktreeMetadata.query({ path: task.worktree_path })
       .then(setMetadata).catch(() => setMetadata(null))
   }, [task.worktree_path])
 
@@ -239,9 +240,9 @@ export function useConsolidatedGeneralData(
     if (!projectPath) return
     setInitializing(true)
     try {
-      await getTrpcVanillaClient().worktrees.init.mutate({ path: projectPath })
+      await trpcClient.worktrees.init.mutate({ path: projectPath })
       setIsGitRepo(true)
-      const branch = await getTrpcVanillaClient().worktrees.getCurrentBranch.query({ path: projectPath })
+      const branch = await trpcClient.worktrees.getCurrentBranch.query({ path: projectPath })
       setCurrentBranch(branch)
     } catch { /* ignore */ }
     finally { setInitializing(false) }
@@ -250,7 +251,7 @@ export function useConsolidatedGeneralData(
   /** Resolve worktree path params (shared by direct create and ask-dialog flows) */
   const resolveWorktreeParams = useCallback(async () => {
     if (!projectPath) return null
-    const basePathTemplate = (await getTrpcVanillaClient().settings.get.query({ key: 'worktree_base_path' })) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+    const basePathTemplate = (await trpcClient.settings.get.query({ key: 'worktree_base_path' })) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
     const basePath = resolveWorktreeBasePathTemplate(basePathTemplate, projectPath)
     const branch = slugify(task.title) || `task-${task.id.slice(0, 8)}`
     const worktreePath = joinWorktreePath(basePath, branch)
@@ -266,14 +267,14 @@ export function useConsolidatedGeneralData(
   ) => {
     if (!projectPath) return
     // Omit projectId so server skips copy resolution — we handle it here
-    await getTrpcVanillaClient().worktrees.createWorktree.mutate({
+    await trpcClient.worktrees.createWorktree.mutate({
       repoPath: projectPath, targetPath: worktreePath,
       ...(useExistingBranch ? { sourceBranch: branch } : { branch })
     })
     if (filesToCopy === 'all') {
-      await getTrpcVanillaClient().worktrees.copyIgnoredFiles.mutate({ repoPath: projectPath, worktreePath, paths: [], mode: 'all' })
+      await trpcClient.worktrees.copyIgnoredFiles.mutate({ repoPath: projectPath, worktreePath, paths: [], mode: 'all' })
     } else if (Array.isArray(filesToCopy) && filesToCopy.length > 0) {
-      await getTrpcVanillaClient().worktrees.copyIgnoredFiles.mutate({ repoPath: projectPath, worktreePath, paths: filesToCopy, mode: 'custom' })
+      await trpcClient.worktrees.copyIgnoredFiles.mutate({ repoPath: projectPath, worktreePath, paths: filesToCopy, mode: 'custom' })
     }
     await onUpdateTask({ id: task.id, worktreePath, worktreeParentBranch: currentBranch })
   }, [projectPath, task.id, currentBranch, onUpdateTask])
@@ -286,7 +287,7 @@ export function useConsolidatedGeneralData(
       if (!params) return
 
       // Check copy behavior before creating
-      const { behavior } = await getTrpcVanillaClient().worktrees.resolveCopyBehavior.query({ projectId: task.project_id })
+      const { behavior } = await trpcClient.worktrees.resolveCopyBehavior.query({ projectId: task.project_id })
       if (behavior === 'ask') {
         // Show dialog — worktree created on confirm
         setCopyFilesDialog({
@@ -300,7 +301,7 @@ export function useConsolidatedGeneralData(
 
       // Non-ask: create immediately (server handles copy for all/custom/none)
       setCreating(true)
-      await getTrpcVanillaClient().worktrees.createWorktree.mutate({
+      await trpcClient.worktrees.createWorktree.mutate({
         repoPath: projectPath, targetPath: params.worktreePath, branch: params.branch,
         projectId: task.project_id
       })
@@ -316,13 +317,13 @@ export function useConsolidatedGeneralData(
     if (!projectPath) return
     setCreateError(null)
     try {
-      const basePathTemplate = (await getTrpcVanillaClient().settings.get.query({ key: 'worktree_base_path' })) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+      const basePathTemplate = (await trpcClient.settings.get.query({ key: 'worktree_base_path' })) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
       const basePath = resolveWorktreeBasePathTemplate(basePathTemplate, projectPath)
       // Use the branch name as the directory name
       const dirName = sourceBranch.replace(/\//g, '-')
       const worktreePath = joinWorktreePath(basePath, dirName)
 
-      const { behavior } = await getTrpcVanillaClient().worktrees.resolveCopyBehavior.query({ projectId: task.project_id })
+      const { behavior } = await trpcClient.worktrees.resolveCopyBehavior.query({ projectId: task.project_id })
       if (behavior === 'ask') {
         setCopyFilesDialog({
           open: true, repoPath: projectPath,
@@ -335,7 +336,7 @@ export function useConsolidatedGeneralData(
       }
 
       setCreating(true)
-      await getTrpcVanillaClient().worktrees.createWorktree.mutate({
+      await trpcClient.worktrees.createWorktree.mutate({
         repoPath: projectPath, targetPath: worktreePath, sourceBranch,
         projectId: task.project_id
       })
@@ -384,7 +385,7 @@ export function useConsolidatedGeneralData(
     if (!projectPath || !task.worktree_path) return
     setRemoving(true)
     try {
-      const result = await getTrpcVanillaClient().worktrees.removeWorktree.mutate({ repoPath: projectPath, worktreePath: task.worktree_path, branchHint: branchToDelete })
+      const result = await trpcClient.worktrees.removeWorktree.mutate({ repoPath: projectPath, worktreePath: task.worktree_path, branchHint: branchToDelete })
       await onUpdateTask({ id: task.id, worktreePath: null, worktreeParentBranch: null })
       if (result.branchError) {
         toast(result.branchError)
@@ -399,7 +400,7 @@ export function useConsolidatedGeneralData(
   // Fetch detected worktrees when no worktree is linked
   useEffect(() => {
     if (hasWorktree || !projectPath) { setDetectedWorktrees([]); return }
-    getTrpcVanillaClient().worktrees.detectWorktrees.query({ repoPath: projectPath })
+    trpcClient.worktrees.detectWorktrees.query({ repoPath: projectPath })
       .then(wts => setDetectedWorktrees(wts.filter(w => !w.isMain)))
       .catch(() => setDetectedWorktrees([]))
   }, [hasWorktree, projectPath])
@@ -409,26 +410,26 @@ export function useConsolidatedGeneralData(
     setActionLoading(action)
     try {
       if (action === 'rebase') {
-        const result = await getTrpcVanillaClient().worktrees.rebaseOnto.mutate({ path: targetPath, ontoBranch: parentBranch })
+        const result = await trpcClient.worktrees.rebaseOnto.mutate({ path: targetPath, ontoBranch: parentBranch })
         if (result.success) { toast('Rebase complete'); fetchBranchData() }
         else if (result.conflicted) toast(result.error ?? 'Rebase has conflicts')
         else toast(result.error ?? 'Rebase failed')
       } else if (action === 'merge') {
-        const result = await getTrpcVanillaClient().worktrees.mergeFrom.mutate({ path: targetPath, branch: parentBranch })
+        const result = await trpcClient.worktrees.mergeFrom.mutate({ path: targetPath, branch: parentBranch })
         if (result.success) { toast(`Merged ${parentBranch}`); fetchBranchData() }
         else if (result.conflicted) toast(result.error ?? 'Merge has conflicts')
         else toast(result.error ?? 'Merge failed')
       } else if (action === 'mergeToParent') {
         if (!projectPath) return
-        const result = await getTrpcVanillaClient().worktrees.mergeIntoParent.mutate({ projectPath: projectPath, parentBranch: parentBranch, sourceBranch: taskBranch })
+        const result = await trpcClient.worktrees.mergeIntoParent.mutate({ projectPath: projectPath, parentBranch: parentBranch, sourceBranch: taskBranch })
         if (result.success) { toast(`Merged into ${parentBranch}`); fetchBranchData() }
         else if (result.conflicted) toast(result.error ?? 'Merge has conflicts')
         else toast(result.error ?? 'Merge failed')
       } else if (action === 'push') {
-        const result = await getTrpcVanillaClient().worktrees.push.mutate({ path: targetPath, branch: taskBranch })
+        const result = await trpcClient.worktrees.push.mutate({ path: targetPath, branch: taskBranch })
         toast(result.success ? 'Pushed' : (result.error ?? 'Push failed'))
       } else if (action === 'pull') {
-        const result = await getTrpcVanillaClient().worktrees.pull.mutate({ path: targetPath })
+        const result = await trpcClient.worktrees.pull.mutate({ path: targetPath })
         if (result.success) { toast('Pulled'); fetchBranchData() }
         else toast(result.error ?? 'Pull failed')
       }
@@ -450,7 +451,7 @@ export function useConsolidatedGeneralData(
 
   const handleMergeToParent = useCallback(async (deleteWorktree: boolean) => {
     if (!projectPath || !parentBranch || !taskBranch) return
-    const hasChanges = await getTrpcVanillaClient().worktrees.hasUncommittedChanges.query({ path: projectPath })
+    const hasChanges = await trpcClient.worktrees.hasUncommittedChanges.query({ path: projectPath })
     setMergeToParentDialog({ open: true, hasMainChanges: hasChanges, deleteWorktree })
   }, [projectPath, parentBranch, taskBranch])
 

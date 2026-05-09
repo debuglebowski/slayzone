@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Sparkles, Check, ArrowLeft, ArrowRight, Info, Layers } from 'lucide-react'
 import { Button, Tooltip, TooltipContent, TooltipTrigger, cn } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
@@ -41,6 +41,7 @@ function resolveLabels(ctx: MergeContext): { oursLabel: string; oursDesc: string
 }
 
 export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved, branchContext }: ConflictFileViewProps) {
+  const trpcClient = useTRPCClient()
   const { editorThemeId, contentVariant } = useTheme()
   const { editorFontSize } = useAppearance()
   const resolvedEditorColors = getThemeEditorColors(editorThemeId, contentVariant)
@@ -74,7 +75,7 @@ export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved,
 
   // Load conflict content
   useEffect(() => {
-    getTrpcVanillaClient().worktrees.getConflictContent.query({ repoPath: repoPath, filePath: filePath }).then(setContent)
+    trpcClient.worktrees.getConflictContent.query({ repoPath: repoPath, filePath: filePath }).then(setContent)
   }, [repoPath, filePath])
 
   // Init CodeMirror editor
@@ -133,8 +134,8 @@ export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved,
   const resolveWithContent = useCallback(async (text: string) => {
     setError(null)
     try {
-      await getTrpcVanillaClient().worktrees.writeResolvedFile.mutate({ repoPath: repoPath, filePath: filePath, content: text })
-      await getTrpcVanillaClient().worktrees.stageFile.mutate({ path: repoPath, filePath: filePath })
+      await trpcClient.worktrees.writeResolvedFile.mutate({ repoPath: repoPath, filePath: filePath, content: text })
+      await trpcClient.worktrees.stageFile.mutate({ path: repoPath, filePath: filePath })
       setResolved(true)
       onResolved()
     } catch (err) {
@@ -147,7 +148,7 @@ export function ConflictFileView({ repoPath, filePath, terminalMode, onResolved,
     setAnalyzing(true)
     setError(null)
     try {
-      const result = await getTrpcVanillaClient().worktrees.analyzeConflict.mutate({
+      const result = await trpcClient.worktrees.analyzeConflict.mutate({
         mode: terminalMode,
         filePath,
         base: content.base,

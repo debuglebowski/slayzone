@@ -1,5 +1,5 @@
 import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Check, X, SkipForward, AlertTriangle, RefreshCw, Plus, PanelLeftClose, PanelLeftOpen, AlignJustify, Columns2, WrapText } from 'lucide-react'
 import { Button, Checkbox, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tooltip, TooltipContent, TooltipTrigger, cn, useShortcutDisplay } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
@@ -99,6 +99,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
   isRepoStale,
   onRepoChange
 }, ref) {
+  const trpcClient = useTRPCClient()
   const gitGeneralShortcut = useShortcutDisplay('panel-git')
   const gitDiffShortcut = useShortcutDisplay('panel-git-diff')
 
@@ -140,8 +141,8 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
     let cancelled = false
     const load = () => {
       Promise.all([
-        getTrpcVanillaClient().settings.get.query({ key: 'git_tab_order' }),
-        getTrpcVanillaClient().settings.get.query({ key: 'git_tab_visibility' }),
+        trpcClient.settings.get.query({ key: 'git_tab_order' }),
+        trpcClient.settings.get.query({ key: 'git_tab_visibility' }),
       ]).then(([order, vis]) => {
         if (cancelled) return
         setTabOrder(normalizeGitTabOrder(order))
@@ -156,14 +157,14 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
 
   const { diffContinuousFlow, diffTreeCollapsed, diffSideBySide, diffWrap } = useAppearance()
   const setBoolSetting = useCallback((key: string, value: boolean) => {
-    getTrpcVanillaClient().settings.set.mutate({ key: key, value: value ? '1' : '0' })
+    trpcClient.settings.set.mutate({ key: key, value: value ? '1' : '0' })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
   }, [])
 
   // Check if repo has a GitHub remote
   useEffect(() => {
     if (!projectPath) { setHasGithubRemote(false); return }
-    getTrpcVanillaClient().worktrees.hasGithubRemote.query({ repoPath: projectPath }).then(setHasGithubRemote).catch(() => setHasGithubRemote(false))
+    trpcClient.worktrees.hasGithubRemote.query({ repoPath: projectPath }).then(setHasGithubRemote).catch(() => setHasGithubRemote(false))
   }, [projectPath])
 
   // Auto-switch to conflicts tab when conflicts detected
@@ -190,13 +191,13 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
     const targetPath = task.worktree_path ?? projectPath
     if (!targetPath) return
 
-    await getTrpcVanillaClient().worktrees.stageAll.mutate({ path: targetPath })
-    await getTrpcVanillaClient().worktrees.commitFiles.mutate({ repoPath: targetPath, message: 'WIP: changes before merge' })
+    await trpcClient.worktrees.stageAll.mutate({ path: targetPath })
+    await trpcClient.worktrees.commitFiles.mutate({ repoPath: targetPath, message: 'WIP: changes before merge' })
 
-    const sourceBranch = await getTrpcVanillaClient().worktrees.getCurrentBranch.query({ path: task.worktree_path! })
+    const sourceBranch = await trpcClient.worktrees.getCurrentBranch.query({ path: task.worktree_path! })
     if (!sourceBranch) throw new Error('Cannot merge: detached HEAD in worktree')
 
-    const result = await getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+    const result = await trpcClient.worktrees.mergeWithAI.mutate({
       projectPath: projectPath!,
       worktreePath: task.worktree_path!,
       parentBranch: task.worktree_parent_branch!,
@@ -207,7 +208,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
       const updated = await onUpdateTask({ id: task.id, status: completedStatus, mergeState: null, mergeContext: null })
       onTaskUpdated(updated)
     } else if (result.resolving) {
-      const ctx = await getTrpcVanillaClient().worktrees.getMergeContext.query({ repoPath: projectPath! })
+      const ctx = await trpcClient.worktrees.getMergeContext.query({ repoPath: projectPath! })
       const updated = await onUpdateTask({
         id: task.id,
         mergeState: 'conflicts',
@@ -222,7 +223,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
   const handleAbortMerge = useCallback(async () => {
     if (!task || !onUpdateTask || !onTaskUpdated) return
     if (projectPath) {
-      try { await getTrpcVanillaClient().worktrees.abortMerge.mutate({ path: projectPath }) } catch { /* already aborted */ }
+      try { await trpcClient.worktrees.abortMerge.mutate({ path: projectPath }) } catch { /* already aborted */ }
     }
     const updated = await onUpdateTask({ id: task.id, mergeState: null, mergeContext: null })
     onTaskUpdated(updated)
@@ -590,7 +591,7 @@ function ConflictPhaseContent({ task, projectPath, completedStatus, isRebase, on
   onTaskUpdated: (task: Task) => void
   onToolbarChange: (data: ConflictToolbarData) => void
 }) {
-
+  const trpcClient = useTRPCClient()
   const [conflictedFiles, setConflictedFiles] = useState<string[]>([])
   const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
@@ -602,7 +603,7 @@ function ConflictPhaseContent({ task, projectPath, completedStatus, isRebase, on
   // Load merge context if not on task
   useEffect(() => {
     if (!mergeContext) {
-      getTrpcVanillaClient().worktrees.getMergeContext.query({ repoPath: projectPath }).then(ctx => {
+      trpcClient.worktrees.getMergeContext.query({ repoPath: projectPath }).then(ctx => {
         if (ctx) {
           setMergeContext(ctx)
           onUpdateTask({ id: task.id, mergeContext: ctx })
@@ -613,7 +614,7 @@ function ConflictPhaseContent({ task, projectPath, completedStatus, isRebase, on
 
   // Load conflicted files
   useEffect(() => {
-    getTrpcVanillaClient().worktrees.getConflictedFiles.query({ path: projectPath }).then(files => {
+    trpcClient.worktrees.getConflictedFiles.query({ path: projectPath }).then((files: string[]) => {
       setConflictedFiles(files)
       if (files.length > 0 && !selectedFile) setSelectedFile(files[0])
     })
@@ -629,8 +630,8 @@ function ConflictPhaseContent({ task, projectPath, completedStatus, isRebase, on
     setCompleting(true)
     setError(null)
     try {
-      const sourceBranch = await getTrpcVanillaClient().worktrees.getCurrentBranch.query({ path: task.worktree_path! })
-      await getTrpcVanillaClient().worktrees.commitFiles.mutate({
+      const sourceBranch = await trpcClient.worktrees.getCurrentBranch.query({ path: task.worktree_path! })
+      await trpcClient.worktrees.commitFiles.mutate({
         repoPath: projectPath,
         message: `Merge ${sourceBranch ?? 'branch'} into ${task.worktree_parent_branch}`,
       })
@@ -649,7 +650,7 @@ function ConflictPhaseContent({ task, projectPath, completedStatus, isRebase, on
     setCompleting(true)
     setError(null)
     try {
-      const result = await getTrpcVanillaClient().worktrees.continueRebase.mutate({ path: projectPath })
+      const result = await trpcClient.worktrees.continueRebase.mutate({ path: projectPath })
       if (result.done) {
         const updates: UpdateTaskInput = { id: task.id, mergeState: null, mergeContext: null }
         if (markDone) updates.status = completedStatus
@@ -670,7 +671,7 @@ function ConflictPhaseContent({ task, projectPath, completedStatus, isRebase, on
   const handleSkipCommit = useCallback(async () => {
     setError(null)
     try {
-      const result = await getTrpcVanillaClient().worktrees.skipRebaseCommit.mutate({ path: projectPath })
+      const result = await trpcClient.worktrees.skipRebaseCommit.mutate({ path: projectPath })
       if (result.done) {
         const updates: UpdateTaskInput = { id: task.id, mergeState: null, mergeContext: null }
         const updated = await onUpdateTask(updates)
@@ -688,9 +689,9 @@ function ConflictPhaseContent({ task, projectPath, completedStatus, isRebase, on
   const handleAbort = useCallback(async () => {
     try {
       if (isRebase) {
-        await getTrpcVanillaClient().worktrees.abortRebase.mutate({ path: projectPath })
+        await trpcClient.worktrees.abortRebase.mutate({ path: projectPath })
       } else {
-        await getTrpcVanillaClient().worktrees.abortMerge.mutate({ path: projectPath })
+        await trpcClient.worktrees.abortMerge.mutate({ path: projectPath })
       }
     } catch { /* already aborted */ }
     const updated = await onUpdateTask({ id: task.id, mergeState: null, mergeContext: null })

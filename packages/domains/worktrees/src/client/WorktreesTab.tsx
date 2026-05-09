@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/settings/client'
 import {
   FolderGit2,
@@ -63,6 +63,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   visible,
   pollIntervalMs = 5000
 }, ref) {
+  const trpcClient = useTRPCClient()
   const {
     projectPath,
     tasks,
@@ -95,7 +96,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   const fetchWorktrees = useCallback(async () => {
     if (!projectPath) return
     try {
-      const detected = await getTrpcVanillaClient().worktrees.detectWorktrees.query({ repoPath: projectPath })
+      const detected = await trpcClient.worktrees.detectWorktrees.query({ repoPath: projectPath })
       setWorktrees(detected)
     } catch { /* polling error */ }
   }, [projectPath])
@@ -117,7 +118,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
       
       // 1. Always prioritize active worktree
       if (activePath) {
-        const isDirty = await getTrpcVanillaClient().worktrees.isDirty.query({ path: activePath })
+        const isDirty = await trpcClient.worktrees.isDirty.query({ path: activePath })
         setDirtyStatuses(prev => {
           if (prev[activePath] === isDirty) return prev
           return { ...prev, [activePath]: isDirty }
@@ -128,7 +129,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
       const backgroundWts = worktrees.filter(wt => wt.path !== activePath)
       if (backgroundWts.length > 0) {
         const randomWt = backgroundWts[Math.floor(Math.random() * backgroundWts.length)]
-        const isDirty = await getTrpcVanillaClient().worktrees.isDirty.query({ path: randomWt.path })
+        const isDirty = await trpcClient.worktrees.isDirty.query({ path: randomWt.path })
         setDirtyStatuses(prev => {
           if (prev[randomWt.path] === isDirty) return prev
           return { ...prev, [randomWt.path]: isDirty }
@@ -197,7 +198,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   const handleRemoveWorktree = async (path: string) => {
     if (!projectPath) return
     try {
-      await getTrpcVanillaClient().worktrees.removeWorktree.mutate({ repoPath: projectPath, worktreePath: path })
+      await trpcClient.worktrees.removeWorktree.mutate({ repoPath: projectPath, worktreePath: path })
       const task = tasks.find(t => t.worktree_path === path)
       if (task && onUpdateTask) {
         await onUpdateTask({ id: task.id, worktreePath: null })
@@ -491,6 +492,7 @@ function WorktreeCard({
   onRemove: () => void
   onAssign: () => void
 }) {
+  const trpcClient = useTRPCClient()
   const { tasks, activeTask } = useGitPanelContext()
   const displayTitle = node.isMain ? 'Main Repository' : (node.branch || 'detached HEAD')
   const isActive = activeTask?.worktree_path === node.path || (node.isMain && !activeTask?.worktree_path && activeTask)
@@ -599,7 +601,7 @@ function WorktreeCard({
                   </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => getTrpcVanillaClient().worktrees.revealInFinder.mutate({ path: node.path })}>
+                  <DropdownMenuItem onClick={() => trpcClient.worktrees.revealInFinder.mutate({ path: node.path })}>
                     <FolderSearch className="h-3.5 w-3.5 mr-2" /> Reveal in Finder
                   </DropdownMenuItem>
                   {!node.task && (
