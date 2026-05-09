@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { RefreshCw, Loader2, SlidersHorizontal, Info, List, Layers } from 'lucide-react'
 import {
   IconButton, Switch, cn, toast,
@@ -43,7 +44,16 @@ export function useBranchGraph(
   /** Unique key for persisting this instance's display config (e.g. 'task:123', 'project:/path') */
   configKey?: string,
 ): BranchGraphState {
+  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const fetchMutation = useMutation(trpc.worktrees.fetch.mutationOptions())
+  const instanceConfigQuery = useQuery({
+    ...trpc.settings.get.queryOptions({ key: `commit_graph:${configKey ?? ''}` }),
+    enabled: !!configKey,
+  })
+  const globalConfigQuery = useQuery(trpc.settings.get.queryOptions({ key: 'commit_graph_config' }))
   const [dagGraph, setDagGraph] = useState<ResolvedGraph | null>(null)
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
@@ -53,23 +63,25 @@ export function useBranchGraph(
   const [currentBranch, setCurrentBranch] = useState<string>('')
   const [config, setConfig] = useState<CommitGraphConfig>(DEFAULT_CONFIG)
 
-  // Load per-instance config (if saved), otherwise global defaults
+  // Hydrate config from cache: instance overrides global
   useEffect(() => {
-    const load = async () => {
-      const instanceJson = configKey ? await trpcClient.settings.get.query({ key: `commit_graph:${configKey}` }) : null
-      if (instanceJson) {
-        setConfig({ ...JSON.parse(instanceJson), baseBranch: '' })
+    if (configKey && instanceConfigQuery.data) {
+      try {
+        setConfig({ ...JSON.parse(instanceConfigQuery.data), baseBranch: '' })
         return
-      }
-      const globalJson = await trpcClient.settings.get.query({ key: 'commit_graph_config' })
-      if (globalJson) {
-        setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' })
-      } else {
+      } catch { /* fall through */ }
+    }
+    if (globalConfigQuery.data) {
+      try {
+        setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalConfigQuery.data), baseBranch: '' })
+      } catch {
         setConfig(DEFAULT_CONFIG)
       }
+    } else if (!instanceConfigQuery.isLoading && !globalConfigQuery.isLoading) {
+      setConfig(DEFAULT_CONFIG)
     }
-    load()
-  }, [configKey])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configKey, instanceConfigQuery.data, globalConfigQuery.data, instanceConfigQuery.isLoading, globalConfigQuery.isLoading])
 
   // Save full config to this instance
   const updateConfig = useCallback((updater: React.SetStateAction<CommitGraphConfig>) => {
@@ -77,24 +89,24 @@ export function useBranchGraph(
       const next = typeof updater === 'function' ? updater(prev) : updater
       if (configKey) {
         const { baseBranch: _, ...persisted } = next
-        trpcClient.settings.set.mutate({ key: `commit_graph:${configKey}`, value: JSON.stringify(persisted) })
+        setSettingMutation.mutate({ key: `commit_graph:${configKey}`, value: JSON.stringify(persisted) })
       }
       return next
     })
-  }, [configKey])
+  }, [configKey, setSettingMutation])
 
   // Reset to global defaults (clear per-instance config)
   const resetConfig = useCallback(async () => {
     if (configKey) {
-      await trpcClient.settings.set.mutate({ key: `commit_graph:${configKey}`, value: '' })
+      await setSettingMutation.mutateAsync({ key: `commit_graph:${configKey}`, value: '' })
     }
-    const globalJson = await trpcClient.settings.get.query({ key: 'commit_graph_config' })
+    const globalJson = await queryClient.fetchQuery(trpc.settings.get.queryOptions({ key: 'commit_graph_config' }))
     if (globalJson) {
-      setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' })
+      try { setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' }) } catch { setConfig(DEFAULT_CONFIG) }
     } else {
       setConfig(DEFAULT_CONFIG)
     }
-  }, [configKey])
+  }, [configKey, setSettingMutation, queryClient, trpc])
 
   const effectiveBaseBranch = useMemo(
     () => config.baseBranch || defaultBaseBranch || currentBranch || 'main',
@@ -144,7 +156,7 @@ export function useBranchGraph(
     if (!projectPath) return
     setFetching(true)
     try {
-      await trpcClient.worktrees.fetch.mutate({ path: projectPath })
+      await fetchMutation.mutateAsync({ path: projectPath })
       await fetchData()
       toast('Fetched from remote')
     } catch {
