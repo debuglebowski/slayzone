@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { AheadBehind, StatusSummary, DiffStatsSummary, WorktreeMetadata, GhPullRequest } from '../shared/types'
 import {
@@ -92,7 +93,9 @@ export function useConsolidatedGeneralData(
   pollIntervalMs: number,
   onUpdateTask: (data: UpdateTaskInput) => Promise<Task>
 ): ConsolidatedGeneralData {
+  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   const hasWorktree = !!task.worktree_path
   const targetPath = task.worktree_path ?? task.base_dir ?? projectPath
   const parentBranch = task.worktree_parent_branch
@@ -185,7 +188,7 @@ export function useConsolidatedGeneralData(
   // Worktree branch
   useEffect(() => {
     if (!task.worktree_path) { setWorktreeBranch(null); return }
-    trpcClient.worktrees.getCurrentBranch.query({ path: task.worktree_path }).then(setWorktreeBranch).catch(() => setWorktreeBranch(null))
+    queryClient.fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path })).then(setWorktreeBranch).catch(() => setWorktreeBranch(null))
   }, [task.worktree_path])
 
   // Poll general data
@@ -215,9 +218,9 @@ export function useConsolidatedGeneralData(
     const repoPath = projectPath || targetPath
     if (!repoPath) return
     if (task.pr_url) {
-      trpcClient.worktrees.getPrByUrl.query({ repoPath: repoPath, url: task.pr_url }).then(setPr).catch(() => setPr(null))
+      queryClient.fetchQuery(trpc.worktrees.getPrByUrl.queryOptions({ repoPath, url: task.pr_url })).then(setPr).catch(() => setPr(null))
     } else if (activeBranch) {
-      trpcClient.worktrees.listOpenPrs.query({ repoPath: repoPath })
+      queryClient.fetchQuery(trpc.worktrees.listOpenPrs.queryOptions({ repoPath }))
         .then(prs => setPr(prs.find(p => p.headRefName === activeBranch) ?? null))
         .catch(() => setPr(null))
     }
@@ -226,7 +229,7 @@ export function useConsolidatedGeneralData(
   // Metadata — one-time per worktree path
   useEffect(() => {
     if (!task.worktree_path) return
-    trpcClient.worktrees.getWorktreeMetadata.query({ path: task.worktree_path })
+    queryClient.fetchQuery(trpc.worktrees.getWorktreeMetadata.queryOptions({ path: task.worktree_path }))
       .then(setMetadata).catch(() => setMetadata(null))
   }, [task.worktree_path])
 
