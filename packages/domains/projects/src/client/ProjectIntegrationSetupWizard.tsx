@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { CheckCircle2, Circle, Info, Loader2 } from 'lucide-react'
 import { Button, Card, CardContent, CardHeader, CardTitle } from '@slayzone/ui'
 import { Checkbox } from '@slayzone/ui'
@@ -111,7 +112,9 @@ export function ProjectIntegrationSetupWizard({
   onCancel,
   onCompleted
 }: ProjectIntegrationSetupWizardProps): React.JSX.Element {
+  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   const [step, setStep] = useState(1)
   const [connections, setConnections] = useState<IntegrationConnectionPublic[]>([])
   const [teams, setTeams] = useState<LinearTeam[]>([])
@@ -242,7 +245,7 @@ export function ProjectIntegrationSetupWizard({
       return
     }
     setLoadingTeams(true)
-    void trpcClient.integrations.listLinearTeams.query({ connectionId })
+    void queryClient.fetchQuery(trpc.integrations.listLinearTeams.queryOptions({ connectionId }))
       .then((result) => {
         const loadedTeams = Array.isArray(result) ? result : result.teams
         setTeams(loadedTeams)
@@ -263,7 +266,7 @@ export function ProjectIntegrationSetupWizard({
       return
     }
     setLoadingProjects(true)
-    void trpcClient.integrations.listLinearProjects.query({ connectionId, teamId })
+    void queryClient.fetchQuery(trpc.integrations.listLinearProjects.queryOptions({ connectionId, teamId }))
       .then((loadedProjects) => {
         setLinearProjects(loadedProjects)
       })
@@ -283,7 +286,7 @@ export function ProjectIntegrationSetupWizard({
       return
     }
     setLoadingGithubProjects(true)
-    void trpcClient.integrations.listGithubProjects.query({ connectionId })
+    void queryClient.fetchQuery(trpc.integrations.listGithubProjects.queryOptions({ connectionId }))
       .then((loadedProjects) => {
         setGithubProjects(loadedProjects)
         setGithubProjectId((current) => current || loadedProjects[0]?.id || '')
