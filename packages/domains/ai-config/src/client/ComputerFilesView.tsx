@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { createPortal } from 'react-dom'
 import { File, FilePlus, Info, Trash2 } from 'lucide-react'
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, FileTree, Input, Switch, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn, fileTreeIndent } from '@slayzone/ui'
@@ -8,9 +9,20 @@ import { COMPUTER_PROVIDER_PATHS } from '../shared/provider-registry'
 import { useContextManagerStore } from './useContextManagerStore'
 
 export function ComputerFilesView() {
-  const trpcClient = useTRPCClient()
-  const [entries, setEntries] = useState<ComputerFileEntry[]>([])
-  const [loading, setLoading] = useState(true)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const filesQuery = useQuery(trpc.aiConfig.getComputerFiles.queryOptions())
+  const entries: ComputerFileEntry[] = filesQuery.data ?? []
+  const loading = filesQuery.isLoading
+  const writeFileMutation = useMutation(trpc.aiConfig.writeContextFile.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getComputerFiles.queryKey() }),
+  }))
+  const deleteFileMutation = useMutation(trpc.aiConfig.deleteComputerFile.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getComputerFiles.queryKey() }),
+  }))
+  const createFileMutation = useMutation(trpc.aiConfig.createComputerFile.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getComputerFiles.queryKey() }),
+  }))
   const selectedPath = useContextManagerStore((s) => s.computerSelectedPath)
   const setSelectedPath = useContextManagerStore((s) => s.setComputerSelectedPath)
   const [content, setContent] = useState('')
@@ -22,24 +34,12 @@ export function ComputerFilesView() {
   const [newFileName, setNewFileName] = useState('')
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const loadFiles = useCallback(async () => {
-    setLoading(true)
-    try {
-      setEntries(await trpcClient.aiConfig.getComputerFiles.query())
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void loadFiles() }, [loadFiles])
-
   const openFile = async (entry: ComputerFileEntry) => {
     if (!entry.exists) {
-      await trpcClient.aiConfig.writeContextFile.mutate({ filePath: entry.path, content: '', projectPath: '' })
-      await loadFiles()
+      await writeFileMutation.mutateAsync({ filePath: entry.path, content: '', projectPath: '' })
     }
     try {
-      const text = await trpcClient.aiConfig.readContextFile.query({ filePath: entry.path, projectPath: '' })
+      const text = await queryClient.fetchQuery(trpc.aiConfig.readContextFile.queryOptions({ filePath: entry.path, projectPath: '' }))
       setContent(text)
       setSelectedPath(entry.path)
     } catch {
@@ -49,12 +49,11 @@ export function ComputerFilesView() {
 
   const autoSave = useCallback(async (path: string, text: string) => {
     try {
-      await trpcClient.aiConfig.writeContextFile.mutate({ filePath: path, content: text, projectPath: '' })
-      await loadFiles()
+      await writeFileMutation.mutateAsync({ filePath: path, content: text, projectPath: '' })
     } catch {
       // silent
     }
-  }, [loadFiles])
+  }, [writeFileMutation])
 
   const handleContentChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value
@@ -71,12 +70,11 @@ export function ComputerFilesView() {
 
   const deleteFile = async (entry: ComputerFileEntry) => {
     try {
-      await trpcClient.aiConfig.deleteComputerFile.mutate({ filePath: entry.path })
+      await deleteFileMutation.mutateAsync({ filePath: entry.path })
       if (selectedPath === entry.path) {
         setSelectedPath(null)
         setContent('')
       }
-      await loadFiles()
     } catch {
       // silent
     }
@@ -86,11 +84,10 @@ export function ComputerFilesView() {
     if (!creatingFile || !newFileName.trim()) return
     const slug = newFileName.trim().replace(/\.md$/, '')
     try {
-      const created = await trpcClient.aiConfig.createComputerFile.mutate({ provider: creatingFile.provider, category: creatingFile.category, slug })
-      const text = await trpcClient.aiConfig.readContextFile.query({ filePath: created.path, projectPath: '' })
+      const created = await createFileMutation.mutateAsync({ provider: creatingFile.provider, category: creatingFile.category, slug })
+      const text = await queryClient.fetchQuery(trpc.aiConfig.readContextFile.queryOptions({ filePath: created.path, projectPath: '' }))
       setSelectedPath(created.path)
       setContent(text)
-      await loadFiles()
       setCreatingFile(null)
       setNewFileName('')
     } catch {
