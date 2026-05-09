@@ -1,6 +1,8 @@
-import { useEffect, useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
+import { useSetting, useSetSettingMutation } from '@slayzone/settings/client'
 import type { PanelConfig, PanelView, WebPanelDefinition } from '../shared/types'
 import { DEFAULT_PANEL_CONFIG, isPanelEnabled, orderIdToTaskId, orderIdToHomeId } from '../shared/types'
 import { mergePanelOrder, mergePredefinedWebPanels } from '../shared/panel-config'
@@ -28,33 +30,34 @@ export function usePanelConfig(): {
   getOrderedHomeIds: () => string[]
 } {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
-  const [config, setConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG)
+  const queryClient = useQueryClient()
+  const raw = useSetting(SETTINGS_KEY)
+  const setSetting = useSetSettingMutation()
 
-  const refresh = useCallback(() => {
-    void trpcClient.settings.get.query({ key: SETTINGS_KEY }).then(raw => setConfig(parseConfig(raw)))
-  }, [trpcClient])
+  const config = useMemo(() => parseConfig(raw), [raw])
 
-  // Mount-load + window event for sibling-component updates.
+  // Sibling-component updates (same window) — invalidate cache so useSetting refetches
   useEffect(() => {
-    refresh()
-    const onChanged = () => refresh()
+    const onChanged = () => {
+      queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey({ key: SETTINGS_KEY }) })
+    }
     window.addEventListener(CHANGE_EVENT, onChanged)
     return () => window.removeEventListener(CHANGE_EVENT, onChanged)
-  }, [refresh])
+  }, [queryClient, trpc])
 
   // Cross-window settings change (CLI / other window edits panel config).
   useSubscription(
     trpc.app.notify.onSettingsChanged.subscriptionOptions(undefined, {
-      onData: refresh,
+      onData: () => {
+        queryClient.invalidateQueries({ queryKey: trpc.settings.get.queryKey({ key: SETTINGS_KEY }) })
+      },
     }),
   )
 
   const updateConfig = useCallback(async (next: PanelConfig) => {
-    setConfig(next)
-    await trpcClient.settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify(next) })
+    await setSetting.mutateAsync({ key: SETTINGS_KEY, value: JSON.stringify(next) })
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT))
-  }, [trpcClient])
+  }, [setSetting])
 
   const enabledWebPanels = useMemo(
     () => config.webPanels.filter(wp => isPanelEnabled(config, wp.id, 'task')),

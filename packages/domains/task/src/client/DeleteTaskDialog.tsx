@@ -1,5 +1,6 @@
 import type { Task } from '@slayzone/task/shared'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,13 +27,14 @@ export function DeleteTaskDialog({
   onDeleted,
   onDeleteTask
 }: DeleteTaskDialogProps): React.JSX.Element {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const deleteMutation = useMutation(trpc.task.delete.mutationOptions())
   const handleDelete = async (): Promise<void> => {
     if (!task) return
     if (onDeleteTask) {
       await onDeleteTask(task.id)
     } else {
-      await trpcClient.task.delete.mutate({ id: task.id })
+      await deleteMutation.mutateAsync({ id: task.id })
     }
     onDeleted()
   }

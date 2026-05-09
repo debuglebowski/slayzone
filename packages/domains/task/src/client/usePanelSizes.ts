@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useSetting, useSetSettingMutation } from '@slayzone/settings/client'
 import type { PanelVisibility } from '../shared/types'
 
 export type PanelSize = number | 'auto'
@@ -17,11 +17,10 @@ const DEFAULT_SIZES: PanelSizes = {
 }
 
 const SETTINGS_KEY = 'taskDetailPanelSizes'
-const HANDLE_WIDTH = 16 // w-4 = 1rem
+const HANDLE_WIDTH = 16
 // Bump when the storage schema changes to force migration
 const STORAGE_VERSION = 5
 
-// Built-in order: terminal, browser, editor, [web panels inserted here], diff, processes, settings
 const BUILTIN_ORDER = ['terminal', 'browser', 'editor', 'artifacts', 'diff', 'processes', 'settings']
 
 /** Build ordered panel list: built-ins in fixed order, web panels between editor and diff */
@@ -31,7 +30,6 @@ export function buildPanelOrder(visibility: PanelVisibility): string[] {
 
   for (const id of BUILTIN_ORDER) {
     order.push(id)
-    // Insert web panels after editor
     if (id === 'editor') {
       order.push(...webPanelIds)
     }
@@ -73,35 +71,36 @@ export function usePanelSizes(): [
   (panel: string) => void,
   () => void
 ] {
-  const trpcClient = useTRPCClient()
+  const stored = useSetting(SETTINGS_KEY)
+  const setSetting = useSetSettingMutation()
   const [sizes, setSizes] = useState<PanelSizes>(DEFAULT_SIZES)
   const loaded = useRef(false)
 
   const persist = useCallback((next: PanelSizes) => {
-    trpcClient.settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify({ ...next, _v: STORAGE_VERSION }) })
-  }, [trpcClient])
+    setSetting.mutate({ key: SETTINGS_KEY, value: JSON.stringify({ ...next, _v: STORAGE_VERSION }) })
+  }, [setSetting])
 
+  // Hydrate local state from cache on first load (and on remote changes).
+  // Local mutations go through `persist` which writes optimistically to cache.
   useEffect(() => {
-    trpcClient.settings.get.query({ key: SETTINGS_KEY }).then((stored) => {
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored)
-          if (parsed._v === STORAGE_VERSION) {
-            const { _v, ...rest } = parsed
-            setSizes({ ...DEFAULT_SIZES, ...rest })
-          } else {
-            // Old format — only keep settings width, reset everything else
-            const migrated = { ...DEFAULT_SIZES, settings: parsed.settings ?? DEFAULT_SIZES.settings }
-            setSizes(migrated)
-            persist(migrated)
-          }
-        } catch {
-          /* ignore parse errors */
+    if (stored === undefined) return  // not loaded yet
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+        if (parsed._v === STORAGE_VERSION) {
+          const { _v: _, ...rest } = parsed
+          setSizes({ ...DEFAULT_SIZES, ...rest })
+        } else {
+          const migrated = { ...DEFAULT_SIZES, settings: parsed.settings ?? DEFAULT_SIZES.settings }
+          setSizes(migrated)
+          persist(migrated)
         }
+      } catch {
+        /* ignore parse errors */
       }
-      loaded.current = true
-    })
-  }, [persist, trpcClient])
+    }
+    loaded.current = true
+  }, [stored, persist])
 
   const updateSizes = useCallback((updates: Partial<PanelSizes>) => {
     setSizes((prev) => {

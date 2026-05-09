@@ -1,5 +1,6 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNowStrict, parseISO } from 'date-fns'
 import {
   Archive,
@@ -16,7 +17,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import type { ActivityEvent, ActivityEventCursor, AutomationActionRun } from '@slayzone/history/shared'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
 
 interface TaskHistoryPanelProps {
@@ -123,14 +124,27 @@ function getEventMarkerMeta(event: ActivityEvent): {
 }
 
 export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.Element {
-  const trpcClient = useTRPCClient()
-  const [events, setEvents] = useState<ActivityEvent[]>([])
-  const [loading, setLoading] = useState(true)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const firstPageQuery = useQuery(trpc.history.listForTask.queryOptions({
+    taskId,
+    options: { limit: TASK_HISTORY_PAGE_SIZE },
+  }))
+  const [extraEvents, setExtraEvents] = useState<ActivityEvent[]>([])
+  const [overrideCursor, setOverrideCursor] = useState<ActivityEventCursor | null | undefined>(undefined)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [nextCursor, setNextCursor] = useState<ActivityEventCursor | null>(null)
   const [expandedRunIds, setExpandedRunIds] = useState<Record<string, boolean>>({})
   const [actionRunsByRunId, setActionRunsByRunId] = useState<Record<string, AutomationActionRun[]>>({})
   const [, setTimestampTick] = useState(0)
+
+  // Reset paginated state when task changes
+  useEffect(() => {
+    setExtraEvents([])
+    setOverrideCursor(undefined)
+    setLoadingMore(false)
+    setExpandedRunIds({})
+    setActionRunsByRunId({})
+  }, [taskId])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -140,26 +154,14 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
     return () => window.clearInterval(interval)
   }, [])
 
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setLoadingMore(false)
-    setNextCursor(null)
-    setExpandedRunIds({})
-    setActionRunsByRunId({})
-    trpcClient.history.listForTask.query({ taskId, options: { limit: TASK_HISTORY_PAGE_SIZE } }).then((result) => {
-      if (!active) return
-      setEvents(result.events)
-      setNextCursor(result.nextCursor)
-      setLoading(false)
-    })
-    return () => { active = false }
-  }, [taskId])
+  const events = [...(firstPageQuery.data?.events ?? []), ...extraEvents]
+  const nextCursor = overrideCursor !== undefined ? overrideCursor : (firstPageQuery.data?.nextCursor ?? null)
+  const loading = firstPageQuery.isLoading
 
   async function toggleAutomationDetails(runId: string): Promise<void> {
     setExpandedRunIds((prev) => ({ ...prev, [runId]: !prev[runId] }))
     if (actionRunsByRunId[runId]) return
-    const runs = await trpcClient.history.getAutomationActionRuns.query({ runId })
+    const runs = await queryClient.fetchQuery(trpc.history.getAutomationActionRuns.queryOptions({ runId }))
     setActionRunsByRunId((prev) => ({ ...prev, [runId]: runs }))
   }
 
@@ -168,12 +170,12 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
 
     setLoadingMore(true)
     try {
-      const result = await trpcClient.history.listForTask.query({
+      const result = await queryClient.fetchQuery(trpc.history.listForTask.queryOptions({
         taskId,
         options: { limit: TASK_HISTORY_PAGE_SIZE, before: nextCursor },
-      })
-      setEvents((prev) => [...prev, ...result.events])
-      setNextCursor(result.nextCursor)
+      }))
+      setExtraEvents((prev) => [...prev, ...result.events])
+      setOverrideCursor(result.nextCursor)
     } finally {
       setLoadingMore(false)
     }

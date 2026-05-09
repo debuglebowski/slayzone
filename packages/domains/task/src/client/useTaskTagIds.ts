@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 
 export interface UseTaskTagIdsReturn {
   tagIds: string[]
@@ -12,18 +13,19 @@ export function useTaskTagIds(
   initialTagIds?: string[]
 ): UseTaskTagIdsReturn {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   const [tagIds, setTagIds] = useState<string[]>(initialTagIds ?? [])
 
   // Re-fetch tag associations on external changes (CLI, MCP)
   useSubscription(
     trpc.task.onChanged.subscriptionOptions(undefined, {
       enabled: !!taskId,
-      onData: () => {
+      onData: async () => {
         if (!taskId) return
-        trpcClient.tags.getForTask.query({ taskId })
-          .then(tags => setTagIds(tags.map(t => t.id)))
-          .catch(() => {})
+        try {
+          const tags = await queryClient.fetchQuery(trpc.tags.getForTask.queryOptions({ taskId }))
+          setTagIds(tags.map(t => t.id))
+        } catch { /* ignore */ }
       },
     }),
   )
