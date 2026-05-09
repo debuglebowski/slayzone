@@ -32,6 +32,7 @@
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/editor": "workspace:*",
     "@slayzone/markdown": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",

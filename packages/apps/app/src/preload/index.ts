@@ -1,6 +1,22 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { BrowserCreateTaskFromLinkIntent, ElectronAPI } from '@slayzone/types'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
+import { isIpcUnchangedSentinel } from '@slayzone/platform'
+
+// Per-channel cache for handlers that opt into withResultDedup on the main side.
+// When main returns the IPC_UNCHANGED_SENTINEL, we return the cached previous
+// value here — saves a 200KB+ structuredClone deserialize for unchanged
+// commit-graph payloads.
+const dedupCache = new Map<string, unknown>()
+async function dedupInvoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const result = await ipcRenderer.invoke(channel, ...args)
+  const key = channel + ':' + JSON.stringify(args)
+  if (isIpcUnchangedSentinel(result)) {
+    return dedupCache.get(key) as T
+  }
+  dedupCache.set(key, result)
+  return result as T
+}
 
 // Prevent Electron's default file drop behavior (navigates to the file).
 // Must be in the preload's main world — isolated world's preventDefault alone
@@ -616,7 +632,7 @@ const api: ElectronAPI = {
     isGitRepo: (path) => ipcRenderer.invoke('git:isGitRepo', path),
     detectChildRepos: (projectPath) => ipcRenderer.invoke('git:detectChildRepos', projectPath),
     listProjectRepos: (projectPath, opts) => ipcRenderer.invoke('git:listProjectRepos', projectPath, opts),
-    detectWorktrees: (repoPath) => ipcRenderer.invoke('git:detectWorktrees', repoPath),
+    detectWorktrees: (repoPath) => dedupInvoke('git:detectWorktrees', repoPath),
     createWorktree: (opts) =>
       ipcRenderer.invoke('git:createWorktree', opts),
     onCreateWorktreePhase: (requestId, cb) => {
@@ -680,11 +696,11 @@ const api: ElectronAPI = {
     pruneRemote: (path) => ipcRenderer.invoke('git:pruneRemote', path),
     rebaseOnto: (path, ontoBranch) => ipcRenderer.invoke('git:rebaseOnto', path, ontoBranch),
     mergeFrom: (path, branch) => ipcRenderer.invoke('git:mergeFrom', path, branch),
-    getDiffStats: (path, ref) => ipcRenderer.invoke('git:getDiffStats', path, ref),
+    getDiffStats: (path, ref) => dedupInvoke('git:getDiffStats', path, ref),
     getWorktreeMetadata: (path) => ipcRenderer.invoke('git:getWorktreeMetadata', path),
     getCommitDag: (path, limit, branches?) => ipcRenderer.invoke('git:getCommitDag', path, limit, branches),
-    getResolvedCommitDag: (path, limit, branches, baseBranch) => ipcRenderer.invoke('git:getResolvedCommitDag', path, limit, branches, baseBranch),
-    getResolvedForkGraph: (targetPath, repoPath, activeBranch, compareBranch, activeBranchLabel, compareBranchLabel) => ipcRenderer.invoke('git:getResolvedForkGraph', targetPath, repoPath, activeBranch, compareBranch, activeBranchLabel, compareBranchLabel),
+    getResolvedCommitDag: (path, limit, branches, baseBranch) => dedupInvoke('git:getResolvedCommitDag', path, limit, branches, baseBranch),
+    getResolvedForkGraph: (targetPath, repoPath, activeBranch, compareBranch, activeBranchLabel, compareBranchLabel) => dedupInvoke('git:getResolvedForkGraph', targetPath, repoPath, activeBranch, compareBranch, activeBranchLabel, compareBranchLabel),
     getResolvedUpstreamGraph: (repoPath, branch) => ipcRenderer.invoke('git:getResolvedUpstreamGraph', repoPath, branch),
     getResolvedRecentCommits: (path, count, branchName) => ipcRenderer.invoke('git:getResolvedRecentCommits', path, count, branchName),
     resolveChildBranches: (path, baseBranch) => ipcRenderer.invoke('git:resolveChildBranches', path, baseBranch),
@@ -693,7 +709,7 @@ const api: ElectronAPI = {
     copyIgnoredFiles: (repoPath, worktreePath, paths, mode?) => ipcRenderer.invoke('git:copyIgnoredFiles', repoPath, worktreePath, paths, mode),
     checkGhInstalled: () => ipcRenderer.invoke('git:checkGhInstalled'),
     hasGithubRemote: (repoPath) => ipcRenderer.invoke('git:hasGithubRemote', repoPath),
-    listOpenPrs: (repoPath) => ipcRenderer.invoke('git:listOpenPrs', repoPath),
+    listOpenPrs: (repoPath) => dedupInvoke('git:listOpenPrs', repoPath),
     getPrByUrl: (repoPath, url) => ipcRenderer.invoke('git:getPrByUrl', repoPath, url),
     createPr: (input) => ipcRenderer.invoke('git:createPr', input),
     getPrComments: (repoPath, prNumber) => ipcRenderer.invoke('git:getPrComments', repoPath, prNumber),

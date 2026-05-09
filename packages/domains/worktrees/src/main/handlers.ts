@@ -2,6 +2,7 @@ import type { IpcMain } from 'electron'
 import { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { withResultDedup } from '@slayzone/platform'
 import { getGitWatcher } from './git-watcher'
 import {
   isGitRepo,
@@ -274,12 +275,12 @@ export function registerWorktreeHandlers(ipcMain: IpcMain, db: Database): void {
     return detection
   })
 
-  ipcMain.handle('git:detectWorktrees', async (_, repoPath: string) => {
+  ipcMain.handle('git:detectWorktrees', withResultDedup(async (_, repoPath: string) => {
     const detected = await detectWorktrees(repoPath)
     const nonMainPaths = detected.filter(d => !d.isMain).map(d => d.path)
     const colors = ensureColors(repoPath, nonMainPaths)
     return detected.map(d => d.isMain ? d : { ...d, color: colors.get(d.path) })
-  })
+  }))
 
   ipcMain.handle('git:createWorktree', async (event, opts: CreateWorktreeOpts) => {
     const { repoPath, targetPath, branch, sourceBranch, projectId, requestId } = opts
@@ -621,9 +622,9 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
     return mergeFrom(path, branch)
   })
 
-  ipcMain.handle('git:getDiffStats', (_, path: string, ref: string) => {
+  ipcMain.handle('git:getDiffStats', withResultDedup((_, path: string, ref: string) => {
     return getDiffStats(path, ref)
-  })
+  }))
 
   ipcMain.handle('git:getWorktreeMetadata', (_, path: string) => {
     return getWorktreeMetadata(path)
@@ -650,13 +651,13 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
   })
 
 
-  ipcMain.handle('git:getResolvedCommitDag', (_, path: string, limit: number, branches: string[] | undefined, baseBranch: string) => {
+  ipcMain.handle('git:getResolvedCommitDag', withResultDedup((_, path: string, limit: number, branches: string[] | undefined, baseBranch: string) => {
     return getResolvedCommitDag(path, limit, branches, baseBranch)
-  })
+  }))
 
-  ipcMain.handle('git:getResolvedForkGraph', (_, targetPath: string, repoPath: string, activeBranch: string, compareBranch: string, activeBranchLabel: string, compareBranchLabel: string) => {
+  ipcMain.handle('git:getResolvedForkGraph', withResultDedup((_, targetPath: string, repoPath: string, activeBranch: string, compareBranch: string, activeBranchLabel: string, compareBranchLabel: string) => {
     return getResolvedForkGraph(targetPath, repoPath, activeBranch, compareBranch, activeBranchLabel, compareBranchLabel)
-  })
+  }))
 
   ipcMain.handle('git:getResolvedUpstreamGraph', (_, repoPath: string, branch: string) => {
     return getResolvedUpstreamGraph(repoPath, branch)
@@ -704,9 +705,9 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
     return hasGithubRemote(repoPath)
   })
 
-  ipcMain.handle('git:listOpenPrs', (_, repoPath: string) => {
+  ipcMain.handle('git:listOpenPrs', withResultDedup((_, repoPath: string) => {
     return listOpenPrs(repoPath)
-  })
+  }))
 
   ipcMain.handle('git:getPrByUrl', (_, repoPath: string, url: string) => {
     return getPrByUrl(repoPath, url)
