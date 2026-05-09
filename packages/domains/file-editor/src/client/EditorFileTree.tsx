@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import {
   File,
@@ -117,7 +118,9 @@ export interface EditorFileTreeHandle {
 }
 
 export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreeProps>(function EditorFileTree({ projectPath, onOpenFile, onFileRenamed, activeFilePath, refreshKey, expandedFolders: controlledExpanded, onExpandedFoldersChange, onReady }, ref) {
+  const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   // Map of dirPath -> children entries (lazy loaded)
   const [dirContents, setDirContents] = useState<Map<string, DirEntry[]>>(new Map())
   const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set())
@@ -172,16 +175,18 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   }, [])
 
   // --- Git status ---
-  const [gitStatus, setGitStatus] = useState<Map<string, GitFileStatus>>(new Map())
-
+  const gitStatusQuery = useQuery(trpc.fileEditor.gitStatus.queryOptions({ rootPath: projectPath }))
+  // refreshKey invalidates the query
   useEffect(() => {
-    let cancelled = false
-    trpcClient.fileEditor.gitStatus.query({ rootPath: projectPath }).then((result) => {
-      if (cancelled || !result.isGitRepo) return
-      setGitStatus(new Map(Object.entries(result.files)))
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [projectPath, refreshKey])
+    if (refreshKey && refreshKey > 0) {
+      queryClient.invalidateQueries({ queryKey: trpc.fileEditor.gitStatus.queryKey({ rootPath: projectPath }) })
+    }
+  }, [refreshKey, queryClient, trpc, projectPath])
+  const gitStatus = useMemo<Map<string, GitFileStatus>>(() => {
+    const data = gitStatusQuery.data
+    if (!data || !data.isGitRepo) return new Map()
+    return new Map(Object.entries(data.files))
+  }, [gitStatusQuery.data])
 
   const dirGitStatus = useMemo(() => {
     const dirs = new Map<string, GitFileStatus>()
