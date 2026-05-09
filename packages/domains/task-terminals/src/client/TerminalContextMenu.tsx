@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { useSetSettingMutation } from '@slayzone/settings/client'
 import {
   ContextMenu,
@@ -53,7 +54,8 @@ export function TerminalContextMenu({
   onResetSession,
   onSetDisplayMode
 }: TerminalContextMenuProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const writeMutation = useMutation(trpc.pty.write.mutationOptions())
   const setSetting = useSetSettingMutation()
   const [hasSelection, setHasSelection] = useState(false)
   const [pendingChatEnable, setPendingChatEnable] = useState(false)
@@ -82,9 +84,9 @@ export function TerminalContextMenu({
 
   const handlePaste = useCallback(() => {
     void navigator.clipboard.readText().then(text => {
-      if (text) trpcClient.pty.write.mutate({ sessionId, data: text })
+      if (text) writeMutation.mutate({ sessionId, data: text })
     })
-  }, [sessionId, trpcClient])
+  }, [sessionId, writeMutation])
 
   const handleSelectAll = useCallback(() => {
     terminalRef.current?.selectAll()
