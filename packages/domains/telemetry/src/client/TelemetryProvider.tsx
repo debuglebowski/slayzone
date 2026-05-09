@@ -1,5 +1,5 @@
 import { createContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { TelemetryTier } from '../shared/types'
 import { initTelemetry, setTelemetryTier as setTelemetryTierInternal, track, startHeartbeat, stopHeartbeat, startIpcTelemetryBridge, stopIpcTelemetryBridge, getPosthogInstance } from './telemetry'
 
@@ -18,6 +18,7 @@ export const TelemetryContext = createContext<TelemetryContextValue>({
 })
 
 export function TelemetryProvider({ children }: { children: ReactNode }) {
+  const trpcClient = useTRPCClient()
   const [tier, setTier] = useState<TelemetryTier>('anonymous')
   const initializedRef = useRef(false)
 
@@ -26,7 +27,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     initializedRef.current = true
 
     performance.mark('sz:telemetry:start')
-    getTrpcVanillaClient().settings.get.query({ key: SETTINGS_KEY }).then(async (stored) => {
+    trpcClient.settings.get.query({ key: SETTINGS_KEY }).then(async (stored) => {
       const t: TelemetryTier = stored === 'opted_in' ? 'opted_in' : 'anonymous'
       setTier(t)
       await initTelemetry(t)
@@ -36,7 +37,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
 
       const ph = await getPosthogInstance()
       if (ph) {
-        getTrpcVanillaClient().app.meta.getVersion.query().then((version) => {
+        trpcClient.app.meta.getVersion.query().then((version) => {
           ph.register({ app_version: version })
           track('app_opened', { version })
         })
@@ -44,13 +45,13 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     })
 
     return () => { stopHeartbeat(); stopIpcTelemetryBridge() }
-  }, [])
+  }, [trpcClient])
 
   const changeTier = useCallback((newTier: TelemetryTier) => {
     setTier(newTier)
     setTelemetryTierInternal(newTier)
-    getTrpcVanillaClient().settings.set.mutate({ key: SETTINGS_KEY, value: newTier })
-  }, [])
+    trpcClient.settings.set.mutate({ key: SETTINGS_KEY, value: newTier })
+  }, [trpcClient])
 
   return (
     <TelemetryContext.Provider value={{ tier, setTier: changeTier, track }}>

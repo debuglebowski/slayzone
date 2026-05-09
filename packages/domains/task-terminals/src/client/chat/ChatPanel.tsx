@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Key } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { useFollowBottom } from './useFollowBottom'
 import {
   ArrowUp,
@@ -82,6 +82,7 @@ const SUGGESTED_PROMPTS = [
 ]
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function ChatPanel(props, ref) {
+  const trpcClient = useTRPCClient()
   const { tabId, taskId, mode, cwd, isActive = true, providerFlagsOverride, permissionNotice: overrideNotice, onSetDisplayMode, onOpenUrl, onOpenFile } = props
   const { state, timeline, inFlight, hydrating, permissionMode, permissionRequests, sendMessage, sendToolResult, respondPermission, abortAndPop, reset: resetTimeline } = useChatSession({
     tabId,
@@ -874,7 +875,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
               <ContextMenuRadioGroup
                 value={appearance.chatWidth}
                 onValueChange={(v) => {
-                  getTrpcVanillaClient().settings.set.mutate({ key: 'chat_width', value: v })
+                  trpcClient.settings.set.mutate({ key: 'chat_width', value: v })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               >
@@ -1097,7 +1098,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                 description="Show all tool calls inline. When off, only user messages + final assistant reply per turn."
                 checked={appearance.chatShowTools}
                 onCheckedChange={(c) => {
-                  getTrpcVanillaClient().settings.set.mutate({ key: 'chat_show_tools', value: c ? '1' : '0' })
+                  trpcClient.settings.set.mutate({ key: 'chat_show_tools', value: c ? '1' : '0' })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />
@@ -1107,7 +1108,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                 checked={showLastMessageTools}
                 disabled={appearance.chatShowTools}
                 onCheckedChange={(c) => {
-                  getTrpcVanillaClient().settings.set.mutate({ key: 'chat_show_last_message_tools', value: c ? '1' : '0' })
+                  trpcClient.settings.set.mutate({ key: 'chat_show_last_message_tools', value: c ? '1' : '0' })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />
@@ -1116,7 +1117,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                 description="Auto-expand Edit and Write tool cards."
                 checked={appearance.chatFileEditsOpenByDefault}
                 onCheckedChange={(c) => {
-                  getTrpcVanillaClient().settings.set.mutate({ key: 'chat_file_edits_open_by_default', value: c ? '1' : '0' })
+                  trpcClient.settings.set.mutate({ key: 'chat_file_edits_open_by_default', value: c ? '1' : '0' })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />
@@ -1125,7 +1126,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                 description="Per-turn footer with duration, cost, and turn count."
                 checked={appearance.chatShowMessageMeta}
                 onCheckedChange={(c) => {
-                  getTrpcVanillaClient().settings.set.mutate({ key: 'chat_show_message_meta', value: c ? '1' : '0' })
+                  trpcClient.settings.set.mutate({ key: 'chat_show_message_meta', value: c ? '1' : '0' })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />
