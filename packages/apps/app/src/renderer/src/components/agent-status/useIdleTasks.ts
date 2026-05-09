@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useEffect, useMemo, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal/shared'
 import type { Task } from '@slayzone/task/shared'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects/shared'
@@ -11,11 +12,6 @@ export interface IdleTask {
   lastOutputTime: number
 }
 
-/**
- * Minimal shape for a session that may be idle. Both PTY (`pty.list()`) and
- * chat (`chat.list()`) return rows that satisfy this — chat sessions live in
- * a different transport but expose the same idle semantics.
- */
 interface AgentSessionRow {
   sessionId: string
   taskId: string
@@ -51,8 +47,6 @@ export function buildIdleTasks(
     const task = tasksById.get(row.taskId)
     if (!task) continue
     if (filterProjectId && task.project_id !== filterProjectId) continue
-    // Defensive: a done task should have its agent killed by `onTaskReachedTerminal`,
-    // but if a session leaks through (e.g. legacy sessions, race) suppress it here.
     const columns = columnsByProjectId?.get(task.project_id) ?? null
     if (isTerminalStatus(task.status, columns)) continue
 
@@ -83,38 +77,38 @@ export function useIdleTasks(
   filterProjectId: string | null,
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
 ): UseIdleTasksResult {
-  const trpcClient = useTRPCClient()
-  const [rows, setRows] = useState<AgentSessionRow[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const ptysQuery = useQuery(trpc.pty.list.queryOptions())
+  const chatsQuery = useQuery(trpc.pty.chatList.queryOptions())
   const recheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const refresh = useCallback(async () => {
-    const [ptys, chats] = await Promise.all([
-      trpcClient.pty.list.query(),
-      trpcClient.pty.chatList.query()
+  const rows: AgentSessionRow[] = useMemo(() => [
+    ...(ptysQuery.data ?? []).map(ptyToRow),
+    ...(chatsQuery.data ?? []).map(chatToRow),
+  ], [ptysQuery.data, chatsQuery.data])
+
+  const refresh = async (): Promise<void> => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.pty.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.pty.chatList.queryKey() }),
     ])
-    setRows([...ptys.map(ptyToRow), ...chats.map(chatToRow)])
-  }, [trpcClient])
+  }
 
   useEffect(() => {
-    refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    // pty:state-change carries both PTY and chat transitions (chat-transport-manager
-    // broadcasts on the same channel via session-registry).
     const unsubStateChange = window.api.pty.onStateChange((_sessionId, newState: TerminalState) => {
-      refresh()
-      // Threshold means a freshly-idle session won't appear yet — recheck once threshold passes.
+      void refresh()
       if (newState === 'idle') {
         if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
-        recheckTimerRef.current = setTimeout(refresh, IDLE_AGE_RECHECK_DELAY_MS)
+        recheckTimerRef.current = setTimeout(() => void refresh(), IDLE_AGE_RECHECK_DELAY_MS)
       }
     })
     return () => {
       unsubStateChange()
       if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
     }
-  }, [refresh])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const idleTasks: IdleTask[] = useMemo(
     () => buildIdleTasks(rows, tasks, filterProjectId, Date.now(), columnsByProjectId),
@@ -133,28 +127,23 @@ export function useIdleTasks(
  * regardless of state. Useful for "is this task active" affordances.
  */
 export function useActiveSessionTaskIds(): Set<string> {
-  const trpcClient = useTRPCClient()
-  const [taskIds, setTaskIds] = useState<Set<string>>(new Set())
-
-  const refresh = useCallback(async () => {
-    const [ptys, chats] = await Promise.all([
-      trpcClient.pty.list.query(),
-      trpcClient.pty.chatList.query()
-    ])
-    const set = new Set<string>()
-    for (const p of ptys) set.add(p.taskId)
-    for (const c of chats) set.add(c.taskId)
-    setTaskIds(set)
-  }, [trpcClient])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const ptysQuery = useQuery(trpc.pty.list.queryOptions())
+  const chatsQuery = useQuery(trpc.pty.chatList.queryOptions())
 
   useEffect(() => {
-    refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    const unsub = window.api.pty.onStateChange(() => { refresh() })
+    const unsub = window.api.pty.onStateChange(() => {
+      queryClient.invalidateQueries({ queryKey: trpc.pty.list.queryKey() })
+      queryClient.invalidateQueries({ queryKey: trpc.pty.chatList.queryKey() })
+    })
     return () => { unsub() }
-  }, [refresh])
+  }, [queryClient, trpc])
 
-  return taskIds
+  return useMemo(() => {
+    const set = new Set<string>()
+    for (const p of (ptysQuery.data ?? [])) set.add(p.taskId)
+    for (const c of (chatsQuery.data ?? [])) set.add(c.taskId)
+    return set
+  }, [ptysQuery.data, chatsQuery.data])
 }
