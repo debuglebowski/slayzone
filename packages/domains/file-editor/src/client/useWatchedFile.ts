@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 export interface UseWatchedFileOptions {
   projectPath: string | null
@@ -35,6 +36,7 @@ export interface UseWatchedFileResult {
  */
 export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileResult {
   const { projectPath, relPath, read, save, debounceMs = 500 } = options
+  const trpc = useTRPC()
 
   const [content, setContentState] = useState('')
   const [originalContent, setOriginalContent] = useState('')
@@ -169,31 +171,31 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   const relPathRef = useRef(relPath)
   relPathRef.current = relPath
 
-  useEffect(() => {
-    if (!projectPath) return
+  useSubscription(
+    trpc.fileEditor.watch.subscriptionOptions(
+      { rootPath: projectPath ?? '' },
+      {
+        enabled: !!projectPath,
+        onData: (e) => {
+          if (e.type !== 'changed') return
+          const changedRoot = e.root
+          const changedRel = e.relPath
+          const normalize = (p: string) => p.replace(/\/+$/, '')
+          if (!projectPath || normalize(changedRoot) !== normalize(projectPath)) return
+          if (changedRel !== relPathRef.current) return
 
-    const sub = getTrpcVanillaClient().fileEditor.watch.subscribe({ rootPath: projectPath }, {
-      onData: (e) => {
-        if (e.type !== 'changed') return
-        const changedRoot = e.root
-        const changedRel = e.relPath
-        const normalize = (p: string) => p.replace(/\/+$/, '')
-        if (normalize(changedRoot) !== normalize(projectPath)) return
-        if (changedRel !== relPathRef.current) return
+          // Ignore echoes from our own in-flight save
+          if (savingRef.current !== null) return
 
-        // Ignore echoes from our own in-flight save
-        if (savingRef.current !== null) return
-
-        if (dirtyRef.current) {
-          setDiskChanged(true)
-          return
-        }
-        void reloadFromDisk()
+          if (dirtyRef.current) {
+            setDiskChanged(true)
+            return
+          }
+          void reloadFromDisk()
+        },
       },
-    })
-
-    return () => sub.unsubscribe()
-  }, [projectPath, reloadFromDisk])
+    ),
+  )
 
   const setContent = useCallback((next: string) => {
     contentRef.current = next

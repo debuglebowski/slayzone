@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import {
   File,
@@ -117,6 +117,7 @@ export interface EditorFileTreeHandle {
 }
 
 export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreeProps>(function EditorFileTree({ projectPath, onOpenFile, onFileRenamed, activeFilePath, refreshKey, expandedFolders: controlledExpanded, onExpandedFoldersChange, onReady }, ref) {
+  const trpcClient = useTRPCClient()
   // Map of dirPath -> children entries (lazy loaded)
   const [dirContents, setDirContents] = useState<Map<string, DirEntry[]>>(new Map())
   const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set())
@@ -167,7 +168,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   const [clipboard, setClipboard] = useState<{ paths: string[]; mode: 'copy' | 'cut' } | null>(null)
   const [osHasFiles, setOsHasFiles] = useState(false)
   const refreshOsClipboard = useCallback(() => {
-    getTrpcVanillaClient().app.clipboard.hasFiles.query().then(setOsHasFiles).catch(() => setOsHasFiles(false))
+    trpcClient.app.clipboard.hasFiles.query().then(setOsHasFiles).catch(() => setOsHasFiles(false))
   }, [])
 
   // --- Git status ---
@@ -175,7 +176,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
 
   useEffect(() => {
     let cancelled = false
-    getTrpcVanillaClient().fileEditor.gitStatus.query({ rootPath: projectPath }).then((result) => {
+    trpcClient.fileEditor.gitStatus.query({ rootPath: projectPath }).then((result) => {
       if (cancelled || !result.isGitRepo) return
       setGitStatus(new Map(Object.entries(result.files)))
     }).catch(() => {})
@@ -214,7 +215,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
 
   const loadDir = useCallback(
     async (dirPath: string) => {
-      const items = await getTrpcVanillaClient().fileEditor.readDir.query({ rootPath: projectPath, dirPath: dirPath })
+      const items = await trpcClient.fileEditor.readDir.query({ rootPath: projectPath, dirPath: dirPath })
       setDirContents((prev) => {
         const next = new Map(prev)
         next.set(dirPath, items)
@@ -324,10 +325,10 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       const newPath = creating.parentPath ? `${creating.parentPath}/${name.trim()}` : name.trim()
       try {
         if (creating.type === 'file') {
-          await getTrpcVanillaClient().fileEditor.createFile.mutate({ rootPath: projectPath, filePath: newPath })
+          await trpcClient.fileEditor.createFile.mutate({ rootPath: projectPath, filePath: newPath })
           track('file_created')
         } else {
-          await getTrpcVanillaClient().fileEditor.createDir.mutate({ rootPath: projectPath, dirPath: newPath })
+          await trpcClient.fileEditor.createDir.mutate({ rootPath: projectPath, dirPath: newPath })
           track('folder_created')
         }
         await loadDir(creating.parentPath)
@@ -351,7 +352,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       const parentDir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : ''
       const newPath = parentDir ? `${parentDir}/${newName.trim()}` : newName.trim()
       try {
-        await getTrpcVanillaClient().fileEditor.rename.mutate({ rootPath: projectPath, oldPath: oldPath, newPath: newPath })
+        await trpcClient.fileEditor.rename.mutate({ rootPath: projectPath, oldPath: oldPath, newPath: newPath })
         track('file_renamed')
         onFileRenamed?.(oldPath, newPath)
         const srcPrefix = oldPath + '/'
@@ -385,7 +386,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       const dirsToReload = new Set<string>()
       for (const p of paths) {
         try {
-          await getTrpcVanillaClient().fileEditor.delete.mutate({ rootPath: projectPath, targetPath: p })
+          await trpcClient.fileEditor.delete.mutate({ rootPath: projectPath, targetPath: p })
           track('file_deleted')
           dirsToReload.add(p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
         } catch (err) {
@@ -446,7 +447,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
 
   const writeOsClipboard = useCallback((relPaths: string[]) => {
     const absolute = relPaths.map((p) => `${projectPath}/${p}`)
-    void getTrpcVanillaClient().app.clipboard.writeFilePaths.mutate({ paths: absolute })
+    void trpcClient.app.clipboard.writeFilePaths.mutate({ paths: absolute })
   }, [projectPath])
 
   const handleCopy = useCallback((paths: string[]) => {
@@ -478,7 +479,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     let internalUsed = false
     if (clipboard) {
       // Verify OS clipboard still matches our internal state (cut paths weren't overwritten externally).
-      const osPaths = await getTrpcVanillaClient().app.clipboard.readFilePaths.query()
+      const osPaths = await trpcClient.app.clipboard.readFilePaths.query()
       const osRelative = osPaths
         .filter((p) => p === projectPath || p.startsWith(projectPrefix))
         .map((p) => p === projectPath ? '' : p.slice(projectPrefix.length))
@@ -493,9 +494,9 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
           const destPath = resolveCollisionPath(rawDest, targetDir)
           try {
             if (clipboard.mode === 'copy') {
-              await getTrpcVanillaClient().fileEditor.copy.mutate({ rootPath: projectPath, srcPath: srcPath, destPath: destPath })
+              await trpcClient.fileEditor.copy.mutate({ rootPath: projectPath, srcPath: srcPath, destPath: destPath })
             } else {
-              await getTrpcVanillaClient().fileEditor.rename.mutate({ rootPath: projectPath, oldPath: srcPath, newPath: destPath })
+              await trpcClient.fileEditor.rename.mutate({ rootPath: projectPath, oldPath: srcPath, newPath: destPath })
               onFileRenamed?.(srcPath, destPath)
               const srcParent = srcPath.includes('/') ? srcPath.slice(0, srcPath.lastIndexOf('/')) : ''
               dirsToReload.add(srcParent)
@@ -509,7 +510,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     }
 
     if (!internalUsed) {
-      const osPaths = await getTrpcVanillaClient().app.clipboard.readFilePaths.query()
+      const osPaths = await trpcClient.app.clipboard.readFilePaths.query()
       for (const abs of osPaths) {
         try {
           if (abs === projectPath || abs.startsWith(projectPrefix)) {
@@ -518,9 +519,9 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
             const name = srcRel.includes('/') ? srcRel.slice(srcRel.lastIndexOf('/') + 1) : srcRel
             const rawDest = targetDir ? `${targetDir}/${name}` : name
             const destPath = resolveCollisionPath(rawDest, targetDir)
-            await getTrpcVanillaClient().fileEditor.copy.mutate({ rootPath: projectPath, srcPath: srcRel, destPath: destPath })
+            await trpcClient.fileEditor.copy.mutate({ rootPath: projectPath, srcPath: srcRel, destPath: destPath })
           } else {
-            await getTrpcVanillaClient().fileEditor.copyIn.mutate({ rootPath: projectPath, absoluteSrc: abs, targetDir })
+            await trpcClient.fileEditor.copyIn.mutate({ rootPath: projectPath, absoluteSrc: abs, targetDir })
           }
         } catch (err) {
           console.error('External paste failed:', err)
@@ -541,7 +542,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       const destName = duplicateName(entry.name, names)
       const destPath = parentDir ? `${parentDir}/${destName}` : destName
       try {
-        await getTrpcVanillaClient().fileEditor.copy.mutate({ rootPath: projectPath, srcPath: entry.path, destPath: destPath })
+        await trpcClient.fileEditor.copy.mutate({ rootPath: projectPath, srcPath: entry.path, destPath: destPath })
         dirsToReload.add(parentDir)
       } catch (err) {
         console.error('Duplicate failed:', err)
@@ -558,7 +559,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
   }, [projectPath])
 
   const handleRevealInFinder = useCallback((entry: DirEntry) => {
-    getTrpcVanillaClient().fileEditor.showInFinder.mutate({ rootPath: projectPath, targetPath: entry.path })
+    trpcClient.fileEditor.showInFinder.mutate({ rootPath: projectPath, targetPath: entry.path })
     track('reveal_in_finder')
   }, [projectPath])
 
@@ -675,7 +676,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
     const srcParent = srcPath.includes('/') ? srcPath.slice(0, srcPath.lastIndexOf('/')) : ''
 
     try {
-      await getTrpcVanillaClient().fileEditor.rename.mutate({ rootPath: projectPath, oldPath: srcPath, newPath: newPath })
+      await trpcClient.fileEditor.rename.mutate({ rootPath: projectPath, oldPath: srcPath, newPath: newPath })
       onFileRenamed?.(srcPath, newPath)
 
       const srcPrefix = srcPath + '/'
