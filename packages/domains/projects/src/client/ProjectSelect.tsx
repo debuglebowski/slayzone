@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import type { Project } from '@slayzone/projects/shared'
 import {
   Select,
@@ -20,11 +20,12 @@ export function ProjectSelect({
   onChange,
   disabled
 }: ProjectSelectProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [projects, setProjects] = useState<Project[]>([])
 
   useEffect(() => {
-    getTrpcVanillaClient().projects.list.query().then(setProjects)
-  }, [])
+    trpcClient.projects.list.query().then(setProjects)
+  }, [trpcClient])
 
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>

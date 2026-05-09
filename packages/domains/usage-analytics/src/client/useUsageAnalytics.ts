@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { AnalyticsSummary, DateRange, ProviderOption } from '../shared/types'
 import { PROVIDER_USAGE_SUPPORT, ALL_PROVIDERS } from '../shared/types'
 
@@ -17,6 +17,7 @@ const EMPTY: AnalyticsSummary = {
 }
 
 export function useUsageAnalytics() {
+  const trpcClient = useTRPCClient()
   const [range, setRange] = useState<DateRange>('30d')
   const [rawData, setRawData] = useState<AnalyticsSummary>(EMPTY)
   const [loading, setLoading] = useState(false)
@@ -27,7 +28,7 @@ export function useUsageAnalytics() {
   // Load enabled modes + default provider from settings on mount
   useEffect(() => {
     Promise.all([
-      getTrpcVanillaClient().settings.get.query({ key: 'default_terminal_mode' }),
+      trpcClient.settings.get.query({ key: 'default_terminal_mode' }),
       window.api.terminalModes.list()
     ]).then(([defaultMode, modes]) => {
       const options: ProviderOption[] = modes
@@ -86,12 +87,12 @@ export function useUsageAnalytics() {
     if (!defaultLoaded) return
     let cancelled = false
 
-    getTrpcVanillaClient().usageAnalytics.query.query(range).then((cached) => {
+    trpcClient.usageAnalytics.query.query(range).then((cached) => {
       if (!cancelled) setRawData(cached)
     })
 
     setLoading(true)
-    getTrpcVanillaClient().usageAnalytics.refresh.mutate(range).then((fresh) => {
+    trpcClient.usageAnalytics.refresh.mutate(range).then((fresh) => {
       if (!cancelled) {
         setRawData(fresh)
         setLoading(false)
@@ -106,7 +107,7 @@ export function useUsageAnalytics() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await getTrpcVanillaClient().usageAnalytics.refresh.mutate(range)
+      const result = await trpcClient.usageAnalytics.refresh.mutate(range)
       setRawData(result)
     } finally {
       setLoading(false)

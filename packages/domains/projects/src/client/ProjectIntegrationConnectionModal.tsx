@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import type { IntegrationProvider } from '@slayzone/integrations/shared'
 import {
   Button,
@@ -84,6 +84,7 @@ export function ProjectIntegrationConnectionModal({
   connectionId,
   onConnectionsChanged
 }: ProjectIntegrationConnectionModalProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [credential, setCredential] = useState('')
   const [jiraDomain, setJiraDomain] = useState('')
   const [jiraEmail, setJiraEmail] = useState('')
@@ -114,19 +115,19 @@ export function ProjectIntegrationConnectionModal({
       if (mode === 'connect') {
         let nextConnection
         if (provider === 'github') {
-          nextConnection = await getTrpcVanillaClient().integrations.connectGithub.mutate({ token: credential.trim(), projectId })
+          nextConnection = await trpcClient.integrations.connectGithub.mutate({ token: credential.trim(), projectId })
         } else if (provider === 'jira') {
-          nextConnection = await getTrpcVanillaClient().integrations.connectJira.mutate({
+          nextConnection = await trpcClient.integrations.connectJira.mutate({
             cloudDomain: jiraDomain.trim(),
             email: jiraEmail.trim(),
             apiToken: credential.trim(),
             projectId
           })
         } else {
-          nextConnection = await getTrpcVanillaClient().integrations.connectLinear.mutate({ apiKey: credential.trim(), projectId })
+          nextConnection = await trpcClient.integrations.connectLinear.mutate({ apiKey: credential.trim(), projectId })
         }
 
-        await getTrpcVanillaClient().integrations.setProjectConnection.mutate({
+        await trpcClient.integrations.setProjectConnection.mutate({
           projectId,
           provider,
           connectionId: nextConnection.id
@@ -135,7 +136,7 @@ export function ProjectIntegrationConnectionModal({
         if (!connectionId) {
           throw new Error('No connection to edit')
         }
-        await getTrpcVanillaClient().integrations.updateConnection.mutate({
+        await trpcClient.integrations.updateConnection.mutate({
           connectionId,
           credential: credential.trim()
         })

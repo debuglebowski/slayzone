@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Settings, RefreshCw, ChevronRight } from 'lucide-react'
 import { Button, Card, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@slayzone/ui'
 import type { TestCategory, ScanResult, TestLabel, TestFileLabel, TestFileNote } from '../shared/types'
@@ -52,6 +52,7 @@ function collapseTree(node: DirNode): DirNode {
 }
 
 export function TestPanel({ projectId, projectPath, groupBy, onOpenSettings }: TestPanelProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [categories, setCategories] = useState<TestCategory[]>([])
   const [scanResult, setScanResult] = useState<ScanResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -79,9 +80,9 @@ export function TestPanel({ projectId, projectPath, groupBy, onOpenSettings }: T
     if (!projectId) return
     const id = ++requestIdRef.current
     const [lbls, fls, fns] = await Promise.all([
-      getTrpcVanillaClient().testPanel.getLabels.query({ projectId: projectId }),
-      getTrpcVanillaClient().testPanel.getFileLabels.query({ projectId: projectId }),
-      getTrpcVanillaClient().testPanel.getFileNotes.query({ projectId: projectId })
+      trpcClient.testPanel.getLabels.query({ projectId: projectId }),
+      trpcClient.testPanel.getFileLabels.query({ projectId: projectId }),
+      trpcClient.testPanel.getFileNotes.query({ projectId: projectId })
     ])
     if (requestIdRef.current === id) {
       setLabels(lbls)
@@ -96,11 +97,11 @@ export function TestPanel({ projectId, projectPath, groupBy, onOpenSettings }: T
     setLoading(true)
     try {
       const [cats, scan, lbls, fls, fns] = await Promise.all([
-        getTrpcVanillaClient().testPanel.getCategories.query({ projectId: projectId }),
-        getTrpcVanillaClient().testPanel.scanFiles.query({ projectPath, projectId }),
-        getTrpcVanillaClient().testPanel.getLabels.query({ projectId: projectId }),
-        getTrpcVanillaClient().testPanel.getFileLabels.query({ projectId: projectId }),
-        getTrpcVanillaClient().testPanel.getFileNotes.query({ projectId: projectId })
+        trpcClient.testPanel.getCategories.query({ projectId: projectId }),
+        trpcClient.testPanel.scanFiles.query({ projectPath, projectId }),
+        trpcClient.testPanel.getLabels.query({ projectId: projectId }),
+        trpcClient.testPanel.getFileLabels.query({ projectId: projectId }),
+        trpcClient.testPanel.getFileNotes.query({ projectId: projectId })
       ])
       if (requestIdRef.current === id) {
         setCategories(cats)
@@ -127,13 +128,13 @@ export function TestPanel({ projectId, projectPath, groupBy, onOpenSettings }: T
 
   const handleToggleLabel = async (filePath: string, labelId: string) => {
     if (!projectId) return
-    await getTrpcVanillaClient().testPanel.toggleFileLabel.mutate({ projectId, filePath, labelId })
+    await trpcClient.testPanel.toggleFileLabel.mutate({ projectId, filePath, labelId })
     reloadLabels()
   }
 
   const handleSetNote = async (filePath: string, note: string) => {
     if (!projectId) return
-    await getTrpcVanillaClient().testPanel.setFileNote.mutate({ projectId, filePath, note })
+    await trpcClient.testPanel.setFileNote.mutate({ projectId, filePath, note })
     reloadLabels()
   }
 

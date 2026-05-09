@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { FolderOpen, Upload } from 'lucide-react'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
@@ -17,6 +17,7 @@ interface GeneralTabProps {
 }
 
 export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTabProps) {
+  const trpcClient = useTRPCClient()
   const [name, setName] = useState('')
   const [color, setColor] = useState('')
   const [path, setPath] = useState('')
@@ -39,7 +40,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const lettersPreview = iconLetters.trim().toUpperCase() || fallbackLetters
 
   const handleBrowse = async () => {
-    const result = await getTrpcVanillaClient().app.dialog.showOpenDialog.mutate({
+    const result = await trpcClient.app.dialog.showOpenDialog.mutate({
       title: 'Select Project Directory',
       defaultPath: path || undefined,
       properties: ['openDirectory', 'createDirectory', 'promptToCreate']
@@ -50,7 +51,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   }
 
   const handleUploadIcon = async () => {
-    const result = await getTrpcVanillaClient().app.dialog.showOpenDialog.mutate({
+    const result = await trpcClient.app.dialog.showOpenDialog.mutate({
       title: 'Select Project Icon',
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }]
@@ -58,7 +59,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     if (result.canceled || !result.filePaths[0]) return
     setIconBusy(true)
     try {
-      const updated = await getTrpcVanillaClient().projects.uploadIcon.mutate({ projectId: project.id, sourcePath: result.filePaths[0] })
+      const updated = await trpcClient.projects.uploadIcon.mutate({ projectId: project.id, sourcePath: result.filePaths[0] })
       setIconImagePath(updated.icon_image_path)
       setIconCacheKey(updated.updated_at)
       onChanged(updated)
@@ -70,7 +71,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   const handleRemoveIcon = async () => {
     setIconBusy(true)
     try {
-      const updated = await getTrpcVanillaClient().projects.update.mutate({ id: project.id, iconImagePath: null })
+      const updated = await trpcClient.projects.update.mutate({ id: project.id, iconImagePath: null })
       setIconImagePath(null)
       setIconCacheKey(updated.updated_at)
       onChanged(updated)
@@ -86,7 +87,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
     setLoading(true)
     try {
       const trimmedLetters = iconLetters.trim()
-      const updated = await getTrpcVanillaClient().projects.update.mutate({
+      const updated = await trpcClient.projects.update.mutate({
         id: project.id,
         name: name.trim(),
         color,

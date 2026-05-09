@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import {
   ArrowLeft,
   ChevronRight,
@@ -129,6 +129,7 @@ export function IntegrationsTab({
   integrationOnboardingProvider = null,
   onIntegrationOnboardingHandled
 }: IntegrationsTabProps) {
+  const trpcClient = useTRPCClient()
   const [connections, setConnections] = useState<IntegrationConnectionPublic[]>([])
   const [githubConnections, setGithubConnections] = useState<IntegrationConnectionPublic[]>([])
   const [mapping, setMapping] = useState<IntegrationProjectMapping | null>(null)
@@ -202,7 +203,7 @@ export function IntegrationsTab({
     if (open) {
       setSelectedIntegrationEntry(null)
       setSelectedIntegrationMode(null)
-      getTrpcVanillaClient().app.meta.isJiraIntegrationEnabled.query().then(setJiraEnabled)
+      trpcClient.app.meta.isJiraIntegrationEnabled.query().then(setJiraEnabled)
     }
   }, [open, project.id])
 
@@ -224,12 +225,12 @@ export function IntegrationsTab({
       loadedGithubMapping,
       loadedGithubProjectConnectionId
     ] = await Promise.all([
-      getTrpcVanillaClient().integrations.listConnections.query({ provider: 'linear' }),
-      getTrpcVanillaClient().integrations.getProjectMapping.query({ projectId: project.id, provider: 'linear' }),
-      getTrpcVanillaClient().integrations.getProjectConnection.query({ projectId: project.id, provider: 'linear' }),
-      getTrpcVanillaClient().integrations.listConnections.query({ provider: 'github' }),
-      getTrpcVanillaClient().integrations.getProjectMapping.query({ projectId: project.id, provider: 'github' }),
-      getTrpcVanillaClient().integrations.getProjectConnection.query({ projectId: project.id, provider: 'github' })
+      trpcClient.integrations.listConnections.query({ provider: 'linear' }),
+      trpcClient.integrations.getProjectMapping.query({ projectId: project.id, provider: 'linear' }),
+      trpcClient.integrations.getProjectConnection.query({ projectId: project.id, provider: 'linear' }),
+      trpcClient.integrations.listConnections.query({ provider: 'github' }),
+      trpcClient.integrations.getProjectMapping.query({ projectId: project.id, provider: 'github' }),
+      trpcClient.integrations.getProjectConnection.query({ projectId: project.id, provider: 'github' })
     ])
     setConnections(loadedConnections)
     setGithubConnections(loadedGithubConnections)
@@ -300,7 +301,7 @@ export function IntegrationsTab({
       }
       setLoadingGithubRepositories(true)
       try {
-        const repos = await getTrpcVanillaClient().integrations.listGithubRepositories.query({ connectionId })
+        const repos = await trpcClient.integrations.listGithubRepositories.query({ connectionId })
         setGithubRepositories(repos)
         setGithubRepositoryFullName((current) => {
           if (current && repos.some((repo) => repo.fullName === current)) return current
@@ -338,7 +339,7 @@ export function IntegrationsTab({
     }
     setLoadingGithubSyncProjects(true)
     setSyncSettingsMessage('')
-    void getTrpcVanillaClient().integrations.listGithubProjects.query({ connectionId: githubProjectConnectionId })
+    void trpcClient.integrations.listGithubProjects.query({ connectionId: githubProjectConnectionId })
       .then((projects) => {
         setGithubSyncProjects(projects)
         setGithubSyncProjectId((current) => {
@@ -369,7 +370,7 @@ export function IntegrationsTab({
     }
     setLoadingLinearSyncTeams(true)
     setSyncSettingsMessage('')
-    void getTrpcVanillaClient().integrations.listLinearTeams.query({ connectionId: linearProjectConnectionId })
+    void trpcClient.integrations.listLinearTeams.query({ connectionId: linearProjectConnectionId })
       .then((result) => {
         const teams = Array.isArray(result) ? result : result.teams
         setLinearSyncTeams(teams)
@@ -400,7 +401,7 @@ export function IntegrationsTab({
     }
     setLoadingLinearSyncProjects(true)
     setSyncSettingsMessage('')
-    void getTrpcVanillaClient().integrations.listLinearProjects.query({ connectionId: linearProjectConnectionId, teamId: linearSyncTeamId })
+    void trpcClient.integrations.listLinearProjects.query({ connectionId: linearProjectConnectionId, teamId: linearSyncTeamId })
       .then((projects) => {
         setLinearSyncProjects(projects)
         setLinearSyncProjectId((current) => {
@@ -431,7 +432,7 @@ export function IntegrationsTab({
     }
     setLoadingLinearImportTeams(true)
     setLinearImportSourceMessage('')
-    void getTrpcVanillaClient().integrations.listLinearTeams.query({ connectionId: linearProjectConnectionId })
+    void trpcClient.integrations.listLinearTeams.query({ connectionId: linearProjectConnectionId })
       .then((result) => {
         const teams = Array.isArray(result) ? result : result.teams
         setLinearImportTeams(teams)
@@ -458,7 +459,7 @@ export function IntegrationsTab({
     }
     setLoadingLinearImportProjects(true)
     setLinearImportSourceMessage('')
-    void getTrpcVanillaClient().integrations.listLinearProjects.query({ connectionId: linearProjectConnectionId, teamId: linearImportTeamId })
+    void trpcClient.integrations.listLinearProjects.query({ connectionId: linearProjectConnectionId, teamId: linearImportTeamId })
       .then((projects) => {
         setLinearImportProjects(projects)
         setLinearImportProjectId((current) => {
@@ -522,7 +523,7 @@ export function IntegrationsTab({
   const handleDisableSyncForProvider = async (provider: IntegrationProvider) => {
     setSwitchingProvider(true)
     try {
-      await getTrpcVanillaClient().integrations.clearProjectProvider.mutate({
+      await trpcClient.integrations.clearProjectProvider.mutate({
         projectId: project.id,
         provider
       })
@@ -539,7 +540,7 @@ export function IntegrationsTab({
 
     setDisconnectingProjectConnectionProvider(provider)
     try {
-      await getTrpcVanillaClient().integrations.clearProjectConnection.mutate({
+      await trpcClient.integrations.clearProjectConnection.mutate({
         projectId: project.id,
         provider
       })
@@ -568,7 +569,7 @@ export function IntegrationsTab({
     setSavingSyncProvider('github')
     setSyncSettingsMessage('')
     try {
-      const saved = await getTrpcVanillaClient().integrations.setProjectMapping.mutate({
+      const saved = await trpcClient.integrations.setProjectMapping.mutate({
         projectId: project.id,
         provider: 'github',
         connectionId: githubProjectConnectionId,
@@ -604,7 +605,7 @@ export function IntegrationsTab({
     setSavingSyncProvider('linear')
     setSyncSettingsMessage('')
     try {
-      const saved = await getTrpcVanillaClient().integrations.setProjectMapping.mutate({
+      const saved = await trpcClient.integrations.setProjectMapping.mutate({
         projectId: project.id,
         provider: 'linear',
         connectionId: linearProjectConnectionId,
@@ -641,7 +642,7 @@ export function IntegrationsTab({
 
     setLoadingSyncStatuses(true)
     try {
-      const statuses = await getTrpcVanillaClient().integrations.fetchProviderStatuses.mutate({
+      const statuses = await trpcClient.integrations.fetchProviderStatuses.mutate({
         connectionId: updatedMapping.connection_id,
         provider,
         externalTeamId: updatedMapping.external_team_id,
@@ -652,7 +653,7 @@ export function IntegrationsTab({
         return
       }
 
-      const updated = await getTrpcVanillaClient().integrations.applyStatusSync.mutate({
+      const updated = await trpcClient.integrations.applyStatusSync.mutate({
         projectId: project.id,
         provider,
         statuses
@@ -679,7 +680,7 @@ export function IntegrationsTab({
 
     setLoadingSyncStatuses(true)
     try {
-      const preview = await getTrpcVanillaClient().integrations.resyncProviderStatuses.mutate({
+      const preview = await trpcClient.integrations.resyncProviderStatuses.mutate({
         projectId: project.id,
         provider
       })
@@ -696,7 +697,7 @@ export function IntegrationsTab({
       ].filter(Boolean).join(', ')
       if (!window.confirm(`Provider statuses changed: ${summary}. Apply?`)) return
 
-      const updated = await getTrpcVanillaClient().integrations.applyStatusSync.mutate({
+      const updated = await trpcClient.integrations.applyStatusSync.mutate({
         projectId: project.id,
         provider,
         statuses: preview.providerStatuses
@@ -740,7 +741,7 @@ export function IntegrationsTab({
     setLoadingIssues(true)
     setImportMessage('')
     try {
-      const result = await getTrpcVanillaClient().integrations.listLinearIssues.query({
+      const result = await trpcClient.integrations.listLinearIssues.query({
         connectionId,
         projectId: project.id,
         teamId,
@@ -770,7 +771,7 @@ export function IntegrationsTab({
     setImporting(true)
     setImportMessage('')
     try {
-      const result = await getTrpcVanillaClient().integrations.importLinearIssues.mutate({
+      const result = await trpcClient.integrations.importLinearIssues.mutate({
         projectId: project.id,
         connectionId,
         teamId,
@@ -796,7 +797,7 @@ export function IntegrationsTab({
     setLoadingGithubRepoIssues(true)
     setGithubRepoImportMessage('')
     try {
-      const result = await getTrpcVanillaClient().integrations.listGithubRepositoryIssues.query({
+      const result = await trpcClient.integrations.listGithubRepositoryIssues.query({
         connectionId,
         projectId: project.id,
         repositoryFullName: githubRepositoryFullName,
@@ -827,7 +828,7 @@ export function IntegrationsTab({
         githubRepoIssueOptions.filter((issue) => !issue.linkedTaskId).map((issue) => issue.id)
       )
       const selectedImportableIds = [...selectedGithubRepoIssueIds].filter((id) => importableIdSet.has(id))
-      const result = await getTrpcVanillaClient().integrations.importGithubRepositoryIssues.mutate({
+      const result = await trpcClient.integrations.importGithubRepositoryIssues.mutate({
         projectId: project.id,
         connectionId,
         repositoryFullName: githubRepositoryFullName,
@@ -861,11 +862,11 @@ export function IntegrationsTab({
     const provider = syncSetupProvider
     if (!provider) return []
 
-    const tasks = await getTrpcVanillaClient().task.getByProject.query({ projectId: project.id })
+    const tasks = await trpcClient.task.getByProject.query({ projectId: project.id })
     const taskIds = tasks.map(t => t.id)
 
     // Single batch call: returns link + status for all tasks
-    const batchItems = await getTrpcVanillaClient().integrations.getBatchTaskSyncStatus.query({ taskIds, provider })
+    const batchItems = await trpcClient.integrations.getBatchTaskSyncStatus.query({ taskIds, provider })
     const itemByTaskId = new Map(batchItems.map(item => [item.taskId, item]))
 
     const rows: TaskSyncRow[] = taskIds.map(taskId => {
@@ -908,7 +909,7 @@ export function IntegrationsTab({
       let errors = 0
       for (const target of targets) {
         try {
-          const result = await getTrpcVanillaClient().integrations.pushTask.mutate({
+          const result = await trpcClient.integrations.pushTask.mutate({
             taskId: target.taskId,
             provider: syncSetupProvider
           })
@@ -923,7 +924,7 @@ export function IntegrationsTab({
       const unlinkedCount = rows.filter((r) => !r.link).length
       let unlinkedPushed = 0
       if (unlinkedCount > 0) {
-        const result = await getTrpcVanillaClient().integrations.pushUnlinkedTasks.mutate({
+        const result = await trpcClient.integrations.pushUnlinkedTasks.mutate({
           projectId: project.id,
           provider: syncSetupProvider
         })
@@ -963,7 +964,7 @@ export function IntegrationsTab({
       let errors = 0
       for (const target of targets) {
         try {
-          const result = await getTrpcVanillaClient().integrations.pullTask.mutate({
+          const result = await trpcClient.integrations.pullTask.mutate({
             taskId: target.taskId,
             provider: syncSetupProvider
           })
@@ -1801,7 +1802,7 @@ export function IntegrationsTab({
                     <button
                       type="button"
                       className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      onClick={() => getTrpcVanillaClient().app.shell.openExternal.mutate({ url: syncExternalUrl })}
+                      onClick={() => trpcClient.app.shell.openExternal.mutate({ url: syncExternalUrl })}
                     >
                       <ExternalLinkIcon className="size-3" />
                       Open in {syncSetupProvider === 'linear' ? 'Linear' : 'GitHub'}

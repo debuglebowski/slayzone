@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Input,
   Button,
@@ -48,15 +48,16 @@ function matchProfile(categories: TestCategory[], profiles: TestProfile[]): stri
 }
 
 export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [profiles, setProfiles] = useState<TestProfile[]>([])
   const [categories, setCategories] = useState<TestCategory[]>([])
   const [labels, setLabels] = useState<TestLabel[]>([])
 
   const reload = useCallback(async () => {
     const [cats, lbls, profs] = await Promise.all([
-      getTrpcVanillaClient().testPanel.getCategories.query({ projectId: projectId }),
-      getTrpcVanillaClient().testPanel.getLabels.query({ projectId: projectId }),
-      getTrpcVanillaClient().testPanel.getProfiles.query()
+      trpcClient.testPanel.getCategories.query({ projectId: projectId }),
+      trpcClient.testPanel.getLabels.query({ projectId: projectId }),
+      trpcClient.testPanel.getProfiles.query()
     ])
     setCategories(cats)
     setLabels(lbls)
@@ -69,7 +70,7 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
 
   const handleProfileChange = async (value: string) => {
     if (value !== CUSTOM_VALUE && value !== '') {
-      await getTrpcVanillaClient().testPanel.applyProfile.mutate({ projectId, profileId: value })
+      await trpcClient.testPanel.applyProfile.mutate({ projectId, profileId: value })
       reload()
     }
   }
@@ -80,7 +81,7 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
       name: 'New Category',
       pattern: '**/*.test.ts'
     }
-    await getTrpcVanillaClient().testPanel.createCategory.mutate(input)
+    await trpcClient.testPanel.createCategory.mutate(input)
     reload()
   }
 
@@ -91,12 +92,12 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
 
   const updateCategory = async (id: string, field: string, value: string | number) => {
     if (!categoryIdsRef.current.has(id)) return
-    await getTrpcVanillaClient().testPanel.updateCategory.mutate({ id, [field]: value })
+    await trpcClient.testPanel.updateCategory.mutate({ id, [field]: value })
     reload()
   }
 
   const deleteCategory = async (id: string) => {
-    await getTrpcVanillaClient().testPanel.deleteCategory.mutate({ id: id })
+    await trpcClient.testPanel.deleteCategory.mutate({ id: id })
     reload()
   }
 
@@ -109,28 +110,28 @@ export function TestsTab({ projectId, groupBy, onGroupByChange }: TestsTabProps)
       name: name.trim(),
       categories: categories.map((c) => ({ name: c.name, pattern: c.pattern, color: c.color }))
     }
-    await getTrpcVanillaClient().testPanel.saveProfile.mutate(profile)
-    setProfiles(await getTrpcVanillaClient().testPanel.getProfiles.query())
+    await trpcClient.testPanel.saveProfile.mutate(profile)
+    setProfiles(await trpcClient.testPanel.getProfiles.query())
     setSavePopoverOpen(false)
   }
 
   const deleteProfile = async (id: string) => {
-    await getTrpcVanillaClient().testPanel.deleteProfile.mutate({ id: id })
-    setProfiles(await getTrpcVanillaClient().testPanel.getProfiles.query())
+    await trpcClient.testPanel.deleteProfile.mutate({ id: id })
+    setProfiles(await trpcClient.testPanel.getProfiles.query())
   }
 
   const addLabel = async () => {
-    await getTrpcVanillaClient().testPanel.createLabel.mutate({ project_id: projectId, name: 'New Label' })
+    await trpcClient.testPanel.createLabel.mutate({ project_id: projectId, name: 'New Label' })
     reload()
   }
 
   const updateLabel = async (id: string, field: string, value: string | number) => {
-    await getTrpcVanillaClient().testPanel.updateLabel.mutate({ id, [field]: value })
+    await trpcClient.testPanel.updateLabel.mutate({ id, [field]: value })
     reload()
   }
 
   const deleteLabel = async (id: string) => {
-    await getTrpcVanillaClient().testPanel.deleteLabel.mutate({ id: id })
+    await trpcClient.testPanel.deleteLabel.mutate({ id: id })
     reload()
   }
 

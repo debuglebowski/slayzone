@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
@@ -44,6 +44,7 @@ export function ProjectSettingsDialog({
   onChanged,
   renderTemplatesTab
 }: ProjectSettingsDialogProps) {
+  const trpcClient = useTRPCClient()
   const [activeTab, setActiveTab] = useState<'general' | 'environment' | 'tasks' | 'tasks/general' | 'tasks/statuses' | 'tasks/tags' | 'worktrees' | 'repos' | 'templates' | 'integrations' | 'ai-config' | 'tests'>('general')
   const detectedRepos = useDetectedRepos(open ? project?.path ?? null : null)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
@@ -55,8 +56,8 @@ export function ProjectSettingsDialog({
     }
     try {
       const [linear, github] = await Promise.all([
-        getTrpcVanillaClient().integrations.getProjectMapping.query({ projectId: project.id, provider: 'linear' }),
-        getTrpcVanillaClient().integrations.getProjectMapping.query({ projectId: project.id, provider: 'github' })
+        trpcClient.integrations.getProjectMapping.query({ projectId: project.id, provider: 'linear' }),
+        trpcClient.integrations.getProjectMapping.query({ projectId: project.id, provider: 'github' })
       ])
       if (linear?.status_setup_complete) setLockedByProvider('Linear')
       else if (github?.status_setup_complete) setLockedByProvider('GitHub')

@@ -1,5 +1,5 @@
 import { FolderGit2, Star } from 'lucide-react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { cn } from '@slayzone/ui'
 import type { Project, DetectedRepo } from '@slayzone/projects/shared'
 import { SettingsTabIntro } from './project-settings-shared'
@@ -11,10 +11,11 @@ interface ReposTabProps {
 }
 
 export function ReposTab({ project, repos, onUpdated }: ReposTabProps) {
+  const trpcClient = useTRPCClient()
   const defaultRepo = project.selected_repo ?? repos[0]?.name ?? null
 
   const handleSetDefault = async (repoName: string) => {
-    const updated = await getTrpcVanillaClient().projects.update.mutate({
+    const updated = await trpcClient.projects.update.mutate({
       id: project.id,
       selectedRepo: repoName
     })

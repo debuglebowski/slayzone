@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import type { ExternalGroup, ExternalScope } from '@slayzone/integrations/shared'
 
 export interface UseProviderDataResult {
@@ -30,6 +30,7 @@ export function useProviderData(
     initialScopeId?: string | null
   }
 ): UseProviderDataResult {
+  const trpcClient = useTRPCClient()
   const [groups, setGroups] = useState<ExternalGroup[]>([])
   const [scopes, setScopes] = useState<ExternalScope[]>([])
   const [loadingGroups, setLoadingGroups] = useState(false)
@@ -55,7 +56,7 @@ export function useProviderData(
     setLoadingGroups(true)
     setError(null)
 
-    getTrpcVanillaClient().integrations.listProviderGroups.query({ connectionId }).then(
+    trpcClient.integrations.listProviderGroups.query({ connectionId }).then(
       (result) => {
         if (cancelled) return
         setGroups(result)
@@ -89,7 +90,7 @@ export function useProviderData(
     let cancelled = false
     setLoadingScopes(true)
 
-    getTrpcVanillaClient().integrations.listProviderScopes.query({ connectionId, groupId: selectedGroupId }).then(
+    trpcClient.integrations.listProviderScopes.query({ connectionId, groupId: selectedGroupId }).then(
       (result) => {
         if (cancelled) return
         setScopes(result)

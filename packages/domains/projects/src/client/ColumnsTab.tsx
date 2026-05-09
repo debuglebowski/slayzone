@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import {
   Plus,
   Trash2,
@@ -28,6 +28,7 @@ interface ColumnsTabProps {
 }
 
 export function ColumnsTab({ project, onUpdated, lockedByProvider }: ColumnsTabProps) {
+  const trpcClient = useTRPCClient()
   const [columnsDraft, setColumnsDraft] = useState<ColumnConfig[]>(() =>
     resolveColumns(project.columns_config)
   )
@@ -110,7 +111,7 @@ export function ColumnsTab({ project, onUpdated, lockedByProvider }: ColumnsTabP
       return
     }
 
-    const updated = await getTrpcVanillaClient().projects.update.mutate({
+    const updated = await trpcClient.projects.update.mutate({
       id: project.id,
       columnsConfig: normalized
     })

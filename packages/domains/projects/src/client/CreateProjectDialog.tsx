@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
@@ -44,6 +44,7 @@ const START_OPTIONS: Array<{
 ]
 
 export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreateProjectDialogProps) {
+  const trpcClient = useTRPCClient()
   const [name, setName] = useState('')
   const [color, setColor] = useState(() => DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)])
   const [path, setPath] = useState('')
@@ -52,7 +53,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const visibleStartOptions = START_OPTIONS
 
   const handleBrowse = async () => {
-    const result = await getTrpcVanillaClient().app.dialog.showOpenDialog.mutate({
+    const result = await trpcClient.app.dialog.showOpenDialog.mutate({
       title: 'Select Project Directory',
       properties: ['openDirectory', 'createDirectory', 'promptToCreate']
     })
@@ -72,7 +73,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
 
     setLoading(true)
     try {
-      const project = await getTrpcVanillaClient().projects.create.mutate({
+      const project = await trpcClient.projects.create.mutate({
         name: name.trim(),
         color,
         path: path || undefined

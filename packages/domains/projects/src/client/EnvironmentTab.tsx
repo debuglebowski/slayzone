@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { Button } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
@@ -15,6 +15,7 @@ interface EnvironmentTabProps {
 }
 
 export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabProps) {
+  const trpcClient = useTRPCClient()
   const [execType, setExecType] = useState<'host' | 'docker' | 'ssh'>('host')
   const [execContainer, setExecContainer] = useState('')
   const [execSshTarget, setExecSshTarget] = useState('')
@@ -61,7 +62,7 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
           ? { type: 'ssh' as const, target: execSshTarget.trim(), ...(execWorkdir.trim() ? { workdir: execWorkdir.trim() } : {}), ...(execShell.trim() ? { shell: execShell.trim() } : {}) }
           : null
 
-      const updated = await getTrpcVanillaClient().projects.update.mutate({
+      const updated = await trpcClient.projects.update.mutate({
         id: project.id,
         executionContext
       })
@@ -129,7 +130,7 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
                 onClick={async () => {
                   setTestingConnection(true)
                   setTestResult(null)
-                  const result = await getTrpcVanillaClient().pty.testExecutionContext.query({ type: 'docker', container: execContainer.trim() }).catch((e: unknown) => ({ success: false as const, error: e instanceof Error ? e.message : String(e) }))
+                  const result = await trpcClient.pty.testExecutionContext.query({ type: 'docker', container: execContainer.trim() }).catch((e: unknown) => ({ success: false as const, error: e instanceof Error ? e.message : String(e) }))
                   setTestResult(result)
                   setTestingConnection(false)
                 }}
@@ -169,7 +170,7 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
                 onClick={async () => {
                   setTestingConnection(true)
                   setTestResult(null)
-                  const result = await getTrpcVanillaClient().pty.testExecutionContext.query({ type: 'ssh', target: execSshTarget.trim() }).catch((e: unknown) => ({ success: false as const, error: e instanceof Error ? e.message : String(e) }))
+                  const result = await trpcClient.pty.testExecutionContext.query({ type: 'ssh', target: execSshTarget.trim() }).catch((e: unknown) => ({ success: false as const, error: e instanceof Error ? e.message : String(e) }))
                   setTestResult(result)
                   setTestingConnection(false)
                 }}

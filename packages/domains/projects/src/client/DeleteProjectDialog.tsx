@@ -9,7 +9,7 @@ import {
   AlertDialogTitle
 } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 interface DeleteProjectDialogProps {
   project: Project | null
@@ -24,9 +24,10 @@ export function DeleteProjectDialog({
   onOpenChange,
   onDeleted
 }: DeleteProjectDialogProps) {
+  const trpcClient = useTRPCClient()
   const handleDelete = async () => {
     if (!project) return
-    await getTrpcVanillaClient().projects.delete.mutate({ id: project.id })
+    await trpcClient.projects.delete.mutate({ id: project.id })
     onDeleted()
   }
 

@@ -6,7 +6,7 @@ import {
   Button, Input, Label
 } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 interface CreateTagDialogProps {
   open: boolean
@@ -23,6 +23,7 @@ interface CreateTagDialogProps {
 const DEFAULT_PRESET = TAG_PRESETS[17] // indigo
 
 export function CreateTagDialog({ open, onOpenChange, projectId, tag, existingTags, onCreated, onUpdated }: CreateTagDialogProps) {
+  const trpcClient = useTRPCClient()
   const usedColors = new Set(
     (existingTags ?? [])
       .filter((t) => !tag || t.id !== tag.id) // don't exclude the tag being edited
@@ -46,7 +47,7 @@ export function CreateTagDialog({ open, onOpenChange, projectId, tag, existingTa
 
   const handleSubmit = async () => {
     if (!name.trim()) return
-    const trpc = getTrpcVanillaClient()
+    const trpc = trpcClient
     if (isEditing) {
       const updated = await trpc.tags.update.mutate({
         id: tag.id,
