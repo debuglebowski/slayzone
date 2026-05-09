@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { createPortal } from 'react-dom'
 import { ExternalLink, Pencil, Star, Search, Plus, Trash2 } from 'lucide-react'
 import { Button, cn, IconButton, Input, Label, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@slayzone/ui'
@@ -474,10 +475,15 @@ function ComputerMcpPanel() {
     setCustomServers(await loadCustomServers(trpcClient))
   }, [trpcClient])
 
+  const trpc = useTRPC()
+  const favoritesQuery = useQuery(trpc.settings.get.queryOptions({ key: 'mcp_favorites' }))
+  const setSetting = useMutation(trpc.settings.set.mutationOptions())
   useEffect(() => {
-    void trpcClient.settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
-      if (raw) setFavorites(JSON.parse(raw) as string[])
-    })
+    if (favoritesQuery.data) {
+      try { setFavorites(JSON.parse(favoritesQuery.data) as string[]) } catch { /* ignore */ }
+    }
+  }, [favoritesQuery.data])
+  useEffect(() => {
     void loadCustom()
   }, [loadCustom])
 
@@ -486,7 +492,7 @@ function ComputerMcpPanel() {
       ? favorites.filter((f) => f !== id)
       : [...favorites, id]
     setFavorites(next)
-    await trpcClient.settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
+    setSetting.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
   }
 
   const deleteCustomServer = async (id: string) => {
@@ -658,11 +664,14 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
     [enabledProviders]
   )
 
+  const projectTrpc = useTRPC()
+  const projectFavoritesQuery = useQuery(projectTrpc.settings.get.queryOptions({ key: 'mcp_favorites' }))
+  const setProjectFavoritesSetting = useMutation(projectTrpc.settings.set.mutationOptions())
   useEffect(() => {
-    void trpcClient.settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
-      if (raw) setFavorites(JSON.parse(raw) as string[])
-    })
-  }, [])
+    if (projectFavoritesQuery.data) {
+      try { setFavorites(JSON.parse(projectFavoritesQuery.data) as string[]) } catch { /* ignore */ }
+    }
+  }, [projectFavoritesQuery.data])
 
   const writableProviders = useMemo(
     () => new Set(configs.filter((cfg) => cfg.writable).map((cfg) => cfg.provider)),
@@ -674,7 +683,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
       ? favorites.filter((f) => f !== id)
       : [...favorites, id]
     setFavorites(next)
-    await trpcClient.settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
+    setProjectFavoritesSetting.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
   }
 
   const isFavorite = (id: string) => favorites.includes(id)
