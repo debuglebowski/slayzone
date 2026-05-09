@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
 
 export interface BrowserTabPlaceholderHandle {
@@ -35,6 +35,7 @@ interface BrowserTabPlaceholderProps {
 
 export const BrowserTabPlaceholder = forwardRef<BrowserTabPlaceholderHandle, BrowserTabPlaceholderProps>(
   function BrowserTabPlaceholder({ tabId, taskId, url, partition, visible, hidden, isResizing, className, onStateChange, onOverlayChange }, ref) {
+    const trpcClient = useTRPCClient()
     const { viewId, state, actions, placeholderRef, hiddenByOverlay } = useBrowserView({
       tabId,
       taskId,
@@ -62,13 +63,13 @@ export const BrowserTabPlaceholder = forwardRef<BrowserTabPlaceholderHandle, Bro
       if (!taskId || !viewId) return
       let cancelled = false
       void (async () => {
-        const wcId = await getTrpcVanillaClient().app.browser.getWebContentsId.query({ viewId }) as number | null
+        const wcId = await trpcClient.app.browser.getWebContentsId.query({ viewId }) as number | null
         if (cancelled || wcId == null) return
-        await getTrpcVanillaClient().app.webview.registerBrowserTab.mutate({ taskId, tabId, webContentsId: wcId })
+        await trpcClient.app.webview.registerBrowserTab.mutate({ taskId, tabId, webContentsId: wcId })
       })()
       return () => {
         cancelled = true
-        void getTrpcVanillaClient().app.webview.unregisterBrowserTab.mutate({ taskId, tabId })
+        void trpcClient.app.webview.unregisterBrowserTab.mutate({ taskId, tabId })
       }
     }, [taskId, tabId, viewId])
 

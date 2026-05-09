@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, createRef } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import { ArrowLeft, ArrowRight, RotateCw, X, Plus, Import, Smartphone, Monitor, Tablet, LayoutGrid, ChevronDown, ChevronUp, Crosshair, Camera, Bug, Sun, Moon, PaintbrushVertical, Keyboard, Puzzle, Trash2, Download, TriangleAlert } from 'lucide-react'
 import type { BrowserTabTheme } from '../shared'
@@ -480,6 +480,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   onScreenshot,
   canUseDomPicker = true,
 }: BrowserPanelProps, ref) {
+  const trpcClient = useTRPCClient()
   const { browserDefaultUrl, browserDefaultZoom, browserDeviceDefaults } = useAppearance()
   const elementPickerShortcut = useShortcutDisplay('browser-element-picker')
   const urlInputRef = useRef<HTMLInputElement>(null)
@@ -560,21 +561,21 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Per-tab webContents registration is owned by BrowserTabPlaceholder.
   useEffect(() => {
     if (!taskId) return
-    void getTrpcVanillaClient().app.webview.setActiveBrowserTab.mutate({ taskId, tabId: tabs.activeTabId })
+    void trpcClient.app.webview.setActiveBrowserTab.mutate({ taskId, tabId: tabs.activeTabId })
   }, [taskId, tabs.activeTabId])
 
   // Sync keyboard passthrough to main process
   useEffect(() => {
     if (!activeViewId) return
-    void getTrpcVanillaClient().app.browser.setKeyboardPassthrough.mutate({ viewId: activeViewId, enabled: captureShortcuts })
+    void trpcClient.app.browser.setKeyboardPassthrough.mutate({ viewId: activeViewId, enabled: captureShortcuts })
   }, [activeViewId, captureShortcuts])
 
   // Fetch URLs from other tasks in the same project when dropdown opens
   useEffect(() => {
     if (!importDropdownOpen || !taskId) return
     const promise = projectId
-      ? getTrpcVanillaClient().task.getByProject.query({ projectId: projectId })
-      : getTrpcVanillaClient().task.getAll.query()
+      ? trpcClient.task.getByProject.query({ projectId: projectId })
+      : trpcClient.task.getAll.query()
     promise.then(tasks => {
       const entries: TaskUrlEntry[] = []
       for (const t of tasks) {
@@ -664,8 +665,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     setExtensionsError(null)
     try {
       const [installed, discovered] = await Promise.all([
-        getTrpcVanillaClient().app.browser.getExtensions.query() as Promise<InstalledBrowserExtension[]>,
-        getTrpcVanillaClient().app.browser.discoverBrowserExtensions.query() as Promise<Array<{ name: string; extensions: Array<{ id: string; name: string; version: string; path: string; alreadyImported: boolean; manifestVersion?: number }> }>>,
+        trpcClient.app.browser.getExtensions.query() as Promise<InstalledBrowserExtension[]>,
+        trpcClient.app.browser.discoverBrowserExtensions.query() as Promise<Array<{ name: string; extensions: Array<{ id: string; name: string; version: string; path: string; alreadyImported: boolean; manifestVersion?: number }> }>>,
       ])
       const installedIds = new Set(installed.map(extension => extension.id))
       setExtensions(installed)
@@ -698,13 +699,13 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   const handleActivateExtension = useCallback((extensionId: string) => {
     setExtensionsManagerOpen(false)
     requestAnimationFrame(() => {
-      void getTrpcVanillaClient().app.browser.activateExtension.mutate({ extensionId })
+      void trpcClient.app.browser.activateExtension.mutate({ extensionId })
     })
   }, [])
 
   const handleImportExtension = useCallback(async (path: string, name: string) => {
     try {
-      const result = await getTrpcVanillaClient().app.browser.importExtension.mutate({ extPath: path }) as { id?: string; name?: string; error?: string } | null
+      const result = await trpcClient.app.browser.importExtension.mutate({ extPath: path }) as { id?: string; name?: string; error?: string } | null
       if (result && 'id' in result) {
         await refreshExtensions()
         return
@@ -718,7 +719,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   const handleLoadExtension = useCallback(async () => {
     try {
-      const result = await getTrpcVanillaClient().app.browser.loadExtension.mutate() as { id?: string; name?: string; error?: string } | null
+      const result = await trpcClient.app.browser.loadExtension.mutate() as { id?: string; name?: string; error?: string } | null
       if (result && 'id' in result) {
         await refreshExtensions()
         return
@@ -734,7 +735,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   const handleRemoveExtension = useCallback(async (extensionId: string) => {
     try {
-      await getTrpcVanillaClient().app.browser.removeExtension.mutate({ extensionId })
+      await trpcClient.app.browser.removeExtension.mutate({ extensionId })
       await refreshExtensions()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to remove extension'
@@ -831,7 +832,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       const handle = ref.current
       if (!handle?.viewId) continue
       const shouldBeVisible = tabId === tabs.activeTabId && isActive !== false && !extensionsManagerOpen
-      void getTrpcVanillaClient().app.browser.setVisible.mutate({ viewId: handle.viewId, visible: shouldBeVisible })
+      void trpcClient.app.browser.setVisible.mutate({ viewId: handle.viewId, visible: shouldBeVisible })
     }
   }, [tabs.activeTabId, isActive, extensionsManagerOpen])
 
@@ -893,7 +894,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Handle new-tab-request events from main process (Cmd+Click / middle-click on links)
   useEffect(() => {
     if (!taskId) return
-    const sub = getTrpcVanillaClient().app.browser.onEvent.subscribe(undefined, {
+    const sub = trpcClient.app.browser.onEvent.subscribe(undefined, {
       onData: (raw) => {
         const event = raw as { type: string; taskId?: string; url?: string; background?: boolean }
         if (event.type !== 'new-tab-request' || event.taskId !== taskId) return
@@ -922,12 +923,12 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Only fires when browser scope is active (panel or WebContentsView focused).
   useShortcutAction('browser-scroll-top', () => {
     if (!activeViewId) return false // decline — let event propagate
-    void getTrpcVanillaClient().app.browser.sendInputEvent.mutate({ viewId: activeViewId, input: { type: 'keyDown', keyCode: 'Up', modifiers: ['meta'] } })
+    void trpcClient.app.browser.sendInputEvent.mutate({ viewId: activeViewId, input: { type: 'keyDown', keyCode: 'Up', modifiers: ['meta'] } })
     return undefined
   })
   useShortcutAction('browser-scroll-bottom', () => {
     if (!activeViewId) return false
-    void getTrpcVanillaClient().app.browser.sendInputEvent.mutate({ viewId: activeViewId, input: { type: 'keyDown', keyCode: 'Down', modifiers: ['meta'] } })
+    void trpcClient.app.browser.sendInputEvent.mutate({ viewId: activeViewId, input: { type: 'keyDown', keyCode: 'Down', modifiers: ['meta'] } })
     return undefined
   })
 
@@ -997,12 +998,12 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
     void (async () => {
       try {
-        const isOpen = await getTrpcVanillaClient().app.browser.isDevToolsOpen.query({ viewId: activeViewId })
+        const isOpen = await trpcClient.app.browser.isDevToolsOpen.query({ viewId: activeViewId })
         if (isOpen) {
-          await getTrpcVanillaClient().app.browser.closeDevTools.mutate({ viewId: activeViewId })
+          await trpcClient.app.browser.closeDevTools.mutate({ viewId: activeViewId })
           setDevToolsOpen(false)
         } else {
-          await getTrpcVanillaClient().app.browser.openDevTools.mutate({ viewId: activeViewId, mode: 'bottom' })
+          await trpcClient.app.browser.openDevTools.mutate({ viewId: activeViewId, mode: 'bottom' })
           setDevToolsOpen(true)
         }
       } catch {
@@ -1078,7 +1079,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     setFindText('')
     setFindResult(null)
     if (activeViewId) {
-      void getTrpcVanillaClient().app.browser.stopFindInPage.mutate({ viewId: activeViewId, action: 'clearSelection' })
+      void trpcClient.app.browser.stopFindInPage.mutate({ viewId: activeViewId, action: 'clearSelection' })
     }
   }, [activeViewId])
 
@@ -1092,16 +1093,16 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
 
   const findNext = useCallback((forward: boolean) => {
     if (!activeViewId || !findText) return
-    void getTrpcVanillaClient().app.browser.findInPage.mutate({ viewId: activeViewId, text: findText, options: { forward, findNext: true } })
+    void trpcClient.app.browser.findInPage.mutate({ viewId: activeViewId, text: findText, options: { forward, findNext: true } })
   }, [activeViewId, findText])
 
   const handleFindTextChange = useCallback((text: string) => {
     setFindText(text)
     if (!activeViewId) return
     if (text) {
-      void getTrpcVanillaClient().app.browser.findInPage.mutate({ viewId: activeViewId, text, options: { forward: true } })
+      void trpcClient.app.browser.findInPage.mutate({ viewId: activeViewId, text, options: { forward: true } })
     } else {
-      void getTrpcVanillaClient().app.browser.stopFindInPage.mutate({ viewId: activeViewId, action: 'clearSelection' })
+      void trpcClient.app.browser.stopFindInPage.mutate({ viewId: activeViewId, action: 'clearSelection' })
       setFindResult(null)
     }
   }, [activeViewId])
@@ -1109,7 +1110,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   // Subscribe to found-in-page results
   useEffect(() => {
     if (!findMode) return
-    const sub = getTrpcVanillaClient().app.browser.onEvent.subscribe(undefined, {
+    const sub = trpcClient.app.browser.onEvent.subscribe(undefined, {
       onData: (raw) => {
         const event = raw as { type: string; viewId: string; finalUpdate?: boolean; activeMatchOrdinal?: number; matches?: number }
         if (event.type !== 'found-in-page') return

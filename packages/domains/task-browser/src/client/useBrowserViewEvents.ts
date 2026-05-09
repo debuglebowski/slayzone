@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 export interface LoadError {
   code: number
@@ -33,85 +34,87 @@ const INITIAL_STATE: BrowserViewState = {
 }
 
 export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
+  const trpc = useTRPC()
   const [state, setState] = useState<BrowserViewState>(INITIAL_STATE)
   const viewIdRef = useRef(viewId)
   viewIdRef.current = viewId
 
+  // Reset state when viewId changes (or clears).
   useEffect(() => {
-    if (!viewId) {
-      setState(INITIAL_STATE)
-      return
-    }
-
-    const sub = getTrpcVanillaClient().app.browser.onEvent.subscribe(undefined, { onData: (raw) => {
-      const event = raw as { viewId: string; type: string; [k: string]: unknown }
-      if (event.viewId !== viewIdRef.current) return
-
-      switch (event.type) {
-        case 'did-navigate':
-          setState((prev) => ({
-            ...prev,
-            url: event.url as string,
-            canGoBack: event.canGoBack as boolean,
-            canGoForward: event.canGoForward as boolean,
-            error: null,
-          }))
-          break
-
-        case 'did-start-loading':
-          setState((prev) => ({ ...prev, isLoading: true }))
-          break
-
-        case 'did-stop-loading':
-          setState((prev) => ({ ...prev, isLoading: false }))
-          break
-
-        case 'page-title-updated':
-          setState((prev) => ({ ...prev, title: event.title as string }))
-          break
-
-        case 'page-favicon-updated': {
-          const favicons = event.favicons as string[] | undefined
-          const favicon = favicons?.[0]
-          if (favicon) {
-            setState((prev) => ({ ...prev, favicon }))
-          }
-          break
-        }
-
-        case 'dom-ready':
-          setState((prev) => ({
-            ...prev,
-            domReady: true,
-            error: null,
-            hasLoadedRealPage: prev.hasLoadedRealPage || (prev.url !== '' && prev.url !== 'about:blank'),
-          }))
-          break
-
-        case 'did-fail-load':
-          setState((prev) => ({
-            ...prev,
-            isLoading: false,
-            error: {
-              code: event.errorCode as number,
-              description: event.errorDescription as string,
-              url: event.url as string,
-            },
-          }))
-          break
-
-        case 'crashed':
-          setState((prev) => ({
-            ...prev,
-            isLoading: false,
-            error: { code: -1, description: 'Renderer process crashed', url: '' },
-          }))
-          break
-      }
-    } })
-
-    return () => sub.unsubscribe()
+    if (!viewId) setState(INITIAL_STATE)
   }, [viewId])
+
+  useSubscription(
+    trpc.app.browser.onEvent.subscriptionOptions(undefined, {
+      enabled: !!viewId,
+      onData: (raw) => {
+        const event = raw as { viewId: string; type: string; [k: string]: unknown }
+        if (event.viewId !== viewIdRef.current) return
+
+        switch (event.type) {
+          case 'did-navigate':
+            setState((prev) => ({
+              ...prev,
+              url: event.url as string,
+              canGoBack: event.canGoBack as boolean,
+              canGoForward: event.canGoForward as boolean,
+              error: null,
+            }))
+            break
+
+          case 'did-start-loading':
+            setState((prev) => ({ ...prev, isLoading: true }))
+            break
+
+          case 'did-stop-loading':
+            setState((prev) => ({ ...prev, isLoading: false }))
+            break
+
+          case 'page-title-updated':
+            setState((prev) => ({ ...prev, title: event.title as string }))
+            break
+
+          case 'page-favicon-updated': {
+            const favicons = event.favicons as string[] | undefined
+            const favicon = favicons?.[0]
+            if (favicon) {
+              setState((prev) => ({ ...prev, favicon }))
+            }
+            break
+          }
+
+          case 'dom-ready':
+            setState((prev) => ({
+              ...prev,
+              domReady: true,
+              error: null,
+              hasLoadedRealPage: prev.hasLoadedRealPage || (prev.url !== '' && prev.url !== 'about:blank'),
+            }))
+            break
+
+          case 'did-fail-load':
+            setState((prev) => ({
+              ...prev,
+              isLoading: false,
+              error: {
+                code: event.errorCode as number,
+                description: event.errorDescription as string,
+                url: event.url as string,
+              },
+            }))
+            break
+
+          case 'crashed':
+            setState((prev) => ({
+              ...prev,
+              isLoading: false,
+              error: { code: -1, description: 'Renderer process crashed', url: '' },
+            }))
+            break
+        }
+      },
+    }),
+  )
 
   return state
 }

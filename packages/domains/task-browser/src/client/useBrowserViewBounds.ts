@@ -1,5 +1,6 @@
 import { useCallback, useRef, useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 
 interface UseBrowserViewBoundsOpts {
   visible: boolean
@@ -12,6 +13,8 @@ export function useBrowserViewBounds(
   opts: UseBrowserViewBoundsOpts
 ): { placeholderRef: (el: HTMLDivElement | null) => void; hiddenByOverlay: boolean } {
   const { visible, hidden, isResizing } = opts
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const effectivelyVisible = visible && !hidden && !isResizing
   const [appZoomFactor, setAppZoomFactor] = useState(1)
 
@@ -28,12 +31,14 @@ export function useBrowserViewBounds(
 
   useEffect(() => {
     let cancelled = false
-
-    void getTrpcVanillaClient().app.meta.getZoomFactor.query().then((factor) => {
+    void trpcClient.app.meta.getZoomFactor.query().then((factor) => {
       if (!cancelled) setAppZoomFactor(factor)
     })
+    return () => { cancelled = true }
+  }, [trpcClient])
 
-    const sub = getTrpcVanillaClient().app.menu.onZoomFactorChanged.subscribe(undefined, {
+  useSubscription(
+    trpc.app.menu.onZoomFactorChanged.subscriptionOptions(undefined, {
       onData: (factor) => {
         setAppZoomFactor((current) => {
           if (Math.abs(current - (factor as number)) < 0.0001) return current
@@ -41,19 +46,13 @@ export function useBrowserViewBounds(
           return factor as number
         })
       },
-    })
-    const unsubscribe = () => sub.unsubscribe()
-
-    return () => {
-      cancelled = true
-      unsubscribe()
-    }
-  }, [])
+    }),
+  )
 
   // Sync visibility changes
   useEffect(() => {
     if (!viewId) return
-    void getTrpcVanillaClient().app.browser.setVisible.mutate({ viewId, visible: effectivelyVisible })
+    void trpcClient.app.browser.setVisible.mutate({ viewId, visible: effectivelyVisible })
   }, [viewId, effectivelyVisible])
 
   // Track whether we've hidden this view due to a dialog overlay
@@ -90,11 +89,11 @@ export function useBrowserViewBounds(
       if (overlaps && !hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = true
         setHiddenByOverlay(true)
-        void getTrpcVanillaClient().app.browser.setVisible.mutate({ viewId: vid, visible: false })
+        void trpcClient.app.browser.setVisible.mutate({ viewId: vid, visible: false })
       } else if (!overlaps && hiddenByOverlayRef.current) {
         hiddenByOverlayRef.current = false
         setHiddenByOverlay(false)
-        void getTrpcVanillaClient().app.browser.setVisible.mutate({ viewId: vid, visible: true })
+        void trpcClient.app.browser.setVisible.mutate({ viewId: vid, visible: true })
       }
 
       // Only sync bounds when not hidden by overlay
@@ -112,7 +111,7 @@ export function useBrowserViewBounds(
         if (!last || last.x !== x || last.y !== y || last.width !== width || last.height !== height) {
           lastBoundsRef.current = { x, y, width, height }
           if (width > 0 && height > 0) {
-            void getTrpcVanillaClient().app.browser.setBounds.mutate({ viewId: vid, bounds: { x, y, width, height } })
+            void trpcClient.app.browser.setBounds.mutate({ viewId: vid, bounds: { x, y, width, height } })
           }
         }
       }
@@ -146,7 +145,7 @@ export function useBrowserViewBounds(
   const handleMouseDown = useCallback(() => {
     const vid = viewIdRef.current
     if (vid) {
-      void getTrpcVanillaClient().app.browser.focus.mutate({ viewId: vid })
+      void trpcClient.app.browser.focus.mutate({ viewId: vid })
     }
   }, [])
 

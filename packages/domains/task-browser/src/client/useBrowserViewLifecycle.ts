@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 interface DesktopHandoffPolicy {
   protocol: string
@@ -17,6 +17,7 @@ interface UseBrowserViewLifecycleOpts {
 
 export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { viewId: string | null } {
   const { tabId, taskId, url, partition, kind, desktopHandoffPolicy } = opts
+  const trpcClient = useTRPCClient()
   const [viewId, setViewId] = useState<string | null>(null)
   const mountedRef = useRef(true)
   const currentTabIdRef = useRef(tabId)
@@ -32,7 +33,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
       if (!mountedRef.current || currentTabIdRef.current !== tabId) return
 
       try {
-        const id = await getTrpcVanillaClient().app.browser.createView.mutate({
+        const id = await trpcClient.app.browser.createView.mutate({
           taskId,
           tabId,
           partition,
@@ -50,7 +51,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
         }
 
         if (!mountedRef.current || currentTabIdRef.current !== tabId) {
-          void getTrpcVanillaClient().app.browser.destroyView.mutate({ viewId: id })
+          void trpcClient.app.browser.destroyView.mutate({ viewId: id })
           return
         }
 
@@ -69,7 +70,7 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
       mountedRef.current = false
       if (retryTimer) clearTimeout(retryTimer)
       if (createdViewId) {
-        void getTrpcVanillaClient().app.browser.destroyView.mutate({ viewId: createdViewId })
+        void trpcClient.app.browser.destroyView.mutate({ viewId: createdViewId })
       }
       setViewId(null)
     }
