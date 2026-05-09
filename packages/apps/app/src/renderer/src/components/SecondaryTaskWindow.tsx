@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Pin } from 'lucide-react'
 import type { Task, PanelVisibility } from '@slayzone/task/shared'
 import { TaskDetailPage } from '@slayzone/task/client/TaskDetailPage'
@@ -19,6 +20,8 @@ const DEFAULT_PANEL_VIS: PanelVisibility = {
 }
 
 export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [taskId, setTaskId] = useState(initialTaskId)
   const [data, setData] = useState<TaskDetailData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -29,15 +32,19 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
   useEffect(() => {
     if (!followPrimary) return
     let alive = true
-    getTrpcVanillaClient().app.taskWindows.getPrimaryActive.query().then((id) => {
+    trpcClient.app.taskWindows.getPrimaryActive.query().then((id) => {
       const tid = id as string | null
       if (alive && tid && tid !== taskId) setTaskId(tid)
     })
-    const sub = getTrpcVanillaClient().app.taskWindows.onPrimaryActiveChanged.subscribe(undefined, {
+    return () => { alive = false }
+  }, [followPrimary, trpcClient]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useSubscription(
+    trpc.app.taskWindows.onPrimaryActiveChanged.subscriptionOptions(undefined, {
+      enabled: followPrimary,
       onData: (id) => { if (id) setTaskId(id as string) },
-    })
-    return () => { alive = false; sub.unsubscribe() }
-  }, [followPrimary]) // eslint-disable-line react-hooks/exhaustive-deps
+    }),
+  )
 
   const loadTask = useCallback(async () => {
     try {
@@ -59,7 +66,7 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
   }, [])
 
   const handleClose = useCallback(() => {
-    getTrpcVanillaClient().app.window.close.mutate()
+    trpcClient.app.window.close.mutate()
   }, [])
 
   const project = data?.project ?? null
@@ -129,14 +136,14 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
                 onBack={handleClose}
                 onTaskUpdated={handleTaskUpdated}
                 onArchiveTask={async (id) => {
-                  await getTrpcVanillaClient().task.archive.mutate({ id: id })
+                  await trpcClient.task.archive.mutate({ id: id })
                   handleClose()
                 }}
                 onDeleteTask={async (id) => {
-                  await getTrpcVanillaClient().task.delete.mutate({ id: id })
+                  await trpcClient.task.delete.mutate({ id: id })
                   handleClose()
                 }}
-                onNavigateToTask={(id) => { getTrpcVanillaClient().app.taskWindows.open.mutate({ taskId: id }) }}
+                onNavigateToTask={(id) => { trpcClient.app.taskWindows.open.mutate({ taskId: id }) }}
                 onCloseTab={handleClose}
                 initialData={initialDataForPage}
                 isSidePanelResizing={false}

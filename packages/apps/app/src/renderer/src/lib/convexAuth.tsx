@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
 import { api } from 'convex/_generated/api'
@@ -52,6 +52,7 @@ function clearConvexAuthStorage(): void {
 }
 
 function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const { isLoading, isAuthenticated } = useConvexAuth()
   const actions = useAuthActions()
   const [lastError, setLastError] = useState<string | null>(null)
@@ -85,7 +86,7 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
         try {
           setLastError(null)
           if (convexUrl) {
-            const signInResult = await getTrpcVanillaClient().app.auth.githubSystemSignIn.mutate({
+            const signInResult = await trpcClient.app.auth.githubSystemSignIn.mutate({
               convexUrl,
               redirectTo: OAUTH_REDIRECT_URI
             }) as { ok: boolean; code?: string; verifier?: string; error?: string; cancelled?: boolean }
@@ -138,7 +139,7 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
   useEffect(() => {
     if (!isAuthenticated) return
     const sync = (): void => {
-      getTrpcVanillaClient().app.leaderboard.getLocalStats.query()
+      trpcClient.app.leaderboard.getLocalStats.query()
         .then((stats) => { if (stats.days.length > 0) syncDailyStats({ days: stats.days }) })
         .catch(() => {})
     }

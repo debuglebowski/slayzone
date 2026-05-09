@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { useEffect, useState, useRef } from 'react'
 import logo from '@/assets/logo-solid.svg'
 
@@ -13,14 +13,15 @@ const PAUSE_AFTER_ERASE = 200
 const HOLD_AFTER_DONE = 600
 
 export function LoadingScreen({ onDone }: { onDone?: () => void }): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [version, setVersion] = useState('')
   const [text, setText] = useState('')
   const onDoneRef = useRef(onDone)
   onDoneRef.current = onDone
 
   useEffect(() => {
-    getTrpcVanillaClient().app.meta.getVersion.query().then(setVersion)
-  }, [])
+    trpcClient.app.meta.getVersion.query().then(setVersion)
+  }, [trpcClient])
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = []

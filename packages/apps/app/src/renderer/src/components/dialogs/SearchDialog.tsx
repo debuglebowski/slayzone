@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Command,
   CommandEmpty,
@@ -94,6 +94,7 @@ export function SearchDialog({
   onSelectTask,
   onSelectProject
 }: SearchDialogProps) {
+  const trpcClient = useTRPCClient()
   const fileContext = useDialogStore((s) => s.searchFileContext)
   const [allFiles, setAllFiles] = useState<string[]>([])
   const [search, setSearch] = useState('')
@@ -110,11 +111,11 @@ export function SearchDialog({
       setAllFiles(cacheRef.current.files)
       return
     }
-    getTrpcVanillaClient().fileEditor.listAllFiles.query({ rootPath: path }).then((list) => {
+    trpcClient.fileEditor.listAllFiles.query({ rootPath: path }).then((list) => {
       cacheRef.current = { path, files: list }
       setAllFiles(list)
     })
-  }, [open, fileContext])
+  }, [open, fileContext, trpcClient])
 
   useEffect(() => {
     if (open) {

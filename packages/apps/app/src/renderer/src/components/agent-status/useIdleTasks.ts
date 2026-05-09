@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal/shared'
 import type { Task } from '@slayzone/task/shared'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects/shared'
@@ -83,16 +83,17 @@ export function useIdleTasks(
   filterProjectId: string | null,
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
 ): UseIdleTasksResult {
+  const trpcClient = useTRPCClient()
   const [rows, setRows] = useState<AgentSessionRow[]>([])
   const recheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async () => {
     const [ptys, chats] = await Promise.all([
-      getTrpcVanillaClient().pty.list.query(),
-      getTrpcVanillaClient().pty.chatList.query()
+      trpcClient.pty.list.query(),
+      trpcClient.pty.chatList.query()
     ])
     setRows([...ptys.map(ptyToRow), ...chats.map(chatToRow)])
-  }, [])
+  }, [trpcClient])
 
   useEffect(() => {
     refresh()
@@ -132,18 +133,19 @@ export function useIdleTasks(
  * regardless of state. Useful for "is this task active" affordances.
  */
 export function useActiveSessionTaskIds(): Set<string> {
+  const trpcClient = useTRPCClient()
   const [taskIds, setTaskIds] = useState<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     const [ptys, chats] = await Promise.all([
-      getTrpcVanillaClient().pty.list.query(),
-      getTrpcVanillaClient().pty.chatList.query()
+      trpcClient.pty.list.query(),
+      trpcClient.pty.chatList.query()
     ])
     const set = new Set<string>()
     for (const p of ptys) set.add(p.taskId)
     for (const c of chats) set.add(c.taskId)
     setTaskIds(set)
-  }, [])
+  }, [trpcClient])
 
   useEffect(() => {
     refresh()
