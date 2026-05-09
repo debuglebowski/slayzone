@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { ChevronRight, ListTree, Circle, ExternalLink, CircleDot, Signal, Gauge } from 'lucide-react'
 import {
   cn,
@@ -142,15 +143,16 @@ function paddingLeftForDepth(depth: number): number {
 }
 
 function RowContextMenu({ task, onOpenChange, children }: { task: ManagerTask; onOpenChange?: (open: boolean) => void; children: React.ReactNode }): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const handleStatusChange = useCallback((status: string) => {
-    getTrpcVanillaClient().task.update.mutate({ id: task.id, status }).catch(() => {})
-  }, [task.id])
+    trpcClient.task.update.mutate({ id: task.id, status }).catch(() => {})
+  }, [task.id, trpcClient])
   const handlePriorityChange = useCallback((v: string) => {
-    getTrpcVanillaClient().task.update.mutate({ id: task.id, priority: Number.parseInt(v, 10) }).catch(() => {})
-  }, [task.id])
+    trpcClient.task.update.mutate({ id: task.id, priority: Number.parseInt(v, 10) }).catch(() => {})
+  }, [task.id, trpcClient])
   const handleProgressChange = useCallback((v: string) => {
-    getTrpcVanillaClient().task.update.mutate({ id: task.id, progress: Number.parseInt(v, 10) }).catch(() => {})
-  }, [task.id])
+    trpcClient.task.update.mutate({ id: task.id, progress: Number.parseInt(v, 10) }).catch(() => {})
+  }, [task.id, trpcClient])
   return (
     <ContextMenu onOpenChange={onOpenChange}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
@@ -356,25 +358,25 @@ export function ManagerSidebar({
   onToggleOff,
   onResizingChange,
 }: ManagerSidebarProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [descendants, setDescendants] = useState<ManagerTask[]>([])
 
+  const refresh = useCallback((): void => {
+    trpcClient.task.getSubTasksRecursive.query({ rootId: rootTaskId })
+      .then((rows) => setDescendants(rows as unknown as ManagerTask[]))
+      .catch(() => {})
+  }, [rootTaskId, trpcClient])
+
   useEffect(() => {
-    let cancelled = false
-    const refresh = (): void => {
-      getTrpcVanillaClient()
-        .task.getSubTasksRecursive.query({ rootId: rootTaskId })
-        .then((rows) => {
-          if (!cancelled) setDescendants(rows as unknown as ManagerTask[])
-        })
-        .catch(() => {})
-    }
     refresh()
-    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => refresh() }); const cleanup = () => _sub.unsubscribe()
-    return () => {
-      cancelled = true
-      cleanup?.()
-    }
-  }, [rootTaskId])
+  }, [refresh])
+
+  useSubscription(
+    trpc.task.onChanged.subscriptionOptions(undefined, {
+      onData: () => refresh(),
+    }),
+  )
 
   const [hideCompleted, setHideCompleted] = useState<boolean>(() => {
     try { return window.localStorage?.getItem(HIDE_COMPLETED_KEY) === '1' } catch { return false }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { usePty } from '@slayzone/terminal'
 import { Terminal as TerminalView } from '@slayzone/terminal/client/LazyTerminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
@@ -89,6 +90,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   taskProgress,
   initialManagerMode,
 }: TerminalContainerProps, ref) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const {
     tabs,
     groups,
@@ -115,7 +118,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     setManagerMode((v) => {
       const next = !v
       if (v) setManagerSelectedTask(null)
-      getTrpcVanillaClient().task.update.mutate({ id: taskId, managerMode: next }).catch(() => {})
+      trpcClient.task.update.mutate({ id: taskId, managerMode: next }).catch(() => {})
       return next
     })
   }, [taskId])
@@ -132,18 +135,20 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   // `loaded` guards the auto-exit effect so it doesn't fire before the first fetch resolves
   // (which would incorrectly clear a persisted managerMode on mount).
   const [subtaskInfo, setSubtaskInfo] = useState<{ loaded: boolean; has: boolean }>({ loaded: false, has: false })
+  const refreshSubtaskInfo = useCallback((): void => {
+    trpcClient.task.getSubTasks.query({ parentId: taskId })
+      .then((rows) => setSubtaskInfo({ loaded: true, has: rows.length > 0 }))
+      .catch(() => {})
+  }, [taskId, trpcClient])
   useEffect(() => {
-    let cancelled = false
     setSubtaskInfo({ loaded: false, has: false })
-    const refresh = (): void => {
-      getTrpcVanillaClient().task.getSubTasks.query({ parentId: taskId })
-        .then((rows) => { if (!cancelled) setSubtaskInfo({ loaded: true, has: rows.length > 0 }) })
-        .catch(() => {})
-    }
-    refresh()
-    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => refresh() }); const cleanup = () => _sub.unsubscribe()
-    return () => { cancelled = true; cleanup?.() }
-  }, [taskId])
+    refreshSubtaskInfo()
+  }, [taskId, refreshSubtaskInfo])
+  useSubscription(
+    trpc.task.onChanged.subscriptionOptions(undefined, {
+      onData: () => refreshSubtaskInfo(),
+    }),
+  )
   const hasSubtasks = subtaskInfo.has
 
   // Auto-exit manager mode if subtasks disappear — persist the off state.
@@ -151,7 +156,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     if (subtaskInfo.loaded && !subtaskInfo.has && managerMode) {
       setManagerMode(false)
       setManagerSelectedTask(null)
-      getTrpcVanillaClient().task.update.mutate({ id: taskId, managerMode: false }).catch(() => {})
+      trpcClient.task.update.mutate({ id: taskId, managerMode: false }).catch(() => {})
     }
   }, [subtaskInfo, managerMode, taskId])
 
@@ -203,7 +208,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     const claimAll = () => {
       for (const tab of tabs) {
         const sid = getSessionId(tab.id)
-        if (sid) void getTrpcVanillaClient().app.taskWindows.claimSession.mutate({ sessionId: sid })
+        if (sid) void trpcClient.app.taskWindows.claimSession.mutate({ sessionId: sid })
       }
     }
     claimAll()

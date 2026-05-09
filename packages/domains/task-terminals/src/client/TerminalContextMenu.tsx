@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
+import { useSetSettingMutation } from '@slayzone/settings/client'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -52,6 +53,8 @@ export function TerminalContextMenu({
   onResetSession,
   onSetDisplayMode
 }: TerminalContextMenuProps) {
+  const trpcClient = useTRPCClient()
+  const setSetting = useSetSettingMutation()
   const [hasSelection, setHasSelection] = useState(false)
   const [pendingChatEnable, setPendingChatEnable] = useState(false)
   const { terminalFontSize } = useAppearance()
@@ -79,9 +82,9 @@ export function TerminalContextMenu({
 
   const handlePaste = useCallback(() => {
     void navigator.clipboard.readText().then(text => {
-      if (text) getTrpcVanillaClient().pty.write.mutate({ sessionId, data: text })
+      if (text) trpcClient.pty.write.mutate({ sessionId, data: text })
     })
-  }, [sessionId])
+  }, [sessionId, trpcClient])
 
   const handleSelectAll = useCallback(() => {
     terminalRef.current?.selectAll()
@@ -105,9 +108,9 @@ export function TerminalContextMenu({
 
   const updateFontSize = useCallback((size: number) => {
     const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, size))
-    void getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_font_size', value: String(clamped) })
+    setSetting.mutate({ key: 'terminal_font_size', value: String(clamped) })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-  }, [])
+  }, [setSetting])
 
   return (
     <ContextMenu onOpenChange={handleOpenChange}>
