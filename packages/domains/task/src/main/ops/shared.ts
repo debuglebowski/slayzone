@@ -195,8 +195,10 @@ export function cleanupTaskImmediate(taskId: string): void {
   runtimeAdapters.killPtysByTaskId(taskId)
 }
 
-/** Kill PTY + processes + remove worktree + artifact files — used for archive and hard purge */
-export async function cleanupTaskFull(db: Database, taskId: string): Promise<void> {
+/** Kill PTY + processes + remove worktree + artifact files — used for archive and hard purge.
+ *  `batchIds` lists every task being cleaned up in the same operation so the shared-worktree
+ *  guard ignores siblings that are about to be archived (e.g. cascade from parent). */
+export async function cleanupTaskFull(db: Database, taskId: string, batchIds: string[] = [taskId]): Promise<void> {
   cleanupTaskImmediate(taskId)
   runtimeAdapters.killTaskProcesses(taskId)
   // Clean up artifact files on disk
@@ -208,6 +210,16 @@ export async function cleanupTaskFull(db: Database, taskId: string): Promise<voi
   ).get(taskId) as { worktree_path: string | null; project_id: string } | undefined
 
   if (!task?.worktree_path) return
+
+  // Skip removal if any other live task (outside this batch) still references the same worktree.
+  // Subtasks inherit parent's worktree_path; first batch member to run cleanup actually removes,
+  // siblings short-circuit on `existsSync(worktreePath)` inside removeWorktree.
+  const ids = batchIds.length > 0 ? batchIds : [taskId]
+  const placeholders = ids.map(() => '?').join(',')
+  const sharedRow = db.prepare(
+    `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders}) AND archived_at IS NULL AND deleted_at IS NULL`
+  ).get(task.worktree_path, ...ids) as { n: number } | undefined
+  if ((sharedRow?.n ?? 0) > 0) return
 
   const project = db.prepare(
     'SELECT path FROM projects WHERE id = ?'

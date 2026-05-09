@@ -81,6 +81,7 @@ describe('db:tasks:create', () => {
     expect(child.parent_id).toBe(parent.id)
   })
 
+
   test('uses project-specific default status from columns config', () => {
     const customProjectId = crypto.randomUUID()
     h.db.prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)').run(
@@ -933,6 +934,65 @@ describe('needs_attention', () => {
   test('handleAttentionTransition no-op for unknown task', () => {
     const set = handleAttentionTransition(h.db, 'no-such-task', 'idle', 'running')
     expect(set).toBe(false)
+  })
+})
+
+// --- Subtask worktree inheritance ---
+// Captured asynchronously at file scope (top-level await) so describe() can
+// run sync expects against resolved Task rows without racing h.cleanup().
+const inheritFixtures = await (async () => {
+  const wtParent = await (h.invoke('db:tasks:create', { projectId, title: 'WtParent' }) as Promise<Task>)
+  h.invoke('db:tasks:update', {
+    id: wtParent.id,
+    worktreePath: '/tmp/wt-parent',
+    worktreeParentBranch: 'main',
+    baseDir: '/tmp/base',
+    repoName: 'repo-x',
+  })
+  const wtChild = await (h.invoke('db:tasks:create', { projectId, title: 'WtChild', parentId: wtParent.id }) as Promise<Task>)
+
+  const noWtParent = await (h.invoke('db:tasks:create', { projectId, title: 'NoWtParent' }) as Promise<Task>)
+  const noWtChild = await (h.invoke('db:tasks:create', { projectId, title: 'NoWtChild', parentId: noWtParent.id }) as Promise<Task>)
+
+  const repoParent = await (h.invoke('db:tasks:create', { projectId, title: 'RepoParent' }) as Promise<Task>)
+  h.invoke('db:tasks:update', { id: repoParent.id, repoName: 'parent-repo' })
+  const repoChild = await (h.invoke('db:tasks:create', { projectId, title: 'RepoChild', parentId: repoParent.id, repoName: 'caller-repo' }) as Promise<Task>)
+
+  // Shared-worktree cleanup guard: archiving the subtask alone must NOT remove parent's worktree_path
+  const guardParent = await (h.invoke('db:tasks:create', { projectId, title: 'GuardParent' }) as Promise<Task>)
+  h.invoke('db:tasks:update', {
+    id: guardParent.id,
+    worktreePath: '/tmp/wt-guard',
+    worktreeParentBranch: 'main',
+  })
+  const guardChild = await (h.invoke('db:tasks:create', { projectId, title: 'GuardChild', parentId: guardParent.id }) as Promise<Task>)
+  await (h.invoke('db:tasks:archive', guardChild.id) as Promise<Task>)
+  const guardParentAfter = await (h.invoke('db:tasks:get', guardParent.id) as Promise<Task>)
+
+  return { wtChild, noWtChild, repoChild, guardParentAfter }
+})()
+
+describe('subtask worktree inheritance', () => {
+  test('inherits parent worktree fields', () => {
+    expect(inheritFixtures.wtChild.worktree_path).toBe('/tmp/wt-parent')
+    expect(inheritFixtures.wtChild.worktree_parent_branch).toBe('main')
+    expect(inheritFixtures.wtChild.base_dir).toBe('/tmp/base')
+    expect(inheritFixtures.wtChild.repo_name).toBe('repo-x')
+  })
+
+  test('null when parent has no worktree', () => {
+    expect(inheritFixtures.noWtChild.worktree_path).toBeNull()
+    expect(inheritFixtures.noWtChild.worktree_parent_branch).toBeNull()
+    expect(inheritFixtures.noWtChild.base_dir).toBeNull()
+  })
+
+  test('parent repo_name overrides caller-supplied value', () => {
+    expect(inheritFixtures.repoChild.repo_name).toBe('parent-repo')
+  })
+
+  test('archiving subtask alone keeps parent worktree fields intact', () => {
+    expect(inheritFixtures.guardParentAfter.worktree_path).toBe('/tmp/wt-guard')
+    expect(inheritFixtures.guardParentAfter.worktree_parent_branch).toBe('main')
   })
 })
 

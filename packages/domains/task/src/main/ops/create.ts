@@ -82,7 +82,23 @@ export async function createTaskOp(db: Database, data: CreateTaskInput, deps: Op
 
   if (!initialTask) return null
 
-  await maybeAutoCreateWorktree(db, id, data.projectId, data.title, data.repoName)
+  if (data.parentId) {
+    const parent = db.prepare(
+      'SELECT repo_name, worktree_path, worktree_parent_branch, base_dir FROM tasks WHERE id = ?'
+    ).get(data.parentId) as
+      | { repo_name: string | null; worktree_path: string | null; worktree_parent_branch: string | null; base_dir: string | null }
+      | undefined
+
+    if (parent) {
+      db.prepare(`
+        UPDATE tasks
+        SET repo_name = ?, worktree_path = ?, worktree_parent_branch = ?, base_dir = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(parent.repo_name, parent.worktree_path, parent.worktree_parent_branch, parent.base_dir, id)
+    }
+  } else {
+    await maybeAutoCreateWorktree(db, id, data.projectId, data.title, data.repoName)
+  }
   const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
   const task = parseTask(row)
   if (task) {

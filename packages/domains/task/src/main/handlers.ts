@@ -72,8 +72,9 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
     `SELECT id FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', '-5 minutes')`
   ).all() as { id: string }[]
   void (async () => {
+    const staleIds = stale.map((r) => r.id)
     for (const { id } of stale) {
-      await cleanupTaskFull(db, id)
+      await cleanupTaskFull(db, id, staleIds)
     }
   })()
   if (stale.length > 0) {
@@ -111,8 +112,9 @@ export function registerTaskHandlers(ipcMain: IpcMain, db: Database, onMutation?
        AND updated_at < datetime('now', '-24 hours')`
   ).all() as { id: string }[]).filter(({ id }) => !openTaskIds.has(id))
   void (async () => {
+    const staleTempIds = staleTemp.map((r) => r.id)
     for (const { id } of staleTemp) {
-      await cleanupTaskFull(db, id)
+      await cleanupTaskFull(db, id, staleTempIds)
     }
   })()
   if (staleTemp.length > 0) {

@@ -10,10 +10,10 @@ export async function archiveTaskOp(db: Database, id: string, deps: OpDeps): Pro
   const projectRow = db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(id) as { project_id: string } | undefined
   const toArchiveRows = db.prepare('SELECT * FROM tasks WHERE id = ? OR parent_id = ?').all(id, id) as Record<string, unknown>[]
   const toArchiveTasks = parseTasks(toArchiveRows)
-  await cleanupTaskFull(db, id)
-  // Also archive sub-tasks
   const childIds = (db.prepare('SELECT id FROM tasks WHERE parent_id = ? AND archived_at IS NULL').all(id) as { id: string }[]).map(r => r.id)
-  for (const childId of childIds) { await cleanupTaskFull(db, childId) }
+  const batch = [id, ...childIds]
+  await cleanupTaskFull(db, id, batch)
+  for (const childId of childIds) { await cleanupTaskFull(db, childId, batch) }
   const archivedTask = db.transaction(() => {
     db.prepare(`
       UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, base_dir = NULL, updated_at = datetime('now')
