@@ -1,5 +1,7 @@
-import { useEffect, useState, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { AgentTurnRange } from '../shared/types'
 
 /**
@@ -11,38 +13,41 @@ import type { AgentTurnRange } from '../shared/types'
  */
 export function useAgentTurns(
   worktreePath: string | null | undefined,
-  refreshKey?: unknown
+  refreshKey?: unknown,
 ): AgentTurnRange[] {
-  const [turns, setTurns] = useState<AgentTurnRange[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const enabled = !!worktreePath
 
-  const reload = useCallback(async () => {
-    if (!worktreePath) {
-      setTurns([])
-      return
-    }
-    const list = await getTrpcVanillaClient().agentTurns.list.query({ worktreePath })
-    setTurns(list)
-  }, [worktreePath])
+  const { data: turns = [] } = useQuery(
+    trpc.agentTurns.list.queryOptions(
+      { worktreePath: worktreePath ?? '' },
+      { enabled },
+    ),
+  )
 
-  useEffect(() => {
-    void reload()
-  }, [reload, refreshKey])
-
+  // Identity change of `refreshKey` forces a refetch.
   useEffect(() => {
     if (!worktreePath) return
-    const norm = (p: string) => p.replace(/\/+$/, '')
-    const target = norm(worktreePath)
-    const sub = getTrpcVanillaClient().agentTurns.onChanged.subscribe(undefined, {
+    queryClient.invalidateQueries({
+      queryKey: trpc.agentTurns.list.queryKey({ worktreePath }),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
+
+  useSubscription(
+    trpc.agentTurns.onChanged.subscriptionOptions(undefined, {
       onData: (changedPath) => {
-        // Strict equality after trailing-slash normalization. Avoids false
-        // positives from suffix-match when two worktree paths share a tail.
-        if (norm(changedPath) === target) {
-          void reload()
+        if (!worktreePath) return
+        const norm = (p: string) => p.replace(/\/+$/, '')
+        if (norm(changedPath) === norm(worktreePath)) {
+          queryClient.invalidateQueries({
+            queryKey: trpc.agentTurns.list.queryKey({ worktreePath }),
+          })
         }
       },
-    })
-    return () => sub.unsubscribe()
-  }, [worktreePath, reload])
+    }),
+  )
 
   return turns
 }

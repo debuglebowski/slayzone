@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Frame, X } from 'lucide-react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { usePty } from '@slayzone/terminal/client'
@@ -14,43 +16,43 @@ interface FloatingSession {
 }
 
 export function FloatingAgentPanel() {
-  const [session, setSession] = useState<FloatingSession | null>(null)
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+
+  const sessionQuery = useQuery(trpc.app.floatingAgent.getSession.queryOptions())
+  const sessionData = sessionQuery.data as unknown as { sessionId: string; cwd: string; mode: string } | null | undefined
+  const session: FloatingSession | null = sessionData
+    ? { sessionId: sessionData.sessionId, cwd: sessionData.cwd, mode: sessionData.mode as TerminalMode }
+    : null
+
+  const configQuery = useQuery(trpc.app.floatingAgent.getConfig.queryOptions())
+  const configData = configQuery.data as unknown as { style?: string } | null | undefined
+  const style: 'widget' | 'icon' = (configData?.style as 'widget' | 'icon') ?? 'widget'
+
+  const stateQuery = useQuery(trpc.app.floatingAgent.getState.queryOptions())
+  const stateData = stateQuery.data as unknown as { mode?: 'auto' | 'manual' | null; hasCustomSize?: boolean } | null | undefined
+  const detachMode: 'auto' | 'manual' | null = stateData?.mode ?? null
+  const hasCustomSize: boolean = !!stateData?.hasCustomSize
+
   const [collapsed, setCollapsed] = useState(true)
-  const [style, setStyle] = useState<'widget' | 'icon'>('widget')
   const [terminalState, setTerminalState] = useState<TerminalState>('starting')
   const [showTerminal, setShowTerminal] = useState(false)
-  const [detachMode, setDetachMode] = useState<'auto' | 'manual' | null>(null)
-  const [hasCustomSize, setHasCustomSize] = useState(false)
   const { subscribeState, getState } = usePty()
 
-  useEffect(() => {
-    getTrpcVanillaClient().app.floatingAgent.getSession.query().then((data) => {
-      if (data) {
-        const d = data as { sessionId: string; cwd: string; mode: string }
-        setSession({ sessionId: d.sessionId, cwd: d.cwd, mode: d.mode as TerminalMode })
-      }
-    })
-    getTrpcVanillaClient().app.floatingAgent.getConfig.query().then((config) => {
-      if (config) setStyle((config as { style: string }).style as 'widget' | 'icon')
-    })
-    const sub = getTrpcVanillaClient().app.floatingAgent.onSessionChanged.subscribe(undefined, {
+  // Re-fetch session + config when the server fires onSessionChanged.
+  useSubscription(
+    trpc.app.floatingAgent.onSessionChanged.subscriptionOptions(undefined, {
       onData: () => {
-        getTrpcVanillaClient().app.floatingAgent.getSession.query().then((data) => {
-          if (data) {
-            const d = data as { sessionId: string; cwd: string; mode: string }
-            setSession({ sessionId: d.sessionId, cwd: d.cwd, mode: d.mode as TerminalMode })
-          }
-        })
-        getTrpcVanillaClient().app.floatingAgent.getConfig.query().then((config) => {
-          if (config) setStyle((config as { style: string }).style as 'widget' | 'icon')
-        })
+        queryClient.invalidateQueries({ queryKey: trpc.app.floatingAgent.getSession.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.app.floatingAgent.getConfig.queryKey() })
       },
-    })
-    return () => sub.unsubscribe()
-  }, [])
+    }),
+  )
 
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().app.floatingAgent.onCollapseChanged.subscribe(undefined, {
+  // Collapse state is owned by the main process (drives window resizing). Mirror to local state.
+  useSubscription(
+    trpc.app.floatingAgent.onCollapseChanged.subscriptionOptions(undefined, {
       onData: ({ collapsed: c }) => {
         setCollapsed(c)
         if (c) {
@@ -59,25 +61,17 @@ export function FloatingAgentPanel() {
           setTimeout(() => setShowTerminal(true), 150)
         }
       },
-    })
-    return () => sub.unsubscribe()
-  }, [])
+    }),
+  )
 
-  useEffect(() => {
-    getTrpcVanillaClient().app.floatingAgent.getState.query().then((s) => {
-      const st = s as { mode: 'auto' | 'manual' | null; hasCustomSize: boolean }
-      setDetachMode(st.mode)
-      setHasCustomSize(st.hasCustomSize)
-    })
-    const sub = getTrpcVanillaClient().app.floatingAgent.onState.subscribe(undefined, {
-      onData: (s) => {
-        const st = s as { mode: 'auto' | 'manual' | null; hasCustomSize: boolean }
-        setDetachMode(st.mode)
-        setHasCustomSize(st.hasCustomSize)
+  // Detach state changes invalidate the cached state query.
+  useSubscription(
+    trpc.app.floatingAgent.onState.subscriptionOptions(undefined, {
+      onData: () => {
+        queryClient.invalidateQueries({ queryKey: trpc.app.floatingAgent.getState.queryKey() })
       },
-    })
-    return () => sub.unsubscribe()
-  }, [])
+    }),
+  )
 
   useEffect(() => {
     if (!session) return
@@ -85,26 +79,22 @@ export function FloatingAgentPanel() {
     if (contextState !== 'starting') {
       setTerminalState(contextState)
     } else {
-      getTrpcVanillaClient().pty.getState.query({ sessionId: session.sessionId }).then((backendState) => {
+      trpcClient.pty.getState.query({ sessionId: session.sessionId }).then((backendState) => {
         if (backendState) setTerminalState(backendState)
       })
     }
     return subscribeState(session.sessionId, (newState) => {
       setTerminalState(newState)
     })
-  }, [session, getState, subscribeState])
+  }, [session, getState, subscribeState, trpcClient])
 
-  const handleToggle = useCallback(() => {
-    getTrpcVanillaClient().app.floatingAgent.toggleCollapse.mutate()
-  }, [])
+  const toggleCollapse = useMutation(trpc.app.floatingAgent.toggleCollapse.mutationOptions())
+  const resetSize = useMutation(trpc.app.floatingAgent.resetSize.mutationOptions())
+  const reattach = useMutation(trpc.app.floatingAgent.reattach.mutationOptions())
 
-  const handleResetSize = useCallback(() => {
-    getTrpcVanillaClient().app.floatingAgent.resetSize.mutate()
-  }, [])
-
-  const handleClose = useCallback(() => {
-    getTrpcVanillaClient().app.floatingAgent.reattach.mutate()
-  }, [])
+  const handleToggle = useCallback(() => { toggleCollapse.mutate() }, [toggleCollapse])
+  const handleResetSize = useCallback(() => { resetSize.mutate() }, [resetSize])
+  const handleClose = useCallback(() => { reattach.mutate() }, [reattach])
 
   const showClose = detachMode === 'manual'
   const showReset = hasCustomSize

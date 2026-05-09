@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   useTerminalModes,
   getVisibleModes,
@@ -68,15 +69,19 @@ export function AgentSidePanel({
   const visibleModes = getVisibleModes(modes, mode)
   const { builtin, custom } = groupTerminalModes(visibleModes)
 
+  const trpc = useTRPC()
+  const claimSession = useMutation(trpc.app.taskWindows.claimSession.mutationOptions())
+
   // Multi-window: claim PTY routing when this window becomes active or regains focus.
   // Without this, secondary window mounts AgentSidePanel but PTY output keeps flowing to
   // the previously-bound window. Claim redirects the session + replays buffer here.
   useEffect(() => {
     if (!isActive || !sessionId) return
-    getTrpcVanillaClient().app.taskWindows.claimSession.mutate({ sessionId })
-    const onFocus = () => { getTrpcVanillaClient().app.taskWindows.claimSession.mutate({ sessionId }) }
+    claimSession.mutate({ sessionId })
+    const onFocus = () => { claimSession.mutate({ sessionId }) }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, sessionId])
 
   return (
