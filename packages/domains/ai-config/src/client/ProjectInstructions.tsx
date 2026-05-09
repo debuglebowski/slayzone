@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { createPortal } from 'react-dom'
 import { File, FileText, Link2, RefreshCw, Unlink } from 'lucide-react'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn } from '@slayzone/ui'
@@ -47,11 +48,28 @@ export function ProjectInstructions({
   projectId,
   projectPath,
 }: ProjectInstructionsProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const isProjectFlag = !!projectId && !!projectPath
+  const rootInstructionsQuery = useQuery({
+    ...trpc.aiConfig.getRootInstructions.queryOptions({ projectId: projectId ?? '', projectPath: projectPath ?? '' }),
+    enabled: isProjectFlag,
+  })
+  const variantQuery = useQuery({
+    ...trpc.aiConfig.getProjectInstructionVariant.queryOptions({ projectId: projectId ?? '' }),
+    enabled: isProjectFlag,
+  })
+  const pushInstructionsMutation = useMutation(trpc.aiConfig.pushProviderInstructions.mutationOptions())
+  const setVariantMutation = useMutation(trpc.aiConfig.setProjectInstructionVariant.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getRootInstructions.queryKey() })
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectInstructionVariant.queryKey() })
+    },
+  }))
   const [providerHealth, setProviderHealth] = useState<Partial<Record<CliProvider, { health: SyncHealth; reason: SyncReason | null; contentHash?: string | null; lineCount?: number | null }>>>({})
-  const [linkedVariant, setLinkedVariant] = useState<AiConfigItem | null>(null)
+  const linkedVariant: AiConfigItem | null = variantQuery.data ?? null
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const loading = rootInstructionsQuery.isLoading || variantQuery.isLoading
   const [pickerOpen, setPickerOpen] = useState(false)
   const [variants, setVariants] = useState<AiConfigItem[]>([])
 
@@ -88,22 +106,19 @@ export function ProjectInstructions({
     }
   }, [files, selectedPath, linkedVariant])
 
-  const load = useCallback(async () => {
-    if (!isProject) return
-    setLoading(true)
-    try {
-      const [result, variant] = await Promise.all([
-        trpcClient.aiConfig.getRootInstructions.query({ projectId: projectId!, projectPath: projectPath! }),
-        trpcClient.aiConfig.getProjectInstructionVariant.query({ projectId: projectId! }),
-      ])
-      setProviderHealth(result.providerHealth ?? {})
-      setLinkedVariant(variant ?? null)
-    } finally {
-      setLoading(false)
+  // Sync provider health from rootInstructionsQuery
+  useEffect(() => {
+    if (rootInstructionsQuery.data) {
+      setProviderHealth(rootInstructionsQuery.data.providerHealth ?? {})
     }
-  }, [isProject, projectId, projectPath])
+  }, [rootInstructionsQuery.data])
 
-  useEffect(() => { void load() }, [load])
+  const load = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getRootInstructions.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectInstructionVariant.queryKey() }),
+    ])
+  }, [queryClient, trpc])
 
   // Editable file: read/save/watch via shared primitive. relPath null in linked-variant mode
   // (Textarea is readOnly there).
@@ -112,34 +127,32 @@ export function ProjectInstructions({
     relPath: !linkedVariant && selectedFile ? selectedFile.path : null,
     read: useCallback(async () => {
       if (!projectPath || !selectedProvider) return null
-      const r = await trpcClient.aiConfig.readProviderInstructions.query({ projectPath, provider: selectedProvider })
+      const r = await queryClient.fetchQuery(trpc.aiConfig.readProviderInstructions.queryOptions({ projectPath, provider: selectedProvider }))
       return r.content
-    }, [projectPath, selectedProvider]),
+    }, [projectPath, selectedProvider, queryClient, trpc]),
     save: useCallback(async (content: string) => {
       if (!projectId || !projectPath || !selectedProvider) return
-      const result = await trpcClient.aiConfig.pushProviderInstructions.mutate({ projectId, projectPath, provider: selectedProvider, content })
+      const result = await pushInstructionsMutation.mutateAsync({ projectId, projectPath, provider: selectedProvider, content })
       setProviderHealth(result.providerHealth ?? {})
-    }, [projectId, projectPath, selectedProvider]),
+    }, [projectId, projectPath, selectedProvider, pushInstructionsMutation]),
   })
 
   const openPicker = useCallback(async () => {
-    const items = await trpcClient.aiConfig.listInstructionVariants.query()
+    const items = await queryClient.fetchQuery(trpc.aiConfig.listInstructionVariants.queryOptions())
     setVariants(items)
     setPickerOpen(true)
-  }, [])
+  }, [queryClient, trpc])
 
   const handleLink = useCallback(async (variantId: string) => {
     if (!projectId) return
-    await trpcClient.aiConfig.setProjectInstructionVariant.mutate({ projectId, variantItemId: variantId, projectPath: projectPath ?? undefined })
+    await setVariantMutation.mutateAsync({ projectId, variantItemId: variantId, projectPath: projectPath ?? undefined })
     setPickerOpen(false)
-    void load()
-  }, [projectId, projectPath, load])
+  }, [projectId, projectPath, setVariantMutation])
 
   const handleUnlink = useCallback(async () => {
     if (!projectId) return
-    await trpcClient.aiConfig.setProjectInstructionVariant.mutate({ projectId, variantItemId: null })
-    void load()
-  }, [projectId, load])
+    await setVariantMutation.mutateAsync({ projectId, variantItemId: null })
+  }, [projectId, setVariantMutation])
 
   // Resizable split (custom mode only)
   const [splitWidth, setSplitWidth] = useState(350)
