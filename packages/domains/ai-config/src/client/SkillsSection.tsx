@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { createPortal } from 'react-dom'
 import { Plus } from 'lucide-react'
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
@@ -29,6 +29,7 @@ function nextAvailableSlug(base: string, existingSlugs: Set<string>): string {
 }
 
 export function SkillsSection({ level, projectId, projectPath }: SkillsSectionProps) {
+  const trpcClient = useTRPCClient()
   const scope: AiConfigScope = level === 'library' ? 'library' : 'project'
   const isProject = level === 'project' && !!projectId && !!projectPath
 
@@ -51,7 +52,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
 
   const refreshSyncStatus = useCallback(async () => {
     if (!isProject || !projectId || !projectPath) return
-    const linked = await getTrpcVanillaClient().aiConfig.getProjectSkillsStatus.query({ projectId, projectPath })
+    const linked = await trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath })
     const healthMap = new Map<string, SyncHealth>()
     const newStatusMap = new Map<string, ProjectSkillStatus>()
     for (const s of linked) {
@@ -68,9 +69,9 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
       try {
         if (isProject && projectId && projectPath) {
           // Auto-create DB records for any new on-disk skill files
-          await getTrpcVanillaClient().aiConfig.reconcileProjectSkills.mutate({ projectId, projectPath })
+          await trpcClient.aiConfig.reconcileProjectSkills.mutate({ projectId, projectPath })
         }
-        const rows = await getTrpcVanillaClient().aiConfig.listItems.query({
+        const rows = await trpcClient.aiConfig.listItems.query({
           scope,
           projectId: isProject ? projectId : undefined,
           type: 'skill',
@@ -79,7 +80,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
         const healthMap = new Map<string, SyncHealth>()
         const newStatusMap = new Map<string, ProjectSkillStatus>()
         if (isProject && projectId && projectPath) {
-          const linked = await getTrpcVanillaClient().aiConfig.getProjectSkillsStatus.query({ projectId, projectPath })
+          const linked = await trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath })
           const ids = new Set(rows.map(r => r.id))
           for (const s of linked) {
             newLinkedIds.push(s.item.id)
@@ -104,12 +105,12 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
 
   useEffect(() => {
     if (!isProject || !projectId) return
-    void getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId }).then(setEnabledProviders)
+    void trpcClient.aiConfig.getProjectProviders.query({ projectId }).then(setEnabledProviders)
   }, [isProject, projectId])
 
   // Load marketplace update info
   useEffect(() => {
-    getTrpcVanillaClient().aiConfig.marketplace.checkUpdates.query().then((updates) => {
+    trpcClient.aiConfig.marketplace.checkUpdates.query().then((updates) => {
       const map = new Map<string, SkillUpdateInfo>()
       for (const u of updates) map.set(u.itemId, u)
       setUpdateMap(map)
@@ -131,7 +132,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   }, [setSkillViewMode, scope])
 
   const handleUpdateItem = useCallback(async (id: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id, ...patch })
+    const updated = await trpcClient.aiConfig.updateItem.mutate({ id, ...patch })
     if (updated) {
       setItems(prev => prev.map(i => i.id === updated.id ? updated : i))
       void refreshSyncStatus()
@@ -139,7 +140,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   }, [refreshSyncStatus])
 
   const handleDeleteItem = useCallback(async (id: string) => {
-    await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id })
+    await trpcClient.aiConfig.deleteItem.mutate({ id })
     setItems(prev => prev.filter(i => i.id !== id))
     if (selectedSkillId === id) setSelectedSkillId(null)
   }, [selectedSkillId])
@@ -147,26 +148,26 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   const handleMarketplaceUpdate = useCallback(async (itemId: string) => {
     const info = updateMap.get(itemId)
     if (!info) return
-    const updated = await getTrpcVanillaClient().aiConfig.marketplace.updateSkill.mutate({ itemId, entryId: info.entryId }) as AiConfigItem | null
+    const updated = await trpcClient.aiConfig.marketplace.updateSkill.mutate({ itemId, entryId: info.entryId }) as AiConfigItem | null
     if (updated) setItems(prev => prev.map(i => i.id === updated.id ? updated : i))
     setUpdateMap(prev => { const next = new Map(prev); next.delete(itemId); return next })
   }, [updateMap])
 
   const handleSyncSkillToDisk = useCallback(async (itemId: string) => {
     if (!isProject || !projectId || !projectPath) return
-    await getTrpcVanillaClient().aiConfig.syncAll.mutate({ projectId, projectPath, itemId })
+    await trpcClient.aiConfig.syncAll.mutate({ projectId, projectPath, itemId })
     await refreshSyncStatus()
   }, [isProject, projectId, projectPath, refreshSyncStatus])
 
   const handleSyncSkillProviderToDisk = useCallback(async (itemId: string, provider: CliProvider) => {
     if (!isProject || !projectId || !projectPath) return
-    await getTrpcVanillaClient().aiConfig.syncAll.mutate({ projectId, projectPath, itemId, providers: [provider] })
+    await trpcClient.aiConfig.syncAll.mutate({ projectId, projectPath, itemId, providers: [provider] })
     await refreshSyncStatus()
   }, [isProject, projectId, projectPath, refreshSyncStatus])
 
   const handlePullSkillProviderFromDisk = useCallback(async (itemId: string, provider: CliProvider) => {
     if (!isProject || !projectId || !projectPath) return
-    const updated = await getTrpcVanillaClient().aiConfig.pullProviderSkill.mutate({ projectId, projectPath, provider, itemId })
+    const updated = await trpcClient.aiConfig.pullProviderSkill.mutate({ projectId, projectPath, provider, itemId })
     setItems(prev => prev.map(i => i.id === updated.item.id ? updated.item : i))
     await refreshSyncStatus()
   }, [isProject, projectId, projectPath, refreshSyncStatus])
@@ -176,12 +177,12 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
       try { return !!JSON.parse(target.metadata_json)?.marketplace } catch { return false }
     })()
     if (hasMarketplace) {
-      const updated = await getTrpcVanillaClient().aiConfig.marketplace.unlinkSkill.mutate({ itemId: target.id }) as AiConfigItem | null
+      const updated = await trpcClient.aiConfig.marketplace.unlinkSkill.mutate({ itemId: target.id }) as AiConfigItem | null
       if (updated) setItems(prev => prev.map(i => i.id === updated.id ? updated : i))
       return
     }
     if (isProject && projectId && target.scope === 'library') {
-      await getTrpcVanillaClient().aiConfig.removeProjectSelection.mutate({ projectId, itemId: target.id })
+      await trpcClient.aiConfig.removeProjectSelection.mutate({ projectId, itemId: target.id })
       setItems(prev => prev.filter(i => i.id !== target.id))
       setLinkedIds(prev => prev.filter(id => id !== target.id))
       if (selectedSkillId === target.id) setSelectedSkillId(null)
@@ -191,7 +192,7 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
   const handleCreateSkill = useCallback(async () => {
     const existingSlugs = new Set(items.map(i => i.slug))
     const slug = nextAvailableSlug('new-skill', existingSlugs)
-    const created = await getTrpcVanillaClient().aiConfig.createItem.mutate({
+    const created = await trpcClient.aiConfig.createItem.mutate({
       type: 'skill',
       scope,
       projectId: isProject ? projectId : undefined,

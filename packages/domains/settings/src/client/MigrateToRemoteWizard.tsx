@@ -11,7 +11,7 @@ import {
   Label,
   toast,
 } from '@slayzone/ui'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { MigrateReceipt, ProgressEvent } from '@slayzone/migrate/shared'
 
 interface Props {
@@ -43,6 +43,7 @@ interface PreviewSummary {
 }
 
 export function MigrateToRemoteWizard({ open, onOpenChange }: Props) {
+  const trpcClient = useTRPCClient()
   const [step, setStep] = useState<Step>('intro')
   const [url, setUrl] = useState('')
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' })
@@ -108,7 +109,7 @@ export function MigrateToRemoteWizard({ open, onOpenChange }: Props) {
     setRunning(true)
     try {
       // Local-side counts via existing local tRPC.
-      const trpc = getTrpcVanillaClient()
+      const trpc = trpcClient
       const [tasks, projects] = await Promise.all([
         trpc.task.getAll.query().catch(() => [] as unknown[]),
         trpc.projects.list.query().catch(() => [] as Array<{ path?: string | null }>),
@@ -140,7 +141,7 @@ export function MigrateToRemoteWizard({ open, onOpenChange }: Props) {
 
   const startSubscription = (): void => {
     subRef.current?.unsubscribe()
-    const trpc = getTrpcVanillaClient()
+    const trpc = trpcClient
     const sub = trpc.migrate.progress.subscribe(undefined, {
       onData: (ev) => {
         setProgressEvents((prev) => [...prev, ev])
@@ -162,7 +163,7 @@ export function MigrateToRemoteWizard({ open, onOpenChange }: Props) {
     setStep('progress')
     startSubscription()
     try {
-      const trpc = getTrpcVanillaClient()
+      const trpc = trpcClient
       // Pre-migration backup safety net (skip on dry-run — pointless).
       if (!dryRun) {
         try {
@@ -187,7 +188,7 @@ export function MigrateToRemoteWizard({ open, onOpenChange }: Props) {
   }
 
   const switchToRemoteAndRelaunch = async (): Promise<void> => {
-    const trpc = getTrpcVanillaClient()
+    const trpc = trpcClient
     try {
       await trpc.settings.set.mutate({ key: 'server_mode', value: 'remote' })
       await trpc.settings.set.mutate({ key: 'remote_server_url', value: url.trim() })

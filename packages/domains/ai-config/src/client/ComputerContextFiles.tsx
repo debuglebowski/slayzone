@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { File, FilePlus, Trash2 } from 'lucide-react'
 import { Button, Input, Textarea, cn } from '@slayzone/ui'
 import type { CliProvider, ComputerFileEntry } from '../shared'
@@ -10,6 +10,7 @@ interface ComputerContextFilesProps {
 }
 
 export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {}) {
+  const trpcClient = useTRPCClient()
   const [entries, setEntries] = useState<ComputerFileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -21,7 +22,7 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
   const loadFiles = useCallback(async () => {
     setLoading(true)
     try {
-      setEntries(await getTrpcVanillaClient().aiConfig.getComputerFiles.query())
+      setEntries(await trpcClient.aiConfig.getComputerFiles.query())
     } finally {
       setLoading(false)
     }
@@ -32,11 +33,11 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
   const openFile = async (entry: ComputerFileEntry) => {
     // Create file if it doesn't exist
     if (!entry.exists) {
-      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath: entry.path, content: '', projectPath: '' })
+      await trpcClient.aiConfig.writeContextFile.mutate({ filePath: entry.path, content: '', projectPath: '' })
       await loadFiles()
     }
     try {
-      const text = await getTrpcVanillaClient().aiConfig.readContextFile.query({ filePath: entry.path, projectPath: '' })
+      const text = await trpcClient.aiConfig.readContextFile.query({ filePath: entry.path, projectPath: '' })
       setContent(text)
 
       setSelectedPath(entry.path)
@@ -48,7 +49,7 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
 
   const autoSave = useCallback(async (path: string, text: string) => {
     try {
-      await getTrpcVanillaClient().aiConfig.writeContextFile.mutate({ filePath: path, content: text, projectPath: '' })
+      await trpcClient.aiConfig.writeContextFile.mutate({ filePath: path, content: text, projectPath: '' })
 
     } catch {
       // silent
@@ -70,7 +71,7 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
 
   const deleteFile = async (entry: ComputerFileEntry) => {
     try {
-      await getTrpcVanillaClient().aiConfig.deleteComputerFile.mutate({ filePath: entry.path })
+      await trpcClient.aiConfig.deleteComputerFile.mutate({ filePath: entry.path })
       if (selectedPath === entry.path) {
         setSelectedPath(null)
         setContent('')
@@ -86,8 +87,8 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps = {})
     const slug = newFileName.trim().replace(/\.md$/, '')
 
     try {
-      const created = await getTrpcVanillaClient().aiConfig.createComputerFile.mutate({ provider: creatingFile.provider, category: creatingFile.category, slug })
-      const text = await getTrpcVanillaClient().aiConfig.readContextFile.query({ filePath: created.path, projectPath: '' })
+      const created = await trpcClient.aiConfig.createComputerFile.mutate({ provider: creatingFile.provider, category: creatingFile.category, slug })
+      const text = await trpcClient.aiConfig.readContextFile.query({ filePath: created.path, projectPath: '' })
       setSelectedPath(created.path)
       setContent(text)
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import {
   ArrowLeft, AlertTriangle, ChevronRight,
   Plus, Sparkles, Server, FileText, FolderTree, Settings2,
@@ -110,6 +110,7 @@ function OverviewPanel({
   onNavigate: (section: Section) => void
   version: number
 }) {
+  const trpcClient = useTRPCClient()
   const [data, setData] = useState<OverviewData | null>(null)
 
   useEffect(() => {
@@ -117,9 +118,9 @@ function OverviewPanel({
     void (async () => {
       try {
         const [instrContent, skills, providers] = await Promise.all([
-          getTrpcVanillaClient().aiConfig.getLibraryInstructions.query(),
-          getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'library', type: 'skill' }),
-          getTrpcVanillaClient().aiConfig.listProviders.query()
+          trpcClient.aiConfig.getLibraryInstructions.query(),
+          trpcClient.aiConfig.listItems.query({ scope: 'library', type: 'skill' }),
+          trpcClient.aiConfig.listProviders.query()
         ])
         if (stale) return
         setData({
@@ -164,13 +165,14 @@ function OverviewPanel({
 // ---------------------------------------------------------------------------
 
 function ProvidersPanel() {
+  const trpcClient = useTRPCClient()
   const [providers, setProviders] = useState<CliProviderInfo[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetch = async () => {
       try {
-        const list = await getTrpcVanillaClient().aiConfig.listProviders.query()
+        const list = await trpcClient.aiConfig.listProviders.query()
         setProviders(list)
       } finally {
         setLoading(false)
@@ -185,7 +187,7 @@ function ProvidersPanel() {
   const handleToggle = async (provider: CliProviderInfo) => {
     if (provider.isDefault) return
     const newEnabled = !provider.enabled
-    await getTrpcVanillaClient().aiConfig.toggleProvider.mutate({ id: provider.id, enabled: newEnabled })
+    await trpcClient.aiConfig.toggleProvider.mutate({ id: provider.id, enabled: newEnabled })
     setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, enabled: newEnabled } : p))
   }
 
@@ -253,6 +255,7 @@ export function ContextManagerSettings({
   onOpenContextManager,
   initialSection
 }: ContextManagerSettingsProps) {
+  const trpcClient = useTRPCClient()
   const isProject = scope === 'project' && !!projectId && !!projectPath
   const activeProjectTab = projectTab ?? 'config'
 
@@ -284,6 +287,7 @@ export function ContextManagerSettings({
 // ---------------------------------------------------------------------------
 
 function LegacyContextManager({ initialSection }: { initialSection: ContextManagerSection | null }) {
+  const trpcClient = useTRPCClient()
   const [section, setSection] = useState<Section | null>(initialSection)
   const [items, setItems] = useState<AiConfigItem[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -297,7 +301,7 @@ function LegacyContextManager({ initialSection }: { initialSection: ContextManag
     if (!isItemSection) return
     setLoading(true)
     try {
-      const rows = await getTrpcVanillaClient().aiConfig.listItems.query({
+      const rows = await trpcClient.aiConfig.listItems.query({
         scope: 'library',
         type: 'skill'
       })
@@ -320,7 +324,7 @@ function LegacyContextManager({ initialSection }: { initialSection: ContextManag
     if (!isItemSection) return
     const existingSlugs = new Set(items.map((item) => item.slug))
     const slug = nextAvailableSlug('new-skill', existingSlugs)
-    const created = await getTrpcVanillaClient().aiConfig.createItem.mutate({
+    const created = await trpcClient.aiConfig.createItem.mutate({
       type: 'skill',
       scope: 'library',
       slug,
@@ -331,13 +335,13 @@ function LegacyContextManager({ initialSection }: { initialSection: ContextManag
   }
 
   const handleUpdate = async (itemId: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: itemId, ...patch })
+    const updated = await trpcClient.aiConfig.updateItem.mutate({ id: itemId, ...patch })
     if (!updated) return
     setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
   }
 
   const handleDelete = async (itemId: string) => {
-    await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: itemId })
+    await trpcClient.aiConfig.deleteItem.mutate({ id: itemId })
     setItems((prev) => prev.filter((item) => item.id !== itemId))
     setEditingId(null)
   }

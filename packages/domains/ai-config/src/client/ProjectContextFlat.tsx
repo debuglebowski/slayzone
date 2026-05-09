@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import {
   ArrowLeft, ChevronRight,
   FileText, RefreshCw, Server, Settings2, Sparkles,
@@ -197,6 +197,7 @@ function ProjectOverviewPanel({
 // ---------------------------------------------------------------------------
 
 export function ProjectContextFlat({ projectId, projectPath, onOpenContextManager }: ProjectContextFlatProps) {
+  const trpcClient = useTRPCClient()
   const [data, setData] = useState<ContextData | null>(null)
   const [version, setVersion] = useState(0)
   const [syncingMode, setSyncingMode] = useState<'sync' | 'reset' | null>(null)
@@ -209,12 +210,12 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenContextManage
     void (async () => {
       try {
         const [skillsStatus, localItems, enabledProviders, instructions, contextTree, mcpConfigs] = await Promise.all([
-          getTrpcVanillaClient().aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
-          getTrpcVanillaClient().aiConfig.listItems.query({ scope: 'project', projectId }),
-          getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId }),
-          getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId, projectPath }),
-          getTrpcVanillaClient().aiConfig.getContextTree.query({ projectPath, projectId }),
-          getTrpcVanillaClient().aiConfig.discoverMcpConfigs.query({ projectPath })
+          trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
+          trpcClient.aiConfig.listItems.query({ scope: 'project', projectId }),
+          trpcClient.aiConfig.getProjectProviders.query({ projectId }),
+          trpcClient.aiConfig.getRootInstructions.query({ projectId, projectPath }),
+          trpcClient.aiConfig.getContextTree.query({ projectPath, projectId }),
+          trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath })
         ])
         if (stale) return
         setData({
@@ -239,7 +240,7 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenContextManage
     if (!data) return
     setSyncingMode('sync')
     try {
-      const result = await getTrpcVanillaClient().aiConfig.syncAll.mutate({
+      const result = await trpcClient.aiConfig.syncAll.mutate({
         projectId,
         projectPath
       })
@@ -257,7 +258,7 @@ export function ProjectContextFlat({ projectId, projectPath, onOpenContextManage
   const handleResetAndSync = async () => {
     setSyncingMode('reset')
     try {
-      const result = await getTrpcVanillaClient().aiConfig.syncAll.mutate({
+      const result = await trpcClient.aiConfig.syncAll.mutate({
         projectId,
         projectPath,
         pruneUnmanaged: true

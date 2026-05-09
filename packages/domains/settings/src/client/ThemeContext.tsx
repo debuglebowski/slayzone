@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import { track } from '@slayzone/telemetry/client'
 import { applyTheme } from './apply-theme'
@@ -54,6 +55,8 @@ function migrateThemeId(id: string): string {
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [theme, setTheme] = useState<Theme>('dark')
   const [preference, setPreferenceState] = useState<ThemePreference>('dark')
 
@@ -87,24 +90,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         savedThemeId, savedSplit, savedDark, savedLight,
         savedTermOvrId, savedEditorOvrId,
       ] = await Promise.all([
-        getTrpcVanillaClient().settings.getEffectiveTheme.query(),
-        getTrpcVanillaClient().settings.getThemeSource.query(),
-        getTrpcVanillaClient().settings.get.query({ key: 'app_theme_id' }),
-        getTrpcVanillaClient().settings.get.query({ key: 'app_theme_split' }),
-        getTrpcVanillaClient().settings.get.query({ key: 'app_theme_id_dark' }),
-        getTrpcVanillaClient().settings.get.query({ key: 'app_theme_id_light' }),
-        getTrpcVanillaClient().settings.get.query({ key: 'terminal_override_theme_id' }),
-        getTrpcVanillaClient().settings.get.query({ key: 'editor_override_theme_id' }),
+        trpcClient.settings.getEffectiveTheme.query(),
+        trpcClient.settings.getThemeSource.query(),
+        trpcClient.settings.get.query({ key: 'app_theme_id' }),
+        trpcClient.settings.get.query({ key: 'app_theme_split' }),
+        trpcClient.settings.get.query({ key: 'app_theme_id_dark' }),
+        trpcClient.settings.get.query({ key: 'app_theme_id_light' }),
+        trpcClient.settings.get.query({ key: 'terminal_override_theme_id' }),
+        trpcClient.settings.get.query({ key: 'editor_override_theme_id' }),
       ])
       if (disposed) return
 
       // Migrate single theme from legacy
       let resolvedId = savedThemeId
       if (!resolvedId) {
-        const legacyId = await getTrpcVanillaClient().settings.get.query({ key: 'content_theme_dark' })
-          .then(v => v ?? getTrpcVanillaClient().settings.get.query({ key: 'terminal_theme_dark' }))
+        const legacyId = await trpcClient.settings.get.query({ key: 'content_theme_dark' })
+          .then(v => v ?? trpcClient.settings.get.query({ key: 'terminal_theme_dark' }))
         resolvedId = migrateThemeId(legacyId ?? DEFAULT_THEME_ID)
-        getTrpcVanillaClient().settings.set.mutate({ key: 'app_theme_id', value: resolvedId })
+        trpcClient.settings.set.mutate({ key: 'app_theme_id', value: resolvedId })
       } else {
         resolvedId = migrateThemeId(resolvedId)
       }
@@ -136,18 +139,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       performance.mark('sz:theme:end')
     })
 
-    const sub = getTrpcVanillaClient().settings.onThemeChanged.subscribe(undefined, {
-      onData: (effective) => {
-        if (disposed) return
-        setTheme(effective)
-      },
-    })
-
     return () => {
       disposed = true
-      sub.unsubscribe()
     }
-  }, [])
+  }, [trpcClient])
+
+  useSubscription(
+    trpc.settings.onThemeChanged.subscriptionOptions(undefined, {
+      onData: (effective) => {
+        setTheme(effective)
+      },
+    }),
+  )
 
   // Re-apply chrome whenever resolved themeId or theme changes
   useEffect(() => {
@@ -155,7 +158,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme, themeId])
 
   const setPreference = async (nextPreference: ThemePreference) => {
-    const effective = await getTrpcVanillaClient().settings.setTheme.mutate(nextPreference)
+    const effective = await trpcClient.settings.setTheme.mutate(nextPreference)
     setPreferenceState(nextPreference)
     setTheme(effective)
     track('theme_changed', { mode: nextPreference as 'light' | 'dark' | 'system' })
@@ -163,7 +166,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setThemeId = (id: string) => {
     setSingleThemeId(id)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'app_theme_id', value: id })
+    trpcClient.settings.set.mutate({ key: 'app_theme_id', value: id })
     track('theme_changed', { themeId: id })
   }
 
@@ -171,31 +174,31 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (enabled) {
       setThemeIdDarkState(singleThemeId)
       setThemeIdLightState(singleThemeId)
-      getTrpcVanillaClient().settings.set.mutate({ key: 'app_theme_id_dark', value: singleThemeId })
-      getTrpcVanillaClient().settings.set.mutate({ key: 'app_theme_id_light', value: singleThemeId })
+      trpcClient.settings.set.mutate({ key: 'app_theme_id_dark', value: singleThemeId })
+      trpcClient.settings.set.mutate({ key: 'app_theme_id_light', value: singleThemeId })
     }
     setSplitThemesState(enabled)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'app_theme_split', value: enabled ? '1' : '0' })
+    trpcClient.settings.set.mutate({ key: 'app_theme_split', value: enabled ? '1' : '0' })
   }
 
   const setThemeIdDark = (id: string) => {
     setThemeIdDarkState(id)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'app_theme_id_dark', value: id })
+    trpcClient.settings.set.mutate({ key: 'app_theme_id_dark', value: id })
   }
 
   const setThemeIdLight = (id: string) => {
     setThemeIdLightState(id)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'app_theme_id_light', value: id })
+    trpcClient.settings.set.mutate({ key: 'app_theme_id_light', value: id })
   }
 
   const setTerminalOverrideThemeId = (id: string) => {
     setTerminalOverrideThemeIdState(id)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'terminal_override_theme_id', value: id })
+    trpcClient.settings.set.mutate({ key: 'terminal_override_theme_id', value: id })
   }
 
   const setEditorOverrideThemeId = (id: string) => {
     setEditorOverrideThemeIdState(id)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'editor_override_theme_id', value: id })
+    trpcClient.settings.set.mutate({ key: 'editor_override_theme_id', value: id })
   }
 
   const value = useMemo<ThemeContextValue>(() => ({

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { createPortal } from 'react-dom'
 import { File, FileText, Link2, RefreshCw, Unlink } from 'lucide-react'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn } from '@slayzone/ui'
@@ -47,6 +47,7 @@ export function ProjectInstructions({
   projectId,
   projectPath,
 }: ProjectInstructionsProps) {
+  const trpcClient = useTRPCClient()
   const [providerHealth, setProviderHealth] = useState<Partial<Record<CliProvider, { health: SyncHealth; reason: SyncReason | null; contentHash?: string | null; lineCount?: number | null }>>>({})
   const [linkedVariant, setLinkedVariant] = useState<AiConfigItem | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -92,8 +93,8 @@ export function ProjectInstructions({
     setLoading(true)
     try {
       const [result, variant] = await Promise.all([
-        getTrpcVanillaClient().aiConfig.getRootInstructions.query({ projectId: projectId!, projectPath: projectPath! }),
-        getTrpcVanillaClient().aiConfig.getProjectInstructionVariant.query({ projectId: projectId! }),
+        trpcClient.aiConfig.getRootInstructions.query({ projectId: projectId!, projectPath: projectPath! }),
+        trpcClient.aiConfig.getProjectInstructionVariant.query({ projectId: projectId! }),
       ])
       setProviderHealth(result.providerHealth ?? {})
       setLinkedVariant(variant ?? null)
@@ -111,32 +112,32 @@ export function ProjectInstructions({
     relPath: !linkedVariant && selectedFile ? selectedFile.path : null,
     read: useCallback(async () => {
       if (!projectPath || !selectedProvider) return null
-      const r = await getTrpcVanillaClient().aiConfig.readProviderInstructions.query({ projectPath, provider: selectedProvider })
+      const r = await trpcClient.aiConfig.readProviderInstructions.query({ projectPath, provider: selectedProvider })
       return r.content
     }, [projectPath, selectedProvider]),
     save: useCallback(async (content: string) => {
       if (!projectId || !projectPath || !selectedProvider) return
-      const result = await getTrpcVanillaClient().aiConfig.pushProviderInstructions.mutate({ projectId, projectPath, provider: selectedProvider, content })
+      const result = await trpcClient.aiConfig.pushProviderInstructions.mutate({ projectId, projectPath, provider: selectedProvider, content })
       setProviderHealth(result.providerHealth ?? {})
     }, [projectId, projectPath, selectedProvider]),
   })
 
   const openPicker = useCallback(async () => {
-    const items = await getTrpcVanillaClient().aiConfig.listInstructionVariants.query()
+    const items = await trpcClient.aiConfig.listInstructionVariants.query()
     setVariants(items)
     setPickerOpen(true)
   }, [])
 
   const handleLink = useCallback(async (variantId: string) => {
     if (!projectId) return
-    await getTrpcVanillaClient().aiConfig.setProjectInstructionVariant.mutate({ projectId, variantItemId: variantId, projectPath: projectPath ?? undefined })
+    await trpcClient.aiConfig.setProjectInstructionVariant.mutate({ projectId, variantItemId: variantId, projectPath: projectPath ?? undefined })
     setPickerOpen(false)
     void load()
   }, [projectId, projectPath, load])
 
   const handleUnlink = useCallback(async () => {
     if (!projectId) return
-    await getTrpcVanillaClient().aiConfig.setProjectInstructionVariant.mutate({ projectId, variantItemId: null })
+    await trpcClient.aiConfig.setProjectInstructionVariant.mutate({ projectId, variantItemId: null })
     void load()
   }, [projectId, load])
 

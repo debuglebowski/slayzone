@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import { createPortal } from 'react-dom'
 import { ExternalLink, Pencil, Star, Search, Plus, Trash2 } from 'lucide-react'
 import { Button, cn, IconButton, Input, Label, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@slayzone/ui'
@@ -23,13 +23,13 @@ interface EditTarget {
   server: CustomMcpServer
 }
 
-async function loadCustomServers(): Promise<CustomMcpServer[]> {
-  const raw = await getTrpcVanillaClient().settings.get.query({ key: 'mcp_custom_servers' })
+async function loadCustomServers(trpcClient: ReturnType<typeof useTRPCClient>): Promise<CustomMcpServer[]> {
+  const raw = await trpcClient.settings.get.query({ key: 'mcp_custom_servers' })
   return raw ? (JSON.parse(raw) as CustomMcpServer[]) : []
 }
 
-async function saveCustomServers(servers: CustomMcpServer[]): Promise<void> {
-  await getTrpcVanillaClient().settings.set.mutate({ key: 'mcp_custom_servers', value: JSON.stringify(servers) })
+async function saveCustomServers(trpcClient: ReturnType<typeof useTRPCClient>, servers: CustomMcpServer[]): Promise<void> {
+  await trpcClient.settings.set.mutate({ key: 'mcp_custom_servers', value: JSON.stringify(servers) })
 }
 
 function matchesSearch(query: string, ...fields: (string | undefined)[]) {
@@ -247,6 +247,7 @@ interface AddComputerMcpDialogProps {
 }
 
 function AddComputerMcpDialog({ open, onOpenChange, onAdded, editTarget }: AddComputerMcpDialogProps) {
+  const trpcClient = useTRPCClient()
   const [serverKey, setServerKey] = useState('')
   const [description, setDescription] = useState('')
   const [command, setCommand] = useState('')
@@ -273,7 +274,7 @@ function AddComputerMcpDialog({ open, onOpenChange, onAdded, editTarget }: AddCo
     if (!serverKey.trim() || !command.trim()) return
     setSaving(true)
     try {
-      let existing = await loadCustomServers()
+      let existing = await loadCustomServers(trpcClient)
       if (editTarget && editTarget.originalKey !== serverKey.trim()) {
         existing = existing.filter((s) => s.id !== editTarget.originalKey)
       }
@@ -283,7 +284,7 @@ function AddComputerMcpDialog({ open, onOpenChange, onAdded, editTarget }: AddCo
         description: description.trim() || undefined,
         config: buildConfig(command, args, envVars)
       }
-      await saveCustomServers([...existing.filter((s) => s.id !== entry.id), entry])
+      await saveCustomServers(trpcClient, [...existing.filter((s) => s.id !== entry.id), entry])
       reset()
       onAdded()
       onOpenChange(false)
@@ -333,6 +334,7 @@ interface AddProjectMcpDialogProps {
 }
 
 function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProviders, onAdded, editTarget, editProviders }: AddProjectMcpDialogProps) {
+  const trpcClient = useTRPCClient()
   const [serverKey, setServerKey] = useState('')
   const [description, setDescription] = useState('')
   const [command, setCommand] = useState('')
@@ -373,7 +375,7 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
 
       if (keyChanged && editProviders) {
         for (const provider of editProviders) {
-          await getTrpcVanillaClient().aiConfig.removeMcpServer.mutate({
+          await trpcClient.aiConfig.removeMcpServer.mutate({
             projectPath,
             provider,
             serverKey: editTarget.originalKey
@@ -383,7 +385,7 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
 
       for (const [provider, enabled] of Object.entries(providers)) {
         if (!enabled) continue
-        await getTrpcVanillaClient().aiConfig.writeMcpServer.mutate({
+        await trpcClient.aiConfig.writeMcpServer.mutate({
           projectPath,
           provider: provider as McpTarget,
           serverKey: serverKey.trim(),
@@ -392,7 +394,7 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
       }
 
       // Persist metadata (description) to computer custom servers list
-      let existing = await loadCustomServers()
+      let existing = await loadCustomServers(trpcClient)
       if (keyChanged && editTarget) {
         existing = existing.filter((s) => s.id !== editTarget.originalKey)
       }
@@ -402,7 +404,7 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
         description: description.trim() || undefined,
         config
       }
-      await saveCustomServers([...existing.filter((s) => s.id !== entry.id), entry])
+      await saveCustomServers(trpcClient, [...existing.filter((s) => s.id !== entry.id), entry])
 
       reset()
       onAdded()
@@ -460,6 +462,7 @@ function AddProjectMcpDialog({ open, onOpenChange, projectPath, availableProvide
 // ---------------------------------------------------------------------------
 
 function ComputerMcpPanel() {
+  const trpcClient = useTRPCClient()
   const headerPortal = useHeaderPortal()
   const [favorites, setFavorites] = useState<string[]>([])
   const [customServers, setCustomServers] = useState<CustomMcpServer[]>([])
@@ -468,11 +471,11 @@ function ComputerMcpPanel() {
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
 
   const loadCustom = useCallback(async () => {
-    setCustomServers(await loadCustomServers())
-  }, [])
+    setCustomServers(await loadCustomServers(trpcClient))
+  }, [trpcClient])
 
   useEffect(() => {
-    void getTrpcVanillaClient().settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
+    void trpcClient.settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
       if (raw) setFavorites(JSON.parse(raw) as string[])
     })
     void loadCustom()
@@ -483,13 +486,13 @@ function ComputerMcpPanel() {
       ? favorites.filter((f) => f !== id)
       : [...favorites, id]
     setFavorites(next)
-    await getTrpcVanillaClient().settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
+    await trpcClient.settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
   }
 
   const deleteCustomServer = async (id: string) => {
     const next = customServers.filter((s) => s.id !== id)
     setCustomServers(next)
-    await saveCustomServers(next)
+    await saveCustomServers(trpcClient, next)
   }
 
   const editCustomServer = (server: CustomMcpServer) => {
@@ -620,6 +623,7 @@ interface MergedServer {
 }
 
 function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
+  const trpcClient = useTRPCClient()
   const headerPortal = useHeaderPortal()
   const [enabledProviders, setEnabledProviders] = useState<CliProvider[]>([])
   const [configs, setConfigs] = useState<McpConfigFileResult[]>([])
@@ -635,9 +639,9 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
     setLoading(true)
     try {
       const [results, custom, providers] = await Promise.all([
-        getTrpcVanillaClient().aiConfig.discoverMcpConfigs.query({ projectPath }),
-        loadCustomServers(),
-        getTrpcVanillaClient().aiConfig.getProjectProviders.query({ projectId })
+        trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath }),
+        loadCustomServers(trpcClient),
+        trpcClient.aiConfig.getProjectProviders.query({ projectId })
       ])
       setConfigs(results)
       setCustomServers(custom)
@@ -655,7 +659,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
   )
 
   useEffect(() => {
-    void getTrpcVanillaClient().settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
+    void trpcClient.settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
       if (raw) setFavorites(JSON.parse(raw) as string[])
     })
   }, [])
@@ -670,7 +674,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
       ? favorites.filter((f) => f !== id)
       : [...favorites, id]
     setFavorites(next)
-    await getTrpcVanillaClient().settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
+    await trpcClient.settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
   }
 
   const isFavorite = (id: string) => favorites.includes(id)
@@ -728,7 +732,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
     if (!config) return
     for (const provider of enabledMcpTargets) {
       if (server.providers.includes(provider)) continue
-      await getTrpcVanillaClient().aiConfig.writeMcpServer.mutate({
+      await trpcClient.aiConfig.writeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key,
@@ -741,7 +745,7 @@ function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps) {
   const disableServer = async (server: MergedServer) => {
     for (const provider of server.providers) {
       if (!writableProviders.has(provider)) continue
-      await getTrpcVanillaClient().aiConfig.removeMcpServer.mutate({
+      await trpcClient.aiConfig.removeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key

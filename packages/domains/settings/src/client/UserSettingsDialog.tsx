@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
+import { useSetting, useSetSettingMutation } from './queries'
 import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
@@ -50,51 +52,36 @@ export function UserSettingsDialog({
 }: UserSettingsDialogProps) {
   // Modes list is SHARED because multiple tabs (AI Providers, Panels) need it
   const { modes, createMode, updateMode, deleteMode, testMode, restoreDefaults, resetToDefaultState } = useTerminalModes()
-  
+
+  const trpc = useTRPC()
+  const setSetting = useSetSettingMutation()
+  const defaultTerminalModeRaw = useSetting('default_terminal_mode')
+  const defaultTerminalMode: TerminalMode = (defaultTerminalModeRaw as TerminalMode) || 'claude-code'
+  const defaultTabDisplayModeRaw = useSetting('default_tab_display_mode')
+  const defaultTabDisplayMode: DefaultDisplayMode = defaultTabDisplayModeRaw === 'chat' ? 'chat' : 'xterm'
+
+  const { data: providerSupportsChat = false } = useQuery(
+    trpc.chat.supports.queryOptions({ mode: defaultTerminalMode }),
+  )
+
   const [activeTab, setActiveTab] = useState(initialTab)
-  const [defaultTerminalMode, setDefaultTerminalMode] = useState<TerminalMode>('claude-code')
-  const [defaultTabDisplayMode, setDefaultTabDisplayMode] = useState<DefaultDisplayMode>('xterm')
-  const [providerSupportsChat, setProviderSupportsChat] = useState(false)
-
-  useEffect(() => {
-    if (open) {
-      getTrpcVanillaClient().settings.get.query({ key: 'default_terminal_mode' }).then(m => {
-        if (m) setDefaultTerminalMode(m as TerminalMode)
-      })
-      getTrpcVanillaClient().settings.get.query({ key: 'default_tab_display_mode' }).then(m => {
-        if (m === 'chat' || m === 'xterm') setDefaultTabDisplayMode(m)
-      })
-    }
-  }, [open])
-
-  useEffect(() => {
-    let cancelled = false
-    getTrpcVanillaClient().chat.supports.query({ mode: defaultTerminalMode }).then(supported => {
-      if (cancelled) return
-      setProviderSupportsChat(supported)
-    })
-    return () => { cancelled = true }
-  }, [defaultTerminalMode])
 
   useEffect(() => {
     if (!providerSupportsChat && defaultTabDisplayMode === 'chat') {
-      setDefaultTabDisplayMode('xterm')
-      getTrpcVanillaClient().settings.set.mutate({ key: 'default_tab_display_mode', value: 'xterm' })
+      setSetting.mutate({ key: 'default_tab_display_mode', value: 'xterm' })
       window.dispatchEvent(new CustomEvent('sz:settings-changed'))
     }
-  }, [providerSupportsChat, defaultTabDisplayMode])
+  }, [providerSupportsChat, defaultTabDisplayMode, setSetting])
 
   const onDefaultTerminalModeChange = useCallback((mode: TerminalMode) => {
-    setDefaultTerminalMode(mode)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'default_terminal_mode', value: mode })
+    setSetting.mutate({ key: 'default_terminal_mode', value: mode })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-  }, [])
+  }, [setSetting])
 
   const onDefaultTabDisplayModeChange = useCallback((mode: DefaultDisplayMode) => {
-    setDefaultTabDisplayMode(mode)
-    getTrpcVanillaClient().settings.set.mutate({ key: 'default_tab_display_mode', value: mode })
+    setSetting.mutate({ key: 'default_tab_display_mode', value: mode })
     window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-  }, [])
+  }, [setSetting])
 
   useEffect(() => {
     if (open) setActiveTab(initialTab)

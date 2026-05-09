@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from "@slayzone/transport/client"
 import {
   AlertTriangle, ChevronDown, ChevronRight,
   Plus, Loader2, X
@@ -61,6 +61,7 @@ function useSkillItem({
   projectPath: string
   onChanged: () => void
 }) {
+  const trpcClient = useTRPCClient()
   const [slug, setSlugRaw] = useState(item.slug)
   const [content, setContent] = useState(item.content)
   const validation = getSkillValidation({
@@ -102,7 +103,7 @@ function useSkillItem({
 
   const saveContent = useCallback(async (text: string) => {
     try {
-      await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content: text })
+      await trpcClient.aiConfig.updateItem.mutate({ id: item.id, content: text })
       setExpectedContents({})
       onChanged()
     } catch { /* silent */ }
@@ -122,7 +123,7 @@ function useSkillItem({
   const handleSlugSave = async () => {
     setSavingSlug(true)
     try {
-      await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, slug })
+      await trpcClient.aiConfig.updateItem.mutate({ id: item.id, slug })
       setSlugDirty(false)
       setExpectedContents({})
       onChanged()
@@ -135,7 +136,7 @@ function useSkillItem({
 
   const handleRevert = async () => {
     try {
-      await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id })
+      await trpcClient.aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id })
       toast.success(`Reverted ${item.slug} to library`)
       onChanged()
     } catch (err) {
@@ -145,8 +146,8 @@ function useSkillItem({
 
   const loadDiskAndExpected = useCallback(async (provider: CliProvider) => {
     const [disk, expected] = await Promise.all([
-      getTrpcVanillaClient().aiConfig.readProviderSkill.query({ projectPath, provider, itemId: item.id }),
-      getTrpcVanillaClient().aiConfig.getExpectedSkillContent.query({ projectPath, provider, itemId: item.id }),
+      trpcClient.aiConfig.readProviderSkill.query({ projectPath, provider, itemId: item.id }),
+      trpcClient.aiConfig.getExpectedSkillContent.query({ projectPath, provider, itemId: item.id }),
     ])
     setDiskContents(prev => ({ ...prev, [provider]: disk.exists ? disk.content : '' }))
     setExpectedContents(prev => ({ ...prev, [provider]: expected }))
@@ -168,7 +169,7 @@ function useSkillItem({
   const handlePush = async (provider: CliProvider) => {
     setSyncingProvider(provider)
     try {
-      await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id, provider })
+      await trpcClient.aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id, provider })
       const expected = expectedContents[provider]
       if (expected !== undefined) {
         setDiskContents(prev => ({ ...prev, [provider]: expected }))
@@ -182,7 +183,7 @@ function useSkillItem({
   const handlePull = async (provider: CliProvider) => {
     setPullingProvider(provider)
     try {
-      await getTrpcVanillaClient().aiConfig.pullProviderSkill.mutate({ projectId, projectPath, provider, itemId: item.id })
+      await trpcClient.aiConfig.pullProviderSkill.mutate({ projectId, projectPath, provider, itemId: item.id })
       onChanged()
     } finally {
       setPullingProvider(null)
@@ -192,7 +193,7 @@ function useSkillItem({
   const handleSyncAll = async () => {
     setSyncingAll(true)
     try {
-      await getTrpcVanillaClient().aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id })
+      await trpcClient.aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id })
       const updated: Partial<Record<CliProvider, string>> = {}
       for (const { provider } of providerRows) {
         const expected = expectedContents[provider]
@@ -209,7 +210,7 @@ function useSkillItem({
     const nextContent = repairSkillFrontmatter(item.slug, content)
     setContent(nextContent)
     try {
-      await getTrpcVanillaClient().aiConfig.updateItem.mutate({ id: item.id, content: nextContent })
+      await trpcClient.aiConfig.updateItem.mutate({ id: item.id, content: nextContent })
       setExpectedContents({})
       onChanged()
     } catch {
@@ -467,6 +468,7 @@ export function ItemSection({
   type, linkedItems, localItems, enabledProviders,
   projectId, projectPath, onOpenContextManager, onChanged
 }: ItemSectionProps) {
+  const trpcClient = useTRPCClient()
   const [showPicker, setShowPicker] = useState(false)
 
   const allItems = [
@@ -477,9 +479,9 @@ export function ItemSection({
 
   const handleRemove = async (itemId: string, isLocal: boolean) => {
     if (isLocal) {
-      await getTrpcVanillaClient().aiConfig.deleteItem.mutate({ id: itemId })
+      await trpcClient.aiConfig.deleteItem.mutate({ id: itemId })
     } else {
-      await getTrpcVanillaClient().aiConfig.removeProjectSelection.mutate({ projectId, itemId })
+      await trpcClient.aiConfig.removeProjectSelection.mutate({ projectId, itemId })
     }
     onChanged()
   }
