@@ -3,16 +3,12 @@ import type { DiagnosticsConfig } from '../shared'
 
 const HARD_EVENT_CAP = 200_000
 const CHUNK_LIMIT = 1000
-const IDLE_THRESHOLD_SEC = 60
-const IDLE_THRESHOLD_FALLBACK_SEC = 10
-const TICK_BUSY_MS = 30_000
+const TICK_IDLE_MS = 60_000
 const TICK_WORK_MS = 3_000
-const MAX_PAUSE_MS = 4 * 60 * 60_000
 
 export interface RetentionDeps {
   getDb: () => Database | null
   getConfig: () => DiagnosticsConfig
-  getIdleSeconds: () => number
   now?: () => number
 }
 
@@ -55,14 +51,11 @@ export function runRetentionChunk(
 
 let currentTimer: NodeJS.Timeout | null = null
 let isStopped = false
-let lastSuccessfulRunMs = 0
 
 export function startRetentionScheduler(deps: RetentionDeps): void {
   stopRetentionScheduler()
   isStopped = false
-  const now = deps.now ?? Date.now
-  lastSuccessfulRunMs = now()
-  scheduleNext(deps, TICK_BUSY_MS)
+  scheduleNext(deps, TICK_IDLE_MS)
 }
 
 export function stopRetentionScheduler(): void {
@@ -83,18 +76,7 @@ function tick(deps: RetentionDeps): void {
   const db = deps.getDb()
   const config = deps.getConfig()
   if (!db || !config.enabled) {
-    scheduleNext(deps, TICK_BUSY_MS)
-    return
-  }
-
-  const idle = deps.getIdleSeconds()
-  const threshold =
-    now() - lastSuccessfulRunMs > MAX_PAUSE_MS
-      ? IDLE_THRESHOLD_FALLBACK_SEC
-      : IDLE_THRESHOLD_SEC
-
-  if (idle < threshold) {
-    scheduleNext(deps, TICK_BUSY_MS)
+    scheduleNext(deps, TICK_IDLE_MS)
     return
   }
 
@@ -102,10 +84,9 @@ function tick(deps: RetentionDeps): void {
   try {
     const result = runRetentionChunk(db, config, now())
     moreWork = result.moreWork
-    lastSuccessfulRunMs = now()
   } catch (err) {
     // Don't recordDiagnosticEvent — same DB would recurse on DB-level failure
     console.error('[diagnostics retention] chunk failed:', err)
   }
-  scheduleNext(deps, moreWork ? TICK_WORK_MS : TICK_BUSY_MS)
+  scheduleNext(deps, moreWork ? TICK_WORK_MS : TICK_IDLE_MS)
 }

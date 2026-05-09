@@ -30,6 +30,32 @@ const DEFAULT_CONFIG: DiagnosticsConfig = {
 }
 
 const IPC_PAYLOAD_SKIP_CHANNELS = new Set(['pty:write', 'pty:getBufferSince', 'pty:getBuffer'])
+
+// High-frequency / low-signal channels — skip the request+response log entries
+// entirely. Listener still runs; only the diagnostics writes are dropped.
+// Without this the autocomplete poll loop alone produces ~80 IPC events/sec
+// → 160 sync sqlite inserts/sec → multi-GB diag DBs in days.
+const IPC_LOG_SKIP_CHANNELS = new Set([
+  'chat:listFiles',
+  'chat:listSkills',
+  'chat:listCommands',
+  'chat:listAgents',
+  'git:isGitRepo',
+  'git:getCurrentBranch',
+  'git:getRemoteUrl',
+  'git:getStatusSummary',
+  'git:getAheadBehindUpstream',
+  'git:getResolvedCommitDag',
+  'git:resolveChildBranches',
+  'git:getDiffStats',
+  'db:tasks:getSubTasks',
+  'db:artifactFolders:getByTask',
+  'db:artifacts:getByTask',
+  'db:taskTags:getForTask',
+  'db:loadBoardData',
+  'session:getState',
+  'files:pathExists',
+])
 const CRITICAL_SETTINGS_KEYS = new Set([
   'theme',
   'shell',
@@ -353,31 +379,36 @@ function instrumentIpcMain(ipcMain: IpcMain): void {
       const startedAt = Date.now()
       const traceId = buildTraceId(channel, startedAt)
       const includePayload = !IPC_PAYLOAD_SKIP_CHANNELS.has(channel)
+      const logRequestResponse = !IPC_LOG_SKIP_CHANNELS.has(channel)
 
-      recordDiagnosticEvent({
-        level: 'info',
-        source: 'ipc',
-        event: 'ipc.request',
-        traceId,
-        channel,
-        message: channel,
-        payload: includePayload ? { args: summarizeArgs(args) } : { skipped: true }
-      })
-
-      try {
-        const result = await listener(event, ...args)
+      if (logRequestResponse) {
         recordDiagnosticEvent({
           level: 'info',
           source: 'ipc',
-          event: 'ipc.response',
+          event: 'ipc.request',
           traceId,
           channel,
           message: channel,
-          payload: {
-            durationMs: Date.now() - startedAt,
-            resultType: result == null ? null : typeof result
-          }
+          payload: includePayload ? { args: summarizeArgs(args) } : { skipped: true }
         })
+      }
+
+      try {
+        const result = await listener(event, ...args)
+        if (logRequestResponse) {
+          recordDiagnosticEvent({
+            level: 'info',
+            source: 'ipc',
+            event: 'ipc.response',
+            traceId,
+            channel,
+            message: channel,
+            payload: {
+              durationMs: Date.now() - startedAt,
+              resultType: result == null ? null : typeof result
+            }
+          })
+        }
 
         const dbMutationEvent = buildDbMutationEvent(channel, args, traceId)
         if (dbMutationEvent) {
@@ -393,6 +424,7 @@ function instrumentIpcMain(ipcMain: IpcMain): void {
 
         return result
       } catch (error) {
+        // Errors always logged — even on hot channels, errors are signal.
         recordDiagnosticEvent({
           level: 'error',
           source: 'ipc',
@@ -595,9 +627,7 @@ export function registerDiagnosticsHandlers(ipcMain: IpcMain, db: Database, even
 
   startRetentionScheduler({
     getDb: () => diagnosticsDb,
-    getConfig: getDiagnosticsConfig,
-    getIdleSeconds: () =>
-      electronRuntime.powerMonitor?.getSystemIdleTime?.() ?? Number.MAX_SAFE_INTEGER
+    getConfig: getDiagnosticsConfig
   })
 
   ipcMain.handle('diagnostics:getConfig', () => getDiagnosticsConfig())
