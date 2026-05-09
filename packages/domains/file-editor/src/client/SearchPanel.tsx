@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
-import type { FileSearchResult, OpenFileOptions } from '../shared'
+import type { OpenFileOptions } from '../shared'
 import { FileIcon } from './FileIcon'
 
 interface SearchPanelProps {
@@ -11,44 +12,45 @@ interface SearchPanelProps {
 }
 
 export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
   const [matchCase, setMatchCase] = useState(false)
   const [useRegex, setUseRegex] = useState(false)
-  const [results, setResults] = useState<FileSearchResult[]>([])
-  const [searching, setSearching] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [debouncedInput, setDebouncedInput] = useState({ query: '', matchCase: false, useRegex: false })
 
   // Focus input on mount
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
-  // Debounced search
+  // Debounce the input → debouncedInput (the trigger for useQuery)
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (!query.trim()) {
-      setResults([])
-      setSearching(false)
-      return
+    const id = setTimeout(() => setDebouncedInput({ query, matchCase, useRegex }), 300)
+    return () => clearTimeout(id)
+  }, [query, matchCase, useRegex])
+
+  const searchQuery = useQuery({
+    ...trpc.fileEditor.searchFiles.queryOptions({
+      rootPath: projectPath,
+      query: debouncedInput.query,
+      options: { matchCase: debouncedInput.matchCase, regex: debouncedInput.useRegex },
+    }),
+    enabled: !!debouncedInput.query.trim(),
+  })
+
+  const results = (debouncedInput.query.trim() ? searchQuery.data : []) ?? []
+  const searching = !!query.trim() && (query !== debouncedInput.query || searchQuery.isLoading)
+
+  // Track on each new result set
+  useEffect(() => {
+    if (searchQuery.data && debouncedInput.query.trim()) {
+      track('file_search_used', { had_results: searchQuery.data.length > 0 })
+      setCollapsed(new Set())
     }
-    setSearching(true)
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const res = await trpcClient.fileEditor.searchFiles.query({ rootPath: projectPath, query, options: { matchCase, regex: useRegex } })
-        setResults(res)
-        setCollapsed(new Set())
-        track('file_search_used', { had_results: res.length > 0 })
-      } catch {
-        setResults([])
-      } finally {
-        setSearching(false)
-      }
-    }, 300)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query, matchCase, useRegex, projectPath, trpcClient])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery.data])
 
   const totalMatches = results.reduce((n, r) => n + r.matches.length, 0)
 

@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { useTabStore, type Tab } from '@slayzone/settings'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import { track } from '@slayzone/telemetry/client'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 
 type PtyContext = {
   subscribeExit: (sessionId: string, cb: (exitCode: number) => void) => () => void
@@ -27,7 +28,9 @@ export function useTabLifecycle({
   ptyContext: PtyContext
   setTerminalFocusRequests: React.Dispatch<React.SetStateAction<Record<string, number>>>
 }): void {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const deleteTaskMutation = useMutation(trpc.task.delete.mutationOptions())
   // Sync task/project data into tab store for worktree grouping + temp task detection
   useEffect(() => {
     useTabStore.setState({ _taskLookup: { tasks, projects } })
@@ -62,10 +65,10 @@ export function useTabLifecycle({
           // Skip auto-close when the PTY exit was triggered by a display-mode
           // switch (terminal → chat). setTabDisplayMode persists displayMode
           // before killing the PTY, so the row already reflects the new mode.
-          const tabsList = await trpcClient.taskTerminals.list.query({ taskId: tab.taskId }).catch(() => null)
+          const tabsList = await queryClient.fetchQuery(trpc.taskTerminals.list.queryOptions({ taskId: tab.taskId })).catch(() => null)
           const mainTab = tabsList?.find((t) => t.isMain)
           if (mainTab?.displayMode === 'chat') return
-          await trpcClient.task.delete.mutate({ id: tab.taskId }).catch(() => {})
+          await deleteTaskMutation.mutateAsync({ id: tab.taskId }).catch(() => {})
           setTasks((prev) => prev.filter((task) => task.id !== tab.taskId))
           useTabStore.getState().closeTabByTaskId(tab.taskId)
         })()
@@ -75,7 +78,7 @@ export function useTabLifecycle({
     return () => {
       unsubscribes.forEach((unsub) => unsub())
     }
-  }, [tabs, tasks, ptyContext, setTasks, trpcClient])
+  }, [tabs, tasks, ptyContext, setTasks, queryClient, trpc, deleteTaskMutation])
 
   // Track whether task data has loaded at least once.
   const tasksLoadedRef = useRef(false)
