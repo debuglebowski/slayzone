@@ -41,6 +41,14 @@ test('returns null for unrecognized output', () => {
   expect(adapter.detectActivity('Some random text', 'unknown')).toBe(null)
 })
 
+test('completion stamp does NOT report working', () => {
+  // "Cooked for 56s" / "Cogitated for 4m 24s" = Claude finished — must not
+  // pin state to 'running' (regression from a4b6d8d1 attention-state removal).
+  expect(adapter.detectActivity('✻ Cooked for 56s', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('· Cogitated for 4m 24s', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('✽ Pondering for 2h', 'unknown')).toBe(null)
+})
+
 console.log('\nClaudeAdapter.detectPrompt\n')
 
 test('detects Y/n as permission prompt', () => {
