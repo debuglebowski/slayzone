@@ -1,9 +1,9 @@
-import { createTRPCReact } from '@trpc/react-query'
+import { createTRPCContext } from '@trpc/tanstack-react-query'
 import { createTRPCClient, createWSClient, wsLink, type TRPCClient } from '@trpc/client'
 import superjson from 'superjson'
 import type { AppRouter } from '../server/router'
 
-export const trpc = createTRPCReact<AppRouter>()
+export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>()
 
 export type CreateTrpcClientOpts = {
   url: string

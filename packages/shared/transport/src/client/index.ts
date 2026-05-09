@@ -1,5 +1,7 @@
 export {
-  trpc,
+  TRPCProvider,
+  useTRPC,
+  useTRPCClient,
   createTrpcWsClient,
   getTrpcVanillaClient,
   tryGetTrpcVanillaClient,

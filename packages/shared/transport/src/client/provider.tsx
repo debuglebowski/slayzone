@@ -1,9 +1,10 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { createTRPCClient, createWSClient, wsLink } from '@trpc/client'
 import superjson from 'superjson'
 import type { AppRouter } from '../server/router'
-import { trpc, setTrpcVanillaClient } from './trpc'
+import { TRPCProvider, setTrpcVanillaClient } from './trpc'
 
 export type TrpcProviderProps = {
   url: string
@@ -11,17 +12,19 @@ export type TrpcProviderProps = {
 }
 
 export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
-  const [queryClient] = useState(() => new QueryClient())
-  const [{ wsClient, trpcClient, vanillaClient }] = useState(() => {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: { queries: { staleTime: 60_000 } },
+      }),
+  )
+  const [{ wsClient, vanillaClient }] = useState(() => {
     const ws = createWSClient({ url })
-    const links = [wsLink({ client: ws, transformer: superjson })]
-    const vanilla = createTRPCClient<AppRouter>({ links })
+    const vanilla = createTRPCClient<AppRouter>({
+      links: [wsLink({ client: ws, transformer: superjson })],
+    })
     setTrpcVanillaClient(vanilla)
-    return {
-      wsClient: ws,
-      trpcClient: trpc.createClient({ links }),
-      vanillaClient: vanilla,
-    }
+    return { wsClient: ws, vanillaClient: vanilla }
   })
 
   useEffect(() => {
@@ -30,12 +33,12 @@ export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
     }
   }, [wsClient])
 
-  // Reference vanillaClient to keep it alive across renders.
-  void vanillaClient
-
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </trpc.Provider>
+    <QueryClientProvider client={queryClient}>
+      <TRPCProvider trpcClient={vanillaClient} queryClient={queryClient}>
+        {children}
+        {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+      </TRPCProvider>
+    </QueryClientProvider>
   )
 }
