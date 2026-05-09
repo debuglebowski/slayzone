@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { PanelVisibility } from '../shared/types'
 
 export type PanelSize = number | 'auto'
@@ -67,21 +67,22 @@ export function resolveWidths(
   return result
 }
 
-function persist(sizes: PanelSizes): void {
-  getTrpcVanillaClient().settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify({ ...sizes, _v: STORAGE_VERSION }) })
-}
-
 export function usePanelSizes(): [
   PanelSizes,
   (updates: Partial<PanelSizes>) => void,
   (panel: string) => void,
   () => void
 ] {
+  const trpcClient = useTRPCClient()
   const [sizes, setSizes] = useState<PanelSizes>(DEFAULT_SIZES)
   const loaded = useRef(false)
 
+  const persist = useCallback((next: PanelSizes) => {
+    trpcClient.settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify({ ...next, _v: STORAGE_VERSION }) })
+  }, [trpcClient])
+
   useEffect(() => {
-    getTrpcVanillaClient().settings.get.query({ key: SETTINGS_KEY }).then((stored) => {
+    trpcClient.settings.get.query({ key: SETTINGS_KEY }).then((stored) => {
       if (stored) {
         try {
           const parsed = JSON.parse(stored)
@@ -100,7 +101,7 @@ export function usePanelSizes(): [
       }
       loaded.current = true
     })
-  }, [])
+  }, [persist, trpcClient])
 
   const updateSizes = useCallback((updates: Partial<PanelSizes>) => {
     setSizes((prev) => {
@@ -108,7 +109,7 @@ export function usePanelSizes(): [
       if (loaded.current) persist(next)
       return next
     })
-  }, [])
+  }, [persist])
 
   const resetPanel = useCallback((panel: string) => {
     updateSizes({ [panel]: DEFAULT_SIZES[panel] ?? 'auto' })

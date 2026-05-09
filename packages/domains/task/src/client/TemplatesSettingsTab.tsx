@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Label, Switch, Input, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import {
   Select,
@@ -50,23 +50,24 @@ interface TemplatesSettingsTabProps {
 }
 
 export function TemplatesSettingsTab({ projectId }: TemplatesSettingsTabProps) {
+  const trpcClient = useTRPCClient()
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [editingTemplate, setEditingTemplate] = useState<TaskTemplate | null>(null)
   const [showDialog, setShowDialog] = useState(false)
 
   const load = useCallback(() => {
-    getTrpcVanillaClient().task.templatesGetByProject.query({ projectId: projectId }).then(setTemplates)
-  }, [projectId])
+    trpcClient.task.templatesGetByProject.query({ projectId: projectId }).then(setTemplates)
+  }, [projectId, trpcClient])
 
   useEffect(() => { load() }, [load])
 
   const handleDelete = async (id: string) => {
-    await getTrpcVanillaClient().task.templatesDelete.mutate({ id: id })
+    await trpcClient.task.templatesDelete.mutate({ id: id })
     load()
   }
 
   const handleSetDefault = async (templateId: string, isDefault: boolean) => {
-    await getTrpcVanillaClient().task.templatesSetDefault.mutate({ projectId: projectId, templateId: isDefault ? templateId : null })
+    await trpcClient.task.templatesSetDefault.mutate({ projectId: projectId, templateId: isDefault ? templateId : null })
     load()
   }
 
@@ -187,6 +188,7 @@ interface TemplateFormDialogProps {
 }
 
 function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateFormDialogProps) {
+  const trpcClient = useTRPCClient()
   const isEdit = !!template
   const [name, setName] = useState(template?.name ?? '')
   const [description, setDescription] = useState(template?.description ?? '')
@@ -223,7 +225,7 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
           panelVisibility,
           isDefault,
         }
-        await getTrpcVanillaClient().task.templatesUpdate.mutate(data)
+        await trpcClient.task.templatesUpdate.mutate(data)
       } else {
         const data: CreateTaskTemplateInput = {
           projectId,
@@ -235,7 +237,7 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
           panelVisibility,
           isDefault,
         }
-        await getTrpcVanillaClient().task.templatesCreate.mutate(data)
+        await trpcClient.task.templatesCreate.mutate(data)
       }
       onSaved()
       onClose()

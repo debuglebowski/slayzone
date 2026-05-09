@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
   Button, Input, Label, Tooltip, TooltipTrigger, TooltipContent, cn,
@@ -27,6 +27,7 @@ interface ProcessDialogProps {
 }
 
 export function ProcessDialog({ open, onOpenChange, process, taskId, projectId, cwd, onSaved, onSpawned }: ProcessDialogProps) {
+  const trpcClient = useTRPCClient()
   const [form, setForm] = useState<AddFormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -65,9 +66,9 @@ export function ProcessDialog({ open, onOpenChange, process, taskId, projectId, 
     try {
       const { tid, pid } = resolveScope()
       if (process) {
-        await getTrpcVanillaClient().processes.update.mutate({ processId: process.id, updates: { label: form.label.trim(), command: form.command.trim(), autoRestart: form.autoRestart, taskId: tid, projectId: pid } })
+        await trpcClient.processes.update.mutate({ processId: process.id, updates: { label: form.label.trim(), command: form.command.trim(), autoRestart: form.autoRestart, taskId: tid, projectId: pid } })
       } else {
-        await getTrpcVanillaClient().processes.create.mutate({ projectId: pid, taskId: tid, label: form.label.trim(), command: form.command.trim(), cwd: cwd ?? '', autoRestart: form.autoRestart })
+        await trpcClient.processes.create.mutate({ projectId: pid, taskId: tid, label: form.label.trim(), command: form.command.trim(), cwd: cwd ?? '', autoRestart: form.autoRestart })
       }
       onSaved()
       onOpenChange(false)
@@ -86,11 +87,11 @@ export function ProcessDialog({ open, onOpenChange, process, taskId, projectId, 
       const { tid, pid } = resolveScope()
       let id: string
       if (process) {
-        await getTrpcVanillaClient().processes.update.mutate({ processId: process.id, updates: { label: form.label.trim(), command: form.command.trim(), autoRestart: form.autoRestart, taskId: tid, projectId: pid } })
-        await getTrpcVanillaClient().processes.restart.mutate({ processId: process.id })
+        await trpcClient.processes.update.mutate({ processId: process.id, updates: { label: form.label.trim(), command: form.command.trim(), autoRestart: form.autoRestart, taskId: tid, projectId: pid } })
+        await trpcClient.processes.restart.mutate({ processId: process.id })
         id = process.id
       } else {
-        id = await getTrpcVanillaClient().processes.spawn.mutate({ projectId: pid, taskId: tid, label: form.label.trim(), command: form.command.trim(), cwd: cwd ?? '', autoRestart: form.autoRestart })
+        id = await trpcClient.processes.spawn.mutate({ projectId: pid, taskId: tid, label: form.label.trim(), command: form.command.trim(), cwd: cwd ?? '', autoRestart: form.autoRestart })
       }
       onSpawned(id)
       onOpenChange(false)

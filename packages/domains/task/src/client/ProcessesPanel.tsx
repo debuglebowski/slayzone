@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Play, Square, RotateCcw, Plus, Trash2, Cpu, Pencil, FileText, MoreHorizontal, CornerDownLeft, Info, Loader2, Globe } from 'lucide-react'
 import { cn, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { ProcessDialog } from './ProcessDialog'
@@ -88,6 +89,7 @@ function ProcessRow({
   onOpenUrl?: (url: string) => void
   logEndRef: (el: HTMLDivElement | null) => void
 }) {
+  const trpcClient = useTRPCClient()
   const serverUrl = proc.status === 'running' ? proc.serverUrl ?? null : null
   return (
     <div className="rounded-lg border border-border bg-surface-3 overflow-hidden group/row">
@@ -188,7 +190,7 @@ function ProcessRow({
             onClick={(e) => {
               e.preventDefault()
               if (onOpenUrl) onOpenUrl(serverUrl)
-              else void getTrpcVanillaClient().app.shell.openExternal.mutate({ url: serverUrl })
+              else void trpcClient.app.shell.openExternal.mutate({ url: serverUrl })
             }}
             className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-sky-400 bg-sky-400/10 border-sky-400/20 hover:bg-sky-400/20 transition-colors"
             title={`Open ${serverUrl}`}
@@ -252,6 +254,8 @@ function SectionHeader({ label }: { label: string }) {
 }
 
 export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOpenUrl }: { taskId: string | null; projectId: string | null; cwd?: string | null; terminalSessionId?: string; onOpenUrl?: (url: string) => void }) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [processes, setProcesses] = useState<ProcessEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
@@ -262,7 +266,7 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
 
   useEffect(() => {
     setLoading(true)
-    getTrpcVanillaClient().processes.listForTask.query({ taskId, projectId }).then((list) => {
+    trpcClient.processes.listForTask.query({ taskId, projectId }).then((list) => {
       const entries = (list as ProcessEntry[]).map(p => {
         if (p.serverUrl || p.status !== 'running') return p
         for (let i = p.logBuffer.length - 1; i >= 0; i--) {
@@ -276,8 +280,8 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
     })
   }, [taskId, projectId])
 
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().processes.onLog.subscribe(undefined, {
+  useSubscription(
+    trpc.processes.onLog.subscriptionOptions(undefined, {
       onData: ({ id: processId, line }) => {
         const url = extractUrlFromLine(line)
         setProcesses(prev =>
@@ -286,45 +290,40 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
             : p)
         )
       },
-    })
-    return () => sub.unsubscribe()
-  }, [])
+    }),
+  )
 
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().processes.onStatus.subscribe(undefined, {
+  useSubscription(
+    trpc.processes.onStatus.subscriptionOptions(undefined, {
       onData: ({ id: processId, status }) => {
         setProcesses(prev => prev.map(p => p.id === processId
           ? { ...p, status: status as ProcessEntry['status'], serverUrl: status === 'running' ? p.serverUrl : null }
           : p))
       },
-    })
-    return () => sub.unsubscribe()
-  }, [])
+    }),
+  )
 
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().processes.onStats.subscribe(undefined, {
+  useSubscription(
+    trpc.processes.onStats.subscriptionOptions(undefined, {
       onData: (s) => setStats(s as Record<string, { cpu: number; rss: number }>),
-    })
-    return () => sub.unsubscribe()
-  }, [])
+    }),
+  )
 
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().processes.onTitle.subscribe(undefined, {
+  useSubscription(
+    trpc.processes.onTitle.subscriptionOptions(undefined, {
       onData: ({ id: processId, title }) => {
         setProcesses(prev => prev.map(p => p.id === processId ? { ...p, processTitle: title } : p))
       },
-    })
-    return () => sub.unsubscribe()
-  }, [])
+    }),
+  )
 
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().app.menu.onCloseTask.subscribe(undefined, {
+  useSubscription(
+    trpc.app.menu.onCloseTask.subscriptionOptions(undefined, {
       onData: (closedTaskId) => {
-        if (taskId && (closedTaskId as string) === taskId) getTrpcVanillaClient().processes.killTask.mutate({ taskId })
+        if (taskId && (closedTaskId as string) === taskId) trpcClient.processes.killTask.mutate({ taskId })
       },
-    })
-    return () => sub.unsubscribe()
-  }, [taskId])
+    }),
+  )
 
   useEffect(() => {
     for (const id of expandedLogs) {
@@ -333,7 +332,7 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
   }, [processes, expandedLogs])
 
   const refreshList = useCallback(async () => {
-    const list = await getTrpcVanillaClient().processes.listForTask.query({ taskId, projectId })
+    const list = await trpcClient.processes.listForTask.query({ taskId, projectId })
     setProcesses(list as ProcessEntry[])
   }, [taskId, projectId])
 
@@ -347,23 +346,23 @@ export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOp
   }, [])
 
   const handleKill = useCallback(async (id: string) => {
-    await getTrpcVanillaClient().processes.kill.mutate({ processId: id })
+    await trpcClient.processes.kill.mutate({ processId: id })
     setProcesses(prev => prev.filter(p => p.id !== id))
     setExpandedLogs(prev => { const next = new Set(prev); next.delete(id); return next })
   }, [])
 
   const handleStop = useCallback(async (id: string) => {
-    await getTrpcVanillaClient().processes.stop.mutate({ processId: id })
+    await trpcClient.processes.stop.mutate({ processId: id })
   }, [])
 
   const handleRestart = useCallback(async (id: string) => {
-    await getTrpcVanillaClient().processes.restart.mutate({ processId: id })
+    await trpcClient.processes.restart.mutate({ processId: id })
   }, [])
 
   const handleInject = useCallback((proc: ProcessEntry) => {
     if (proc.logBuffer.length === 0) return
     const output = `\r\n--- ${proc.label} output ---\r\n${proc.logBuffer.join('\r\n')}\r\n---\r\n`
-    void getTrpcVanillaClient().pty.write.mutate({ sessionId: terminalSessionId ?? `${taskId}:${taskId}`, data: output })
+    void trpcClient.pty.write.mutate({ sessionId: terminalSessionId ?? `${taskId}:${taskId}`, data: output })
   }, [taskId, terminalSessionId])
 
   const openNewDialog = useCallback(() => {

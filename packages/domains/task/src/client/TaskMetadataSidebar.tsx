@@ -8,7 +8,7 @@ import { isCompletedStatus, isTerminalStatus } from '@slayzone/projects/shared'
 import { TaskProgressPopover } from './TaskProgressPopover'
 import type { Tag } from '@slayzone/tags/shared'
 import { TagSelector } from '@slayzone/tags/client'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { ExternalLink, TaskSyncStatus } from '@slayzone/integrations/shared'
 import {
   Select,
@@ -82,6 +82,7 @@ export function TaskMetadataSidebar({
   onTagsChange,
   onTagCreated
 }: TaskMetadataSidebarProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [allTasks, setAllTasks] = useState<Task[]>([])
   const [blockers, setBlockers] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -94,9 +95,9 @@ export function TaskMetadataSidebar({
   useEffect(() => {
     const loadData = async () => {
       const [tasks, currentBlockers, allProjects] = await Promise.all([
-        getTrpcVanillaClient().task.getAll.query(),
-        getTrpcVanillaClient().task.getBlockers.query({ taskId: task.id }),
-        getTrpcVanillaClient().projects.list.query()
+        trpcClient.task.getAll.query(),
+        trpcClient.task.getBlockers.query({ taskId: task.id }),
+        trpcClient.projects.list.query()
       ])
       setAllTasks(tasks.filter((t) => t.id !== task.id))
       setBlockers(currentBlockers)
@@ -107,7 +108,7 @@ export function TaskMetadataSidebar({
   }, [task.id])
 
   const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
-    await getTrpcVanillaClient().task.addBlocker.mutate({ taskId: task.id, blockerTaskId: blockerTaskId })
+    await trpcClient.task.addBlocker.mutate({ taskId: task.id, blockerTaskId: blockerTaskId })
     const blockerTask = allTasks.find((t) => t.id === blockerTaskId)
     if (blockerTask) {
       setBlockers([...blockers, blockerTask])
@@ -116,25 +117,25 @@ export function TaskMetadataSidebar({
   }
 
   const handleRemoveBlocker = async (blockerTaskId: string): Promise<void> => {
-    await getTrpcVanillaClient().task.removeBlocker.mutate({ taskId: task.id, blockerTaskId: blockerTaskId })
+    await trpcClient.task.removeBlocker.mutate({ taskId: task.id, blockerTaskId: blockerTaskId })
     setBlockers(blockers.filter((b) => b.id !== blockerTaskId))
   }
 
   const handleSetBlocked = async (): Promise<void> => {
     track('task_blocked', {})
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, isBlocked: true })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, isBlocked: true })
     onUpdate(updated)
   }
 
   const handleUnblock = async (): Promise<void> => {
     track('task_unblocked')
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, isBlocked: false, blockedComment: null })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, isBlocked: false, blockedComment: null })
     onUpdate(updated)
   }
 
   const handleSetBlockedWithComment = async (): Promise<void> => {
     track('task_blocked', { hasComment: 'true' })
-    const updated = await getTrpcVanillaClient().task.update.mutate({
+    const updated = await trpcClient.task.update.mutate({
       id: task.id,
       isBlocked: true,
       blockedComment: blockedComment.trim() || null
@@ -157,44 +158,44 @@ export function TaskMetadataSidebar({
     if (isTerminalStatus(status, selectedProject?.columns_config)) {
       track('task_completed', { provider: task.terminal_mode ?? 'terminal', had_worktree: Boolean(task.worktree_path) })
     }
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, status })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, status })
     onUpdate(updated)
   }
 
   const handleProjectChange = async (projectId: string): Promise<void> => {
     track('task_moved_to_project')
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, projectId })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, projectId })
     onUpdate(updated)
   }
 
   const handlePriorityChange = async (priority: number): Promise<void> => {
     track('task_priority_changed', { priority: String(priority) })
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, priority })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, priority })
     onUpdate(updated)
   }
 
   const handleDueDateChange = async (date: Date | undefined): Promise<void> => {
     track('due_date_set')
     const dueDate = date ? format(date, 'yyyy-MM-dd') : null
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, dueDate })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, dueDate })
     onUpdate(updated)
   }
 
   const handleSnooze = async (until: string): Promise<void> => {
     track('task_snoozed')
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, snoozedUntil: until })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, snoozedUntil: until })
     onUpdate(updated)
   }
 
   const handleUnsnooze = async (): Promise<void> => {
     track('task_unsnoozed')
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, snoozedUntil: null })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, snoozedUntil: null })
     onUpdate(updated)
   }
 
   const handleProgressChange = async (progress: number): Promise<void> => {
     track('task_progress_changed', { value: String(progress) })
-    const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, progress })
+    const updated = await trpcClient.task.update.mutate({ id: task.id, progress })
     onUpdate(updated)
   }
 
@@ -203,7 +204,7 @@ export function TaskMetadataSidebar({
   const handleTagToggle = async (tagId: string, checked: boolean): Promise<void> => {
     if (checked) track('tag_assigned')
     const newTagIds = checked ? [...taskTagIds, tagId] : taskTagIds.filter((id) => id !== tagId)
-    await getTrpcVanillaClient().tags.setForTask.mutate({ taskId: task.id, tagIds: newTagIds })
+    await trpcClient.tags.setForTask.mutate({ taskId: task.id, tagIds: newTagIds })
     onTagsChange(newTagIds)
   }
 
@@ -449,7 +450,7 @@ export function TaskMetadataSidebar({
             <span className="flex-1 whitespace-pre-wrap">{task.blocked_comment}</span>
             <button
               onClick={async () => {
-                const updated = await getTrpcVanillaClient().task.update.mutate({ id: task.id, blockedComment: null })
+                const updated = await trpcClient.task.update.mutate({ id: task.id, blockedComment: null })
                 onUpdate(updated)
               }}
               className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground"
@@ -601,6 +602,7 @@ function toUnknownSyncStatus(link: ExternalLink, taskId: string): TaskSyncStatus
 }
 
 export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
+  const trpcClient = useTRPCClient()
   const [links, setLinks] = useState<ExternalLink[]>([])
   const [syncStatusByLinkId, setSyncStatusByLinkId] = useState<Record<string, TaskSyncStatus>>({})
   const [linkLoadingById, setLinkLoadingById] = useState<Record<string, 'open' | 'pull' | 'push' | undefined>>({})
@@ -610,8 +612,8 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     void (async () => {
       try {
         const [linearLink, githubLink] = await Promise.all([
-          getTrpcVanillaClient().integrations.getLink.query({ taskId, provider: 'linear' }),
-          getTrpcVanillaClient().integrations.getLink.query({ taskId, provider: 'github' })
+          trpcClient.integrations.getLink.query({ taskId, provider: 'linear' }),
+          trpcClient.integrations.getLink.query({ taskId, provider: 'github' })
         ])
 
         const loadedLinks = [linearLink, githubLink].filter((link): link is ExternalLink => Boolean(link))
@@ -625,7 +627,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
 
         const statusEntries = await Promise.all(loadedLinks.map(async (link) => {
           try {
-            const status = await getTrpcVanillaClient().integrations.getTaskSyncStatus.query({ taskId, provider: link.provider })
+            const status = await trpcClient.integrations.getTaskSyncStatus.query({ taskId, provider: link.provider })
             return [link.id, status] as const
           } catch {
             return [link.id, toUnknownSyncStatus(link, taskId)] as const
@@ -647,7 +649,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
 
   const refreshLinkSyncStatus = async (link: ExternalLink) => {
     try {
-      const status = await getTrpcVanillaClient().integrations.getTaskSyncStatus.query({ taskId, provider: link.provider })
+      const status = await trpcClient.integrations.getTaskSyncStatus.query({ taskId, provider: link.provider })
       setSyncStatusByLinkId((current) => ({ ...current, [link.id]: status }))
     } catch {
       setSyncStatusByLinkId((current) => ({ ...current, [link.id]: toUnknownSyncStatus(link, taskId) }))
@@ -670,7 +672,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     if (!link.external_url) return
     setLinkLoading(link.id, 'open')
     try {
-      await getTrpcVanillaClient().app.shell.openExternal.mutate({ url: link.external_url })
+      await trpcClient.app.shell.openExternal.mutate({ url: link.external_url })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     } finally {
@@ -683,17 +685,17 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     setLinkLoading(link.id, 'pull')
     try {
       if (link.provider === 'linear') {
-        const result = await getTrpcVanillaClient().integrations.syncNow.mutate({ taskId })
+        const result = await trpcClient.integrations.syncNow.mutate({ taskId })
         const errSuffix = result.errors.length > 0 ? ` (${result.errors.length} errors)` : ''
         const message = `${PROVIDER_LABELS[link.provider]} synced: ${result.pulled} pulled, ${result.pushed} pushed${errSuffix}`
         if (result.errors.length > 0) toast.error(message)
         else toast.success(message)
-        const refreshedTask = await getTrpcVanillaClient().task.get.query({ id: taskId })
+        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
         return
       }
 
-      const result = await getTrpcVanillaClient().integrations.pullTask.mutate({
+      const result = await trpcClient.integrations.pullTask.mutate({
         taskId,
         provider: 'github'
       })
@@ -701,7 +703,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
       if (result.pulled) toast.success(message)
       else toast(message)
       if (result.pulled) {
-        const refreshedTask = await getTrpcVanillaClient().task.get.query({ id: taskId })
+        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
       }
     } catch (error) {
@@ -716,20 +718,20 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     setLinkLoading(link.id, 'push')
     try {
       if (link.provider === 'linear') {
-        const result = await getTrpcVanillaClient().integrations.syncNow.mutate({ taskId })
+        const result = await trpcClient.integrations.syncNow.mutate({ taskId })
         const errSuffix = result.errors.length > 0 ? ` (${result.errors.length} errors)` : ''
         const message = `${PROVIDER_LABELS[link.provider]} synced: ${result.pulled} pulled, ${result.pushed} pushed${errSuffix}`
         if (result.pushed > 0) toast.success(message)
         else if (result.errors.length > 0) toast.error(message)
         else toast(message)
         if (result.pulled > 0) {
-          const refreshedTask = await getTrpcVanillaClient().task.get.query({ id: taskId })
+          const refreshedTask = await trpcClient.task.get.query({ id: taskId })
           if (refreshedTask) onUpdate(refreshedTask)
         }
         return
       }
 
-      const result = await getTrpcVanillaClient().integrations.pushTask.mutate({
+      const result = await trpcClient.integrations.pushTask.mutate({
         taskId,
         provider: 'github'
       })
@@ -737,7 +739,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
       if (result.pushed) toast.success(message)
       else toast(message)
       if (result.pushed) {
-        const refreshedTask = await getTrpcVanillaClient().task.get.query({ id: taskId })
+        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
       }
     } catch (error) {

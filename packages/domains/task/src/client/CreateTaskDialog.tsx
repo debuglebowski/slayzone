@@ -11,7 +11,7 @@ import { CreateTagDialog } from '@slayzone/tags/client'
 import type { Project } from '@slayzone/projects/shared'
 import { getDefaultStatus } from '@slayzone/projects/shared'
 import { track } from '@slayzone/telemetry/client'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   createTaskSchema,
   type CreateTaskFormData,
@@ -62,6 +62,7 @@ export function CreateTaskDialog({
   tags,
   onTagCreated
 }: CreateTaskDialogProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [createTagOpen, setCreateTagOpen] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
@@ -82,7 +83,7 @@ export function CreateTaskDialog({
 
   useEffect(() => {
     if (!open) return
-    getTrpcVanillaClient().projects.list.query().then((list) => setProjects(list))
+    trpcClient.projects.list.query().then((list) => setProjects(list))
   }, [open])
 
   const selectedProjectId = form.watch('projectId')
@@ -97,7 +98,7 @@ export function CreateTaskDialog({
       setSelectedTemplateId('__none__')
       return
     }
-    getTrpcVanillaClient().task.templatesGetByProject.query({ projectId: selectedProjectId }).then((list) => {
+    trpcClient.task.templatesGetByProject.query({ projectId: selectedProjectId }).then((list) => {
       setTemplates(list)
       const def = list.find((t) => t.is_default)
       setSelectedTemplateId(def?.id ?? '__none__')
@@ -129,8 +130,8 @@ export function CreateTaskDialog({
   ): Promise<void> => {
     const isAutoCreateEnabledForProject = async (projectId: string): Promise<boolean> => {
       const [globalSetting, projects] = await Promise.all([
-        getTrpcVanillaClient().settings.get.query({ key: 'auto_create_worktree_on_task_create' }),
-        getTrpcVanillaClient().projects.list.query()
+        trpcClient.settings.get.query({ key: 'auto_create_worktree_on_task_create' }),
+        trpcClient.projects.list.query()
       ])
       const project = projects.find((p) => p.id === projectId)
       const override = project?.auto_create_worktree_on_task_create
@@ -146,7 +147,7 @@ export function CreateTaskDialog({
       shouldAutoCreateWorktree = false
     }
 
-    const task = await getTrpcVanillaClient().task.create.mutate({
+    const task = await trpcClient.task.create.mutate({
       projectId: data.projectId,
       title: data.title,
       description: data.description || undefined,
@@ -156,7 +157,7 @@ export function CreateTaskDialog({
       templateId: selectedTemplateId === '__none__' ? undefined : selectedTemplateId
     })
     if (data.tagIds.length > 0) {
-      await getTrpcVanillaClient().tags.setForTask.mutate({ taskId: task.id, tagIds: data.tagIds })
+      await trpcClient.tags.setForTask.mutate({ taskId: task.id, tagIds: data.tagIds })
     }
     if (shouldAutoCreateWorktree && !task.worktree_path) {
       window.alert('Task created, but worktree auto-create failed. You can add one from the Git panel.')

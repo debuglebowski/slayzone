@@ -16,7 +16,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import type { ActivityEvent, ActivityEventCursor, AutomationActionRun } from '@slayzone/history/shared'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
 
 interface TaskHistoryPanelProps {
@@ -123,6 +123,7 @@ function getEventMarkerMeta(event: ActivityEvent): {
 }
 
 export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [events, setEvents] = useState<ActivityEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -146,7 +147,7 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
     setNextCursor(null)
     setExpandedRunIds({})
     setActionRunsByRunId({})
-    getTrpcVanillaClient().history.listForTask.query({ taskId, options: { limit: TASK_HISTORY_PAGE_SIZE } }).then((result) => {
+    trpcClient.history.listForTask.query({ taskId, options: { limit: TASK_HISTORY_PAGE_SIZE } }).then((result) => {
       if (!active) return
       setEvents(result.events)
       setNextCursor(result.nextCursor)
@@ -158,7 +159,7 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
   async function toggleAutomationDetails(runId: string): Promise<void> {
     setExpandedRunIds((prev) => ({ ...prev, [runId]: !prev[runId] }))
     if (actionRunsByRunId[runId]) return
-    const runs = await getTrpcVanillaClient().history.getAutomationActionRuns.query({ runId })
+    const runs = await trpcClient.history.getAutomationActionRuns.query({ runId })
     setActionRunsByRunId((prev) => ({ ...prev, [runId]: runs }))
   }
 
@@ -167,7 +168,7 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
 
     setLoadingMore(true)
     try {
-      const result = await getTrpcVanillaClient().history.listForTask.query({
+      const result = await trpcClient.history.listForTask.query({
         taskId,
         options: { limit: TASK_HISTORY_PAGE_SIZE, before: nextCursor },
       })

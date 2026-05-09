@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useMemo } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 
 interface OwnershipEntry {
   panelId: string
@@ -12,6 +13,8 @@ interface OwnershipEntry {
  * show a stub.
  */
 export function usePanelOwnership(taskId: string | undefined) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [windowId, setWindowId] = useState<number | null>(null)
   const [entries, setEntries] = useState<OwnershipEntry[]>([])
   const [releasedOnClose, setReleasedOnClose] = useState<Array<{ taskId: string; panelId: string }> | null>(null)
@@ -19,44 +22,44 @@ export function usePanelOwnership(taskId: string | undefined) {
   // Resolve this window's id once via tRPC (server reads ?windowId from WS query)
   useEffect(() => {
     let alive = true
-    getTrpcVanillaClient().app.taskWindows.getWindowId.query().then((id) => {
+    trpcClient.app.taskWindows.getWindowId.query().then((id) => {
       if (alive) setWindowId(id as number | null)
     })
-    return () => {
-      alive = false
-    }
-  }, [])
+    return () => { alive = false }
+  }, [trpcClient])
 
+  // Initial ownership snapshot for this task. Resets when taskId changes.
   useEffect(() => {
     if (!taskId) {
       setEntries([])
       return
     }
     let alive = true
-    getTrpcVanillaClient().app.taskWindows.getOwnership.query({ taskId }).then((list) => {
+    trpcClient.app.taskWindows.getOwnership.query({ taskId }).then((list) => {
       if (alive) setEntries(list as OwnershipEntry[])
     })
-    const sub = getTrpcVanillaClient().app.taskWindows.onOwnershipChanged.subscribe(undefined, {
+    return () => { alive = false }
+  }, [taskId, trpcClient])
+
+  useSubscription(
+    trpc.app.taskWindows.onOwnershipChanged.subscriptionOptions(undefined, {
+      enabled: !!taskId,
       onData: (payload) => {
         if (payload.taskId === taskId) setEntries(payload.ownership)
       },
-    })
-    return () => {
-      alive = false
-      sub.unsubscribe()
-    }
-  }, [taskId])
+    }),
+  )
 
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().app.taskWindows.onPanelsReleasedOnClose.subscribe(undefined, {
+  useSubscription(
+    trpc.app.taskWindows.onPanelsReleasedOnClose.subscriptionOptions(undefined, {
+      enabled: !!taskId,
       onData: (payload) => {
         if (!taskId) return
         const forThisTask = payload.released.filter((r) => r.taskId === taskId)
         if (forThisTask.length > 0) setReleasedOnClose(forThisTask)
       },
-    })
-    return () => sub.unsubscribe()
-  }, [taskId])
+    }),
+  )
 
   const ownerOf = useCallback(
     (panelId: string): number | null => entries.find((e) => e.panelId === panelId)?.ownerWindowId ?? null,
@@ -82,25 +85,25 @@ export function usePanelOwnership(taskId: string | undefined) {
   const claim = useCallback(
     async (panelId: string) => {
       if (!taskId) return { ok: false }
-      return getTrpcVanillaClient().app.taskWindows.claimPanel.mutate({ taskId, panelId })
+      return trpcClient.app.taskWindows.claimPanel.mutate({ taskId, panelId })
     },
-    [taskId]
+    [taskId, trpcClient]
   )
 
   const claimAndCloseOther = useCallback(
     async (panelId: string) => {
       if (!taskId) return { ok: false }
-      return getTrpcVanillaClient().app.taskWindows.claimAndCloseOther.mutate({ taskId, panelId })
+      return trpcClient.app.taskWindows.claimAndCloseOther.mutate({ taskId, panelId })
     },
-    [taskId]
+    [taskId, trpcClient]
   )
 
   const release = useCallback(
     async (panelId: string) => {
       if (!taskId) return { ok: false }
-      return getTrpcVanillaClient().app.taskWindows.releasePanel.mutate({ taskId, panelId })
+      return trpcClient.app.taskWindows.releasePanel.mutate({ taskId, panelId })
     },
-    [taskId]
+    [taskId, trpcClient]
   )
 
   const consumeReleasedOnClose = useCallback(() => {

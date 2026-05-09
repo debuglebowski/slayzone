@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type CSSProperties, type DragEvent } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ImageDown, FileCode, Archive, Rows2, Rows3, Maximize2, AlignCenter, History, Scissors, ClipboardPaste, CopyPlus, SlidersHorizontal, Settings2, Type } from 'lucide-react'
 import {
   cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button, Input, Label, Switch,
@@ -126,6 +127,8 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
   searchRegex: boolean
   onSearchMatchCountChange: (count: number) => void
 }) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const { notesFontFamily, notesCheckedHighlight, notesShowToolbar, notesSpellcheck, editorMinimapEnabled, editorTocEnabled } = useAppearance()
   const { editorThemeId, contentVariant } = useTheme()
   const themeColors: EditorThemeColors = useMemo(
@@ -173,7 +176,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
   const loadFromDisk = useCallback(async (): Promise<void> => {
     const [c, mtime] = await Promise.all([
       readContent(artifact.id),
-      getTrpcVanillaClient().task.artifactsGetMtime.query({ id: artifact.id }),
+      trpcClient.task.artifactsGetMtime.query({ id: artifact.id }),
     ])
     setContent(c ?? '')
     baselineMtimeRef.current = mtime
@@ -187,7 +190,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
   useEffect(() => {
     if (isBinary) {
       setLoading(false)
-      getTrpcVanillaClient().task.artifactsGetMtime.query({ id: artifact.id }).then((m) => { baselineMtimeRef.current = m })
+      trpcClient.task.artifactsGetMtime.query({ id: artifact.id }).then((m) => { baselineMtimeRef.current = m })
       setPreviewVersion(v => v + 1)
       return
     }
@@ -207,8 +210,8 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
   }, [artifact.id, isBinary, loadFromDisk, saveContent])
 
   // fs.watch subscription — disk is the single source of truth for content.
-  useEffect(() => {
-    const sub = getTrpcVanillaClient().task.artifactsOnContentChanged.subscribe(undefined, {
+  useSubscription(
+    trpc.task.artifactsOnContentChanged.subscriptionOptions(undefined, {
       onData: (changedId) => {
         if (changedId !== artifact.id) return
         if (isDirtyRef.current) {
@@ -217,9 +220,8 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
           loadFromDisk()
         }
       },
-    })
-    return () => sub.unsubscribe()
-  }, [artifact.id, loadFromDisk])
+    }),
+  )
 
 
   const handleChange = useCallback((value: string) => {
@@ -228,7 +230,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(async () => {
       saveTimerRef.current = null
-      const currentMtime = await getTrpcVanillaClient().task.artifactsGetMtime.query({ id: artifact.id })
+      const currentMtime = await trpcClient.task.artifactsGetMtime.query({ id: artifact.id })
       if (
         currentMtime != null &&
         baselineMtimeRef.current != null &&
@@ -240,7 +242,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
         return
       }
       await saveContent(artifact.id, value)
-      const newMtime = await getTrpcVanillaClient().task.artifactsGetMtime.query({ id: artifact.id })
+      const newMtime = await trpcClient.task.artifactsGetMtime.query({ id: artifact.id })
       baselineMtimeRef.current = newMtime
       setIsDirty(false)
       // Cache-bust preview iframes only. Editor must NOT see this bump or
@@ -264,7 +266,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
     }
     if (contentRef.current == null) return
     await saveContent(artifact.id, contentRef.current)
-    const newMtime = await getTrpcVanillaClient().task.artifactsGetMtime.query({ id: artifact.id })
+    const newMtime = await trpcClient.task.artifactsGetMtime.query({ id: artifact.id })
     baselineMtimeRef.current = newMtime
     setIsDirty(false)
     setExternalChangePending(false)
@@ -462,6 +464,7 @@ function HtmlPreviewFrame({ artifactId, contentVersion, getFilePath }: { artifac
 // --- Main panel ---
 
 export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelProps>(function ArtifactsPanel({ taskId, isResizing, initialActiveArtifactId, onActiveArtifactIdChange }, ref) {
+  const trpcClient = useTRPCClient()
   const {
     artifacts, folders, isLoading, selectedId, setSelectedId,
     createArtifact, updateArtifact, deleteArtifact, renameArtifact, moveArtifactToFolder,
@@ -578,7 +581,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
   const [clipboard, setClipboard] = useState<{ ids: string[]; mode: 'copy' | 'cut' } | null>(null)
   const [osHasFiles, setOsHasFiles] = useState(false)
   const refreshOsClipboard = useCallback(() => {
-    getTrpcVanillaClient().app.clipboard.hasFiles.query().then(setOsHasFiles).catch(() => setOsHasFiles(false))
+    trpcClient.app.clipboard.hasFiles.query().then(setOsHasFiles).catch(() => setOsHasFiles(false))
   }, [])
   const willCreateRef = useRef(false)
   const createInputRef = useCallback((node: HTMLInputElement | null) => {
@@ -680,7 +683,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
   // --- Upload / drop ---
 
   const handleUpload = useCallback(async () => {
-    const result = await getTrpcVanillaClient().app.dialog.showOpenDialog.mutate({
+    const result = await trpcClient.app.dialog.showOpenDialog.mutate({
       title: 'Upload Artifact',
       properties: ['openFile', 'multiSelections']
     })
@@ -873,7 +876,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
 
   const writeArtifactsToOsClipboard = useCallback(async (ids: string[]) => {
     const paths = (await Promise.all(ids.map((id) => getFilePath(id)))).filter((p): p is string => !!p)
-    await getTrpcVanillaClient().app.clipboard.writeFilePaths.mutate({ paths })
+    await trpcClient.app.clipboard.writeFilePaths.mutate({ paths })
   }, [getFilePath])
 
   const handleArtifactCopy = useCallback((ids: string[]) => {
@@ -889,9 +892,9 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
   }, [writeArtifactsToOsClipboard])
 
   const handleArtifactPaste = useCallback(async (destFolderId: string | null) => {
-    const osPaths = await getTrpcVanillaClient().app.clipboard.readFilePaths.query()
+    const osPaths = await trpcClient.app.clipboard.readFilePaths.query()
     if (!osPaths.length) return
-    const created = await getTrpcVanillaClient().task.artifactsPasteFiles.mutate({ sourcePaths: osPaths, destTaskId: taskId, destFolderId })
+    const created = await trpcClient.task.artifactsPasteFiles.mutate({ sourcePaths: osPaths, destTaskId: taskId, destFolderId })
     // Cut-mode source delete only if internal clipboard markers still match OS clipboard
     if (clipboard?.mode === 'cut') {
       const sourcePathSet = new Set(osPaths)
@@ -917,7 +920,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     if (!paths.length) return
     const sourceArtifact = artifacts.find((a) => a.id === ids[0])
     const destFolderId = sourceArtifact?.folder_id ?? null
-    await getTrpcVanillaClient().task.artifactsPasteFiles.mutate({ sourcePaths: paths, destTaskId: taskId, destFolderId })
+    await trpcClient.task.artifactsPasteFiles.mutate({ sourcePaths: paths, destTaskId: taskId, destFolderId })
   }, [getFilePath, artifacts, taskId])
 
   const handleDeleteSelected = useCallback(async (ids: string[]) => {

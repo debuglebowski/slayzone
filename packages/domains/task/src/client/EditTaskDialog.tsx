@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
@@ -48,6 +48,7 @@ export function EditTaskDialog({
   onOpenChange,
   onUpdated
 }: EditTaskDialogProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const [projects, setProjects] = useState<Project[]>([])
   const form = useForm<UpdateTaskFormData>({
     resolver: zodResolver(updateTaskSchema),
@@ -77,7 +78,7 @@ export function EditTaskDialog({
 
   useEffect(() => {
     if (!open) return
-    getTrpcVanillaClient().projects.list.query().then((list) => setProjects(list))
+    trpcClient.projects.list.query().then((list) => setProjects(list))
   }, [open])
 
   const selectedProject = projects.find((project) => project.id === task?.project_id)
@@ -92,7 +93,7 @@ export function EditTaskDialog({
   }, [task, projectStatusOptions, selectedProject, form])
 
   const onSubmit = async (data: UpdateTaskFormData): Promise<void> => {
-    const updated = await getTrpcVanillaClient().task.update.mutate({
+    const updated = await trpcClient.task.update.mutate({
       id: data.id,
       title: data.title,
       description: data.description,

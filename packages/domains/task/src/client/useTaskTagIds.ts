@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useEffect, useState } from 'react'
+import { useSubscription } from '@trpc/tanstack-react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 
 export interface UseTaskTagIdsReturn {
   tagIds: string[]
@@ -10,19 +11,27 @@ export function useTaskTagIds(
   taskId: string | null | undefined,
   initialTagIds?: string[]
 ): UseTaskTagIdsReturn {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [tagIds, setTagIds] = useState<string[]>(initialTagIds ?? [])
 
   // Re-fetch tag associations on external changes (CLI, MCP)
+  useSubscription(
+    trpc.task.onChanged.subscriptionOptions(undefined, {
+      enabled: !!taskId,
+      onData: () => {
+        if (!taskId) return
+        trpcClient.tags.getForTask.query({ taskId })
+          .then(tags => setTagIds(tags.map(t => t.id)))
+          .catch(() => {})
+      },
+    }),
+  )
+
+  // Reset to initial whenever the taskId changes (parent passed new initialTagIds).
   useEffect(() => {
-    if (!taskId) return
-    const refresh = (): void => {
-      getTrpcVanillaClient()
-        .tags.getForTask.query({ taskId })
-        .then(tags => setTagIds(tags.map(t => t.id)))
-        .catch(() => {})
-    }
-    const _sub = getTrpcVanillaClient().task.onChanged.subscribe(undefined, { onData: () => refresh() }); const cleanup = () => _sub.unsubscribe()
-    return () => { cleanup?.() }
+    if (initialTagIds) setTagIds(initialTagIds)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId])
 
   return { tagIds, setTagIds }

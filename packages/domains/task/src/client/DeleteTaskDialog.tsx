@@ -1,5 +1,5 @@
 import type { Task } from '@slayzone/task/shared'
-import { getTrpcVanillaClient } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,12 +26,13 @@ export function DeleteTaskDialog({
   onDeleted,
   onDeleteTask
 }: DeleteTaskDialogProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const handleDelete = async (): Promise<void> => {
     if (!task) return
     if (onDeleteTask) {
       await onDeleteTask(task.id)
     } else {
-      await getTrpcVanillaClient().task.delete.mutate({ id: task.id })
+      await trpcClient.task.delete.mutate({ id: task.id })
     }
     onDeleted()
   }
