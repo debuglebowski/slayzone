@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useImperativeHandle, forwardRef } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { AlignCenter, Code, Columns2, Eye, FileCode, Files, Maximize2, RefreshCw, Rows2, Rows3, Search, Settings2, SlidersHorizontal, Type } from 'lucide-react'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import {
@@ -100,7 +101,9 @@ interface MarkdownFilePaneProps {
 }
 
 function MarkdownFilePane({ filePath, projectPath, content, onChange, onSave, onOpenFile, themeColors, readability, width, fontFamily, handleRef }: MarkdownFilePaneProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
+  const openPathMutation = useMutation(trpc.app.shell.openPath.mutationOptions())
   const editorRef = useRef<MilkdownEditor | null>(null)
   useEffect(() => {
     if (!handleRef) return
@@ -132,7 +135,7 @@ function MarkdownFilePane({ filePath, projectPath, content, onChange, onSave, on
       return
     }
     if (/^(https?:|mailto:)/i.test(resolvedHref)) {
-      void trpcClient.app.shell.openExternal.mutate({ url: resolvedHref })
+      openExternalMutation.mutate({ url: resolvedHref })
       return
     }
     if (resolvedHref.startsWith('slz-file://')) {
@@ -146,7 +149,7 @@ function MarkdownFilePane({ filePath, projectPath, content, onChange, onSave, on
           return
         }
       }
-      void trpcClient.app.shell.openPath.mutate({ absPath })
+      openPathMutation.mutate({ absPath })
     }
   }, [projectPath, onOpenFile])
 
@@ -169,7 +172,9 @@ function MarkdownFilePane({ filePath, projectPath, content, onChange, onSave, on
 }
 
 export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewProps>(function FileEditorView({ projectPath, initialEditorState, onEditorStateChange }, ref) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const showInFinderMutation = useMutation(trpc.fileEditor.showInFinder.mutationOptions())
+  const copyInMutation = useMutation(trpc.fileEditor.copyIn.mutationOptions())
   const setSetting = useSetSettingMutation()
   const {
     openFiles,
@@ -378,7 +383,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
   }, [])
 
   const handleRevealInFinder = useCallback((filePath: string) => {
-    void trpcClient.fileEditor.showInFinder.mutate({ rootPath: projectPath, targetPath: filePath })
+    showInFinderMutation.mutate({ rootPath: projectPath, targetPath: filePath })
   }, [projectPath, trpcClient])
 
   const handleFileDragOver = useCallback((e: React.DragEvent) => {
@@ -427,7 +432,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       } else {
         // External file — copy into project root
         try {
-          const relPath = await trpcClient.fileEditor.copyIn.mutate({ rootPath: projectPath, absoluteSrc: absPath })
+          const relPath = await copyInMutation.mutateAsync({ rootPath: projectPath, absoluteSrc: absPath })
           openFile(relPath)
         } catch {
           // Copy failed (e.g. directory, permission error)
