@@ -1,5 +1,6 @@
 export { useDialogStore, type SearchFileContext } from './useDialogStore'
 export { UserSettingsDialog } from './UserSettingsDialog'
+export { useSetting, useSetSettingMutation } from './queries'
 export { ThemeProvider, useTheme } from './ThemeContext'
 export { applyTheme } from './apply-theme'
 export { useTabStore, tabStoreReady, type Tab, type ActiveView } from './useTabStore'
