@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef, useMemo, type CSSProperties, type DragEvent } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ImageDown, FileCode, Archive, Rows2, Rows3, Maximize2, AlignCenter, History, Scissors, ClipboardPaste, CopyPlus, SlidersHorizontal, Settings2, Type } from 'lucide-react'
@@ -129,6 +130,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
 }) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
   const { notesFontFamily, notesCheckedHighlight, notesShowToolbar, notesSpellcheck, editorMinimapEnabled, editorTocEnabled } = useAppearance()
   const { editorThemeId, contentVariant } = useTheme()
   const themeColors: EditorThemeColors = useMemo(
@@ -176,7 +178,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
   const loadFromDisk = useCallback(async (): Promise<void> => {
     const [c, mtime] = await Promise.all([
       readContent(artifact.id),
-      trpcClient.task.artifactsGetMtime.query({ id: artifact.id }),
+      queryClient.fetchQuery(trpc.task.artifactsGetMtime.queryOptions({ id: artifact.id })),
     ])
     setContent(c ?? '')
     baselineMtimeRef.current = mtime
@@ -190,7 +192,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
   useEffect(() => {
     if (isBinary) {
       setLoading(false)
-      trpcClient.task.artifactsGetMtime.query({ id: artifact.id }).then((m) => { baselineMtimeRef.current = m })
+      queryClient.fetchQuery(trpc.task.artifactsGetMtime.queryOptions({ id: artifact.id })).then((m) => { baselineMtimeRef.current = m })
       setPreviewVersion(v => v + 1)
       return
     }
@@ -230,7 +232,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(async () => {
       saveTimerRef.current = null
-      const currentMtime = await trpcClient.task.artifactsGetMtime.query({ id: artifact.id })
+      const currentMtime = await queryClient.fetchQuery(trpc.task.artifactsGetMtime.queryOptions({ id: artifact.id }))
       if (
         currentMtime != null &&
         baselineMtimeRef.current != null &&
@@ -242,7 +244,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
         return
       }
       await saveContent(artifact.id, value)
-      const newMtime = await trpcClient.task.artifactsGetMtime.query({ id: artifact.id })
+      const newMtime = await queryClient.fetchQuery(trpc.task.artifactsGetMtime.queryOptions({ id: artifact.id }))
       baselineMtimeRef.current = newMtime
       setIsDirty(false)
       // Cache-bust preview iframes only. Editor must NOT see this bump or
@@ -266,7 +268,7 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
     }
     if (contentRef.current == null) return
     await saveContent(artifact.id, contentRef.current)
-    const newMtime = await trpcClient.task.artifactsGetMtime.query({ id: artifact.id })
+    const newMtime = await queryClient.fetchQuery(trpc.task.artifactsGetMtime.queryOptions({ id: artifact.id }))
     baselineMtimeRef.current = newMtime
     setIsDirty(false)
     setExternalChangePending(false)
