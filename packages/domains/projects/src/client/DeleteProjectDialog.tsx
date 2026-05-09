@@ -9,7 +9,8 @@ import {
   AlertDialogTitle
 } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 interface DeleteProjectDialogProps {
   project: Project | null
@@ -24,10 +25,11 @@ export function DeleteProjectDialog({
   onOpenChange,
   onDeleted
 }: DeleteProjectDialogProps) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const deleteMutation = useMutation(trpc.projects.delete.mutationOptions())
   const handleDelete = async () => {
     if (!project) return
-    await trpcClient.projects.delete.mutate({ id: project.id })
+    await deleteMutation.mutateAsync({ id: project.id })
     onDeleted()
   }
 

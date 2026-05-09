@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
-import type { Project } from '@slayzone/projects/shared'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Select,
   SelectContent,
@@ -20,12 +19,9 @@ export function ProjectSelect({
   onChange,
   disabled
 }: ProjectSelectProps): React.JSX.Element {
-  const trpcClient = useTRPCClient()
-  const [projects, setProjects] = useState<Project[]>([])
-
-  useEffect(() => {
-    trpcClient.projects.list.query().then(setProjects)
-  }, [trpcClient])
+  const trpc = useTRPC()
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+  const projects = projectsQuery.data ?? []
 
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>

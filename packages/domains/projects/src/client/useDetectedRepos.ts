@@ -1,13 +1,12 @@
-import { useState, useEffect } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { DetectedRepo } from '@slayzone/projects/shared'
 
 export function useDetectedRepos(projectPath: string | null): DetectedRepo[] {
-  const trpcClient = useTRPCClient()
-  const [repos, setRepos] = useState<DetectedRepo[]>([])
-  useEffect(() => {
-    if (!projectPath) { setRepos([]); return }
-    trpcClient.worktrees.detectChildRepos.query({ projectPath: projectPath }).then(setRepos).catch(() => setRepos([]))
-  }, [projectPath, trpcClient])
-  return repos
+  const trpc = useTRPC()
+  const reposQuery = useQuery({
+    ...trpc.worktrees.detectChildRepos.queryOptions({ projectPath: projectPath ?? '' }),
+    enabled: !!projectPath,
+  })
+  return reposQuery.data ?? []
 }
