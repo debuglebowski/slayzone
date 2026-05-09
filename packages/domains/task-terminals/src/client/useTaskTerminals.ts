@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import type { TabDisplayMode, TerminalTab, TerminalGroup } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal/shared'
@@ -52,6 +53,7 @@ function computeGroups(tabs: TerminalTab[]): TerminalGroup[] {
 
 export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): UseTaskTerminalsResult {
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const trpcClient = useTRPCClient()
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeGroupId, setActiveGroupId] = useState<string>(taskId) // Main group id = taskId
@@ -65,9 +67,8 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
     const loadTabs = async () => {
       try {
         await trpcClient.taskTerminals.ensureMain.mutate({ taskId, mode: defaultMode })
-        const loadedTabs = await trpcClient.taskTerminals.list.query({ taskId })
+        const loadedTabs = await queryClient.fetchQuery(trpc.taskTerminals.list.queryOptions({ taskId }))
         setTabs(loadedTabs)
-        // Set active to main group if current active doesn't exist
         const loadedGroups = computeGroups(loadedTabs)
         if (!loadedGroups.find(g => g.id === activeGroupId)) {
           const mainGroup = loadedGroups.find(g => g.isMain)
@@ -79,7 +80,7 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
     }
     loadTabs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, defaultMode, trpcClient])
+  }, [taskId, defaultMode])
 
   // Re-fetch when an external actor (CLI via REST, other window) mutates tabs.
   // Optionally focus the new tab's group if `focusTabId` is provided.
@@ -88,7 +89,7 @@ export function useTaskTerminals(taskId: string, defaultMode: TerminalMode): Use
       onData: async ({ taskId: changedTaskId, focusTabId }) => {
         if (changedTaskId !== taskId) return
         try {
-          const loadedTabs = await trpcClient.taskTerminals.list.query({ taskId })
+          const loadedTabs = await queryClient.fetchQuery(trpc.taskTerminals.list.queryOptions({ taskId }))
           setTabs(loadedTabs)
           if (focusTabId) {
             const target = loadedTabs.find(t => t.id === focusTabId)
