@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useTRPCClient } from "@slayzone/transport/client"
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   ArrowLeft, AlertTriangle, ChevronRight,
   Plus, Sparkles, Server, FileText, FolderTree, Settings2,
@@ -110,30 +111,23 @@ function OverviewPanel({
   onNavigate: (section: Section) => void
   version: number
 }) {
-  const trpcClient = useTRPCClient()
-  const [data, setData] = useState<OverviewData | null>(null)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const instructionsQuery = useQuery(trpc.aiConfig.getLibraryInstructions.queryOptions())
+  const skillsQuery = useQuery(trpc.aiConfig.listItems.queryOptions({ scope: 'library', type: 'skill' }))
+  const providersQuery = useQuery(trpc.aiConfig.listProviders.queryOptions())
+  const data: OverviewData | null = (instructionsQuery.data !== undefined && skillsQuery.data && providersQuery.data) ? {
+    instructions: { content: instructionsQuery.data },
+    skills: skillsQuery.data,
+    providers: providersQuery.data,
+  } : null
 
+  // Refresh on version bump
   useEffect(() => {
-    let stale = false
-    void (async () => {
-      try {
-        const [instrContent, skills, providers] = await Promise.all([
-          trpcClient.aiConfig.getLibraryInstructions.query(),
-          trpcClient.aiConfig.listItems.query({ scope: 'library', type: 'skill' }),
-          trpcClient.aiConfig.listProviders.query()
-        ])
-        if (stale) return
-        setData({
-          instructions: { content: instrContent },
-          skills,
-          providers,
-        })
-      } catch {
-        // silently fail — cards will show loading state
-      }
-    })()
-    return () => { stale = true }
-  }, [version])
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getLibraryInstructions.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+    queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listProviders.queryKey() })
+  }, [version, queryClient, trpc])
 
   if (!data) {
     return (
@@ -165,30 +159,26 @@ function OverviewPanel({
 // ---------------------------------------------------------------------------
 
 function ProvidersPanel() {
-  const trpcClient = useTRPCClient()
-  const [providers, setProviders] = useState<CliProviderInfo[]>([])
-  const [loading, setLoading] = useState(true)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const providersQuery = useQuery(trpc.aiConfig.listProviders.queryOptions())
+  const providers = providersQuery.data ?? []
+  const loading = providersQuery.isLoading
+  const toggleProviderMutation = useMutation(trpc.aiConfig.toggleProvider.mutationOptions({
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listProviders.queryKey() }),
+  }))
 
+  // Refetch when settings change globally
   useEffect(() => {
-    const fetch = async () => {
-      try {
-        const list = await trpcClient.aiConfig.listProviders.query()
-        setProviders(list)
-      } finally {
-        setLoading(false)
-      }
-    }
-    void fetch()
-    const handler = () => { void fetch() }
+    const handler = () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listProviders.queryKey() })
     window.addEventListener('sz:settings-changed', handler)
     return () => window.removeEventListener('sz:settings-changed', handler)
-  }, [])
+  }, [queryClient, trpc])
 
   const handleToggle = async (provider: CliProviderInfo) => {
     if (provider.isDefault) return
     const newEnabled = !provider.enabled
-    await trpcClient.aiConfig.toggleProvider.mutate({ id: provider.id, enabled: newEnabled })
-    setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, enabled: newEnabled } : p))
+    await toggleProviderMutation.mutateAsync({ id: provider.id, enabled: newEnabled })
   }
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
@@ -286,34 +276,42 @@ export function ContextManagerSettings({
 // ---------------------------------------------------------------------------
 
 function LegacyContextManager({ initialSection }: { initialSection: ContextManagerSection | null }) {
-  const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [section, setSection] = useState<Section | null>(initialSection)
-  const [items, setItems] = useState<AiConfigItem[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
   const [providerVersion] = useState(0)
   const [syncCheckVersion] = useState(0)
 
   const isItemSection = section === 'skill'
 
-  const loadItems = useCallback(async () => {
-    if (!isItemSection) return
-    setLoading(true)
-    try {
-      const rows = await trpcClient.aiConfig.listItems.query({
-        scope: 'library',
-        type: 'skill'
-      })
-      setItems(rows)
-    } finally {
-      setLoading(false)
-    }
-  }, [section, isItemSection])
+  const itemsQuery = useQuery({
+    ...trpc.aiConfig.listItems.queryOptions({ scope: 'library', type: 'skill' }),
+    enabled: isItemSection,
+  })
+  const items = itemsQuery.data ?? []
+  const loading = isItemSection && itemsQuery.isLoading
+
+  const invalidateItems = () => queryClient.invalidateQueries({ queryKey: trpc.aiConfig.listItems.queryKey() })
+  const createItemMutation = useMutation(trpc.aiConfig.createItem.mutationOptions({
+    onSuccess: (created) => {
+      invalidateItems()
+      setEditingId(created.id)
+    },
+  }))
+  const updateItemMutation = useMutation(trpc.aiConfig.updateItem.mutationOptions({
+    onSuccess: invalidateItems,
+  }))
+  const deleteItemMutation = useMutation(trpc.aiConfig.deleteItem.mutationOptions({
+    onSuccess: () => {
+      invalidateItems()
+      setEditingId(null)
+    },
+  }))
 
   useEffect(() => {
-    void loadItems()
     setEditingId(null)
-  }, [loadItems])
+  }, [section])
 
   useEffect(() => {
     setSection(initialSection)
@@ -323,26 +321,20 @@ function LegacyContextManager({ initialSection }: { initialSection: ContextManag
     if (!isItemSection) return
     const existingSlugs = new Set(items.map((item) => item.slug))
     const slug = nextAvailableSlug('new-skill', existingSlugs)
-    const created = await trpcClient.aiConfig.createItem.mutate({
+    await createItemMutation.mutateAsync({
       type: 'skill',
       scope: 'library',
       slug,
       content: buildDefaultSkillContent(slug)
     })
-    setItems((prev) => [created, ...prev])
-    setEditingId(created.id)
   }
 
   const handleUpdate = async (itemId: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await trpcClient.aiConfig.updateItem.mutate({ id: itemId, ...patch })
-    if (!updated) return
-    setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+    await updateItemMutation.mutateAsync({ id: itemId, ...patch })
   }
 
   const handleDelete = async (itemId: string) => {
-    await trpcClient.aiConfig.deleteItem.mutate({ id: itemId })
-    setItems((prev) => prev.filter((item) => item.id !== itemId))
-    setEditingId(null)
+    await deleteItemMutation.mutateAsync({ id: itemId })
   }
 
   const librarySkillContent = (() => {
