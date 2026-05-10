@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal/shared'
+import { isAliveTerminalState } from '@slayzone/terminal/shared'
 import type { Task } from '@slayzone/task/shared'
 import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects/shared'
 
@@ -127,8 +128,24 @@ export function useIdleTasks(
 }
 
 /**
- * Returns the set of task ids that currently have any agent session (PTY or chat),
- * regardless of state. Useful for "is this task active" affordances.
+ * Pure: derive the set of task ids with a live (non-dead) agent session.
+ * Filters out exited PTYs that linger in `pty.list()` during the ~100 ms
+ * post-exit cleanup window — see `isAliveTerminalState`.
+ */
+export function buildActiveSessionTaskIds(
+  ptys: Pick<PtyInfo, 'taskId' | 'state'>[],
+  chats: Pick<ChatSessionStateEntry, 'taskId' | 'state'>[]
+): Set<string> {
+  const set = new Set<string>()
+  for (const p of ptys) if (isAliveTerminalState(p.state)) set.add(p.taskId)
+  for (const c of chats) if (isAliveTerminalState(c.state)) set.add(c.taskId)
+  return set
+}
+
+/**
+ * Returns the set of task ids that currently have a live agent session (PTY
+ * or chat). Used for "is this task active" affordances. Dead sessions are
+ * excluded so the badge clears as soon as the process exits.
  */
 export function useActiveSessionTaskIds(): Set<string> {
   const [taskIds, setTaskIds] = useState<Set<string>>(new Set())
@@ -138,10 +155,7 @@ export function useActiveSessionTaskIds(): Set<string> {
       window.api.pty.list(),
       window.api.chat.list()
     ])
-    const set = new Set<string>()
-    for (const p of ptys) set.add(p.taskId)
-    for (const c of chats) set.add(c.taskId)
-    setTaskIds(set)
+    setTaskIds(buildActiveSessionTaskIds(ptys, chats))
   }, [])
 
   useEffect(() => {
