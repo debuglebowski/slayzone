@@ -185,7 +185,7 @@ export function ProjectIntegrationSetupWizard({
       setMessage('')
     }
     try {
-      const loadedConnections = await trpcClient.integrations.listConnections.query(provider)
+      const loadedConnections = await trpcClient.integrations.listConnections.query({ provider })
       setConnections(loadedConnections)
       setConnectionId((current) => {
         if (connectionLocked) {

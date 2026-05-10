@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useImperativeHandle, forwardRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
-import { AlignCenter, Code, Columns2, Eye, FileCode, Files, Maximize2, RefreshCw, Rows2, Rows3, Search, Settings2, SlidersHorizontal, Type } from 'lucide-react'
+import { Code, Columns2, Eye, FileCode, Files, RefreshCw, Search, SlidersHorizontal } from 'lucide-react'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import {
   AlertDialog,
@@ -15,11 +15,6 @@ import {
   Button,
   Label,
   PulseGrid,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Switch,
   Tooltip,
   TooltipContent,

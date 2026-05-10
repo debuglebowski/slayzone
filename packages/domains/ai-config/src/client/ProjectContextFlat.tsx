@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
   ArrowLeft, ChevronRight,

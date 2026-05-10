@@ -876,7 +876,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // bounces start a fresh one.
   useEffect(() => {
     if (!task) return
-    const unsubscribe = ((cb) => { const s = trpcClient.pty.onRespawnSuggested.subscribe(undefined, { onData: ({ taskId }) => cb(taskId) }); return () => s.unsubscribe() })(async (taskId) => {
+    const unsubscribe = ((cb: (taskId: string) => void) => { const s = trpcClient.pty.onRespawnSuggested.subscribe(undefined, { onData: ({ taskId }) => cb(taskId) }); return () => s.unsubscribe() })(async (taskId: string) => {
       if (taskId !== task.id) return
       if (task.terminal_mode === 'terminal') return
       const sid = getMainSessionId(task.id)

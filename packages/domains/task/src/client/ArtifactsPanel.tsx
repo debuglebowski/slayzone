@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardR
 import { useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
-import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, ZoomIn, ZoomOut, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ImageDown, FileCode, Archive, Rows2, Rows3, Maximize2, AlignCenter, History, Scissors, ClipboardPaste, CopyPlus, SlidersHorizontal, Settings2, Type } from 'lucide-react'
+import { Upload, Download, Trash2, FileText, Code, Globe, Image, GitBranch, Eye, Code2, Columns2, FolderPlus, Pencil, FilePlus, FolderOpen, Folder, ArrowRight, Copy, Search, Files, PanelLeftClose, PanelLeft, ImageDown, FileCode, Archive, History, Scissors, ClipboardPaste, CopyPlus, SlidersHorizontal } from 'lucide-react'
 import {
   cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Button, Input, Label, Switch,
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent,
@@ -20,7 +20,7 @@ import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task/sh
 import { getEffectiveRenderMode, getExtensionFromTitle, RENDER_MODE_INFO, isBinaryRenderMode, canExportAsPdf, canExportAsPng, canExportAsHtml } from '@slayzone/task/shared'
 import { Markdown, MermaidBlock, CanvasMediaView } from '@slayzone/markdown/client'
 import { useAppearance, getThemeEditorColors, type EditorThemeColors } from '@slayzone/ui'
-import { useTheme } from '@slayzone/settings/client'
+import { useTheme, useSetSettingMutation } from '@slayzone/settings/client'
 import { SearchableCodeView, type SearchableCodeViewHandle } from '@slayzone/file-editor/client/SearchableCodeView'
 import { EditorToc } from '@slayzone/file-editor/client/EditorToc'
 import { type MarkdownHeading } from '@slayzone/file-editor/client/markdown-headings'
@@ -466,6 +466,7 @@ function HtmlPreviewFrame({ artifactId, contentVersion, getFilePath }: { artifac
 
 export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelProps>(function ArtifactsPanel({ taskId, isResizing, initialActiveArtifactId, onActiveArtifactIdChange }, ref) {
   const trpcClient = useTRPCClient()
+  const setSetting = useSetSettingMutation()
   const {
     artifacts, folders, isLoading, selectedId, setSelectedId,
     createArtifact, updateArtifact, deleteArtifact, renameArtifact, moveArtifactToFolder,
@@ -1389,14 +1390,14 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                       <div className="flex items-center justify-between">
                         <Label htmlFor="art-toc" className="text-sm cursor-pointer">Outline</Label>
                         <Switch id="art-toc" checked={editorTocEnabled} onCheckedChange={(v) => {
-                          void window.api.settings.set('editor_toc_enabled', v ? '1' : '0')
+                          setSetting.mutate({ key: 'editor_toc_enabled', value: v ? '1' : '0' })
                           window.dispatchEvent(new Event('sz:settings-changed'))
                         }} />
                       </div>
                       <div className="flex items-center justify-between">
                         <Label htmlFor="art-minimap" className={cn('text-sm cursor-pointer', viewMode === 'preview' && 'text-muted-foreground/50')}>Minimap{viewMode === 'preview' ? ' (not in preview)' : ''}</Label>
                         <Switch id="art-minimap" checked={editorMinimapEnabled && viewMode !== 'preview'} disabled={viewMode === 'preview'} onCheckedChange={(v) => {
-                          void window.api.settings.set('editor_minimap_enabled', v ? '1' : '0')
+                          setSetting.mutate({ key: 'editor_minimap_enabled', value: v ? '1' : '0' })
                           window.dispatchEvent(new Event('sz:settings-changed'))
                         }} />
                       </div>
@@ -1429,7 +1430,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                       <div className="flex items-center justify-between">
                         <Label htmlFor="art-mono" className="text-sm cursor-pointer">Use mono font</Label>
                         <Switch id="art-mono" checked={notesFontFamily === 'mono'} onCheckedChange={(v) => {
-                          void window.api.settings.set('notes_font_family', v ? 'mono' : 'sans')
+                          setSetting.mutate({ key: 'notes_font_family', value: v ? 'mono' : 'sans' })
                           window.dispatchEvent(new Event('sz:settings-changed'))
                         }} />
                       </div>

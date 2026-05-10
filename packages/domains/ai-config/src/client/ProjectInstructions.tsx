@@ -73,7 +73,6 @@ export function ProjectInstructions({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [variants, setVariants] = useState<AiConfigItem[]>([])
 
-  const isProject = !!projectId && !!projectPath
   const files = dedupeProviderFiles(providerHealth).sort((a, b) => a.path.localeCompare(b.path))
   const selectedFile = files.find((f) => f.path === selectedPath)
   const selectedProvider = selectedFile?.providers[0] ?? null
@@ -112,13 +111,6 @@ export function ProjectInstructions({
       setProviderHealth(rootInstructionsQuery.data.providerHealth ?? {})
     }
   }, [rootInstructionsQuery.data])
-
-  const load = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getRootInstructions.queryKey() }),
-      queryClient.invalidateQueries({ queryKey: trpc.aiConfig.getProjectInstructionVariant.queryKey() }),
-    ])
-  }, [queryClient, trpc])
 
   // Editable file: read/save/watch via shared primitive. relPath null in linked-variant mode
   // (Textarea is readOnly there).
