@@ -504,7 +504,7 @@ function App(): React.JSX.Element {
     if (activeTab?.type !== 'task') return
     const task = tasksMap.get(activeTab.taskId)
     if (!task?.needs_attention) return
-    void window.api.db.updateTask({ id: activeTab.taskId, needsAttention: false }).catch(() => {})
+    void trpcClient.task.update.mutate({ id: activeTab.taskId, needsAttention: false }).catch(() => {})
   }, [activeTab, tasksMap])
   useEffect(() => {
     if (activeTaskProjectId && activeTaskProjectId !== selectedProjectId) setSelectedProjectId(activeTaskProjectId)
