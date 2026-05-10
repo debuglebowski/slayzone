@@ -45,14 +45,29 @@ function isWithinDuration(lockedUntil: string | null | undefined): boolean {
   return new Date(lockedUntil).getTime() > Date.now()
 }
 
-function isWithinSchedule(sched: { from: string; to: string } | null | undefined): boolean {
+function isWithinSchedule(sched: { from: string; to: string; weekdays?: boolean[] } | null | undefined): boolean {
   if (!sched) return false
   const now = new Date()
   const current = now.getHours() * 60 + now.getMinutes()
   const from = parseHHMM(sched.from)
   const to = parseHHMM(sched.to)
-  if (from <= to) return current >= from && current < to   // same-day: 09:00–17:00
-  return current >= from || current < to                    // overnight: 18:00–09:00
+  const today = now.getDay()
+  // Weekday gating uses the schedule's start day. Missing weekdays array = all days active (back-compat).
+  // All-false array = effectively disabled.
+  const isStartDayActive = (dayIdx: number): boolean => {
+    if (!sched.weekdays) return true
+    if (sched.weekdays.length !== 7) return true
+    if (sched.weekdays.every(d => !d)) return false
+    return !!sched.weekdays[dayIdx]
+  }
+  if (from <= to) {
+    // same-day: 09:00–17:00 — gated by today
+    return isStartDayActive(today) && current >= from && current < to
+  }
+  // overnight: 18:00–09:00 — after `from` gated by today; before `to` gated by yesterday (the start day)
+  if (current >= from) return isStartDayActive(today)
+  if (current < to) return isStartDayActive((today + 6) % 7)
+  return false
 }
 
 export function isProjectDurationLocked(project: Project | null | undefined): boolean {
