@@ -30,6 +30,16 @@ function expect(actual: unknown) {
   }
 }
 
+console.log('\nClaudeAdapter config\n')
+
+test('transitionOnInput is not explicitly false (uses TUI default = idle clock gated by adapter activity)', () => {
+  // The 60s idle timer must actually fire on this full-screen TUI — otherwise
+  // cursor blink keeps lastOutputTime fresh and state stays 'running'. Default
+  // (undefined or true) gives that behavior; an explicit `false` would re-
+  // introduce the historical stuck-running bug.
+  expect(adapter.transitionOnInput !== false).toBe(true)
+})
+
 console.log('\nClaudeAdapter.detectActivity\n')
 
 test('detects spinner as working', () => {
@@ -39,6 +49,14 @@ test('detects spinner as working', () => {
 
 test('returns null for unrecognized output', () => {
   expect(adapter.detectActivity('Some random text', 'unknown')).toBe(null)
+})
+
+test('completion stamp does NOT report working', () => {
+  // "Cooked for 56s" / "Cogitated for 4m 24s" = Claude finished — must not
+  // pin state to 'running' (regression from a4b6d8d1 attention-state removal).
+  expect(adapter.detectActivity('✻ Cooked for 56s', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('· Cogitated for 4m 24s', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('✽ Pondering for 2h', 'unknown')).toBe(null)
 })
 
 console.log('\nClaudeAdapter.detectPrompt\n')

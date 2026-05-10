@@ -92,3 +92,48 @@ export function activityToTerminalState(activity: ActivityState): TerminalState 
       return null
   }
 }
+
+/**
+ * Should an output chunk refresh `lastOutputTime` (the idle clock)?
+ *
+ * - TUI adapter (default, `transitionOnInput !== false`): refresh ONLY on
+ *   detected activity — raw redraws must not pin the clock open.
+ * - Output-driven adapter (`transitionOnInput === false`, e.g. plain shell):
+ *   refresh on every chunk so a tail-style stream stays "active".
+ */
+export function shouldRefreshIdleClock(
+  adapter: { transitionOnInput?: boolean },
+  detectedActivity: ActivityState | null
+): boolean {
+  return adapter.transitionOnInput === false || !!detectedActivity
+}
+
+/**
+ * Should the inactivity checker flip a session 'running' → 'idle' right now?
+ * Pure: true iff the session is running and has been silent past its timeout.
+ */
+export function shouldFlipToIdle(
+  state: TerminalState,
+  lastOutputTime: number,
+  now: number,
+  idleTimeoutMs: number
+): boolean {
+  return state === 'running' && now - lastOutputTime >= idleTimeoutMs
+}
+
+/**
+ * Should pressing Enter auto-flip a session to 'running'?
+ * TUI adapters (default) want this so the spinner state is reflected
+ * immediately; plain shell opts out to avoid spurious "running" on commands.
+ */
+export function shouldFlipToRunningOnInput(
+  adapter: { transitionOnInput?: boolean },
+  state: TerminalState,
+  inputBufferTrimmedLength: number
+): boolean {
+  return (
+    adapter.transitionOnInput !== false &&
+    inputBufferTrimmedLength > 0 &&
+    state !== 'running'
+  )
+}

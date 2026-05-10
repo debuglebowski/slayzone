@@ -2,7 +2,7 @@
  * Idle task selection tests.
  * Run with: npx tsx packages/apps/app/src/renderer/src/components/agent-status/useIdleTasks.test.ts
  */
-import { buildIdleTasks } from './useIdleTasks'
+import { buildIdleTasks, buildActiveSessionTaskIds } from './useIdleTasks'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import type { Task } from '@slayzone/task/shared'
 
@@ -233,6 +233,72 @@ test('PTY + chat rows for different tasks both surface', () => {
   const result = buildIdleTasks(rows, [task1, task2], null, NOW)
   expect(result.length).toBe(2)
   expect(result.map(r => r.task.id).sort()).toEqual(['t1', 't2'])
+})
+
+// --- buildActiveSessionTaskIds ---
+
+test('buildActiveSessionTaskIds: includes alive PTY rows', () => {
+  const set = buildActiveSessionTaskIds(
+    [
+      { taskId: 't1', state: 'running' },
+      { taskId: 't2', state: 'idle' },
+      { taskId: 't3', state: 'starting' },
+      { taskId: 't4', state: 'error' }
+    ],
+    []
+  )
+  expect(set.size).toBe(4)
+  for (const id of ['t1', 't2', 't3', 't4']) {
+    expect(set.has(id)).toBe(true)
+  }
+})
+
+test('buildActiveSessionTaskIds: excludes dead PTY rows', () => {
+  const set = buildActiveSessionTaskIds(
+    [
+      { taskId: 't1', state: 'dead' },
+      { taskId: 't2', state: 'running' }
+    ],
+    []
+  )
+  expect(set.size).toBe(1)
+  expect(set.has('t1')).toBe(false)
+  expect(set.has('t2')).toBe(true)
+})
+
+test('buildActiveSessionTaskIds: excludes dead chat rows', () => {
+  const set = buildActiveSessionTaskIds(
+    [],
+    [
+      { taskId: 't1', state: 'dead' },
+      { taskId: 't2', state: 'idle' }
+    ]
+  )
+  expect(set.has('t1')).toBe(false)
+  expect(set.has('t2')).toBe(true)
+})
+
+test('buildActiveSessionTaskIds: dedupes when PTY + chat both alive for same task', () => {
+  const set = buildActiveSessionTaskIds(
+    [{ taskId: 't1', state: 'running' }],
+    [{ taskId: 't1', state: 'idle' }]
+  )
+  expect(set.size).toBe(1)
+  expect(set.has('t1')).toBe(true)
+})
+
+test('buildActiveSessionTaskIds: dead PTY does not mask live chat for same task', () => {
+  const set = buildActiveSessionTaskIds(
+    [{ taskId: 't1', state: 'dead' }],
+    [{ taskId: 't1', state: 'running' }]
+  )
+  expect(set.size).toBe(1)
+  expect(set.has('t1')).toBe(true)
+})
+
+test('buildActiveSessionTaskIds: empty input → empty set', () => {
+  const set = buildActiveSessionTaskIds([], [])
+  expect(set.size).toBe(0)
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

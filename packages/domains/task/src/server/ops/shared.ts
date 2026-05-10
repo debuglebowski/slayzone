@@ -18,6 +18,10 @@ import {
   getWorktreeColor,
   ensureProjectWorktreeColors,
 } from '@slayzone/worktrees/server'
+import {
+  DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
+  resolveWorktreeBasePathTemplate,
+} from '@slayzone/worktrees/shared'
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -100,7 +104,8 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
     is_temporary: Boolean(row.is_temporary),
     is_blocked: Boolean(row.is_blocked),
     active_artifact_id: (row.active_artifact_id as string) ?? null,
-    manager_mode: Boolean(row.manager_mode)
+    manager_mode: Boolean(row.manager_mode),
+    needs_attention: Boolean(row.needs_attention)
   } as Task
 }
 
@@ -194,8 +199,10 @@ export function cleanupTaskImmediate(taskId: string): void {
   runtimeAdapters.killPtysByTaskId(taskId)
 }
 
-/** Kill PTY + processes + remove worktree + artifact files — used for archive and hard purge */
-export async function cleanupTaskFull(db: Database, taskId: string): Promise<void> {
+/** Kill PTY + processes + remove worktree + artifact files — used for archive and hard purge.
+ *  `batchIds` lists every task being cleaned up in the same operation so the shared-worktree
+ *  guard ignores siblings that are about to be archived (e.g. cascade from parent). */
+export async function cleanupTaskFull(db: Database, taskId: string, batchIds: string[] = [taskId]): Promise<void> {
   cleanupTaskImmediate(taskId)
   runtimeAdapters.killTaskProcesses(taskId)
   // Clean up artifact files on disk
@@ -207,6 +214,16 @@ export async function cleanupTaskFull(db: Database, taskId: string): Promise<voi
   ).get(taskId) as { worktree_path: string | null; project_id: string } | undefined
 
   if (!task?.worktree_path) return
+
+  // Skip removal if any other live task (outside this batch) still references the same worktree.
+  // Subtasks inherit parent's worktree_path; first batch member to run cleanup actually removes,
+  // siblings short-circuit on `existsSync(worktreePath)` inside removeWorktree.
+  const ids = batchIds.length > 0 ? batchIds : [taskId]
+  const placeholders = ids.map(() => '?').join(',')
+  const sharedRow = db.prepare(
+    `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders}) AND archived_at IS NULL AND deleted_at IS NULL`
+  ).get(task.worktree_path, ...ids) as { n: number } | undefined
+  if ((sharedRow?.n ?? 0) > 0) return
 
   const project = db.prepare(
     'SELECT path FROM projects WHERE id = ?'
@@ -229,8 +246,6 @@ export async function cleanupTaskFull(db: Database, taskId: string): Promise<voi
   }
 }
 
-const DEFAULT_WORKTREE_BASE_PATH_TEMPLATE = '{project}/..'
-
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -244,11 +259,6 @@ function slugify(text: string): string {
 function parseBooleanSetting(value: string | null | undefined): boolean {
   if (!value) return false
   return value === '1' || value.toLowerCase() === 'true'
-}
-
-function resolveWorktreeBasePathTemplate(template: string, projectPath: string): string {
-  const expanded = template.replaceAll('{project}', projectPath.replace(/[\\/]+$/, ''))
-  return path.normalize(expanded)
 }
 
 function isAutoCreateWorktreeEnabled(db: Database, projectId: string): boolean {
@@ -543,6 +553,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.blockedComment !== undefined) { fields.push('blocked_comment = ?'); values.push(data.blockedComment) }
   if (data.repoName !== undefined) { fields.push('repo_name = ?'); values.push(data.repoName) }
   if (data.activeArtifactId !== undefined) { fields.push('active_artifact_id = ?'); values.push(data.activeArtifactId) }
+  if (data.needsAttention !== undefined) { fields.push('needs_attention = ?'); values.push(data.needsAttention ? 1 : 0) }
 
   if (fields.length === 0) {
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as Record<string, unknown> | undefined

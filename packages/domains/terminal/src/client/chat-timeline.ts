@@ -909,6 +909,21 @@ export function isInFlight(state: ChatTimelineState): boolean {
 }
 
 /**
+ * AskUserQuestion parks the turn on user input. The card itself surfaces the
+ * prompt + answer UI, so a typing indicator below would falsely imply the
+ * agent is still working. True while the latest tool in the current turn is
+ * an unanswered AskUserQuestion (no later user-text yet).
+ */
+export function isAwaitingUserQuestion(state: ChatTimelineState): boolean {
+  for (let i = state.timeline.length - 1; i >= 0; i--) {
+    const item = state.timeline[i]
+    if (item.kind === 'user-text') return false
+    if (item.kind === 'tool' && item.invocation.name === 'AskUserQuestion') return true
+  }
+  return false
+}
+
+/**
  * Drift recovery: when a NEW user-turn boundary lands (user-sent / fresh
  * user-message / process-exit) while counters still say in-flight, the prior
  * turn was orphaned — its terminator (`result` / `interrupted` /

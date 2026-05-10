@@ -5,6 +5,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  Separator,
   cn,
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
@@ -31,6 +32,8 @@ interface AppSidebarProps {
   onUsageAnalytics: () => void
   onLeaderboard: () => void
   onTaskClick?: (taskId: string) => void
+  onCloseTab?: (taskId: string) => void
+  onOpenTaskInBackground?: (taskId: string) => void
   zenMode?: boolean
   onboardingChecklist: OnboardingChecklistState
   idleByProject?: Map<string, number>
@@ -40,6 +43,9 @@ interface AppSidebarProps {
   taskProgress?: Map<string, number>
   doneTaskIds?: Set<string>
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
+  headerUsage?: ReactNode
+  headerActions?: ReactNode
+  compactFooter?: ReactNode
 }
 
 export function AppSidebar({
@@ -52,6 +58,8 @@ export function AppSidebar({
   onUsageAnalytics,
   onLeaderboard,
   onTaskClick,
+  onCloseTab,
+  onOpenTaskInBackground,
   zenMode,
   onboardingChecklist,
   idleByProject,
@@ -61,6 +69,9 @@ export function AppSidebar({
   taskProgress,
   doneTaskIds,
   columnsByProjectId,
+  headerUsage,
+  headerActions,
+  compactFooter,
 }: AppSidebarProps) {
   const sidebarView = useTabStore((s) => s.sidebarView)
   const setSidebarView = useTabStore((s) => s.setSidebarView)
@@ -72,6 +83,7 @@ export function AppSidebar({
 
   const [hoverRevealed, setHoverRevealed] = useState(false)
   const [resizing, setResizing] = useState(false)
+  const [footerExpanded, setFooterExpanded] = useState(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cancelClose = useCallback(() => {
@@ -84,10 +96,15 @@ export function AppSidebar({
   const scheduleClose = useCallback(() => {
     cancelClose()
     const tick = () => {
-      // Keep card open as long as a dropdown / context menu / popover is open
-      // (Radix portals these to document.body so mouse leaves the card while
-      // interacting with them).
-      if (document.querySelector('[role="menu"], [role="dialog"]')) {
+      // Keep card open while a dropdown / context menu / popover / dialog is
+      // *actually open*. Radix lazy-mounted dialogs stay in DOM after close
+      // with data-state="closed", so filter by data-state="open" — otherwise
+      // any once-opened dialog blocks auto-close forever.
+      if (
+        document.querySelector(
+          '[role="menu"][data-state="open"], [role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'
+        )
+      ) {
         closeTimerRef.current = setTimeout(tick, 200)
         return
       }
@@ -144,6 +161,8 @@ export function AppSidebar({
               onSelectProject,
               onProjectSettings,
               onTaskClick,
+              onCloseTab,
+              onOpenTaskInBackground,
               onReorderProjects,
               idleByProject,
               taskContextMenuRender,
@@ -155,37 +174,64 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="py-4 gap-3 border-t border-border/60">
-        <SidebarFooterIcons
-          layout={view.footerLayout}
-          tasks={tasks}
-          onTaskClick={onTaskClick}
-          onSettings={onSettings}
-          onUsageAnalytics={onUsageAnalytics}
-          onLeaderboard={onLeaderboard}
-          onboardingChecklist={onboardingChecklist}
-          trailing={
-            view.footerLayout === 'horizontal' ? (
-              <SidebarViewSwitcher
-                current={sidebarView}
-                onChange={setSidebarView}
-                compact={false}
-                autoHide={sidebarAutoHide}
-                onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
-              />
-            ) : null
-          }
-        />
-        {view.footerLayout === 'vertical' && (
-          <div className="flex justify-center">
-            <SidebarViewSwitcher
-              current={sidebarView}
-              onChange={setSidebarView}
-              compact
-              autoHide={sidebarAutoHide}
-              onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
+      <SidebarFooter
+        className={cn('py-4 gap-3', !headerUsage && 'border-t border-border/60')}
+        onMouseEnter={compactFooter ? () => setFooterExpanded(true) : undefined}
+        onMouseLeave={compactFooter ? () => setFooterExpanded(false) : undefined}
+        onFocus={compactFooter ? () => setFooterExpanded(true) : undefined}
+        onBlur={
+          compactFooter
+            ? (e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setFooterExpanded(false)
+              }
+            : undefined
+        }
+      >
+        {compactFooter && !footerExpanded ? (
+          compactFooter
+        ) : (
+          <>
+            {headerUsage && (
+              <>
+                <div className="flex flex-wrap items-center justify-center gap-1 py-1 px-2">
+                  {headerUsage}
+                </div>
+                <Separator />
+              </>
+            )}
+            <SidebarFooterIcons
+              layout={view.footerLayout}
+              tasks={tasks}
+              onTaskClick={onTaskClick}
+              onSettings={onSettings}
+              onUsageAnalytics={onUsageAnalytics}
+              onLeaderboard={onLeaderboard}
+              onboardingChecklist={onboardingChecklist}
+              actions={headerActions}
+              trailing={
+                view.footerLayout === 'horizontal' ? (
+                  <SidebarViewSwitcher
+                    current={sidebarView}
+                    onChange={setSidebarView}
+                    compact
+                    autoHide={sidebarAutoHide}
+                    onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
+                  />
+                ) : null
+              }
             />
-          </div>
+            {view.footerLayout === 'vertical' && (
+              <div className="flex justify-center">
+                <SidebarViewSwitcher
+                  current={sidebarView}
+                  onChange={setSidebarView}
+                  compact
+                  autoHide={sidebarAutoHide}
+                  onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
+                />
+              </div>
+            )}
+          </>
         )}
       </SidebarFooter>
       {isResizable && effectiveWidth != null && (

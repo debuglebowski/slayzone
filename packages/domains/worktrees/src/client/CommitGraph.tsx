@@ -1,6 +1,6 @@
 import { cn, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Copy, Check } from 'lucide-react'
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { memo, useState, useRef, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ResolvedCommit, ResolvedGraph } from '../shared/types'
 
@@ -916,7 +916,7 @@ function CommitRow({
 
 const OVERSCAN = 10
 
-export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOnMerges, renderLimit, className }: CommitGraphProps) {
+function CommitGraphImpl({ graph, filterQuery, tipsOnly, includeTags, breakOnMerges, renderLimit, className }: CommitGraphProps) {
   const { copiedHash, handleCopy } = useCopyHash()
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
@@ -1173,4 +1173,10 @@ export function CommitGraph({ graph, filterQuery, tipsOnly, includeTags, breakOn
     </div>
   )
 }
+
+// Memoized export — relies on stable `graph` prop reference (upstream pollers
+// dedup their state via content hash + useStablePoll, so the same data does not
+// produce a new object). Default shallow check on remaining primitive props
+// (filterQuery, tipsOnly, includeTags, breakOnMerges, renderLimit, className).
+export const CommitGraph = memo(CommitGraphImpl)
 

@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { useTRPCClient } from '@slayzone/transport/client'
 import type { TRPCClient } from '@trpc/client'
 import type { AppRouter } from '@slayzone/transport/server'
@@ -297,7 +297,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     }
   }, [opts.tabId, opts.taskId, opts.mode, opts.cwd, opts.providerFlagsOverride, trpcClient])
 
-  const sendMessage = async (text: string): Promise<void> => {
+  // Stable ref so consumers (autocomplete `sources` useMemo, ChatPanel chatApi)
+  // don't reinitialize on every parent render. dispatch is stable from useReducer.
+  const sendMessage = useCallback(async (text: string): Promise<void> => {
     const chat = getChatApi(trpcClient)
     // Optimistic: paint the user-text immediately so the UI doesn't lag the IPC
     // roundtrip. Main still emits the canonical `user-message` event and the
@@ -311,7 +313,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       dispatch({ type: 'user-send-failed' })
       throw err
     }
-  }
+  }, [opts.tabId, trpcClient])
 
   const sendToolResult = async (args: {
     toolUseId: string

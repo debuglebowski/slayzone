@@ -1,3 +1,9 @@
+export {
+  DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
+  resolveWorktreeBasePathTemplate,
+  joinWorktreePath,
+} from '../shared/path-template'
+
 /**
  * Convert a string to a URL/branch-friendly slug
  * "Fix Login Bug" → "fix-login-bug"
@@ -10,79 +16,4 @@ export function slugify(text: string): string {
     .replace(/[\s_]+/g, '-') // spaces/underscores to hyphens
     .replace(/-+/g, '-') // collapse multiple hyphens
     .replace(/^-|-$/g, '') // trim leading/trailing hyphens
-}
-
-export const DEFAULT_WORKTREE_BASE_PATH_TEMPLATE = '{project}/..'
-
-/**
- * Expands user template tokens in worktree base path.
- * "{project}/.." with "/repo/slayzone" -> "/repo"
- */
-export function resolveWorktreeBasePathTemplate(template: string, projectPath: string): string {
-  const normalizedProject = projectPath.replace(/[\\/]+$/, '')
-  const resolved = template.replaceAll('{project}', normalizedProject)
-  const normalized = normalizePath(resolved)
-
-  // Relative templates are treated as project-relative
-  if (normalized && !isAbsolutePath(normalized)) {
-    const sep = normalizedProject.includes('\\') ? '\\' : '/'
-    return normalizePath(`${normalizedProject}${sep}${normalized}`)
-  }
-
-  return normalized
-}
-
-function isAbsolutePath(input: string): boolean {
-  if (!input) return false
-  if (input.startsWith('/')) return true
-  if (/^[A-Za-z]:[\\/]/.test(input)) return true
-  if (input.startsWith('\\\\')) return true
-  return false
-}
-
-/**
- * Joins worktree base path and branch with a consistent path separator.
- */
-export function joinWorktreePath(basePath: string, branch: string): string {
-  const separator = basePath.includes('\\') ? '\\' : '/'
-  const trimmedBase = basePath.replace(/[\\/]+$/, '')
-  return `${trimmedBase}${separator}${branch}`
-}
-
-function normalizePath(input: string): string {
-  if (!input) return input
-
-  const separator = input.includes('\\') ? '\\' : '/'
-  const unified = separator === '\\' ? input.replaceAll('/', '\\') : input.replaceAll('\\', '/')
-
-  let prefix = ''
-  let rest = unified
-
-  const windowsDrive = rest.match(/^[A-Za-z]:[\\/]?/)
-  if (windowsDrive) {
-    prefix = `${windowsDrive[0].slice(0, 2)}${separator}`
-    rest = rest.slice(windowsDrive[0].length)
-  } else if (rest.startsWith(separator)) {
-    prefix = separator
-    rest = rest.replace(new RegExp(`^\\${separator}+`), '')
-  }
-
-  const rawParts = rest.split(separator).filter(Boolean)
-  const parts: string[] = []
-  for (const part of rawParts) {
-    if (part === '.') continue
-    if (part === '..') {
-      if (parts.length > 0 && parts[parts.length - 1] !== '..') {
-        parts.pop()
-      } else if (!prefix) {
-        parts.push(part)
-      }
-      continue
-    }
-    parts.push(part)
-  }
-
-  const normalized = parts.join(separator)
-  if (!prefix) return normalized
-  return normalized ? `${prefix}${normalized}` : prefix
 }

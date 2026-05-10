@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { Play, Square, RotateCcw, Plus, Trash2, Cpu, Pencil, FileText, MoreHorizontal, CornerDownLeft, Info, Loader2, Globe } from 'lucide-react'
 import { cn, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { ProcessDialog } from './ProcessDialog'
@@ -257,7 +257,6 @@ function SectionHeader({ label }: { label: string }) {
 
 export function ProcessesPanel({ taskId, projectId, cwd, terminalSessionId, onOpenUrl }: { taskId: string | null; projectId: string | null; cwd?: string | null; terminalSessionId?: string; onOpenUrl?: (url: string) => void }) {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const killTaskMutation = useMutation(trpc.processes.killTask.mutationOptions())
   const killMutation = useMutation(trpc.processes.kill.mutationOptions())

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, autoUpdater as nativeAutoUpdater } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor, autoUpdater as nativeAutoUpdater } from 'electron'
 import { is } from '@electron-toolkit/utils'
 // electron-updater is CJS. electron-vite v5 outputs ESM for main, and Node's
 // CJS→ESM interop doesn't detect Object.defineProperty getters as named exports.
@@ -70,6 +70,14 @@ export function initAutoUpdater(): void {
       console.error('[updater] periodic check failed:', err instanceof Error ? err.message : err)
     })
   }, CHECK_INTERVAL_MS)
+
+  powerMonitor.on('resume', () => {
+    if (downloadedVersion) return
+    console.log('[updater] resume check')
+    getAutoUpdater().checkForUpdatesAndNotify().catch((err) => {
+      console.error('[updater] resume check failed:', err instanceof Error ? err.message : err)
+    })
+  })
 }
 
 async function waitForRendererDrain(): Promise<'ready' | 'timeout' | 'no-window'> {

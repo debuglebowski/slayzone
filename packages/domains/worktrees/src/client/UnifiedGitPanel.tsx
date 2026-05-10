@@ -603,7 +603,6 @@ function ConflictPhaseContent({ task, projectPath, completedStatus, isRebase, on
 }) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
-  const queryClient = useQueryClient()
   const mergeContextQuery = useQuery({
     ...trpc.worktrees.getMergeContext.queryOptions({ repoPath: projectPath }),
     enabled: !task.merge_context,

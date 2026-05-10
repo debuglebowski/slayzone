@@ -76,12 +76,12 @@ export function WorktreesSettingsTab() {
               <span className="text-sm cursor-default">Base path</span>
             </TooltipTrigger>
             <TooltipContent side="right" className="max-w-64">
-              Where git worktrees are created when starting a task on a new branch. Use {'{project}'} as a placeholder for the project directory.
+              Where git worktrees are created when starting a task on a new branch. Tokens: {'{project}'} = project path, {'{project-folder-name}'} = project basename.
             </TooltipContent>
           </Tooltip>
           <Input
             className="w-full max-w-lg"
-            placeholder="{project}/.."
+            placeholder="../{project-folder-name}-workspaces"
             value={worktreeBasePath}
             onChange={(e) => setWorktreeBasePathDraft(e.target.value)}
             onBlur={() => {
@@ -106,7 +106,7 @@ export function WorktreesSettingsTab() {
           </label>
         </div>
         <p className="text-xs text-muted-foreground">
-          Use {'{project}'} as a token. Leave empty to use {'{project}/..'}.
+          Tokens: {'{project}'} (full project path), {'{project-folder-name}'} (basename). Leave empty to use {'../{project-folder-name}-workspaces'}.
           Project settings can override auto-create behavior.
         </p>
       </div>

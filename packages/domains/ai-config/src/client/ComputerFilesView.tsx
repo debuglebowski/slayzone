@@ -240,7 +240,7 @@ export function ComputerFilesView() {
       {headerTarget && createPortal(
         <div className="flex items-center gap-4">
           {isJson && jsonError && (
-            <span className="rounded-full bg-destructive px-2.5 py-0.5 text-[11px] font-medium text-destructive-foreground">
+            <span className="rounded-full bg-destructive px-2.5 py-0.5 text-[11px] font-medium text-white">
               Invalid JSON
             </span>
           )}

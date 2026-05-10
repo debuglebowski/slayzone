@@ -2,8 +2,15 @@
  * Tests for StateMachine (terminal state transitions + debounce)
  * Run with: npx tsx packages/domains/terminal/src/main/state-machine.test.ts
  */
-import { StateMachine, activityToTerminalState } from './state-machine'
+import {
+  StateMachine,
+  activityToTerminalState,
+  shouldRefreshIdleClock,
+  shouldFlipToIdle,
+  shouldFlipToRunningOnInput,
+} from './state-machine'
 import type { TerminalState } from '@slayzone/terminal/shared'
+import type { ActivityState } from './adapters/types'
 
 let passed = 0
 let failed = 0
@@ -235,6 +242,122 @@ test('working → running', () => {
 test('unknown → null', () => {
   expect(activityToTerminalState('unknown')).toBe(null)
 })
+
+console.log('\nshouldRefreshIdleClock\n')
+
+test('TUI default (undefined): refresh ONLY on detected activity', () => {
+  expect(shouldRefreshIdleClock({}, 'working')).toBe(true)
+  expect(shouldRefreshIdleClock({}, null)).toBe(false)
+})
+
+test('TUI explicit (true): same as default', () => {
+  expect(shouldRefreshIdleClock({ transitionOnInput: true }, 'working')).toBe(true)
+  expect(shouldRefreshIdleClock({ transitionOnInput: true }, null)).toBe(false)
+})
+
+test('output-driven (false): refresh on EVERY chunk', () => {
+  expect(shouldRefreshIdleClock({ transitionOnInput: false }, 'working')).toBe(true)
+  expect(shouldRefreshIdleClock({ transitionOnInput: false }, null)).toBe(true)
+})
+
+console.log('\nshouldFlipToIdle\n')
+
+test('flips when running and silent past timeout', () => {
+  expect(shouldFlipToIdle('running', 0, 60_000, 60_000)).toBe(true)
+  expect(shouldFlipToIdle('running', 0, 100_000, 60_000)).toBe(true)
+})
+
+test('does NOT flip when running but still inside window', () => {
+  expect(shouldFlipToIdle('running', 0, 59_999, 60_000)).toBe(false)
+})
+
+test('does NOT flip when not running', () => {
+  expect(shouldFlipToIdle('idle', 0, 100_000, 60_000)).toBe(false)
+  expect(shouldFlipToIdle('starting', 0, 100_000, 60_000)).toBe(false)
+  expect(shouldFlipToIdle('dead', 0, 100_000, 60_000)).toBe(false)
+})
+
+console.log('\nshouldFlipToRunningOnInput\n')
+
+test('TUI default + non-empty input + not running → flip', () => {
+  expect(shouldFlipToRunningOnInput({}, 'idle', 5)).toBe(true)
+})
+
+test('output-driven (false) → never flip on input', () => {
+  expect(shouldFlipToRunningOnInput({ transitionOnInput: false }, 'idle', 5)).toBe(false)
+})
+
+test('empty input → no flip', () => {
+  expect(shouldFlipToRunningOnInput({}, 'idle', 0)).toBe(false)
+})
+
+test('already running → no flip', () => {
+  expect(shouldFlipToRunningOnInput({}, 'running', 5)).toBe(false)
+})
+
+console.log('\nIntegration: TUI redraw stream → idle flip\n')
+
+/**
+ * Regression test for the stuck-running bug. Simulates the chain:
+ *   1. Adapter detects spinner once → state = 'running'
+ *   2. Long stream of redraw chunks (cursor blink, status bar) — adapter
+ *      returns null for each (no activity).
+ *   3. After idle window passes, the inactivity checker MUST flip to 'idle'.
+ *
+ * If `shouldRefreshIdleClock` were to update the clock on every chunk
+ * (the old buggy behavior on Claude/CCS/Qwen), the checker would never
+ * flip and this test would loop forever — guarded by the assert.
+ */
+test('TUI default: redraw stream does NOT keep idle clock pinned open', () => {
+  let lastOutputTime = 0
+  const adapter = {} // default = TUI
+  const idleTimeoutMs = 60_000
+
+  // Step 1: spinner glyph chunk — adapter returns 'working'.
+  const t0 = 1000
+  if (shouldRefreshIdleClock(adapter, 'working')) lastOutputTime = t0
+  expect(lastOutputTime).toBe(t0)
+
+  // Step 2: 10 redraw chunks at 100ms intervals over 1 second — all return null.
+  let now = t0
+  for (let i = 0; i < 10; i++) {
+    now += 100
+    if (shouldRefreshIdleClock(adapter, null)) lastOutputTime = now
+  }
+  // Clock unchanged — stayed pinned at t0.
+  expect(lastOutputTime).toBe(t0)
+
+  // Step 3: jump just past the idle window from t0.
+  now = t0 + idleTimeoutMs
+  expect(shouldFlipToIdle('running', lastOutputTime, now, idleTimeoutMs)).toBe(true)
+})
+
+test('output-driven (false): redraw stream KEEPS idle clock fresh (legacy plain-shell behavior)', () => {
+  let lastOutputTime = 0
+  const adapter = { transitionOnInput: false }
+  const idleTimeoutMs = 60_000
+
+  const t0 = 1000
+  if (shouldRefreshIdleClock(adapter, null)) lastOutputTime = t0
+  expect(lastOutputTime).toBe(t0)
+
+  let now = t0
+  for (let i = 0; i < 10; i++) {
+    now += 100
+    if (shouldRefreshIdleClock(adapter, null)) lastOutputTime = now
+  }
+  // Clock kept refreshing — last update at t0 + 1000.
+  expect(lastOutputTime).toBe(t0 + 1000)
+
+  // Even at the "old" idle window from t0, clock isn't past timeout because
+  // we kept refreshing.
+  now = t0 + idleTimeoutMs
+  expect(shouldFlipToIdle('running', lastOutputTime, now, idleTimeoutMs)).toBe(false)
+})
+
+// Quiet unused-var warnings on imports referenced only via type-narrowing in tests.
+const _activitySanity: ActivityState = 'working'
+void _activitySanity
 
 console.log(`\n${passed} passed, ${failed} failed\n`)
 if (failed > 0) process.exitCode = 1

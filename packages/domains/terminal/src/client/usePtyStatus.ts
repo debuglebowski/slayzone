@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
+import { isAliveTerminalState } from '@slayzone/terminal/shared'
 
 /**
  * Returns Set of sessionIds with alive PTY sessions
@@ -13,6 +14,6 @@ export function usePtyStatus(): Set<string> {
   })
   return useMemo(() => {
     if (!data) return new Set<string>()
-    return new Set(data.filter((p) => p.state !== 'dead').map((p) => p.sessionId))
+    return new Set(data.filter((p) => isAliveTerminalState(p.state)).map((p) => p.sessionId))
   }, [data])
 }

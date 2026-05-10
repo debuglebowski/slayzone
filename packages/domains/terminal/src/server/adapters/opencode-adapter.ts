@@ -9,8 +9,6 @@ export class OpencodeAdapter implements TerminalAdapter {
   readonly mode = 'opencode' as const
   // Bubble Tea TUI updates in many small chunks; short idle timeout for completion
   readonly idleTimeoutMs = 2500
-  // Full-screen TUI constantly redraws — detect working from user input, not output
-  readonly transitionOnInput = true
 
   encodeSubmit = defaultEncodeSubmit
 

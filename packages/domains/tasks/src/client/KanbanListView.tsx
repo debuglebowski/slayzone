@@ -22,7 +22,7 @@ import type { Tag } from '@slayzone/tags/shared'
 import { groupTasksBy, columnToCreateTaskDraft, PRIORITY_LABELS, todayISO, type Column } from './kanban'
 import type { ViewConfig, CardProperties } from './FilterState'
 import { TaskContextMenu } from './TaskContextMenu'
-import { cn, getColumnStatusStyle, getTerminalStateStyle, Tooltip, TooltipContent, TooltipTrigger, PriorityIcon } from '@slayzone/ui'
+import { cn, getColumnStatusStyle, getTerminalStateStyle, TerminalProgressDot, Tooltip, TooltipContent, TooltipTrigger, PriorityIcon } from '@slayzone/ui'
 import { IconButton } from '@slayzone/ui'
 import { ChevronDown, Plus, AlertCircle, AlarmClockOff, Check, GitMerge, Link2 } from 'lucide-react'
 import { usePty, useActiveTaskIds } from '@slayzone/terminal'
@@ -89,14 +89,7 @@ function TerminalDot({ taskId }: { taskId: string }): React.JSX.Element | null {
   const style = getTerminalStateStyle(terminalState)
   if (!style) return null
 
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className={cn('h-2 w-2 rounded-full shrink-0', style.color)} />
-      </TooltipTrigger>
-      <TooltipContent>{style.label}</TooltipContent>
-    </Tooltip>
-  )
+  return <TerminalProgressDot state={terminalState} />
 }
 
 // ── Sortable list row ──

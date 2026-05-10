@@ -11,7 +11,7 @@ import { RingBuffer, type BufferChunk } from '../server/ring-buffer'
 import { getAdapter, type TerminalMode, type TerminalAdapter, type SpawnConfig, type ActivityState, type ErrorInfo, type ExecutionContext } from '../server/adapters'
 import { interpolateTemplate } from '../server/adapters/template-interpolation'
 import { parseShellArgs } from '../server/adapters/flag-parser'
-import { StateMachine, activityToTerminalState } from '../server/state-machine'
+import { StateMachine, activityToTerminalState, shouldRefreshIdleClock, shouldFlipToIdle, shouldFlipToRunningOnInput } from '../server/state-machine'
 import { quoteForShell, buildExecCommand, resolveUserShell, getShellStartupArgs, wrapShellWithUlimit } from '../server/shell-env'
 import { shouldShellFallback, shouldNotifySessionNotFound, buildRecoveryMessage } from '../server/pty-exit-strategy'
 import { computeSyncQueryResponse, type TerminalTheme } from '../server/sync-query-response'
@@ -289,8 +289,7 @@ function checkInactiveSessions(): void {
   const now = Date.now()
   for (const [sessionId, session] of sessions) {
     const timeout = session.adapter.idleTimeoutMs ?? IDLE_TIMEOUT_MS
-    const inactiveTime = now - session.lastOutputTime
-    if (inactiveTime >= timeout && session.state === 'running') {
+    if (shouldFlipToIdle(session.state, session.lastOutputTime, now, timeout)) {
       session.activity = 'unknown'
       transitionState(sessionId, 'idle')
     }
@@ -945,10 +944,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
         // Use adapter for activity detection
         const detectedActivity = session.adapter.detectActivity(data, session.activity)
 
-      // Update idle tracking: for transitionOnInput adapters (full-screen TUIs that
-      // redraw constantly), only update on meaningful activity detection. Otherwise
-      // the idle timer never fires because lastOutputTime keeps refreshing.
-      if (!session.adapter.transitionOnInput || detectedActivity) {
+      // Idle clock policy lives in `shouldRefreshIdleClock`. TUI adapters
+      // (default) refresh only on detected activity so cursor blinks /
+      // status redraws don't pin the clock open; output-driven adapters
+      // (`transitionOnInput === false`, e.g. plain shell) refresh on every chunk.
+      if (shouldRefreshIdleClock(session.adapter, detectedActivity)) {
         session.lastOutputTime = Date.now()
       }
 
@@ -1328,7 +1328,7 @@ export function writePty(sessionId: string, data: string): boolean {
     if (submittedLine.trim().length > 0) {
       emitInputSubmit(sessionId, session.taskId, submittedLine)
     }
-    if (session.adapter.transitionOnInput && session.inputBuffer.trim().length > 0 && session.state !== 'running') {
+    if (shouldFlipToRunningOnInput(session.adapter, session.state, session.inputBuffer.trim().length)) {
       session.activity = 'working'
       session.lastOutputTime = Date.now() // reset idle timer from input submission
       transitionState(sessionId, 'running')

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Settings, Keyboard, ChevronDown, Megaphone, Check, CheckCheck, Trophy, BarChart3 } from 'lucide-react'
+import { Settings, Keyboard, ChevronDown, Megaphone, Check, CheckCheck, Trophy, BarChart3, MoreHorizontal } from 'lucide-react'
 import { FaRegHandshake } from 'react-icons/fa'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import { isConvexConfigured } from '@/lib/convexAuth'
@@ -18,13 +18,17 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
   cn,
   shortcutDefinitions,
   formatKeysForDisplay,
   useShortcutStore,
   type ShortcutDefinition
 } from '@slayzone/ui'
-import { useTabStore, useDialogStore } from '@slayzone/settings'
+import { useDialogStore } from '@slayzone/settings'
 import type { Task } from '@slayzone/task/shared'
 import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
 import { KeyRecorder } from '@/components/KeyRecorder'
@@ -38,6 +42,7 @@ interface SidebarFooterIconsProps {
   onLeaderboard: () => void
   onboardingChecklist: OnboardingChecklistState
   trailing?: React.ReactNode
+  actions?: React.ReactNode
 }
 
 function ShortcutRow({
@@ -186,6 +191,7 @@ export function SidebarFooterIcons({
   onLeaderboard,
   onboardingChecklist,
   trailing,
+  actions,
 }: SidebarFooterIconsProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [openShortcutGroup, setOpenShortcutGroup] = useState<string | null>(() => shortcutDefinitions[0]?.group ?? null)
@@ -194,8 +200,6 @@ export function SidebarFooterIcons({
   const [pendingKeys, setPendingKeys] = useState<string | null>(null)
   const [pendingConflict, setPendingConflict] = useState<ShortcutDefinition | null>(null)
   const [shadowWarning, setShadowWarning] = useState<{ defId: string; shadow: ShortcutDefinition } | null>(null)
-
-  const activeView = useTabStore((s) => s.activeView)
 
   const overrides = useShortcutStore((s) => s.overrides)
   const { getKeys, findConflict, findShadow, setOverride, batchSetOverrides, resetAll, setRecording } = useShortcutStore()
@@ -271,43 +275,14 @@ export function SidebarFooterIcons({
   const containerClass = cn(
     layout === 'vertical'
       ? 'flex flex-col items-center gap-2'
-      : 'grid [grid-template-columns:repeat(auto-fit,minmax(36px,1fr))] gap-1 py-1 px-1 place-items-center'
+      : 'grid [grid-template-columns:repeat(auto-fill,2.5rem)] gap-1 py-1 px-2 justify-start'
   )
 
   return (
     <div className={containerClass}>
+      {actions}
       <TerminalStatusPopover tasks={tasks} onTaskClick={onTaskClick} side={tooltipSide} />
 
-      {isConvexConfigured && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <IconButton
-              aria-label="Leaderboard"
-              variant="ghost"
-              size={layout === 'horizontal' ? 'icon-sm' : 'icon-lg'}
-              onClick={onLeaderboard}
-              className={cn('rounded-lg', activeView === 'leaderboard' ? 'bg-primary text-primary-foreground shadow-md ring-1 ring-primary/30 hover:!bg-primary hover:!text-primary-foreground' : 'text-muted-foreground')}
-            >
-              <Trophy className="size-5" />
-            </IconButton>
-          </TooltipTrigger>
-          <TooltipContent side={tooltipSide}>Leaderboard</TooltipContent>
-        </Tooltip>
-      )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <IconButton
-            aria-label="Usage Analytics"
-            variant="ghost"
-            size="icon-lg"
-            onClick={onUsageAnalytics}
-            className={cn('rounded-lg', activeView === 'usage-analytics' ? 'bg-primary text-primary-foreground shadow-md ring-1 ring-primary/30 hover:!bg-primary hover:!text-primary-foreground' : 'text-muted-foreground')}
-          >
-            <BarChart3 className="size-5" />
-          </IconButton>
-        </TooltipTrigger>
-        <TooltipContent side={tooltipSide}>Usage</TooltipContent>
-      </Tooltip>
       <Popover open={checklistOpen} onOpenChange={setChecklistOpen}>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -317,7 +292,7 @@ export function SidebarFooterIcons({
                 aria-label="Getting Started"
                 className={cn(
                   'relative inline-flex items-center justify-center rounded-lg transition-colors',
-                  layout === 'horizontal' ? 'size-8' : 'h-11 w-11',
+                  layout === 'horizontal' ? 'size-10' : 'h-11 w-11',
                   'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
                   onboardingChecklist.dismissed && 'opacity-80'
                 )}
@@ -405,34 +380,43 @@ export function SidebarFooterIcons({
           </div>
         </PopoverContent>
       </Popover>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <IconButton
-            aria-label="What's New"
-            variant="ghost"
-            size="icon-lg"
-            onClick={() => useDialogStore.getState().openChangelog()}
-            className="rounded-lg text-muted-foreground"
-          >
-            <Megaphone className="size-5" />
-          </IconButton>
-        </TooltipTrigger>
-        <TooltipContent side={tooltipSide}>What's New</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <IconButton
-            aria-label="Keyboard Shortcuts"
-            variant="ghost"
-            size="icon-lg"
-            onClick={() => setShortcutsOpen(true)}
-            className="rounded-lg text-muted-foreground"
-          >
-            <Keyboard className="size-5" />
-          </IconButton>
-        </TooltipTrigger>
-        <TooltipContent side={tooltipSide}>Keyboard Shortcuts</TooltipContent>
-      </Tooltip>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                aria-label="More"
+                variant="ghost"
+                size="icon-lg"
+                className="rounded-lg text-muted-foreground"
+              >
+                <MoreHorizontal className="size-5" />
+              </IconButton>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side={tooltipSide}>More</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent side="top" align="start" className="min-w-[200px]">
+          {isConvexConfigured && (
+            <DropdownMenuItem onSelect={onLeaderboard} className="cursor-pointer">
+              <Trophy className="size-4" />
+              <span>Leaderboard</span>
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem onSelect={onUsageAnalytics} className="cursor-pointer">
+            <BarChart3 className="size-4" />
+            <span>Usage Analytics</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => useDialogStore.getState().openChangelog()} className="cursor-pointer">
+            <Megaphone className="size-4" />
+            <span>What's New</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setShortcutsOpen(true)} className="cursor-pointer">
+            <Keyboard className="size-4" />
+            <span>Keyboard Shortcuts</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {isConvexConfigured && <FeedbackDialog />}
       <Dialog open={shortcutsOpen} onOpenChange={(open) => {
         setShortcutsOpen(open)
@@ -497,6 +481,7 @@ export function SidebarFooterIcons({
           </div>
         </DialogContent>
       </Dialog>
+      {trailing}
       <Tooltip>
         <TooltipTrigger asChild>
           <IconButton
@@ -511,7 +496,6 @@ export function SidebarFooterIcons({
         </TooltipTrigger>
         <TooltipContent side={tooltipSide}>Settings</TooltipContent>
       </Tooltip>
-      {trailing}
     </div>
   )
 }

@@ -14,6 +14,10 @@ export class CodexAdapter implements TerminalAdapter {
   // Codex TUI updates in many small chunks, so we keep "working" latched and
   // let a short idle timeout decide when activity has stopped.
   readonly idleTimeoutMs = 2500
+  // detectActivity only fires on the "esc to interrupt" hint, which Codex may
+  // hide during certain phases (e.g. tool execution). Stay output-driven so
+  // those quiet phases don't prematurely flip to idle mid-response.
+  readonly transitionOnInput = false
   readonly sessionIdCommand = '/status'
 
   encodeSubmit = defaultEncodeSubmit

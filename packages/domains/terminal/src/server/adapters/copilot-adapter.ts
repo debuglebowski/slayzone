@@ -8,7 +8,6 @@ import { whichBinary, validateShellEnv } from '../shell-env'
 export class CopilotAdapter implements TerminalAdapter {
   readonly mode = 'copilot' as const
   readonly idleTimeoutMs = 2500
-  readonly transitionOnInput = true
 
   encodeSubmit = defaultEncodeSubmit
 

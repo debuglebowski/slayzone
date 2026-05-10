@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { GitBranch, GitMerge, GitPullRequest, FolderTree, FolderGit2, Link2, Loader2, AlertTriangle, ChevronDown, Trash2 } from 'lucide-react'

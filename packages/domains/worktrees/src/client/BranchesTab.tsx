@@ -6,6 +6,7 @@ import {
   IconButton, Switch, cn, toast,
   Popover, PopoverTrigger, PopoverContent,
   Label,
+  useStablePoll,
 } from '@slayzone/ui'
 import type { CommitGraphConfig, ResolvedGraph } from '../shared/types'
 import { CommitGraph } from './CommitGraph'
@@ -113,12 +114,12 @@ export function useBranchGraph(
     [config.baseBranch, defaultBaseBranch, currentBranch]
   )
 
+  const lastHashRef = useRef<string>('')
+
   const fetchData = useCallback(async () => {
-    if (!projectPath) return
+    if (!projectPath) return null
     try {
       const branch = await trpcClient.worktrees.getCurrentBranch.query({ path: projectPath })
-      if (branch) setCurrentBranch(branch)
-
       const baseBranch = config.baseBranch || defaultBaseBranch || branch || 'main'
 
       const branchSet = new Set<string>([baseBranch])
@@ -132,25 +133,37 @@ export function useBranchGraph(
       const graph = await trpcClient.worktrees.getResolvedCommitDag.query({
         path: projectPath, limit: FETCH_LIMIT, branches: [...branchSet], baseBranch,
       })
-      setDagGraph(graph)
-    } catch { /* polling error */ }
-  }, [projectPath, config, defaultBaseBranch])
+      // Hash excludes `relativeDate` — that string updates over time
+      // ("3 minutes ago") even when the commit hash is unchanged, which would
+      // defeat the dedup. Stale display dates are acceptable; they refresh on
+      // any real change (new commit / ref move).
+      const stableCommits = graph.commits.map(({ relativeDate: _r, ...rest }) => rest)
+      const hash = JSON.stringify({ branch, baseBranch: graph.baseBranch, branches: graph.branches, commits: stableCommits })
+      if (hash !== lastHashRef.current) {
+        lastHashRef.current = hash
+        if (branch) setCurrentBranch(branch)
+        setDagGraph(graph)
+      }
+      if (!initialLoad.current) {
+        setLoading(false)
+        initialLoad.current = true
+      }
+      return hash
+    } catch {
+      if (!initialLoad.current) {
+        setLoading(false)
+        initialLoad.current = true
+      }
+      return null
+    }
+  }, [projectPath, config, defaultBaseBranch, trpcClient])
 
   useEffect(() => {
     initialLoad.current = false
+    setLoading(true)
   }, [projectPath])
 
-  useEffect(() => {
-    if (!visible || !projectPath) return
-    if (!initialLoad.current) {
-      setLoading(true)
-      fetchData().finally(() => { setLoading(false); initialLoad.current = true })
-    } else {
-      fetchData()
-    }
-    const timer = setInterval(fetchData, 10000)
-    return () => clearInterval(timer)
-  }, [visible, projectPath, fetchData])
+  useStablePoll(fetchData, { enabled: visible && !!projectPath, baseDelayMs: 10_000 })
 
   const handleFetch = useCallback(async () => {
     if (!projectPath) return
@@ -164,9 +177,12 @@ export function useBranchGraph(
     } finally {
       setFetching(false)
     }
+    // refresh is wrapped above
   }, [projectPath, fetchData])
 
-  return { dagGraph, loading, filter, setFilter, config, setConfig: updateConfig, resetConfig, effectiveBaseBranch, fetching, handleFetch, refresh: fetchData }
+  const refresh = useCallback(async (): Promise<void> => { await fetchData() }, [fetchData])
+
+  return { dagGraph, loading, filter, setFilter, config, setConfig: updateConfig, resetConfig, effectiveBaseBranch, fetching, handleFetch, refresh }
 }
 
 // --- Toolbar buttons (display, info, fetch) ---

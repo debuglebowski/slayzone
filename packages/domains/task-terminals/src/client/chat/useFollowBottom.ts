@@ -21,23 +21,17 @@ export interface FollowBottomApi {
 
 /**
  * Sticks scroll position to bottom of container when content grows.
- * Releases when user scrolls up past THRESHOLD_PX. Re-engages when user
- * scrolls back within THRESHOLD_PX.
+ * Releases when user scrolls up via wheel/touch/keyboard. Re-engages
+ * automatically once the user scrolls back within THRESHOLD_PX of bottom.
  *
- * Programmatic scrolls are guarded so they don't read as user input.
- * Selection-in-progress and explicit user wheel-up always escape the lock.
+ * `stuck` (lock state) and `isAtBottom` (UI indicator) are tracked
+ * independently so a stale scroll event during streaming bursts cannot
+ * falsely release the lock — releases require explicit user input.
  */
 export function useFollowBottom(): FollowBottomApi {
   const stuckRef = useRef(true)
-  const programmaticRef = useRef(false)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
-
-  const setStuck = useCallback((v: boolean) => {
-    if (stuckRef.current === v) return
-    stuckRef.current = v
-    setIsAtBottom(v)
-  }, [])
 
   const isUserSelectingInside = useCallback((root: HTMLElement) => {
     const sel = typeof window !== 'undefined' ? window.getSelection() : null
@@ -47,18 +41,35 @@ export function useFollowBottom(): FollowBottomApi {
   }, [])
 
   const scrollRef = useMemo<CallbackRef<HTMLElement>>(() => {
+    const measureAtBottom = (el: HTMLElement) => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+      return dist <= THRESHOLD_PX
+    }
+    // Scroll events update the UI indicator and re-engage the stick when the
+    // user scrolls back to bottom. They do NOT release the stick: a fast
+    // streaming burst can produce a scroll event whose scrollTop lags the
+    // freshly-grown scrollHeight, which would otherwise read "not at bottom"
+    // and unstick the lock mid-stream. Release happens only on user input.
     const handleScroll = () => {
       const el = scrollRef.current
       if (!el) return
-      if (programmaticRef.current) return
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
-      setStuck(dist <= THRESHOLD_PX)
+      const atBottom = measureAtBottom(el)
+      setIsAtBottom(atBottom)
+      if (atBottom && !stuckRef.current) stuckRef.current = true
     }
-    const handleWheel = (e: WheelEvent) => {
-      if (e.deltaY >= 0) return
+    const releaseStick = () => {
       const el = scrollRef.current
       if (!el) return
-      if (el.scrollHeight > el.clientHeight) setStuck(false)
+      if (el.scrollHeight <= el.clientHeight) return
+      stuckRef.current = false
+      setIsAtBottom(measureAtBottom(el))
+    }
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) releaseStick()
+    }
+    const handleTouchMove = () => releaseStick()
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home') releaseStick()
     }
     const ref = ((el: HTMLElement | null) => {
       const prev = ref.current
@@ -66,31 +77,32 @@ export function useFollowBottom(): FollowBottomApi {
       if (prev) {
         prev.removeEventListener('scroll', handleScroll)
         prev.removeEventListener('wheel', handleWheel)
+        prev.removeEventListener('touchmove', handleTouchMove)
+        prev.removeEventListener('keydown', handleKeyDown)
       }
       ref.current = el
       if (el) {
         el.addEventListener('scroll', handleScroll, { passive: true })
         el.addEventListener('wheel', handleWheel, { passive: true })
+        el.addEventListener('touchmove', handleTouchMove, { passive: true })
+        el.addEventListener('keydown', handleKeyDown)
       }
     }) as CallbackRef<HTMLElement>
     ref.current = null
     return ref
-  }, [setStuck])
+  }, [])
 
   const scrollNow = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    programmaticRef.current = true
     el.scrollTop = el.scrollHeight
-    requestAnimationFrame(() => {
-      programmaticRef.current = false
-    })
   }, [scrollRef])
 
   const scrollToBottom = useCallback(() => {
-    setStuck(true)
+    stuckRef.current = true
+    setIsAtBottom(true)
     scrollNow()
-  }, [scrollNow, setStuck])
+  }, [scrollNow])
 
   const contentRef = useMemo<CallbackRef<HTMLElement>>(() => {
     const ref = ((el: HTMLElement | null) => {

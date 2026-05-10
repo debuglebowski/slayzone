@@ -55,6 +55,7 @@ import {
   DialogTitle,
   DialogDescription,
   PulseGrid,
+  useStablePoll,
 } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { GhPullRequest, GhPrComment, GhPrCommit, GhPrTimelineEvent, MergeStrategy } from '../shared/types'
@@ -168,7 +169,8 @@ export function PullRequestTab({ task, projectPath, visible, onUpdateTask, onTas
 
   // PR is linked — show status
   if (task.pr_url && pr) {
-    return <LinkedPrView pr={pr} projectPath={projectPath!} visible={visible} onUnlink={handleUnlink} onRefreshPr={refreshPr} />
+    const onRefreshPrVoid = async (): Promise<void> => { await refreshPr() }
+    return <LinkedPrView pr={pr} projectPath={projectPath!} visible={visible} onUnlink={handleUnlink} onRefreshPr={onRefreshPrVoid} />
   }
   if (task.pr_url && !pr) {
     return (
@@ -233,6 +235,7 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
   onRefreshPr: () => Promise<void>
 }) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const addCommentMutation = useMutation(trpc.worktrees.addPrComment.mutationOptions())
   const editCommentMutation = useMutation(trpc.worktrees.editPrComment.mutationOptions())
@@ -278,12 +281,22 @@ function LinkedPrView({ pr, projectPath, visible, onUnlink, onRefreshPr }: {
     await Promise.all([onRefreshPr(), fetchComments()])
   }, [onRefreshPr, fetchComments])
 
-  useEffect(() => {
-    if (!visible) return
-    fetchComments()
-    const timer = setInterval(fetchComments, 30000)
-    return () => clearInterval(timer)
-  }, [visible, fetchComments])
+  const lastCommentsHashRef = useRef<string>('')
+
+  const fetchCommentsPoll = useCallback(async () => {
+    if (!projectPath) return null
+    try {
+      const data = await trpcClient.worktrees.getPrComments.query({ repoPath: projectPath, prNumber: pr.number })
+      const hash = JSON.stringify(data)
+      if (hash !== lastCommentsHashRef.current) {
+        lastCommentsHashRef.current = hash
+        setComments(data)
+      }
+      return hash
+    } catch { return null }
+  }, [projectPath, pr.number, trpcClient])
+
+  useStablePoll(fetchCommentsPoll, { enabled: visible, baseDelayMs: 30_000 })
 
   // Fetch gh user for edit button
   useEffect(() => {

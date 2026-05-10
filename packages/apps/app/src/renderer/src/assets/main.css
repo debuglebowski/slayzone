@@ -296,8 +296,8 @@
   --mk-h-stacked-mt: 0.4em;
 
   /* Paragraph */
-  --mk-p-mt: 0.25em;
-  --mk-p-mb: 0.25em;
+  --mk-p-mt: 1.25em;
+  --mk-p-mb: 1.25em;
 
   /* Lists */
   --mk-list-indent: 1.75em;
@@ -350,8 +350,8 @@
 
   --mk-h-stacked-mt: 0.2em;
 
-  --mk-p-mt: 0.125em;
-  --mk-p-mb: 0.125em;
+  --mk-p-mt: 0.7em;
+  --mk-p-mb: 0.7em;
   --mk-list-mt: 0.125em;
   --mk-list-mb: 0.125em;
   --mk-li-mt: 0;

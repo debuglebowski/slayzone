@@ -9,6 +9,10 @@ export class GeminiAdapter implements TerminalAdapter {
   readonly mode = 'gemini' as const
   // Ink TUI redraws in bursts; short idle timeout to detect when response is done
   readonly idleTimeoutMs = 2500
+  // detectActivity is coarse (any chunk > 50 chars → working). Stay output-
+  // driven so small redraw chunks during real work still pin the idle clock
+  // open — otherwise Gemini would flip to idle mid-response.
+  readonly transitionOnInput = false
   // Gemini's Ink TUI + Node.js bundle takes 7+ seconds to produce first output
   readonly startupTimeoutMs = 20_000
   readonly sessionIdCommand = '/stats'

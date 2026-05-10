@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Monitor, X } from 'lucide-react'
-import { IconButton, getTerminalStateStyle } from '@slayzone/ui'
+import { IconButton, getTerminalStateStyle, useStablePoll } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import type { PtyInfo } from '@slayzone/terminal/shared'
@@ -26,22 +26,26 @@ export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: Te
   const [open, setOpen] = useState(false)
   const [, tick] = useState(0)
 
+  const lastHashRef = useRef<string>('')
+
   const refreshPtys = useCallback(async () => {
     const list = await trpcClient.pty.list.query()
-    setPtys(list)
+    const hash = JSON.stringify(list.map((p) => ({ s: p.sessionId, st: p.state, c: p.createdAt })))
+    if (hash !== lastHashRef.current) {
+      lastHashRef.current = hash
+      setPtys(list)
+    }
+    return hash
   }, [trpcClient])
 
-  // Refresh list when popover opens
+  useStablePoll(refreshPtys, { enabled: open, baseDelayMs: 5000 })
+
+  // Tick every second for live duration display while popover is open (cosmetic).
   useEffect(() => {
-    if (open) {
-      refreshPtys()
-      const refreshInterval = setInterval(refreshPtys, 5000)
-      // Tick every second for live duration display
-      const tickInterval = setInterval(() => tick(t => t + 1), 1000)
-      return () => { clearInterval(refreshInterval); clearInterval(tickInterval) }
-    }
-    return undefined
-  }, [open, refreshPtys])
+    if (!open) return
+    const tickInterval = setInterval(() => tick(t => t + 1), 1000)
+    return () => clearInterval(tickInterval)
+  }, [open])
 
   // Refresh on state-change events
   useSubscription(

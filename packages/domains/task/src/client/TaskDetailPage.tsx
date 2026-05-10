@@ -16,7 +16,7 @@ import { BUILTIN_PANEL_IDS, getProviderConversationId, getProviderFlags, setProv
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects/shared'
-import { getDefaultStatus, getDoneStatus, isTerminalStatus, resolveRepoPath } from '@slayzone/projects/shared'
+import { getDefaultStatus, getDoneStatus, isCompletedStatus, isTerminalStatus, resolveColumns, resolveRepoPath } from '@slayzone/projects/shared'
 import { useDetectedRepos } from '@slayzone/projects'
 import { DEV_SERVER_URL_PATTERN, SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import type { TerminalMode, ValidationResult } from '@slayzone/terminal/shared'
@@ -1761,6 +1761,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     .filter((panelId) => !!panelVisibility[panelId]).length
   const hasVisiblePanels = visiblePanelCount > 0
   const multipleVisiblePanels = visiblePanelCount > 1
+  const isTaskCompleted = isCompletedStatus(task.status, project?.columns_config)
 
   return (
     <div id="task-detail" className={cn("h-full flex flex-col", compact ? "p-0" : "gap-4")}>
@@ -2041,6 +2042,36 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
       {/* Split view: terminal | browser | settings | git diff */}
       <div id="task-panels" ref={splitContainerRef} className="flex-1 flex min-h-0">
+        {isTaskCompleted ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-full max-w-xl min-h-52 rounded-lg border border-border bg-surface-3 px-5 py-7 text-center flex flex-col items-center justify-center">
+              <p className="text-2xl font-semibold">Task is completed</p>
+              <p className="mt-3 text-base text-muted-foreground">Change the status to view task details.</p>
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                {resolveColumns(project?.columns_config)
+                  .filter((col) => col.category === 'started')
+                  .map((col) => {
+                    const optStyle = getColumnStatusStyle(col.id, project?.columns_config)
+                    const OptIcon = optStyle?.icon ?? Circle
+                    return (
+                      <button
+                        key={col.id}
+                        type="button"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-1 px-2.5 py-1.5 text-sm cursor-pointer hover:bg-accent"
+                        onClick={async () => {
+                          const updated = await updateTaskAndNotify({ id: task.id, status: col.id })
+                          handleTaskUpdate(updated)
+                        }}
+                      >
+                        <OptIcon className={cn('size-4', optStyle?.iconClass)} strokeWidth={3} />
+                        Move to {col.label}
+                      </button>
+                    )
+                  })}
+              </div>
+            </div>
+          </div>
+        ) : (<>
         {!compact && !hasVisiblePanels && (
           <div className="flex-1 flex items-center justify-center">
             <div className="w-full max-w-xl min-h-52 rounded-lg border border-border bg-surface-3 px-5 py-7 text-center flex flex-col items-center justify-center">
@@ -3023,6 +3054,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             )}
           </div>
         )}
+        </>)}
       </div>
 
       <LoopModeDialog

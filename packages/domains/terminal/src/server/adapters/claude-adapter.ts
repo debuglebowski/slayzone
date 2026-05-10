@@ -23,6 +23,11 @@ export class ClaudeAdapter implements TerminalAdapter {
       .replace(/\x1b[()][AB012]/g, '')
       .trimStart()
 
+    // Completion stamp like "✻ Cooked for 56s" / "· Cogitated for 4m 24s" —
+    // Claude finished, awaiting input. Return null so state-machine doesn't
+    // false-flag this as 'working'; idle-timeout fallback handles the
+    // running→idle transition.
+    if (/^[·✻✽✶✳✢].*\bfor \d+[smh]/m.test(stripped)) return null
     if (/^[·✻✽✶✳✢]/m.test(stripped)) return 'working'
 
     return null

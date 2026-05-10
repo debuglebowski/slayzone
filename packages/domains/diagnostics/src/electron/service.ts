@@ -1,4 +1,4 @@
-import electron, { type IpcMain, type App } from 'electron'
+import { type IpcMain, type App } from 'electron'
 import type { Database } from 'better-sqlite3'
 import {
   bindDiagnosticsDbs,
@@ -34,7 +34,6 @@ const CRITICAL_SETTINGS_KEYS = new Set([
   'diagnostics_retention_days',
 ])
 
-const electronRuntime = electron as unknown as Partial<typeof import('electron')>
 let isIpcInstrumented = false
 
 function summarizeArgs(args: unknown[]): unknown {
@@ -244,8 +243,6 @@ export function registerDiagnosticsHandlers(ipcMain: IpcMain, db: Database, even
   startRetentionScheduler({
     getDb: () => eventsDb,
     getConfig: getDiagnosticsConfig,
-    getIdleSeconds: () =>
-      electronRuntime.powerMonitor?.getSystemIdleTime?.() ?? Number.MAX_SAFE_INTEGER,
   })
 }
 

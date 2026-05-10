@@ -10,14 +10,14 @@ export async function archiveManyTasksOp(db: Database, ids: string[], deps: OpDe
   const placeholdersForExisting = ids.map(() => '?').join(',')
   const existingRows = db.prepare(`SELECT * FROM tasks WHERE id IN (${placeholdersForExisting}) OR parent_id IN (${placeholdersForExisting})`).all(...ids, ...ids) as Record<string, unknown>[]
   const existingTasks = parseTasks(existingRows)
-  for (const id of ids) {
-    await cleanupTaskFull(db, id)
-  }
-  // Also archive sub-tasks of all given parents
+  // Resolve sub-tasks first so cleanup can exclude in-batch siblings from the shared-worktree guard.
   const parentPlaceholders = ids.map(() => '?').join(',')
   const childIds = (db.prepare(`SELECT id FROM tasks WHERE parent_id IN (${parentPlaceholders}) AND archived_at IS NULL`).all(...ids) as { id: string }[]).map(r => r.id)
-  for (const childId of childIds) { await cleanupTaskFull(db, childId) }
   const allIds = [...ids, ...childIds]
+  for (const id of ids) {
+    await cleanupTaskFull(db, id, allIds)
+  }
+  for (const childId of childIds) { await cleanupTaskFull(db, childId, allIds) }
   const placeholders = allIds.map(() => '?').join(',')
   db.transaction(() => {
     db.prepare(`

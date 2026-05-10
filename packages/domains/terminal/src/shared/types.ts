@@ -1,6 +1,17 @@
 export type TerminalMode = string
 export type TerminalState = 'starting' | 'running' | 'idle' | 'error' | 'dead'
 
+/**
+ * True when state represents a session whose backing process is still around.
+ * `dead` = process exited (kill, natural exit, crash). All other states still
+ * have a live PTY/child. Use to derive "is this task active" affordances —
+ * `pty.list()` returns rows during the ~100 ms post-exit cleanup window, so
+ * consumers must filter by state, not just existence.
+ */
+export function isAliveTerminalState(state: TerminalState): boolean {
+  return state !== 'dead'
+}
+
 export const BuiltinTerminalMode = {
   ClaudeCode: 'claude-code',
   Codex: 'codex',

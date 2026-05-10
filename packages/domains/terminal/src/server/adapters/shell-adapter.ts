@@ -7,6 +7,11 @@ import { defaultEncodeSubmit, type TerminalAdapter, type PromptInfo, type Activi
 export class ShellAdapter implements TerminalAdapter {
   readonly mode = 'terminal' as const
   readonly idleTimeoutMs = null // use default 60s
+  // Output-driven idle: a tail-style stream w/o a working pattern should keep
+  // the session "active". `detectActivity` only fires when a user-defined
+  // pattern matches, so we can't gate the idle clock on it. Opt out → every
+  // output chunk refreshes lastOutputTime (legacy behavior).
+  readonly transitionOnInput = false
 
   constructor(
     private readonly patterns?: {

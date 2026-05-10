@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, createRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import { ArrowLeft, ArrowRight, RotateCw, X, Plus, Import, Smartphone, Monitor, Tablet, LayoutGrid, ChevronDown, ChevronUp, Crosshair, Camera, Bug, Sun, Moon, PaintbrushVertical, Keyboard, Puzzle, Trash2, Download, TriangleAlert } from 'lucide-react'
 import type { BrowserTabTheme } from '../shared'
@@ -483,7 +483,6 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   canUseDomPicker = true,
 }: BrowserPanelProps, ref) {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const setActiveBrowserTabMutation = useMutation(trpc.app.webview.setActiveBrowserTab.mutationOptions())
   const setKeyboardPassthroughMutation = useMutation(trpc.app.browser.setKeyboardPassthrough.mutationOptions())

@@ -115,7 +115,7 @@ import { buildBackupOps, startAutoBackup, stopAutoBackup, createPreMigrationBack
 // Domain handlers
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import { configureTaskRuntimeAdapters, pathExists, saveTempImage, closeArtifactWatcher, startArtifactWatcher } from '@slayzone/task/electron'
-import { taskEvents } from '@slayzone/task/server'
+import { taskEvents, handleAttentionTransition } from '@slayzone/task/server'
 import type { ServerHandle } from '@slayzone/server'
 import { startEmbeddedServerSupervised, type SupervisorHandle } from './embedded-server-supervisor'
 import { getSetting } from '@slayzone/settings/server'
@@ -1221,6 +1221,16 @@ app.whenReady().then(async () => {
   // Task automation: auto-move tasks on terminal state change
   onGlobalStateChange((sessionId, newState, oldState) => {
     handleTerminalStateChange(db, sessionId, newState, oldState, notifyTasksChanged, onTaskReachedTerminal)
+
+    // Attention flag: PTY just finished a turn (running → idle|error). Renderer
+    // clears the flag when the user focuses the task tab.
+    try {
+      if (handleAttentionTransition(db, sessionId, newState, oldState)) {
+        notifyTasksChanged()
+      }
+    } catch (err) {
+      console.error('[attention] failed to set needs_attention:', err)
+    }
   })
 
   // Expose test helpers for e2e

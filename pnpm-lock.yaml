@@ -1432,6 +1432,9 @@ importers:
       '@slayzone/markdown':
         specifier: workspace:*
         version: link:../../shared/markdown
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../projects

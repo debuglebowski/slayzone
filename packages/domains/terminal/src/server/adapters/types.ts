@@ -73,9 +73,24 @@ export interface TerminalAdapter {
   readonly startupTimeoutMs?: number | null
 
   /**
-   * If true, pty-manager transitions to 'working' when user presses Enter.
-   * Useful for full-screen TUIs that constantly redraw (making output-based
-   * detection unreliable). Paired with idleTimeoutMs for return to 'idle'.
+   * Controls how the idle clock + state-on-input behaves. **Default: true**.
+   *
+   * `true` (default — full-screen TUI):
+   *   - On user Enter, pty-manager flips state to 'running'.
+   *   - `lastOutputTime` is refreshed ONLY when `detectActivity` returns a
+   *     truthy activity. Raw output chunks (cursor blink, status redraws) do
+   *     not pin the idle clock open. After `idleTimeoutMs` of no detected
+   *     activity, the inactivity checker flips 'running' → 'idle'.
+   *
+   * `false` (output-driven idle — plain shell, dumb pipes):
+   *   - User Enter does NOT flip state.
+   *   - `lastOutputTime` is refreshed on EVERY output chunk. Suitable for
+   *     adapters whose `detectActivity` doesn't fire reliably (or at all),
+   *     e.g. tailing logs in a plain shell.
+   *
+   * Set `false` only for non-TUI adapters. The wrong-side-of-safe failure mode
+   * is the bug we hit historically: leaving this unset on a full-screen TUI
+   * → idle clock never closes → state stuck on 'running' indefinitely.
    */
   readonly transitionOnInput?: boolean
 

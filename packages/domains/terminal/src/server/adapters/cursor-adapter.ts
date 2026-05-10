@@ -9,8 +9,6 @@ export class CursorAdapter implements TerminalAdapter {
   readonly mode = 'cursor-agent' as const
   // Ink TUI redraws in bursts; short idle timeout to detect when response is done
   readonly idleTimeoutMs = 2500
-  // Full-screen TUI constantly redraws — detect working from user input, not output
-  readonly transitionOnInput = true
 
   encodeSubmit = defaultEncodeSubmit
 

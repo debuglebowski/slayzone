@@ -129,7 +129,6 @@ function ArtifactContentEditor({ artifact, viewMode, readContent, saveContent, g
   onSearchMatchCountChange: (count: number) => void
 }) {
   const trpc = useTRPC()
-  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const { notesFontFamily, notesCheckedHighlight, notesShowToolbar, notesSpellcheck, editorMinimapEnabled, editorTocEnabled } = useAppearance()
   const { editorThemeId, contentVariant } = useTheme()

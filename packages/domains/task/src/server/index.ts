@@ -12,6 +12,7 @@ export type { CreateImportedTaskInput } from './ops'
 export { taskEvents } from './events'
 export type { TaskEventMap } from './events'
 export type { OpDeps } from './ops/shared'
+export { handleAttentionTransition } from './attention'
 export { getTemplateForTask, parseTemplate } from './template'
 export {
   listArtifactsByTask,

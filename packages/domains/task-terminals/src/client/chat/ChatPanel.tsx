@@ -43,7 +43,7 @@ import {
 } from '@slayzone/ui'
 import { ConfirmDisplayModeDialog } from '../ConfirmDisplayModeDialog'
 import type { TabDisplayMode } from '../../shared/types'
-import { useChatSession, BackgroundJobsBanner, PulseGrid, deriveLoadingLabel, type TimelineItem } from '@slayzone/terminal/client'
+import { useChatSession, BackgroundJobsBanner, PulseGrid, deriveLoadingLabel, isAwaitingUserQuestion, type TimelineItem } from '@slayzone/terminal/client'
 import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
 import { useAutocomplete } from './autocomplete/useAutocomplete'
@@ -836,7 +836,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                     </div>
                   )
                 })}
-                {inFlight && <TypingIndicator label={deriveLoadingLabel(state)} />}
+                {inFlight && !isAwaitingUserQuestion(state) && <TypingIndicator label={deriveLoadingLabel(state)} />}
               </div>
             )}
           </div>
@@ -1003,7 +1003,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                 void handleStop()
               }}
               disabled={displaySessionEnded}
-              className="shrink-0 size-8 rounded-full flex items-center justify-center bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
+              className="shrink-0 size-8 rounded-full flex items-center justify-center bg-destructive text-white hover:bg-destructive/90 transition-colors disabled:opacity-50"
               title="Stop generation (Esc)"
               aria-label="Stop generation"
             >

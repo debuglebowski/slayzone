@@ -196,7 +196,8 @@ test.describe('Git worktree operations', () => {
       .poll(() => execGit('git branch'))
       .toContain(branchName)
 
-    // Verify default template behavior: {project}/.. resolves to project parent.
+    // Verify worktree path stored in DB matches the explicit targetPath used above
+    // (test exercises direct createWorktree, not the auto-create default template).
     const task = await getTask(mainWindow, taskId)
     const worktreePathFromDb = task?.worktree_path ?? ''
     const expectedWorktreePath = path.join(path.dirname(TEST_PROJECT_PATH), branchName)

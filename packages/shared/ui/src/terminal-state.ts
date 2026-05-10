@@ -16,6 +16,12 @@ const TERMINAL_STATE_STYLES: Record<string, TerminalStateStyle> = {
   error: { color: 'bg-red-400', textColor: 'text-red-500', label: 'Error' }
 }
 
+export const ATTENTION_STATE_STYLE: TerminalStateStyle = {
+  color: 'bg-amber-400 animate-pulse',
+  textColor: 'text-amber-500',
+  label: 'Needs attention',
+}
+
 export function getTerminalStateStyle(state: string | undefined): TerminalStateStyle | null {
   if (!state) return null
   return TERMINAL_STATE_STYLES[state] ?? null

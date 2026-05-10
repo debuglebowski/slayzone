@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react'
+import { useState, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/settings/client'
@@ -36,7 +36,8 @@ import {
   TooltipTrigger,
   Input,
   PriorityIcon,
-  PulseGrid
+  PulseGrid,
+  useStablePoll
 } from '@slayzone/ui'
 import { type FilterState, groupTasksBy, getViewConfig, type Column } from '@slayzone/tasks'
 import { resolveColumns } from '@slayzone/projects/shared'
@@ -68,7 +69,6 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const removeWorktreeMutation = useMutation(trpc.worktrees.removeWorktree.mutationOptions())
-  const revealInFinderMutation = useMutation(trpc.worktrees.revealInFinder.mutationOptions())
   const {
     projectPath,
     tasks,
@@ -107,38 +107,38 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
     await queryClient.invalidateQueries({ queryKey: trpc.worktrees.detectWorktrees.queryKey() })
   }, [queryClient, trpc])
 
-  // Optimized dirty status polling
-  useEffect(() => {
-    if (!visible || worktrees.length === 0) return
+  useStablePoll(fetchWorktrees, { enabled: visible && !!projectPath, baseDelayMs: pollIntervalMs })
 
-    const pollDirty = async () => {
-      const activePath = activeTask?.worktree_path || (worktrees.find(wt => wt.isMain)?.path)
-      
-      // 1. Always prioritize active worktree
-      if (activePath) {
-        const isDirty = await trpcClient.worktrees.isDirty.query({ path: activePath })
-        setDirtyStatuses(prev => {
-          if (prev[activePath] === isDirty) return prev
-          return { ...prev, [activePath]: isDirty }
-        })
-      }
-
-      // 2. Stagger background worktrees (check one per poll)
-      const backgroundWts = worktrees.filter(wt => wt.path !== activePath)
-      if (backgroundWts.length > 0) {
-        const randomWt = backgroundWts[Math.floor(Math.random() * backgroundWts.length)]
-        const isDirty = await trpcClient.worktrees.isDirty.query({ path: randomWt.path })
-        setDirtyStatuses(prev => {
-          if (prev[randomWt.path] === isDirty) return prev
-          return { ...prev, [randomWt.path]: isDirty }
-        })
-      }
+  // Optimized dirty-status polling — already dedups setState via prev[path] check.
+  // Wrap in stable poll for backoff timing; the per-call fetch returns a string
+  // hash so the hook can detect identical results across ticks.
+  const pollDirty = useCallback(async () => {
+    if (worktrees.length === 0) return null
+    const activePath = activeTask?.worktree_path || (worktrees.find(wt => wt.isMain)?.path)
+    let activeDirty: boolean | null = null
+    if (activePath) {
+      activeDirty = await trpcClient.worktrees.isDirty.query({ path: activePath })
+      setDirtyStatuses(prev => {
+        if (prev[activePath] === activeDirty) return prev
+        return { ...prev, [activePath]: activeDirty as boolean }
+      })
     }
+    const backgroundWts = worktrees.filter(wt => wt.path !== activePath)
+    let bgKey: string | null = null
+    let bgDirty: boolean | null = null
+    if (backgroundWts.length > 0) {
+      const randomWt = backgroundWts[Math.floor(Math.random() * backgroundWts.length)]
+      bgKey = randomWt.path
+      bgDirty = await trpcClient.worktrees.isDirty.query({ path: randomWt.path })
+      setDirtyStatuses(prev => {
+        if (prev[randomWt.path] === bgDirty) return prev
+        return { ...prev, [randomWt.path]: bgDirty as boolean }
+      })
+    }
+    return JSON.stringify({ activePath, activeDirty, bgKey, bgDirty })
+  }, [worktrees, activeTask?.worktree_path, trpcClient])
 
-    pollDirty()
-    const timer = setInterval(pollDirty, 10000) // Poll every 10s
-    return () => clearInterval(timer)
-  }, [visible, worktrees, activeTask?.worktree_path])
+  useStablePoll(pollDirty, { enabled: visible && worktrees.length > 0, baseDelayMs: 10_000 })
 
   // Build hierarchical tree structure
   const tree = useMemo(() => {
