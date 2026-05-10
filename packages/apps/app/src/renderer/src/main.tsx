@@ -7,14 +7,14 @@ import { TelemetryProvider } from '@slayzone/telemetry/client'
 import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
-import { FloatingAgentPanel } from './components/agent-panel/FloatingAgentPanel'
+import { FloatingGlobalAgentPanel } from './components/global-agent-panel/FloatingGlobalAgentPanel'
 import { SecondaryTaskWindow } from './components/SecondaryTaskWindow'
 import { getDiagnosticsContext } from './lib/diagnosticsClient'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
 import { MaybeProfiler } from './lib/perfProfiler'
 
 const params = new URLSearchParams(window.location.search)
-const isFloatingAgent = params.get('floating') === 'agent'
+const isFloatingGlobalAgentPanel = params.get('floating') === 'global-agent-panel'
 const taskWindowId = params.get('taskWindow')
 
 window.addEventListener('error', (event) => {
@@ -41,12 +41,12 @@ window.addEventListener('unhandledrejection', (event) => {
   })
 })
 
-// Floating agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
-if (isFloatingAgent) {
+// Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
+if (isFloatingGlobalAgentPanel) {
   createRoot(document.getElementById('root')!).render(
     <PtyProvider>
       <ThemeProvider>
-        <FloatingAgentPanel />
+        <FloatingGlobalAgentPanel />
       </ThemeProvider>
     </PtyProvider>
   )

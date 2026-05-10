@@ -29,7 +29,7 @@ import { RotateCcw, MoreHorizontal, PictureInPicture2, PictureInPicture, Focus }
 
 export type FloatingStateKind = 'attached' | 'detached' | 'disabled'
 
-interface AgentSidePanelProps {
+interface GlobalAgentSidePanelProps {
   width: number
   sessionId: string
   cwd: string
@@ -45,10 +45,10 @@ interface AgentSidePanelProps {
   onReattach?: () => void
 }
 
-export const AGENT_PANEL_MIN_WIDTH = 320
-export const AGENT_PANEL_MAX_WIDTH = 720
+export const GLOBAL_AGENT_PANEL_MIN_WIDTH = 320
+export const GLOBAL_AGENT_PANEL_MAX_WIDTH = 720
 
-export function AgentSidePanel({
+export function GlobalAgentSidePanel({
   width,
   sessionId,
   cwd,
@@ -62,13 +62,13 @@ export function AgentSidePanel({
   floatingState = 'attached',
   onDetach,
   onReattach
-}: AgentSidePanelProps) {
+}: GlobalAgentSidePanelProps) {
   const { modes } = useTerminalModes()
   const visibleModes = getVisibleModes(modes, mode)
   const { builtin, custom } = groupTerminalModes(visibleModes)
 
   // Multi-window: claim PTY routing when this window becomes active or regains focus.
-  // Without this, secondary window mounts AgentSidePanel but PTY output keeps flowing to
+  // Without this, secondary window mounts GlobalAgentSidePanel but PTY output keeps flowing to
   // the previously-bound window. Claim redirects the session + replays buffer here.
   useEffect(() => {
     if (!isActive || !sessionId) return
@@ -81,7 +81,7 @@ export function AgentSidePanel({
   return (
     <div className="relative h-full rounded-md bg-surface-1 border border-border overflow-hidden flex flex-col" style={{ width }}>
       <div className="flex items-center shrink-0 h-10 px-2 gap-2 border-b border-border bg-surface-1">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Agent</span>
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Global Agent</span>
         <div className="ml-auto flex items-center gap-2">
           {onModeChange && (
             <Select
@@ -91,7 +91,7 @@ export function AgentSidePanel({
               }}
             >
               <SelectTrigger
-                data-testid="agent-panel-mode-trigger"
+                data-testid="global-agent-panel-mode-trigger"
                 size="sm"
                 className="!h-6 min-w-28 px-2 py-0 text-xs"
               >

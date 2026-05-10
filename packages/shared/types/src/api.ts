@@ -470,7 +470,7 @@ export interface ElectronAPI {
     cliStatus: () => Promise<{ installed: boolean; path?: string }>
     installCli: () => Promise<{ ok: boolean; path?: string; permissionDenied?: boolean; elevationCancelled?: boolean; error?: string; pathNotInPATH?: boolean }>
   }
-  floatingAgent: {
+  floatingGlobalAgentPanel: {
     setEnabled: (enabled: boolean) => Promise<{ kind: string }>
     setSessionId: (sessionId: string | null) => Promise<{ kind: string }>
     setPanelOpen: (isOpen: boolean) => Promise<{ kind: string }>

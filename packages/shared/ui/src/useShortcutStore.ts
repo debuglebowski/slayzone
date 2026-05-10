@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { shortcutDefinitions, SHORTCUT_DEFAULT_MIGRATIONS, type ShortcutDefinition, type ShortcutScope } from '@slayzone/shortcuts'
+import { shortcutDefinitions, SHORTCUT_DEFAULT_MIGRATIONS, SHORTCUT_ID_RENAMES, type ShortcutDefinition, type ShortcutScope } from '@slayzone/shortcuts'
 
 // Typed accessor for the Electron preload API. The full type lives in @slayzone/types
 // and is augmented onto Window by the preload. We use a minimal cast here so this
@@ -45,6 +45,14 @@ export const useShortcutStore = create<ShortcutState>((set, get) => ({
         // Clear any user overrides that still match a retired default, so the
         // new default takes effect. Registry lives next to shortcutDefinitions.
         let changed = false
+        // Rename legacy shortcut ids first so subsequent migrations apply on the new id.
+        for (const { from, to } of SHORTCUT_ID_RENAMES) {
+          if (from in parsed) {
+            if (!(to in parsed)) parsed[to] = parsed[from]
+            delete parsed[from]
+            changed = true
+          }
+        }
         for (const { id, oldDefault } of SHORTCUT_DEFAULT_MIGRATIONS) {
           if (parsed[id] === oldDefault) {
             delete parsed[id]

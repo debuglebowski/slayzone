@@ -14,7 +14,7 @@ const DOT_COLORS: Record<TerminalState, string> = {
   dead:      '#666',
 }
 
-export function FloatingAgentCollapsedIcon({ state, onExpand }: Props) {
+export function FloatingGlobalAgentPanelCollapsedIcon({ state, onExpand }: Props) {
   const color = DOT_COLORS[state] ?? DOT_COLORS.dead
   const pulse = state === 'starting' || state === 'running'
 

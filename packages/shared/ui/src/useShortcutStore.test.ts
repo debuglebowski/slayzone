@@ -74,6 +74,26 @@ describe('load', () => {
       expect(mockShortcuts.changed).not.toHaveBeenCalled()
     })
   })
+
+  describe('id renames', () => {
+    it('rewrites override key when shortcut id is renamed', async () => {
+      mockSettings.get.mockResolvedValue(JSON.stringify({ 'agent-panel': 'mod+shift+a' }))
+      await useShortcutStore.getState().load()
+      expect(useShortcutStore.getState().overrides).toEqual({ 'global-agent-panel': 'mod+shift+a' })
+      expect(mockSettings.set).toHaveBeenCalledOnce()
+      expect(mockSettings.set).toHaveBeenCalledWith('custom_shortcuts', JSON.stringify({ 'global-agent-panel': 'mod+shift+a' }))
+      expect(mockShortcuts.changed).toHaveBeenCalledOnce()
+    })
+
+    it('keeps existing new-id override when both legacy and new ids present', async () => {
+      mockSettings.get.mockResolvedValue(JSON.stringify({
+        'agent-panel': 'mod+shift+a',
+        'global-agent-panel': 'mod+alt+a',
+      }))
+      await useShortcutStore.getState().load()
+      expect(useShortcutStore.getState().overrides).toEqual({ 'global-agent-panel': 'mod+alt+a' })
+    })
+  })
 })
 
 describe('getKeys', () => {

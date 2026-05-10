@@ -22,7 +22,7 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'sidebar-auto-hide', label: 'Sidebar Auto-Hide', group: 'General', defaultKeys: 'ctrl+period', scope: 'global' },
   { id: 'explode-mode', label: 'Explode Mode', group: 'General', defaultKeys: 'mod+shift+e', scope: 'global' },
   { id: 'exit-zen-explode', label: 'Exit Zen / Explode', group: 'General', defaultKeys: 'escape', scope: 'global' },
-  { id: 'agent-panel', label: 'Agent Panel', group: 'General', defaultKeys: 'mod+period', scope: 'global' },
+  { id: 'global-agent-panel', label: 'Global Agent Panel', group: 'General', defaultKeys: 'mod+period', scope: 'global' },
   { id: 'agent-status-panel', label: 'Agent Status Panel', group: 'General', defaultKeys: 'mod+shift+period', scope: 'global' },
   { id: 'global-settings', label: 'Global Settings', group: 'General', defaultKeys: 'mod+,', scope: 'global' },
   { id: 'project-settings', label: 'Project Settings', group: 'General', defaultKeys: 'mod+shift+,', scope: 'global' },
@@ -87,13 +87,19 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
   { id: 'terminal-search-close', label: 'Close Search', group: 'Terminal', defaultKeys: 'escape', scope: 'terminal' },
 ]
 
+/** Legacy shortcut IDs renamed; user overrides under the old id should be
+ *  rewritten to the new id on load so customizations are preserved. */
+export const SHORTCUT_ID_RENAMES: { from: string; to: string }[] = [
+  { from: 'agent-panel', to: 'global-agent-panel' },
+]
+
 /** Legacy default key combos that should be cleared from user overrides on load,
  *  so users pick up the new default after a rebind. Append an entry on every
  *  default swap — pair with the new `defaultKeys` value above. */
 export const SHORTCUT_DEFAULT_MIGRATIONS: { id: string; oldDefault: string }[] = [
   { id: 'zen-mode',           oldDefault: 'mod+j' },         // moved to mod+shift+j
   { id: 'panel-settings',     oldDefault: 'mod+s' },         // moved to mod+j
-  { id: 'agent-panel',        oldDefault: 'mod+.' },         // dot→period (react-hotkeys-hook v5 e.code matching)
+  { id: 'global-agent-panel', oldDefault: 'mod+.' },         // dot→period (react-hotkeys-hook v5 e.code matching)
   { id: 'agent-status-panel', oldDefault: 'ctrl+.' },        // moved to mod+shift+period
   { id: 'agent-status-panel', oldDefault: 'mod+shift+.' },   // dot→period
   { id: 'sidebar-auto-hide',  oldDefault: 'ctrl+.' },        // dot→period

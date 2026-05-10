@@ -120,7 +120,7 @@ import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/main'
 import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners, sweepScrollbackOrphans } from '@slayzone/terminal/main'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
-import { attachFloatingAgent, setupFloatingAgent } from './floating-agent'
+import { attachFloatingGlobalAgentPanel, setupFloatingGlobalAgentPanel } from './floating-global-agent-panel'
 import { attachTaskWindows, setupTaskWindows } from './task-windows'
 import { registerTerminalTabsHandlers } from '@slayzone/task-terminals/main'
 import { registerWorktreeHandlers, closeGitWatcher } from '@slayzone/worktrees/main'
@@ -702,8 +702,8 @@ function createMainWindow(): void {
     return { action: 'deny' }
   })
 
-  // Floating agent panel: register main window with state machine adapter
-  attachFloatingAgent(mainWindow)
+  // Floating global agent panel: register main window with state machine adapter
+  attachFloatingGlobalAgentPanel(mainWindow)
   attachTaskWindows(mainWindow)
 
   mainWindow.on('closed', () => {
@@ -1241,9 +1241,9 @@ app.whenReady().then(async () => {
       } catch { return true }
     },
   )
-  setupFloatingAgent(() => currentOverrides)
+  setupFloatingGlobalAgentPanel(() => currentOverrides)
   setupTaskWindows()
-  logBoot('floating agent + task windows set up')
+  logBoot('floating global agent panel + task windows set up')
 
   // Task automation: auto-move tasks on terminal state change
   onGlobalStateChange((sessionId, newState, oldState) => {

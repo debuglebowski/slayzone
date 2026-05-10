@@ -4,6 +4,7 @@ export {
   shortcutDefinitions,
   MENU_SHORTCUT_DEFAULTS,
   SHORTCUT_DEFAULT_MIGRATIONS,
+  SHORTCUT_ID_RENAMES,
   type ShortcutDefinition,
 } from './definitions'
 export { toElectronAccelerator, matchesShortcut, matchesElectronInput, formatKeysForDisplay, formatKeysVerbose, withShortcut, normalizeHotkeyString, type ElectronInput } from './accelerator'

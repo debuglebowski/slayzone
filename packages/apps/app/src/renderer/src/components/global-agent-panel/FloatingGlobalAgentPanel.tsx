@@ -3,8 +3,8 @@ import { Frame, X } from 'lucide-react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { usePty } from '@slayzone/terminal/client'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
-import { FloatingAgentCollapsed } from './FloatingAgentCollapsed'
-import { FloatingAgentCollapsedIcon } from './FloatingAgentCollapsedIcon'
+import { FloatingGlobalAgentPanelCollapsed } from './FloatingGlobalAgentPanelCollapsed'
+import { FloatingGlobalAgentPanelCollapsedIcon } from './FloatingGlobalAgentPanelCollapsedIcon'
 
 interface FloatingSession {
   sessionId: string
@@ -12,7 +12,7 @@ interface FloatingSession {
   mode: TerminalMode
 }
 
-export function FloatingAgentPanel() {
+export function FloatingGlobalAgentPanel() {
   const [session, setSession] = useState<FloatingSession | null>(null)
   const [collapsed, setCollapsed] = useState(true)
   const [style, setStyle] = useState<'widget' | 'icon'>('widget')
@@ -23,17 +23,17 @@ export function FloatingAgentPanel() {
   const { subscribeState, getState } = usePty()
 
   useEffect(() => {
-    window.api.floatingAgent.getSession().then((data) => {
+    window.api.floatingGlobalAgentPanel.getSession().then((data) => {
       if (data) setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
     })
-    window.api.floatingAgent.getConfig().then((config) => {
+    window.api.floatingGlobalAgentPanel.getConfig().then((config) => {
       if (config) setStyle(config.style as 'widget' | 'icon')
     })
-    const unsub = window.api.floatingAgent.onSessionChanged(() => {
-      window.api.floatingAgent.getSession().then((data) => {
+    const unsub = window.api.floatingGlobalAgentPanel.onSessionChanged(() => {
+      window.api.floatingGlobalAgentPanel.getSession().then((data) => {
         if (data) setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
       })
-      window.api.floatingAgent.getConfig().then((config) => {
+      window.api.floatingGlobalAgentPanel.getConfig().then((config) => {
         if (config) setStyle(config.style as 'widget' | 'icon')
       })
     })
@@ -41,7 +41,7 @@ export function FloatingAgentPanel() {
   }, [])
 
   useEffect(() => {
-    return window.api.floatingAgent.onCollapseChanged((c) => {
+    return window.api.floatingGlobalAgentPanel.onCollapseChanged((c) => {
       setCollapsed(c)
       if (c) {
         setShowTerminal(false)
@@ -52,11 +52,11 @@ export function FloatingAgentPanel() {
   }, [])
 
   useEffect(() => {
-    window.api.floatingAgent.getState().then((s) => {
+    window.api.floatingGlobalAgentPanel.getState().then((s) => {
       setDetachMode(s.mode)
       setHasCustomSize(s.hasCustomSize)
     })
-    return window.api.floatingAgent.onState((s) => {
+    return window.api.floatingGlobalAgentPanel.onState((s) => {
       setDetachMode(s.mode)
       setHasCustomSize(s.hasCustomSize)
     })
@@ -78,15 +78,15 @@ export function FloatingAgentPanel() {
   }, [session, getState, subscribeState])
 
   const handleToggle = useCallback(() => {
-    window.api.floatingAgent.toggleCollapse()
+    window.api.floatingGlobalAgentPanel.toggleCollapse()
   }, [])
 
   const handleResetSize = useCallback(() => {
-    window.api.floatingAgent.resetSize()
+    window.api.floatingGlobalAgentPanel.resetSize()
   }, [])
 
   const handleClose = useCallback(() => {
-    window.api.floatingAgent.reattach()
+    window.api.floatingGlobalAgentPanel.reattach()
   }, [])
 
   const showClose = detachMode === 'manual'
@@ -94,9 +94,9 @@ export function FloatingAgentPanel() {
 
   if (collapsed) {
     if (style === 'icon') {
-      return <FloatingAgentCollapsedIcon state={terminalState} onExpand={handleToggle} />
+      return <FloatingGlobalAgentPanelCollapsedIcon state={terminalState} onExpand={handleToggle} />
     }
-    return <FloatingAgentCollapsed state={terminalState} onExpand={handleToggle} onResetSize={handleResetSize} onClose={handleClose} showClose={showClose} showReset={showReset} />
+    return <FloatingGlobalAgentPanelCollapsed state={terminalState} onExpand={handleToggle} onResetSize={handleResetSize} onClose={handleClose} showClose={showClose} showReset={showReset} />
   }
 
   return (
@@ -105,7 +105,7 @@ export function FloatingAgentPanel() {
         className="shrink-0 h-7 flex items-center justify-between px-3 bg-surface-1 border-b border-border select-none"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Agent</span>
+        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Global Agent</span>
         <div className="flex items-center gap-0.5">
           {showReset && (
             <button

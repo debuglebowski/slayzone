@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 
-export interface AgentPanelState {
+export interface GlobalAgentPanelState {
   isOpen: boolean
   panelWidth: number
   sessionIndex: number
@@ -8,22 +8,22 @@ export interface AgentPanelState {
   floatingEnabled: boolean
 }
 
-export const DEFAULT_AGENT_PANEL_WIDTH = 400
+export const DEFAULT_GLOBAL_AGENT_PANEL_WIDTH = 400
 
-const DEFAULT_STATE: AgentPanelState = {
+const DEFAULT_STATE: GlobalAgentPanelState = {
   isOpen: false,
-  panelWidth: DEFAULT_AGENT_PANEL_WIDTH,
+  panelWidth: DEFAULT_GLOBAL_AGENT_PANEL_WIDTH,
   sessionIndex: 0,
   floatingEnabled: false
 }
 
-const SETTINGS_KEY = 'agentPanelState'
+const SETTINGS_KEY = 'globalAgentPanelState'
 
-export function useAgentPanelState(): [
-  AgentPanelState,
-  (updates: Partial<AgentPanelState>) => void
+export function useGlobalAgentPanelState(): [
+  GlobalAgentPanelState,
+  (updates: Partial<GlobalAgentPanelState>) => void
 ] {
-  const [state, setState] = useState<AgentPanelState>(DEFAULT_STATE)
+  const [state, setState] = useState<GlobalAgentPanelState>(DEFAULT_STATE)
 
   useEffect(() => {
     window.api.settings.get(SETTINGS_KEY).then((stored) => {
@@ -37,7 +37,7 @@ export function useAgentPanelState(): [
     })
   }, [])
 
-  const updateState = useCallback((updates: Partial<AgentPanelState>) => {
+  const updateState = useCallback((updates: Partial<GlobalAgentPanelState>) => {
     setState((prev) => {
       const next = { ...prev, ...updates }
       window.api.settings.set(SETTINGS_KEY, JSON.stringify(next))
