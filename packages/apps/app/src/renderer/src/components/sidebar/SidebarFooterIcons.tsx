@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Settings, Keyboard, ChevronDown, Megaphone, Check, CheckCheck, Trophy, BarChart3, MoreHorizontal } from 'lucide-react'
+import { Settings, Keyboard, ChevronDown, Megaphone, Check, CheckCheck, Trophy, BarChart3 } from 'lucide-react'
 import { FaRegHandshake } from 'react-icons/fa'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import { isConvexConfigured } from '@/lib/convexAuth'
@@ -18,10 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
   cn,
   shortcutDefinitions,
   formatKeysForDisplay,
@@ -380,43 +376,64 @@ export function SidebarFooterIcons({
           </div>
         </PopoverContent>
       </Popover>
-      <DropdownMenu>
+      {isConvexConfigured && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <IconButton
-                aria-label="More"
-                variant="ghost"
-                size="icon-lg"
-                className="rounded-lg text-muted-foreground"
-              >
-                <MoreHorizontal className="size-5" />
-              </IconButton>
-            </DropdownMenuTrigger>
+            <IconButton
+              aria-label="Leaderboard"
+              variant="ghost"
+              size="icon-lg"
+              onClick={onLeaderboard}
+              className="rounded-lg text-muted-foreground"
+            >
+              <Trophy className="size-5" />
+            </IconButton>
           </TooltipTrigger>
-          <TooltipContent side={tooltipSide}>More</TooltipContent>
+          <TooltipContent side={tooltipSide}>Leaderboard</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent side="top" align="start" className="min-w-[200px]">
-          {isConvexConfigured && (
-            <DropdownMenuItem onSelect={onLeaderboard} className="cursor-pointer">
-              <Trophy className="size-4" />
-              <span>Leaderboard</span>
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem onSelect={onUsageAnalytics} className="cursor-pointer">
-            <BarChart3 className="size-4" />
-            <span>Usage Analytics</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => useDialogStore.getState().openChangelog()} className="cursor-pointer">
-            <Megaphone className="size-4" />
-            <span>What's New</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setShortcutsOpen(true)} className="cursor-pointer">
-            <Keyboard className="size-4" />
-            <span>Keyboard Shortcuts</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <IconButton
+            aria-label="Usage Analytics"
+            variant="ghost"
+            size="icon-lg"
+            onClick={onUsageAnalytics}
+            className="rounded-lg text-muted-foreground"
+          >
+            <BarChart3 className="size-5" />
+          </IconButton>
+        </TooltipTrigger>
+        <TooltipContent side={tooltipSide}>Usage Analytics</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <IconButton
+            aria-label="What's New"
+            variant="ghost"
+            size="icon-lg"
+            onClick={() => useDialogStore.getState().openChangelog()}
+            className="rounded-lg text-muted-foreground"
+          >
+            <Megaphone className="size-5" />
+          </IconButton>
+        </TooltipTrigger>
+        <TooltipContent side={tooltipSide}>What's New</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <IconButton
+            aria-label="Keyboard Shortcuts"
+            variant="ghost"
+            size="icon-lg"
+            onClick={() => setShortcutsOpen(true)}
+            className="rounded-lg text-muted-foreground"
+          >
+            <Keyboard className="size-5" />
+          </IconButton>
+        </TooltipTrigger>
+        <TooltipContent side={tooltipSide}>Keyboard Shortcuts</TooltipContent>
+      </Tooltip>
       {isConvexConfigured && <FeedbackDialog />}
       <Dialog open={shortcutsOpen} onOpenChange={(open) => {
         setShortcutsOpen(open)

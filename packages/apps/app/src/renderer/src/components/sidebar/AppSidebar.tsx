@@ -5,7 +5,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  Separator,
   cn,
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
@@ -43,8 +42,6 @@ interface AppSidebarProps {
   taskProgress?: Map<string, number>
   doneTaskIds?: Set<string>
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
-  headerUsage?: ReactNode
-  headerActions?: ReactNode
   compactFooter?: ReactNode
 }
 
@@ -69,8 +66,6 @@ export function AppSidebar({
   taskProgress,
   doneTaskIds,
   columnsByProjectId,
-  headerUsage,
-  headerActions,
   compactFooter,
 }: AppSidebarProps) {
   const sidebarView = useTabStore((s) => s.sidebarView)
@@ -83,7 +78,6 @@ export function AppSidebar({
 
   const [hoverRevealed, setHoverRevealed] = useState(false)
   const [resizing, setResizing] = useState(false)
-  const [footerExpanded, setFooterExpanded] = useState(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cancelClose = useCallback(() => {
@@ -174,31 +168,11 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter
-        className={cn('py-4 gap-3', !headerUsage && 'border-t border-border/60')}
-        onMouseEnter={compactFooter ? () => setFooterExpanded(true) : undefined}
-        onMouseLeave={compactFooter ? () => setFooterExpanded(false) : undefined}
-        onFocus={compactFooter ? () => setFooterExpanded(true) : undefined}
-        onBlur={
-          compactFooter
-            ? (e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) setFooterExpanded(false)
-              }
-            : undefined
-        }
-      >
-        {compactFooter && !footerExpanded ? (
+      <SidebarFooter className={cn('py-4 gap-3', !compactFooter && 'border-t border-border/60')}>
+        {compactFooter ? (
           compactFooter
         ) : (
           <>
-            {headerUsage && (
-              <>
-                <div className="flex flex-wrap items-center justify-center gap-1 py-1 px-2">
-                  {headerUsage}
-                </div>
-                <Separator />
-              </>
-            )}
             <SidebarFooterIcons
               layout={view.footerLayout}
               tasks={tasks}
@@ -207,7 +181,6 @@ export function AppSidebar({
               onUsageAnalytics={onUsageAnalytics}
               onLeaderboard={onLeaderboard}
               onboardingChecklist={onboardingChecklist}
-              actions={headerActions}
               trailing={
                 view.footerLayout === 'horizontal' ? (
                   <SidebarViewSwitcher

@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
 import { initShortcuts } from './shortcut-init'
-import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus, Settings } from 'lucide-react'
+import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus, MoreHorizontal, Settings, Trophy, BarChart3, Megaphone, ListTree, PanelLeftClose, Bell, Bot, Check, Monitor } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
@@ -28,7 +28,8 @@ import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/project
 import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectLocked, PROJECT_LOCKED_TOAST, hasActiveLockOverride, clearLockOverrides } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider, type SearchFileContext } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
-import { usePty, useActiveTaskIds } from '@slayzone/terminal/client'
+import { usePty, useActiveTaskIds, usePtyStatus } from '@slayzone/terminal/client'
+import { TerminalStatusDialog } from '@slayzone/terminal'
 // Shared
 import {
   Button,
@@ -48,7 +49,7 @@ import {
   UpdateButton,
   UpdateToast
 } from '@slayzone/ui'
-import { SidebarProvider, cn, PanelToggle, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withShortcut, withModalGuard, scopeTracker } from '@slayzone/ui'
+import { SidebarProvider, cn, PanelToggle, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withShortcut, withModalGuard, scopeTracker, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
@@ -1185,12 +1186,7 @@ function App(): React.JSX.Element {
   }, [projects, openProjectSettings])
 
   const headerHidden = sidebarView === 'tree' && !treeShowHeader
-  const headerUsageContent = (
-    <>
-      <BoostPill />
-      <UsagePopover data={usageData} onRefresh={refreshUsage} />
-    </>
-  )
+  const activePtyCount = usePtyStatus().size
   const renderHeaderActions = (compact: boolean) => {
     const btnSize = compact ? "h-7 w-7" : "size-10 rounded-lg"
     const iconSize = compact ? "size-4" : "size-5"
@@ -1238,34 +1234,145 @@ function App(): React.JSX.Element {
     </div>
   )
   const compactFooterContent = (
-    <div className="flex items-center justify-center gap-3 px-2 py-1">
-      <UsagePopover data={usageData} onRefresh={refreshUsage} />
-      <AgentStatusButton
-        active={agentStatusState.isLocked}
-        count={attentionTaskIds.size}
-        onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })}
-        shortcutHint={agentStatusPanelShortcut}
-      />
-      <button
-        onClick={selectedProjectId && !durationLocked ? handleCreateScratchTerminal : undefined}
-        disabled={!selectedProjectId || durationLocked}
-        className={cn(
-          'h-7 w-7 flex items-center justify-center transition-colors',
-          selectedProjectId && !durationLocked
-            ? 'text-muted-foreground hover:text-foreground'
-            : 'text-muted-foreground/40 cursor-not-allowed',
-        )}
-        aria-label="New temporary task"
-      >
-        <TerminalSquare className="size-4" />
-      </button>
-      <button
-        onClick={handleOpenSettings}
-        className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-        aria-label="Settings"
-      >
-        <Settings className="size-4" />
-      </button>
+    <div className="flex items-center justify-between gap-2 px-2 py-1">
+      <div className="min-w-0 flex items-center">
+        <UsagePopover data={usageData} onRefresh={refreshUsage} />
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          onClick={handleOpenSettings}
+          className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Settings"
+        >
+          <Settings className="size-4" />
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="More"
+              className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <MoreHorizontal className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="end" className="min-w-[240px]">
+            <DropdownMenuItem
+              onSelect={() => setExplodeMode((p) => !p)}
+              disabled={openTaskIds.length < 2}
+              className="cursor-pointer"
+            >
+              <LayoutGrid className="size-4" />
+              <span>Explode mode</span>
+              {explodeMode && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => useDialogStore.getState().openTerminals()}
+              className="cursor-pointer"
+            >
+              <Monitor className="size-4" />
+              <span className="flex items-center gap-2">
+                <span>Active terminals</span>
+                {activePtyCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-foreground text-background text-[10px] font-medium tabular-nums">
+                    {activePtyCount}
+                  </span>
+                )}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                setAgentPanelState({ isOpen: !agentPanelState.isOpen })
+              }
+              disabled={!selectedProjectId}
+              className="cursor-pointer"
+            >
+              <Bot className="size-4" />
+              <span>Agent panel</span>
+              {agentPanelState.isOpen && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                setAgentStatusState({ isLocked: !agentStatusState.isLocked })
+              }
+              className="cursor-pointer"
+            >
+              <Bell className="size-4" />
+              <span className="flex items-center gap-2">
+                <span>Agent status panel</span>
+                {idleTasks.length > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-foreground text-background text-[10px] font-medium tabular-nums">
+                    {idleTasks.length}
+                  </span>
+                )}
+              </span>
+              {agentStatusState.isLocked && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => useTabStore.getState().setActiveView('leaderboard')}
+              className="cursor-pointer"
+            >
+              <Trophy className="size-4" />
+              <span>Leaderboard</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => useTabStore.getState().setActiveView('usage-analytics')}
+              className="cursor-pointer"
+            >
+              <BarChart3 className="size-4" />
+              <span>Usage Analytics</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => useDialogStore.getState().openChangelog()}
+              className="cursor-pointer"
+            >
+              <Megaphone className="size-4" />
+              <span>What's New</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => useTabStore.getState().setSidebarView('tree')}
+              className="cursor-pointer"
+            >
+              <ListTree className="size-4" />
+              <span>Tree view</span>
+              {sidebarView === 'tree' && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => useTabStore.getState().setSidebarView('projects')}
+              className="cursor-pointer"
+            >
+              <Kanban className="size-4" />
+              <span>Projects view</span>
+              {sidebarView === 'projects' && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault()
+                useTabStore.getState().setSidebarAutoHide(!sidebarAutoHide)
+              }}
+              className="cursor-pointer"
+            >
+              <PanelLeftClose className="size-4" />
+              <span>Auto-hide sidebar</span>
+              {sidebarAutoHide && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            {updateVersion && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => window.api.app.restartForUpdate()}
+                  className="cursor-pointer text-green-500"
+                >
+                  <span>Restart to install v{updateVersion}</span>
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   )
 
@@ -1282,8 +1389,6 @@ function App(): React.JSX.Element {
           onUsageAnalytics={() => { useTabStore.getState().setActiveView('usage-analytics') }}
           onTaskClick={openTask} onCloseTab={closeTabByTaskId} onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)} zenMode={zenMode} onboardingChecklist={onboardingChecklist} idleByProject={idleByProject} onReorderProjects={reorderProjects}
           terminalStates={terminalStates} taskProgress={taskProgress} doneTaskIds={doneTaskIds} columnsByProjectId={columnsByProjectId}
-          headerUsage={headerHidden ? headerUsageContent : undefined}
-          headerActions={headerHidden ? renderHeaderActions(false) : undefined}
           compactFooter={headerHidden ? compactFooterContent : undefined}
           taskContextMenuRender={(task, child) => (
             <TaskContextMenu
@@ -1616,6 +1721,7 @@ function App(): React.JSX.Element {
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction autoFocus onClick={handleCompleteTaskConfirm}>Complete</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
         </AlertDialog>
         <UpdateToast version={updateToastDismissed ? null : updateVersion} onRestart={() => window.api.app.restartForUpdate()} onDismiss={() => setUpdateToastDismissed(true)} />
+        <TerminalStatusDialog tasks={tasks} onTaskClick={openTask} />
         <Toaster position="bottom-right" theme="dark" closeButton />
       </div>
     </SidebarProvider>
