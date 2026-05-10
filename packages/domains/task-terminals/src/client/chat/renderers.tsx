@@ -955,20 +955,44 @@ export function ToolCallAskUserQuestion({ invocation }: ToolProps) {
   )
 }
 
+// Marker text the Approve button sends. Detector below scans for it to mark
+// the plan as approved — keep sender + detector in sync via this const.
+const PLAN_APPROVED_MARKER = 'Approved'
+
 export function ToolCallExitPlanMode({ invocation }: ToolProps) {
   const input = invocation.input as { plan?: string } | null
   const plan = input?.plan ?? ''
   const denied = invocation.denied === true
   const { setChatMode, sendMessage, timeline } = useChatView()
-  // Hide approve-footer once another chat message lands after this plan —
-  // either user typed something or a new assistant turn started. Keeps the
-  // footer from lingering on stale plan cards mid-scrollback.
-  const isLastMessage = useMemo(() => {
-    const idx = timeline.findIndex((t) => t.kind === 'tool' && t.invocation.id === invocation.id)
-    if (idx < 0) return true
-    return !timeline.slice(idx + 1).some((t) => t.kind === 'user-text' || t.kind === 'text')
+  // Show approve-footer only on the LAST ExitPlanMode card AND only until the
+  // user clicks Approve. Both signals are derived from `timeline` so the state
+  // survives unmount (virtualized scroll, tab switch). The click sends a
+  // canonical 'Approved' user-text — its presence after this plan idx marks
+  // it pressed. `denied` never flips back, so we can't rely on invocation
+  // status alone.
+  const { isLastPlan, pressed } = useMemo(() => {
+    let lastPlanId: string | null = null
+    let myIdx = -1
+    for (let i = 0; i < timeline.length; i++) {
+      const t = timeline[i]
+      if (t.kind === 'tool' && t.invocation.name === 'ExitPlanMode') {
+        lastPlanId = t.invocation.id
+        if (t.invocation.id === invocation.id) myIdx = i
+      }
+    }
+    let approved = false
+    if (myIdx >= 0) {
+      for (let i = myIdx + 1; i < timeline.length; i++) {
+        const t = timeline[i]
+        if (t.kind === 'user-text' && t.text === PLAN_APPROVED_MARKER) {
+          approved = true
+          break
+        }
+      }
+    }
+    return { isLastPlan: lastPlanId === invocation.id, pressed: approved }
   }, [timeline, invocation.id])
-  const showApproveFooter = denied && isLastMessage
+  const showApproveFooter = denied && isLastPlan && !pressed
   return (
     <div className="pl-4 pr-4 py-3">
       <div className="flex gap-3 items-start">
@@ -988,10 +1012,7 @@ export function ToolCallExitPlanMode({ invocation }: ToolProps) {
           )}
           {showApproveFooter && (
             <div className="border-t border-amber-500/20 bg-amber-500/10 px-3 py-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
-              <span className="flex-1">
-                Plan-mode exit blocked — the SDK requires explicit approval.
-                Approve to switch to auto-accept and re-run the plan.
-              </span>
+              <span className="flex-1">Approve plan?</span>
               {setChatMode && (
                 <button
                   onClick={async () => {
@@ -1000,7 +1021,7 @@ export function ToolCallExitPlanMode({ invocation }: ToolProps) {
                     } catch {
                       return
                     }
-                    sendMessage?.('Approved')
+                    sendMessage?.(PLAN_APPROVED_MARKER)
                   }}
                   className="shrink-0 rounded-md border border-amber-500/40 bg-amber-500/20 hover:bg-amber-500/30 px-2 py-1 font-medium text-amber-900 dark:text-amber-200 transition-colors"
                 >
