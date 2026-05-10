@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, GitBranch, Home, Pin, Power, Search, Settings, X } from 'lucide-react'
+import { ChevronDown, Clock, GitBranch, Home, Pin, Power, Search, Settings, X } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import { cn, TerminalProgressDot, PriorityIcon, getColumnStatusStyle, TASK_STATUS_ORDER, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from '@slayzone/ui'
 import { type Task } from '@slayzone/task/shared'
@@ -393,34 +393,47 @@ export function TreeView({
     if (!treeGroupByStatus) {
       return rootTasks.map((task, i) => renderTask(task, 1, [i < rootTasks.length - 1]))
     }
+    const tempTasks: Task[] = []
+    const persistentTasks: Task[] = []
+    for (const t of rootTasks) {
+      if (t.is_temporary) tempTasks.push(t)
+      else persistentTasks.push(t)
+    }
     const cols = columnsByProjectId?.get(projectId) ?? null
     const order: string[] = cols
       ? [...cols].sort((a, b) => a.position - b.position).map((c) => c.id)
       : [...TASK_STATUS_ORDER]
     const byStatus = new Map<string, Task[]>()
-    for (const t of rootTasks) {
+    for (const t of persistentTasks) {
       const arr = byStatus.get(t.status) ?? []
       arr.push(t)
       byStatus.set(t.status, arr)
     }
-    const groups: { status: string; tasks: Task[] }[] = []
+    type Group = { key: string; label: string; icon: typeof Clock | null; iconClass?: string; tasks: Task[] }
+    const groups: Group[] = []
+    if (tempTasks.length > 0) {
+      groups.push({ key: '__temporary__', label: 'Temporary', icon: Clock, iconClass: 'text-muted-foreground/60', tasks: tempTasks })
+    }
     for (const s of order) {
       const arr = byStatus.get(s)
-      if (arr && arr.length > 0) groups.push({ status: s, tasks: arr })
+      if (!arr || arr.length === 0) continue
+      const style = getColumnStatusStyle(s, cols)
+      groups.push({ key: s, label: style?.label ?? s, icon: style?.icon ?? null, iconClass: style?.iconClass, tasks: arr })
     }
     for (const [s, arr] of byStatus) {
-      if (!order.includes(s)) groups.push({ status: s, tasks: arr })
+      if (order.includes(s)) continue
+      const style = getColumnStatusStyle(s, cols)
+      groups.push({ key: s, label: style?.label ?? s, icon: style?.icon ?? null, iconClass: style?.iconClass, tasks: arr })
     }
     const showLabel = groups.length > 1
     return groups.map((g) => {
-      const style = getColumnStatusStyle(g.status, cols)
-      const StatusIcon = style?.icon
+      const Icon = g.icon
       return (
-        <div key={g.status}>
+        <div key={g.key}>
           {showLabel && (
             <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              {StatusIcon && <StatusIcon className={cn('size-3', style?.iconClass)} />}
-              <span>{style?.label ?? g.status}</span>
+              {Icon && <Icon className={cn('size-3', g.iconClass)} />}
+              <span>{g.label}</span>
             </div>
           )}
           {g.tasks.map((task, i) => renderTask(task, 1, [i < g.tasks.length - 1]))}
