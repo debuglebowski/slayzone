@@ -306,6 +306,11 @@ export function TreeView({
           >
             {task.title || 'Untitled'}
           </span>
+          {task.needs_attention && (
+            <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+              Attention
+            </span>
+          )}
           {treeShowWorktree && task.worktree_path && (
             <GitBranch
               aria-label="Worktree"
