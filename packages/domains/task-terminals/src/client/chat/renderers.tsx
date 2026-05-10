@@ -788,6 +788,20 @@ export function ToolCallAskUserQuestion({ invocation }: ToolProps) {
     if (sendMessage) sendMessage(text)
   }
 
+  const handleCancel = (): void => {
+    if (!canRespond || locked) return
+    setSubmittedText('Cancelled')
+    setAnswered(true)
+    if (pendingPrompt && respondPermission) {
+      void respondPermission({
+        requestId: pendingPrompt.requestId,
+        decision: { behavior: 'deny', message: 'User cancelled the question.' },
+      })
+      return
+    }
+    if (sendMessage) sendMessage('Cancelled')
+  }
+
   return (
     <div className="pl-4 pr-4 py-3">
       <div className="flex gap-3 items-start">
@@ -934,6 +948,19 @@ export function ToolCallAskUserQuestion({ invocation }: ToolProps) {
                   </span>
                   <button
                     type="button"
+                    onClick={handleCancel}
+                    disabled={!canRespond}
+                    className={cn(
+                      'shrink-0 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                      canRespond
+                        ? 'border-border/60 bg-background/60 hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive text-muted-foreground'
+                        : 'border-border/40 bg-muted/30 text-muted-foreground cursor-not-allowed',
+                    )}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleSubmit}
                     disabled={!canSubmit || !canRespond}
                     className={cn(
@@ -955,9 +982,15 @@ export function ToolCallAskUserQuestion({ invocation }: ToolProps) {
   )
 }
 
-// Marker text the Approve button sends. Detector below scans for it to mark
-// the plan as approved — keep sender + detector in sync via this const.
-const PLAN_APPROVED_MARKER = 'Approved'
+// Marker text the Approve/Cancel buttons send. Detector below scans for either
+// to mark the plan as resolved — keep sender + detector in sync via these consts.
+// Sentinel-style strings so normal user text ("Approved", "Cancelled") doesn't
+// accidentally trigger plan resolution. Hidden from chat render via
+// `isPlanMarker` below.
+export const PLAN_APPROVED_MARKER = '__slay_plan_approved__'
+export const PLAN_CANCELLED_MARKER = '__slay_plan_cancelled__'
+export const isPlanMarker = (text: string): boolean =>
+  text === PLAN_APPROVED_MARKER || text === PLAN_CANCELLED_MARKER
 
 export function ToolCallExitPlanMode({ invocation }: ToolProps) {
   const input = invocation.input as { plan?: string } | null
@@ -980,17 +1013,17 @@ export function ToolCallExitPlanMode({ invocation }: ToolProps) {
         if (t.invocation.id === invocation.id) myIdx = i
       }
     }
-    let approved = false
+    let resolved = false
     if (myIdx >= 0) {
       for (let i = myIdx + 1; i < timeline.length; i++) {
         const t = timeline[i]
-        if (t.kind === 'user-text' && t.text === PLAN_APPROVED_MARKER) {
-          approved = true
+        if (t.kind === 'user-text' && (t.text === PLAN_APPROVED_MARKER || t.text === PLAN_CANCELLED_MARKER)) {
+          resolved = true
           break
         }
       }
     }
-    return { isLastPlan: lastPlanId === invocation.id, pressed: approved }
+    return { isLastPlan: lastPlanId === invocation.id, pressed: resolved }
   }, [timeline, invocation.id])
   const showApproveFooter = denied && isLastPlan && !pressed
   return (
@@ -1013,6 +1046,15 @@ export function ToolCallExitPlanMode({ invocation }: ToolProps) {
           {showApproveFooter && (
             <div className="border-t border-amber-500/20 bg-amber-500/10 px-3 py-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
               <span className="flex-1">Approve plan?</span>
+              <button
+                onClick={() => {
+                  sendMessage?.(PLAN_CANCELLED_MARKER)
+                }}
+                disabled={!sendMessage}
+                className="shrink-0 rounded-md border border-border/60 bg-background/60 hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive px-2 py-1 font-medium text-muted-foreground transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
               {setChatMode && (
                 <button
                   onClick={async () => {
@@ -1098,6 +1140,8 @@ export function isRenderable(item: TimelineItem): boolean {
   if (item.kind === 'rate-limit' && item.status === 'allowed') return false
   // Launcher tool is rendered inside SubAgentRow's accordion, not at root.
   if (item.kind === 'tool' && isAgentLauncherToolName(item.invocation.name)) return false
+  // Plan resolution markers are detector-only, never shown as user bubbles.
+  if (item.kind === 'user-text' && isPlanMarker(item.text)) return false
   return true
 }
 
