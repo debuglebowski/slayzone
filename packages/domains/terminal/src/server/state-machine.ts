@@ -83,11 +83,15 @@ export class StateMachine {
   }
 }
 
-/** Map ActivityState to TerminalState */
+/** Map ActivityState to TerminalState. `'idle'` is an explicit done-signal
+ *  some adapters emit (e.g. claude completion stamp) to flip running→idle
+ *  immediately rather than waiting for the silence timer. */
 export function activityToTerminalState(activity: ActivityState): TerminalState | null {
   switch (activity) {
     case 'working':
       return 'running'
+    case 'idle':
+      return 'idle'
     default:
       return null
   }
@@ -97,7 +101,10 @@ export function activityToTerminalState(activity: ActivityState): TerminalState 
  * Should an output chunk refresh `lastOutputTime` (the idle clock)?
  *
  * - TUI adapter (default, `transitionOnInput !== false`): refresh ONLY on
- *   detected activity — raw redraws must not pin the clock open.
+ *   detected `'working'` — raw redraws and explicit `'idle'` signals must
+ *   not pin the clock open. Keeping the clock un-refreshed on `'idle'` lets
+ *   the silence-timer fallback stay primed in case the active signal is
+ *   missed by a later chunk.
  * - Output-driven adapter (`transitionOnInput === false`, e.g. plain shell):
  *   refresh on every chunk so a tail-style stream stays "active".
  */
@@ -105,7 +112,7 @@ export function shouldRefreshIdleClock(
   adapter: { transitionOnInput?: boolean },
   detectedActivity: ActivityState | null
 ): boolean {
-  return adapter.transitionOnInput === false || !!detectedActivity
+  return adapter.transitionOnInput === false || detectedActivity === 'working'
 }
 
 /**

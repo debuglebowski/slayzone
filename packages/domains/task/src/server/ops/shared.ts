@@ -105,7 +105,8 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
     is_blocked: Boolean(row.is_blocked),
     active_artifact_id: (row.active_artifact_id as string) ?? null,
     manager_mode: Boolean(row.manager_mode),
-    needs_attention: Boolean(row.needs_attention)
+    needs_attention: Boolean(row.needs_attention),
+    dev_url_toast_dismissed: Boolean(row.dev_url_toast_dismissed)
   } as Task
 }
 
@@ -554,6 +555,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.repoName !== undefined) { fields.push('repo_name = ?'); values.push(data.repoName) }
   if (data.activeArtifactId !== undefined) { fields.push('active_artifact_id = ?'); values.push(data.activeArtifactId) }
   if (data.needsAttention !== undefined) { fields.push('needs_attention = ?'); values.push(data.needsAttention ? 1 : 0) }
+  if (data.devUrlToastDismissed !== undefined) { fields.push('dev_url_toast_dismissed = ?'); values.push(data.devUrlToastDismissed ? 1 : 0) }
 
   if (fields.length === 0) {
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as Record<string, unknown> | undefined

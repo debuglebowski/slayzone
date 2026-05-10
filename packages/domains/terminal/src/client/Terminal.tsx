@@ -16,6 +16,12 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 
+function countNewlines(s: string): number {
+  let n = 0
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 10) n++
+  return n
+}
+
 // Strip trailing whitespace from each line of selection text.
 // xterm's getTrimmedLength treats rendered spaces (e.g. from padded UI like
 // lazygit, fzf, tables) as real content, so copies include them. Pasting
@@ -165,6 +171,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const clearedSeqRef = useRef<number | null>(null)
   const initializedRef = useRef(false)
   const lastRenderedSeqRef = useRef<number>(-1)
+  const archiveStartOffsetRef = useRef<number>(0)
+  const archiveTotalSizeRef = useRef<number>(0)
+  const loadMoreInProgressRef = useRef(false)
+  const totalLoadedLinesRef = useRef<number>(0)
   const resizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const dragCounter = useRef(0)
@@ -177,6 +187,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [deadCrashOutput, setDeadCrashOutput] = useState<string | null>(null)
   const [doctorResults, setDoctorResults] = useState<import('@slayzone/terminal/shared').ValidationResult[] | null>(null)
   const [doctorLoading, setDoctorLoading] = useState(false)
+  const [showLoadMore, setShowLoadMore] = useState(false)
+  const [loadMoreBusy, setLoadMoreBusy] = useState(false)
 
   // Refs for callbacks to prevent initTerminal dependency churn.
   // When onConversationCreated fires (saving conversation ID), it updates task state
@@ -217,7 +229,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const { subscribe, subscribeExit, subscribeSessionInvalid, subscribeState, getState, getCrashOutput, resetTaskState, cleanupTask } = usePty()
   const { terminalThemeId, contentVariant } = useTheme()
-  const { terminalFontSize, terminalFontFamily, terminalScrollback } = useAppearance()
+  const { terminalFontSize, terminalFontFamily, terminalScrollback, terminalArchiveInitialLines, terminalArchiveStepLines } = useAppearance()
 
   const resolvedTerminalTheme = getThemeTerminalColors(terminalThemeId, contentVariant)
   const resolvedTerminalVariant = contentVariant
@@ -232,6 +244,57 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     terminalRef.current?.clear()
     terminalRef.current?.write('\x1b[0m')
   }, [sessionId])
+
+  // "Load more" — pull older lines from disk archive and prepend by clearing
+  // xterm and re-writing (older + serialized current). xterm has no prepend API.
+  const loadMoreHistory = useCallback(async (): Promise<void> => {
+    if (loadMoreInProgressRef.current) return
+    if (archiveStartOffsetRef.current <= 0) return
+    const t = terminalRef.current
+    const sa = serializeAddonRef.current
+    if (!t || !sa) return
+
+    loadMoreInProgressRef.current = true
+    setLoadMoreBusy(true)
+    try {
+      const result = await trpcClient.pty.getHistoryBefore.query({
+        sessionId,
+        currentEarliestOffset: archiveStartOffsetRef.current,
+        lineCount: terminalArchiveStepLines,
+      })
+      if (!result.data || result.data.length === 0) {
+        archiveStartOffsetRef.current = result.earliestOffset
+        setShowLoadMore(result.earliestOffset > 0)
+        return
+      }
+
+      // Snapshot current xterm contents (visible viewport + in-memory scrollback)
+      // before clearing. Use serializeAddon so ANSI styling is preserved.
+      const currentSerialized = sa.serialize()
+      const addedLines = countNewlines(result.data)
+      totalLoadedLinesRef.current += addedLines
+
+      // Bump xterm scrollback so older + current fits without eviction.
+      t.options.scrollback = Math.max(t.options.scrollback ?? 1000, totalLoadedLinesRef.current + 200)
+
+      t.clear()
+      t.reset()
+      t.write('\x1b[0m')
+      t.write(result.data)
+      t.write('\x1b[0m')
+      t.write(currentSerialized)
+
+      archiveStartOffsetRef.current = result.earliestOffset
+      setShowLoadMore(result.earliestOffset > 0)
+
+      // Restore approximate scroll position so the user's previously-visible
+      // content stays in view (xterm defaults scroll to bottom after writes).
+      t.scrollLines(-addedLines)
+    } finally {
+      loadMoreInProgressRef.current = false
+      setLoadMoreBusy(false)
+    }
+  }, [sessionId, terminalArchiveStepLines, trpcClient])
 
   useImperativeHandle(ref, () => ({
     focus: () => terminalRef.current?.focus(),
@@ -436,7 +499,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         cursorBlink: false,
         fontSize: terminalFontSize,
         fontFamily: terminalFontFamily,
-        scrollback: terminalScrollback,
+        scrollback: Math.max(terminalScrollback, terminalArchiveInitialLines + 200),
         scrollOnEraseInDisplay: true,
         theme: resolvedTerminalTheme,
         minimumContrastRatio: resolvedTerminalVariant === 'light' ? 4.5 : 1,
@@ -541,23 +604,33 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (signal.aborted) return // Don't continue if unmounted
       let createCols = terminal.cols
       let createRows = terminal.rows
+      // Lazy-load archive tail BEFORE any branch logic. Covers both:
+      //  - hot reattach (PTY exists; archive holds full live history)
+      //  - cold restore after app restart (PTY map empty, but archive on disk
+      //    has prior session output that should still be visible).
+      // Setting lastRenderedSeqRef BEFORE writing closes the race where live
+      // `pty:data` chunks (sync-mirrored to the archive) would otherwise be
+      // double-written via the live subscription.
+      const snapshot = await trpcClient.pty.getHistorySnapshot.query({ sessionId, lineCount: terminalArchiveInitialLines })
+      if (signal.aborted) return
+      if (snapshot && snapshot.data.length > 0) {
+        lastRenderedSeqRef.current = snapshot.currentSeq
+        archiveStartOffsetRef.current = snapshot.earliestOffset
+        archiveTotalSizeRef.current = snapshot.totalSize
+        totalLoadedLinesRef.current = countNewlines(snapshot.data)
+        terminal.write('\x1b[0m')
+        terminal.write(snapshot.data)
+        terminal.write('\x1b[0m')
+        setShowLoadMore(snapshot.earliestOffset > 0)
+      } else {
+        lastRenderedSeqRef.current = snapshot?.currentSeq ?? -1
+      }
+
       if (exists) {
         // Sync state from main process (fixes stuck loading spinner)
         const actualState = await trpcClient.pty.getState.query({ sessionId })
         if (signal.aborted) return // Don't setState if unmounted
         if (actualState) setPtyState(actualState)
-
-        // Restore from backend buffer (single source of truth)
-        // Use getBufferSince with -1 to get all chunks
-        const result = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: -1 })
-        if (result && result.chunks.length > 0) {
-          terminal.write('\x1b[0m') // Reset ANSI state before buffer replay
-          for (const chunk of result.chunks) {
-            terminal.write(chunk.data)
-          }
-          terminal.write('\x1b[0m') // Reset ANSI state after buffer replay
-          lastRenderedSeqRef.current = result.currentSeq
-        }
       } else {
 
         // Generate conversation ID for AI modes whose initialCommand uses {id}.
@@ -674,7 +747,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         setIsInitializing(false)
       }
     }
-  }, [sessionId, cwd, mode, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart])
+  }, [sessionId, cwd, mode, resetTaskState, handleTerminalKeyEvent, clearBufferWithoutRestart, terminalArchiveInitialLines, terminalArchiveStepLines, trpcClient])
 
   // Initialize terminal
   useEffect(() => {
@@ -753,6 +826,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const unsubData = subscribe(sessionId, (data, seq) => {
       const cutoff = clearedSeqRef.current
       if (cutoff !== null && seq <= cutoff) return
+      // Skip chunks already covered by the initial archive snapshot replay.
+      // Archive writes are sync-mirrored to disk before pty:data fires, so any
+      // chunk with seq <= lastRenderedSeqRef is guaranteed to be in the tail
+      // we just wrote — re-writing here would duplicate output.
+      if (seq <= lastRenderedSeqRef.current) return
       if (!terminalRef.current) return
       pendingChunks.push(data)
       pendingSeq = seq
@@ -832,7 +910,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       fitAddonRef.current.fit()
       trpcClient.pty.resize.mutate({ sessionId, cols: terminalRef.current.cols, rows: terminalRef.current.rows })
     })
-  }, [sessionId])
+  }, [sessionId, trpcClient])
 
   // Safety net: prevent permanent 'starting' state after init completes.
   // If the backend dies or IPC events are lost, this watchdog transitions
@@ -930,11 +1008,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     fitAddonRef.current?.fit()
   }, [terminalFontFamily])
 
-  // Update scrollback buffer at runtime
+  // Update scrollback buffer at runtime. Floor at totalLoadedLines so archive
+  // content already pulled via "Load more" doesn't get evicted when the user
+  // tweaks the base setting downward.
   useEffect(() => {
     const t = terminalRef.current
     if (!t) return
-    t.options.scrollback = terminalScrollback
+    t.options.scrollback = Math.max(terminalScrollback, totalLoadedLinesRef.current + 200)
   }, [terminalScrollback])
 
   // Handle Ctrl+Shift+C/V at the DOM level for reliable copy/paste on Linux/Windows.
@@ -1185,6 +1265,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         onClick={() => terminalRef.current?.focus()}
       >
         <div ref={containerRef} className="h-full w-full overflow-hidden" />
+        {showLoadMore && !isLoading && (
+          <button
+            type="button"
+            onClick={() => void loadMoreHistory()}
+            disabled={loadMoreBusy}
+            className="absolute top-1.5 left-1/2 -translate-x-1/2 z-20 px-2.5 py-1 text-xs rounded-full bg-surface-2/90 hover:bg-accent text-muted-foreground hover:text-foreground border border-border backdrop-blur-sm transition-colors disabled:opacity-50"
+          >
+            {loadMoreBusy ? 'Loading…' : 'Load more'}
+          </button>
+        )}
         {isLoading && (
           <div className="absolute inset-0 z-10" style={{ backgroundColor: resolvedTerminalTheme.background ?? '#0a0a0a' }}>
             <PulseGrid />

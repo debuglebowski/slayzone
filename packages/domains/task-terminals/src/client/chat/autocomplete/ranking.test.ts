@@ -96,14 +96,31 @@ test('usage tiebreak — higher count beats alphabetical', () => {
   assertEqual(out[1].name, 'caveman-commit')
 })
 
-test('usage tiebreak — equal usage falls back to alphabetical', () => {
+test('exact name match wins over alphabetical tiebreak', () => {
+  // Equal usage. Without exact-match priority, alphabetical would put
+  // 'caveman-commit' first. Exact match for 'commit' overrides.
   const usage: Record<string, number> = { commit: 3, 'caveman-commit': 3 }
   const out = rankByName(pool, 'commit', {
     getName: (i) => i.name,
     getUsage: (i) => usage[i.name] ?? 0,
   })
-  assertEqual(out[0].name, 'caveman-commit')
-  assertEqual(out[1].name, 'commit')
+  assertEqual(out[0].name, 'commit')
+  assertEqual(out[1].name, 'caveman-commit')
+})
+
+test('exact match wins over higher usage of partial match', () => {
+  // Partial match has much higher usage; exact match still ranks first.
+  const usage: Record<string, number> = { commit: 0, 'caveman-commit': 100 }
+  const out = rankByName(pool, 'commit', {
+    getName: (i) => i.name,
+    getUsage: (i) => usage[i.name] ?? 0,
+  })
+  assertEqual(out[0].name, 'commit')
+})
+
+test('exact match priority is case-insensitive', () => {
+  const out = rankByName(pool, 'COMMIT', { getName: (i) => i.name })
+  assertEqual(out[0].name, 'commit')
 })
 
 test('empty query — usage outranks alphabetical', () => {
@@ -138,6 +155,18 @@ test('cross-source usage tiebreak applies across source boundaries', () => {
   const skills = makeSource('skills', [{ name: 'caveman-commit' }, { name: 'commit' }])
   const out = rankAcrossSources([skills], 'commit', (sourceId, name) => {
     if (sourceId === 'skills' && name === 'commit') return 10
+    return 0
+  })
+  assertEqual((out[0].item as NamedItem).name, 'commit')
+})
+
+test('cross-source exact match beats higher-usage partial match', () => {
+  // Skills has the exact match 'commit' with zero usage. Commands has 'commit-amend'
+  // (partial fuzzy match) with high usage. Exact match must still rank first.
+  const skills = makeSource('skills', [{ name: 'commit' }])
+  const commands = makeSource('commands', [{ name: 'commit-amend' }])
+  const out = rankAcrossSources([skills, commands], 'commit', (sourceId, name) => {
+    if (sourceId === 'commands' && name === 'commit-amend') return 100
     return 0
   })
   assertEqual((out[0].item as NamedItem).name, 'commit')

@@ -8,15 +8,15 @@ import { TrpcProvider, tryGetTrpcVanillaClient } from '@slayzone/transport/clien
 import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
-import { FloatingAgentPanel } from './components/agent-panel/FloatingAgentPanel'
 import { RemoteConfigScreen } from './components/RemoteConfigScreen'
+import { FloatingGlobalAgentPanel } from './components/global-agent-panel/FloatingGlobalAgentPanel'
 import { SecondaryTaskWindow } from './components/SecondaryTaskWindow'
 import { getDiagnosticsContext } from './lib/diagnosticsClient'
 import { ConvexAuthBootstrap } from './lib/convexAuth'
 import { MaybeProfiler } from './lib/perfProfiler'
 
 const params = new URLSearchParams(window.location.search)
-const isFloatingAgent = params.get('floating') === 'agent'
+const isFloatingGlobalAgentPanel = params.get('floating') === 'global-agent-panel'
 const taskWindowId = params.get('taskWindow')
 
 window.addEventListener('error', (event) => {
@@ -45,15 +45,28 @@ window.addEventListener('unhandledrejection', (event) => {
   }).catch(() => {})
 })
 
-// Floating agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
-if (isFloatingAgent) {
-  createRoot(document.getElementById('root')!).render(
-    <PtyProvider>
-      <ThemeProvider>
-        <FloatingAgentPanel />
-      </ThemeProvider>
-    </PtyProvider>
-  )
+// Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
+if (isFloatingGlobalAgentPanel) {
+  window.api.app.getServerUrl().then((server) => {
+    if (server.mode === 'remote' && !server.url) {
+      createRoot(document.getElementById('root')!).render(<RemoteConfigScreen initialUrl="" />)
+      return
+    }
+
+    const wid = window.api.app.windowId ?? ''
+    const trpcUrl = wid
+      ? `${server.url}${server.url.includes('?') ? '&' : '?'}windowId=${wid}`
+      : server.url
+    createRoot(document.getElementById('root')!).render(
+      <TrpcProvider url={trpcUrl}>
+        <PtyProvider>
+          <ThemeProvider>
+            <FloatingGlobalAgentPanel />
+          </ThemeProvider>
+        </PtyProvider>
+      </TrpcProvider>
+    )
+  })
 } else if (taskWindowId) {
   // Secondary task window: full TaskDetailPage scoped to one task. No tab store / sidebar.
   createRoot(document.getElementById('root')!).render(

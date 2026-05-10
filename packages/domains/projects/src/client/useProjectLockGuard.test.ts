@@ -123,6 +123,53 @@ describe('isScheduleLocked', () => {
     expect(isScheduleLocked(p)).toBeFalsy()
     clearLockOverrides(p.id)
   })
+
+  test('weekdays missing → behaves as all days active (back-compat)', () => {
+    const p = makeProject(newId(), { locked_until: null, rate_limit: null, schedule: activeSchedule() })
+    expect(isScheduleLocked(p)).toBeTruthy()
+  })
+
+  test('weekdays today=false → not locked even within time window', () => {
+    const today = new Date().getDay()
+    const weekdays = Array(7).fill(true)
+    weekdays[today] = false
+    const p = makeProject(newId(), {
+      locked_until: null,
+      rate_limit: null,
+      schedule: { ...activeSchedule(), weekdays },
+    })
+    expect(isScheduleLocked(p)).toBeFalsy()
+  })
+
+  test('weekdays today=true → locked within time window', () => {
+    const today = new Date().getDay()
+    const weekdays = Array(7).fill(false)
+    weekdays[today] = true
+    const p = makeProject(newId(), {
+      locked_until: null,
+      rate_limit: null,
+      schedule: { ...activeSchedule(), weekdays },
+    })
+    expect(isScheduleLocked(p)).toBeTruthy()
+  })
+
+  test('weekdays all-false → never locked', () => {
+    const p = makeProject(newId(), {
+      locked_until: null,
+      rate_limit: null,
+      schedule: { ...activeSchedule(), weekdays: Array(7).fill(false) },
+    })
+    expect(isScheduleLocked(p)).toBeFalsy()
+  })
+
+  test('weekdays length != 7 → behaves as missing (back-compat)', () => {
+    const p = makeProject(newId(), {
+      locked_until: null,
+      rate_limit: null,
+      schedule: { ...activeSchedule(), weekdays: [true, true] },
+    })
+    expect(isScheduleLocked(p)).toBeTruthy()
+  })
 })
 
 describe('hasActiveLockOverride', () => {

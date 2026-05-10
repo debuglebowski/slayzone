@@ -1,7 +1,8 @@
 /**
- * Fuzzy ranking via fzf — name matches outrank description matches. Tiebreak chain:
- * fzf score desc → usage count desc → alphabetical asc. Shared by skills / commands
- * / agents / builtins.
+ * Fuzzy ranking via fzf — exact name matches always outrank everything; then name
+ * matches outrank description matches. Tiebreak chain: exact-name first → fzf score
+ * desc → usage count desc → alphabetical asc. Shared by skills / commands / agents
+ * / builtins.
  */
 import { Fzf } from 'fzf'
 import type { AutocompleteSource } from './types'
@@ -17,6 +18,10 @@ export interface RankAccessors<Item> {
 function makeFzf<T>(items: T[], selector: (t: T) => string): Fzf<readonly T[]> {
   type AnyCtor = new (list: readonly T[], opts: unknown) => Fzf<readonly T[]>
   return new (Fzf as unknown as AnyCtor)(items, { selector, casing: 'case-insensitive' })
+}
+
+function isExactMatch(name: string, query: string): boolean {
+  return name.toLowerCase() === query.toLowerCase()
 }
 
 export function rankByName<Item>(
@@ -38,20 +43,22 @@ export function rankByName<Item>(
   const nameHits = makeFzf(items, getName).find(query)
   const matched = new Set<Item>(nameHits.map((h) => h.item))
 
-  const merged: { item: Item; score: number }[] = nameHits.map((h) => ({
+  const merged: { item: Item; score: number; exact: boolean }[] = nameHits.map((h) => ({
     item: h.item,
     score: h.score,
+    exact: isExactMatch(getName(h.item), query),
   }))
 
   if (getDescription) {
     const pool = items.filter((i) => !matched.has(i))
     for (const h of makeFzf(pool, getDescription).find(query)) {
-      merged.push({ item: h.item, score: 0 })
+      merged.push({ item: h.item, score: 0, exact: false })
     }
   }
 
   merged.sort(
     (a, b) =>
+      Number(b.exact) - Number(a.exact) ||
       b.score - a.score ||
       usage(b.item) - usage(a.item) ||
       getName(a.item).localeCompare(getName(b.item))
@@ -116,16 +123,18 @@ export function rankAcrossSources(
   } else {
     const nameHits = makeFzf(universe, (u) => u.name).find(query)
     const matched = new Set<U>(nameHits.map((h) => h.item))
-    const merged: { entry: U; score: number }[] = nameHits.map((h) => ({
+    const merged: { entry: U; score: number; exact: boolean }[] = nameHits.map((h) => ({
       entry: h.item,
       score: h.score,
+      exact: isExactMatch(h.item.name, query),
     }))
     const pool = universe.filter((e) => !matched.has(e) && e.description)
     for (const h of makeFzf(pool, (e) => e.description).find(query)) {
-      merged.push({ entry: h.item, score: 0 })
+      merged.push({ entry: h.item, score: 0, exact: false })
     }
     merged.sort(
       (a, b) =>
+        Number(b.exact) - Number(a.exact) ||
         b.score - a.score ||
         u(b.entry) - u(a.entry) ||
         a.entry.name.localeCompare(b.entry.name)

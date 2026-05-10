@@ -169,10 +169,10 @@ export const appLevelRouter = router({
       getAppDeps().menuEvents.on('go-home', h)
       return () => getAppDeps().menuEvents.off('go-home', h)
     })),
-    onToggleAgentPanel: publicProcedure.subscription(() => observable<void>((emit) => {
+    onToggleGlobalAgentPanel: publicProcedure.subscription(() => observable<void>((emit) => {
       const h = () => emit.next()
-      getAppDeps().menuEvents.on('toggle-agent-panel', h)
-      return () => getAppDeps().menuEvents.off('toggle-agent-panel', h)
+      getAppDeps().menuEvents.on('toggle-global-agent-panel', h)
+      return () => getAppDeps().menuEvents.off('toggle-global-agent-panel', h)
     })),
     onToggleAgentStatusPanel: publicProcedure.subscription(() => observable<void>((emit) => {
       const h = () => emit.next()
@@ -441,39 +441,39 @@ export const appLevelRouter = router({
     })),
   }),
 
-  // Floating agent
-  floatingAgent: router({
+  // Floating global agent panel
+  floatingGlobalAgentPanel: router({
     setEnabled: publicProcedure.input(z.object({ enabled: z.boolean() })).mutation(({ input }) =>
-      getAppDeps().floatingAgent.setEnabled(input.enabled),
+      getAppDeps().floatingGlobalAgentPanel.setEnabled(input.enabled),
     ),
     setSessionId: publicProcedure.input(z.object({ sessionId: z.string().nullable() })).mutation(({ input }) =>
-      getAppDeps().floatingAgent.setSessionId(input.sessionId),
+      getAppDeps().floatingGlobalAgentPanel.setSessionId(input.sessionId),
     ),
     setPanelOpen: publicProcedure.input(z.object({ isOpen: z.boolean() })).mutation(({ input }) =>
-      getAppDeps().floatingAgent.setPanelOpen(input.isOpen),
+      getAppDeps().floatingGlobalAgentPanel.setPanelOpen(input.isOpen),
     ),
-    toggleCollapse: publicProcedure.mutation(() => getAppDeps().floatingAgent.toggleCollapse()),
-    resetSize: publicProcedure.mutation(() => getAppDeps().floatingAgent.resetSize()),
-    detach: publicProcedure.mutation(() => getAppDeps().floatingAgent.detach()),
-    reattach: publicProcedure.mutation(() => getAppDeps().floatingAgent.reattach()),
-    getState: publicProcedure.query(() => getAppDeps().floatingAgent.getState()),
-    getSession: publicProcedure.query(() => getAppDeps().floatingAgent.getSession()),
-    getConfig: publicProcedure.query(() => getAppDeps().floatingAgent.getConfig()),
+    toggleCollapse: publicProcedure.mutation(() => getAppDeps().floatingGlobalAgentPanel.toggleCollapse()),
+    resetSize: publicProcedure.mutation(() => getAppDeps().floatingGlobalAgentPanel.resetSize()),
+    detach: publicProcedure.mutation(() => getAppDeps().floatingGlobalAgentPanel.detach()),
+    reattach: publicProcedure.mutation(() => getAppDeps().floatingGlobalAgentPanel.reattach()),
+    getState: publicProcedure.query(() => getAppDeps().floatingGlobalAgentPanel.getState()),
+    getSession: publicProcedure.query(() => getAppDeps().floatingGlobalAgentPanel.getSession()),
+    getConfig: publicProcedure.query(() => getAppDeps().floatingGlobalAgentPanel.getConfig()),
     onState: publicProcedure.subscription(() => observable<unknown>((emit) => {
       const handler = (payload: unknown) => emit.next(payload)
-      const ev = getAppDeps().floatingAgent.events
+      const ev = getAppDeps().floatingGlobalAgentPanel.events
       ev.on('state', handler)
       return () => ev.off('state', handler)
     })),
     onSessionChanged: publicProcedure.subscription(() => observable<void>((emit) => {
       const handler = () => emit.next()
-      const ev = getAppDeps().floatingAgent.events
+      const ev = getAppDeps().floatingGlobalAgentPanel.events
       ev.on('session-changed', handler)
       return () => ev.off('session-changed', handler)
     })),
     onCollapseChanged: publicProcedure.subscription(() => observable<{ collapsed: boolean }>((emit) => {
       const handler = (collapsed: boolean) => emit.next({ collapsed })
-      const ev = getAppDeps().floatingAgent.events
+      const ev = getAppDeps().floatingGlobalAgentPanel.events
       ev.on('collapse-changed', handler)
       return () => ev.off('collapse-changed', handler)
     })),

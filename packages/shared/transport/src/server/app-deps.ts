@@ -80,7 +80,7 @@ export type AppDeps = {
   // Native-menu / app shortcut events dispatched to renderer
   menuEvents: EventEmitter & {
     on(event: 'go-home', listener: () => void): EventEmitter
-    on(event: 'toggle-agent-panel', listener: () => void): EventEmitter
+    on(event: 'toggle-global-agent-panel', listener: () => void): EventEmitter
     on(event: 'toggle-agent-status-panel', listener: () => void): EventEmitter
     on(event: 'open-settings', listener: () => void): EventEmitter
     on(event: 'open-project-settings', listener: () => void): EventEmitter
@@ -159,7 +159,7 @@ export type AppDeps = {
       off(event: string, listener: (...args: unknown[]) => void): EventEmitter
     }
   }
-  floatingAgent: {
+  floatingGlobalAgentPanel: {
     setEnabled: (enabled: boolean) => unknown
     setSessionId: (sessionId: string | null) => unknown
     setPanelOpen: (isOpen: boolean) => unknown

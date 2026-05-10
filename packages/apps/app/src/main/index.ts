@@ -122,11 +122,11 @@ import { getSetting } from '@slayzone/settings/server'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
-import { createPtyOps, ptyEvents, buildUsageOps, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, createChatOps, createChatQueueOps, chatEvents, chatQueueEvents, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes } from '@slayzone/terminal/electron'
+import { createPtyOps, ptyEvents, buildUsageOps, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, createChatOps, createChatQueueOps, chatEvents, chatQueueEvents, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners, sweepScrollbackOrphans } from '@slayzone/terminal/electron'
 import { setDatabase } from '@slayzone/terminal/electron'
 import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalModes } from '@slayzone/terminal/server'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
-import { attachFloatingAgent, setupFloatingAgent, floatingAgentOps, floatingAgentEvents } from './floating-agent'
+import { attachFloatingGlobalAgentPanel, setupFloatingGlobalAgentPanel, floatingGlobalAgentPanelOps, floatingGlobalAgentPanelEvents } from './floating-global-agent-panel'
 import { attachTaskWindows, setupTaskWindows, taskWindowsOps, taskWindowsEvents } from './task-windows'
 import { closeGitWatcher } from '@slayzone/worktrees/server'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
@@ -711,8 +711,8 @@ function createMainWindow(): void {
     return { action: 'deny' }
   })
 
-  // Floating agent panel: register main window with state machine adapter
-  attachFloatingAgent(mainWindow)
+  // Floating global agent panel: register main window with state machine adapter
+  attachFloatingGlobalAgentPanel(mainWindow)
   attachTaskWindows(mainWindow)
 
   mainWindow.on('closed', () => {
@@ -792,9 +792,9 @@ function createMainWindow(): void {
       menuEvents.emit('reload-app')
     }
 
-    if (matchesElectronInput(ei, getEffectiveKeys('agent-panel', currentOverrides))) {
+    if (matchesElectronInput(ei, getEffectiveKeys('global-agent-panel', currentOverrides))) {
       event.preventDefault()
-      menuEvents.emit('toggle-agent-panel')
+      menuEvents.emit('toggle-global-agent-panel')
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('agent-status-panel', currentOverrides))) {
@@ -1205,7 +1205,6 @@ app.whenReady().then(async () => {
   startArtifactWatcher(join(getDataRoot(), 'artifacts'))
   logBoot('artifact watcher started')
 
-
   wireNativeThemeBridge()
   setDatabase(db)
   syncTerminalModes(db)
@@ -1214,18 +1213,37 @@ app.whenReady().then(async () => {
     events: ptyEvents,
   })
   logBoot('pty ops wired into tRPC')
-  setupFloatingAgent(() => currentOverrides)
+
+  // Sweep orphan scrollback archives whose task or tab no longer exists.
+  // Runs once at startup; cheap (single readdir per task).
+  void sweepScrollbackOrphans(
+    (taskId) => {
+      try {
+        const row = db.prepare('SELECT 1 FROM tasks WHERE id = ? AND deleted_at IS NULL').get(taskId)
+        return !!row
+      } catch { return true }
+    },
+    (taskId, tabId) => {
+      try {
+        const row = db.prepare('SELECT 1 FROM terminal_tabs WHERE id = ? AND task_id = ?').get(tabId, taskId)
+        return !!row
+      } catch { return true }
+    },
+  )
+  setupFloatingGlobalAgentPanel(() => currentOverrides)
   setupTaskWindows()
-  logBoot('floating agent + task windows set up')
+  logBoot('floating global agent panel + task windows set up')
 
   // Task automation: auto-move tasks on terminal state change
   onGlobalStateChange((sessionId, newState, oldState) => {
     handleTerminalStateChange(db, sessionId, newState, oldState, notifyTasksChanged, onTaskReachedTerminal)
 
-    // Attention flag: PTY just finished a turn (running → idle|error). Renderer
-    // clears the flag when the user focuses the task tab.
+    // Attention flag: PTY just finished a turn (running → idle|error). Gated
+    // on hasSessionUserInput so that initial spawn/banner settle (which can
+    // trigger running → idle on auto-respawn after task open) does not flag
+    // the task. Renderer clears the flag when the user focuses the task tab.
     try {
-      if (handleAttentionTransition(db, sessionId, newState, oldState)) {
+      if (handleAttentionTransition(db, sessionId, newState, oldState, hasSessionUserInput(sessionId))) {
         notifyTasksChanged()
       }
     } catch (err) {
@@ -1238,6 +1256,9 @@ app.whenReady().then(async () => {
     ;(globalThis as Record<string, unknown>).__db = db
     ;(globalThis as Record<string, unknown>).__spawnProcess = spawnProcess
     // __restorePtyHandlers removed — tRPC procedures don't need re-registration.
+    ;(globalThis as Record<string, unknown>).__notifyPtyState = notifyGlobalStateListeners
+    ;(globalThis as Record<string, unknown>).__markSessionUserInput = markSessionUserInput
+    ;(globalThis as Record<string, unknown>).__clearSessionUserInputMark = clearSessionUserInputMark
   }
 
   setOnTaskReachedTerminalHandler(electronOnTaskReachedTerminal)
@@ -1536,9 +1557,9 @@ app.whenReady().then(async () => {
       },
       events: browserViewEvents,
     },
-    floatingAgent: {
-      ...floatingAgentOps,
-      events: floatingAgentEvents,
+    floatingGlobalAgentPanel: {
+      ...floatingGlobalAgentPanelOps,
+      events: floatingGlobalAgentPanelEvents,
     },
     taskWindows: {
       ...taskWindowsOps,

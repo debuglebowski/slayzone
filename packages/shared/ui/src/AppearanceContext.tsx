@@ -19,6 +19,9 @@ export interface AppearanceSettings {
   // Terminal
   terminalFontFamily: string
   terminalScrollback: number
+  terminalArchiveCapMb: number
+  terminalArchiveInitialLines: number
+  terminalArchiveStepLines: number
   // Diff
   diffContextLines: '0' | '3' | '5' | 'all'
   diffIgnoreWhitespace: boolean
@@ -60,6 +63,9 @@ export const appearanceDefaults: AppearanceSettings = {
   editorRenderWhitespace: 'none',
   terminalFontFamily: 'Menlo, Monaco, "Courier New", monospace',
   terminalScrollback: 5000,
+  terminalArchiveCapMb: 10,
+  terminalArchiveInitialLines: 1000,
+  terminalArchiveStepLines: 1000,
   diffContextLines: '3',
   diffIgnoreWhitespace: false,
   diffContinuousFlow: false,

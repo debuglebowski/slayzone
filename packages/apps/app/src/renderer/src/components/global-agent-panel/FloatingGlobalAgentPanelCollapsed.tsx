@@ -18,7 +18,7 @@ const STATUS_MAP: Record<TerminalState, { color: string; pulse: boolean; text: s
   dead:      { color: '#666',    pulse: false, text: 'session ended' },
 }
 
-export function FloatingAgentCollapsed({ state, onExpand, onResetSize, onClose, showClose, showReset }: Props) {
+export function FloatingGlobalAgentPanelCollapsed({ state, onExpand, onResetSize, onClose, showClose, showReset }: Props) {
   const status = STATUS_MAP[state] ?? STATUS_MAP.dead
 
   return (
@@ -32,7 +32,7 @@ export function FloatingAgentCollapsed({ state, onExpand, onResetSize, onClose, 
           className={`w-2.5 h-2.5 rounded-full shrink-0${status.pulse ? ' animate-pulse' : ''}`}
           style={{ backgroundColor: status.color }}
         />
-        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest leading-none">Agent</span>
+        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest leading-none">Global Agent</span>
         <div className="ml-auto flex items-center gap-0.5">
           {showReset && (
             <button

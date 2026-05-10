@@ -6,8 +6,8 @@ import { Frame, X } from 'lucide-react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { usePty } from '@slayzone/terminal/client'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
-import { FloatingAgentCollapsed } from './FloatingAgentCollapsed'
-import { FloatingAgentCollapsedIcon } from './FloatingAgentCollapsedIcon'
+import { FloatingGlobalAgentPanelCollapsed } from './FloatingGlobalAgentPanelCollapsed'
+import { FloatingGlobalAgentPanelCollapsedIcon } from './FloatingGlobalAgentPanelCollapsedIcon'
 
 interface FloatingSession {
   sessionId: string
@@ -15,21 +15,21 @@ interface FloatingSession {
   mode: TerminalMode
 }
 
-export function FloatingAgentPanel() {
+export function FloatingGlobalAgentPanel() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
-  const sessionQuery = useQuery(trpc.app.floatingAgent.getSession.queryOptions())
+  const sessionQuery = useQuery(trpc.app.floatingGlobalAgentPanel.getSession.queryOptions())
   const sessionData = sessionQuery.data as unknown as { sessionId: string; cwd: string; mode: string } | null | undefined
   const session: FloatingSession | null = sessionData
     ? { sessionId: sessionData.sessionId, cwd: sessionData.cwd, mode: sessionData.mode as TerminalMode }
     : null
 
-  const configQuery = useQuery(trpc.app.floatingAgent.getConfig.queryOptions())
+  const configQuery = useQuery(trpc.app.floatingGlobalAgentPanel.getConfig.queryOptions())
   const configData = configQuery.data as unknown as { style?: string } | null | undefined
   const style: 'widget' | 'icon' = (configData?.style as 'widget' | 'icon') ?? 'widget'
 
-  const stateQuery = useQuery(trpc.app.floatingAgent.getState.queryOptions())
+  const stateQuery = useQuery(trpc.app.floatingGlobalAgentPanel.getState.queryOptions())
   const stateData = stateQuery.data as unknown as { mode?: 'auto' | 'manual' | null; hasCustomSize?: boolean } | null | undefined
   const detachMode: 'auto' | 'manual' | null = stateData?.mode ?? null
   const hasCustomSize: boolean = !!stateData?.hasCustomSize
@@ -41,17 +41,17 @@ export function FloatingAgentPanel() {
 
   // Re-fetch session + config when the server fires onSessionChanged.
   useSubscription(
-    trpc.app.floatingAgent.onSessionChanged.subscriptionOptions(undefined, {
+    trpc.app.floatingGlobalAgentPanel.onSessionChanged.subscriptionOptions(undefined, {
       onData: () => {
-        queryClient.invalidateQueries({ queryKey: trpc.app.floatingAgent.getSession.queryKey() })
-        queryClient.invalidateQueries({ queryKey: trpc.app.floatingAgent.getConfig.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.app.floatingGlobalAgentPanel.getSession.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.app.floatingGlobalAgentPanel.getConfig.queryKey() })
       },
     }),
   )
 
   // Collapse state is owned by the main process (drives window resizing). Mirror to local state.
   useSubscription(
-    trpc.app.floatingAgent.onCollapseChanged.subscriptionOptions(undefined, {
+    trpc.app.floatingGlobalAgentPanel.onCollapseChanged.subscriptionOptions(undefined, {
       onData: ({ collapsed: c }) => {
         setCollapsed(c)
         if (c) {
@@ -65,9 +65,9 @@ export function FloatingAgentPanel() {
 
   // Detach state changes invalidate the cached state query.
   useSubscription(
-    trpc.app.floatingAgent.onState.subscriptionOptions(undefined, {
+    trpc.app.floatingGlobalAgentPanel.onState.subscriptionOptions(undefined, {
       onData: () => {
-        queryClient.invalidateQueries({ queryKey: trpc.app.floatingAgent.getState.queryKey() })
+        queryClient.invalidateQueries({ queryKey: trpc.app.floatingGlobalAgentPanel.getState.queryKey() })
       },
     }),
   )
@@ -87,9 +87,9 @@ export function FloatingAgentPanel() {
     })
   }, [session, getState, subscribeState, queryClient, trpc])
 
-  const toggleCollapse = useMutation(trpc.app.floatingAgent.toggleCollapse.mutationOptions())
-  const resetSize = useMutation(trpc.app.floatingAgent.resetSize.mutationOptions())
-  const reattach = useMutation(trpc.app.floatingAgent.reattach.mutationOptions())
+  const toggleCollapse = useMutation(trpc.app.floatingGlobalAgentPanel.toggleCollapse.mutationOptions())
+  const resetSize = useMutation(trpc.app.floatingGlobalAgentPanel.resetSize.mutationOptions())
+  const reattach = useMutation(trpc.app.floatingGlobalAgentPanel.reattach.mutationOptions())
 
   const handleToggle = useCallback(() => { toggleCollapse.mutate() }, [toggleCollapse])
   const handleResetSize = useCallback(() => { resetSize.mutate() }, [resetSize])
@@ -100,9 +100,9 @@ export function FloatingAgentPanel() {
 
   if (collapsed) {
     if (style === 'icon') {
-      return <FloatingAgentCollapsedIcon state={terminalState} onExpand={handleToggle} />
+      return <FloatingGlobalAgentPanelCollapsedIcon state={terminalState} onExpand={handleToggle} />
     }
-    return <FloatingAgentCollapsed state={terminalState} onExpand={handleToggle} onResetSize={handleResetSize} onClose={handleClose} showClose={showClose} showReset={showReset} />
+    return <FloatingGlobalAgentPanelCollapsed state={terminalState} onExpand={handleToggle} onResetSize={handleResetSize} onClose={handleClose} showClose={showClose} showReset={showReset} />
   }
 
   return (
@@ -111,7 +111,7 @@ export function FloatingAgentPanel() {
         className="shrink-0 h-7 flex items-center justify-between px-3 bg-surface-1 border-b border-border select-none"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Agent</span>
+        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Global Agent</span>
         <div className="flex items-center gap-0.5">
           {showReset && (
             <button

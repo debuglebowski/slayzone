@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, GitBranch, Home, Pin, Power, Search, Settings, X } from 'lucide-react'
+import { BookOpen, ChevronDown, Clock, GitBranch, Home, Pin, Plus, Power, Search, Settings, X } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import { cn, TerminalProgressDot, PriorityIcon, getColumnStatusStyle, TASK_STATUS_ORDER, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from '@slayzone/ui'
 import { type Task } from '@slayzone/task/shared'
 import { useDialogStore, useTabStore } from '@slayzone/settings'
 import { useFilterStateMap, sortTasks, getViewConfig } from '@slayzone/tasks'
 import { useActiveSessionTaskIds } from '@/components/agent-status/useIdleTasks'
+import { TreeDisplaySettings } from '../TreeDisplaySettings'
 import type { SidebarViewContext } from './types'
 
 // Tree guide layout (mirrors EditorToc / ManagerSidebar).
@@ -306,6 +307,11 @@ export function TreeView({
           >
             {task.title || 'Untitled'}
           </span>
+          {task.needs_attention && (
+            <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+              Attention
+            </span>
+          )}
           {treeShowWorktree && task.worktree_path && (
             <GitBranch
               aria-label="Worktree"
@@ -393,34 +399,47 @@ export function TreeView({
     if (!treeGroupByStatus) {
       return rootTasks.map((task, i) => renderTask(task, 1, [i < rootTasks.length - 1]))
     }
+    const tempTasks: Task[] = []
+    const persistentTasks: Task[] = []
+    for (const t of rootTasks) {
+      if (t.is_temporary) tempTasks.push(t)
+      else persistentTasks.push(t)
+    }
     const cols = columnsByProjectId?.get(projectId) ?? null
     const order: string[] = cols
       ? [...cols].sort((a, b) => a.position - b.position).map((c) => c.id)
       : [...TASK_STATUS_ORDER]
     const byStatus = new Map<string, Task[]>()
-    for (const t of rootTasks) {
+    for (const t of persistentTasks) {
       const arr = byStatus.get(t.status) ?? []
       arr.push(t)
       byStatus.set(t.status, arr)
     }
-    const groups: { status: string; tasks: Task[] }[] = []
+    type Group = { key: string; label: string; icon: typeof Clock | null; iconClass?: string; tasks: Task[] }
+    const groups: Group[] = []
+    if (tempTasks.length > 0) {
+      groups.push({ key: '__temporary__', label: 'Temporary', icon: Clock, iconClass: 'text-muted-foreground/60', tasks: tempTasks })
+    }
     for (const s of order) {
       const arr = byStatus.get(s)
-      if (arr && arr.length > 0) groups.push({ status: s, tasks: arr })
+      if (!arr || arr.length === 0) continue
+      const style = getColumnStatusStyle(s, cols)
+      groups.push({ key: s, label: style?.label ?? s, icon: style?.icon ?? null, iconClass: style?.iconClass, tasks: arr })
     }
     for (const [s, arr] of byStatus) {
-      if (!order.includes(s)) groups.push({ status: s, tasks: arr })
+      if (order.includes(s)) continue
+      const style = getColumnStatusStyle(s, cols)
+      groups.push({ key: s, label: style?.label ?? s, icon: style?.icon ?? null, iconClass: style?.iconClass, tasks: arr })
     }
     const showLabel = groups.length > 1
     return groups.map((g) => {
-      const style = getColumnStatusStyle(g.status, cols)
-      const StatusIcon = style?.icon
+      const Icon = g.icon
       return (
-        <div key={g.status}>
+        <div key={g.key}>
           {showLabel && (
             <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              {StatusIcon && <StatusIcon className={cn('size-3', style?.iconClass)} />}
-              <span>{style?.label ?? g.status}</span>
+              {Icon && <Icon className={cn('size-3', g.iconClass)} />}
+              <span>{g.label}</span>
             </div>
           )}
           {g.tasks.map((task, i) => renderTask(task, 1, [i < g.tasks.length - 1]))}
@@ -433,6 +452,13 @@ export function TreeView({
     const projectTasks = tasksByProject.get(project.id) ?? []
     const rootTasks = rootTasksByProject.get(project.id) ?? []
     const isOpen = openProjects[project.id] ?? false
+    const isContextActive = selectedProjectId === project.id && activeView === 'context'
+    const isHomeActive =
+      selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
+    const anyActive = isHomeActive || isContextActive
+    const visClasses = anyActive
+      ? 'opacity-100'
+      : 'opacity-0 group-hover/projectrow:opacity-100 focus-visible:opacity-100'
 
     return (
       <Collapsible.Root
@@ -470,15 +496,41 @@ export function TreeView({
             type="button"
             onClick={() => onSelectProject(project.id)}
             aria-label={`Open ${project.name} home`}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground opacity-0 group-hover/projectrow:opacity-100 focus-visible:opacity-100 transition-[color,opacity]"
+            className={cn(
+              'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,opacity,background-color]',
+              visClasses,
+              isHomeActive
+                ? 'bg-foreground text-background shadow-sm hover:bg-foreground/90'
+                : 'text-muted-foreground/70 hover:text-foreground'
+            )}
           >
             <Home className="size-3.5" />
           </button>
           <button
             type="button"
+            onClick={() => {
+              useTabStore.getState().setSelectedProjectId(project.id)
+              useTabStore.getState().setActiveView('context')
+            }}
+            aria-label={`Context Manager for ${project.name}`}
+            className={cn(
+              'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,opacity,background-color]',
+              visClasses,
+              isContextActive
+                ? 'bg-foreground text-background shadow-sm hover:bg-foreground/90'
+                : 'text-muted-foreground/70 hover:text-foreground'
+            )}
+          >
+            <BookOpen className="size-3.5" />
+          </button>
+          <button
+            type="button"
             onClick={() => onProjectSettings(project)}
             aria-label={`Settings for ${project.name}`}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground opacity-0 group-hover/projectrow:opacity-100 focus-visible:opacity-100 transition-[color,opacity] mr-0.5"
+            className={cn(
+              'inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:text-foreground transition-[color,opacity] mr-0.5',
+              visClasses
+            )}
           >
             <Settings className="size-3.5" />
           </button>
@@ -516,6 +568,21 @@ export function TreeView({
             <span className="shrink-0 text-[10px] text-muted-foreground/50">{searchShortcut}</span>
           )}
         </button>
+      </div>
+      <div className="flex items-end justify-between gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+        <span className="leading-none pb-1">Projects</span>
+        <div className="flex items-end gap-1">
+          <TreeDisplaySettings />
+          <button
+            type="button"
+            aria-label="Add project"
+            title="Add project"
+            onClick={() => useDialogStore.getState().openCreateProject()}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+          >
+            <Plus className="size-3.5" />
+          </button>
+        </div>
       </div>
       {visibleProjects.map(renderProject)}
       {hiddenProjects.length > 0 && (

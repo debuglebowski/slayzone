@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { ChevronRight, Cpu, FileCode, GitCompare, Globe, GripVertical, Paperclip, Plus, Settings2, SquareTerminal, Trash2 } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -38,6 +38,7 @@ interface PanelRowDescriptor {
 
 const PANEL_SETTING_KEYS = [
   'panel_config', 'terminal_font_family', 'terminal_scrollback',
+  'terminal_archive_cap_mb', 'terminal_archive_initial_lines', 'terminal_archive_step_lines',
   'editor_word_wrap', 'editor_render_whitespace', 'editor_tab_size', 'editor_indent_tabs',
   'diff_context_lines', 'diff_ignore_whitespace', 'diff_continuous_flow',
   'diff_tree_collapsed', 'diff_side_by_side', 'diff_wrap',
@@ -214,6 +215,7 @@ function SortablePanelRow({ id, descriptor }: { id: string; descriptor: PanelRow
 
 export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTerminalMode, onDefaultTerminalModeChange, defaultTabDisplayMode, onDefaultTabDisplayModeChange, providerSupportsChat }: PanelsSettingsTabProps) {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   const setSetting = useSetSettingMutation()
   const s = useSettings(PANEL_SETTING_KEYS)
@@ -222,7 +224,6 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-
   // Derived from cache
   const panelConfig = useMemo<PanelConfig>(() => {
     if (!s.panel_config) return DEFAULT_PANEL_CONFIG
@@ -285,12 +286,18 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
   // Local drafts for text inputs with onBlur-write semantics
   const [draftTermFontFamily, setDraftTermFontFamily] = useState<string | null>(null)
   const [draftTermScrollback, setDraftTermScrollback] = useState<string | null>(null)
+  const [draftTerminalArchiveCapMb, setDraftTerminalArchiveCapMb] = useState<string | null>(null)
+  const [draftTerminalArchiveInitialLines, setDraftTerminalArchiveInitialLines] = useState<string | null>(null)
+  const [draftTerminalArchiveStepLines, setDraftTerminalArchiveStepLines] = useState<string | null>(null)
   const [draftBrowserUrl, setDraftBrowserUrl] = useState<string | null>(null)
   const [draftBrowserZoom, setDraftBrowserZoom] = useState<string | null>(null)
   const [draftBrowserDevices, setDraftBrowserDevices] = useState<typeof browserDevices | null>(null)
 
   const liveTermFontFamily = draftTermFontFamily ?? s.terminal_font_family ?? 'Menlo, Monaco, "Courier New", monospace'
   const liveTermScrollback = draftTermScrollback ?? s.terminal_scrollback ?? '5000'
+  const liveTerminalArchiveCapMb = draftTerminalArchiveCapMb ?? s.terminal_archive_cap_mb ?? '10'
+  const liveTerminalArchiveInitialLines = draftTerminalArchiveInitialLines ?? s.terminal_archive_initial_lines ?? '1000'
+  const liveTerminalArchiveStepLines = draftTerminalArchiveStepLines ?? s.terminal_archive_step_lines ?? '1000'
   const liveBrowserUrl = draftBrowserUrl ?? s.browser_default_url ?? ''
   const liveBrowserZoom = draftBrowserZoom ?? s.browser_default_zoom ?? '100'
   const liveBrowserDevices = draftBrowserDevices ?? browserDevices
@@ -583,6 +590,61 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
                   if (n >= 0) setSetting.mutate({ key: 'terminal_scrollback', value: String(n) }, { onSuccess: () => setDraftTermScrollback(null) })
                   else setDraftTermScrollback(null)
                 }
+              }}
+            />
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Max scrollback file (MB)</span>
+            <Input
+              className="max-w-32"
+              type="number"
+              min={1}
+              value={liveTerminalArchiveCapMb}
+              onChange={(e) => setDraftTerminalArchiveCapMb(e.target.value)}
+              onBlur={() => {
+                if (draftTerminalArchiveCapMb === null) return
+                const n = parseInt(draftTerminalArchiveCapMb, 10)
+                if (n >= 1) {
+                  setSetting.mutate(
+                    { key: 'terminal_archive_cap_mb', value: String(n) },
+                    { onSuccess: () => setDraftTerminalArchiveCapMb(null) },
+                  )
+                  void trpcClient.pty.setArchiveCapMb.mutate({ mb: n })
+                } else {
+                  setDraftTerminalArchiveCapMb(null)
+                }
+              }}
+            />
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Lines on tab open</span>
+            <Input
+              className="max-w-32"
+              type="number"
+              min={50}
+              value={liveTerminalArchiveInitialLines}
+              onChange={(e) => setDraftTerminalArchiveInitialLines(e.target.value)}
+              onBlur={() => {
+                if (draftTerminalArchiveInitialLines === null) return
+                const n = parseInt(draftTerminalArchiveInitialLines, 10)
+                if (n >= 50) setSetting.mutate({ key: 'terminal_archive_initial_lines', value: String(n) }, { onSuccess: () => setDraftTerminalArchiveInitialLines(null) })
+                else setDraftTerminalArchiveInitialLines(null)
+              }}
+            />
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Lines per Load more</span>
+            <Input
+              className="max-w-32"
+              type="number"
+              min={50}
+              value={liveTerminalArchiveStepLines}
+              onChange={(e) => setDraftTerminalArchiveStepLines(e.target.value)}
+              onBlur={() => {
+                if (draftTerminalArchiveStepLines === null) return
+                const n = parseInt(draftTerminalArchiveStepLines, 10)
+                if (n >= 50) setSetting.mutate({ key: 'terminal_archive_step_lines', value: String(n) }, { onSuccess: () => setDraftTerminalArchiveStepLines(null) })
+                else setDraftTerminalArchiveStepLines(null)
               }}
             />
           </div>

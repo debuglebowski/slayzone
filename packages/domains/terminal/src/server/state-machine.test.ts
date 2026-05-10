@@ -239,25 +239,39 @@ test('working → running', () => {
   expect(activityToTerminalState('working')).toBe('running')
 })
 
+test('idle → idle (explicit done-signal from adapter)', () => {
+  expect(activityToTerminalState('idle')).toBe('idle')
+})
+
 test('unknown → null', () => {
   expect(activityToTerminalState('unknown')).toBe(null)
 })
 
 console.log('\nshouldRefreshIdleClock\n')
 
-test('TUI default (undefined): refresh ONLY on detected activity', () => {
+test('TUI default (undefined): refresh ONLY on detected working', () => {
   expect(shouldRefreshIdleClock({}, 'working')).toBe(true)
+  expect(shouldRefreshIdleClock({}, 'idle')).toBe(false)
   expect(shouldRefreshIdleClock({}, null)).toBe(false)
 })
 
 test('TUI explicit (true): same as default', () => {
   expect(shouldRefreshIdleClock({ transitionOnInput: true }, 'working')).toBe(true)
+  expect(shouldRefreshIdleClock({ transitionOnInput: true }, 'idle')).toBe(false)
   expect(shouldRefreshIdleClock({ transitionOnInput: true }, null)).toBe(false)
 })
 
 test('output-driven (false): refresh on EVERY chunk', () => {
   expect(shouldRefreshIdleClock({ transitionOnInput: false }, 'working')).toBe(true)
+  expect(shouldRefreshIdleClock({ transitionOnInput: false }, 'idle')).toBe(true)
   expect(shouldRefreshIdleClock({ transitionOnInput: false }, null)).toBe(true)
+})
+
+test('TUI: explicit idle does NOT pin clock (timer fallback stays primed)', () => {
+  // Active 'idle' is the primary done-signal, but if a later chunk's signal
+  // is missed the silence timer must still be able to fire. So 'idle' must
+  // NOT refresh lastOutputTime — same treatment as null.
+  expect(shouldRefreshIdleClock({}, 'idle')).toBe(false)
 })
 
 console.log('\nshouldFlipToIdle\n')

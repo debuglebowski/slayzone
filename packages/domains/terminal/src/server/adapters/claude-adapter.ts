@@ -6,9 +6,17 @@ import { KITTY_SHIFT_ENTER, ENTER } from '@slayzone/terminal/shared'
  * Adapter for Claude Code CLI.
  * Uses pattern-based heuristics for activity detection in interactive mode.
  */
+// Bullet glyphs Claude TUI uses to mark spinner / progress / completion lines.
+const BULLET = '[·✻✽✶✳✢]'
+const BULLET_LINE_RE = new RegExp(`^${BULLET}`)
+const COMPLETION_TAIL_RE = /\bfor \d+[smh]/
+
 export class ClaudeAdapter implements TerminalAdapter {
   readonly mode = 'claude-code' as const
-  readonly idleTimeoutMs = null // use default 60s
+  // Active 'idle' signal (completion stamp) is the primary done-signal; this
+  // 5s fallback covers chunks where the stamp was scrolled off-screen or
+  // delivered alongside chrome that hides it from the per-line scan.
+  readonly idleTimeoutMs = 5_000
 
   /** Claude Code enables Kitty keyboard protocol; internal newlines must be
    *  encoded as Shift+Enter so they're treated as newline-in-input (not submit). */
@@ -16,20 +24,38 @@ export class ClaudeAdapter implements TerminalAdapter {
     return text.replace(/[\r\n]+$/, '').replace(/\n/g, KITTY_SHIFT_ENTER) + ENTER
   }
 
+  /**
+   * Per-line bullet-glyph scan.
+   *
+   *   live spinner line  = bullet w/o "for Xs"   (e.g. "✻ Cogitating...")
+   *   completion stamp   = bullet w/  "for Xs"   (e.g. "· Cooked for 56s")
+   *
+   * Resolution rules for a single chunk:
+   *   - any live spinner present → `'working'`     (something is in flight)
+   *   - only completion stamps   → `'idle'`        (turn finished — active flip)
+   *   - no bullet lines at all   → `null`          (chrome / cursor blink)
+   *
+   * Active `'idle'` flip lets state-machine transition running→idle
+   * immediately on the completion stamp instead of waiting on the silence
+   * timer. The 5s `idleTimeoutMs` is a safety net if this signal is missed.
+   */
   detectActivity(data: string, _current: ActivityState): ActivityState | null {
     const stripped = data
       .replace(/\x1b\]([^\x07\x1b]|\x1b(?!\\))*(\x07|\x1b\\|\x9c)/g, '')
       .replace(/\x1b\[[?0-9;]*[A-Za-z]/g, '')
       .replace(/\x1b[()][AB012]/g, '')
-      .trimStart()
 
-    // Completion stamp like "✻ Cooked for 56s" / "· Cogitated for 4m 24s" —
-    // Claude finished, awaiting input. Return null so state-machine doesn't
-    // false-flag this as 'working'; idle-timeout fallback handles the
-    // running→idle transition.
-    if (/^[·✻✽✶✳✢].*\bfor \d+[smh]/m.test(stripped)) return null
-    if (/^[·✻✽✶✳✢]/m.test(stripped)) return 'working'
+    let sawLiveSpinner = false
+    let sawCompletion = false
+    for (const raw of stripped.split(/\r?\n/)) {
+      const line = raw.trimStart()
+      if (!BULLET_LINE_RE.test(line)) continue
+      if (COMPLETION_TAIL_RE.test(line)) sawCompletion = true
+      else sawLiveSpinner = true
+    }
 
+    if (sawLiveSpinner) return 'working'
+    if (sawCompletion) return 'idle'
     return null
   }
 

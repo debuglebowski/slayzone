@@ -1,4 +1,4 @@
-export { TerminalStatusPopover } from './TerminalStatusPopover'
+export { TerminalStatusPopover, TerminalStatusButton, TerminalStatusDialog } from './TerminalStatusPopover'
 export { PtyProvider, usePty, usePendingPrompts, useActiveTaskIds } from './PtyContext'
 export { PtyStateDot, PtyProgressDot, useTerminalState, type PtyProgressDotProps } from './PtyStateDot'
 export { usePtyStatus } from './usePtyStatus'

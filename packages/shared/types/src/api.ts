@@ -6,6 +6,8 @@ import type {
   SessionInfo,
   PromptInfo,
   BufferSinceResult,
+  HistorySnapshotResult,
+  HistoryRangeResult,
   ValidationResult,
   TerminalModeInfo,
   CreateTerminalModeInput,
@@ -151,6 +153,9 @@ export interface ElectronAPI {
       sessionId: string
     ) => Promise<{ success: boolean; clearedSeq: number | null }>
     getBufferSince: (sessionId: string, afterSeq: number) => Promise<BufferSinceResult | null>
+    getHistorySnapshot: (sessionId: string, lineCount: number) => Promise<HistorySnapshotResult>
+    getHistoryBefore: (sessionId: string, currentEarliestOffset: number, lineCount: number) => Promise<HistoryRangeResult>
+    setArchiveCapMb: (mb: number) => Promise<void>
     list: () => Promise<PtyInfo[]>
     onData: (callback: (sessionId: string, data: string, seq: number) => void) => () => void
     onExit: (callback: (sessionId: string, exitCode: number) => void) => () => void

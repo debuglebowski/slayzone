@@ -5,7 +5,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  Separator,
   cn,
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
@@ -17,8 +16,6 @@ import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
 import { SidebarFooterIcons } from './SidebarFooterIcons'
 import { SidebarViewSwitcher } from './SidebarViewSwitcher'
 import { SidebarResizeHandle } from './SidebarResizeHandle'
-import { TreeStatusFilter } from './TreeStatusFilter'
-import { TreeDisplaySettings } from './TreeDisplaySettings'
 import { getView } from './views/registry'
 import logo from '@/assets/logo.svg'
 
@@ -43,8 +40,6 @@ interface AppSidebarProps {
   taskProgress?: Map<string, number>
   doneTaskIds?: Set<string>
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
-  headerUsage?: ReactNode
-  headerActions?: ReactNode
   compactFooter?: ReactNode
 }
 
@@ -69,8 +64,6 @@ export function AppSidebar({
   taskProgress,
   doneTaskIds,
   columnsByProjectId,
-  headerUsage,
-  headerActions,
   compactFooter,
 }: AppSidebarProps) {
   const sidebarView = useTabStore((s) => s.sidebarView)
@@ -79,11 +72,12 @@ export function AppSidebar({
   const setSidebarWidth = useTabStore((s) => s.setSidebarWidth)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const setSidebarAutoHide = useTabStore((s) => s.setSidebarAutoHide)
+  const treeShowHeader = useTabStore((s) => s.treeShowHeader)
+  const setTreeShowHeader = useTabStore((s) => s.setTreeShowHeader)
   const view = getView(sidebarView)
 
   const [hoverRevealed, setHoverRevealed] = useState(false)
   const [resizing, setResizing] = useState(false)
-  const [footerExpanded, setFooterExpanded] = useState(false)
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cancelClose = useCallback(() => {
@@ -135,8 +129,8 @@ export function AppSidebar({
       )}
     >
       {sidebarView === 'tree' && (
-        <div className="absolute top-0 left-0 right-0 h-11 flex items-center justify-end gap-1 pr-3 z-20">
-          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1 pointer-events-none select-none text-xs font-medium tracking-wide text-foreground">
+        <div className="absolute top-0 left-0 right-0 h-11 flex items-center justify-center gap-1 pr-3 z-20 pointer-events-none">
+          <div className="flex items-center gap-1 select-none text-xs font-medium tracking-wide text-foreground">
             <span>Slay</span>
             <img
               src={logo}
@@ -147,8 +141,6 @@ export function AppSidebar({
             />
             <span>Zone</span>
           </div>
-          <TreeStatusFilter />
-          <TreeDisplaySettings />
         </div>
       )}
       <SidebarContent className="pb-4 pt-11 scrollbar-hide">
@@ -174,31 +166,11 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter
-        className={cn('py-4 gap-3', !headerUsage && 'border-t border-border/60')}
-        onMouseEnter={compactFooter ? () => setFooterExpanded(true) : undefined}
-        onMouseLeave={compactFooter ? () => setFooterExpanded(false) : undefined}
-        onFocus={compactFooter ? () => setFooterExpanded(true) : undefined}
-        onBlur={
-          compactFooter
-            ? (e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) setFooterExpanded(false)
-              }
-            : undefined
-        }
-      >
-        {compactFooter && !footerExpanded ? (
+      <SidebarFooter className={cn('py-4 gap-3', !compactFooter && 'border-t border-border/60')}>
+        {compactFooter ? (
           compactFooter
         ) : (
           <>
-            {headerUsage && (
-              <>
-                <div className="flex flex-wrap items-center justify-center gap-1 py-1 px-2">
-                  {headerUsage}
-                </div>
-                <Separator />
-              </>
-            )}
             <SidebarFooterIcons
               layout={view.footerLayout}
               tasks={tasks}
@@ -207,7 +179,6 @@ export function AppSidebar({
               onUsageAnalytics={onUsageAnalytics}
               onLeaderboard={onLeaderboard}
               onboardingChecklist={onboardingChecklist}
-              actions={headerActions}
               trailing={
                 view.footerLayout === 'horizontal' ? (
                   <SidebarViewSwitcher
@@ -216,6 +187,8 @@ export function AppSidebar({
                     compact
                     autoHide={sidebarAutoHide}
                     onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
+                    showHeader={treeShowHeader}
+                    onToggleShowHeader={() => setTreeShowHeader(!treeShowHeader)}
                   />
                 ) : null
               }
@@ -228,6 +201,8 @@ export function AppSidebar({
                   compact
                   autoHide={sidebarAutoHide}
                   onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
+                  showHeader={treeShowHeader}
+                  onToggleShowHeader={() => setTreeShowHeader(!treeShowHeader)}
                 />
               </div>
             )}

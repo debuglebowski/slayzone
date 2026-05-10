@@ -1,12 +1,12 @@
 /**
- * Floating Agent State Machine — pure reducer.
+ * Floating Global Agent Panel State Machine — pure reducer.
  *
  * No Electron imports. Side effects expressed as Action[] returned from reduce().
- * Adapter (../floating-agent.ts) executes the actions.
+ * Adapter (../floating-global-agent-panel.ts) executes the actions.
  *
- * Goal: single source of truth for floating-agent lifecycle. All focus/blur,
- * user toggles, and session changes funnel through this reducer. Illegal
- * transitions are no-ops with a diagnostic; they cannot crash the adapter.
+ * Goal: single source of truth for floating global agent panel lifecycle. All
+ * focus/blur, user toggles, and session changes funnel through this reducer.
+ * Illegal transitions are no-ops with a diagnostic; they cannot crash the adapter.
  */
 
 export type DetachMode = 'auto' | 'manual'

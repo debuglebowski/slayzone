@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { SlidersHorizontal, EyeOff, ListFilter, ListTree } from 'lucide-react'
 import {
   Popover,
@@ -8,6 +9,7 @@ import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
+  buildStatusOptions,
   cn,
 } from '@slayzone/ui'
 import { useTabStore, type TreeSubtaskMode } from '@slayzone/settings'
@@ -30,43 +32,38 @@ export function TreeDisplaySettings() {
   const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treeGroupByStatus = useTabStore((s) => s.treeGroupByStatus)
-  const treeShowHeader = useTabStore((s) => s.treeShowHeader)
+  const treeStatusFilter = useTabStore((s) => s.treeStatusFilter)
   const setTreeShowStatus = useTabStore((s) => s.setTreeShowStatus)
   const setTreeShowPriority = useTabStore((s) => s.setTreeShowPriority)
   const setTreeSubtaskMode = useTabStore((s) => s.setTreeSubtaskMode)
   const setTreeCrossOutDone = useTabStore((s) => s.setTreeCrossOutDone)
   const setTreeShowWorktree = useTabStore((s) => s.setTreeShowWorktree)
   const setTreeGroupByStatus = useTabStore((s) => s.setTreeGroupByStatus)
-  const setTreeShowHeader = useTabStore((s) => s.setTreeShowHeader)
+  const setTreeStatusFilter = useTabStore((s) => s.setTreeStatusFilter)
+
+  const statusOptions = useMemo(() => buildStatusOptions(null), [])
+  const toggleStatus = (value: string) => {
+    setTreeStatusFilter(
+      treeStatusFilter.includes(value)
+        ? treeStatusFilter.filter((s) => s !== value)
+        : [...treeStatusFilter, value]
+    )
+  }
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="Display settings"
-          title="Display settings"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+          aria-label="View settings"
+          title="View settings"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
         >
-          <SlidersHorizontal className="size-4" />
+          <SlidersHorizontal className="size-3.5" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-[400px] p-3" align="start">
         <div className="space-y-6">
-          {/* Layout — sidebar chrome */}
-          <div className="space-y-3">
-            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block">
-              Layout
-            </span>
-            <Row
-              id="tree-show-header"
-              label="Show header"
-              hint="Sidebar title and toolbar"
-              checked={treeShowHeader}
-              onChange={setTreeShowHeader}
-            />
-          </div>
-
           {/* Tasks — per-row markers + style */}
           <div className="space-y-3">
             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block">
@@ -147,6 +144,42 @@ export function TreeDisplaySettings() {
                   )
                 })}
               </div>
+            </div>
+          </div>
+
+          {/* Filters — status visibility */}
+          <div className="space-y-2">
+            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block">
+              Filters
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {statusOptions.map((opt) => {
+                const Icon = opt.icon
+                const checked = treeStatusFilter.includes(opt.value)
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="checkbox"
+                    aria-checked={checked}
+                    onClick={() => toggleStatus(opt.value)}
+                    className={cn(
+                      'group inline-flex items-center gap-1.5 rounded-full border px-2 h-7 text-xs transition-colors',
+                      checked
+                        ? 'border-border bg-accent/60 text-foreground hover:border-foreground/40'
+                        : 'border-transparent bg-input/30 text-muted-foreground/70 hover:text-foreground hover:border-border'
+                    )}
+                  >
+                    <Icon
+                      className={cn(
+                        'size-3.5 shrink-0 transition-opacity',
+                        checked ? opt.iconClass : 'opacity-50'
+                      )}
+                    />
+                    <span>{opt.label}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
         </div>

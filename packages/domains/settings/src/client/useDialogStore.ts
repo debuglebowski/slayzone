@@ -56,6 +56,10 @@ interface DialogState {
   showAnimatedTour: boolean
   openAnimatedTour: () => void
   closeAnimatedTour: () => void
+
+  terminalsOpen: boolean
+  openTerminals: () => void
+  closeTerminals: () => void
 }
 
 export const useDialogStore = create<DialogState>()((set) => ({
@@ -100,4 +104,8 @@ export const useDialogStore = create<DialogState>()((set) => ({
   showAnimatedTour: false,
   openAnimatedTour: () => set({ showAnimatedTour: true }),
   closeAnimatedTour: () => set({ showAnimatedTour: false }),
+
+  terminalsOpen: false,
+  openTerminals: () => set({ terminalsOpen: true }),
+  closeTerminals: () => set({ terminalsOpen: false }),
 }))

@@ -2470,6 +2470,46 @@ const migrations: Migration[] = [
       // tab focus. Orthogonal to TerminalState (which is in-memory + per-PTY).
       db.exec(`ALTER TABLE tasks ADD COLUMN needs_attention INTEGER NOT NULL DEFAULT 0`)
     }
+  },
+  {
+    version: 131,
+    up: (db) => {
+      // Per-task dismissal of the dev-server URL detected toast. Once dismissed,
+      // the toast never reappears for that task.
+      db.exec(`ALTER TABLE tasks ADD COLUMN dev_url_toast_dismissed INTEGER NOT NULL DEFAULT 0`)
+    }
+  },
+  {
+    version: 132,
+    up: (db) => {
+      // Rename agent panel settings key: agentPanelState → globalAgentPanelState.
+      db.prepare(`
+        UPDATE settings SET key = 'globalAgentPanelState'
+        WHERE key = 'agentPanelState'
+          AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'globalAgentPanelState')
+      `).run()
+      db.prepare("DELETE FROM settings WHERE key = 'agentPanelState'").run()
+    }
+  },
+  {
+    version: 133,
+    up: (db) => {
+      // Rename floating global agent panel settings keys to match the panel rename:
+      //   floatingAgentExpandedSize → floatingGlobalAgentPanelExpandedSize
+      //   floatingAgentConfig       → floatingGlobalAgentPanelConfig
+      const renames: Array<[string, string]> = [
+        ['floatingAgentExpandedSize', 'floatingGlobalAgentPanelExpandedSize'],
+        ['floatingAgentConfig', 'floatingGlobalAgentPanelConfig'],
+      ]
+      for (const [from, to] of renames) {
+        db.prepare(`
+          UPDATE settings SET key = ?
+          WHERE key = ?
+            AND NOT EXISTS (SELECT 1 FROM settings WHERE key = ?)
+        `).run(to, from, to)
+        db.prepare("DELETE FROM settings WHERE key = ?").run(from)
+      }
+    }
   }
 ]
 

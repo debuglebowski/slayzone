@@ -69,6 +69,8 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
   const [scheduleEnabled, setScheduleEnabled] = useState(false)
   const [scheduleFrom, setScheduleFrom] = useState('18:00')
   const [scheduleTo, setScheduleTo] = useState('09:00')
+  // getDay-indexed: Sun=0..Sat=6. Default all-on.
+  const [scheduleWeekdays, setScheduleWeekdays] = useState<boolean[]>(() => Array(7).fill(true))
 
   const [disableUnlockEarly, setDisableUnlockEarly] = useState(false)
 
@@ -84,6 +86,11 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
     setScheduleEnabled(!!config?.schedule)
     setScheduleFrom(config?.schedule?.from ?? '18:00')
     setScheduleTo(config?.schedule?.to ?? '09:00')
+    setScheduleWeekdays(
+      config?.schedule?.weekdays && config.schedule.weekdays.length === 7
+        ? [...config.schedule.weekdays]
+        : Array(7).fill(true)
+    )
     setDisableUnlockEarly(config?.disable_unlock_early ?? false)
   }, [open, config])
 
@@ -98,10 +105,15 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
     if (scheduleEnabled) {
       if (scheduleFrom !== config?.schedule?.from) return true
       if (scheduleTo !== config?.schedule?.to) return true
+      const persistedWeekdays =
+        config?.schedule?.weekdays && config.schedule.weekdays.length === 7
+          ? config.schedule.weekdays
+          : Array(7).fill(true)
+      if (scheduleWeekdays.some((v, i) => v !== persistedWeekdays[i])) return true
     }
     if (disableUnlockEarly !== (config?.disable_unlock_early ?? false)) return true
     return false
-  }, [config, durationEnabled, rateLimitEnabled, maxTasks, perMinutes, scheduleEnabled, scheduleFrom, scheduleTo, disableUnlockEarly])
+  }, [config, durationEnabled, rateLimitEnabled, maxTasks, perMinutes, scheduleEnabled, scheduleFrom, scheduleTo, scheduleWeekdays, disableUnlockEarly])
 
   async function handleApply() {
     const locked_until = durationEnabled
@@ -112,7 +124,13 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
       rate_limit: rateLimitEnabled
         ? { max_tasks: maxTasks, per_minutes: parseInt(perMinutes, 10) }
         : null,
-      schedule: scheduleEnabled ? { from: scheduleFrom, to: scheduleTo } : null,
+      schedule: scheduleEnabled && scheduleWeekdays.some(Boolean)
+        ? {
+            from: scheduleFrom,
+            to: scheduleTo,
+            weekdays: scheduleWeekdays.every(Boolean) ? undefined : [...scheduleWeekdays],
+          }
+        : null,
       disable_unlock_early: disableUnlockEarly,
     }
     const updated = await updateMutation.mutateAsync({ id: project.id, lockConfig })
@@ -245,7 +263,7 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
             {scheduleEnabled && (
               <>
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Lock this project between set hours daily
+                  Lock this project between set hours on selected weekdays
                 </p>
                 <div className="flex items-center gap-2 text-xs">
                   <Input
@@ -261,6 +279,39 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
                     onChange={(e) => setScheduleTo(e.target.value)}
                     className="h-8 flex-1 min-w-0 text-xs"
                   />
+                </div>
+                <div className="flex items-center gap-1">
+                  {[
+                    { storageIdx: 1, label: 'M' },
+                    { storageIdx: 2, label: 'T' },
+                    { storageIdx: 3, label: 'W' },
+                    { storageIdx: 4, label: 'T' },
+                    { storageIdx: 5, label: 'F' },
+                    { storageIdx: 6, label: 'S' },
+                    { storageIdx: 0, label: 'S' },
+                  ].map(({ storageIdx, label }, displayIdx) => {
+                    const active = scheduleWeekdays[storageIdx]
+                    return (
+                      <button
+                        key={displayIdx}
+                        type="button"
+                        onClick={() =>
+                          setScheduleWeekdays((prev) => {
+                            const next = [...prev]
+                            next[storageIdx] = !next[storageIdx]
+                            return next
+                          })
+                        }
+                        className={`flex-1 h-7 rounded-md border text-[11px] font-semibold transition-colors ${
+                          active
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-transparent text-muted-foreground/50 hover:bg-surface-2 hover:text-muted-foreground'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
                 </div>
               </>
             )}

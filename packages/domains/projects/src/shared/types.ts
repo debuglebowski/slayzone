@@ -29,10 +29,12 @@ export interface ProjectLockConfig {
     max_tasks: number
     per_minutes: number
   } | null
-  /** Schedule lock — locked daily between these times. "HH:MM" 24h format. null = disabled */
+  /** Schedule lock — locked between these times on selected weekdays. "HH:MM" 24h format. null = disabled */
   schedule: {
     from: string
     to: string
+    /** Length-7 array indexed by JS getDay() (Sun=0..Sat=6). Missing = all 7 days active (back-compat). */
+    weekdays?: boolean[]
   } | null
   /** When true, hide "Unlock early" button on lockscreen. Default false. */
   disable_unlock_early?: boolean

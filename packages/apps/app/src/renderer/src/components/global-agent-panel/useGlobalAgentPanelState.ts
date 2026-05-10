@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useSetting, useSetSettingMutation } from '@slayzone/settings/client'
 
-export interface AgentPanelState {
+export interface GlobalAgentPanelState {
   isOpen: boolean
   panelWidth: number
   sessionIndex: number
@@ -9,18 +9,18 @@ export interface AgentPanelState {
   floatingEnabled: boolean
 }
 
-export const DEFAULT_AGENT_PANEL_WIDTH = 400
+export const DEFAULT_GLOBAL_AGENT_PANEL_WIDTH = 400
 
-const DEFAULT_STATE: AgentPanelState = {
+const DEFAULT_STATE: GlobalAgentPanelState = {
   isOpen: false,
-  panelWidth: DEFAULT_AGENT_PANEL_WIDTH,
+  panelWidth: DEFAULT_GLOBAL_AGENT_PANEL_WIDTH,
   sessionIndex: 0,
   floatingEnabled: false,
 }
 
-const SETTINGS_KEY = 'agentPanelState'
+const SETTINGS_KEY = 'globalAgentPanelState'
 
-function parseState(raw: string | null | undefined): AgentPanelState {
+function parseState(raw: string | null | undefined): GlobalAgentPanelState {
   if (!raw) return DEFAULT_STATE
   try {
     return { ...DEFAULT_STATE, ...JSON.parse(raw) }
@@ -29,16 +29,16 @@ function parseState(raw: string | null | undefined): AgentPanelState {
   }
 }
 
-export function useAgentPanelState(): [
-  AgentPanelState,
-  (updates: Partial<AgentPanelState>) => void,
+export function useGlobalAgentPanelState(): [
+  GlobalAgentPanelState,
+  (updates: Partial<GlobalAgentPanelState>) => void,
 ] {
   const raw = useSetting(SETTINGS_KEY)
   const state = parseState(raw)
   const setSetting = useSetSettingMutation()
 
   const updateState = useCallback(
-    (updates: Partial<AgentPanelState>) => {
+    (updates: Partial<GlobalAgentPanelState>) => {
       const next = { ...state, ...updates }
       setSetting.mutate({ key: SETTINGS_KEY, value: JSON.stringify(next) })
     },

@@ -2,9 +2,20 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { Monitor, X } from 'lucide-react'
-import { IconButton, getTerminalStateStyle, useStablePoll } from '@slayzone/ui'
-import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
+import {
+  IconButton,
+  getTerminalStateStyle,
+  useStablePoll,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@slayzone/ui'
+import { useDialogStore } from '@slayzone/settings'
 import type { PtyInfo } from '@slayzone/terminal/shared'
 
 interface TaskRef {
@@ -12,20 +23,77 @@ interface TaskRef {
   title: string
 }
 
-interface TerminalStatusPopoverProps {
-  tasks: TaskRef[]
-  onTaskClick?: (taskId: string) => void
+interface TerminalStatusButtonProps {
   side?: 'top' | 'right' | 'bottom' | 'left'
 }
 
-export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: TerminalStatusPopoverProps) {
+interface TerminalStatusDialogProps {
+  tasks: TaskRef[]
+  onTaskClick?: (taskId: string) => void
+}
+
+/** Trigger button — shows running PTY count, opens shared dialog. */
+export function TerminalStatusButton({ side = 'right' }: TerminalStatusButtonProps) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
+  const [count, setCount] = useState(0)
+  const lastHashRef = useRef<string>('')
+
+  const refreshPtys = useCallback(async () => {
+    const list = await trpcClient.pty.list.query()
+    const hash = JSON.stringify(list.map((p) => ({ s: p.sessionId, st: p.state })))
+    if (hash !== lastHashRef.current) {
+      lastHashRef.current = hash
+      setCount(list.length)
+    }
+    return hash
+  }, [trpcClient])
+
+  useStablePoll(refreshPtys, { enabled: true, baseDelayMs: 5000 })
+
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: () => refreshPtys(),
+    }),
+  )
+
+  useEffect(() => {
+    refreshPtys()
+  }, [refreshPtys])
+
+  if (count === 0) return null
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <IconButton
+          aria-label="Active terminals"
+          variant="ghost"
+          size="icon-lg"
+          className="rounded-lg text-muted-foreground relative"
+          onClick={() => useDialogStore.getState().openTerminals()}
+        >
+          <Monitor className="size-5" />
+          <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+            {count}
+          </span>
+        </IconButton>
+      </TooltipTrigger>
+      <TooltipContent side={side}>Active Terminals</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Shared dialog — render once at app root. Controlled via useDialogStore.terminalsOpen. */
+export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialogProps) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const open = useDialogStore((s) => s.terminalsOpen)
+  const closeTerminals = useDialogStore((s) => s.closeTerminals)
+
   const [ptys, setPtys] = useState<PtyInfo[]>([])
   const [stats, setStats] = useState<Record<string, { cpu: number; rss: number }>>({})
-  const [open, setOpen] = useState(false)
   const [, tick] = useState(0)
-
   const lastHashRef = useRef<string>('')
 
   const refreshPtys = useCallback(async () => {
@@ -40,40 +108,33 @@ export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: Te
 
   useStablePoll(refreshPtys, { enabled: open, baseDelayMs: 5000 })
 
-  // Tick every second for live duration display while popover is open (cosmetic).
   useEffect(() => {
     if (!open) return
-    const tickInterval = setInterval(() => tick(t => t + 1), 1000)
+    const tickInterval = setInterval(() => tick((t) => t + 1), 1000)
     return () => clearInterval(tickInterval)
   }, [open])
 
-  // Refresh on state-change events
   useSubscription(
     trpc.pty.onStateChange.subscriptionOptions(undefined, {
       onData: () => refreshPtys(),
     }),
   )
 
-  // Subscribe to stats
   useEffect(() => {
     const unsub = window.api.pty.onStats((s) => setStats(s))
     return unsub
   }, [])
 
-  // Initial load
   useEffect(() => {
-    refreshPtys()
-  }, [refreshPtys])
+    if (open) refreshPtys()
+  }, [open, refreshPtys])
 
   const handleTerminate = async (sessionId: string) => {
     await trpcClient.pty.kill.mutate({ sessionId })
     refreshPtys()
   }
 
-  // Extract taskId from sessionId (format: taskId or taskId:tabId)
-  const getTaskIdFromSession = (sessionId: string): string => {
-    return sessionId.split(':')[0]
-  }
+  const getTaskIdFromSession = (sessionId: string): string => sessionId.split(':')[0]
 
   const getTaskName = (sessionId: string): string => {
     const taskId = getTaskIdFromSession(sessionId)
@@ -88,50 +149,28 @@ export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: Te
     return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
   }
 
-  const formatMemory = (rss: number): string => {
-    return rss >= 1024 ? `${(rss / 1024).toFixed(0)} MB` : `${rss} KB`
-  }
+  const formatMemory = (rss: number): string => (rss >= 1024 ? `${(rss / 1024).toFixed(0)} MB` : `${rss} KB`)
 
   const count = ptys.length
 
-  if (count === 0) {
-    return null
-  }
-
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <IconButton
-              aria-label="Active terminals"
-              variant="ghost"
-              size="icon-lg"
-              className="rounded-lg text-muted-foreground relative"
-            >
-              <Monitor className="size-5" />
-              <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                {count}
-              </span>
-            </IconButton>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side={side}>Active Terminals</TooltipContent>
-      </Tooltip>
-      <PopoverContent side={side} align="end" className="w-fit max-w-[20vw] max-h-[80vh] flex flex-col">
-        <div className="space-y-3 min-h-0 flex flex-col">
-          <div className="flex items-center justify-between shrink-0">
-            <h4 className="font-medium text-sm">Active Terminals</h4>
-            <span className="text-xs text-muted-foreground">{count} running</span>
-          </div>
-          <div className="space-y-2 min-h-0 overflow-y-auto">
-            {ptys.map((pty) => (
+    <Dialog open={open} onOpenChange={(v) => !v && closeTerminals()}>
+      <DialogContent className="max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Active Terminals</DialogTitle>
+          <DialogDescription className="sr-only">List of active terminal sessions</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 min-h-0 overflow-y-auto">
+          {count === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No active terminals.</p>
+          ) : (
+            ptys.map((pty) => (
               <div
                 key={pty.sessionId}
                 className="flex items-center justify-between p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors cursor-pointer"
                 onClick={() => {
                   onTaskClick?.(getTaskIdFromSession(pty.sessionId))
-                  setOpen(false)
+                  closeTerminals()
                 }}
               >
                 <div className="flex-1 min-w-0 mr-2">
@@ -139,10 +178,14 @@ export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: Te
                   <div className="flex items-center gap-1 mt-2 flex-wrap">
                     {(() => {
                       const style = getTerminalStateStyle(pty.state)
-                      return style && (
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${style.textColor} bg-current/10 w-16 text-center`}>
-                          {style.label}
-                        </span>
+                      return (
+                        style && (
+                          <span
+                            className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${style.textColor} bg-current/10 w-16 text-center`}
+                          >
+                            {style.label}
+                          </span>
+                        )
                       )
                     })()}
                     <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full text-muted-foreground bg-muted w-16 text-center">
@@ -164,15 +207,23 @@ export function TerminalStatusPopover({ tasks, onTaskClick, side = 'right' }: Te
                   aria-label="Terminate terminal"
                   variant="ghost"
                   className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                  onClick={(e) => { e.stopPropagation(); handleTerminate(pty.sessionId) }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleTerminate(pty.sessionId)
+                  }}
                 >
                   <X className="size-4" />
                 </IconButton>
               </div>
-            ))}
-          </div>
+            ))
+          )}
         </div>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   )
+}
+
+/** @deprecated use TerminalStatusButton + render TerminalStatusDialog once at app root. */
+export function TerminalStatusPopover(props: TerminalStatusButtonProps & TerminalStatusDialogProps) {
+  return <TerminalStatusButton side={props.side} />
 }

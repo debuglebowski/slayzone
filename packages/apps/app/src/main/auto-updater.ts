@@ -64,7 +64,6 @@ export function initAutoUpdater(): void {
     console.error('[updater] init failed:', err instanceof Error ? err.message : err)
   }
   setInterval(() => {
-    if (downloadedVersion) return
     console.log('[updater] periodic check')
     getAutoUpdater().checkForUpdatesAndNotify().catch((err) => {
       console.error('[updater] periodic check failed:', err instanceof Error ? err.message : err)
@@ -72,7 +71,6 @@ export function initAutoUpdater(): void {
   }, CHECK_INTERVAL_MS)
 
   powerMonitor.on('resume', () => {
-    if (downloadedVersion) return
     console.log('[updater] resume check')
     getAutoUpdater().checkForUpdatesAndNotify().catch((err) => {
       console.error('[updater] resume check failed:', err instanceof Error ? err.message : err)
@@ -161,19 +159,19 @@ export async function checkForUpdates(): Promise<void> {
   try {
     const updater = getAutoUpdater()
 
-    // If already downloaded, just re-notify renderer
+    // Re-notify renderer of any already-downloaded ver, then continue — newer may exist
     if (downloadedVersion) {
       sendUpdateStatus({ type: 'downloaded', version: downloadedVersion })
-      return
     }
 
     const result = await updater.checkForUpdates()
     if (!result || !result.updateInfo || result.updateInfo.version === app.getVersion()) {
-      sendUpdateStatus({ type: 'not-available' })
+      // Suppress not-available toast if we still have a pending downloaded ver
+      if (!downloadedVersion) sendUpdateStatus({ type: 'not-available' })
       return
     }
 
-    // Download in progress — the 'update-downloaded' handler will notify renderer
+    // Newer ver — lib downloads, 'update-downloaded' handler notifies renderer
   } catch (err) {
     sendUpdateStatus({ type: 'error', message: err instanceof Error ? err.message : String(err) })
   }

@@ -76,6 +76,11 @@ const api: ElectronAPI = {
     getBuffer: (sessionId) => ipcRenderer.invoke('pty:getBuffer', sessionId),
     clearBuffer: (sessionId) => ipcRenderer.invoke('pty:clearBuffer', sessionId),
     getBufferSince: (sessionId, afterSeq) => ipcRenderer.invoke('pty:getBufferSince', sessionId, afterSeq),
+    getHistorySnapshot: (sessionId: string, lineCount: number) =>
+      ipcRenderer.invoke('pty:getHistorySnapshot', sessionId, lineCount),
+    getHistoryBefore: (sessionId: string, currentEarliestOffset: number, lineCount: number) =>
+      ipcRenderer.invoke('pty:getHistoryBefore', sessionId, currentEarliestOffset, lineCount),
+    setArchiveCapMb: (mb: number) => ipcRenderer.invoke('pty:setArchiveCapMb', mb),
     list: () => ipcRenderer.invoke('pty:list'),
     onData: (callback: (sessionId: string, data: string, seq: number) => void) => {
       const handler = (_event: unknown, sessionId: string, data: string, seq: number) => callback(sessionId, data, seq)

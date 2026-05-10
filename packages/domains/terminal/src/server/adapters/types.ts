@@ -3,8 +3,11 @@ import type { ExecutionContext } from '@slayzone/terminal/shared'
 export type TerminalMode = string
 export type { ExecutionContext }
 
-// Activity states for CLI tools
-export type ActivityState = 'working' | 'unknown'
+// Activity states for CLI tools.
+// `'idle'` is an EXPLICIT done-signal an adapter can emit to flip
+// running→idle immediately (e.g. claude completion stamp), bypassing
+// the silence-timer fallback in `shouldFlipToIdle`.
+export type ActivityState = 'working' | 'idle' | 'unknown'
 
 // Error info from CLI
 export interface ErrorInfo {

@@ -11,21 +11,21 @@ import {
   type Event as FsmEvent,
   type Action,
   type Context
-} from './floating-agent/state-machine'
+} from './floating-global-agent-panel/state-machine'
 
 // --- Types ---
 
 type AnchorPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'center-bottom' | 'center-left' | 'center-right'
 type WidgetStyle = 'widget' | 'icon'
 
-interface FloatingAgentConfig {
+interface FloatingGlobalAgentPanelConfig {
   style: WidgetStyle
   position: AnchorPosition
 }
 
 // --- Constants ---
 
-const DEFAULT_CONFIG: FloatingAgentConfig = { style: 'widget', position: 'bottom-right' }
+const DEFAULT_CONFIG: FloatingGlobalAgentPanelConfig = { style: 'widget', position: 'bottom-right' }
 const COLLAPSED_WIDTH = 220
 const COLLAPSED_HEIGHT = 80
 const COLLAPSED_ICON_SIZE = 60
@@ -41,9 +41,9 @@ let state: State = { kind: 'attached' }
 let ctx: Context = { enabled: false, panelOpen: false, sessionId: null, collapsed: true }
 
 let mainWindow: BrowserWindow | null = null
-let floatingAgentWindow: BrowserWindow | null = null
+let floatingGlobalAgentPanelWindow: BrowserWindow | null = null
 let currentFloatingSession: { sessionId: string; cwd: string; mode: string } | null = null
-let currentConfig: FloatingAgentConfig = DEFAULT_CONFIG
+let currentConfig: FloatingGlobalAgentPanelConfig = DEFAULT_CONFIG
 let registeredAccelerator: string | null = null
 let getShortcutOverrides: () => Record<string, string | null> = () => ({})
 let expandedSize: { width: number; height: number } | null = null
@@ -70,28 +70,28 @@ function dispatch(event: FsmEvent): void {
 function executeAction(action: Action): void {
   switch (action.kind) {
     case 'create-floating-window':
-      if (!floatingAgentWindow || floatingAgentWindow.isDestroyed()) {
-        floatingAgentWindow = createFloatingAgentWindow()
+      if (!floatingGlobalAgentPanelWindow || floatingGlobalAgentPanelWindow.isDestroyed()) {
+        floatingGlobalAgentPanelWindow = createFloatingGlobalAgentPanelWindow()
       }
       readConfig()
       readExpandedSize()
       return
 
     case 'destroy-floating-window':
-      if (floatingAgentWindow && !floatingAgentWindow.isDestroyed()) {
-        floatingAgentWindow.destroy()
+      if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
+        floatingGlobalAgentPanelWindow.destroy()
       }
-      floatingAgentWindow = null
+      floatingGlobalAgentPanelWindow = null
       currentFloatingSession = null
       return
 
     case 'redirect-session-to-floating':
-      if (floatingAgentWindow && !floatingAgentWindow.isDestroyed()) {
-        const ok = redirectSessionWindow(action.sessionId, floatingAgentWindow)
+      if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
+        const ok = redirectSessionWindow(action.sessionId, floatingGlobalAgentPanelWindow)
         if (ok) {
           currentFloatingSession = readSessionMeta(action.sessionId)
-          if (!floatingAgentWindow.isDestroyed()) {
-            floatingAgentEvents.emit('session-changed')
+          if (!floatingGlobalAgentPanelWindow.isDestroyed()) {
+            floatingGlobalAgentPanelEvents.emit('session-changed')
           }
         }
       }
@@ -121,17 +121,17 @@ function executeAction(action: Action): void {
       return
 
     case 'show-floating':
-      if (floatingAgentWindow && !floatingAgentWindow.isDestroyed()) {
+      if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
         // showInactive() — never steal focus. If we used show() the floating
         // window would activate the app, immediately firing 'did-become-active'
         // and triggering an unwanted reattach loop.
-        floatingAgentWindow.showInactive()
+        floatingGlobalAgentPanelWindow.showInactive()
       }
       return
 
     case 'hide-floating':
-      if (floatingAgentWindow && !floatingAgentWindow.isDestroyed()) {
-        floatingAgentWindow.hide()
+      if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
+        floatingGlobalAgentPanelWindow.hide()
       }
       return
 
@@ -161,8 +161,8 @@ function executeAction(action: Action): void {
       return
 
     case 'send-collapse-changed':
-      if (floatingAgentWindow && !floatingAgentWindow.isDestroyed()) {
-        floatingAgentEvents.emit('collapse-changed', action.collapsed)
+      if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
+        floatingGlobalAgentPanelEvents.emit('collapse-changed', action.collapsed)
       }
       return
 
@@ -171,14 +171,14 @@ function executeAction(action: Action): void {
       return
 
     case 'set-resizable':
-      if (floatingAgentWindow && !floatingAgentWindow.isDestroyed()) {
-        floatingAgentWindow.setResizable(action.resizable)
+      if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
+        floatingGlobalAgentPanelWindow.setResizable(action.resizable)
         if (action.resizable) {
-          floatingAgentWindow.setMinimumSize(EXPANDED_MIN_WIDTH, EXPANDED_MIN_HEIGHT)
+          floatingGlobalAgentPanelWindow.setMinimumSize(EXPANDED_MIN_WIDTH, EXPANDED_MIN_HEIGHT)
         } else {
           // Reset minimum size — otherwise a previous expanded min would
           // clamp the collapsed setBounds() to the bigger value.
-          floatingAgentWindow.setMinimumSize(0, 0)
+          floatingGlobalAgentPanelWindow.setMinimumSize(0, 0)
         }
       }
       return
@@ -190,7 +190,7 @@ function executeAction(action: Action): void {
         clearTimeout(saveExpandedSizeTimer)
         saveExpandedSizeTimer = null
       }
-      getDatabase().prepare("DELETE FROM settings WHERE key = 'floatingAgentExpandedSize'").run()
+      getDatabase().prepare("DELETE FROM settings WHERE key = 'floatingGlobalAgentPanelExpandedSize'").run()
       broadcastState()
       return
   }
@@ -206,12 +206,12 @@ function broadcastState(): void {
   // Single emit — all renderers (main window + floating panel) subscribe via
   // tRPC subs and dispatch to local state. Window-targeted dispatch is no
   // longer needed since EventEmitter fans out to all subscribers.
-  floatingAgentEvents.emit('state', payload)
+  floatingGlobalAgentPanelEvents.emit('state', payload)
 }
 
 function readSessionMeta(sessionId: string): { sessionId: string; cwd: string; mode: string } {
   const db = getDatabase()
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'agentPanelState'").get() as { value: string } | undefined
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'globalAgentPanelState'").get() as { value: string } | undefined
   let cwd = ''
   let mode = 'claude-code'
   try {
@@ -262,18 +262,18 @@ function getActiveDisplay(): Electron.Display {
 }
 
 function applyBounds(animate: boolean): void {
-  if (!floatingAgentWindow || floatingAgentWindow.isDestroyed()) return
+  if (!floatingGlobalAgentPanelWindow || floatingGlobalAgentPanelWindow.isDestroyed()) return
   const display = getActiveDisplay()
   const size = ctx.collapsed
     ? getCollapsedSize()
     : (expandedSize ?? { width: EXPANDED_WIDTH, height: Math.round(display.workArea.height * EXPANDED_HEIGHT_RATIO) })
   const bounds = calcBounds(display.workArea, currentConfig.position, size.width, size.height)
-  floatingAgentWindow.setBounds(bounds, animate)
+  floatingGlobalAgentPanelWindow.setBounds(bounds, animate)
 }
 
 function readExpandedSize(): void {
   const db = getDatabase()
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'floatingAgentExpandedSize'").get() as { value: string } | undefined
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'floatingGlobalAgentPanelExpandedSize'").get() as { value: string } | undefined
   try {
     if (row?.value) {
       const parsed = JSON.parse(row.value)
@@ -298,14 +298,14 @@ function persistExpandedSize(width: number, height: number): void {
   saveExpandedSizeTimer = setTimeout(() => {
     saveExpandedSizeTimer = null
     const db = getDatabase()
-    db.prepare("INSERT INTO settings (key, value) VALUES ('floatingAgentExpandedSize', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    db.prepare("INSERT INTO settings (key, value) VALUES ('floatingGlobalAgentPanelExpandedSize', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .run(JSON.stringify({ width, height }))
   }, 200)
 }
 
 function readConfig(): void {
   const db = getDatabase()
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'floatingAgentConfig'").get() as { value: string } | undefined
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'floatingGlobalAgentPanelConfig'").get() as { value: string } | undefined
   try {
     currentConfig = row?.value ? { ...DEFAULT_CONFIG, ...JSON.parse(row.value) } : DEFAULT_CONFIG
   } catch { currentConfig = DEFAULT_CONFIG }
@@ -313,16 +313,16 @@ function readConfig(): void {
 
 // --- Shortcut ---
 
-function getAgentPanelAccelerator(): string | null {
+function getGlobalAgentPanelAccelerator(): string | null {
   const overrides = getShortcutOverrides()
-  const keys = overrides['agent-panel'] ?? shortcutDefinitions.find(d => d.id === 'agent-panel')?.defaultKeys
+  const keys = overrides['global-agent-panel'] ?? shortcutDefinitions.find(d => d.id === 'global-agent-panel')?.defaultKeys
   if (!keys) return null
   return toElectronAccelerator(keys)
 }
 
 function registerFloatingShortcut(): void {
   unregisterFloatingShortcut()
-  const accel = getAgentPanelAccelerator()
+  const accel = getGlobalAgentPanelAccelerator()
   if (!accel) return
   const ok = globalShortcut.register(accel, () => {
     if (state.kind === 'detached') dispatch({ kind: 'user-toggle-collapse' })
@@ -339,7 +339,7 @@ function unregisterFloatingShortcut(): void {
 
 // --- Window Factory ---
 
-function createFloatingAgentWindow(): BrowserWindow {
+function createFloatingGlobalAgentPanelWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: COLLAPSED_WIDTH,
     height: COLLAPSED_HEIGHT,
@@ -361,15 +361,15 @@ function createFloatingAgentWindow(): BrowserWindow {
   })
 
   const url = is.dev && process.env['ELECTRON_RENDERER_URL']
-    ? `${process.env['ELECTRON_RENDERER_URL']}?floating=agent`
-    : `file://${join(__dirname, '../renderer/index.html')}?floating=agent`
+    ? `${process.env['ELECTRON_RENDERER_URL']}?floating=global-agent-panel`
+    : `file://${join(__dirname, '../renderer/index.html')}?floating=global-agent-panel`
   win.setAlwaysOnTop(true, 'pop-up-menu')
   win.loadURL(url)
 
   win.on('focus', () => dispatch({ kind: 'floating-focus' }))
   win.on('blur', () => dispatch({ kind: 'floating-blur' }))
   win.on('closed', () => {
-    floatingAgentWindow = null
+    floatingGlobalAgentPanelWindow = null
     currentFloatingSession = null
     dispatch({ kind: 'floating-window-closed' })
   })
@@ -392,7 +392,7 @@ function createFloatingAgentWindow(): BrowserWindow {
 
 import { EventEmitter } from 'node:events'
 
-export const floatingAgentEvents = new EventEmitter() as EventEmitter & {
+export const floatingGlobalAgentPanelEvents = new EventEmitter() as EventEmitter & {
   on(event: 'state', listener: (payload: unknown) => void): EventEmitter
   on(event: 'session-changed', listener: () => void): EventEmitter
   on(event: 'collapse-changed', listener: (collapsed: boolean) => void): EventEmitter
@@ -401,7 +401,7 @@ export const floatingAgentEvents = new EventEmitter() as EventEmitter & {
 
 // --- Public ops (formerly IPC handlers) ---
 
-export const floatingAgentOps = {
+export const floatingGlobalAgentPanelOps = {
   setEnabled: (enabled: boolean) => {
     ctx = { ...ctx, enabled }
     dispatch({ kind: 'user-set-enabled', enabled })
@@ -452,20 +452,20 @@ function currentStatePayload(): { kind: string; sessionId: string | null; mode: 
 
 // --- Public API ---
 
-export function attachFloatingAgent(win: BrowserWindow): void {
+export function attachFloatingGlobalAgentPanel(win: BrowserWindow): void {
   mainWindow = win
 
   // Per-window listeners for OS variants where app-level events don't fire reliably
   win.on('focus', () => dispatch({ kind: 'main-focus' }))
 }
 
-export function setupFloatingAgent(overridesGetter?: () => Record<string, string | null>): void {
+export function setupFloatingGlobalAgentPanel(overridesGetter?: () => Record<string, string | null>): void {
   if (overridesGetter) getShortcutOverrides = overridesGetter
 
   // did-resign-active = app-level signal, fires only when user leaves our
   // app entirely (ignores menu/tooltip transient blur). Detach trigger.
   app.on('did-resign-active', () => dispatch({ kind: 'app-resign-active' }))
-  // Reattach is driven by per-window main-focus (see attachFloatingAgent).
+  // Reattach is driven by per-window main-focus (see attachFloatingGlobalAgentPanel).
   // We deliberately do NOT use did-become-active because it fires before
   // window focus resolves — clicking the floating widget would trigger
   // a spurious reattach since getFocusedWindow() returns stale data at

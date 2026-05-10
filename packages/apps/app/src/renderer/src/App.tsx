@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallbac
 import { useGuardedHotkeys } from '@slayzone/ui'
 import { useTRPCClient } from '@slayzone/transport/client'
 import { initShortcuts } from './shortcut-init'
-import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus, Settings } from 'lucide-react'
+import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus, MoreHorizontal, Settings, Trophy, BarChart3, Megaphone, ListTree, PanelLeftClose, PanelTopOpen, Bell, Bot, Check, Monitor } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
@@ -29,7 +29,8 @@ import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/project
 import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectLocked, PROJECT_LOCKED_TOAST, hasActiveLockOverride, clearLockOverrides } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider, type SearchFileContext } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
-import { usePty, useActiveTaskIds } from '@slayzone/terminal/client'
+import { usePty, useActiveTaskIds, usePtyStatus } from '@slayzone/terminal/client'
+import { TerminalStatusDialog } from '@slayzone/terminal'
 // Shared
 import {
   Button,
@@ -49,12 +50,12 @@ import {
   UpdateButton,
   UpdateToast
 } from '@slayzone/ui'
-import { SidebarProvider, cn, PanelToggle, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withShortcut, withModalGuard, scopeTracker } from '@slayzone/ui'
+import { SidebarProvider, cn, PanelToggle, useUndo, matchesShortcut, useShortcutStore, shortcutDefinitions, useShortcutDisplay, withShortcut, withModalGuard, scopeTracker, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
 import { TabBar } from '@/components/tabs/TabBar'
-import { AgentPanelButton, AgentSidePanel, AGENT_PANEL_MIN_WIDTH, AGENT_PANEL_MAX_WIDTH, useAgentPanelState, DEFAULT_AGENT_PANEL_WIDTH } from '@/components/agent-panel'
+import { GlobalAgentPanelButton, GlobalAgentSidePanel, GLOBAL_AGENT_PANEL_MIN_WIDTH, GLOBAL_AGENT_PANEL_MAX_WIDTH, useGlobalAgentPanelState, DEFAULT_GLOBAL_AGENT_PANEL_WIDTH } from '@/components/global-agent-panel'
 import {
   AgentStatusButton,
   AgentStatusSidePanel,
@@ -372,18 +373,18 @@ function App(): React.JSX.Element {
 
   // Usage, agent panel & agent-status panel state
   const { data: usageData, refresh: refreshUsage } = useUsage()
-  const [agentPanelState, setAgentPanelState] = useAgentPanelState()
+  const [globalAgentPanelState, setGlobalAgentPanelState] = useGlobalAgentPanelState()
   const [agentStatusState, setAgentStatusState] = useAgentStatusState()
   const [isSidePanelResizing, setIsSidePanelResizing] = useState(false)
-  const agentPanelMountedRef = useRef(false)
-  if (agentPanelState.isOpen) agentPanelMountedRef.current = true
-  const agentMode = agentPanelState.mode ?? 'claude-code'
+  const globalAgentPanelMountedRef = useRef(false)
+  if (globalAgentPanelState.isOpen) globalAgentPanelMountedRef.current = true
+  const agentMode = globalAgentPanelState.mode ?? 'claude-code'
   useEffect(() => {
-    if (agentPanelState.mode) return
+    if (globalAgentPanelState.mode) return
     trpcClient.settings.get.query({ key: 'default_terminal_mode' }).then(m => {
-      if (m) setAgentPanelState({ mode: m })
+      if (m) setGlobalAgentPanelState({ mode: m })
     })
-  }, [agentPanelState.mode, setAgentPanelState])
+  }, [globalAgentPanelState.mode, setGlobalAgentPanelState])
   const columnsByProjectId = useMemo(() => {
     const map = new Map<string, ColumnConfig[] | null>()
     for (const p of projects) map.set(p.id, p.columns_config)
@@ -625,50 +626,50 @@ function App(): React.JSX.Element {
   const panelProcessesShortcut = useShortcutDisplay('panel-processes')
   const panelTestsShortcut = useShortcutDisplay('panel-tests')
   const panelAutomationsShortcut = useShortcutDisplay('panel-automations')
-  const agentPanelShortcut = useShortcutDisplay('agent-panel')
+  const globalAgentPanelShortcut = useShortcutDisplay('global-agent-panel')
   const agentStatusPanelShortcut = useShortcutDisplay('agent-status-panel')
-  const agentSessionId = selectedProjectId ? `__agent-panel:${selectedProjectId}:${agentPanelState.sessionIndex}` : null
+  const agentSessionId = selectedProjectId ? `__global-agent-panel:${selectedProjectId}:${globalAgentPanelState.sessionIndex}` : null
 
   const handleAgentNewSession = useCallback(async () => {
     if (agentSessionId) await trpcClient.pty.kill.mutate({ sessionId: agentSessionId })
-    setAgentPanelState({ sessionIndex: (agentPanelState.sessionIndex ?? 0) + 1 })
-  }, [agentSessionId, agentPanelState.sessionIndex, setAgentPanelState])
+    setGlobalAgentPanelState({ sessionIndex: (globalAgentPanelState.sessionIndex ?? 0) + 1 })
+  }, [agentSessionId, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState, trpcClient])
 
   const handleAgentModeChange = useCallback(async (nextMode: string) => {
     if (nextMode === agentMode) return
     if (agentSessionId) await trpcClient.pty.kill.mutate({ sessionId: agentSessionId })
-    setAgentPanelState({ mode: nextMode, sessionIndex: (agentPanelState.sessionIndex ?? 0) + 1 })
-  }, [agentMode, agentSessionId, agentPanelState.sessionIndex, setAgentPanelState])
+    setGlobalAgentPanelState({ mode: nextMode, sessionIndex: (globalAgentPanelState.sessionIndex ?? 0) + 1 })
+  }, [agentMode, agentSessionId, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState, trpcClient])
 
   // Floating agent panel: push context to main-process state machine.
   // All detach/reattach decisions happen in main; renderer just keeps ctx in sync.
   useEffect(() => {
-    trpcClient.app.floatingAgent.setSessionId.mutate({ sessionId: agentSessionId })
+    trpcClient.app.floatingGlobalAgentPanel.setSessionId.mutate({ sessionId: agentSessionId })
   }, [agentSessionId])
   useEffect(() => {
-    trpcClient.app.floatingAgent.setPanelOpen.mutate({ isOpen: agentPanelState.isOpen })
-  }, [agentPanelState.isOpen])
+    trpcClient.app.floatingGlobalAgentPanel.setPanelOpen.mutate({ isOpen: globalAgentPanelState.isOpen })
+  }, [globalAgentPanelState.isOpen])
   useEffect(() => {
-    trpcClient.app.floatingAgent.setEnabled.mutate({ enabled: agentPanelState.floatingEnabled })
-  }, [agentPanelState.floatingEnabled])
+    trpcClient.app.floatingGlobalAgentPanel.setEnabled.mutate({ enabled: globalAgentPanelState.floatingEnabled })
+  }, [globalAgentPanelState.floatingEnabled])
 
-  // Subscribe to floating-agent state for menu label + sidebar visibility.
-  const [floatingAgentState, setFloatingAgentState] = useState<{ kind: 'attached' | 'detached' | 'disabled'; mode: 'auto' | 'manual' | null }>({ kind: 'attached', mode: null })
+  // Subscribe to floating-global-agent-panel state for menu label + sidebar visibility.
+  const [floatingGlobalAgentPanelState, setFloatingGlobalAgentPanelState] = useState<{ kind: 'attached' | 'detached' | 'disabled'; mode: 'auto' | 'manual' | null }>({ kind: 'attached', mode: null })
   useEffect(() => {
-    trpcClient.app.floatingAgent.getState.query().then((s) => {
+    trpcClient.app.floatingGlobalAgentPanel.getState.query().then((s) => {
       const st = s as { kind: string; mode: 'auto' | 'manual' | null }
-      setFloatingAgentState({ kind: st.kind as 'attached' | 'detached' | 'disabled', mode: st.mode })
+      setFloatingGlobalAgentPanelState({ kind: st.kind as 'attached' | 'detached' | 'disabled', mode: st.mode })
     })
-    const sub = trpcClient.app.floatingAgent.onState.subscribe(undefined, {
+    const sub = trpcClient.app.floatingGlobalAgentPanel.onState.subscribe(undefined, {
       onData: (s) => {
         const st = s as { kind: string; mode: 'auto' | 'manual' | null }
-        setFloatingAgentState({ kind: st.kind as 'attached' | 'detached' | 'disabled', mode: st.mode })
+        setFloatingGlobalAgentPanelState({ kind: st.kind as 'attached' | 'detached' | 'disabled', mode: st.mode })
       },
     })
     return () => sub.unsubscribe()
   }, [])
   // Hide sidebar panel when manually detached (auto mode keeps panel visible to avoid layout flash).
-  const hideSidebarPanel = floatingAgentState.kind === 'detached' && floatingAgentState.mode === 'manual'
+  const hideSidebarPanel = floatingGlobalAgentPanelState.kind === 'detached' && floatingGlobalAgentPanelState.mode === 'manual'
 
   // Keyboard shortcuts
   useGuardedHotkeys(getKeys('new-task'), (e) => {
@@ -752,11 +753,11 @@ function App(): React.JSX.Element {
     return () => s.unsubscribe()
   }, [])
   useEffect(() => {
-    const s = trpcClient.app.menu.onToggleAgentPanel.subscribe(undefined, {
-      onData: () => { if (selectedProjectId) setAgentPanelState({ isOpen: !agentPanelState.isOpen }) },
+    const s = trpcClient.app.menu.onToggleGlobalAgentPanel.subscribe(undefined, {
+      onData: () => { if (selectedProjectId) setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen }) },
     })
     return () => s.unsubscribe()
-  }, [selectedProjectId, agentPanelState.isOpen])
+  }, [selectedProjectId, globalAgentPanelState.isOpen])
   useEffect(() => {
     const s = trpcClient.app.menu.onToggleAgentStatusPanel.subscribe(undefined, {
       onData: () => setAgentStatusState({ isLocked: !agentStatusState.isLocked }),
@@ -867,7 +868,7 @@ function App(): React.JSX.Element {
 
   useGuardedHotkeys(getKeys('exit-zen-explode'), () => { if (explodeMode) setExplodeMode(false); else if (zenMode) setZenMode(false) }, { enableOnFormTags: true, enabled: !isRecording })
 
-  useGuardedHotkeys(getKeys('agent-panel'), (e) => { e.preventDefault(); trackShortcut(getKeys('agent-panel')); if (selectedProjectId) setAgentPanelState({ isOpen: !agentPanelState.isOpen }) }, { enableOnFormTags: true, enabled: !isRecording })
+  useGuardedHotkeys(getKeys('global-agent-panel'), (e) => { e.preventDefault(); trackShortcut(getKeys('global-agent-panel')); if (selectedProjectId) setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen }) }, { enableOnFormTags: true, enabled: !isRecording })
 
   useGuardedHotkeys(getKeys('agent-status-panel'), (e) => { e.preventDefault(); trackShortcut(getKeys('agent-status-panel')); setAgentStatusState({ isLocked: !agentStatusState.isLocked }) }, { enableOnFormTags: true, enabled: !isRecording })
 
@@ -1228,12 +1229,7 @@ function App(): React.JSX.Element {
   }, [projects, openProjectSettings])
 
   const headerHidden = sidebarView === 'tree' && !treeShowHeader
-  const headerUsageContent = (
-    <>
-      <BoostPill />
-      <UsagePopover data={usageData} onRefresh={refreshUsage} />
-    </>
-  )
+  const activePtyCount = usePtyStatus().size
   const renderHeaderActions = (compact: boolean) => {
     const btnSize = compact ? "h-7 w-7" : "size-10 rounded-lg"
     const iconSize = compact ? "size-4" : "size-5"
@@ -1266,8 +1262,8 @@ function App(): React.JSX.Element {
           {!selectedProjectId ? <p>Select a project first</p> : durationLocked ? <p>Project locked</p> : <div className="space-y-1"><p>{withShortcut('New temporary task', newTempTaskShortcut)}</p><p className="text-muted-foreground">Temporary tasks auto-delete on close.</p></div>}
         </TooltipContent></Tooltip>
         <AgentStatusButton active={agentStatusState.isLocked} count={attentionTaskIds.size} onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })} shortcutHint={agentStatusPanelShortcut} size={compact ? 'sm' : 'lg'} />
-        <AgentPanelButton active={agentPanelState.isOpen} disabled={!selectedProjectId} onClick={() => setAgentPanelState({ isOpen: !agentPanelState.isOpen })} shortcutHint={agentPanelShortcut} size={compact ? 'sm' : 'lg'} />
         <UpdateButton version={updateVersion} downloadPercent={updateDownloadPercent} onRestart={() => trpcClient.app.meta.restartForUpdate.mutate()} size={compact ? 'sm' : 'lg'} />
+        <GlobalAgentPanelButton active={globalAgentPanelState.isOpen} disabled={!selectedProjectId} onClick={() => setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })} shortcutHint={globalAgentPanelShortcut} size={compact ? 'sm' : 'lg'} />
       </>
     )
   }
@@ -1281,34 +1277,168 @@ function App(): React.JSX.Element {
     </div>
   )
   const compactFooterContent = (
-    <div className="flex items-center justify-center gap-3 px-2 py-1">
-      <UsagePopover data={usageData} onRefresh={refreshUsage} />
-      <AgentStatusButton
-        active={agentStatusState.isLocked}
-        count={attentionTaskIds.size}
-        onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })}
-        shortcutHint={agentStatusPanelShortcut}
-      />
-      <button
-        onClick={selectedProjectId && !durationLocked ? handleCreateScratchTerminal : undefined}
-        disabled={!selectedProjectId || durationLocked}
-        className={cn(
-          'h-7 w-7 flex items-center justify-center transition-colors',
-          selectedProjectId && !durationLocked
-            ? 'text-muted-foreground hover:text-foreground'
-            : 'text-muted-foreground/40 cursor-not-allowed',
-        )}
-        aria-label="New temporary task"
-      >
-        <TerminalSquare className="size-4" />
-      </button>
-      <button
-        onClick={handleOpenSettings}
-        className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-        aria-label="Settings"
-      >
-        <Settings className="size-4" />
-      </button>
+    <div className="flex items-center justify-between gap-2 px-2 py-1">
+      <div className="min-w-0 flex items-center">
+        <UsagePopover data={usageData} onRefresh={refreshUsage} />
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          onClick={handleOpenSettings}
+          className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Settings"
+        >
+          <Settings className="size-4" />
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="More"
+              className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <MoreHorizontal className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="end" className="min-w-[240px]">
+            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              Layout
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onSelect={() => setExplodeMode((p) => !p)}
+              disabled={openTaskIds.length < 2}
+              className="cursor-pointer"
+            >
+              <LayoutGrid className="size-4" />
+              <span>Explode mode</span>
+              {explodeMode && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              Panels
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onSelect={() => useDialogStore.getState().openTerminals()}
+              className="cursor-pointer"
+            >
+              <Monitor className="size-4" />
+              <span className="flex items-center gap-2">
+                <span>Active terminals</span>
+                {activePtyCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-foreground text-background text-[10px] font-medium tabular-nums">
+                    {activePtyCount}
+                  </span>
+                )}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })
+              }
+              disabled={!selectedProjectId}
+              className="cursor-pointer"
+            >
+              <Bot className="size-4" />
+              <span>Global Agent panel</span>
+              {globalAgentPanelState.isOpen && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                setAgentStatusState({ isLocked: !agentStatusState.isLocked })
+              }
+              className="cursor-pointer"
+            >
+              <Bell className="size-4" />
+              <span className="flex items-center gap-2">
+                <span>Agent status panel</span>
+                {idleTasks.length > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-foreground text-background text-[10px] font-medium tabular-nums">
+                    {idleTasks.length}
+                  </span>
+                )}
+              </span>
+              {agentStatusState.isLocked && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              Insights
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onSelect={() => useTabStore.getState().setActiveView('leaderboard')}
+              className="cursor-pointer"
+            >
+              <Trophy className="size-4" />
+              <span>Leaderboard</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => useTabStore.getState().setActiveView('usage-analytics')}
+              className="cursor-pointer"
+            >
+              <BarChart3 className="size-4" />
+              <span>Usage Analytics</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => useDialogStore.getState().openChangelog()}
+              className="cursor-pointer"
+            >
+              <Megaphone className="size-4" />
+              <span>What's New</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              Sidebar
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onSelect={() => useTabStore.getState().setSidebarView('tree')}
+              className="cursor-pointer"
+            >
+              <ListTree className="size-4" />
+              <span>Tree view</span>
+              {sidebarView === 'tree' && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => useTabStore.getState().setSidebarView('projects')}
+              className="cursor-pointer"
+            >
+              <Kanban className="size-4" />
+              <span>Projects view</span>
+              {sidebarView === 'projects' && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault()
+                useTabStore.getState().setTreeShowHeader(!treeShowHeader)
+              }}
+              className="cursor-pointer"
+            >
+              <PanelTopOpen className="size-4" />
+              <span>Show header</span>
+              {treeShowHeader && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault()
+                useTabStore.getState().setSidebarAutoHide(!sidebarAutoHide)
+              }}
+              className="cursor-pointer"
+            >
+              <PanelLeftClose className="size-4" />
+              <span>Auto-hide sidebar</span>
+              {sidebarAutoHide && <Check className="size-4 col-start-3" />}
+            </DropdownMenuItem>
+            {updateVersion && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => trpcClient.app.meta.restartForUpdate.mutate()}
+                  className="cursor-pointer text-green-500"
+                >
+                  <span>Restart to install v{updateVersion}</span>
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   )
 
@@ -1325,8 +1455,6 @@ function App(): React.JSX.Element {
           onUsageAnalytics={() => { useTabStore.getState().setActiveView('usage-analytics') }}
           onTaskClick={openTask} onCloseTab={closeTabByTaskId} onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)} zenMode={zenMode} onboardingChecklist={onboardingChecklist} idleByProject={idleByProject} onReorderProjects={reorderProjects}
           terminalStates={terminalStates} taskProgress={taskProgress} doneTaskIds={doneTaskIds} columnsByProjectId={columnsByProjectId}
-          headerUsage={headerHidden ? headerUsageContent : undefined}
-          headerActions={headerHidden ? renderHeaderActions(false) : undefined}
           compactFooter={headerHidden ? compactFooterContent : undefined}
           taskContextMenuRender={(task, child) => (
             <TaskContextMenu
@@ -1507,7 +1635,7 @@ function App(): React.JSX.Element {
                             return (
                               <React.Fragment key={id}>
                                 {i > 0 && <ResizeHandle width={w} minWidth={id === 'kanban' ? 400 : 200} onWidthChange={w => updatePanelSizes({ [HOME_PANEL_SIZE_KEY[id]]: w })} onReset={() => resetPanelSize(HOME_PANEL_SIZE_KEY[id])} />}
-                                <div className={cn('shrink-0 min-h-0 overflow-hidden', cn('rounded-lg border border-border', id === 'kanban' && Object.values(homePanel.homePanelVisibility).filter(Boolean).length <= 1 && !agentPanelState.isOpen && !agentStatusState.isLocked ? 'border-transparent' : id === 'kanban' ? 'bg-surface-1 p-3' : 'bg-surface-1'))} style={{ width: w }}>
+                                <div className={cn('shrink-0 min-h-0 overflow-hidden', cn('rounded-lg border border-border', id === 'kanban' && Object.values(homePanel.homePanelVisibility).filter(Boolean).length <= 1 && !globalAgentPanelState.isOpen && !agentStatusState.isLocked ? 'border-transparent' : id === 'kanban' ? 'bg-surface-1 p-3' : 'bg-surface-1'))} style={{ width: w }}>
                                   {id === 'kanban' && filter.viewMode !== 'list' && (
                                     <KanbanBoard tasks={displayTasks} columns={selectedProject?.columns_config} viewConfig={getViewConfig(filter)} isActive={tabs[activeTabIndex]?.type === 'home'}
                                       onTaskMove={handleTaskMove} onTaskBulkMove={handleTaskBulkMove} onTaskReorder={reorderTasks} onTaskClick={handleTaskClick}
@@ -1590,22 +1718,22 @@ function App(): React.JSX.Element {
               )}
             </div>
 
-            {agentSessionId && agentPanelMountedRef.current && agentPanelState.isOpen && !hideSidebarPanel && (
-              <ResizeHandle width={agentPanelState.panelWidth} minWidth={AGENT_PANEL_MIN_WIDTH} maxWidth={AGENT_PANEL_MAX_WIDTH}
-                onWidthChange={(w) => setAgentPanelState({ panelWidth: w })}
+            {agentSessionId && globalAgentPanelMountedRef.current && globalAgentPanelState.isOpen && !hideSidebarPanel && (
+              <ResizeHandle width={globalAgentPanelState.panelWidth} minWidth={GLOBAL_AGENT_PANEL_MIN_WIDTH} maxWidth={GLOBAL_AGENT_PANEL_MAX_WIDTH}
+                onWidthChange={(w) => setGlobalAgentPanelState({ panelWidth: w })}
                 onDragStart={() => setIsSidePanelResizing(true)} onDragEnd={() => setIsSidePanelResizing(false)}
-                onReset={() => setAgentPanelState({ panelWidth: DEFAULT_AGENT_PANEL_WIDTH })} />
+                onReset={() => setGlobalAgentPanelState({ panelWidth: DEFAULT_GLOBAL_AGENT_PANEL_WIDTH })} />
             )}
-            {agentSessionId && agentPanelMountedRef.current && !hideSidebarPanel && (
-              <div className={agentPanelState.isOpen ? 'min-h-0' : 'w-0 overflow-hidden invisible'} style={agentPanelState.isOpen ? undefined : { position: 'absolute' as const }}>
-                <AgentSidePanel width={agentPanelState.panelWidth}
-                  sessionId={agentSessionId} cwd={projects.find(p => p.id === selectedProjectId)?.path ?? ''} mode={agentMode as import('@slayzone/terminal/shared').TerminalMode} isActive={agentPanelState.isOpen} isResizing={isSidePanelResizing}
+            {agentSessionId && globalAgentPanelMountedRef.current && !hideSidebarPanel && (
+              <div className={globalAgentPanelState.isOpen ? 'min-h-0' : 'w-0 overflow-hidden invisible'} style={globalAgentPanelState.isOpen ? undefined : { position: 'absolute' as const }}>
+                <GlobalAgentSidePanel width={globalAgentPanelState.panelWidth}
+                  sessionId={agentSessionId} cwd={projects.find(p => p.id === selectedProjectId)?.path ?? ''} mode={agentMode as import('@slayzone/terminal/shared').TerminalMode} isActive={globalAgentPanelState.isOpen} isResizing={isSidePanelResizing}
                   onNewSession={handleAgentNewSession} onModeChange={handleAgentModeChange}
-                  floatingEnabled={agentPanelState.floatingEnabled}
-                  onToggleFloating={() => setAgentPanelState({ floatingEnabled: !agentPanelState.floatingEnabled })}
-                  floatingState={floatingAgentState.kind}
-                  onDetach={() => trpcClient.app.floatingAgent.detach.mutate()}
-                  onReattach={() => trpcClient.app.floatingAgent.reattach.mutate()} />
+                  floatingEnabled={globalAgentPanelState.floatingEnabled}
+                  onToggleFloating={() => setGlobalAgentPanelState({ floatingEnabled: !globalAgentPanelState.floatingEnabled })}
+                  floatingState={floatingGlobalAgentPanelState.kind}
+                  onDetach={() => trpcClient.app.floatingGlobalAgentPanel.detach.mutate()}
+                  onReattach={() => trpcClient.app.floatingGlobalAgentPanel.reattach.mutate()} />
               </div>
             )}
             {agentStatusState.isLocked && (
@@ -1644,7 +1772,7 @@ function App(): React.JSX.Element {
         {shouldMount('deleteProject', !!deletingProject) && <Suspense fallback={null}><DeleteProjectDialog project={deletingProject} open={!!deletingProject} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeDeleteProject() }} onDeleted={handleProjectDeleted} /></Suspense>}
         {shouldMount('settings', settingsOpen) && <Suspense fallback={null}><UserSettingsDialog open={settingsOpen} onOpenChange={(open) => { setSettingsOpen(open); if (!open) { setSettingsRevision((r) => r + 1); setSettingsInitialAiConfigSection(null) } }}
           initialTab={settingsInitialTab} initialAiConfigSection={settingsInitialAiConfigSection} onTabChange={setSettingsInitialTab} /></Suspense>}
-        {shouldMount('search', searchOpen) && <Suspense fallback={null}><SearchDialog open={searchOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeSearch() }} tasks={tasks} projects={projects} closedTabs={closedTabs} openTaskTabs={tabs.filter((t): t is Extract<typeof t, { type: 'task' }> => t.type === 'task')} activeTaskId={(() => { const t = tabs[activeTabIndex]; return t && t.type === 'task' ? t.taskId : null })()} onSelectTask={openTask} onSelectProject={setSelectedProjectId} onNewTask={() => useDialogStore.getState().openCreateTask()} onNewTemporaryTask={() => { void handleCreateScratchTerminal() }} onReopenClosedTab={() => useTabStore.getState().reopenClosedTab()} onAddProject={() => useDialogStore.getState().openCreateProject()} onGoHome={() => { const hi = useTabStore.getState().tabs.findIndex((t) => t.type === 'home'); if (hi >= 0) setActiveTabIndex(hi) }} onToggleAgentPanel={() => { if (selectedProjectId) setAgentPanelState({ isOpen: !agentPanelState.isOpen }) }} onOpenChangelog={() => useDialogStore.getState().openChangelog()} onOpenSettings={handleOpenSettings} /></Suspense>}
+        {shouldMount('search', searchOpen) && <Suspense fallback={null}><SearchDialog open={searchOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeSearch() }} tasks={tasks} projects={projects} closedTabs={closedTabs} openTaskTabs={tabs.filter((t): t is Extract<typeof t, { type: 'task' }> => t.type === 'task')} activeTaskId={(() => { const t = tabs[activeTabIndex]; return t && t.type === 'task' ? t.taskId : null })()} onSelectTask={openTask} onSelectProject={setSelectedProjectId} onNewTask={() => useDialogStore.getState().openCreateTask()} onNewTemporaryTask={() => { void handleCreateScratchTerminal() }} onReopenClosedTab={() => useTabStore.getState().reopenClosedTab()} onAddProject={() => useDialogStore.getState().openCreateProject()} onGoHome={() => { const hi = useTabStore.getState().tabs.findIndex((t) => t.type === 'home'); if (hi >= 0) setActiveTabIndex(hi) }} onToggleGlobalAgentPanel={() => { if (selectedProjectId) setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen }) }} onOpenChangelog={() => useDialogStore.getState().openChangelog()} onOpenSettings={handleOpenSettings} /></Suspense>}
         {shouldMount('onboarding', shouldMountOnboarding) && <Suspense fallback={null}><OnboardingDialog externalOpen={onboardingOpen} onExternalClose={async () => {
           useDialogStore.getState().closeOnboarding()
           const [onboardingCompleted, prompted] = await Promise.all([trpcClient.settings.get.query({ key: 'onboarding_completed' }), trpcClient.settings.get.query({ key: 'tutorial_prompted' })])
@@ -1659,6 +1787,7 @@ function App(): React.JSX.Element {
           <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction autoFocus onClick={handleCompleteTaskConfirm}>Complete</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
         </AlertDialog>
         <UpdateToast version={updateToastDismissed ? null : updateVersion} onRestart={() => trpcClient.app.meta.restartForUpdate.mutate()} onDismiss={() => setUpdateToastDismissed(true)} />
+        <TerminalStatusDialog tasks={tasks} onTaskClick={openTask} />
         <Toaster position="bottom-right" theme="dark" closeButton />
       </div>
     </SidebarProvider>

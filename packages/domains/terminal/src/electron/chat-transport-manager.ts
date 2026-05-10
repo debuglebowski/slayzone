@@ -10,7 +10,9 @@ import type { BufferedEvent } from '../server/chat-events-store'
 import type { ChatMode } from '../shared/chat-mode'
 import type { ChatModel } from '../shared/chat-model'
 import type { ChatEffort } from '../shared/chat-effort'
+import { markSessionUserInput, clearSessionUserInputMark } from './user-input-tracker'
 
+export { markSessionUserInput }
 export type { BufferedEvent } from '../server/chat-events-store'
 
 export type ChatTerminalState = 'starting' | 'running' | 'idle' | 'error' | 'dead'
@@ -639,6 +641,7 @@ export async function createChat(opts: CreateChatOpts): Promise<ChatSessionInfo>
     }
     handleEvent(session, { kind: 'process-exit', code, signal })
     deps.broadcastExit(opts.tabId, session.sessionId, code, signal)
+    clearSessionUserInputMark(`${session.taskId}:${session.tabId}`)
     // Leave session in map so reattach can read buffer; consumer deletes on tab close.
   })
 
@@ -661,6 +664,7 @@ export function sendUserMessage(tabId: string, text: string): boolean {
   session.child.stdin?.write(line + '\n')
   // Record into the session buffer so tab reloads / replay reconstruct user messages.
   handleEvent(session, { kind: 'user-message', text })
+  markSessionUserInput(`${session.taskId}:${session.tabId}`)
   return true
 }
 

@@ -56,7 +56,7 @@ type ActionId =
   | 'reopen-closed-tab'
   | 'add-project'
   | 'go-home'
-  | 'toggle-agent-panel'
+  | 'toggle-global-agent-panel'
   | 'open-changelog'
   | 'open-settings'
 
@@ -81,7 +81,7 @@ const ACTION_DEFS: { id: ActionId; label: string; sublabel: string; shortcutId?:
   { id: 'reopen-closed-tab', label: 'Reopen last closed tab', sublabel: 'Restore the most recently closed task', shortcutId: 'reopen-closed-tab', featured: true },
   { id: 'add-project', label: 'Add project', sublabel: 'Add a project folder' },
   { id: 'go-home', label: 'Go to home', sublabel: 'Switch to the home tab', shortcutId: 'go-home' },
-  { id: 'toggle-agent-panel', label: 'Toggle agent panel', sublabel: 'Show or hide the agent side panel', shortcutId: 'agent-panel' },
+  { id: 'toggle-global-agent-panel', label: 'Toggle global agent panel', sublabel: 'Show or hide the global agent side panel', shortcutId: 'global-agent-panel' },
   { id: 'open-changelog', label: 'Open changelog', sublabel: "What's new in SlayZone" },
   { id: 'open-settings', label: 'Open settings', sublabel: 'App settings', shortcutId: 'global-settings', featured: true }
 ]
@@ -92,7 +92,7 @@ const ACTION_ICONS: Record<ActionId, LucideIcon> = {
   'reopen-closed-tab': History,
   'add-project': FolderPlus,
   'go-home': Home,
-  'toggle-agent-panel': PanelRight,
+  'toggle-global-agent-panel': PanelRight,
   'open-changelog': Megaphone,
   'open-settings': Settings
 }
@@ -171,7 +171,7 @@ interface SearchDialogProps {
   onReopenClosedTab: () => void
   onAddProject: () => void
   onGoHome: () => void
-  onToggleAgentPanel: () => void
+  onToggleGlobalAgentPanel: () => void
   onOpenChangelog: () => void
   onOpenSettings: () => void
 }
@@ -191,7 +191,7 @@ export function SearchDialog({
   onReopenClosedTab,
   onAddProject,
   onGoHome,
-  onToggleAgentPanel,
+  onToggleGlobalAgentPanel,
   onOpenChangelog,
   onOpenSettings
 }: SearchDialogProps) {
@@ -364,7 +364,7 @@ export function SearchDialog({
       case 'reopen-closed-tab': return () => runAction(onReopenClosedTab)
       case 'add-project': return () => runAction(onAddProject)
       case 'go-home': return () => runAction(onGoHome)
-      case 'toggle-agent-panel': return () => runAction(onToggleAgentPanel)
+      case 'toggle-global-agent-panel': return () => runAction(onToggleGlobalAgentPanel)
       case 'open-changelog': return () => runAction(onOpenChangelog)
       case 'open-settings': return () => runAction(onOpenSettings)
     }

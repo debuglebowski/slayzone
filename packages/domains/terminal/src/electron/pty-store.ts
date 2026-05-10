@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { createPty, writePty, submitPty, resizePty, killPty, hasPty, getBuffer, clearBuffer, getBufferSince, listPtys, getState, setDatabase, setTerminalTheme, testExecutionContext } from './pty-manager'
+import { createPty, writePty, submitPty, resizePty, killPty, hasPty, getBuffer, clearBuffer, getBufferSince, getHistorySnapshot, getHistoryBefore, setArchiveCapBytes, listPtys, getState, setDatabase, setTerminalTheme, testExecutionContext } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
 import { listChatSessions } from './chat-transport-manager'
 
@@ -56,6 +56,17 @@ export function createPtyOps(db: Database) {
 
   // Synchronize built-in modes from code to database
   syncTerminalModes(db)
+
+  // Apply scrollback archive cap from setting (default 10MB if unset)
+  try {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('terminal_archive_cap_mb') as { value: string } | undefined
+    const mb = row?.value ? parseInt(row.value, 10) : NaN
+    if (Number.isFinite(mb) && mb >= 1) setArchiveCapBytes(mb * 1024 * 1024)
+  } catch { /* ignore */ }
+
+  const ptySetArchiveCapMb = (mb: number) => {
+    if (Number.isFinite(mb) && mb >= 1) setArchiveCapBytes(Math.floor(mb) * 1024 * 1024)
+  }
 
   // Terminal Modes CRUD
   const terminalModesList = async () => {
@@ -310,6 +321,14 @@ const ptyResize = (sessionId: string, cols: number, rows: number) => {
     return getBufferSince(sessionId, afterSeq)
   }
 
+  const ptyGetHistorySnapshot = (sessionId: string, lineCount: number) => {
+    return getHistorySnapshot(sessionId, lineCount)
+  }
+
+  const ptyGetHistoryBefore = (sessionId: string, currentEarliestOffset: number, lineCount: number) => {
+    return getHistoryBefore(sessionId, currentEarliestOffset, lineCount)
+  }
+
   const ptyList = () => {
     return listPtys()
   }
@@ -371,6 +390,9 @@ const ptyResize = (sessionId: string, cols: number, rows: number) => {
     ptyGetBuffer,
     ptyClearBuffer,
     ptyGetBufferSince,
+    ptyGetHistorySnapshot,
+    ptyGetHistoryBefore,
+    ptySetArchiveCapMb,
     ptyList,
     chatList,
     ptyGetState,
@@ -381,4 +403,3 @@ const ptyResize = (sessionId: string, cols: number, rows: number) => {
     ptySetShellOverride
   }
 }
-

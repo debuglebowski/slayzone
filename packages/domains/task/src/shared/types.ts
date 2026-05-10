@@ -495,6 +495,9 @@ export interface Task {
   // Set when an agent PTY for this task transitioned running → idle|error and the
   // user has not yet focused the task. Cleared when the task tab gains focus.
   needs_attention: boolean
+  // True once user dismisses the dev-server URL toast for this task — toast never
+  // reappears for the task again.
+  dev_url_toast_dismissed: boolean
   created_at: string
   updated_at: string
 }
@@ -599,4 +602,6 @@ export interface UpdateTaskInput {
   parentId?: string | null
   // Attention flag (true = set, false = clear)
   needsAttention?: boolean
+  // Persisted dismissal of the dev-server URL detected toast (per task)
+  devUrlToastDismissed?: boolean
 }

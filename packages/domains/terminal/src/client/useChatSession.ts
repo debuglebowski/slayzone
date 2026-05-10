@@ -270,12 +270,13 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       try {
         const buffered = await chat.getBufferSince(opts.tabId, -1)
         if (cancelled) return
-        for (const { seq, event } of buffered) {
-          if (seq > lastSeqRef.current) {
-            dispatch({ type: 'event', event })
-            lastSeqRef.current = seq
-          }
-        }
+        // Route replay through applyLive (not raw dispatch) so side-channel
+        // state — notably `permissionRequests` for unresolved AskUserQuestion
+        // prompts — repopulates on tab reattach. Without this, hydrating a tab
+        // with a pending perm-request leaves the Map empty; Submit can't find
+        // the prompt → falls back to `sendMessage`, but the CLI is still
+        // blocked waiting on `control_response` and never responds.
+        for (const { seq, event } of buffered) applyLive(event, seq)
       } catch {
         /* ignore replay failures */
       } finally {
