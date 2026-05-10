@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
 import { initShortcuts } from './shortcut-init'
-import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus } from 'lucide-react'
+import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus, Settings } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
@@ -28,7 +28,7 @@ import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/project
 import { ProjectLockPopover, ProjectLockScreen, isRateLimited, recordTaskOpen, isProjectLocked, PROJECT_LOCKED_TOAST, hasActiveLockOverride, clearLockOverrides } from '@slayzone/projects'
 import { useTabStore, useDialogStore, AppearanceProvider, type SearchFileContext } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
-import { usePty } from '@slayzone/terminal/client'
+import { usePty, useActiveTaskIds } from '@slayzone/terminal/client'
 // Shared
 import {
   Button,
@@ -149,9 +149,12 @@ function App(): React.JSX.Element {
 
   // View state (tabs + selected project, persisted via zustand)
   const tabs = useTabStore((s) => s.tabs)
+  const closedTabs = useTabStore((s) => s.closedTabs)
   const activeTabIndex = useTabStore((s) => s.activeTabIndex)
   const activeView = useTabStore((s) => s.activeView)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
+  const sidebarView = useTabStore((s) => s.sidebarView)
+  const treeShowHeader = useTabStore((s) => s.treeShowHeader)
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const selectedProjectId = useTabStore((s) => s.selectedProjectId)
   const { setActiveTabIndex, setSelectedProjectId, openTask: rawOpenTask, openTaskInBackground, reorderTabs, reopenClosedTab } = useTabStore.getState()
@@ -201,6 +204,7 @@ function App(): React.JSX.Element {
   const { isBuiltinEnabled: isHomePanelEnabled, getOrderedHomeIds } = usePanelConfig()
   const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
   const [updateVersion, setUpdateVersion] = useState<string | null>(null)
+  const [updateDownloadPercent, setUpdateDownloadPercent] = useState<number | null>(null)
   const [updateToastDismissed, setUpdateToastDismissed] = useState(false)
 
   // Home panel state (extracted — owns its own state fully)
@@ -244,7 +248,18 @@ function App(): React.JSX.Element {
     () => tabs.filter((t): t is { type: 'task'; taskId: string; title: string } => t.type === 'task').map((t) => t.taskId),
     [tabs]
   )
-  const terminalStates = useTerminalStateTracking(openTaskIds, ptyContext)
+  const activeAgentTaskIds = useActiveSessionTaskIds()
+  // PTYs outlive tabs (tab close ≠ PTY kill). Track tabs ∪ live PTY tasks so
+  // tree-view rows for closed tabs still reflect the running PTY's state.
+  // Source from PtyContext's in-memory alive set rather than the IPC-polling
+  // useActiveSessionTaskIds — same trigger surface, no roundtrip per event.
+  const aliveTaskIds = useActiveTaskIds()
+  const trackedTaskIds = useMemo(() => {
+    const s = new Set(openTaskIds)
+    for (const id of aliveTaskIds) s.add(id)
+    return [...s]
+  }, [openTaskIds, aliveTaskIds])
+  const terminalStates = useTerminalStateTracking(trackedTaskIds, ptyContext)
 
   // Tab lifecycle (extracted — manages sync, cleanup, cache eviction, page tracking)
   useTabLifecycle({ tasks, projects, tabs, activeTabIndex, setTasks, ptyContext, setTerminalFocusRequests })
@@ -362,7 +377,6 @@ function App(): React.JSX.Element {
     return map
   }, [projects])
   const { idleTasks: rawIdleTasks } = useIdleTasks(tasks, null, columnsByProjectId)
-  const activeAgentTaskIds = useActiveSessionTaskIds()
   const shutdownAgentForTask = useCallback(async (taskId: string) => {
     const [ptys, chats] = await Promise.all([window.api.pty.list(), window.api.chat.list()])
     const ptyKills = ptys.filter((p) => p.taskId === taskId).map((p) => window.api.pty.kill(p.sessionId))
@@ -744,10 +758,10 @@ function App(): React.JSX.Element {
     return window.api.app.onUpdateStatus((status) => {
       switch (status.type) {
         case 'checking': toast.loading('Checking for updates...', { id: 'update-check' }); break
-        case 'downloading': toast.loading(`Downloading update... ${status.percent}%`, { id: 'update-check' }); break
-        case 'downloaded': toast.dismiss('update-check'); setUpdateVersion(status.version); setUpdateToastDismissed(false); break
-        case 'not-available': toast.success('You\'re on the latest version', { id: 'update-check' }); break
-        case 'error': toast.dismiss('update-check'); toast.error(`Update failed: ${status.message}`, { duration: 8000 }); break
+        case 'downloading': setUpdateDownloadPercent(status.percent); toast.dismiss('update-check'); break
+        case 'downloaded': toast.dismiss('update-check'); setUpdateDownloadPercent(null); setUpdateVersion(status.version); setUpdateToastDismissed(false); break
+        case 'not-available': setUpdateDownloadPercent(null); toast.success('You\'re on the latest version', { id: 'update-check' }); break
+        case 'error': setUpdateDownloadPercent(null); toast.dismiss('update-check'); toast.error(`Update failed: ${status.message}`, { duration: 8000 }); break
       }
     })
   }, [])
@@ -1170,6 +1184,91 @@ function App(): React.JSX.Element {
     return () => { window.removeEventListener('open-settings', handleGlobal); window.removeEventListener('open-project-settings', handleProject) }
   }, [projects, openProjectSettings])
 
+  const headerHidden = sidebarView === 'tree' && !treeShowHeader
+  const headerUsageContent = (
+    <>
+      <BoostPill />
+      <UsagePopover data={usageData} onRefresh={refreshUsage} />
+    </>
+  )
+  const renderHeaderActions = (compact: boolean) => {
+    const btnSize = compact ? "h-7 w-7" : "size-10 rounded-lg"
+    const iconSize = compact ? "size-4" : "size-5"
+    return (
+      <>
+        <Tooltip><TooltipTrigger asChild>
+          <button onClick={() => useTabStore.getState().toggleProjectScopedTabs()}
+            className={cn(btnSize, "flex items-center justify-center transition-colors border-b-2", projectScopedTabs ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground")}>
+            <FolderClosed className={iconSize} />
+          </button>
+        </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{projectScopedTabs ? 'Show all tabs' : 'Show project tabs only'} ({projectTabsShortcut})</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild>
+          <button onClick={() => setZenMode((prev) => !prev)}
+            className={cn(btnSize, "flex items-center justify-center transition-colors border-b-2", zenMode ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground")}>
+            <Focus className={iconSize} />
+          </button>
+        </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{zenMode ? 'Exit zen mode' : 'Zen mode'} ({zenModeShortcut})</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild>
+          <button disabled={openTaskIds.length < 2} onClick={() => setExplodeMode((prev) => !prev)}
+            className={cn(btnSize, "flex items-center justify-center transition-colors border-b-2", explodeMode ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground", openTaskIds.length < 2 && "opacity-30 pointer-events-none")}>
+            <LayoutGrid className={iconSize} />
+          </button>
+        </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{explodeMode ? 'Exit explode mode' : 'Explode mode'} ({explodeModeShortcut})</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild>
+          <button onClick={selectedProjectId && !durationLocked ? handleCreateScratchTerminal : undefined} disabled={!selectedProjectId || durationLocked}
+            className={cn(btnSize, "flex items-center justify-center transition-colors", selectedProjectId && !durationLocked ? "text-muted-foreground hover:text-foreground" : "text-muted-foreground/40 cursor-not-allowed")}>
+            <TerminalSquare className={iconSize} />
+          </button>
+        </TooltipTrigger><TooltipContent side="bottom" className="text-xs max-w-64">
+          {!selectedProjectId ? <p>Select a project first</p> : durationLocked ? <p>Project locked</p> : <div className="space-y-1"><p>{withShortcut('New temporary task', newTempTaskShortcut)}</p><p className="text-muted-foreground">Temporary tasks auto-delete on close.</p></div>}
+        </TooltipContent></Tooltip>
+        <AgentStatusButton active={agentStatusState.isLocked} count={attentionTaskIds.size} onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })} shortcutHint={agentStatusPanelShortcut} size={compact ? 'sm' : 'lg'} />
+        <AgentPanelButton active={agentPanelState.isOpen} disabled={!selectedProjectId} onClick={() => setAgentPanelState({ isOpen: !agentPanelState.isOpen })} shortcutHint={agentPanelShortcut} size={compact ? 'sm' : 'lg'} />
+        <UpdateButton version={updateVersion} downloadPercent={updateDownloadPercent} onRestart={() => window.api.app.restartForUpdate()} size={compact ? 'sm' : 'lg'} />
+      </>
+    )
+  }
+  const tabBarRightContent = (
+    <div className="flex items-center gap-1">
+      <BoostPill />
+      <div className="w-4" />
+      <UsagePopover data={usageData} onRefresh={refreshUsage} />
+      <div className="w-4" />
+      {renderHeaderActions(true)}
+    </div>
+  )
+  const compactFooterContent = (
+    <div className="flex items-center justify-center gap-3 px-2 py-1">
+      <UsagePopover data={usageData} onRefresh={refreshUsage} />
+      <AgentStatusButton
+        active={agentStatusState.isLocked}
+        count={attentionTaskIds.size}
+        onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })}
+        shortcutHint={agentStatusPanelShortcut}
+      />
+      <button
+        onClick={selectedProjectId && !durationLocked ? handleCreateScratchTerminal : undefined}
+        disabled={!selectedProjectId || durationLocked}
+        className={cn(
+          'h-7 w-7 flex items-center justify-center transition-colors',
+          selectedProjectId && !durationLocked
+            ? 'text-muted-foreground hover:text-foreground'
+            : 'text-muted-foreground/40 cursor-not-allowed',
+        )}
+        aria-label="New temporary task"
+      >
+        <TerminalSquare className="size-4" />
+      </button>
+      <button
+        onClick={handleOpenSettings}
+        className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Settings"
+      >
+        <Settings className="size-4" />
+      </button>
+    </div>
+  )
+
   return (
     <AppearanceProvider settingsRevision={settingsRevision}>
     <SidebarProvider defaultOpen={true}>
@@ -1181,8 +1280,11 @@ function App(): React.JSX.Element {
           onSettings={handleOpenSettings}
           onLeaderboard={() => { useTabStore.getState().setActiveView('leaderboard') }}
           onUsageAnalytics={() => { useTabStore.getState().setActiveView('usage-analytics') }}
-          onTaskClick={openTask} zenMode={zenMode} onboardingChecklist={onboardingChecklist} idleByProject={idleByProject} onReorderProjects={reorderProjects}
+          onTaskClick={openTask} onCloseTab={closeTabByTaskId} onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)} zenMode={zenMode} onboardingChecklist={onboardingChecklist} idleByProject={idleByProject} onReorderProjects={reorderProjects}
           terminalStates={terminalStates} taskProgress={taskProgress} doneTaskIds={doneTaskIds} columnsByProjectId={columnsByProjectId}
+          headerUsage={headerHidden ? headerUsageContent : undefined}
+          headerActions={headerHidden ? renderHeaderActions(false) : undefined}
+          compactFooter={headerHidden ? compactFooterContent : undefined}
           taskContextMenuRender={(task, child) => (
             <TaskContextMenu
               task={task}
@@ -1209,8 +1311,9 @@ function App(): React.JSX.Element {
           )}
         />
 
-        <div id="right-column" className={`flex-1 flex min-w-0 bg-sidebar pb-2 pr-2 ${zenMode || sidebarAutoHide ? 'pl-2' : ''}`}>
+        <div id="right-column" className={`flex-1 flex min-w-0 bg-sidebar pb-2 pr-2 ${headerHidden ? 'pt-2' : ''} ${zenMode || sidebarAutoHide ? 'pl-2' : ''}`}>
           <div id="right-main" className="flex-1 flex flex-col min-w-0 min-h-0">
+          {!headerHidden && (
           <div className={zenMode || sidebarAutoHide ? "pl-16" : ""}>
             <TabBar
               hideTabs={explodeMode}
@@ -1251,45 +1354,10 @@ function App(): React.JSX.Element {
                   )}
                 </>
               ) : undefined}
-              rightContent={
-                <div className="flex items-center gap-1">
-                  <BoostPill />
-                  <div className="w-4" />
-                  <UsagePopover data={usageData} onRefresh={refreshUsage} />
-                  <div className="w-4" />
-                  <Tooltip><TooltipTrigger asChild>
-                    <button onClick={() => useTabStore.getState().toggleProjectScopedTabs()}
-                      className={cn("h-7 w-7 flex items-center justify-center transition-colors border-b-2", projectScopedTabs ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground")}>
-                      <FolderClosed className="size-4" />
-                    </button>
-                  </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{projectScopedTabs ? 'Show all tabs' : 'Show project tabs only'} ({projectTabsShortcut})</TooltipContent></Tooltip>
-                  <Tooltip><TooltipTrigger asChild>
-                    <button onClick={() => setZenMode((prev) => !prev)}
-                      className={cn("h-7 w-7 flex items-center justify-center transition-colors border-b-2", zenMode ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground")}>
-                      <Focus className="size-4" />
-                    </button>
-                  </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{zenMode ? 'Exit zen mode' : 'Zen mode'} ({zenModeShortcut})</TooltipContent></Tooltip>
-                  <Tooltip><TooltipTrigger asChild>
-                    <button disabled={openTaskIds.length < 2} onClick={() => setExplodeMode((prev) => !prev)}
-                      className={cn("h-7 w-7 flex items-center justify-center transition-colors border-b-2", explodeMode ? "text-foreground border-foreground" : "text-muted-foreground border-transparent hover:text-foreground", openTaskIds.length < 2 && "opacity-30 pointer-events-none")}>
-                      <LayoutGrid className="size-4" />
-                    </button>
-                  </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{explodeMode ? 'Exit explode mode' : 'Explode mode'} ({explodeModeShortcut})</TooltipContent></Tooltip>
-                  <Tooltip><TooltipTrigger asChild>
-                    <button onClick={selectedProjectId && !durationLocked ? handleCreateScratchTerminal : undefined} disabled={!selectedProjectId || durationLocked}
-                      className={cn("h-7 w-7 flex items-center justify-center transition-colors", selectedProjectId && !durationLocked ? "text-muted-foreground hover:text-foreground" : "text-muted-foreground/40 cursor-not-allowed")}>
-                      <TerminalSquare className="size-4" />
-                    </button>
-                  </TooltipTrigger><TooltipContent side="bottom" className="text-xs max-w-64">
-                    {!selectedProjectId ? <p>Select a project first</p> : durationLocked ? <p>Project locked</p> : <div className="space-y-1"><p>{withShortcut('New temporary task', newTempTaskShortcut)}</p><p className="text-muted-foreground">Temporary tasks auto-delete on close.</p></div>}
-                  </TooltipContent></Tooltip>
-                  <AgentStatusButton active={agentStatusState.isLocked} count={attentionTaskIds.size} onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })} shortcutHint={agentStatusPanelShortcut} />
-                  <AgentPanelButton active={agentPanelState.isOpen} disabled={!selectedProjectId} onClick={() => setAgentPanelState({ isOpen: !agentPanelState.isOpen })} shortcutHint={agentPanelShortcut} />
-                  <UpdateButton version={updateVersion} onRestart={() => window.api.app.restartForUpdate()} />
-                </div>
-              }
+              rightContent={tabBarRightContent}
             />
           </div>
+          )}
 
           <div id="content-wrapper" className="flex-1 min-h-0 flex">
             <div id="main-area" className="flex-1 min-w-0 min-h-0 rounded-lg bg-surface-0 flex overflow-hidden p-4">
@@ -1533,7 +1601,7 @@ function App(): React.JSX.Element {
         {shouldMount('deleteProject', !!deletingProject) && <Suspense fallback={null}><DeleteProjectDialog project={deletingProject} open={!!deletingProject} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeDeleteProject() }} onDeleted={handleProjectDeleted} /></Suspense>}
         {shouldMount('settings', settingsOpen) && <Suspense fallback={null}><UserSettingsDialog open={settingsOpen} onOpenChange={(open) => { setSettingsOpen(open); if (!open) { setSettingsRevision((r) => r + 1); setSettingsInitialAiConfigSection(null) } }}
           initialTab={settingsInitialTab} initialAiConfigSection={settingsInitialAiConfigSection} onTabChange={setSettingsInitialTab} /></Suspense>}
-        {shouldMount('search', searchOpen) && <Suspense fallback={null}><SearchDialog open={searchOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeSearch() }} tasks={tasks} projects={projects} onSelectTask={openTask} onSelectProject={setSelectedProjectId} /></Suspense>}
+        {shouldMount('search', searchOpen) && <Suspense fallback={null}><SearchDialog open={searchOpen} onOpenChange={(open) => { if (!open) useDialogStore.getState().closeSearch() }} tasks={tasks} projects={projects} closedTabs={closedTabs} openTaskTabs={tabs.filter((t): t is Extract<typeof t, { type: 'task' }> => t.type === 'task')} activeTaskId={(() => { const t = tabs[activeTabIndex]; return t && t.type === 'task' ? t.taskId : null })()} onSelectTask={openTask} onSelectProject={setSelectedProjectId} onNewTask={() => useDialogStore.getState().openCreateTask()} onNewTemporaryTask={() => { void handleCreateScratchTerminal() }} onReopenClosedTab={() => useTabStore.getState().reopenClosedTab()} onAddProject={() => useDialogStore.getState().openCreateProject()} onGoHome={() => { const hi = useTabStore.getState().tabs.findIndex((t) => t.type === 'home'); if (hi >= 0) setActiveTabIndex(hi) }} onToggleAgentPanel={() => { if (selectedProjectId) setAgentPanelState({ isOpen: !agentPanelState.isOpen }) }} onOpenChangelog={() => useDialogStore.getState().openChangelog()} onOpenSettings={handleOpenSettings} /></Suspense>}
         {shouldMount('onboarding', shouldMountOnboarding) && <Suspense fallback={null}><OnboardingDialog externalOpen={onboardingOpen} onExternalClose={async () => {
           useDialogStore.getState().closeOnboarding()
           const [onboardingCompleted, prompted] = await Promise.all([window.api.settings.get('onboarding_completed'), window.api.settings.get('tutorial_prompted')])

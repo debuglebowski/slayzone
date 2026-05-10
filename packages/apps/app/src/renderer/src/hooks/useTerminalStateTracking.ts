@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import type { TerminalState } from '@slayzone/terminal/shared'
 
 type PtyContext = {
@@ -7,45 +7,63 @@ type PtyContext = {
 }
 
 export function useTerminalStateTracking(
-  openTaskIds: string[],
+  trackedTaskIds: string[],
   ptyContext: PtyContext
 ): Map<string, TerminalState> {
   const [terminalStates, setTerminalStates] = useState<Map<string, TerminalState>>(new Map())
+  const subsRef = useRef<Map<string, () => void>>(new Map())
+  const taskIdsRef = useRef(trackedTaskIds)
+  taskIdsRef.current = trackedTaskIds
+
+  // Caller may produce new array refs every render even when contents are
+  // stable (e.g. derived from a polled Set). Diffing keys off content avoids
+  // tearing down + re-subscribing on every PTY state event.
+  const key = useMemo(() => [...trackedTaskIds].sort().join('|'), [trackedTaskIds])
 
   useEffect(() => {
-    const unsubscribes: (() => void)[] = []
+    const desired = new Set(taskIdsRef.current)
+    const subs = subsRef.current
+    const removed: string[] = []
+    const added: string[] = []
 
-    for (const taskId of openTaskIds) {
-      const mainSessionId = `${taskId}:${taskId}`
+    for (const [taskId, unsub] of subs) {
+      if (!desired.has(taskId)) {
+        unsub()
+        subs.delete(taskId)
+        removed.push(taskId)
+      }
+    }
 
-      const currentState = ptyContext.getState(mainSessionId)
-      setTerminalStates((prev) => {
-        const next = new Map(prev)
-        next.set(taskId, currentState)
-        return next
-      })
-
-      const unsub = ptyContext.subscribeState(mainSessionId, (newState) => {
+    for (const taskId of desired) {
+      if (subs.has(taskId)) continue
+      const sessionId = `${taskId}:${taskId}`
+      const unsub = ptyContext.subscribeState(sessionId, (newState) => {
         setTerminalStates((prev) => {
           const next = new Map(prev)
           next.set(taskId, newState)
           return next
         })
       })
-      unsubscribes.push(unsub)
+      subs.set(taskId, unsub)
+      added.push(taskId)
     }
 
+    if (removed.length === 0 && added.length === 0) return
+
     setTerminalStates((prev) => {
-      const openSet = new Set(openTaskIds)
       const next = new Map(prev)
-      for (const key of next.keys()) {
-        if (!openSet.has(key)) next.delete(key)
-      }
+      for (const id of removed) next.delete(id)
+      for (const id of added) next.set(id, ptyContext.getState(`${id}:${id}`))
       return next
     })
+  }, [key, ptyContext])
 
-    return () => unsubscribes.forEach((fn) => fn())
-  }, [openTaskIds, ptyContext])
+  useEffect(() => {
+    return () => {
+      for (const unsub of subsRef.current.values()) unsub()
+      subsRef.current.clear()
+    }
+  }, [])
 
   return terminalStates
 }

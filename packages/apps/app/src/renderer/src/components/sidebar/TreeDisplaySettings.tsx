@@ -29,12 +29,14 @@ export function TreeDisplaySettings() {
   const treeSubtaskMode = useTabStore((s) => s.treeSubtaskMode)
   const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
+  const treeGroupByStatus = useTabStore((s) => s.treeGroupByStatus)
   const treeShowHeader = useTabStore((s) => s.treeShowHeader)
   const setTreeShowStatus = useTabStore((s) => s.setTreeShowStatus)
   const setTreeShowPriority = useTabStore((s) => s.setTreeShowPriority)
   const setTreeSubtaskMode = useTabStore((s) => s.setTreeSubtaskMode)
   const setTreeCrossOutDone = useTabStore((s) => s.setTreeCrossOutDone)
   const setTreeShowWorktree = useTabStore((s) => s.setTreeShowWorktree)
+  const setTreeGroupByStatus = useTabStore((s) => s.setTreeGroupByStatus)
   const setTreeShowHeader = useTabStore((s) => s.setTreeShowHeader)
 
   return (
@@ -97,6 +99,13 @@ export function TreeDisplaySettings() {
               hint="Strikethrough done tasks"
               checked={treeCrossOutDone}
               onChange={setTreeCrossOutDone}
+            />
+            <Row
+              id="tree-group-by-status"
+              label="Group by status"
+              hint="Bucket root tasks under status headings"
+              checked={treeGroupByStatus}
+              onChange={setTreeGroupByStatus}
             />
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">

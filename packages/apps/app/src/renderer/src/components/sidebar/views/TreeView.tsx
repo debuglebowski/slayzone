@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, GitBranch, Home, Pin, Settings } from 'lucide-react'
+import { ChevronDown, GitBranch, Home, Pin, Power, Search, Settings, X } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
-import { cn, TerminalProgressDot, PriorityIcon, getColumnStatusStyle } from '@slayzone/ui'
+import { cn, TerminalProgressDot, PriorityIcon, getColumnStatusStyle, TASK_STATUS_ORDER, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from '@slayzone/ui'
 import { type Task } from '@slayzone/task/shared'
-import { useTabStore } from '@slayzone/settings'
+import { useDialogStore, useTabStore } from '@slayzone/settings'
 import { useFilterStateMap, sortTasks, getViewConfig } from '@slayzone/tasks'
 import { useActiveSessionTaskIds } from '@/components/agent-status/useIdleTasks'
 import type { SidebarViewContext } from './types'
@@ -62,6 +62,8 @@ export function TreeView({
   onSelectProject,
   onProjectSettings,
   onTaskClick,
+  onCloseTab,
+  onOpenTaskInBackground,
   taskContextMenuRender,
   terminalStates,
   taskProgress,
@@ -82,12 +84,25 @@ export function TreeView({
   const treeIncludeAllSubtasks = treeSubtaskMode === 'all'
   const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
+  const treeGroupByStatus = useTabStore((s) => s.treeGroupByStatus)
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const pinnedSet = useMemo(() => new Set(treePinnedTaskIds), [treePinnedTaskIds])
+
+  const tabs = useTabStore((s) => s.tabs)
+  const openTabTaskIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const t of tabs) if (t.type === 'task') ids.add(t.taskId)
+    return ids
+  }, [tabs])
+
   const passesFilter = useCallback(
     (t: Task) =>
-      !t.archived_at && (statusFilter.has(t.status) || pinnedSet.has(t.id) || t.is_temporary),
-    [statusFilter, pinnedSet]
+      !t.archived_at &&
+      (statusFilter.has(t.status) ||
+        pinnedSet.has(t.id) ||
+        t.is_temporary ||
+        openTabTaskIds.has(t.id)),
+    [statusFilter, pinnedSet, openTabTaskIds]
   )
 
   // A task is "visible" if it passes the filter OR if any descendant in the same
@@ -204,13 +219,6 @@ export function TreeView({
   const projectIsActive = (pid: string) =>
     selectedProjectId === pid && (activeTabType === 'home' || activeView === 'context')
 
-  const tabs = useTabStore((s) => s.tabs)
-  const openTabTaskIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const t of tabs) if (t.type === 'task') ids.add(t.taskId)
-    return ids
-  }, [tabs])
-
   const sessionTaskIds = useActiveSessionTaskIds()
 
   const activeProjectIds = useMemo(() => {
@@ -245,6 +253,7 @@ export function TreeView({
 
   const renderTask = (task: Task, depth: number, ancestorFlags: boolean[]): ReactNode => {
     const isActive = activeTaskId === task.id
+    const isOpenTab = openTabTaskIds.has(task.id)
     const children = childrenByParent.get(task.id) ?? []
     const termState = terminalStates?.get(task.id)
     const progress = taskProgress?.get(task.id)
@@ -259,16 +268,26 @@ export function TreeView({
         data-task-id={task.id}
         data-active={isActive ? 'true' : undefined}
         onClick={() => onTaskClick?.(task.id)}
+        onAuxClick={(e) => {
+          if (e.button !== 1) return
+          e.preventDefault()
+          e.stopPropagation()
+          if (isOpenTab) onCloseTab?.(task.id)
+          else onOpenTaskInBackground?.(task.id)
+        }}
+        onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
         style={{ paddingLeft: tgPaddingLeft(depth), minHeight: TG_ROW_HEIGHT }}
-        className="relative flex w-full items-center pr-1 text-sm text-left"
+        className="group/treerow relative flex w-full items-center pr-1 text-sm text-left"
       >
         <TreeGuides depth={depth} ancestorFlags={ancestorFlags} />
         <span
           className={cn(
-            'flex flex-1 items-center gap-2 rounded-md px-1.5 py-1 min-w-0 transition-colors',
+            'relative flex flex-1 items-center gap-2 rounded-md px-1.5 py-1 min-w-0 transition-colors',
             isActive
               ? 'bg-white/10 text-foreground'
-              : 'text-muted-foreground hover:bg-accent/40 hover:text-accent-foreground'
+              : isOpenTab
+                ? 'text-foreground hover:bg-accent/40'
+                : 'text-muted-foreground/45 hover:bg-accent/40 hover:text-accent-foreground'
           )}
         >
           <TerminalProgressDot
@@ -306,6 +325,59 @@ export function TreeView({
           {treeShowStatus && StatusIcon && (
             <StatusIcon className={cn('size-3.5 shrink-0', statusStyle?.iconClass)} />
           )}
+          {isOpenTab && onCloseTab ? (
+            <Tooltip delayDuration={500}>
+              <TooltipTrigger asChild>
+                <span
+                  role="button"
+                  aria-label="Close tab"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onCloseTab(task.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onCloseTab(task.id)
+                  }}
+                  className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground opacity-0 group-hover/treerow:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+                >
+                  <X className="size-3.5" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right">Close tab (middle-click)</TooltipContent>
+            </Tooltip>
+          ) : !isOpenTab && onOpenTaskInBackground ? (
+            <Tooltip delayDuration={500}>
+              <TooltipTrigger asChild>
+                <span
+                  role="button"
+                  aria-label="Open in background tab"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onOpenTaskInBackground(task.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onOpenTaskInBackground(task.id)
+                  }}
+                  className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground opacity-0 group-hover/treerow:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+                >
+                  <Power className="size-3" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right">Open in background tab (middle-click)</TooltipContent>
+            </Tooltip>
+          ) : (
+            <span aria-hidden className="inline-block size-5 shrink-0" />
+          )}
         </span>
       </button>
     )
@@ -315,6 +387,46 @@ export function TreeView({
         {children.map((c, i) => renderTask(c, depth + 1, [...ancestorFlags, i < children.length - 1]))}
       </div>
     )
+  }
+
+  const renderRootTasks = (rootTasks: Task[], projectId: string): ReactNode => {
+    if (!treeGroupByStatus) {
+      return rootTasks.map((task, i) => renderTask(task, 1, [i < rootTasks.length - 1]))
+    }
+    const cols = columnsByProjectId?.get(projectId) ?? null
+    const order: string[] = cols
+      ? [...cols].sort((a, b) => a.position - b.position).map((c) => c.id)
+      : [...TASK_STATUS_ORDER]
+    const byStatus = new Map<string, Task[]>()
+    for (const t of rootTasks) {
+      const arr = byStatus.get(t.status) ?? []
+      arr.push(t)
+      byStatus.set(t.status, arr)
+    }
+    const groups: { status: string; tasks: Task[] }[] = []
+    for (const s of order) {
+      const arr = byStatus.get(s)
+      if (arr && arr.length > 0) groups.push({ status: s, tasks: arr })
+    }
+    for (const [s, arr] of byStatus) {
+      if (!order.includes(s)) groups.push({ status: s, tasks: arr })
+    }
+    const showLabel = groups.length > 1
+    return groups.map((g) => {
+      const style = getColumnStatusStyle(g.status, cols)
+      const StatusIcon = style?.icon
+      return (
+        <div key={g.status}>
+          {showLabel && (
+            <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              {StatusIcon && <StatusIcon className={cn('size-3', style?.iconClass)} />}
+              <span>{style?.label ?? g.status}</span>
+            </div>
+          )}
+          {g.tasks.map((task, i) => renderTask(task, 1, [i < g.tasks.length - 1]))}
+        </div>
+      )
+    })
   }
 
   const renderProject = (project: typeof sortedProjects[number]) => {
@@ -333,7 +445,7 @@ export function TreeView({
           style={{
             backgroundColor: `color-mix(in oklch, ${project.color} ${projectIsActive(project.id) ? 22 : 10}%, transparent)`
           }}
-          className="group/projectrow relative flex items-center gap-0.5 transition-[filter] hover:brightness-125"
+          className="group/projectrow relative flex h-10 items-center gap-0.5 transition-[filter] hover:brightness-125"
         >
           <Collapsible.Trigger
             aria-label={isOpen ? `Collapse ${project.name}` : `Expand ${project.name}`}
@@ -378,7 +490,7 @@ export function TreeView({
                 No active tasks
               </span>
             ) : (
-              rootTasks.map((task, i) => renderTask(task, 1, [i < rootTasks.length - 1]))
+              renderRootTasks(rootTasks, project.id)
             )}
           </div>
         </Collapsible.Content>
@@ -386,8 +498,25 @@ export function TreeView({
     )
   }
 
+  const openSearch = useDialogStore((s) => s.openSearch)
+  const searchShortcut = useShortcutDisplay('search')
+
   return (
     <div className="flex flex-col gap-3 px-1">
+      <div className="py-3">
+        <button
+          type="button"
+          onClick={() => openSearch()}
+          aria-label="Search"
+          className="flex w-full items-center gap-2 rounded-xl bg-surface-1 px-3 h-10 text-xs text-muted-foreground/60 hover:text-foreground transition-colors"
+        >
+          <Search className="size-3.5 shrink-0" />
+          <span className="flex-1 text-left">Search files, folders, tasks…</span>
+          {searchShortcut && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/50">{searchShortcut}</span>
+          )}
+        </button>
+      </div>
       {visibleProjects.map(renderProject)}
       {hiddenProjects.length > 0 && (
         <button
