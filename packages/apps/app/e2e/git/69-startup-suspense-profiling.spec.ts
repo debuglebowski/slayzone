@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp, goHome, clickProject, TEST_PROJECT_PATH } from '../fixtures/electron'
 import fs from 'fs'
 import path from 'path'
@@ -335,16 +336,16 @@ test.describe('Startup & Suspense Profiling', () => {
 
       // Replicate fetchTaskDetail's parallel calls
       const [task, tags, taskTags, projects, subTasks] = await Promise.all([
-        time('db.getTask', () => window.api.db.getTask(taskId)),
+        time('db.getTask', () => getTrpcVanillaClient().task.get.query({ id: taskId })),
         time('tags.getTags', () => window.api.tags.getTags()),
         time('taskTags.getTagsForTask', () => window.api.taskTags.getTagsForTask(taskId)),
-        time('db.getProjects', () => window.api.db.getProjects()),
-        time('db.getSubTasks', () => window.api.db.getSubTasks(taskId)),
+        time('db.getProjects', () => getTrpcVanillaClient().projects.list.query()),
+        time('db.getSubTasks', () => getTrpcVanillaClient().task.getSubTasks.query({ parentId: taskId })),
       ])
 
       // Sequential: parent task lookup
       if (task?.parent_id) {
-        await time('db.getTask(parent)', () => window.api.db.getTask(task.parent_id!))
+        await time('db.getTask(parent)', () => getTrpcVanillaClient().task.get.query({ id: task.parent_id! }))
       }
 
       const totalMs = Math.round((performance.now() - totalStart) * 100) / 100

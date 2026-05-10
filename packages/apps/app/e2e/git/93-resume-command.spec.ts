@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, switchTerminalMode, getMainSessionId } from '../fixtures/terminal'
@@ -123,7 +124,7 @@ test.describe('Resume command opts', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume claude', status: 'in_progress' })
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({
+      ({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { 'claude-code': { conversationId: cid } },
       }),
@@ -145,7 +146,7 @@ test.describe('Resume command opts', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume codex', status: 'in_progress', terminalMode: 'codex' })
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({
+      ({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { codex: { conversationId: cid } },
       }),
@@ -167,7 +168,7 @@ test.describe('Resume command opts', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume gemini', status: 'in_progress', terminalMode: 'gemini' })
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({
+      ({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { gemini: { conversationId: cid } },
       }),
@@ -189,7 +190,7 @@ test.describe('Resume command opts', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume cursor', status: 'in_progress', terminalMode: 'cursor-agent' })
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({
+      ({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { 'cursor-agent': { conversationId: cid } },
       }),
@@ -211,7 +212,7 @@ test.describe('Resume command opts', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume opencode', status: 'in_progress', terminalMode: 'opencode' })
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({
+      ({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { opencode: { conversationId: cid } },
       }),
@@ -233,7 +234,7 @@ test.describe('Resume command opts', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume qwen', status: 'in_progress', terminalMode: 'qwen-code' })
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({
+      ({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { 'qwen-code': { conversationId: cid } },
       }),
@@ -255,7 +256,7 @@ test.describe('Resume command opts', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC resume copilot', status: 'in_progress', terminalMode: 'copilot' })
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({
+      ({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { copilot: { conversationId: cid } },
       }),
@@ -279,7 +280,7 @@ test.describe('Resume command opts', () => {
     const t = await s.createTask({ projectId, title: 'RC cfg path', status: 'in_progress', terminalMode: 'codex' })
     // Use providerConfig field (not legacy codexConversationId)
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({
+      ({ id }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { codex: { conversationId: 'via-provider-config' } },
       }),
@@ -301,7 +302,7 @@ test.describe('Resume command opts', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'RC flags test', status: 'in_progress' })
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({
+      ({ id }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { 'claude-code': { flags: '--custom-test-flag --verbose' } },
       }),

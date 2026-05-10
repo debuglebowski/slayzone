@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp, goHome, clickProject, TEST_PROJECT_PATH } from '../fixtures/electron'
 import fs from 'fs'
 import path from 'path'
@@ -145,21 +146,21 @@ test.describe('Performance Profiling', () => {
   test('05 — IPC round-trip: loadBoardData', async ({ mainWindow }) => {
     const loadMs = await mainWindow.evaluate(async () => {
       const start = performance.now()
-      await window.api.db.loadBoardData()
+      await getTrpcVanillaClient().task.loadBoardData.query()
       return Math.round(performance.now() - start)
     })
 
     const createMs = await mainWindow.evaluate(async (pid: string) => {
       const start = performance.now()
-      const task = await window.api.db.createTask({ projectId: pid, title: 'timing-test' })
+      const task = await getTrpcVanillaClient().task.create.mutate({ projectId: pid, title: 'timing-test' })
       const elapsed = Math.round(performance.now() - start)
-      await window.api.db.deleteTask(task.id).catch(() => {})
+      await getTrpcVanillaClient().task.delete.mutate({ id: task.id }).catch(() => {})
       return elapsed
     }, projectId)
 
     const getProjectsMs = await mainWindow.evaluate(async () => {
       const start = performance.now()
-      await window.api.db.getProjects()
+      await getTrpcVanillaClient().projects.list.query()
       return Math.round(performance.now() - start)
     })
 
@@ -232,7 +233,7 @@ test.describe('Performance Profiling', () => {
     const scaleData = await mainWindow.evaluate(async () => {
       const mem = (performance as any).memory
       const loadStart = performance.now()
-      await window.api.db.loadBoardData()
+      await getTrpcVanillaClient().task.loadBoardData.query()
       const loadMs = Math.round(performance.now() - loadStart)
       return {
         taskCount: 100,

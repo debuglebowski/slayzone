@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, TEST_PROJECT_PATH, resetApp, ensureGitRepo} from '../fixtures/electron'
 import path from 'path'
 
@@ -38,7 +39,7 @@ test.describe('Auto worktree on task create', () => {
     const expectedBranch = slugify(title)
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
+        const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), created.id)
         return task?.worktree_path ?? null
       })
       .toBe(path.join(path.dirname(TEST_PROJECT_PATH), expectedBranch))
@@ -60,7 +61,7 @@ test.describe('Auto worktree on task create', () => {
       status: 'todo'
     })
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), created.id)
     expect(task?.worktree_path).toBeNull()
   })
 
@@ -84,7 +85,7 @@ test.describe('Auto worktree on task create', () => {
     const expectedBranch = slugify(title)
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
+        const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), created.id)
         return task?.worktree_path ?? null
       })
       .toBe(path.join(path.dirname(TEST_PROJECT_PATH), expectedBranch))

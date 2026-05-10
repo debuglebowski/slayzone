@@ -49,7 +49,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
 
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SIC codex fresh', status: 'in_progress', terminalMode: 'codex' })
-    await mainWindow.evaluate(({ id }) => window.api.db.updateTask({
+    await mainWindow.evaluate(({ id }) => getTrpcVanillaClient().task.update.mutate({
       id, providerConfig: { codex: { flags: '--full-auto --search --disable apps' } }
     }), { id: t.id })
     await s.refreshData()
@@ -63,7 +63,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
       return buf.length > 0
     }, { timeout: 60_000 }).toBe(true)
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
     expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
   })
 
@@ -84,7 +84,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
       return buf.length > 0
     }, { timeout: 60_000 }).toBe(true)
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
     expect(task?.provider_config?.gemini?.conversationId ?? null).toBeNull()
   })
 
@@ -110,11 +110,11 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
     await mainWindow.evaluate(({ id }) => getTrpcVanillaClient().pty.write.mutate({ sessionId: id, data: '\r' }), { id: sessionId })
 
     await expect.poll(async () => {
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
       return task?.provider_config?.gemini?.conversationId ?? null
     }, { timeout: 15_000 }).not.toBeNull()
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
     expect(task?.provider_config?.gemini?.conversationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
     )
@@ -136,7 +136,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
     const storedId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SIC codex persist', status: 'in_progress', terminalMode: 'codex' })
-    await mainWindow.evaluate(({ id, cid }) => window.api.db.updateTask({
+    await mainWindow.evaluate(({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
       id, providerConfig: { codex: { conversationId: cid, flags: '--full-auto --search --disable apps' } }
     }), { id: t.id, cid: storedId })
     await s.refreshData()
@@ -153,7 +153,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
     // Wait for any async detection to potentially overwrite
     await mainWindow.waitForTimeout(5000)
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
     expect(task?.provider_config?.codex?.conversationId).toBe(storedId)
   })
 })

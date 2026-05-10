@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, getMainSessionId } from '../fixtures/terminal'
@@ -124,7 +125,7 @@ test.describe('Session invalidation', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SI clear id', status: 'in_progress' })
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({
+      ({ id }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { 'claude-code': { conversationId: 'stale-id-to-clear' } },
       }),
@@ -141,7 +142,7 @@ test.describe('Session invalidation', () => {
 
     // conversationId should be cleared
     await expect.poll(async () => {
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
       return task?.provider_config?.['claude-code']?.conversationId ?? null
     }, { timeout: 10_000 }).toBeNull()
   })
@@ -150,7 +151,7 @@ test.describe('Session invalidation', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SI kill pty', status: 'in_progress' })
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({
+      ({ id }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { 'claude-code': { conversationId: 'stale-kill-test' } },
       }),
@@ -177,7 +178,7 @@ test.describe('Session invalidation', () => {
     const t = await s.createTask({ projectId, title: 'SI cross mode', status: 'in_progress' })
     // Set conversation IDs for both claude-code and codex
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({
+      ({ id }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: {
           'claude-code': { conversationId: 'claude-to-clear' },
@@ -197,12 +198,12 @@ test.describe('Session invalidation', () => {
 
     // Wait for claude-code's ID to be cleared
     await expect.poll(async () => {
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
       return task?.provider_config?.['claude-code']?.conversationId ?? null
     }, { timeout: 10_000 }).toBeNull()
 
     // codex's ID should survive
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
     expect(task?.provider_config?.codex?.conversationId).toBe('codex-should-survive')
   })
 
@@ -212,7 +213,7 @@ test.describe('Session invalidation', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SI reset', status: 'in_progress' })
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({
+      ({ id }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { 'claude-code': { conversationId: 'reset-me' } },
       }),
@@ -232,7 +233,7 @@ test.describe('Session invalidation', () => {
 
     // conversationId should be cleared
     await expect.poll(async () => {
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
       return task?.provider_config?.['claude-code']?.conversationId ?? null
     }, { timeout: 10_000 }).toBeNull()
 
@@ -254,7 +255,7 @@ test.describe('Session invalidation', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SI restart', status: 'in_progress' })
     await mainWindow.evaluate(
-      ({ id, cid }) => window.api.db.updateTask({
+      ({ id, cid }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { 'claude-code': { conversationId: cid } },
       }),
@@ -273,7 +274,7 @@ test.describe('Session invalidation', () => {
     await mainWindow.getByRole('menuitem', { name: 'Restart terminal' }).click()
 
     // conversationId should be PRESERVED
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), t.id)
     expect(task?.provider_config?.['claude-code']?.conversationId).toBe(storedId)
 
     // PTY should have been killed

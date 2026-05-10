@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, goHome, clickProject, resetApp, ensureGitRepo} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { pressShortcut } from '../fixtures/shortcuts'
@@ -11,7 +12,7 @@ test.describe('Git worktree operations', () => {
   const branchName = 'worktree-task' // slugify('Worktree task')
 
   const getTask = async (page: import('@playwright/test').Page, id: string) =>
-    page.evaluate((taskId) => window.api.db.getTask(taskId), id)
+    page.evaluate((taskId) => getTrpcVanillaClient().task.get.query({ id: taskId }), id)
 
   const execGit = (command: string) =>
     execSync(command, { cwd: TEST_PROJECT_PATH, stdio: 'pipe' }).toString()
@@ -163,8 +164,8 @@ test.describe('Git worktree operations', () => {
     const existing = await getTask(mainWindow, taskId)
     if (existing?.worktree_path) {
       await mainWindow.evaluate(async ({ repoPath, worktreePath, id }) => {
-        await window.api.git.removeWorktree(repoPath, worktreePath).catch(() => {})
-        await window.api.db.updateTask({ id, worktreePath: null })
+        await getTrpcVanillaClient().worktrees.removeWorktree.mutate({ repoPath: repoPath, worktreePath: worktreePath }).catch(() => {})
+        await getTrpcVanillaClient().task.update.mutate({ id, worktreePath: null })
       }, { repoPath: TEST_PROJECT_PATH, worktreePath: existing.worktree_path, id: taskId })
     }
 
@@ -177,8 +178,8 @@ test.describe('Git worktree operations', () => {
     const parentBranch = execGit('git branch --show-current').trim() || 'main'
 
     await mainWindow.evaluate(async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-      await window.api.git.createWorktree({ repoPath, targetPath, branch })
-      await window.api.db.updateTask({
+      await getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+      await getTrpcVanillaClient().task.update.mutate({
         id: taskId,
         worktreePath: targetPath,
         worktreeParentBranch: parentBranch
@@ -223,8 +224,8 @@ test.describe('Git worktree operations', () => {
     const parentBranch = execGit('git branch --show-current').trim()
 
     await mainWindow.evaluate(async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-      await window.api.git.createWorktree({ repoPath, targetPath, branch })
-      await window.api.db.updateTask({
+      await getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+      await getTrpcVanillaClient().task.update.mutate({
         id: taskId,
         worktreePath: targetPath,
         worktreeParentBranch: parentBranch
@@ -273,8 +274,8 @@ test.describe('Git worktree operations', () => {
     const parentBranch = execGit('git branch --show-current').trim()
 
     await mainWindow.evaluate(async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
-      await window.api.git.createWorktree({ repoPath, targetPath, branch })
-      await window.api.db.updateTask({
+      await getTrpcVanillaClient().worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+      await getTrpcVanillaClient().task.update.mutate({
         id: taskId,
         worktreePath: targetPath,
         worktreeParentBranch: parentBranch
@@ -297,7 +298,7 @@ test.describe('Git worktree operations', () => {
 
     await expect
       .poll(async () => {
-        const active = await mainWindow.evaluate(() => window.api.db.getTasks())
+        const active = await mainWindow.evaluate(() => getTrpcVanillaClient().task.getAll.query())
         return active.some((task) => task.id === created.id)
       })
       .toBe(false)

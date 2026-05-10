@@ -124,7 +124,7 @@ test.describe('CLI: slay', () => {
       // Wait for notify → refreshData so getTask can find it
       await expect(mainWindow.getByText(title)).toBeVisible({ timeout: 10_000 })
 
-      const tasks = await mainWindow.evaluate(() => window.api.db.getTasks()) as {
+      const tasks = await mainWindow.evaluate(() => getTrpcVanillaClient().task.getAll.query()) as {
         title: string; terminal_mode: string;
         provider_config: Record<string, { flags?: string }>
       }[]
@@ -538,7 +538,8 @@ test.describe('CLI: slay', () => {
       parentTaskId = parent.id
       // Create a subtask via the API
       await (mainWindow.evaluate as (fn: (d: unknown) => unknown, d: unknown) => Promise<unknown>)(
-        (d) => window.api.db.createTask(d as Parameters<typeof window.api.db.createTask>[0]),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (d) => getTrpcVanillaClient().task.create.mutate(d as any),
         { projectId, title: 'CLI seeded subtask', status: 'todo', parentId: parent.id }
       )
       await s.refreshData()
@@ -609,7 +610,7 @@ test.describe('CLI: slay', () => {
       expect(r.status).toBe(0)
 
       const subtasks = await mainWindow.evaluate(
-        (pid) => window.api.db.getSubTasks(pid),
+        (pid) => getTrpcVanillaClient().task.getSubTasks.query({ parentId: pid }),
         parentTaskId,
       ) as { title: string; provider_config: Record<string, { flags?: string }> }[]
       const subtask = subtasks.find((t) => t.title === title)!

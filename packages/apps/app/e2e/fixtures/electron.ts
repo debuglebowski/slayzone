@@ -1,4 +1,5 @@
 import { test as base, expect, type Page, type Locator } from '@playwright/test'
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { _electron as electron, type ElectronApplication } from 'playwright'
 import path from 'path'
 import fs from 'fs'
@@ -398,7 +399,7 @@ export const test = base.extend<ElectronFixtures>({
 export function seed(page: Page) {
   return {
     createProject: (data: { name: string; color: string; path?: string }) =>
-      page.evaluate((d) => window.api.db.createProject(d), data),
+      page.evaluate((d) => getTrpcVanillaClient().projects.create.mutate(d), data),
 
     createTask: (data: {
       projectId: string
@@ -406,20 +407,20 @@ export function seed(page: Page) {
       status?: string
       priority?: number
       dueDate?: string
-    }) => page.evaluate((d) => window.api.db.createTask(d), data),
+    }) => page.evaluate((d) => getTrpcVanillaClient().task.create.mutate(d), data),
 
     updateTask: (data: { id: string; status?: string; priority?: number; progress?: number; dueDate?: string | null }) =>
-      page.evaluate((d) => window.api.db.updateTask(d), data),
+      page.evaluate((d) => getTrpcVanillaClient().task.update.mutate(d), data),
 
-    deleteTask: (id: string) => page.evaluate((i) => window.api.db.deleteTask(i), id),
+    deleteTask: (id: string) => page.evaluate((i) => getTrpcVanillaClient().task.delete.mutate({ id: i }), id),
 
-    archiveTask: (id: string) => page.evaluate((i) => window.api.db.archiveTask(i), id),
+    archiveTask: (id: string) => page.evaluate((i) => getTrpcVanillaClient().task.archive.mutate({ id: i }), id),
 
-    archiveTasks: (ids: string[]) => page.evaluate((i) => window.api.db.archiveTasks(i), ids),
+    archiveTasks: (ids: string[]) => page.evaluate((i) => getTrpcVanillaClient().task.archiveMany.mutate({ ids: i }), ids),
 
     createTag: (data: { name: string; color?: string; textColor?: string; projectId?: string }) =>
       page.evaluate(async (d) => {
-        const projectId = d.projectId ?? (await window.api.db.getProjects())[0]?.id
+        const projectId = d.projectId ?? (await getTrpcVanillaClient().projects.list.query())[0]?.id
         if (!projectId) {
           throw new Error('Cannot create tag without a project')
         }
@@ -445,9 +446,9 @@ export function seed(page: Page) {
         b: blockerTaskId,
       }),
 
-    getProjects: () => page.evaluate(() => window.api.db.getProjects()),
+    getProjects: () => page.evaluate(() => getTrpcVanillaClient().projects.list.query()),
 
-    getTasks: () => page.evaluate(() => window.api.db.getTasks()),
+    getTasks: () => page.evaluate(() => getTrpcVanillaClient().task.getAll.query()),
 
     updateProject: (data: {
       id: string
@@ -463,14 +464,14 @@ export function seed(page: Page) {
         category: 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled'
       }> | null
     }) =>
-      page.evaluate((d) => window.api.db.updateProject(d), data),
+      page.evaluate((d) => getTrpcVanillaClient().projects.update.mutate(d), data),
 
-    deleteProject: (id: string) => page.evaluate((i) => window.api.db.deleteProject(i), id),
+    deleteProject: (id: string) => page.evaluate((i) => getTrpcVanillaClient().projects.delete.mutate({ id: i }), id),
 
     deleteAllProjects: async () => {
       await page.evaluate(async () => {
-        const projects = await window.api.db.getProjects()
-        for (const p of projects) await window.api.db.deleteProject(p.id)
+        const projects = await getTrpcVanillaClient().projects.list.query()
+        for (const p of projects) await getTrpcVanillaClient().projects.delete.mutate({ id: p.id })
       })
     },
 
@@ -634,7 +635,7 @@ export async function openProjectSettings(page: Page, abbrev: string): Promise<L
       }
     } else {
       const projectId = await page.evaluate((projectAbbrev) => {
-        return window.api.db.getProjects()
+        return getTrpcVanillaClient().projects.list.query()
           .then((projects) => projects.find((project) => project.name.slice(0, 2).toUpperCase() === projectAbbrev)?.id ?? null)
       }, abbrev)
       if (projectId) {

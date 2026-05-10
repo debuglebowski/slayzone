@@ -71,7 +71,7 @@ test.describe.skip('Gemini integration', () => {
     test.setTimeout(60_000)
     // Store a marker conversationId so the app thinks there's a previous session
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({
+      ({ id }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { gemini: { conversationId: 'gemini-previous' } },
       }),

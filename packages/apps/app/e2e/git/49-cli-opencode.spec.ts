@@ -65,7 +65,7 @@ test.describe('OpenCode CLI integration', () => {
     test.setTimeout(60_000)
     // Store a conversationId so the app resumes with --session
     await mainWindow.evaluate(
-      ({ id }) => window.api.db.updateTask({
+      ({ id }) => getTrpcVanillaClient().task.update.mutate({
         id,
         providerConfig: { opencode: { conversationId: 'oc-prev-session' } },
       }),
