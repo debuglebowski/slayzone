@@ -43,7 +43,7 @@ test.describe.skip('Codex resize — no duplicate prompt', () => {
     taskId = t.id
     sessionId = getMainSessionId(taskId)
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'codex' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' }), taskId)
     await s.refreshData()
 
     // Pre-seed terminal theme so OSC 11 responses are correct from the start

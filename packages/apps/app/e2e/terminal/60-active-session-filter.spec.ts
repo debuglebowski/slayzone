@@ -15,6 +15,7 @@
  * We use plain `terminal` mode (no external CLI dependency) and assert via
  * the same IPC surface the renderer hook uses.
  */
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
@@ -59,7 +60,7 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
   test('alive PTY → task in active set; killed PTY → task removed within bounded window', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Active filter task', status: 'in_progress' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), task.id)
     await s.refreshData()
 
     const sessionId = getMainSessionId(task.id)
@@ -90,7 +91,7 @@ test.describe('useActiveSessionTaskIds: dead session filter', () => {
   test('eager kill: filter clears active flag even before session is evicted from the map', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Eager-kill filter task', status: 'in_progress' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), task.id)
     await s.refreshData()
 
     const sessionId = getMainSessionId(task.id)

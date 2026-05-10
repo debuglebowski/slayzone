@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   getMainSessionId,
@@ -35,7 +36,7 @@ test.describe('Terminal shell fallback on CLI crash', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      ({ id, mode }) => window.api.db.updateTask({ id, terminalMode: mode }),
+      ({ id, mode }) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: mode }),
       { id: taskId, mode: customModeId }
     )
     await s.refreshData()

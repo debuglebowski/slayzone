@@ -7,6 +7,7 @@
  *
  * Doctor-menu tests use `claude-code` (binary must be installed).
  */
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH, goHome, clickProject } from '../fixtures/electron'
 import {
@@ -55,7 +56,7 @@ test.describe('Terminal crash overlay', () => {
 
     // Set the task to the custom mode and open its terminal.
     await mainWindow.evaluate(
-      ({ id, m }) => window.api.db.updateTask({ id, terminalMode: m }),
+      ({ id, m }) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: m }),
       { id: taskId, m: crashModeId }
     )
     await s.refreshData()

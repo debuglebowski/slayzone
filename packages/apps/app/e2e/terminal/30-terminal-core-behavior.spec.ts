@@ -33,7 +33,7 @@ test.describe('Terminal buffer restore', () => {
     const t = await s.createTask({ projectId: p.id, title: 'Buffer restore task', status: 'in_progress' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 
@@ -72,7 +72,7 @@ test.describe('Terminal state transitions', () => {
     const t = await s.createTask({ projectId: p.id, title: 'State transition task', status: 'in_progress' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 
@@ -112,7 +112,7 @@ test.describe('Terminal mode switch teardown', () => {
     const t = await s.createTask({ projectId: p.id, title: 'Mode teardown task', status: 'in_progress' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 
@@ -127,7 +127,7 @@ test.describe('Terminal mode switch teardown', () => {
 
     await switchTerminalMode(mainWindow, 'codex')
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), taskId)
     expect(task?.terminal_mode).toBe('codex')
 
     await waitForPtySession(mainWindow, sessionId)
@@ -153,7 +153,7 @@ test.describe('Terminal tab rename persistence', () => {
     const t = await s.createTask({ projectId: p.id, title: 'Tab rename task', status: 'todo' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 
@@ -165,13 +165,13 @@ test.describe('Terminal tab rename persistence', () => {
 
     await expect
       .poll(async () => {
-        const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskId)
+        const tabs = await mainWindow.evaluate((id) => getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }), taskId)
         const nonMain = tabs.find((tab: { id: string; isMain: boolean }) => !tab.isMain)
         return nonMain?.id ?? null
       })
       .not.toBeNull()
 
-    const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskId)
+    const tabs = await mainWindow.evaluate((id) => getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }), taskId)
     const nonMainTab = tabs.find((tab: { id: string; isMain: boolean }) => !tab.isMain)
     expect(nonMainTab).toBeTruthy()
     const nonMainTabId = nonMainTab!.id
@@ -187,7 +187,7 @@ test.describe('Terminal tab rename persistence', () => {
 
     await expect
       .poll(async () => {
-        const list = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskId)
+        const list = await mainWindow.evaluate((id) => getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }), taskId)
         const renamed = list.find((t: { id: string }) => t.id === nonMainTabId)
         return renamed?.label ?? null
       })
@@ -216,7 +216,7 @@ test.describe('Terminal clear buffer', () => {
     const t = await s.createTask({ projectId: p.id, title: 'Clear buffer task', status: 'in_progress' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 
@@ -280,7 +280,7 @@ test.describe('Terminal restart shortcut', () => {
     const t = await s.createTask({ projectId: p.id, title: 'Restart shortcut task', status: 'in_progress' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 
@@ -331,7 +331,7 @@ test.describe('Trailing PTY output on exit', () => {
     const t = await s.createTask({ projectId: p.id, title: 'Trailing output task', status: 'in_progress' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 

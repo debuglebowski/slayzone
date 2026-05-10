@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
@@ -39,7 +40,7 @@ test.describe('Terminal search', () => {
     taskId = t.id
     sessionId = getMainSessionId(taskId)
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
 
     // Open terminal and seed it with content

@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, goHome, clickProject, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { switchTerminalMode } from '../fixtures/terminal'
@@ -82,11 +83,11 @@ test.describe('Session banner behavior', () => {
 
     await mainWindow.evaluate(({ noAuto, nav, d1, d2, noPty }) => {
       return Promise.all([
-        window.api.db.updateTask({ id: noAuto, terminalMode: 'codex' }),
-        window.api.db.updateTask({ id: nav, terminalMode: 'codex' }),
-        window.api.db.updateTask({ id: d1, terminalMode: 'cursor-agent' }),
-        window.api.db.updateTask({ id: d2, terminalMode: 'cursor-agent' }),
-        window.api.db.updateTask({ id: noPty, terminalMode: 'codex' }),
+        getTrpcVanillaClient().task.update.mutate({ id: noAuto, terminalMode: 'codex' }),
+        getTrpcVanillaClient().task.update.mutate({ id: nav, terminalMode: 'codex' }),
+        getTrpcVanillaClient().task.update.mutate({ id: d1, terminalMode: 'cursor-agent' }),
+        getTrpcVanillaClient().task.update.mutate({ id: d2, terminalMode: 'cursor-agent' }),
+        getTrpcVanillaClient().task.update.mutate({ id: noPty, terminalMode: 'codex' }),
       ])
     }, { noAuto: noAutoTaskId, nav: navTaskId, d1: dismissTask1Id, d2: dismissTask2Id, noPty: noPtyTaskId })
 
@@ -120,7 +121,7 @@ test.describe('Session banner behavior', () => {
     expect(statusCount).toBe(0)
 
     // Session should NOT be saved
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), noAutoTaskId)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), noAutoTaskId)
     expect(task?.codex_conversation_id ?? null).toBeNull()
   })
 
@@ -223,7 +224,7 @@ test.describe('Session banner behavior', () => {
 
     // Banner still visible, session not saved
     await expect(mainWindow.getByText('Session not saved').last()).toBeVisible()
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), noPtyTaskId)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), noPtyTaskId)
     expect(task?.codex_conversation_id ?? null).toBeNull()
 
     // Restore pty:exists

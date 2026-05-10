@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp, goHome, clickProject } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
@@ -21,7 +22,7 @@ test.describe('Terminal loading recovery', () => {
     const t = await s.createTask({ projectId: p.id, title: 'Loading recovery task', status: 'in_progress' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 
@@ -51,8 +52,8 @@ test.describe('Terminal loading recovery', () => {
   test('terminal shows after rapid tab switches', async ({ mainWindow }) => {
     // Create a second task to switch between
     const s = seed(mainWindow)
-    const t2 = await s.createTask({ projectId: (await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId))!.project_id, title: 'Switch target task', status: 'todo' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), t2.id)
+    const t2 = await s.createTask({ projectId: (await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), taskId))!.project_id, title: 'Switch target task', status: 'todo' })
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), t2.id)
     await s.refreshData()
 
     // Open first task

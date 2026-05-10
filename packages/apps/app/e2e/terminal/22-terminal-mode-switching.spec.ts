@@ -76,7 +76,7 @@ test.describe('Terminal mode switching', () => {
     await expect(modeTrigger(mainWindow)).toBeVisible()
 
     // Verify persisted mode from DB after re-open
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), taskId)
     expect(task?.terminal_mode).toBe('codex')
   })
 
@@ -92,7 +92,7 @@ test.describe('Terminal mode switching', () => {
   test('conversation IDs cleared on mode switch', async ({ mainWindow }) => {
     // Set fake conversation IDs for multiple providers
     await mainWindow.evaluate((id) =>
-      window.api.db.updateTask({
+      getTrpcVanillaClient().task.update.mutate({
         id,
         claudeConversationId: 'fake-convo-123',
         codexConversationId: 'fake-codex-456',
@@ -106,7 +106,7 @@ test.describe('Terminal mode switching', () => {
     await expect(modeTrigger(mainWindow)).toHaveText(/Codex/)
 
     // Verify ALL conversation IDs cleared
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), taskId)
     expect(task?.claude_conversation_id).toBeNull()
     expect(task?.codex_conversation_id).toBeNull()
     expect(task?.cursor_conversation_id).toBeNull()
@@ -121,7 +121,7 @@ test.describe('Terminal mode switching', () => {
   test('switching back to a mode restores that mode default flags', async ({ mainWindow }) => {
     // Set custom flags for claude-code
     await mainWindow.evaluate((id) =>
-      window.api.db.updateTask({ id, claudeFlags: '--custom-flag-test' }), taskId)
+      getTrpcVanillaClient().task.update.mutate({ id, claudeFlags: '--custom-flag-test' }), taskId)
 
     // Switch to codex then back
     await switchTerminalMode(mainWindow, 'codex')
@@ -134,7 +134,7 @@ test.describe('Terminal mode switching', () => {
     const expectedDefaultFlags = claudeMode?.defaultFlags ?? ''
 
     // Returning to claude-code should re-apply the mode default flags
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), taskId)
     expect(task?.claude_flags).toBe(expectedDefaultFlags)
   })
 
@@ -159,17 +159,17 @@ test.describe('Terminal mode switching', () => {
       async (id) => {
         await getTrpcVanillaClient().pty.kill.mutate({ sessionId: `${id}:${id}` })
         await new Promise((r) => setTimeout(r, 100))
-        await window.api.db.updateTask({ id, terminalMode: 'codex' } as never)
+        await getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'codex' } as never)
       },
       temp.id
     )
 
     await expect.poll(
-      async () => (await mainWindow.evaluate((id) => window.api.db.getTask(id), temp.id))?.terminal_mode,
+      async () => (await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), temp.id))?.terminal_mode,
       { timeout: 5_000 }
     ).toBe('codex')
 
-    const updated = await mainWindow.evaluate((id) => window.api.db.getTask(id), temp.id)
+    const updated = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), temp.id)
     expect(updated?.terminal_mode).toBe('codex')
   })
 
@@ -193,14 +193,14 @@ test.describe('Terminal mode switching', () => {
 
     // displayMode flips to 'chat' in DB
     await expect.poll(async () => {
-      const list = await mainWindow.evaluate((id) => window.api.tabs.list(id), temp.id)
+      const list = await mainWindow.evaluate((id) => getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }), temp.id)
       return list.find((t) => t.isMain)?.displayMode
     }, { timeout: 5_000 }).toBe('chat')
 
     // Task still exists — auto-close hook must NOT have deleted it
     // Poll a few cycles to ensure the PTY exit handler had time to fire.
     await mainWindow.waitForTimeout(500)
-    const tasks = await mainWindow.evaluate(() => window.api.db.getTasks())
+    const tasks = await mainWindow.evaluate(() => getTrpcVanillaClient().task.getAll.query())
     expect(tasks.some((t) => t.id === temp.id)).toBe(true)
 
     // Now toggle back to xterm via the header menu's "Disable chat" item.
@@ -209,13 +209,13 @@ test.describe('Terminal mode switching', () => {
     await mainWindow.getByRole('button', { name: 'Disable' }).click()
 
     await expect.poll(async () => {
-      const list = await mainWindow.evaluate((id) => window.api.tabs.list(id), temp.id)
+      const list = await mainWindow.evaluate((id) => getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }), temp.id)
       return list.find((t) => t.isMain)?.displayMode
     }, { timeout: 5_000 }).toBe('xterm')
 
     // Task still alive
     await mainWindow.waitForTimeout(500)
-    const tasksAfter = await mainWindow.evaluate(() => window.api.db.getTasks())
+    const tasksAfter = await mainWindow.evaluate(() => getTrpcVanillaClient().task.getAll.query())
     expect(tasksAfter.some((t) => t.id === temp.id)).toBe(true)
   })
 
@@ -234,7 +234,7 @@ test.describe('Terminal mode switching', () => {
     await sendAppShortcut(electronApp, 'app:close-active-task')
 
     await expect.poll(async () => {
-      const activeTasks = await mainWindow.evaluate(() => window.api.db.getTasks())
+      const activeTasks = await mainWindow.evaluate(() => getTrpcVanillaClient().task.getAll.query())
       return !activeTasks.some((task) => task.id === temp.id)
     }, { timeout: 15_000 }).toBe(true)
   })

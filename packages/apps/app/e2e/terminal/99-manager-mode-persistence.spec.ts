@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal } from '../fixtures/terminal'
 
@@ -19,22 +20,22 @@ test.describe('Manager mode persistence', () => {
 
     // Subtask — toggle button only renders when direct children exist.
     await mainWindow.evaluate(
-      ({ projectId, parentId }) => window.api.db.createTask({ projectId, title: 'Subtask A', status: 'in_progress', parentId }),
+      ({ projectId, parentId }) => getTrpcVanillaClient().task.create.mutate({ projectId, title: 'Subtask A', status: 'in_progress', parentId }),
       { projectId: p.id, parentId: parentTaskId }
     )
 
     // Use raw shell to avoid any AI CLI boot in tests.
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), parentTaskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), parentTaskId)
     await s.refreshData()
   })
 
   test('updateTask({managerMode}) writes tasks.manager_mode column', async ({ mainWindow }) => {
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, managerMode: true }), parentTaskId)
-    let task = await mainWindow.evaluate((id) => window.api.db.getTask(id), parentTaskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, managerMode: true }), parentTaskId)
+    let task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), parentTaskId)
     expect(task?.manager_mode).toBe(true)
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, managerMode: false }), parentTaskId)
-    task = await mainWindow.evaluate((id) => window.api.db.getTask(id), parentTaskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, managerMode: false }), parentTaskId)
+    task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), parentTaskId)
     expect(task?.manager_mode).toBe(false)
   })
 
@@ -50,7 +51,7 @@ test.describe('Manager mode persistence', () => {
     // DB reflects the toggle.
     await expect
       .poll(async () => {
-        const t = await mainWindow.evaluate((id) => window.api.db.getTask(id), parentTaskId)
+        const t = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), parentTaskId)
         return t?.manager_mode
       }, { timeout: 2_000 })
       .toBe(true)

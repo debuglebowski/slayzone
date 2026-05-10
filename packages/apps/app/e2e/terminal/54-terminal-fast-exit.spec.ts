@@ -21,7 +21,7 @@ test.describe('Terminal fast exit', () => {
     taskId = t.id
 
     // Terminal mode with /usr/bin/true as shell — exits immediately with code 0
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await mainWindow.evaluate(() => getTrpcVanillaClient().pty.setShellOverride.mutate({ value: '/usr/bin/true' }))
     await s.refreshData()
   })

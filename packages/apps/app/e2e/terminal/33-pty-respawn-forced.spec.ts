@@ -41,7 +41,7 @@ test.describe('Forced PTY respawn via REST', () => {
   test('REST broadcasts pty:respawn-forced to renderer', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Force respawn signal', status: 'in_progress' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), task.id)
     await s.refreshData()
 
     // Subscribe & ack so the REST call's await resolves. TaskDetailPage isn't
@@ -93,7 +93,7 @@ test.describe('Forced PTY respawn via REST', () => {
   test('Force respawn restarts existing PTY (terminal mode)', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Force respawn restart', status: 'in_progress' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), task.id)
     await s.refreshData()
 
     const sessionId = getMainSessionId(task.id)

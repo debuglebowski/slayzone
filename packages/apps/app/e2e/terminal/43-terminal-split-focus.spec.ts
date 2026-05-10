@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, waitForPtySession, getMainSessionId } from '../fixtures/terminal'
@@ -13,7 +14,7 @@ test.describe('Terminal split focus', () => {
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
     const t = await s.createTask({ projectId: p.id, title: 'SplitTask', status: 'todo' })
     taskId = t.id
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 
@@ -28,13 +29,13 @@ test.describe('Terminal split focus', () => {
 
     // Wait for second tab to appear
     await expect.poll(async () => {
-      const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskId)
+      const tabs = await mainWindow.evaluate((id) => getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }), taskId)
       return tabs.length
     }).toBe(2)
 
     // Get the new tab's ID (the non-main tab)
     const newTabId = await mainWindow.evaluate(async (id) => {
-      const tabs = await window.api.tabs.list(id)
+      const tabs = await getTrpcVanillaClient().taskTerminals.list.query({ taskId: id })
       return tabs.find((t: any) => !t.isMain)?.id
     }, taskId)
     expect(newTabId).toBeTruthy()

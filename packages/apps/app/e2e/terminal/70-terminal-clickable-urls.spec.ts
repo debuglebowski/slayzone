@@ -7,6 +7,7 @@
  * 2. Playwright mouse: native mouse API with held modifier keys (tests xterm Linkifier
  *    hover → click → activate chain through Chromium's input pipeline)
  */
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import {
   getMainSessionId,
@@ -52,7 +53,7 @@ test.describe('Terminal clickable URLs', () => {
     taskId = t.id
     sessionId = getMainSessionId(taskId)
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 

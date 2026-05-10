@@ -38,7 +38,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
   test('status → done kills PTY and notifies renderer (Part A)', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Kill-notify test', status: 'in_progress' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), task.id)
     await s.refreshData()
 
     const sessionId = getMainSessionId(task.id)
@@ -55,7 +55,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     }, sessionId)
 
     // Move to done — triggers killPtysByTaskId in main
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, status: 'done' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, status: 'done' }), task.id)
 
     // Part A assertion: pty:exit IPC reaches the renderer. Before the fix this
     // event would be silently dropped because killPty eagerly deleted the session
@@ -70,7 +70,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
   test('status → in_progress broadcasts pty:respawn-suggested (Part B)', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Revive-signal test', status: 'in_progress' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'claude-code' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'claude-code' }), task.id)
     await s.refreshData()
 
     // Subscribe before any status changes
@@ -83,7 +83,7 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     }, task.id)
 
     // Terminal → non-terminal revive should NOT fire if we were never in terminal status
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, status: 'todo' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, status: 'todo' }), task.id)
     await mainWindow.waitForTimeout(200)
     const noopCalls = await mainWindow.evaluate(() =>
       (window as unknown as { __respawnCalls: string[] }).__respawnCalls.length
@@ -91,8 +91,8 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     expect(noopCalls).toBe(0)
 
     // Now do the full cycle: in_progress → done → in_progress
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, status: 'done' }), task.id)
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, status: 'in_progress' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, status: 'done' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, status: 'in_progress' }), task.id)
 
     await expect.poll(async () =>
       mainWindow.evaluate(

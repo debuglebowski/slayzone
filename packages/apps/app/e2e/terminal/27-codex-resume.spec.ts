@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, waitForPtySession } from '../fixtures/terminal'
@@ -18,7 +19,7 @@ test.describe('Codex resume', () => {
 
     await mainWindow.evaluate(
       ({ id, conversationId }) => {
-        return window.api.db.updateTask({
+        return getTrpcVanillaClient().task.update.mutate({
           id,
           terminalMode: 'codex',
           codexConversationId: conversationId,
@@ -35,7 +36,7 @@ test.describe('Codex resume', () => {
     const sessionId = `${taskId}:${taskId}`
     await waitForPtySession(mainWindow, sessionId)
 
-    const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), taskId)
+    const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), taskId)
     expect(task?.terminal_mode).toBe('codex')
     expect(task?.codex_conversation_id).toBe(codexConversationId)
   })

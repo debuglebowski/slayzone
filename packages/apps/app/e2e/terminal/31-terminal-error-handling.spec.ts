@@ -19,7 +19,7 @@ test.describe('Terminal error handling', () => {
     const t = await s.createTask({ projectId: p.id, title: 'Terminal error task', status: 'todo' })
     taskId = t.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskId)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskId)
     await s.refreshData()
   })
 

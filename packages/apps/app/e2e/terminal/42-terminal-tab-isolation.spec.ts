@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, waitForPtySession, getMainSessionId } from '../fixtures/terminal'
@@ -18,8 +19,8 @@ test.describe('Terminal tab keyboard isolation', () => {
     taskIdA = a.id
     taskIdB = b.id
 
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskIdA)
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), taskIdB)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskIdA)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), taskIdB)
     await s.refreshData()
   })
 
@@ -34,20 +35,20 @@ test.describe('Terminal tab keyboard isolation', () => {
 
     // Task B is active. Create a new tab via the API targeting task B.
     await mainWindow.evaluate(
-      (id) => window.api.tabs.create({ taskId: id, mode: 'terminal' }),
+      (id) => getTrpcVanillaClient().taskTerminals.create.mutate({ taskId: id, mode: 'terminal' }),
       taskIdB
     )
 
     // Wait for the new tab to appear in task B
     await expect
       .poll(async () => {
-        const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskIdB)
+        const tabs = await mainWindow.evaluate((id) => getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }), taskIdB)
         return tabs.length
       })
       .toBe(2)
 
     // Task A should still have only 1 tab (the main tab)
-    const tabsA = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskIdA)
+    const tabsA = await mainWindow.evaluate((id) => getTrpcVanillaClient().taskTerminals.list.query({ taskId: id }), taskIdA)
     expect(tabsA.length).toBe(1)
   })
 })

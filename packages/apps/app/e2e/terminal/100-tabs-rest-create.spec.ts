@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import type { ElectronApplication } from '@playwright/test'
 import { openTaskTerminal, waitForPtySession } from '../fixtures/terminal'
@@ -75,7 +76,7 @@ test.describe('Tab create/split via REST', () => {
   test('create inserts tab row + spawns PTY when task is open', async ({ electronApp, mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Tabs create spawn', status: 'in_progress' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), task.id)
     await s.refreshData()
 
     // Open task so TerminalContainer is mounted and listens for tabs:changed.
@@ -100,7 +101,7 @@ test.describe('Tab create/split via REST', () => {
   test('split adds pane in same group', async ({ electronApp, mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Tabs split spawn', status: 'in_progress' })
-    await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), task.id)
+    await mainWindow.evaluate((id) => getTrpcVanillaClient().task.update.mutate({ id, terminalMode: 'terminal' }), task.id)
     await s.refreshData()
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Tabs split spawn' })

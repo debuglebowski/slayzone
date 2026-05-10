@@ -1,3 +1,4 @@
+import { getTrpcVanillaClient } from '@slayzone/transport/client'
 import { test, expect, seed, goHome, clickProject, resetApp} from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { switchTerminalMode, openTaskTerminal } from '../fixtures/terminal'
@@ -75,10 +76,10 @@ test.describe('Session ID banners', () => {
 
     await mainWindow.evaluate(({ codex, gemini, cursor, opencode }) => {
       return Promise.all([
-        window.api.db.updateTask({ id: codex, terminalMode: 'codex' }),
-        window.api.db.updateTask({ id: gemini, terminalMode: 'gemini' }),
-        window.api.db.updateTask({ id: cursor, terminalMode: 'cursor-agent' }),
-        window.api.db.updateTask({ id: opencode, terminalMode: 'opencode' }),
+        getTrpcVanillaClient().task.update.mutate({ id: codex, terminalMode: 'codex' }),
+        getTrpcVanillaClient().task.update.mutate({ id: gemini, terminalMode: 'gemini' }),
+        getTrpcVanillaClient().task.update.mutate({ id: cursor, terminalMode: 'cursor-agent' }),
+        getTrpcVanillaClient().task.update.mutate({ id: opencode, terminalMode: 'opencode' }),
         // claude task stays as default claude-code
       ])
     }, { codex: codexTaskId, gemini: geminiTaskId, cursor: cursorTaskId, opencode: opencodeTaskId })
@@ -110,7 +111,7 @@ test.describe('Session ID banners', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), codexTaskId)
+        const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), codexTaskId)
         return task?.codex_conversation_id ?? null
       })
       .toBe(detectedId)
@@ -135,7 +136,7 @@ test.describe('Session ID banners', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), geminiTaskId)
+        const task = await mainWindow.evaluate((id) => getTrpcVanillaClient().task.get.query({ id: id }), geminiTaskId)
         return task?.gemini_conversation_id ?? null
       })
       .toBe(detectedId)
