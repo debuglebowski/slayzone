@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Loader2 } from 'lucide-react'
 import { cn } from './utils'
 import { getTerminalStateStyle, ATTENTION_STATE_STYLE } from './terminal-state'
 import { ProgressRing } from './progress-ring'
@@ -38,6 +39,7 @@ export function TerminalProgressDot({
 
   const dotColor = stateStyle?.color ?? 'bg-muted-foreground/40'
   const stateLabel = stateStyle?.label ?? 'No session'
+  const isRunning = !needsAttention && state === 'running'
 
   const blob = (
     <span className={cn('relative inline-flex items-center justify-center shrink-0 size-3.5', className)}>
@@ -45,7 +47,14 @@ export function TerminalProgressDot({
         <ProgressRing value={progress!} size={size} strokeWidth={1.5} className="absolute inset-0" />
       )}
       {showState && (
-        <span className={cn('relative z-10 size-2 rounded-full', dotColor)} aria-label={stateLabel} />
+        isRunning ? (
+          <Loader2
+            className={cn('relative z-10 size-3 animate-spin', stateStyle?.textColor ?? 'text-green-500')}
+            aria-label={stateLabel}
+          />
+        ) : (
+          <span className={cn('relative z-10 size-2 rounded-full', dotColor)} aria-label={stateLabel} />
+        )
       )}
     </span>
   )
