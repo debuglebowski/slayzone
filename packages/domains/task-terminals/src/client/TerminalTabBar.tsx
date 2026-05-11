@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
-import { Plus, X, Columns2, Terminal as TerminalIcon, Bot, Command, MousePointerClick, Sparkles, Code, Glasses, ListTree } from 'lucide-react'
-import { cn, useShortcutDisplay, withShortcut } from '@slayzone/ui'
-import type { TerminalTab, TerminalGroup } from '../shared/types'
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, Fragment } from 'react'
+import { Plus, X, Columns2, Terminal as TerminalIcon, Bot, Command, MousePointerClick, Sparkles, Code, Glasses, ListTree, MessageSquare, TerminalSquare } from 'lucide-react'
+import { cn, useShortcutDisplay, withShortcut, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
+import type { TerminalTab, TerminalGroup, TabDisplayMode } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal/shared'
+import { isChatSupported } from '../shared/chat-modes'
 
 interface TerminalTabBarProps {
   groups: TerminalGroup[]
@@ -18,6 +19,7 @@ interface TerminalTabBarProps {
   rightContent?: React.ReactNode
   managerModeActive?: boolean
   onManagerToggle?: () => void
+  onMainDisplayModeToggle?: (current: TabDisplayMode) => void
 }
 
 const MODE_ICONS: Partial<Record<TerminalMode, typeof TerminalIcon>> = {
@@ -52,7 +54,8 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
   terminalTitles,
   rightContent,
   managerModeActive,
-  onManagerToggle
+  onManagerToggle,
+  onMainDisplayModeToggle
 }: TerminalTabBarProps, ref: React.Ref<TerminalTabBarHandle>) {
   const terminalSplitShortcut = useShortcutDisplay('terminal-split')
   const [editingTabId, setEditingTabId] = useState<string | null>(null)
@@ -183,10 +186,41 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
           const isActive = group.id === activeGroupId
           const isSinglePane = group.tabs.length === 1
           const isDragOver = dragOverGroupId === group.id
+          const mainTab = group.isMain ? group.tabs.find(t => t.isMain) : undefined
+          const showDisplayModeToggle =
+            !!mainTab && isChatSupported(mainTab.mode) && !!onMainDisplayModeToggle
+          const displayMode: TabDisplayMode = mainTab?.displayMode ?? 'xterm'
+          const DisplayModeIcon = displayMode === 'chat' ? TerminalSquare : MessageSquare
 
           return (
+            <Fragment key={group.id}>
+            {showDisplayModeToggle && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid="main-tab-display-mode-toggle"
+                    aria-label={displayMode === 'chat' ? 'Switch to terminal view' : 'Switch to chat view (beta)'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onMainDisplayModeToggle?.(displayMode)
+                    }}
+                    className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                  >
+                    <DisplayModeIcon className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="flex items-center gap-1.5">
+                  <span>{displayMode === 'chat' ? 'Switch to terminal' : 'Switch to chat'}</span>
+                  {displayMode !== 'chat' && (
+                    <span className="text-[9px] uppercase tracking-wide leading-none px-1 py-0.5 rounded-full bg-amber-400/20 text-amber-300 dark:bg-amber-500/20 dark:text-amber-700">
+                      beta
+                    </span>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            )}
             <div
-              key={group.id}
               data-testid={`terminal-tab-${group.id}`}
               data-tab-id={group.id}
               data-tab-main={group.isMain ? 'true' : 'false'}
@@ -265,6 +299,7 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
                 )
               })}
             </div>
+            </Fragment>
           )
         })}
         <button

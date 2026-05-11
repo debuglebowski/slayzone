@@ -2185,6 +2185,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onFocusRequestHandled={handleTerminalFocusRequestHandled}
                   onMainTabActiveChange={setIsMainTabActive}
                   onMainDisplayModeChange={setMainTabDisplayMode}
+                  onMainDisplayModeToggleRequest={(current) => {
+                    if (current === 'chat') setPendingChatDisable(true)
+                    else setPendingChatEnable(true)
+                  }}
                   onOpenUrl={openDevServerInBrowser}
                   onOpenFile={handleQuickOpenFile}
                   onMainReset={handleResetTerminal}

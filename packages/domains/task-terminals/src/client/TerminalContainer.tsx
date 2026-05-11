@@ -42,6 +42,7 @@ interface TerminalContainerProps {
   onFocusRequestHandled?: (requestId: number) => void
   onMainTabActiveChange?: (isMainActive: boolean) => void
   onMainDisplayModeChange?: (mode: TabDisplayMode) => void
+  onMainDisplayModeToggleRequest?: (current: TabDisplayMode) => void
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onMainReset?: () => void
@@ -78,6 +79,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   onFocusRequestHandled,
   onMainTabActiveChange,
   onMainDisplayModeChange,
+  onMainDisplayModeToggleRequest,
   onOpenUrl,
   onOpenFile,
   onMainReset,
@@ -469,6 +471,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           rightContent={rightContent}
           managerModeActive={managerMode}
           onManagerToggle={hasSubtasks ? handleManagerToggle : undefined}
+          onMainDisplayModeToggle={onMainDisplayModeToggleRequest}
         />
         <div className="flex-1 min-h-0 relative">
           {isManagerResizing ? (
