@@ -64,6 +64,115 @@ test('detects alternative working indicator phrases', () => {
   expect(adapter.detectActivity('Ctrl+C to stop', 'unknown')).toBe('working')
 })
 
+console.log('\nCodexAdapter.detectActivity (modal → idle)\n')
+
+const EXEC_MODAL = [
+  'Allow Electron-as-Node to load native better-sqlite3 outside sandbox for DB test diagnosis?',
+  '  1. Yes',
+  '  2. Yes, and don\'t ask again for commands that start with `ELECTRON_RUN_AS_NODE=1 npx electron`',
+  '  3. No, and tell Codex what to do differently'
+].join('\n')
+
+const PATCH_MODAL = [
+  'Would you like to make the following edits?',
+  '  1. Yes, proceed',
+  '  2. Yes, and don\'t ask again for these files',
+  '  3. No, and tell Codex what to do differently'
+].join('\n')
+
+const PERMS_MODAL = [
+  'Would you like to grant these permissions?',
+  '  1. Yes, grant these permissions for this turn',
+  '  2. Yes, grant these permissions for this session',
+  '  3. No, continue without permissions'
+].join('\n')
+
+const TRUST_MODAL = [
+  'Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt injection.',
+  '  1. Yes, continue',
+  '  2. No, quit'
+].join('\n')
+
+const MCP_MODAL = [
+  'context7 needs your approval.',
+  '  1. Yes, provide the requested info',
+  '  2. No, but continue without it'
+].join('\n')
+
+test('exec approval modal → idle', () => {
+  expect(adapter.detectActivity(EXEC_MODAL, 'working')).toBe('idle')
+})
+
+test('patch approval modal → idle', () => {
+  expect(adapter.detectActivity(PATCH_MODAL, 'working')).toBe('idle')
+})
+
+test('permissions modal → idle', () => {
+  expect(adapter.detectActivity(PERMS_MODAL, 'working')).toBe('idle')
+})
+
+test('trust directory modal → idle', () => {
+  expect(adapter.detectActivity(TRUST_MODAL, 'working')).toBe('idle')
+})
+
+test('MCP elicitation modal → idle', () => {
+  expect(adapter.detectActivity(MCP_MODAL, 'working')).toBe('idle')
+})
+
+test('working indicator wins over modal-looking text', () => {
+  const data = `${EXEC_MODAL}\n• Editing files (5s • esc to interrupt)`
+  expect(adapter.detectActivity(data, 'unknown')).toBe('working')
+})
+
+test('plain output without modal markers → null', () => {
+  expect(adapter.detectActivity('  1. one\n  2. two\n  3. three', 'unknown')).toBe(null)
+})
+
+console.log('\nCodexAdapter.detectPrompt\n')
+
+test('exec modal returns permission prompt', () => {
+  const p = adapter.detectPrompt(EXEC_MODAL)
+  expect(p?.type).toBe('permission')
+})
+
+test('patch modal returns permission prompt', () => {
+  const p = adapter.detectPrompt(PATCH_MODAL)
+  expect(p?.type).toBe('permission')
+})
+
+test('permissions modal returns permission prompt', () => {
+  const p = adapter.detectPrompt(PERMS_MODAL)
+  expect(p?.type).toBe('permission')
+})
+
+test('trust modal returns permission prompt', () => {
+  const p = adapter.detectPrompt(TRUST_MODAL)
+  expect(p?.type).toBe('permission')
+})
+
+test('MCP modal returns permission prompt', () => {
+  const p = adapter.detectPrompt(MCP_MODAL)
+  expect(p?.type).toBe('permission')
+})
+
+test('detectPrompt handles ANSI sequences in modal', () => {
+  const ansi = `\x1b[3m${EXEC_MODAL.split('\n')[0]}\x1b[23m\n\x1b[39;48;2;65;69;76m  2. Yes, and don't ask again for commands that start with \`x\`\x1b[0m\n  3. No, and tell Codex what to do differently`
+  expect(adapter.detectPrompt(ansi)?.type).toBe('permission')
+})
+
+test('detectPrompt ignores plain output', () => {
+  expect(adapter.detectPrompt('Just running some command output')).toBe(null)
+})
+
+test('detectPrompt ignores numbered list without modal title/deny', () => {
+  // Numbered list of TODOs etc. — must not false-positive
+  expect(adapter.detectPrompt('Steps:\n  1. compile\n  2. test\n  3. ship')).toBe(null)
+})
+
+test('detectPrompt ignores working indicator alone', () => {
+  expect(adapter.detectPrompt('• Planning (3m 37s • esc to interrupt)')).toBe(null)
+})
+
 console.log('\nCodexAdapter.detectError\n')
 
 test('detects stale codex resume session as SESSION_NOT_FOUND', () => {

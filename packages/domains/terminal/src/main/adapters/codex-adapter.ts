@@ -38,9 +38,35 @@ export class CodexAdapter implements TerminalAdapter {
       || /\b(?:ctrl\s*\+\s*c|control-c)\s+to\s+(?:interrupt|cancel|stop)\b/i.test(text)
   }
 
+  /**
+   * Detect a codex approval modal.
+   *
+   * Signal anchors on stable Rust string literals from `codex-rs/tui/src/bottom_pane/
+   * approval_overlay.rs` and `onboarding/trust_directory.rs` (codex 0.130+):
+   *
+   *   - Numbered options row: `  1. Yes`, `  2. No, ...`
+   *   - Deny label literal: `No, and tell Codex what to do differently` (appears in
+   *     exec / patch / permissions kinds — most stable per-kind invariant)
+   *   - Built-in title strings (covers trust + MCP elicit which lack the deny label)
+   *
+   * The visible title line may be model-generated ("Allow X to Y?") and is NOT
+   * reliable on its own — so we require `numbered` AND (`deny` OR `title`).
+   */
+  private static hasApprovalModal(text: string): boolean {
+    const hasNumbered = /(?:^|\s)\d+\.\s+(?:Yes|No)\b/i.test(text)
+    if (!hasNumbered) return false
+    const hasDeny = /\bNo,\s+and\s+tell\s+Codex\b/i.test(text)
+    if (hasDeny) return true
+    return /\b(?:Would\s+you\s+like\s+to\s+(?:run|grant|make)|Do\s+you\s+(?:want\s+to\s+approve|trust\s+the\s+contents)|needs\s+your\s+approval)/i.test(text)
+  }
+
   detectActivity(data: string, _current: ActivityState): ActivityState | null {
     const stripped = CodexAdapter.normalizeText(CodexAdapter.stripAnsi(data))
     if (CodexAdapter.hasWorkingIndicator(stripped)) return 'working'
+    // Approval modal visible → explicit idle flip; user input is awaited.
+    // Mirrors claude's completion-stamp pattern so we don't wait the full
+    // idleTimeoutMs silence window.
+    if (CodexAdapter.hasApprovalModal(stripped)) return 'idle'
     return null
   }
 
@@ -175,8 +201,11 @@ export class CodexAdapter implements TerminalAdapter {
     return null
   }
 
-  detectPrompt(_data: string): PromptInfo | null {
-    // TODO: Implement when Codex output format is known
+  detectPrompt(data: string): PromptInfo | null {
+    const stripped = CodexAdapter.normalizeText(CodexAdapter.stripAnsi(data))
+    if (CodexAdapter.hasApprovalModal(stripped)) {
+      return { type: 'permission', text: stripped, position: 0 }
+    }
     return null
   }
 
