@@ -35,22 +35,19 @@ function expect(actual: unknown) {
   }
 }
 
-function createDb(): Database.Database {
+function createDb(toVersion?: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  runMigrations(db)
+  runMigrations(db, { toVersion })
   return db
 }
 
 console.log('\nai-config slug migration')
 
 test('normalizes and de-duplicates slugs per scope/type bucket', () => {
-  const db = createDb()
+  const db = createDb(46)
   try {
-    // Simulate a database that has applied v46 but not v47 yet.
-    db.pragma('user_version = 46')
-
     const projectId = crypto.randomUUID()
     db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
       .run(projectId, 'Migration', '#000', '/tmp/migration')
@@ -71,7 +68,7 @@ test('normalizes and de-duplicates slugs per scope/type bucket', () => {
     insertItem.run(p1, 'command', 'project', projectId, 'Deploy Plan', 'Deploy Plan', '', '2025-01-01 00:00:00', '2025-01-01 00:00:00')
     insertItem.run(p2, 'command', 'project', projectId, 'deploy-plan', 'deploy-plan', '', '2025-01-02 00:00:00', '2025-01-02 00:00:00')
 
-    runMigrations(db)
+    runMigrations(db, { toVersion: 47 })
 
     const byId = new Map(
       (db.prepare('SELECT id, slug, name FROM ai_config_items WHERE id IN (?, ?, ?, ?)').all(g1, g2, p1, p2) as Array<{

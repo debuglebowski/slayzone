@@ -30,11 +30,11 @@ function expect(actual: unknown) {
   }
 }
 
-function createDb(): Database.Database {
+function createDb(toVersion?: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  runMigrations(db)
+  runMigrations(db, { toVersion })
   return db
 }
 
@@ -46,12 +46,12 @@ function hasProjectColumn(db: Database.Database, columnName: string): boolean {
 console.log('\nworktree source branch migration')
 
 test('handles drift where user_version=50 but worktree_source_branch already exists', () => {
-  const db = createDb()
+  const db = createDb(51)
   try {
     expect(hasProjectColumn(db, 'worktree_source_branch')).toBe(true)
 
     db.pragma('user_version = 50')
-    runMigrations(db)
+    runMigrations(db, { toVersion: 51 })
 
     expect(hasProjectColumn(db, 'worktree_source_branch')).toBe(true)
     const version = db.pragma('user_version', { simple: true }) as number

@@ -40,11 +40,7 @@ function freshDbAt122(): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  // Run all migrations first to get full schema, then roll back the unique
-  // index from v123 so we can seed collisions and re-run v123.
-  runMigrations(db)
-  db.exec('DROP INDEX IF EXISTS tags_project_color_unique')
-  db.pragma('user_version = 122')
+  runMigrations(db, { toVersion: 122 })
   return db
 }
 

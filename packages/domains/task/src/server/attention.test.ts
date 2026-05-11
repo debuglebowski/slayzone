@@ -1,3 +1,6 @@
+/**
+ * Run with: ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/domains/task/src/server/attention.test.ts
+ */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { handleAttentionTransition } from './attention.js'
 import { parseTask, updateTask } from './ops/shared.js'

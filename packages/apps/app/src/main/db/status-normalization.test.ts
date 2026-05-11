@@ -40,11 +40,11 @@ function expect(actual: unknown) {
   }
 }
 
-function createDb(): Database.Database {
+function createDb(toVersion?: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  runMigrations(db)
+  runMigrations(db, { toVersion })
   return db
 }
 
@@ -168,7 +168,7 @@ test('no-ops when projects.columns_config is missing', () => {
 })
 
 test('repairs drifted schema where user_version=42 but columns_config is missing', () => {
-  const db = createDb()
+  const db = createDb(42)
   try {
     db.exec('ALTER TABLE projects DROP COLUMN columns_config')
     expect(hasProjectColumn(db, 'columns_config')).toBe(false)
@@ -183,7 +183,7 @@ test('repairs drifted schema where user_version=42 but columns_config is missing
 })
 
 test('handles drift where user_version=41 but columns_config already exists', () => {
-  const db = createDb()
+  const db = createDb(42)
   try {
     expect(hasProjectColumn(db, 'columns_config')).toBe(true)
 

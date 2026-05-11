@@ -35,21 +35,19 @@ function expect(actual: unknown) {
   }
 }
 
-function createDb(): Database.Database {
+function createDb(toVersion?: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  runMigrations(db)
+  runMigrations(db, { toVersion })
   return db
 }
 
 console.log('\nai-config raw skill migration')
 
 test('backfills legacy split skill rows into raw content and strips canonical metadata', () => {
-  const db = createDb()
+  const db = createDb(77)
   try {
-    db.pragma('user_version = 77')
-
     const projectId = crypto.randomUUID()
     db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
       .run(projectId, 'Migration', '#000', '/tmp/migration')
@@ -75,7 +73,7 @@ test('backfills legacy split skill rows into raw content and strips canonical me
       })
     )
 
-    runMigrations(db)
+    runMigrations(db, { toVersion: 78 })
 
     const row = db.prepare('SELECT content, metadata_json FROM ai_config_items WHERE id = ?').get(itemId) as {
       content: string
@@ -94,10 +92,8 @@ test('backfills legacy split skill rows into raw content and strips canonical me
 })
 
 test('leaves body-only skills without canonical frontmatter invalid after migration', () => {
-  const db = createDb()
+  const db = createDb(77)
   try {
-    db.pragma('user_version = 77')
-
     const itemId = crypto.randomUUID()
     db.prepare(`
       INSERT INTO ai_config_items (
@@ -111,7 +107,7 @@ test('leaves body-only skills without canonical frontmatter invalid after migrat
       '{}'
     )
 
-    runMigrations(db)
+    runMigrations(db, { toVersion: 78 })
 
     const row = db.prepare('SELECT content, metadata_json FROM ai_config_items WHERE id = ?').get(itemId) as {
       content: string

@@ -30,11 +30,11 @@ function expect(actual: unknown) {
   }
 }
 
-function createDb(): Database.Database {
+function createDb(toVersion?: number): Database.Database {
   const db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  runMigrations(db)
+  runMigrations(db, { toVersion })
   return db
 }
 
@@ -48,20 +48,15 @@ function setSetting(db: Database.Database, key: string, value: string): void {
     .run(key, value)
 }
 
-function rewindAndApply(db: Database.Database, toVersion: number): void {
-  db.pragma(`user_version = ${toVersion}`)
-  runMigrations(db)
-}
-
 console.log('\nagent panel rename migration')
 
 test('v132 renames agentPanelState → globalAgentPanelState', () => {
-  const db = createDb()
+  const db = createDb(131)
   try {
     db.prepare("DELETE FROM settings WHERE key IN ('agentPanelState', 'globalAgentPanelState')").run()
     const payload = JSON.stringify({ isOpen: true, panelWidth: 480 })
     setSetting(db, 'agentPanelState', payload)
-    rewindAndApply(db, 131)
+    runMigrations(db, { toVersion: 132 })
     expect(getSetting(db, 'globalAgentPanelState')).toBe(payload)
     expect(getSetting(db, 'agentPanelState')).toBe(null)
   } finally {
@@ -70,12 +65,12 @@ test('v132 renames agentPanelState → globalAgentPanelState', () => {
 })
 
 test('v132 keeps existing globalAgentPanelState if both present', () => {
-  const db = createDb()
+  const db = createDb(131)
   try {
     db.prepare("DELETE FROM settings WHERE key IN ('agentPanelState', 'globalAgentPanelState')").run()
     setSetting(db, 'agentPanelState', '{"old":true}')
     setSetting(db, 'globalAgentPanelState', '{"new":true}')
-    rewindAndApply(db, 131)
+    runMigrations(db, { toVersion: 132 })
     expect(getSetting(db, 'globalAgentPanelState')).toBe('{"new":true}')
     expect(getSetting(db, 'agentPanelState')).toBe(null)
   } finally {
@@ -84,13 +79,13 @@ test('v132 keeps existing globalAgentPanelState if both present', () => {
 })
 
 test('v133 renames floatingAgent* keys to floatingGlobalAgentPanel*', () => {
-  const db = createDb()
+  const db = createDb(132)
   try {
     const keys = ['floatingAgentExpandedSize', 'floatingAgentConfig', 'floatingGlobalAgentPanelExpandedSize', 'floatingGlobalAgentPanelConfig']
     for (const k of keys) db.prepare('DELETE FROM settings WHERE key = ?').run(k)
     setSetting(db, 'floatingAgentExpandedSize', '{"width":400,"height":300}')
     setSetting(db, 'floatingAgentConfig', '{"style":"icon","position":"bottom-right"}')
-    rewindAndApply(db, 132)
+    runMigrations(db, { toVersion: 133 })
     expect(getSetting(db, 'floatingGlobalAgentPanelExpandedSize')).toBe('{"width":400,"height":300}')
     expect(getSetting(db, 'floatingGlobalAgentPanelConfig')).toBe('{"style":"icon","position":"bottom-right"}')
     expect(getSetting(db, 'floatingAgentExpandedSize')).toBe(null)
@@ -101,11 +96,11 @@ test('v133 renames floatingAgent* keys to floatingGlobalAgentPanel*', () => {
 })
 
 test('v133 noop when no legacy keys exist', () => {
-  const db = createDb()
+  const db = createDb(132)
   try {
     const keys = ['floatingAgentExpandedSize', 'floatingAgentConfig', 'floatingGlobalAgentPanelExpandedSize', 'floatingGlobalAgentPanelConfig']
     for (const k of keys) db.prepare('DELETE FROM settings WHERE key = ?').run(k)
-    rewindAndApply(db, 132)
+    runMigrations(db, { toVersion: 133 })
     expect(getSetting(db, 'floatingGlobalAgentPanelExpandedSize')).toBe(null)
     expect(getSetting(db, 'floatingGlobalAgentPanelConfig')).toBe(null)
   } finally {

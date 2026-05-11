@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
-import { parseSkillFrontmatter, renderSkillFrontmatter, validateSkillFrontmatter } from '@slayzone/ai-config/shared'
+import { parseSkillFrontmatter, renderSkillFrontmatter, validateSkillFrontmatter } from '@slayzone/ai-config/shared/skill-frontmatter'
 
 interface Migration {
   version: number
@@ -2515,11 +2515,12 @@ const migrations: Migration[] = [
 
 export const LATEST_MIGRATION_VERSION = migrations[migrations.length - 1].version
 
-export function runMigrations(db: Database.Database): void {
+export function runMigrations(db: Database.Database, options: { toVersion?: number } = {}): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number
+  const toVersion = options.toVersion ?? LATEST_MIGRATION_VERSION
 
   for (const migration of migrations) {
-    if (migration.version > currentVersion) {
+    if (migration.version > currentVersion && migration.version <= toVersion) {
       db.transaction(() => {
         migration.up(db)
         db.pragma(`user_version = ${migration.version}`)

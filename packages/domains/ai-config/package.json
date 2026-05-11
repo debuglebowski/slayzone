@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
+    "./shared/skill-frontmatter": "./src/shared/skill-frontmatter.ts",
     "./server": "./src/server/index.ts",
     "./client": "./src/client/index.ts"
   },
