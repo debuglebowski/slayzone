@@ -1,9 +1,17 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle, Fragment } from 'react'
-import { Plus, X, Columns2, Terminal as TerminalIcon, Bot, Command, MousePointerClick, Sparkles, Code, Glasses, ListTree, MessageSquare, TerminalSquare } from 'lucide-react'
+import { Plus, X, Columns2, Terminal as TerminalIcon, MessageSquare, TerminalSquare } from 'lucide-react'
+import ClaudeColor from '@lobehub/icons/es/Claude/components/Color'
+import CodexColor from '@lobehub/icons/es/Codex/components/Color'
+import GeminiColor from '@lobehub/icons/es/Gemini/components/Color'
+import CopilotColor from '@lobehub/icons/es/Copilot/components/Color'
+import CursorMono from '@lobehub/icons/es/Cursor/components/Mono'
+import OpenCodeMono from '@lobehub/icons/es/OpenCode/components/Mono'
 import { cn, useShortcutDisplay, withShortcut, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import type { TerminalTab, TerminalGroup, TabDisplayMode } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { isChatSupported } from '../shared/chat-modes'
+
+type IconComponent = React.ComponentType<{ className?: string }>
 
 interface TerminalTabBarProps {
   groups: TerminalGroup[]
@@ -17,19 +25,17 @@ interface TerminalTabBarProps {
   onGroupRename: (tabId: string, label: string | null) => void
   terminalTitles?: Map<string, string>
   rightContent?: React.ReactNode
-  managerModeActive?: boolean
-  onManagerToggle?: () => void
   onMainDisplayModeToggle?: (current: TabDisplayMode) => void
 }
 
-const MODE_ICONS: Partial<Record<TerminalMode, typeof TerminalIcon>> = {
-  'claude-code': Bot,
-  'codex': Command,
-  'cursor-agent': MousePointerClick,
-  'gemini': Sparkles,
-  'opencode': Code,
-  'copilot': Glasses,
-  'ccs': Bot,
+const MODE_ICONS: Partial<Record<TerminalMode, IconComponent>> = {
+  'claude-code': ClaudeColor as IconComponent,
+  'codex': CodexColor as IconComponent,
+  'cursor-agent': CursorMono as IconComponent,
+  'gemini': GeminiColor as IconComponent,
+  'opencode': OpenCodeMono as IconComponent,
+  'copilot': CopilotColor as IconComponent,
+  'ccs': ClaudeColor as IconComponent,
   'terminal': TerminalIcon
 }
 
@@ -53,8 +59,6 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
   onGroupRename,
   terminalTitles,
   rightContent,
-  managerModeActive,
-  onManagerToggle,
   onMainDisplayModeToggle
 }: TerminalTabBarProps, ref: React.Ref<TerminalTabBarHandle>) {
   const terminalSplitShortcut = useShortcutDisplay('terminal-split')
@@ -165,22 +169,6 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
       data-testid="terminal-tabbar"
       className="flex items-center h-10 px-2 bg-surface-1 border-b border-border"
     >
-      {onManagerToggle && !managerModeActive && (
-        <button
-          type="button"
-          data-testid="terminal-manager-toggle"
-          className={cn(
-            'flex items-center justify-center h-7 w-7 rounded-md shrink-0 mr-1 cursor-pointer transition-all select-none',
-            'bg-surface-2 dark:bg-surface-2/50 hover:bg-accent/80 dark:hover:bg-accent/50',
-            'text-muted-foreground'
-          )}
-          onClick={onManagerToggle}
-          title="Manager mode"
-          aria-pressed="false"
-        >
-          <ListTree className="size-4" />
-        </button>
-      )}
       <div className="flex items-center gap-1 min-w-0 overflow-x-auto scrollbar-hide">
         {groups.map(group => {
           const isActive = group.id === activeGroupId
@@ -274,9 +262,6 @@ export const TerminalTabBar = forwardRef<TerminalTabBarHandle, TerminalTabBarPro
                         />
                       ) : (
                         <span className="truncate text-sm">{displayLabels.get(tab.id)}</span>
-                      )}
-                      {tab.isMain && (
-                        <span className="text-[10px] text-orange-300/80 bg-orange-400/10 px-1.5 rounded-full">main</span>
                       )}
                       {!tab.isMain && (
                         <button
