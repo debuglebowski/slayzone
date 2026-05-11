@@ -2192,10 +2192,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   ref={terminalContainerRef}
                   key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${task.worktree_path || ''}-${task.base_dir || ''}`}
                   taskId={task.id}
-                  taskTitle={task.title}
-                  taskStatus={task.status}
-                  taskProgress={task.progress}
-                  initialManagerMode={task.manager_mode}
                   isActive={isActive}
                   hasShortcutFocus={shortcutActive}
                   cwd={effectiveRepoPath || project?.path || ''}
@@ -2214,6 +2210,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   onFocusRequestHandled={handleTerminalFocusRequestHandled}
                   onMainTabActiveChange={setIsMainTabActive}
                   onMainDisplayModeChange={setMainTabDisplayMode}
+                  onMainDisplayModeToggleRequest={(current) => {
+                    if (current === 'chat') setPendingChatDisable(true)
+                    else setPendingChatEnable(true)
+                  }}
                   onOpenUrl={openDevServerInBrowser}
                   onOpenFile={handleQuickOpenFile}
                   onMainReset={handleResetTerminal}

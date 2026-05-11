@@ -57,15 +57,6 @@ export const ptyRouter = router({
   getBufferSince: publicProcedure
     .input(z.object({ sessionId: z.string(), afterSeq: z.number() }))
     .query(({ input }) => ops().ptyGetBufferSince(input.sessionId, input.afterSeq)),
-  getHistorySnapshot: publicProcedure
-    .input(z.object({ sessionId: z.string(), lineCount: z.number() }))
-    .query(({ input }) => ops().ptyGetHistorySnapshot(input.sessionId, input.lineCount)),
-  getHistoryBefore: publicProcedure
-    .input(z.object({ sessionId: z.string(), currentEarliestOffset: z.number(), lineCount: z.number() }))
-    .query(({ input }) => ops().ptyGetHistoryBefore(input.sessionId, input.currentEarliestOffset, input.lineCount)),
-  setArchiveCapMb: publicProcedure.input(z.object({ mb: z.number() })).mutation(({ input }) =>
-    ops().ptySetArchiveCapMb(input.mb),
-  ),
   list: publicProcedure.query(() => ops().ptyList()),
   chatList: publicProcedure.query(() => ops().chatList()),
   getState: publicProcedure.input(z.object({ sessionId: z.string() })).query(({ input }) =>

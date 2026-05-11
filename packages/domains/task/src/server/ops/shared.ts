@@ -104,7 +104,6 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
     is_temporary: Boolean(row.is_temporary),
     is_blocked: Boolean(row.is_blocked),
     active_artifact_id: (row.active_artifact_id as string) ?? null,
-    manager_mode: Boolean(row.manager_mode),
     needs_attention: Boolean(row.needs_attention),
     dev_url_toast_dismissed: Boolean(row.dev_url_toast_dismissed)
   } as Task
@@ -437,10 +436,6 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.progress !== undefined) {
     fields.push('progress = ?')
     values.push(Math.max(0, Math.min(100, Math.round(data.progress))))
-  }
-  if (data.managerMode !== undefined) {
-    fields.push('manager_mode = ?')
-    values.push(data.managerMode ? 1 : 0)
   }
   if (data.dueDate !== undefined) { fields.push('due_date = ?'); values.push(data.dueDate) }
   if (data.projectId !== undefined) {

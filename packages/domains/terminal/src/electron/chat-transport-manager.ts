@@ -176,6 +176,15 @@ interface Session {
   staged: AgentEvent[]
   /** Re-entry guard: true while flushing `staged` through `commitEvent`. */
   flushingStaged: boolean
+  /**
+   * True while the CLI is parked on an inbound `permission-request` (e.g.
+   * AskUserQuestion). Drives the idle flip so tab indicators / kanban /
+   * automations see "waiting on user", but also gates the queue drainer:
+   * draining a queued user_message into stdin mid-tool would interleave with
+   * the pending tool_result the SDK still expects. Cleared on the first
+   * non-permission event after the user answers.
+   */
+  awaitingUserInput: boolean
 }
 
 const MAX_BUFFER_EVENTS = 2000
@@ -240,6 +249,17 @@ export function getSessionTerminalState(tabId: string): ChatTerminalState | null
   return s ? s.terminalState : null
 }
 
+/**
+ * True if the CLI is parked on a user-blocking permission_request (e.g.
+ * AskUserQuestion). Drainer must NOT pop queued user_messages in this state —
+ * sending them as user_message blocks would interleave with the pending
+ * tool_result the SDK still expects.
+ */
+export function isSessionAwaitingUserInput(tabId: string): boolean {
+  const s = sessions.get(tabId)
+  return s ? s.awaitingUserInput : false
+}
+
 function commitEvent(session: Session, event: AgentEvent): void {
   const seq = appendToBuffer(session, event)
   deps.broadcastEvent(session.tabId, event, seq)
@@ -251,12 +271,40 @@ function commitEvent(session: Session, event: AgentEvent): void {
   //   idle    — turn finished, waiting on user
   //   error   — result came back with isError
   //   dead    — process exited
-  if (event.kind === 'user-message' || event.kind === 'turn-init' || event.kind === 'tool-call') {
-    transitionState(session, 'running')
-  } else if (event.kind === 'result') {
-    transitionState(session, event.isError ? 'error' : 'idle')
-  } else if (event.kind === 'process-exit') {
-    transitionState(session, 'dead')
+  if (event.kind === 'permission-request') {
+    // Turn parks on user input (AskUserQuestion etc.) — flip to idle so tab
+    // indicators, kanban cards, and automations see the same "waiting on user"
+    // state PTY adapters signal via completion stamp / approval modal.
+    // Auto-denied prompts (ExitPlanMode) are intercepted upstream and never
+    // reach commit. `awaitingUserInput` gates the queue drainer so a queued
+    // user-message doesn't interleave with the SDK's pending tool_result.
+    session.awaitingUserInput = true
+    transitionState(session, 'idle')
+  } else {
+    // Clear the gate only on events that prove the SDK consumed the
+    // control_response and resumed forward progress. stderr / rate-limit /
+    // control-response / unknown can fire mid-park and must NOT release the
+    // gate, or a `chat:queue:push` would race the SDK's pending tool_result.
+    if (
+      event.kind === 'assistant-text' ||
+      event.kind === 'assistant-thinking' ||
+      event.kind === 'tool-call' ||
+      event.kind === 'tool-result' ||
+      event.kind === 'turn-init' ||
+      event.kind === 'user-message' ||
+      event.kind === 'result' ||
+      event.kind === 'interrupted' ||
+      event.kind === 'process-exit'
+    ) {
+      session.awaitingUserInput = false
+    }
+    if (event.kind === 'user-message' || event.kind === 'turn-init' || event.kind === 'tool-call') {
+      transitionState(session, 'running')
+    } else if (event.kind === 'result') {
+      transitionState(session, event.isError ? 'error' : 'idle')
+    } else if (event.kind === 'process-exit') {
+      transitionState(session, 'dead')
+    }
   }
 
   // Mark session as healthy once we see any real content.
@@ -516,6 +564,7 @@ export async function createChat(opts: CreateChatOpts): Promise<ChatSessionInfo>
     onInvalidResume: opts.onInvalidResume,
     staged: [],
     flushingStaged: false,
+    awaitingUserInput: false,
   }
   sessions.set(opts.tabId, session)
 

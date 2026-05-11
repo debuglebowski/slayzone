@@ -90,7 +90,7 @@ export const DETECTION_ENGINES: DetectionEngine[] = [
 
 export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
   { id: BuiltinTerminalMode.ClaudeCode, label: 'Claude', type: 'claude-code', initialCommand: 'claude --session-id {id} {flags}', resumeCommand: 'claude --resume {id} {flags}', headlessCommand: 'claude -p {prompt} {flags}', defaultFlags: '--allow-dangerously-skip-permissions', enabled: true, isBuiltin: true, order: 0 },
-  { id: BuiltinTerminalMode.Codex, label: 'Codex', type: 'codex', initialCommand: 'codex {flags}', resumeCommand: 'codex {flags} resume {id}', headlessCommand: 'codex exec {flags} {prompt}', defaultFlags: '--full-auto --search', enabled: true, isBuiltin: true, order: 1 },
+  { id: BuiltinTerminalMode.Codex, label: 'Codex', type: 'codex', initialCommand: 'codex {flags}', resumeCommand: 'codex {flags} resume {id}', headlessCommand: 'codex exec {flags} {prompt}', defaultFlags: '--sandbox workspace-write', enabled: true, isBuiltin: true, order: 1 },
   { id: BuiltinTerminalMode.Gemini, label: 'Gemini', type: 'gemini', initialCommand: 'gemini {flags}', resumeCommand: 'gemini --resume latest {flags}', headlessCommand: 'gemini -p {prompt} {flags}', defaultFlags: '--yolo', enabled: true, isBuiltin: true, order: 2 },
   { id: BuiltinTerminalMode.CursorAgent, label: 'Cursor', type: 'cursor-agent', initialCommand: 'cursor-agent {flags}', resumeCommand: 'cursor-agent --resume {id} {flags}', headlessCommand: 'cursor-agent -p {prompt} {flags}', defaultFlags: '--force', enabled: true, isBuiltin: true, order: 3 },
   { id: BuiltinTerminalMode.OpenCode, label: 'OpenCode', type: 'opencode', initialCommand: 'opencode {flags}', resumeCommand: 'opencode --session {id} {flags}', headlessCommand: 'opencode run {flags} {prompt}', defaultFlags: '', enabled: true, isBuiltin: true, order: 4 },
@@ -168,25 +168,6 @@ export interface BufferChunk {
 export interface BufferSinceResult {
   chunks: BufferChunk[]
   currentSeq: number
-}
-
-// Snapshot of disk-archived scrollback for lazy initial render.
-// `data` is the last `lineCount` lines from the archive file.
-// `earliestOffset` is the byte offset where `data` starts in the archive (0 = file fully fits).
-// `totalSize` is the archive file's current byte size.
-// `currentSeq` is the live ring's current seq at snapshot time — chunks with seq > currentSeq are new.
-export interface HistorySnapshotResult {
-  data: string
-  earliestOffset: number
-  totalSize: number
-  currentSeq: number
-}
-
-// Result of fetching older lines via "Load more".
-// `data` is the bytes between [earliestOffset, currentEarliestOffset) (exclusive end).
-export interface HistoryRangeResult {
-  data: string
-  earliestOffset: number
 }
 
 export interface PromptInfo {

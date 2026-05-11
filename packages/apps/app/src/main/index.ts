@@ -122,7 +122,7 @@ import { getSetting } from '@slayzone/settings/server'
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/server'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { wireNativeThemeBridge } from '@slayzone/settings/electron'
-import { createPtyOps, ptyEvents, buildUsageOps, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, createChatOps, createChatQueueOps, chatEvents, chatQueueEvents, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners, sweepScrollbackOrphans } from '@slayzone/terminal/electron'
+import { createPtyOps, ptyEvents, buildUsageOps, killAllPtys, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, createChatOps, createChatQueueOps, chatEvents, chatQueueEvents, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners } from '@slayzone/terminal/electron'
 import { setDatabase } from '@slayzone/terminal/electron'
 import { onTaskReachedTerminal, setOnTaskReachedTerminalHandler, syncTerminalModes } from '@slayzone/terminal/server'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
@@ -1214,22 +1214,6 @@ app.whenReady().then(async () => {
   })
   logBoot('pty ops wired into tRPC')
 
-  // Sweep orphan scrollback archives whose task or tab no longer exists.
-  // Runs once at startup; cheap (single readdir per task).
-  void sweepScrollbackOrphans(
-    (taskId) => {
-      try {
-        const row = db.prepare('SELECT 1 FROM tasks WHERE id = ? AND deleted_at IS NULL').get(taskId)
-        return !!row
-      } catch { return true }
-    },
-    (taskId, tabId) => {
-      try {
-        const row = db.prepare('SELECT 1 FROM terminal_tabs WHERE id = ? AND task_id = ?').get(tabId, taskId)
-        return !!row
-      } catch { return true }
-    },
-  )
   setupFloatingGlobalAgentPanel(() => currentOverrides)
   setupTaskWindows()
   logBoot('floating global agent panel + task windows set up')

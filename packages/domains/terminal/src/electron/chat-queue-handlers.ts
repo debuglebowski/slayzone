@@ -4,6 +4,7 @@ import {
   sendUserMessage,
   getSessionInfo,
   getSessionTerminalState,
+  isSessionAwaitingUserInput,
   registerChatQueueDrainer,
 } from './chat-transport-manager'
 import {
@@ -38,11 +39,17 @@ function broadcast(channel: 'queue-changed' | 'queue-drained', ...args: unknown[
  * fires" case). Gated on `terminalState === 'idle'` so drains during a
  * live turn don't interleave with the in-flight assistant response.
  *
+ * Extra gate: `isSessionAwaitingUserInput` blocks drain during an inbound
+ * permission-request (AskUserQuestion etc.) — that idle flip is "waiting on
+ * user", not "free to send next turn"; a user_message here would race the
+ * SDK's pending tool_result.
+ *
  * Pop is atomic via a transaction; if `sendUserMessage` fails we
  * re-insert at head so the next drain retries.
  */
 export function drainChatQueue(db: Database, tabId: string): void {
   if (getSessionTerminalState(tabId) !== 'idle') return
+  if (isSessionAwaitingUserInput(tabId)) return
   const info = getSessionInfo(tabId)
   if (!info || info.ended) return
 

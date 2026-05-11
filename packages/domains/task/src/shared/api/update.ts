@@ -61,9 +61,8 @@ export const updateTaskInputSchema = z
     snoozedUntil: z.string().nullable().optional(),
     prUrl: z.string().nullable().optional(),
 
-    // Temp + orchestrator
+    // Temp
     isTemporary: z.boolean().optional(),
-    managerMode: z.boolean().optional(),
 
     // Blocked
     isBlocked: z.boolean().optional(),

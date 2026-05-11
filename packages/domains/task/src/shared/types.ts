@@ -490,8 +490,6 @@ export interface Task {
   repo_name: string | null
   // External link (populated via JOIN)
   linear_url: string | null
-  // Orchestrator (subtask manager) sidebar toggle state, persisted per task
-  manager_mode: boolean
   // Set when an agent PTY for this task transitioned running → idle|error and the
   // user has not yet focused the task. Cleared when the task tab gains focus.
   needs_attention: boolean
@@ -589,8 +587,6 @@ export interface UpdateTaskInput {
   prUrl?: string | null
   // Temporary task
   isTemporary?: boolean
-  // Orchestrator sidebar toggle state
-  managerMode?: boolean
   // Blocked
   isBlocked?: boolean
   blockedComment?: string | null

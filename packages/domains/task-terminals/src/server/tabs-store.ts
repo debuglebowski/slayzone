@@ -1,5 +1,4 @@
 import type { Database } from 'better-sqlite3'
-import { deleteScrollbackArchive } from '@slayzone/terminal/server'
 import type { TerminalTab, UpdateTerminalTabInput } from '../shared/types'
 import { rowToTab, resolveDisplayMode, type TabRow } from './ops'
 
@@ -39,7 +38,6 @@ export function deleteTab(db: Database, tabId: string): boolean {
   if (!tab) return false
   if (tab.is_main === 1) return false
   db.prepare('DELETE FROM terminal_tabs WHERE id = ?').run(tabId)
-  void deleteScrollbackArchive(`${tab.task_id}:${tabId}`)
   return true
 }
 

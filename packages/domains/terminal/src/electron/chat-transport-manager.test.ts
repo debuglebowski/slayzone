@@ -1031,5 +1031,135 @@ await test('permission-request AskUserQuestion → broadcast, no auto-deny', asy
   expect(events.some((e) => e.kind === 'permission-request')).toBe(true)
 })
 
+await test('permission-request → flips terminal state to idle + sets awaitingUserInput', async () => {
+  await setup()
+  const stateChanges: { next: string; old: string }[] = []
+  const fake = makeFakeChild()
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: () => {},
+    broadcastStateChange: (_s, next, old) => stateChanges.push({ next, old }),
+    broadcastExit: () => {},
+  })
+  await mgr.createChat({
+    tabId: 'tab-ask-state',
+    taskId: 'task-test',
+    mode: 'claude-code',
+    cwd: '/tmp',
+    conversationId: null,
+    providerFlags: [],
+  })
+  // turn-init lifts state → running
+  fake._stdout.write(
+    JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sess-1', model: 'claude', cwd: '/tmp', tools: [] }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.getSessionTerminalState('tab-ask-state')).toBe('running')
+
+  // permission-request (AskUserQuestion) → idle + awaitingUserInput=true
+  fake._stdout.write(
+    JSON.stringify({
+      type: 'control_request',
+      request_id: 'cu_state_1',
+      request: {
+        subtype: 'can_use_tool',
+        tool_name: 'AskUserQuestion',
+        tool_use_id: 'tu_state_1',
+        input: { questions: [] },
+      },
+    }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.getSessionTerminalState('tab-ask-state')).toBe('idle')
+  expect(mgr.isSessionAwaitingUserInput('tab-ask-state')).toBe(true)
+  expect(stateChanges.some((s) => s.old === 'running' && s.next === 'idle')).toBe(true)
+
+  // Subsequent assistant-text (SDK resumed after user answered) clears flag
+  fake._stdout.write(
+    JSON.stringify({
+      type: 'assistant',
+      message: { id: 'm1', content: [{ type: 'text', text: 'thanks' }] },
+    }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.isSessionAwaitingUserInput('tab-ask-state')).toBe(false)
+})
+
+await test('awaitingUserInput stays true across stderr / non-progress events', async () => {
+  await setup()
+  const fake = makeFakeChild()
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: () => {},
+    broadcastStateChange: () => {},
+    broadcastExit: () => {},
+  })
+  await mgr.createChat({
+    tabId: 'tab-ask-noclear',
+    taskId: 'task-test',
+    mode: 'claude-code',
+    cwd: '/tmp',
+    conversationId: null,
+    providerFlags: [],
+  })
+  fake._stdout.write(
+    JSON.stringify({
+      type: 'control_request',
+      request_id: 'cu_nc_1',
+      request: {
+        subtype: 'can_use_tool',
+        tool_name: 'AskUserQuestion',
+        tool_use_id: 'tu_nc_1',
+        input: {},
+      },
+    }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.isSessionAwaitingUserInput('tab-ask-noclear')).toBe(true)
+
+  // stderr does not prove SDK resumed — flag must stay true.
+  fake._stderr.write('some warning\n')
+  await new Promise((r) => setImmediate(r))
+  await new Promise((r) => setTimeout(r, 150)) // stderr is debounced
+  expect(mgr.isSessionAwaitingUserInput('tab-ask-noclear')).toBe(true)
+})
+
+await test('drainChatQueue skips when awaitingUserInput is true (mid AskUserQuestion)', async () => {
+  await setup()
+  const fake = makeFakeChild()
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: () => {},
+    broadcastStateChange: () => {},
+    broadcastExit: () => {},
+  })
+  await mgr.createChat({
+    tabId: 'tab-ask-drain',
+    taskId: 'task-test',
+    mode: 'claude-code',
+    cwd: '/tmp',
+    conversationId: null,
+    providerFlags: [],
+  })
+  fake._stdout.write(
+    JSON.stringify({
+      type: 'control_request',
+      request_id: 'cu_drain_1',
+      request: {
+        subtype: 'can_use_tool',
+        tool_name: 'AskUserQuestion',
+        tool_use_id: 'tu_drain_1',
+        input: {},
+      },
+    }) + '\n'
+  )
+  await new Promise((r) => setImmediate(r))
+  expect(mgr.getSessionTerminalState('tab-ask-drain')).toBe('idle')
+  expect(mgr.isSessionAwaitingUserInput('tab-ask-drain')).toBe(true)
+})
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

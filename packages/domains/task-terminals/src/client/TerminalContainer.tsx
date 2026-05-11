@@ -1,16 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useSubscription } from '@trpc/tanstack-react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '@slayzone/transport/client'
 import { usePty } from '@slayzone/terminal'
-import { Terminal as TerminalView } from '@slayzone/terminal/client/LazyTerminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { matchesShortcut, useShortcutStore, withModalGuard, getThemeChrome, getChromeStyleOverrides } from '@slayzone/ui'
 import { useTheme } from '@slayzone/settings/client'
 import { useTaskTerminals } from './useTaskTerminals'
 import { TerminalTabBar, type TerminalTabBarHandle } from './TerminalTabBar'
 import { TerminalSplitGroup, type TerminalSplitGroupHandle } from './TerminalSplitGroup'
-import { ManagerSidebar, type ManagerTask } from './ManagerSidebar'
 import type { TabDisplayMode } from '../shared/types'
 
 export interface TerminalContainerHandle {
@@ -45,19 +42,12 @@ interface TerminalContainerProps {
   onFocusRequestHandled?: (requestId: number) => void
   onMainTabActiveChange?: (isMainActive: boolean) => void
   onMainDisplayModeChange?: (mode: TabDisplayMode) => void
+  onMainDisplayModeToggleRequest?: (current: TabDisplayMode) => void
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
   onMainReset?: () => void
   rightContent?: React.ReactNode
   overlay?: React.ReactNode
-  /** Title of the root task — shown as "Main" row label in manager sidebar. */
-  taskTitle?: string
-  /** Status of the root task — drives the manager-sidebar root icon + strikethrough. */
-  taskStatus?: string
-  /** Progress of the root task (0-100) — drives the progress ring around the root pty dot. */
-  taskProgress?: number
-  /** Persisted orchestrator/manager-mode toggle state (from task.manager_mode). */
-  initialManagerMode?: boolean
 }
 
 export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalContainerProps>(function TerminalContainer({
@@ -81,19 +71,14 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   onFocusRequestHandled,
   onMainTabActiveChange,
   onMainDisplayModeChange,
+  onMainDisplayModeToggleRequest,
   onOpenUrl,
   onOpenFile,
   onMainReset,
   rightContent,
   overlay,
-  taskTitle,
-  taskStatus,
-  taskProgress,
-  initialManagerMode,
 }: TerminalContainerProps, ref) {
   const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const updateTaskMutation = useMutation(trpc.task.update.mutationOptions())
   const claimSessionMutation = useMutation(trpc.app.taskWindows.claimSession.mutationOptions())
   const {
     tabs,
@@ -111,57 +96,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
 
   // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
   const shortcutActive = hasShortcutFocus ?? isActive
-
-  // Manager mode: optional left sidebar showing subtask tree; selecting a subtask
-  // swaps the output area to that subtask's main PTY session.
-  // Persisted per-task via tasks.manager_mode column.
-  const [managerMode, setManagerMode] = useState<boolean>(initialManagerMode ?? false)
-  const [managerSelectedTask, setManagerSelectedTask] = useState<ManagerTask | null>(null)
-  const handleManagerToggle = useCallback(() => {
-    setManagerMode((v) => {
-      const next = !v
-      if (v) setManagerSelectedTask(null)
-      updateTaskMutation.mutateAsync({ id: taskId, managerMode: next }).catch(() => {})
-      return next
-    })
-  }, [taskId])
-  const handleManagerSelect = useCallback((task: ManagerTask | null) => {
-    setManagerSelectedTask(task)
-  }, [])
-  // Reset selection + sync mode from task prop when switching task.
-  useEffect(() => {
-    setManagerSelectedTask(null)
-    setManagerMode(initialManagerMode ?? false)
-  }, [taskId, initialManagerMode])
-
-  // Track whether task has any direct subtasks — toggle button hidden otherwise.
-  // `loaded` guards the auto-exit effect so it doesn't fire before the first fetch resolves
-  // (which would incorrectly clear a persisted managerMode on mount).
-  const [subtaskInfo, setSubtaskInfo] = useState<{ loaded: boolean; has: boolean }>({ loaded: false, has: false })
-  const refreshSubtaskInfo = useCallback((): void => {
-    queryClient.fetchQuery(trpc.task.getSubTasks.queryOptions({ parentId: taskId }))
-      .then((rows) => setSubtaskInfo({ loaded: true, has: rows.length > 0 }))
-      .catch(() => {})
-  }, [taskId, queryClient, trpc])
-  useEffect(() => {
-    setSubtaskInfo({ loaded: false, has: false })
-    refreshSubtaskInfo()
-  }, [taskId, refreshSubtaskInfo])
-  useSubscription(
-    trpc.task.onChanged.subscriptionOptions(undefined, {
-      onData: () => refreshSubtaskInfo(),
-    }),
-  )
-  const hasSubtasks = subtaskInfo.has
-
-  // Auto-exit manager mode if subtasks disappear — persist the off state.
-  useEffect(() => {
-    if (subtaskInfo.loaded && !subtaskInfo.has && managerMode) {
-      setManagerMode(false)
-      setManagerSelectedTask(null)
-      updateTaskMutation.mutateAsync({ id: taskId, managerMode: false }).catch(() => {})
-    }
-  }, [subtaskInfo, managerMode, taskId])
 
   const { subscribePrompt, subscribeTitle } = usePty()
   const { terminalOverrideThemeId, contentVariant } = useTheme()
@@ -220,7 +154,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
   }, [tabs, getSessionId])
 
   // Track terminal process titles for tab labels
-  const [isManagerResizing, setIsManagerResizing] = useState(false)
   const [terminalTitles, setTerminalTitles] = useState<Map<string, string>>(new Map())
   useEffect(() => {
     const unsubs: Array<() => void> = []
@@ -445,23 +378,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     })
   }, [activeGroup, getSessionId, cwd, taskId, conversationId, existingConversationId, supportsSessionId, initialPrompt, providerFlags, executionContext, handleConversationCreated, onSessionInvalid, handleTerminalReady, onFirstInput, onRetry, handleSplitGroup, createTab, closeGroup, closeTab, onMainReset, setTabDisplayMode])
 
-  const showingSubtaskPty = managerMode && managerSelectedTask && managerSelectedTask.id !== taskId
-  const subtaskCwd = managerSelectedTask?.worktree_path ?? managerSelectedTask?.base_dir ?? cwd
-
   return (
     <div className="h-full flex" style={terminalPanelStyle as React.CSSProperties | undefined}>
-      {managerMode && (
-        <ManagerSidebar
-          rootTaskId={taskId}
-          rootTitle={taskTitle ?? 'Main'}
-          rootStatus={taskStatus}
-          rootProgress={taskProgress}
-          selectedTaskId={managerSelectedTask?.id ?? null}
-          onSelect={handleManagerSelect}
-          onToggleOff={handleManagerToggle}
-          onResizingChange={setIsManagerResizing}
-        />
-      )}
       <div className="flex-1 min-w-0 flex flex-col">
         <TerminalTabBar
           ref={tabBarRef}
@@ -476,33 +394,18 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           onPaneMove={movePane}
           onGroupRename={renameTab}
           rightContent={rightContent}
-          managerModeActive={managerMode}
-          onManagerToggle={hasSubtasks ? handleManagerToggle : undefined}
+          onMainDisplayModeToggle={onMainDisplayModeToggleRequest}
         />
         <div className="flex-1 min-h-0 relative">
-          {isManagerResizing ? (
-            <div className="h-full bg-black" />
-          ) : showingSubtaskPty && managerSelectedTask ? (
-            <TerminalView
-              key={`manager:${managerSelectedTask.id}`}
-              sessionId={`${managerSelectedTask.id}:${managerSelectedTask.id}`}
-              cwd={subtaskCwd}
-              mode={managerSelectedTask.terminal_mode}
-              isActive={isActive}
-              onOpenUrl={onOpenUrl}
-              onOpenFile={onOpenFile}
-            />
-          ) : (
-            <TerminalSplitGroup
-              ref={splitGroupRef}
-              key={activeGroupId}
-              panes={paneProps}
-              isActive={isActive}
-              onAttached={handlePaneAttached}
-              onOpenUrl={onOpenUrl}
-              onOpenFile={onOpenFile}
-            />
-          )}
+          <TerminalSplitGroup
+            ref={splitGroupRef}
+            key={activeGroupId}
+            panes={paneProps}
+            isActive={isActive}
+            onAttached={handlePaneAttached}
+            onOpenUrl={onOpenUrl}
+            onOpenFile={onOpenFile}
+          />
           {overlay}
         </div>
       </div>

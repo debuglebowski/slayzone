@@ -381,7 +381,7 @@ const migrations: Migration[] = [
       db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`)
         .run('default_claude_flags', '--allow-dangerously-skip-permissions')
       db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`)
-        .run('default_codex_flags', '--full-auto --search')
+        .run('default_codex_flags', '--sandbox workspace-write')
     }
   },
   {
@@ -2509,6 +2509,82 @@ const migrations: Migration[] = [
         `).run(to, from, to)
         db.prepare("DELETE FROM settings WHERE key = ?").run(from)
       }
+    }
+  },
+  {
+    version: 134,
+    up: (db) => {
+      const replacements = new Map<string, string>([
+        ['--full-auto', '--sandbox workspace-write'],
+        ['--full-auto --search', '--sandbox workspace-write'],
+        ['--full-auto --disable apps', '--sandbox workspace-write --disable apps'],
+        ['--full-auto --search --disable apps', '--sandbox workspace-write --disable apps'],
+      ])
+
+      const migrateFlags = (flags: unknown): string | null => {
+        if (typeof flags !== 'string') return null
+        return replacements.get(flags.trim()) ?? null
+      }
+
+      const updateSetting = db.prepare(`
+        UPDATE settings
+        SET value = ?
+        WHERE key = 'default_codex_flags' AND value = ?
+      `)
+      const updateMode = db.prepare(`
+        UPDATE terminal_modes
+        SET default_flags = ?, updated_at = datetime('now')
+        WHERE id = 'codex' AND default_flags = ?
+      `)
+      const updateTaskFlags = db.prepare(`
+        UPDATE tasks
+        SET codex_flags = ?, updated_at = datetime('now')
+        WHERE codex_flags = ?
+      `)
+
+      for (const [from, to] of replacements) {
+        updateSetting.run(to, from)
+        updateMode.run(to, from)
+        updateTaskFlags.run(to, from)
+      }
+
+      const rows = db.prepare(`
+        SELECT id, provider_config
+        FROM tasks
+        WHERE provider_config LIKE '%--full-auto%'
+      `).all() as Array<{ id: string; provider_config: string | null }>
+      const updateProviderConfig = db.prepare(`
+        UPDATE tasks
+        SET provider_config = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `)
+
+      for (const row of rows) {
+        if (!row.provider_config) continue
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(row.provider_config)
+        } catch {
+          continue
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+
+        const config = parsed as Record<string, { flags?: unknown } | undefined>
+        const codex = config.codex
+        if (!codex || typeof codex !== 'object') continue
+
+        const migrated = migrateFlags(codex.flags)
+        if (!migrated) continue
+
+        codex.flags = migrated
+        updateProviderConfig.run(JSON.stringify(config), row.id)
+      }
+    }
+  },
+  {
+    version: 135,
+    up: (db) => {
+      db.exec(`ALTER TABLE tasks DROP COLUMN manager_mode`)
     }
   }
 ]

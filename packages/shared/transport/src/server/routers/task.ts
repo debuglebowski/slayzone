@@ -53,7 +53,6 @@ import {
   getBlockingOp,
   getByProjectOp,
   getSubTasksOp,
-  getSubTasksRecursiveOp,
   getTaskOp,
   loadBoardDataOp,
   removeBlockerOp,
@@ -92,7 +91,6 @@ export const taskRouter = router({
     return r
   }),
   getSubTasks: publicProcedure.input(z.object({ parentId: z.string() })).query(({ ctx, input }) => getSubTasksOp(ctx.db, input.parentId)),
-  getSubTasksRecursive: publicProcedure.input(z.object({ rootId: z.string() })).query(({ ctx, input }) => getSubTasksRecursiveOp(ctx.db, input.rootId)),
   update: publicProcedure.input(updateInput).mutation(async ({ ctx, input }) => {
     const r = await updateTaskOp(ctx.db, input, {})
     if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })

@@ -133,7 +133,7 @@ test.describe('CLI: slay', () => {
       expect(task.terminal_mode).toBeTruthy()
       expect(task.provider_config).toBeTruthy()
       expect(task.provider_config['claude-code']?.flags).toContain('--allow-dangerously-skip-permissions')
-      expect(task.provider_config['codex']?.flags).toContain('--full-auto')
+      expect(task.provider_config['codex']?.flags).toContain('--sandbox workspace-write')
     })
 
     test('UI updates when CLI discovers port from DB (production path)', async ({ mainWindow }) => {
@@ -617,7 +617,7 @@ test.describe('CLI: slay', () => {
       expect(subtask).toBeTruthy()
       expect(subtask.provider_config).toBeTruthy()
       expect(subtask.provider_config['claude-code']?.flags).toContain('--allow-dangerously-skip-permissions')
-      expect(subtask.provider_config['codex']?.flags).toContain('--full-auto')
+      expect(subtask.provider_config['codex']?.flags).toContain('--sandbox workspace-write')
     })
 
     test('search finds tasks by title', () => {

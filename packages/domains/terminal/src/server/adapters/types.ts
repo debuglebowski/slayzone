@@ -36,7 +36,7 @@ export interface SpawnBinaryInfo {
   name: string
   /** Structural args (resume, session-id) — used for direct CLI, skipped for CCS */
   args: string[]
-  /** Provider-specific flags (--full-auto, --yolo, etc.) — used for direct CLI, skipped for CCS */
+  /** Provider-specific flags (--sandbox, --yolo, etc.) — used for direct CLI, skipped for CCS */
   providerArgs: string[]
   /** Initial prompt text — passed through to both direct CLI and CCS */
   initialPrompt?: string

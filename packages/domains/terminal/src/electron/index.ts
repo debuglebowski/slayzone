@@ -1,7 +1,7 @@
 export { createPtyOps } from './pty-store'
 export { ptyEvents, setDatabase } from './pty-manager'
 export { buildUsageOps } from './usage'
-export { killAllPtys, killPty, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, listPtys, getBuffer, getBufferSince, getHistorySnapshot, getHistoryBefore, setArchiveCapBytes, deleteScrollbackArchive, deleteScrollbackArchiveTask, sweepScrollbackOrphans, writePty, submitPty, getState, hasPty, subscribeToPtyData, subscribeToStateChange, notifyGlobalStateListeners, onPtyInputSubmit, redirectSessionWindow, setOnHostKillHandler, broadcastRespawnRequest, requestForceRespawn, PTY_EXIT_KILLED_BY_HOST } from './pty-manager'
+export { killAllPtys, killPty, killPtysByTaskId, electronOnTaskReachedTerminal, startIdleChecker, stopIdleChecker, getPtyPids, onSessionChange, onGlobalStateChange, listPtys, getBuffer, getBufferSince, writePty, submitPty, getState, hasPty, subscribeToPtyData, subscribeToStateChange, notifyGlobalStateListeners, onPtyInputSubmit, redirectSessionWindow, setOnHostKillHandler, broadcastRespawnRequest, requestForceRespawn, PTY_EXIT_KILLED_BY_HOST } from './pty-manager'
 export { createChatOps, shutdownChatTransports, inspectPermissionFlags, backfillChatModes, chatModeToFlags, type ChatMode } from './chat-store'
 export { createChatQueueOps, chatQueueEvents } from './chat-queue-handlers'
 export { chatEvents } from './chat-transport-manager'
