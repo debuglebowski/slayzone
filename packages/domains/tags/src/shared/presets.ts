@@ -45,3 +45,15 @@ export const TAG_PRESETS: TagPreset[] = [
   { bg: '#6b7280', text: '#ffffff' },
   { bg: '#374151', text: '#e5e7eb' },
 ]
+
+export const DEFAULT_TAG_PRESET = TAG_PRESETS[19]
+
+export function pickAvailableTagPreset(
+  usedPairs: Iterable<string>,
+  preferred: TagPreset = DEFAULT_TAG_PRESET,
+): TagPreset {
+  const used = new Set(usedPairs)
+  const key = (preset: TagPreset) => `${preset.bg}:${preset.text}`
+  if (!used.has(key(preferred))) return preferred
+  return TAG_PRESETS.find((preset) => !used.has(key(preset))) ?? preferred
+}

@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { openDb, notifyApp, resolveProject, resolveProjectArg } from '../db'
+import { DEFAULT_TAG_PRESET, pickAvailableTagPreset } from '@slayzone/tags/shared'
 
 interface TagRow extends Record<string, unknown> {
   id: string
@@ -58,8 +59,8 @@ export function tagsCommand(): Command {
     .command('create <name>')
     .description('Create a tag')
     .option('--project <name|id>', 'Project name or ID (defaults to $SLAYZONE_PROJECT_ID)')
-    .option('--color <hex>', 'Tag color (#RRGGBB)', '#6366f1')
-    .option('--text-color <hex>', 'Text color (#RRGGBB)', '#ffffff')
+    .option('--color <hex>', 'Tag color (#RRGGBB)')
+    .option('--text-color <hex>', 'Text color (#RRGGBB)')
     .action(async (name: string, opts) => {
       const db = openDb()
       const project = resolveProject(db, resolveProjectArg(opts.project))
@@ -70,6 +71,20 @@ export function tagsCommand(): Command {
         { ':pid': project.id }
       )[0] ?? { sort_order: 0 }
 
+      const requested = {
+        bg: opts.color ?? DEFAULT_TAG_PRESET.bg,
+        text: opts.textColor ?? DEFAULT_TAG_PRESET.text,
+      }
+      const usedPairs = db
+        .query<{ color: string; text_color: string }>(
+          `SELECT color, text_color FROM tags WHERE project_id = :pid`,
+          { ':pid': project.id },
+        )
+        .map((tag) => `${tag.color}:${tag.text_color}`)
+      const colorPair = opts.color === undefined && opts.textColor === undefined
+        ? pickAvailableTagPreset(usedPairs, requested)
+        : requested
+
       db.run(
         `INSERT INTO tags (id, project_id, name, color, text_color, sort_order)
          VALUES (:id, :pid, :name, :color, :textColor, :sortOrder)`,
@@ -77,15 +92,15 @@ export function tagsCommand(): Command {
           ':id': id,
           ':pid': project.id,
           ':name': name,
-          ':color': opts.color,
-          ':textColor': opts.textColor,
+          ':color': colorPair.bg,
+          ':textColor': colorPair.text,
           ':sortOrder': nextOrder,
         }
       )
 
       db.close()
       await notifyApp()
-      console.log(`Created tag: ${id.slice(0, 8)}  ${name}  ${opts.color}`)
+      console.log(`Created tag: ${id.slice(0, 8)}  ${name}  ${colorPair.bg}`)
     })
 
   // slay tags delete

@@ -13,6 +13,9 @@ patchedDependencies:
   '@convex-dev/auth@0.0.90':
     hash: 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
     path: patches/@convex-dev__auth@0.0.90.patch
+  electron-vite@5.0.0:
+    hash: 7635422cf783b962d8745f269db0c030fa9bbab929f2d5b8951c8ab2ff17a5dd
+    path: patches/electron-vite@5.0.0.patch
   posix@4.2.0:
     hash: 804705bb712bef4c375046af1f0be81ebf77c27a9a4c5f9816a3da1289b29ebd
     path: patches/posix@4.2.0.patch
@@ -298,7 +301,7 @@ importers:
         version: 25.1.8(electron-builder-squirrel-windows@25.1.8)
       electron-vite:
         specifier: ^5.0.0
-        version: 5.0.0(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.4))
+        version: 5.0.0(patch_hash=7635422cf783b962d8745f269db0c030fa9bbab929f2d5b8951c8ab2ff17a5dd)(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.4))
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
@@ -327,6 +330,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
+      '@slayzone/tags':
+        specifier: workspace:*
+        version: link:../../domains/tags
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
@@ -13378,7 +13384,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron-vite@5.0.0(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.4)):
+  electron-vite@5.0.0(patch_hash=7635422cf783b962d8745f269db0c030fa9bbab929f2d5b8951c8ab2ff17a5dd)(vite@7.3.1(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.4)):
     dependencies:
       '@babel/core': 7.28.6
       '@babel/plugin-transform-arrow-functions': 7.27.1(@babel/core@7.28.6)

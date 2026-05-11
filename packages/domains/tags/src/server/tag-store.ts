@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import { recordActivityEvents } from '@slayzone/history/server'
 import type { CreateTagInput, Tag, UpdateTagInput } from '../shared'
+import { DEFAULT_TAG_PRESET, pickAvailableTagPreset } from '../shared'
 import { tagsEvents } from './events'
 
 function buildTaskTagsChangedEvents(
@@ -38,14 +39,27 @@ export function createTag(db: Database, data: CreateTagInput): Tag {
   const maxOrder = db
     .prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM tags WHERE project_id = ?')
     .get(data.projectId) as { m: number }
+  const requested = {
+    bg: data.color ?? DEFAULT_TAG_PRESET.bg,
+    text: data.textColor ?? DEFAULT_TAG_PRESET.text,
+  }
+  const colorPair = data.color === undefined && data.textColor === undefined
+    ? pickAvailableTagPreset(
+      (db
+        .prepare('SELECT color, text_color FROM tags WHERE project_id = ?')
+        .all(data.projectId) as Array<{ color: string; text_color: string }>)
+        .map((tag) => `${tag.color}:${tag.text_color}`),
+      requested,
+    )
+    : requested
   db.prepare(
     'INSERT INTO tags (id, project_id, name, color, text_color, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
   ).run(
     id,
     data.projectId,
     data.name,
-    data.color ?? '#6366f1',
-    data.textColor ?? '#ffffff',
+    colorPair.bg,
+    colorPair.text,
     maxOrder.m + 1,
   )
   return db.prepare('SELECT * FROM tags WHERE id = ?').get(id) as Tag

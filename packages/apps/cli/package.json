@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@slayzone/platform": "workspace:*",
+    "@slayzone/tags": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
     "archiver": "^7.0.1",
     "commander": "^13.0.0"

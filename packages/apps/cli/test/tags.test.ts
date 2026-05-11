@@ -5,6 +5,7 @@
 import { createTestHarness, test, expect, describe } from '../../../shared/test-utils/ipc-harness.js'
 import { createSlayDbAdapter, captureAll } from './test-harness.js'
 import { resolveProject } from '../src/db-helpers.mjs'
+import { DEFAULT_TAG_PRESET, pickAvailableTagPreset } from '@slayzone/tags/shared'
 import type Database from 'better-sqlite3'
 
 const h = await createTestHarness()
@@ -16,14 +17,20 @@ h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(proj
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId2, 'OtherProj', '#111')
 
 // --- helpers that mirror the CLI tag SQL ---
-function createTag(name: string, pid: string, color = '#6366f1', textColor = '#ffffff') {
+function createTag(name: string, pid: string, color?: string, textColor?: string) {
   const id = crypto.randomUUID()
   const nextOrder = (h.db.prepare(
     `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM tags WHERE project_id = ?`
   ).get(pid) as { n: number }).n
+  const requested = { bg: color ?? DEFAULT_TAG_PRESET.bg, text: textColor ?? DEFAULT_TAG_PRESET.text }
+  const usedPairs = (h.db.prepare('SELECT color, text_color FROM tags WHERE project_id = ?').all(pid) as Array<{ color: string; text_color: string }>)
+    .map((tag) => `${tag.color}:${tag.text_color}`)
+  const colorPair = color === undefined && textColor === undefined
+    ? pickAvailableTagPreset(usedPairs, requested)
+    : requested
   h.db.prepare(
     `INSERT INTO tags (id, project_id, name, color, text_color, sort_order) VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, pid, name, color, textColor, nextOrder)
+  ).run(id, pid, name, colorPair.bg, colorPair.text, nextOrder)
   return { id, name }
 }
 
