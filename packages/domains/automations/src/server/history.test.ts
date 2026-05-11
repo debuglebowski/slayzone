@@ -4,6 +4,7 @@
  */
 import { createTestHarness, test, expect, describe } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine } from './engine.js'
+import { taskEvents } from '@slayzone/task/server'
 
 const h = await createTestHarness()
 
@@ -12,23 +13,8 @@ h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
 const taskId = crypto.randomUUID()
 h.db.prepare('INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)').run(taskId, projectId, 'Automation Task', 'todo', 3, 0)
 
-type Listener = (...args: unknown[]) => void
-const listeners = new Map<string, Listener[]>()
-const ipcMain = {
-  handle: h.ipcMain.handle.bind(h.ipcMain),
-  on(channel: string, handler: Listener) {
-    if (!listeners.has(channel)) listeners.set(channel, [])
-    listeners.get(channel)!.push(handler)
-    h.ipcMain.on(channel, handler as never)
-  },
-  emit(channel: string, ...args: unknown[]) {
-    for (const handler of listeners.get(channel) ?? []) handler(...args)
-  },
-  handlers: h.ipcMain.handlers,
-}
-
-const engine = new AutomationEngine(h.db, () => {})
-engine.start(ipcMain as never)
+const engine = new AutomationEngine(h.db)
+engine.start()
 
 function createAutomation(command: string): string {
   const id = crypto.randomUUID()
@@ -58,7 +44,7 @@ await describe('automation history', () => {
 
     const automationId = createAutomation('printf success')
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    ipcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await sleep(200)
 
     const run = h.db.prepare('SELECT id, status FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT 1').get(automationId) as { id: string; status: string }
@@ -87,7 +73,7 @@ await describe('automation history', () => {
     const longOutputCommand = "i=0; while [ $i -lt 4505 ]; do printf a; i=$((i+1)); done; printf boom >&2; exit 1"
     const automationId = createAutomation(longOutputCommand)
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    ipcMain.emit('db:tasks:update:done', null, taskId, { oldStatus: 'todo' })
+    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await sleep(200)
 
     const run = h.db.prepare('SELECT id, status FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT 1').get(automationId) as { id: string; status: string }

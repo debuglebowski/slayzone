@@ -43,7 +43,6 @@ await describe('mcp archive_many_task', () => {
       expect(row.archived_at !== null).toBe(true)
     }
     expect(spy.calls.length).toBe(ids.length)
-    expect(emits.length).toBeGreaterThanOrEqual(ids.length)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
   })
 

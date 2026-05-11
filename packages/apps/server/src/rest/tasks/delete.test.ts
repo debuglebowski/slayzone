@@ -3,9 +3,9 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/apps/app/src/main/rest-api/tasks/delete.test.ts
  */
 import express from 'express'
-import { createTestHarness, test, expect, describe } from '../../../../../../shared/test-utils/ipc-harness.js'
-import { mountRestApp } from '../../../../../../shared/test-utils/rest-harness.js'
-import { spyTaskEvents } from '../../../../../../shared/test-utils/event-spy.js'
+import { createTestHarness, test, expect, describe } from '../../../../../shared/test-utils/ipc-harness.js'
+import { mountRestApp } from '../../../../../shared/test-utils/rest-harness.js'
+import { spyTaskEvents } from '../../../../../shared/test-utils/event-spy.js'
 import { taskEvents } from '@slayzone/task/server'
 import { registerDeleteTaskRoute } from './delete.js'
 
@@ -41,12 +41,6 @@ await describe('DELETE /api/tasks/:id', () => {
     expect(spy.calls.length).toBe(1)
     expect((spy.calls[0].payload as { taskId: string }).taskId).toBe(id)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
-  })
-
-  test('emits db:tasks:delete:done (dual-emit invariant)', async () => {
-    const id = seedTask()
-    await rest.request('DELETE', `/api/tasks/${id}`)
-    expect(deleteEmits[0][2]).toBe(id)
   })
 
   test('400: malformed id (Zod uuid validation)', async () => {

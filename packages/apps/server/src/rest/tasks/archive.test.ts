@@ -3,9 +3,9 @@
  * Run with: pnpm tsx --loader ./packages/shared/test-utils/loader.ts packages/apps/app/src/main/rest-api/tasks/archive.test.ts
  */
 import express from 'express'
-import { createTestHarness, test, expect, describe } from '../../../../../../shared/test-utils/ipc-harness.js'
-import { mountRestApp } from '../../../../../../shared/test-utils/rest-harness.js'
-import { spyTaskEvents } from '../../../../../../shared/test-utils/event-spy.js'
+import { createTestHarness, test, expect, describe } from '../../../../../shared/test-utils/ipc-harness.js'
+import { mountRestApp } from '../../../../../shared/test-utils/rest-harness.js'
+import { spyTaskEvents } from '../../../../../shared/test-utils/event-spy.js'
 import { taskEvents } from '@slayzone/task/server'
 import { registerArchiveTaskRoute } from './archive.js'
 

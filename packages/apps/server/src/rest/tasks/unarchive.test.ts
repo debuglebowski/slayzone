@@ -3,9 +3,9 @@
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm --loader ./packages/shared/test-utils/loader.ts packages/apps/app/src/main/rest-api/tasks/unarchive.test.ts
  */
 import express from 'express'
-import { createTestHarness, test, expect, describe } from '../../../../../../shared/test-utils/ipc-harness.js'
-import { mountRestApp } from '../../../../../../shared/test-utils/rest-harness.js'
-import { spyTaskEvents } from '../../../../../../shared/test-utils/event-spy.js'
+import { createTestHarness, test, expect, describe } from '../../../../../shared/test-utils/ipc-harness.js'
+import { mountRestApp } from '../../../../../shared/test-utils/rest-harness.js'
+import { spyTaskEvents } from '../../../../../shared/test-utils/event-spy.js'
 import { taskEvents } from '@slayzone/task/server'
 import { registerUnarchiveTaskRoute } from './unarchive.js'
 

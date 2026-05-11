@@ -40,7 +40,6 @@ await describe('mcp unarchive_task', () => {
     const row = h.db.prepare('SELECT archived_at FROM tasks WHERE id = ?').get(id) as { archived_at: string | null }
     expect(row.archived_at).toBeNull()
     expect(spy.calls.length).toBe(1)
-    expect(emits.length).toBeGreaterThanOrEqual(1)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
   })
 

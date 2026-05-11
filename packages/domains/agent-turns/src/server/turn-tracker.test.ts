@@ -21,6 +21,7 @@ function mkRepo(): string {
   git(dir, 'init', '-q', '-b', 'main')
   git(dir, 'config', 'user.email', 'test@test')
   git(dir, 'config', 'user.name', 'test')
+  git(dir, 'config', 'commit.gpgsign', 'false')
   fs.writeFileSync(path.join(dir, 'seed.txt'), 'initial')
   git(dir, 'add', '.')
   git(dir, 'commit', '-m', 'init')

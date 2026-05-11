@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import type { SnapshotResult } from './git-snapshot.js'
 
 function git(repo: string, ...args: string[]): string {
   const r = spawnSync('git', args, { cwd: repo, encoding: 'utf-8' })
@@ -20,6 +21,7 @@ function mkRepo(): string {
   git(dir, 'init', '-q', '-b', 'main')
   git(dir, 'config', 'user.email', 'test@test')
   git(dir, 'config', 'user.name', 'test')
+  git(dir, 'config', 'commit.gpgsign', 'false')
   git(dir, 'commit', '--allow-empty', '-m', 'init')
   return dir
 }
@@ -27,6 +29,11 @@ function mkRepo(): string {
 function refExists(repo: string, refName: string): boolean {
   const r = spawnSync('git', ['rev-parse', '--verify', refName], { cwd: repo, encoding: 'utf-8' })
   return r.status === 0
+}
+
+function snapshotSha(result: SnapshotResult | null): string {
+  if (!result) throw new Error('snapshot missing')
+  return result.snapshotSha
 }
 
 const repos: string[] = []
@@ -40,8 +47,8 @@ await describe('snapshotWorktree — clean tree', () => {
   test('always commits a snapshot with parent=HEAD; ref created', async () => {
     const repo = freshRepo()
     const head = git(repo, 'rev-parse', 'HEAD')
-    const sha = await snapshotWorktree(repo, 'turn-A')
-    expect(sha !== null).toBe(true)
+    const sha = snapshotSha(await snapshotWorktree(repo, 'turn-A'))
+    expect(Boolean(sha)).toBe(true)
     // sha must NOT equal HEAD — always a fresh commit so `<sha>^` reliably points at HEAD-at-snap-time.
     expect(sha === head).toBe(false)
     // Parent of snapshot commit is HEAD.
@@ -60,8 +67,8 @@ await describe('snapshotWorktree — dirty tree', () => {
     const headBefore = git(repo, 'rev-parse', 'HEAD')
 
     fs.writeFileSync(path.join(repo, 'a.txt'), 'two')
-    const sha = await snapshotWorktree(repo, 'turn-B')
-    expect(sha !== null).toBe(true)
+    const sha = snapshotSha(await snapshotWorktree(repo, 'turn-B'))
+    expect(Boolean(sha)).toBe(true)
     expect(sha === headBefore).toBe(false)
 
     // Working tree NOT mutated by snapshot
@@ -73,11 +80,11 @@ await describe('snapshotWorktree — dirty tree', () => {
   test('captures untracked files via -u', async () => {
     const repo = freshRepo()
     fs.writeFileSync(path.join(repo, 'fresh.txt'), 'brand new')
-    const sha = await snapshotWorktree(repo, 'turn-C')
-    expect(sha !== null).toBe(true)
+    const sha = snapshotSha(await snapshotWorktree(repo, 'turn-C'))
+    expect(Boolean(sha)).toBe(true)
 
     // Verify the untracked file is reachable from the snapshot commit's tree.
-    const tree = git(repo, 'ls-tree', '-r', sha as string)
+    const tree = git(repo, 'ls-tree', '-r', sha)
     expect(tree.includes('fresh.txt')).toBe(true)
 
     // Working tree still has it
@@ -130,8 +137,8 @@ await describe('diffIsEmpty', () => {
   test('two snapshots with no edits between → true', async () => {
     const repo = freshRepo()
     fs.writeFileSync(path.join(repo, 'c.txt'), 'static')
-    const sha1 = (await snapshotWorktree(repo, 'turn-E1'))!
-    const sha2 = (await snapshotWorktree(repo, 'turn-E2'))!
+    const sha1 = snapshotSha(await snapshotWorktree(repo, 'turn-E1'))
+    const sha2 = snapshotSha(await snapshotWorktree(repo, 'turn-E2'))
     // -u captures untracked; both snapshots see the same tree → no diff
     expect(await diffIsEmpty(repo, sha1, sha2)).toBe(true)
   })
@@ -141,9 +148,9 @@ await describe('diffIsEmpty', () => {
     fs.writeFileSync(path.join(repo, 'd.txt'), 'before')
     git(repo, 'add', '.')
     git(repo, 'commit', '-m', 'd before')
-    const sha1 = (await snapshotWorktree(repo, 'turn-F1'))!
+    const sha1 = snapshotSha(await snapshotWorktree(repo, 'turn-F1'))
     fs.writeFileSync(path.join(repo, 'd.txt'), 'after')
-    const sha2 = (await snapshotWorktree(repo, 'turn-F2'))!
+    const sha2 = snapshotSha(await snapshotWorktree(repo, 'turn-F2'))
     expect(await diffIsEmpty(repo, sha1, sha2)).toBe(false)
   })
 })
@@ -189,7 +196,7 @@ await describe('snapshot is non-destructive', () => {
   test('untracked-only changes captured', async () => {
     const repo = freshRepo()
     fs.writeFileSync(path.join(repo, 'newfile.txt'), 'untracked content')
-    const sha = (await snapshotWorktree(repo, 'turn-J'))!
+    const sha = snapshotSha(await snapshotWorktree(repo, 'turn-J'))
     const tree = git(repo, 'ls-tree', '-r', sha)
     expect(tree.includes('newfile.txt')).toBe(true)
   })
@@ -201,7 +208,7 @@ await describe('snapshot is non-destructive', () => {
     git(repo, 'commit', '-m', 'gitignore')
     fs.writeFileSync(path.join(repo, 'secret.txt'), 'do not capture')
     fs.writeFileSync(path.join(repo, 'public.txt'), 'capture me')
-    const sha = (await snapshotWorktree(repo, 'turn-K'))!
+    const sha = snapshotSha(await snapshotWorktree(repo, 'turn-K'))
     const tree = git(repo, 'ls-tree', '-r', sha)
     expect(tree.includes('public.txt')).toBe(true)
     expect(tree.includes('secret.txt')).toBe(false)
