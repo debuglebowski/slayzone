@@ -49,7 +49,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SIC codex fresh', status: 'in_progress', terminalMode: 'codex' })
     await mainWindow.evaluate(({ id }) => window.api.db.updateTask({
-      id, providerConfig: { codex: { flags: '--full-auto --search --disable apps' } }
+      id, providerConfig: { codex: { flags: '--sandbox workspace-write --disable apps' } }
     }), { id: t.id })
     await s.refreshData()
 
@@ -136,7 +136,7 @@ test.describe.skip('Session ID consistency (real CLIs)', () => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SIC codex persist', status: 'in_progress', terminalMode: 'codex' })
     await mainWindow.evaluate(({ id, cid }) => window.api.db.updateTask({
-      id, providerConfig: { codex: { conversationId: cid, flags: '--full-auto --search --disable apps' } }
+      id, providerConfig: { codex: { conversationId: cid, flags: '--sandbox workspace-write --disable apps' } }
     }), { id: t.id, cid: storedId })
     await s.refreshData()
 

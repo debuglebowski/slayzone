@@ -55,7 +55,7 @@ await describe('db:taskTemplates:create', () => {
     const t = createTemplate('Full', {
       description: 'A full template',
       terminalMode: 'codex',
-      providerConfig: { codex: { flags: '--full-auto' } },
+      providerConfig: { codex: { flags: '--sandbox workspace-write' } },
       panelVisibility: { terminal: true, browser: true, diff: false, settings: false, editor: false, artifacts: false, processes: false },
       browserTabs: { tabs: [{ id: 't1', url: 'http://localhost:3000', title: 'Dev' }], activeTabId: 't1' },
       webPanelUrls: { grafana: 'http://grafana.local' },
@@ -66,7 +66,7 @@ await describe('db:taskTemplates:create', () => {
     })
     expect(t.description).toBe('A full template')
     expect(t.terminal_mode).toBe('codex')
-    expect(t.provider_config?.codex?.flags).toBe('--full-auto')
+    expect(t.provider_config?.codex?.flags).toBe('--sandbox workspace-write')
     expect(t.panel_visibility?.terminal).toBe(true)
     expect(t.panel_visibility?.browser).toBe(true)
     expect(t.browser_tabs?.tabs).toHaveLength(1)

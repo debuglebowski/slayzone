@@ -65,14 +65,14 @@ describe('db:tasks:create', () => {
   test('builds provider_config from defaults', () => {
     const t = createTask('WithConfig')
     expect(t.provider_config['claude-code']?.flags).toBe('--allow-dangerously-skip-permissions')
-    expect(t.provider_config['codex']?.flags).toBe('--full-auto --search')
+    expect(t.provider_config['codex']?.flags).toBe('--sandbox workspace-write')
   })
 
   test('respects custom flags override', () => {
     const t = createTask('CustomFlags', { claudeFlags: '--verbose' })
     expect(t.provider_config['claude-code']?.flags).toBe('--verbose')
     // Other providers keep defaults
-    expect(t.provider_config['codex']?.flags).toBe('--full-auto --search')
+    expect(t.provider_config['codex']?.flags).toBe('--sandbox workspace-write')
   })
 
   test('creates with parent_id', () => {

@@ -59,7 +59,7 @@ const codexProvider = {
   id: 'codex',
   type: 'codex',
   headlessCommand: 'codex exec {flags} {prompt}',
-  defaultFlags: '--full-auto',
+  defaultFlags: '--sandbox workspace-write',
 }
 
 test('builds claude w/ default flags', () => {
@@ -69,7 +69,7 @@ test('builds claude w/ default flags', () => {
 
 test('builds codex w/ flags-in-middle', () => {
   expect(buildAiHeadlessCommand({ provider: 'codex', prompt: 'hi' }, codexProvider))
-    .toBe(`codex exec --full-auto 'hi'`)
+    .toBe(`codex exec --sandbox workspace-write 'hi'`)
 })
 
 test('explicit empty flags overrides default — trailing position', () => {
