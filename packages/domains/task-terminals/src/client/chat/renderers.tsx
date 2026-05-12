@@ -46,7 +46,7 @@ const CHAT_CARD_INDENT = 'pl-14'
 
 function formatTime(ts: number): string {
   try {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   } catch {
     return ''
   }
@@ -67,7 +67,10 @@ function useCopy(text: string): { copied: boolean; copy: () => void } {
 /** User prompt — right-aligned card. */
 export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user-text' }> }) {
   return (
-    <div className="px-4 py-2 flex justify-end">
+    <div className="group px-4 py-2 flex justify-end items-center gap-2">
+      <span className="shrink-0 text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
+        {formatTime(item.timestamp)}
+      </span>
       <div className="max-w-[85%] min-w-0 rounded-lg border border-primary/25 bg-primary/5 shadow-sm px-3 py-2 text-sm text-foreground whitespace-pre-wrap break-words">
         <HighlightedText text={item.text} />
       </div>
@@ -79,13 +82,16 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
 export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 'text' }> }) {
   return (
     <div className="pl-4 pr-[10%] py-2">
-      <div className="flex gap-3 items-start">
+      <div className="group flex gap-3 items-start">
         <AssistantAvatar />
         <div className="min-w-0 rounded-lg border border-border/50 bg-card/40 shadow-sm px-3 py-2">
           <div className="text-sm leading-relaxed [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_ul]:my-2 [&_ol]:my-2 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_code]:font-mono [&_code]:text-[0.85em]">
             <GhMarkdown>{item.text}</GhMarkdown>
           </div>
         </div>
+        <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
+          {formatTime(item.timestamp)}
+        </span>
       </div>
     </div>
   )
@@ -262,7 +268,7 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
 
   return (
     <>
-      <div className={cn(CHAT_CARD_INDENT, 'pr-4 py-1')} data-testid="sub-agent-row">
+      <div className={cn(CHAT_CARD_INDENT, 'pr-4 py-1 group flex items-start gap-2')} data-testid="sub-agent-row">
         <div className="w-fit max-w-full rounded-md border border-border/50 bg-muted/20 overflow-hidden">
         <button
           type="button"
@@ -322,11 +328,12 @@ export function SubAgentRow({ item }: { item: Extract<TimelineItem, { kind: 'sub
           )}
         </button>
         </div>
+        <HoverTimestamp timestamp={item.timestamp} />
       </div>
       {open && hasChildren && (
         <div className="pl-4" data-testid="sub-agent-children">
           {launcherTool && launcherTool.kind === 'tool' && (
-            <div key={`${item.toolUseId}:launcher`}>{renderTool(launcherTool.invocation)}</div>
+            <div key={`${item.toolUseId}:launcher`}>{renderTool(launcherTool.invocation, launcherTool.timestamp)}</div>
           )}
           {childIndices.map((idx) => {
             const child = timeline[idx]
@@ -359,6 +366,18 @@ function isAgentLauncherToolName(name: string | undefined): boolean {
 
 interface ToolProps {
   invocation: ToolInvocation
+  /** Wall-clock ts of the tool-call timeline item — surfaced on card hover. */
+  timestamp?: number
+}
+
+/** Hover-revealed timestamp, sits beside left-aligned cards (tool, sub-agent, etc.). */
+function HoverTimestamp({ timestamp }: { timestamp?: number }) {
+  if (timestamp == null) return null
+  return (
+    <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
+      {formatTime(timestamp)}
+    </span>
+  )
 }
 
 function extractRawText(raw: unknown): string {
@@ -376,6 +395,7 @@ function ToolShell({
   summary,
   children,
   defaultOpen,
+  timestamp,
 }: {
   invocation: ToolInvocation
   icon: React.ReactNode
@@ -383,6 +403,7 @@ function ToolShell({
   summary?: React.ReactNode
   children?: React.ReactNode
   defaultOpen?: boolean
+  timestamp?: number
 }) {
   const status = invocation.status
   const [open, setOpen] = useState(defaultOpen ?? status === 'error')
@@ -408,7 +429,7 @@ function ToolShell({
   }
   const canOpen = Boolean(body)
   return (
-    <div className={cn(CHAT_CARD_INDENT, 'pr-4 py-1')}>
+    <div className={cn(CHAT_CARD_INDENT, 'pr-4 py-1 group flex items-start gap-2')}>
       <div className="w-fit max-w-full rounded-lg border border-border/50 bg-card/40 overflow-hidden shadow-sm">
         <button
           onClick={() => canOpen && setOpen(!open)}
@@ -433,6 +454,7 @@ function ToolShell({
         </button>
         {open && canOpen && <div className="border-t border-border/40 bg-background/40">{body}</div>}
       </div>
+      <HoverTimestamp timestamp={timestamp} />
     </div>
   )
 }
@@ -450,7 +472,7 @@ function shortenPath(p?: string): string {
   return parts.length > 3 ? '…/' + parts.slice(-2).join('/') : p
 }
 
-export function ToolCallEdit({ invocation }: ToolProps) {
+export function ToolCallEdit({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { file_path?: string; old_string?: string; new_string?: string } | null
   const { fileEditsOpenByDefault } = useChatView()
   const fileDiff = useMemo(() => {
@@ -461,6 +483,7 @@ export function ToolCallEdit({ invocation }: ToolProps) {
       icon={<Pencil className="size-3" />}
       title="Edit"
       invocation={invocation}
+      timestamp={timestamp}
       summary={shortenPath(input?.file_path)}
       defaultOpen={fileEditsOpenByDefault}
     >
@@ -478,7 +501,7 @@ export function ToolCallEdit({ invocation }: ToolProps) {
   )
 }
 
-export function ToolCallRead({ invocation }: ToolProps) {
+export function ToolCallRead({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { file_path?: string; offset?: number; limit?: number } | null
   const structured = invocation.result?.structured as
     | { file?: { content?: string; numLines?: number } }
@@ -491,6 +514,7 @@ export function ToolCallRead({ invocation }: ToolProps) {
       icon={<FileText className="size-3" />}
       title="Read"
       invocation={invocation}
+      timestamp={timestamp}
       summary={summary}
     >
       {structured?.file?.content && (
@@ -502,7 +526,7 @@ export function ToolCallRead({ invocation }: ToolProps) {
   )
 }
 
-export function ToolCallWrite({ invocation }: ToolProps) {
+export function ToolCallWrite({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { file_path?: string; content?: string } | null
   const { fileEditsOpenByDefault } = useChatView()
   return (
@@ -510,6 +534,7 @@ export function ToolCallWrite({ invocation }: ToolProps) {
       icon={<FilePlus className="size-3" />}
       title="Write"
       invocation={invocation}
+      timestamp={timestamp}
       summary={shortenPath(input?.file_path)}
       defaultOpen={fileEditsOpenByDefault}
     >
@@ -522,7 +547,7 @@ export function ToolCallWrite({ invocation }: ToolProps) {
   )
 }
 
-export function ToolCallBash({ invocation }: ToolProps) {
+export function ToolCallBash({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { command?: string; description?: string } | null
   const resultText = extractRawText(invocation.result?.rawContent)
   return (
@@ -530,6 +555,7 @@ export function ToolCallBash({ invocation }: ToolProps) {
       icon={<TerminalIcon className="size-3" />}
       title="Bash"
       invocation={invocation}
+      timestamp={timestamp}
       summary={input?.description ?? input?.command}
       defaultOpen
     >
@@ -548,7 +574,7 @@ export function ToolCallBash({ invocation }: ToolProps) {
   )
 }
 
-export function ToolCallGlob({ invocation }: ToolProps) {
+export function ToolCallGlob({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { pattern?: string; path?: string } | null
   const structured = invocation.result?.structured as
     | { filenames?: string[]; numFiles?: number }
@@ -558,6 +584,7 @@ export function ToolCallGlob({ invocation }: ToolProps) {
       icon={<Search className="size-3" />}
       title="Glob"
       invocation={invocation}
+      timestamp={timestamp}
       summary={`${input?.pattern ?? ''}${structured ? ` → ${structured.numFiles ?? 0} files` : ''}`}
     >
       {structured?.filenames && (
@@ -571,7 +598,7 @@ export function ToolCallGlob({ invocation }: ToolProps) {
   )
 }
 
-export function ToolCallGrep({ invocation }: ToolProps) {
+export function ToolCallGrep({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { pattern?: string; path?: string } | null
   const structured = invocation.result?.structured as
     | { mode?: string; filenames?: string[]; numFiles?: number; numLines?: number; content?: string }
@@ -584,7 +611,7 @@ export function ToolCallGrep({ invocation }: ToolProps) {
         : ''
   }`
   return (
-    <ToolShell icon={<Search className="size-3" />} title="Grep" invocation={invocation} summary={summary}>
+    <ToolShell icon={<Search className="size-3" />} title="Grep" invocation={invocation} timestamp={timestamp} summary={summary}>
       {structured?.content && (
         <pre className="p-3 text-xs font-mono whitespace-pre overflow-x-auto max-h-48 bg-muted/30">
           <LinkText text={structured.content} />
@@ -601,7 +628,7 @@ export function ToolCallGrep({ invocation }: ToolProps) {
   )
 }
 
-export function ToolCallTodoWrite({ invocation }: ToolProps) {
+export function ToolCallTodoWrite({ invocation, timestamp }: ToolProps) {
   const structured = invocation.result?.structured as
     | { newTodos?: Array<{ content: string; status: string; activeForm?: string }> }
     | null
@@ -613,6 +640,7 @@ export function ToolCallTodoWrite({ invocation }: ToolProps) {
       icon={<CheckSquare className="size-3" />}
       title="TodoWrite"
       invocation={invocation}
+      timestamp={timestamp}
       summary={`${todos.length} todos${inProgress ? ` · ${inProgress.content}` : ''}`}
       defaultOpen
     >
@@ -649,7 +677,7 @@ type AskQuestion = {
   options: Array<{ label: string; description: string; preview?: string }>
 }
 
-export function ToolCallAskUserQuestion({ invocation }: ToolProps) {
+export function ToolCallAskUserQuestion({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { questions?: AskQuestion[] } | null
   const questions = input?.questions ?? []
   const { sendMessage, permissionRequests, respondPermission, abortAgent, timeline, collapseSignal } = useChatView()
@@ -814,7 +842,7 @@ export function ToolCallAskUserQuestion({ invocation }: ToolProps) {
 
   return (
     <div className="pl-4 pr-4 py-3">
-      <div className="flex gap-3 items-start">
+      <div className="group flex gap-3 items-start">
         <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white shadow-sm">
           <HelpCircle className="size-3.5" />
         </div>
@@ -987,6 +1015,7 @@ export function ToolCallAskUserQuestion({ invocation }: ToolProps) {
             </div>
           )}
         </div>
+        <HoverTimestamp timestamp={timestamp} />
       </div>
     </div>
   )
@@ -1002,7 +1031,7 @@ export const PLAN_CANCELLED_MARKER = '__slay_plan_cancelled__'
 export const isPlanMarker = (text: string): boolean =>
   text === PLAN_APPROVED_MARKER || text === PLAN_CANCELLED_MARKER
 
-export function ToolCallExitPlanMode({ invocation }: ToolProps) {
+export function ToolCallExitPlanMode({ invocation, timestamp }: ToolProps) {
   const input = invocation.input as { plan?: string } | null
   const plan = input?.plan ?? ''
   const denied = invocation.denied === true
@@ -1038,7 +1067,7 @@ export function ToolCallExitPlanMode({ invocation }: ToolProps) {
   const showApproveFooter = denied && isLastPlan && !pressed
   return (
     <div className="pl-4 pr-4 py-3">
-      <div className="flex gap-3 items-start">
+      <div className="group flex gap-3 items-start">
         <div className="shrink-0 size-7 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-sm">
           <ClipboardList className="size-3.5" />
         </div>
@@ -1083,12 +1112,13 @@ export function ToolCallExitPlanMode({ invocation }: ToolProps) {
             </div>
           )}
         </div>
+        <HoverTimestamp timestamp={timestamp} />
       </div>
     </div>
   )
 }
 
-export function ToolCallGeneric({ invocation }: ToolProps) {
+export function ToolCallGeneric({ invocation, timestamp }: ToolProps) {
   const result = invocation.result?.rawContent
   const resultText =
     typeof result === 'string'
@@ -1102,6 +1132,7 @@ export function ToolCallGeneric({ invocation }: ToolProps) {
       icon={<HelpCircle className="size-3" />}
       title={invocation.name || 'Tool'}
       invocation={invocation}
+      timestamp={timestamp}
       summary={inputPreview}
     >
       <div className="p-3 grid gap-2 text-xs font-mono">
@@ -1136,9 +1167,9 @@ export const toolRenderers: Record<string, React.FC<ToolProps>> = {
   AskUserQuestion: ToolCallAskUserQuestion,
 }
 
-export function renderTool(invocation: ToolInvocation): React.JSX.Element {
+export function renderTool(invocation: ToolInvocation, timestamp?: number): React.JSX.Element {
   const R = toolRenderers[invocation.name] ?? ToolCallGeneric
-  return <R invocation={invocation} />
+  return <R invocation={invocation} timestamp={timestamp} />
 }
 
 /**
@@ -1165,7 +1196,7 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
     case 'thinking':
       return <ThinkingBlock key={key} item={item} />
     case 'tool':
-      return <div key={key}>{renderTool(item.invocation)}</div>
+      return <div key={key}>{renderTool(item.invocation, item.timestamp)}</div>
     case 'session-start':
       return null
     case 'result':
