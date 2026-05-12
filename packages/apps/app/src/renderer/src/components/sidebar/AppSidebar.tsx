@@ -130,8 +130,6 @@ export function AppSidebar({
   const setSidebarWidth = useTabStore((s) => s.setSidebarWidth)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const setSidebarAutoHide = useTabStore((s) => s.setSidebarAutoHide)
-  const treeShowHeader = useTabStore((s) => s.treeShowHeader)
-  const setTreeShowHeader = useTabStore((s) => s.setTreeShowHeader)
   const view = getView(sidebarView)
 
   const [hoverRevealed, setHoverRevealed] = useState(false)
@@ -230,8 +228,6 @@ export function AppSidebar({
                     compact
                     autoHide={sidebarAutoHide}
                     onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
-                    showHeader={treeShowHeader}
-                    onToggleShowHeader={() => setTreeShowHeader(!treeShowHeader)}
                   />
                 ) : null
               }
@@ -244,8 +240,6 @@ export function AppSidebar({
                   compact
                   autoHide={sidebarAutoHide}
                   onToggleAutoHide={() => setSidebarAutoHide(!sidebarAutoHide)}
-                  showHeader={treeShowHeader}
-                  onToggleShowHeader={() => setTreeShowHeader(!treeShowHeader)}
                 />
               </div>
             )}

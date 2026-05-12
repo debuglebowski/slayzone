@@ -10,7 +10,7 @@ import {
   cn,
   useShortcutDisplay,
 } from '@slayzone/ui'
-import { Check, PanelLeftClose, PanelTopOpen } from 'lucide-react'
+import { Check, PanelLeftClose } from 'lucide-react'
 import { viewRegistry, getView } from './views/registry'
 
 interface SidebarViewSwitcherProps {
@@ -19,8 +19,6 @@ interface SidebarViewSwitcherProps {
   compact?: boolean
   autoHide?: boolean
   onToggleAutoHide?: () => void
-  showHeader?: boolean
-  onToggleShowHeader?: () => void
 }
 
 export function SidebarViewSwitcher({
@@ -29,8 +27,6 @@ export function SidebarViewSwitcher({
   compact,
   autoHide,
   onToggleAutoHide,
-  showHeader,
-  onToggleShowHeader,
 }: SidebarViewSwitcherProps) {
   const view = getView(current)
   const Icon = view.icon
@@ -80,19 +76,6 @@ export function SidebarViewSwitcher({
           )
         })}
         <DropdownMenuSeparator />
-        {onToggleShowHeader && current === 'tree' && (
-          <DropdownMenuItem
-            onSelect={(e) => {
-              e.preventDefault()
-              onToggleShowHeader()
-            }}
-            className="cursor-pointer"
-          >
-            <PanelTopOpen className="size-4" />
-            <span>Show header</span>
-            {showHeader && <Check className="size-4 col-start-3" />}
-          </DropdownMenuItem>
-        )}
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault()

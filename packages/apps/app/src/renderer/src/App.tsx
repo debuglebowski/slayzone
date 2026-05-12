@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback, useTransition } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
 import { initShortcuts } from './shortcut-init'
-import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus, MoreHorizontal, Settings, Trophy, BarChart3, Megaphone, ListTree, PanelLeftClose, PanelTopOpen, Bell, Bot, Check, Monitor } from 'lucide-react'
+import { AlertTriangle, FolderClosed, LayoutGrid, TerminalSquare, GitBranch, FileCode, Cpu, Kanban, FlaskConical, Zap, BookOpen, Lock, Focus, MoreHorizontal, Settings, Trophy, BarChart3, Megaphone, ListTree, PanelLeftClose, Bell, Bot, Check, Monitor } from 'lucide-react'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
@@ -155,7 +155,6 @@ function App(): React.JSX.Element {
   const activeView = useTabStore((s) => s.activeView)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const sidebarView = useTabStore((s) => s.sidebarView)
-  const treeShowHeader = useTabStore((s) => s.treeShowHeader)
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const selectedProjectId = useTabStore((s) => s.selectedProjectId)
   const { setActiveTabIndex, setSelectedProjectId, openTask: rawOpenTask, openTaskInBackground, reorderTabs, reopenClosedTab } = useTabStore.getState()
@@ -805,15 +804,15 @@ function App(): React.JSX.Element {
 
   useGuardedHotkeys(getKeys('next-tab'), (e) => {
     e.preventDefault()
-    const { sidebarView: sv, treeShowHeader: tsh } = useTabStore.getState()
-    if (sv === 'tree' && !tsh) cycleSidebarTreeItems(1)
+    const { sidebarView: sv } = useTabStore.getState()
+    if (sv === 'tree') cycleSidebarTreeItems(1)
     else navigateCycle(1)
   }, { enableOnFormTags: true, enabled: !isRecording })
 
   useGuardedHotkeys(getKeys('prev-tab'), (e) => {
     e.preventDefault()
-    const { sidebarView: sv, treeShowHeader: tsh } = useTabStore.getState()
-    if (sv === 'tree' && !tsh) cycleSidebarTreeItems(-1)
+    const { sidebarView: sv } = useTabStore.getState()
+    if (sv === 'tree') cycleSidebarTreeItems(-1)
     else navigateCycle(-1)
   }, { enableOnFormTags: true, enabled: !isRecording })
 
@@ -1185,7 +1184,7 @@ function App(): React.JSX.Element {
     return () => { window.removeEventListener('open-settings', handleGlobal); window.removeEventListener('open-project-settings', handleProject) }
   }, [projects, openProjectSettings])
 
-  const headerHidden = sidebarView === 'tree' && !treeShowHeader
+  const headerHidden = sidebarView === 'tree'
   // Tree view: align with the top icon row.
   // Projects rail: align horizontally with project cards + vertically with the
   //   TabBar (default x=10 sits near the rail's icon center at ~36px).
@@ -1366,17 +1365,6 @@ function App(): React.JSX.Element {
               <Kanban className="size-4" />
               <span>Projects view</span>
               {sidebarView === 'projects' && <Check className="size-4 col-start-3" />}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault()
-                useTabStore.getState().setTreeShowHeader(!treeShowHeader)
-              }}
-              className="cursor-pointer"
-            >
-              <PanelTopOpen className="size-4" />
-              <span>Show header</span>
-              {treeShowHeader && <Check className="size-4 col-start-3" />}
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={(e) => {
