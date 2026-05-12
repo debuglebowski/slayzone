@@ -960,6 +960,75 @@ describe('needs_attention', () => {
   })
 })
 
+// --- Auto-promote temporary tasks on rename ---
+//
+// Renaming a temporary task in any way (UI inline edit, tab double-click, CLI,
+// IPC, sync script) should promote it to a real task — same effect as the
+// "Turn into task" button. Logic lives in updateTask so all paths inherit it.
+
+const tempPromoteProjectId = crypto.randomUUID()
+h.db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
+  .run(tempPromoteProjectId, 'TempPromoteProject', '#abc', '/tmp/temp-promote')
+
+function seedTempTask(initialStatus = 'inbox'): string {
+  const id = crypto.randomUUID()
+  h.db.prepare(
+    'INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, is_temporary) VALUES (?, ?, ?, ?, 3, ?, ?, 1)'
+  ).run(id, tempPromoteProjectId, 'temp', initialStatus, 'claude-code', '{}')
+  return id
+}
+
+function readTempRow(id: string): { is_temporary: number; status: string; title: string } {
+  return h.db.prepare('SELECT is_temporary, status, title FROM tasks WHERE id = ?').get(id) as
+    { is_temporary: number; status: string; title: string }
+}
+
+describe('updateTask — auto-promote temporary on rename', () => {
+  test('renaming a temp task clears is_temporary and moves status to started', () => {
+    const id = seedTempTask('inbox')
+    updateTask(h.db, { id, title: 'Real title' })
+    const row = readTempRow(id)
+    expect(row.is_temporary).toBe(0)
+    expect(row.status).toBe('in_progress')
+    expect(row.title).toBe('Real title')
+  })
+
+  test('non-title updates on a temp task do NOT promote', () => {
+    const id = seedTempTask('inbox')
+    updateTask(h.db, { id, priority: 1 })
+    const row = readTempRow(id)
+    expect(row.is_temporary).toBe(1)
+    expect(row.status).toBe('inbox')
+  })
+
+  test('renaming a non-temp task leaves is_temporary untouched and does not bump status', () => {
+    const id = crypto.randomUUID()
+    h.db.prepare(
+      'INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, is_temporary) VALUES (?, ?, ?, ?, 3, ?, ?, 0)'
+    ).run(id, tempPromoteProjectId, 'real', 'inbox', 'claude-code', '{}')
+    updateTask(h.db, { id, title: 'Renamed' })
+    const row = readTempRow(id)
+    expect(row.is_temporary).toBe(0)
+    expect(row.status).toBe('inbox')
+  })
+
+  test('explicit isTemporary in the update wins over auto-promote', () => {
+    const id = seedTempTask('inbox')
+    updateTask(h.db, { id, title: 'Renamed', isTemporary: true })
+    const row = readTempRow(id)
+    expect(row.is_temporary).toBe(1)
+    expect(row.status).toBe('inbox')
+  })
+
+  test('explicit status in the update wins over auto-promote default', () => {
+    const id = seedTempTask('inbox')
+    updateTask(h.db, { id, title: 'Renamed', status: 'todo' })
+    const row = readTempRow(id)
+    expect(row.is_temporary).toBe(0)
+    expect(row.status).toBe('todo')
+  })
+})
+
 // --- Subtask worktree inheritance ---
 // Captured asynchronously at file scope (top-level await) so describe() can
 // run sync expects against resolved Task rows without racing h.cleanup().

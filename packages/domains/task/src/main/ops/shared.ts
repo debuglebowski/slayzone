@@ -3,7 +3,7 @@ import type { Database } from 'better-sqlite3'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
-import { getDefaultStatus, isKnownStatus, isTerminalStatus, parseColumnsConfig } from '@slayzone/projects/shared'
+import { getDefaultStatus, getStatusByCategory, isKnownStatus, isTerminalStatus, parseColumnsConfig } from '@slayzone/projects/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import path from 'path'
 import { existsSync, rmSync } from 'fs'
@@ -404,17 +404,26 @@ export async function maybeAutoCreateWorktree(
 }
 
 export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
-  const existing = db.prepare('SELECT project_id, status FROM tasks WHERE id = ?').get(data.id) as
-    | { project_id: string; status: string }
+  const existing = db.prepare('SELECT project_id, status, is_temporary FROM tasks WHERE id = ?').get(data.id) as
+    | { project_id: string; status: string; is_temporary: number }
     | undefined
   const targetProjectId = data.projectId ?? existing?.project_id
   const targetColumns = targetProjectId ? getProjectColumns(db, targetProjectId) : null
   const projectChanged = data.projectId !== undefined && existing?.project_id !== data.projectId
+
+  // Auto-promote a temporary task when its title is renamed. Mirrors "Turn into task" behavior:
+  // clears is_temporary and moves status into the `started` category. Caller can opt out by
+  // passing isTemporary explicitly.
+  const shouldPromoteFromTemp =
+    data.title !== undefined && existing?.is_temporary === 1 && data.isTemporary === undefined
+
   let normalizedStatusForWrite: string | undefined
   if (data.status !== undefined) {
     normalizedStatusForWrite = isKnownStatus(data.status, targetColumns)
       ? data.status
       : getDefaultStatus(targetColumns)
+  } else if (shouldPromoteFromTemp) {
+    normalizedStatusForWrite = getStatusByCategory('started', targetColumns) ?? getDefaultStatus(targetColumns)
   } else if (projectChanged && existing?.status && !isKnownStatus(existing.status, targetColumns)) {
     normalizedStatusForWrite = getDefaultStatus(targetColumns)
   }
@@ -542,6 +551,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.loopConfig !== undefined) { fields.push('loop_config = ?'); values.push(data.loopConfig ? JSON.stringify(data.loopConfig) : null) }
   if (data.snoozedUntil !== undefined) { fields.push('snoozed_until = ?'); values.push(data.snoozedUntil) }
   if (data.isTemporary !== undefined) { fields.push('is_temporary = ?'); values.push(data.isTemporary ? 1 : 0) }
+  else if (shouldPromoteFromTemp) { fields.push('is_temporary = ?'); values.push(0) }
   if (data.isBlocked !== undefined) { fields.push('is_blocked = ?'); values.push(data.isBlocked ? 1 : 0) }
   if (data.blockedComment !== undefined) { fields.push('blocked_comment = ?'); values.push(data.blockedComment) }
   if (data.repoName !== undefined) { fields.push('repo_name = ?'); values.push(data.repoName) }
