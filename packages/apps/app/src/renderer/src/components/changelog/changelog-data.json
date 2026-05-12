@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.29.1",
+    "date": "2026-05-12",
+    "tagline": "Sidebar polish, diagnostics rescue",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Sidebar top icon row with stale-skill indicator",
+        "description": "Tree-view sidebar now hosts the Slay{logo}Zone wordmark, Search, and a stale-skill dot in a single top row, with macOS traffic-light spacing adjusted to fit."
+      },
+      {
+        "category": "fix",
+        "title": "Diagnostics DB no longer balloons or freezes the app",
+        "description": "Three-layer fix — self-healing schema, batched writes, and faster retention — stops the diagnostics DB from ballooning into multi-gigabyte sizes that froze the app."
+      }
+    ]
+  },
+  {
     "version": "0.29.0",
     "date": "2026-05-11",
     "tagline": "Attention, scrollback, tree power",

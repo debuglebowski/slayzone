@@ -1,6 +1,24 @@
 # Changelog
 
 
+## v0.29.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.29.0...v0.29.1)
+
+### 🚀 Enhancements
+
+- **window:** MacOS traffic-light position IPC ([92758730](https://github.com/debuglebowski/slayzone/commit/92758730))
+- **ai-config:** Batch stale-skill counts + useStaleSkillCounts hook ([afa654e4](https://github.com/debuglebowski/slayzone/commit/afa654e4))
+- **sidebar:** Tree-view top icon row + stale-skill dot ([b7103c7f](https://github.com/debuglebowski/slayzone/commit/b7103c7f))
+
+### 🩹 Fixes
+
+- **diagnostics:** Self-heal + batched writes + fast retention ([cce5ed1c](https://github.com/debuglebowski/slayzone/commit/cce5ed1c))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.29.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.28.1...v0.29.0)
