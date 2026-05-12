@@ -1,8 +1,26 @@
-import type { IpcMain } from 'electron'
+import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 import { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
-import { withResultDedup } from '@slayzone/platform/ipc'
+import { withResultDedup as withResultDedupBase, type SenderLifecycle } from '@slayzone/platform/ipc'
+
+// Renderer-scoped dedup. Without this, main's cache survives renderer reloads
+// while preload's wipes — main returns IPC_UNCHANGED_SENTINEL to a preload
+// that has no cached value, leaking `undefined` to callers.
+const senderLifecycle: SenderLifecycle<IpcMainInvokeEvent> = {
+  getKey: (event) => event.sender.id,
+  subscribe: (event, onClear) => {
+    event.sender.once('did-start-loading', onClear)
+    event.sender.once('destroyed', onClear)
+  }
+}
+
+function withResultDedup<A extends unknown[], R>(
+  handler: (event: IpcMainInvokeEvent, ...args: A) => R | Promise<R>,
+  options?: { maxEntries?: number; hashFn?: (result: R) => string }
+) {
+  return withResultDedupBase(handler, { ...options, sender: senderLifecycle })
+}
 import { getGitWatcher } from './git-watcher'
 import {
   isGitRepo,

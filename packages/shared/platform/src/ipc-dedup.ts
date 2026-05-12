@@ -25,7 +25,18 @@ export function isIpcUnchangedSentinel(value: unknown): value is IpcUnchangedSen
 
 const UNCHANGED: IpcUnchangedSentinel = Object.freeze({ __ipc_unchanged__: true })
 
-interface DedupOptions<R = unknown> {
+export interface SenderLifecycle<E> {
+  /** Stable per-sender identifier. Return null to bypass dedup for this call. */
+  getKey: (event: E) => number | string | null
+  /**
+   * Subscribe once per sender to lifecycle events that invalidate the cache
+   * (e.g. renderer reload, sender destroyed). Called at most once per sender —
+   * the wrapper deduplicates registration internally.
+   */
+  subscribe: (event: E, onClear: () => void) => void
+}
+
+interface DedupOptions<E, R = unknown> {
   /**
    * Per-key entry cap. Defaults to 64 — enough for typical args (project paths,
    * branch names) without unbounded growth.
@@ -38,6 +49,15 @@ interface DedupOptions<R = unknown> {
    * but don't represent a real content change.
    */
   hashFn?: (result: R) => string
+  /**
+   * Optional sender-scoped cache. When provided, the dedup cache is keyed by
+   * sender identity and cleared via the lifecycle callback — so a renderer
+   * reload invalidates main's cache in lockstep with the renderer's wiped
+   * preload cache. Without this, the cache is process-global and renderer
+   * reloads will cause `IPC_UNCHANGED_SENTINEL` to be returned to a preload
+   * that has no cached value (preload then returns `undefined`).
+   */
+  sender?: SenderLifecycle<E>
 }
 
 /**
@@ -51,17 +71,29 @@ interface DedupOptions<R = unknown> {
  *   previous call for the same args; otherwise returns the result and stores
  *   the new hash.
  *
- * The cache is per-handler (closed over). Main-process restart clears it —
- * fine, since the renderer's first call after boot always returns the full
- * payload (no prior hash).
+ * When `options.sender` is provided, the cache is sender-scoped and lifecycle
+ * events clear it — required to stay in sync with the preload-side cache
+ * across renderer reloads (otherwise the preload returns `undefined` for
+ * unchanged sentinels it never cached). See `SenderLifecycle`.
  */
 export function withResultDedup<E, A extends unknown[], R>(
   handler: (event: E, ...args: A) => R | Promise<R>,
-  options: DedupOptions<R> = {}
+  options: DedupOptions<E, R> = {}
 ): (event: E, ...args: A) => Promise<R | IpcUnchangedSentinel> {
   const maxEntries = options.maxEntries ?? 64
   const hashFn = options.hashFn ?? ((r: R) => JSON.stringify(r))
-  const cache = new Map<string, string>()
+  const sender = options.sender
+
+  const globalCache = new Map<string, string>()
+  const scopedCache = new Map<number | string, Map<string, string>>()
+  const registered = new Set<number | string>()
+
+  const evictIfFull = (bucket: Map<string, string>) => {
+    if (bucket.size > maxEntries) {
+      const oldestKey = bucket.keys().next().value
+      if (oldestKey !== undefined) bucket.delete(oldestKey)
+    }
+  }
 
   return async (event: E, ...args: A): Promise<R | IpcUnchangedSentinel> => {
     const result = await handler(event, ...args)
@@ -71,13 +103,31 @@ export function withResultDedup<E, A extends unknown[], R>(
     let resultHash: string
     try { resultHash = hashFn(result) } catch { return result }
 
-    if (cache.get(argsKey) === resultHash) return UNCHANGED
-
-    cache.set(argsKey, resultHash)
-    if (cache.size > maxEntries) {
-      const oldestKey = cache.keys().next().value
-      if (oldestKey !== undefined) cache.delete(oldestKey)
+    if (!sender) {
+      if (globalCache.get(argsKey) === resultHash) return UNCHANGED
+      globalCache.set(argsKey, resultHash)
+      evictIfFull(globalCache)
+      return result
     }
+
+    const senderKey = sender.getKey(event)
+    if (senderKey === null) return result
+
+    let bucket = scopedCache.get(senderKey)
+    if (!bucket) {
+      bucket = new Map<string, string>()
+      scopedCache.set(senderKey, bucket)
+    }
+    if (!registered.has(senderKey)) {
+      registered.add(senderKey)
+      sender.subscribe(event, () => {
+        scopedCache.delete(senderKey)
+        registered.delete(senderKey)
+      })
+    }
+    if (bucket.get(argsKey) === resultHash) return UNCHANGED
+    bucket.set(argsKey, resultHash)
+    evictIfFull(bucket)
     return result
   }
 }
