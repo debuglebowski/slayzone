@@ -353,7 +353,7 @@ export function TabBar({
             )}
             onClick={() => onTabClick(homeIndex)}
           >
-            <Home className="h-4 w-4" />
+            <Home className="size-3.5" />
           </div>
         </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{withShortcut('Home', goHomeShortcut)}</TooltipContent></Tooltip>
         {leftContent && (

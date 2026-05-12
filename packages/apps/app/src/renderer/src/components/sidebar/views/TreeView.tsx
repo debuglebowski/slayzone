@@ -565,7 +565,7 @@ export function TreeView({
           rightmost button aligns with project Settings icon by construction.
           pl clears macOS traffic lights (80px total - SidebarGroup p-2 (8) -
           this wrapper's px-1 (4) = 68px). */}
-      <div className="relative flex items-center h-10" style={{ paddingLeft: 68 }}>
+      <div className="relative flex items-center h-11" style={{ paddingLeft: 68 }}>
         <div
           aria-hidden
           className="pointer-events-none absolute left-1/2 -translate-x-1/2 flex items-center gap-1 select-none text-xs font-medium tracking-wide text-foreground @max-[300px]:hidden"

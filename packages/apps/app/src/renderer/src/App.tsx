@@ -1196,7 +1196,7 @@ function App(): React.JSX.Element {
   const activePtyCount = usePtyStatus().size
   const renderHeaderActions = (compact: boolean) => {
     const btnSize = compact ? "h-7 w-7" : "size-10 rounded-lg"
-    const iconSize = compact ? "size-4" : "size-5"
+    const iconSize = compact ? "size-3.5" : "size-5"
     return (
       <>
         <Tooltip><TooltipTrigger asChild>
@@ -1476,7 +1476,7 @@ function App(): React.JSX.Element {
                           ? "bg-tab-active border-border"
                           : "border-transparent text-muted-foreground dark:text-muted-foreground"
                       )} onClick={() => useTabStore.getState().setActiveView(activeView === 'context' ? 'tabs' : 'context')}>
-                        <BookOpen className="h-4 w-4" />
+                        <BookOpen className="size-3.5" />
                         {staleSkillCount > 0 && (
                           <span
                             aria-label={`${staleSkillCount} stale skill${staleSkillCount === 1 ? '' : 's'}`}

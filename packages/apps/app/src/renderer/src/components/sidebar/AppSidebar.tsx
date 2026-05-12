@@ -187,7 +187,7 @@ export function AppSidebar({
       )}
     >
       <SidebarContent className={cn('pb-4 scrollbar-hide', sidebarView === 'tree' ? '' : 'pt-11')}>
-        <SidebarGroup>
+        <SidebarGroup className={sidebarView === 'tree' ? 'pt-0' : undefined}>
           <SidebarGroupContent>
             {view.render({
               projects,
