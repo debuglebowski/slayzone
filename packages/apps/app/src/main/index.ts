@@ -117,7 +117,8 @@ import { configureTaskRuntimeAdapters, registerTaskHandlers, registerTaskTemplat
 import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/main'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { registerTagHandlers } from '@slayzone/tags/main'
-import { registerSettingsHandlers, registerThemeHandlers } from '@slayzone/settings/main'
+import { registerFeedbackHandlers } from '@slayzone/feedback/main'
+import { registerSettingsHandlers, registerThemeHandlers, SettingsService } from '@slayzone/settings/main'
 import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners, setPtyEnricher } from '@slayzone/terminal/main'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import { attachFloatingGlobalAgentPanel, setupFloatingGlobalAgentPanel } from './floating-global-agent-panel'
@@ -869,10 +870,14 @@ app.whenReady().then(async () => {
   // Initialize databases
   logBoot('database init start')
   const db = getDatabase()
+  const settings = new SettingsService(db)
   logBoot('db opened')
   await createPreMigrationBackup(db, LATEST_MIGRATION_VERSION)
   logBoot('pre-migration backup done')
   runMigrations(db)
+  // Pre-warm keys used by synchronous IPC handlers (event.returnValue).
+  // Must run after migrations have seeded defaults.
+  await settings.warmCache(['labs_tests_panel', 'labs_jira_integration', 'labs_loop_mode'])
   logBoot('migrations applied')
   normalizeProjectStatusData(db)
 
@@ -913,9 +918,9 @@ app.whenReady().then(async () => {
   const diagDb = getDiagnosticsDatabase()
   logBoot('diagnostics db opened')
   const isLabEnabled = (key: string): boolean => {
-    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
-    if (!row) return is.dev || isPlaywright
-    return row.value === '1'
+    const raw = settings.getCached(key)
+    if (raw === undefined) return is.dev || isPlaywright
+    return raw === '1'
   }
   logBoot('database init complete')
 
@@ -951,7 +956,7 @@ app.whenReady().then(async () => {
 
   // Skip onboarding in Playwright — tested explicitly in 02-onboarding.spec.ts
   if (isPlaywright) {
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')").run()
+    await settings.seedOnboardingCompleted()
   }
 
   registerProcessDiagnostics(app)
@@ -960,26 +965,18 @@ app.whenReady().then(async () => {
   // Migrate CLI symlink from /usr/local/bin to ~/.local/bin on Linux
   if (process.platform === 'linux') {
     const cliMigration = migrateCliBinIfNeeded(getCliSrc())
-    if (cliMigration.status === 'migrated-old-kept') {
-      const shown = db.prepare('SELECT value FROM settings WHERE key = ?').get('cli_migration_dialog_shown') as { value: string } | undefined
-      if (!shown) {
-        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('cli_migration_dialog_shown', '1')
-        dialog.showMessageBox({
-          type: 'info',
-          title: 'CLI symlink migrated',
-          message: `The slay CLI was installed at ${cliMigration.newPath}, but the old symlink at ${cliMigration.oldPath} couldn't be removed.`,
-          detail: `Run: sudo rm ${cliMigration.oldPath}`,
-        })
-      }
+    if (cliMigration.status === 'migrated-old-kept' && (await settings.markCliMigrationDialogShown())) {
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'CLI symlink migrated',
+        message: `The slay CLI was installed at ${cliMigration.newPath}, but the old symlink at ${cliMigration.oldPath} couldn't be removed.`,
+        detail: `Run: sudo rm ${cliMigration.oldPath}`,
+      })
     }
   }
 
   // Load and apply persisted theme BEFORE creating window to prevent flash
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('theme') as
-    | { value: string }
-    | undefined
-  const savedTheme = row?.value as 'light' | 'dark' | 'system' | undefined
-  nativeTheme.themeSource = savedTheme ?? 'dark'
+  nativeTheme.themeSource = await settings.getTheme()
   logBoot('theme loaded')
 
   function getMenuAccelerator(id: string, overrides: Record<string, string | null>): string | undefined {
@@ -1132,18 +1129,13 @@ app.whenReady().then(async () => {
     app.dock?.setIcon(icon)
   }
 
-  function loadShortcutOverrides(): Record<string, string | null> {
-    const raw = db.prepare('SELECT value FROM settings WHERE key = ?').get('custom_shortcuts') as { value: string } | undefined
-    return raw?.value ? JSON.parse(raw.value) : {}
-  }
-
-  currentOverrides = loadShortcutOverrides()
+  currentOverrides = await settings.getShortcutOverrides()
   buildAppMenu(currentOverrides)
   logBoot('app menu built')
 
   // Rebuild menu + update overrides cache whenever shortcuts change
-  ipcMain.on('shortcuts:changed', () => {
-    currentOverrides = loadShortcutOverrides()
+  ipcMain.on('shortcuts:changed', async () => {
+    currentOverrides = await settings.getShortcutOverrides()
     buildAppMenu(currentOverrides)
   })
 
@@ -1198,27 +1190,8 @@ app.whenReady().then(async () => {
   registerTagHandlers(ipcMain, db)
   registerHistoryHandlers(ipcMain, db)
   registerSettingsHandlers(ipcMain, db)
+  registerFeedbackHandlers(ipcMain, db)
   logBoot('core domain handlers registered')
-
-  // Feedback handlers (lightweight, no domain package)
-  ipcMain.handle('db:feedback:listThreads', () => {
-    return db.prepare('SELECT id, title, discord_thread_id, created_at FROM feedback_threads ORDER BY created_at DESC').all()
-  })
-  ipcMain.handle('db:feedback:createThread', (_, input: { id: string; title: string; discord_thread_id: string | null }) => {
-    db.prepare('INSERT INTO feedback_threads (id, title, discord_thread_id) VALUES (?, ?, ?)').run(input.id, input.title, input.discord_thread_id)
-  })
-  ipcMain.handle('db:feedback:getMessages', (_, threadId: string) => {
-    return db.prepare('SELECT id, thread_id, content, created_at FROM feedback_messages WHERE thread_id = ? ORDER BY created_at ASC').all(threadId)
-  })
-  ipcMain.handle('db:feedback:addMessage', (_, input: { id: string; thread_id: string; content: string }) => {
-    db.prepare('INSERT INTO feedback_messages (id, thread_id, content) VALUES (?, ?, ?)').run(input.id, input.thread_id, input.content)
-  })
-  ipcMain.handle('db:feedback:updateThreadDiscordId', (_, threadId: string, discordThreadId: string) => {
-    db.prepare('UPDATE feedback_threads SET discord_thread_id = ? WHERE id = ?').run(discordThreadId, threadId)
-  })
-  ipcMain.handle('db:feedback:deleteThread', (_, threadId: string) => {
-    db.prepare('DELETE FROM feedback_threads WHERE id = ?').run(threadId)
-  })
 
   registerThemeHandlers(ipcMain, db)
   registerUsageHandlers(ipcMain, db)
@@ -2314,7 +2287,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       syncTerminalModes(db)
 
       // 7b. Seed post-onboarding baseline so tests skip the onboarding wizard
-      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')").run()
+      await settings.seedOnboardingCompleted()
+      // Re-warm cache after settings table was dropped + re-migrated
+      await settings.warmCache(['labs_tests_panel', 'labs_jira_integration', 'labs_loop_mode'])
 
       // 8. Restart MCP (after table drop so port is persisted to fresh settings table)
       const mcpMod = await import('./mcp-server')

@@ -100,6 +100,9 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics
+      '@slayzone/feedback':
+        specifier: workspace:*
+        version: link:../../domains/feedback
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../../domains/file-editor
@@ -473,6 +476,19 @@ importers:
       '@types/node':
         specifier: ^22.19.1
         version: 22.19.7
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/domains/feedback:
+    dependencies:
+      electron:
+        specifier: ^41.0.0
+        version: 41.0.3
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1491,6 +1507,9 @@ importers:
       '@slayzone/automations':
         specifier: workspace:*
         version: link:../../domains/automations
+      '@slayzone/feedback':
+        specifier: workspace:*
+        version: link:../../domains/feedback
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../../domains/file-editor
