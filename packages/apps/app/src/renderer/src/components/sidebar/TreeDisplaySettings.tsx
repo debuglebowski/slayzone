@@ -1,43 +1,33 @@
 import { useMemo } from 'react'
-import { SlidersHorizontal, EyeOff, ListFilter, ListTree } from 'lucide-react'
+import { SlidersHorizontal } from 'lucide-react'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
   Switch,
   Label,
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
   buildStatusOptions,
   cn,
 } from '@slayzone/ui'
-import { useTabStore, type TreeSubtaskMode } from '@slayzone/settings'
-
-const SUBTASK_MODES: Array<{
-  value: TreeSubtaskMode
-  label: string
-  Icon: typeof EyeOff
-  tooltip: string
-}> = [
-  { value: 'hide', label: 'Hide', Icon: EyeOff, tooltip: 'Hide all sub-tasks' },
-  { value: 'match', label: 'Match', Icon: ListFilter, tooltip: 'Show sub-tasks that pass the status filter' },
-  { value: 'all', label: 'All', Icon: ListTree, tooltip: 'Show all sub-tasks of any matching parent' },
-]
+import { useTabStore } from '@slayzone/settings'
 
 export function TreeDisplaySettings() {
   const treeShowStatus = useTabStore((s) => s.treeShowStatus)
   const treeShowPriority = useTabStore((s) => s.treeShowPriority)
-  const treeSubtaskMode = useTabStore((s) => s.treeSubtaskMode)
+  const treeShowSubtasks = useTabStore((s) => s.treeShowSubtasks)
+  const treeShowAllSubtasks = useTabStore((s) => s.treeShowAllSubtasks)
   const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
-  const treeHideClosed = useTabStore((s) => s.treeHideClosed)
+  const treeShowOnlyActive = useTabStore((s) => s.treeShowOnlyActive)
+  const treeShowTemporary = useTabStore((s) => s.treeShowTemporary)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treeStatusFilter = useTabStore((s) => s.treeStatusFilter)
   const setTreeShowStatus = useTabStore((s) => s.setTreeShowStatus)
   const setTreeShowPriority = useTabStore((s) => s.setTreeShowPriority)
-  const setTreeSubtaskMode = useTabStore((s) => s.setTreeSubtaskMode)
+  const setTreeShowSubtasks = useTabStore((s) => s.setTreeShowSubtasks)
+  const setTreeShowAllSubtasks = useTabStore((s) => s.setTreeShowAllSubtasks)
   const setTreeCrossOutDone = useTabStore((s) => s.setTreeCrossOutDone)
-  const setTreeHideClosed = useTabStore((s) => s.setTreeHideClosed)
+  const setTreeShowOnlyActive = useTabStore((s) => s.setTreeShowOnlyActive)
+  const setTreeShowTemporary = useTabStore((s) => s.setTreeShowTemporary)
   const setTreeShowWorktree = useTabStore((s) => s.setTreeShowWorktree)
   const setTreeStatusFilter = useTabStore((s) => s.setTreeStatusFilter)
 
@@ -70,53 +60,37 @@ export function TreeDisplaySettings() {
               Tasks
             </span>
             <Row
-              id="tree-hide-closed"
-              label="Hide closed"
-              hint="Hide done and canceled tasks (roots and sub-tasks)"
-              checked={treeHideClosed}
-              onChange={setTreeHideClosed}
+              id="tree-show-only-active"
+              label="Show only active"
+              hint="Only tasks with an active PTY or chat session"
+              checked={treeShowOnlyActive}
+              onChange={setTreeShowOnlyActive}
             />
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <span className="text-sm block">Sub-tasks</span>
-                <p className="text-[11px] text-muted-foreground/70 mt-0.5 leading-snug">
-                  {treeSubtaskMode === 'hide' && 'Sub-tasks are hidden.'}
-                  {treeSubtaskMode === 'match' && 'Shown only when they pass the status filter.'}
-                  {treeSubtaskMode === 'all' && 'All sub-tasks of a matching parent shown.'}
-                </p>
+            <Row
+              id="tree-show-temporary"
+              label="Show temporary"
+              hint="Include temporary scratch tasks"
+              checked={treeShowTemporary}
+              onChange={setTreeShowTemporary}
+            />
+            <Row
+              id="tree-show-subtasks"
+              label="Show sub-tasks"
+              hint="Render children under matching parents"
+              checked={treeShowSubtasks}
+              onChange={setTreeShowSubtasks}
+            />
+            {treeShowSubtasks && (
+              <div className="pl-4 border-l border-border/40">
+                <Row
+                  id="tree-show-all-subtasks"
+                  label="Show all sub-tasks"
+                  hint="Include every descendant of a matching parent, even non-matches"
+                  checked={treeShowAllSubtasks}
+                  onChange={setTreeShowAllSubtasks}
+                />
               </div>
-              <div
-                role="radiogroup"
-                aria-label="Sub-tasks display mode"
-                className="inline-flex shrink-0 rounded-md border border-input bg-input/30 p-0.5"
-              >
-                {SUBTASK_MODES.map(({ value, label, Icon, tooltip }) => {
-                  const active = treeSubtaskMode === value
-                  return (
-                    <Tooltip key={value}>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={active}
-                          aria-label={label}
-                          onClick={() => setTreeSubtaskMode(value)}
-                          className={cn(
-                            'inline-flex h-7 w-8 items-center justify-center rounded-sm transition-colors',
-                            active
-                              ? 'bg-accent text-accent-foreground shadow-sm'
-                              : 'text-muted-foreground hover:text-foreground'
-                          )}
-                        >
-                          <Icon className="size-4" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">{tooltip}</TooltipContent>
-                    </Tooltip>
-                  )
-                })}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Task (singular) — per-row markers + style */}
