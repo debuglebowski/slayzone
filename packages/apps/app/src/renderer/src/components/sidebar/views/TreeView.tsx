@@ -373,7 +373,7 @@ export function TreeView({
                     e.stopPropagation()
                     onCloseTab(task.id)
                   }}
-                  className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground opacity-0 group-hover/treerow:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+                  className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground shrink-0"
                 >
                   <X className="size-3.5" />
                 </span>
