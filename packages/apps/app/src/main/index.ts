@@ -119,7 +119,7 @@ import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerFeedbackHandlers } from '@slayzone/feedback/main'
 import { registerSettingsHandlers, registerThemeHandlers, SettingsService } from '@slayzone/settings/main'
-import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners, setPtyEnricher } from '@slayzone/terminal/main'
+import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners, setPtyEnricher, setPtySpawnedTabRecorder, setPtyShuttingDown, setChatSpawnedTabRecorder, setChatShuttingDown } from '@slayzone/terminal/main'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import { attachFloatingGlobalAgentPanel, setupFloatingGlobalAgentPanel } from './floating-global-agent-panel'
 import { attachTaskWindows, setupTaskWindows } from './task-windows'
@@ -2550,6 +2550,11 @@ app.on('will-quit', () => {
   stopAutoBackup()
   closeArtifactWatcher()
   closeGitWatcher()
+  // Flip the shutdown gate BEFORE killing — pty/chat exit handlers check this
+  // and skip clearing `terminal_tabs.was_spawned`. The flag therefore survives
+  // shutdown and the next boot reads it to auto-restart warm agents.
+  setPtyShuttingDown(true)
+  setChatShuttingDown(true)
   killAllPtys()
   shutdownChatTransports()
   killAllProcesses()
