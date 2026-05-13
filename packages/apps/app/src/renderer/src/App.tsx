@@ -723,7 +723,10 @@ function App(): React.JSX.Element {
   useEffect(() => { return window.api.app.onCloseActiveTask(() => closeActiveTaskRef.current()) }, [])
   useEffect(() => { return window.api.app.onCloseCurrent(() => closeCurrentHomeRef.current()) }, [])
   useEffect(() => { return window.api.app.onCloseTask((taskId) => { useTabStore.getState().closeTabByTaskId(taskId) }) }, [])
-  useEffect(() => { return window.api.app.onOpenTask((taskId) => { openTaskRef.current(taskId) }) }, [])
+  useEffect(() => { return window.api.app.onOpenTask((taskId, background) => {
+    if (background) guardTaskOpen(taskId, openTaskInBackground)
+    else openTaskRef.current(taskId)
+  }) }, [guardTaskOpen, openTaskInBackground])
   useEffect(() => {
     return window.api.app.onGoHome(() => {
       const homeIndex = useTabStore.getState().tabs.findIndex((tab) => tab.type === 'home')

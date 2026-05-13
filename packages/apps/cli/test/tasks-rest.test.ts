@@ -31,6 +31,8 @@ import { registerUpdateTaskRoute } from '../../app/src/main/rest-api/tasks/updat
 import { registerArchiveTaskRoute } from '../../app/src/main/rest-api/tasks/archive.js'
 import { registerDeleteTaskRoute } from '../../app/src/main/rest-api/tasks/delete.js'
 import { registerUnarchiveTaskRoute } from '../../app/src/main/rest-api/tasks/unarchive.js'
+import { registerOpenTaskRoute } from '../../app/src/main/rest-api/tasks/open.js'
+import { BrowserWindow } from '../../../shared/test-utils/mock-electron.js'
 
 const SLAY_BIN = path.resolve(import.meta.dirname, '../dist/slay.js')
 if (!fs.existsSync(SLAY_BIN)) {
@@ -58,6 +60,31 @@ registerUpdateTaskRoute(app, { db, notifyRenderer: () => { notifyCount++ } })
 registerArchiveTaskRoute(app, { db, notifyRenderer: () => { notifyCount++ } })
 registerDeleteTaskRoute(app, { db, notifyRenderer: () => { notifyCount++ } })
 registerUnarchiveTaskRoute(app, { db, notifyRenderer: () => { notifyCount++ } })
+registerOpenTaskRoute(app, { db, notifyRenderer: () => { notifyCount++ } } as never)
+
+// Capture app:open-task broadcasts + window show/focus calls.
+const openTaskBroadcasts: Array<{ taskId: string; background: boolean }> = []
+let showCalled = 0
+let focusCalled = 0
+const fakeWin = {
+  webContents: {
+    send: (channel: string, ...args: unknown[]) => {
+      if (channel === 'app:open-task') {
+        openTaskBroadcasts.push({ taskId: args[0] as string, background: args[1] as boolean })
+      }
+    },
+  },
+  isMinimized: () => false,
+  restore: () => {},
+  show: () => { showCalled++ },
+  focus: () => { focusCalled++ },
+}
+;(BrowserWindow as unknown as { getAllWindows: () => unknown[] }).getAllWindows = () => [fakeWin]
+function resetOpenSpies(): void {
+  openTaskBroadcasts.length = 0
+  showCalled = 0
+  focusCalled = 0
+}
 const rest = await mountRestApp(app)
 
 interface CliResult { exitCode: number | null; stdout: string; stderr: string }
@@ -270,6 +297,40 @@ await describe('CLI tasks archive → REST', () => {
     const row = db.prepare('SELECT archived_at FROM tasks WHERE id = ?').get(id) as { archived_at: string | null }
     expect(row.archived_at !== null).toBe(true)
     expect(spy.calls.length).toBe(1)
+  })
+})
+
+await describe('CLI tasks open → REST /api/open-task', () => {
+  // Create a task once to reuse across these tests.
+  const openTaskId = crypto.randomUUID()
+  const now = new Date().toISOString()
+  db.prepare(
+    `INSERT INTO tasks (id, project_id, title, status, priority, terminal_mode, provider_config, "order", created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+  ).run(openTaskId, projectId, 'OpenMe', 'todo', 3, 'claude-code', '{}', now, now)
+
+  test('default (no flag): broadcasts (id, false) + main window show/focus', async () => {
+    resetOpenSpies()
+    const r = await runCli(['tasks', 'open', openTaskId.slice(0, 8)])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.startsWith('Opening:')).toBe(true)
+    expect(openTaskBroadcasts.length).toBe(1)
+    expect(openTaskBroadcasts[0].taskId).toBe(openTaskId)
+    expect(openTaskBroadcasts[0].background).toBe(false)
+    expect(showCalled).toBe(1)
+    expect(focusCalled).toBe(1)
+  })
+
+  test('--background: broadcasts (id, true) + no show/focus', async () => {
+    resetOpenSpies()
+    const r = await runCli(['tasks', 'open', openTaskId.slice(0, 8), '--background'])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.startsWith('Opening (bg):')).toBe(true)
+    expect(openTaskBroadcasts.length).toBe(1)
+    expect(openTaskBroadcasts[0].taskId).toBe(openTaskId)
+    expect(openTaskBroadcasts[0].background).toBe(true)
+    expect(showCalled).toBe(0)
+    expect(focusCalled).toBe(0)
   })
 })
 

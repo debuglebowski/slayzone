@@ -48,11 +48,13 @@ Event vocabulary: `started`, `plan-ready`, `plan-refined`, `plan-approved`, `que
 
 Per task:
 ```bash
-slay --dev tasks open <id>
+slay --dev tasks open <id> --background
 slay --dev pty wait <id> --state attention
 slay --dev pty submit <id> "Enter plan mode. Read the task with \`slay --dev tasks view\`. Design the most sustainable, robust long-term solution. Preserve all requested functionality — do not drop features to simplify."
 slay --dev pty write <id> $'\r'
 ```
+
+`--background` adds the tab + spawns the PTY without switching focus or activating the tab. Critical for bulk dispatch — without it each `open` steals focus and yanks the user away from whatever they were doing.
 
 Log `started`.
 

@@ -450,7 +450,7 @@ export interface ElectronAPI {
     onCloseTask: (callback: (taskId: string) => void) => () => void
     onBrowserEnsurePanelOpen: (callback: (taskId: string, url?: string, tabId?: string) => void) => () => void
     onBrowserCreateTab: (callback: (payload: { taskId: string; tabId: string; url?: string; background?: boolean }) => void) => () => void
-    onOpenTask: (callback: (taskId: string) => void) => () => void
+    onOpenTask: (callback: (taskId: string, background?: boolean) => void) => () => void
     onOpenArtifact: (callback: (taskId: string, artifactId: string) => void) => () => void
     onScreenshotTrigger: (callback: () => void) => () => void
     onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void

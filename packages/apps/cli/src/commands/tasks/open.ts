@@ -2,7 +2,11 @@ import http from 'node:http'
 import { openDb, getMcpPort } from '../../db'
 import { resolveId } from './_shared'
 
-export async function openAction(idPrefix: string | undefined): Promise<void> {
+export interface OpenOpts {
+  background?: boolean
+}
+
+export async function openAction(idPrefix: string | undefined, opts: OpenOpts = {}): Promise<void> {
   idPrefix = resolveId(idPrefix)
   const db = openDb()
 
@@ -26,9 +30,13 @@ export async function openAction(idPrefix: string | undefined): Promise<void> {
     process.exit(1)
   }
 
+  const path = opts.background
+    ? `/api/open-task/${task.id}?background=1`
+    : `/api/open-task/${task.id}`
+
   await new Promise<void>((resolve) => {
     const req = http.request(
-      { hostname: '127.0.0.1', port, path: `/api/open-task/${task.id}`, method: 'POST' },
+      { hostname: '127.0.0.1', port, path, method: 'POST' },
       (res) => { res.resume(); res.on('end', resolve) },
     )
     req.on('error', () => {
@@ -38,5 +46,5 @@ export async function openAction(idPrefix: string | undefined): Promise<void> {
     req.setTimeout(3000, () => { req.destroy(); console.error('Timed out reaching SlayZone app'); process.exit(1) })
     req.end()
   })
-  console.log(`Opening: ${task.id.slice(0, 8)}  ${task.title}`)
+  console.log(`${opts.background ? 'Opening (bg)' : 'Opening'}: ${task.id.slice(0, 8)}  ${task.title}`)
 }

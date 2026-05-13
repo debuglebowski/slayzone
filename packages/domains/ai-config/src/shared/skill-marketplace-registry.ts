@@ -167,7 +167,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
 
 - \`slay tasks delete <id>\` — permanently remove the task and all its data.
 
-- \`slay tasks open [id]\` — focus the task in the SlayZone app window.
+- \`slay tasks open [id] [--background]\` — focus the task in the SlayZone app window. \`--background\` adds the tab without switching focus or stealing OS window focus (use for bulk-dispatch flows).
 
 - \`slay tasks search <query> [--project <name|id>] [--limit <n>] [--json]\` — case-insensitive substring search across title and description.
   - Includes subtasks in results

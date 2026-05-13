@@ -270,8 +270,8 @@ const api: ElectronAPI = {
       ipcRenderer.on('browser:create-tab', handler)
       return () => ipcRenderer.removeListener('browser:create-tab', handler)
     },
-    onOpenTask: (callback: (taskId: string) => void) => {
-      const handler = (_: unknown, taskId: string) => callback(taskId)
+    onOpenTask: (callback: (taskId: string, background?: boolean) => void) => {
+      const handler = (_: unknown, taskId: string, background?: boolean) => callback(taskId, background)
       ipcRenderer.on('app:open-task', handler)
       return () => ipcRenderer.removeListener('app:open-task', handler)
     },

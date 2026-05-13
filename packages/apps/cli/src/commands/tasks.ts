@@ -101,6 +101,7 @@ export function tasksCommand(): Command {
   cmd
     .command('open [id]')
     .description('Open a task in the SlayZone app (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
+    .option('--background', 'Open as background tab — do not switch focus or activate the tab')
     .action(openAction)
 
   // slay tasks subtasks [id]
