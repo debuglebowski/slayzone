@@ -98,6 +98,29 @@ export function setTransportDepsForTests(override: Partial<TransportDeps>): void
   deps = { ...defaultDeps, ...override }
 }
 
+/**
+ * Composition-root hook to flip the `was_spawned` flag on a `terminal_tabs`
+ * row. We can't import `@slayzone/task-terminals` from inside the terminal
+ * package (would cycle), so the app wires this at boot. Called true on
+ * successful spawn, false on natural / user-initiated exit unless the app
+ * is shutting down (see `setChatShuttingDown`).
+ */
+type SpawnedSetter = (tabId: string, wasSpawned: boolean) => void
+let spawnedSetter: SpawnedSetter | null = null
+export function setSpawnedTabRecorder(fn: SpawnedSetter | null): void {
+  spawnedSetter = fn
+}
+
+/**
+ * Shutdown gate. When true, the exit handler does NOT clear `was_spawned`
+ * so the next boot can auto-restart this chat session. Composition root
+ * MUST set this true in `will-quit` before calling `shutdownChatTransports`.
+ */
+let isShuttingDown = false
+export function setShuttingDown(v: boolean): void {
+  isShuttingDown = v
+}
+
 /** Production-side dep injection (e.g. wire persistEvent to SQLite at startup). */
 export function configureTransport(override: Partial<TransportDeps>): void {
   deps = { ...deps, ...override }
@@ -692,6 +715,14 @@ async function spawnSubprocess(session: Session): Promise<void> {
   session.ended = false
   session.usedResume = Boolean(opts.conversationId)
   session.sawHealthyTurn = false
+  // Mark this tab as warm so a crash / unclean quit can restore it on next
+  // boot. Cleared in the exit handler below on natural/user exit (NOT on
+  // app shutdown — that's the whole point).
+  try {
+    spawnedSetter?.(session.tabId, true)
+  } catch (err) {
+    console.error('[chat-transport] markTabSpawned(true) failed:', err)
+  }
   // Move out of the lazy `not-spawned` state. `child.on('spawn')` below
   // promotes to `idle` once the kernel reports the pid.
   transitionState(session, 'starting')
@@ -790,6 +821,16 @@ async function spawnSubprocess(session: Session): Promise<void> {
       flushStderr()
     }
     session.ended = true
+    // Clear the warm flag UNLESS we're in app shutdown — in which case
+    // preserve so next boot restores. Subprocess crashes / claude-side
+    // exits drop the flag because there's nothing to "restore" anymore.
+    if (!isShuttingDown) {
+      try {
+        spawnedSetter?.(session.tabId, false)
+      } catch (err) {
+        console.error('[chat-transport] markTabSpawned(false) failed:', err)
+      }
+    }
     // Reject any in-flight control_request promises so callers don't hang.
     for (const [id, pending] of session.pendingControl) {
       clearTimeout(pending.timer)

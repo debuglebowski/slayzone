@@ -155,6 +155,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           onSetDisplayMode={pane.onSetDisplayMode}
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
+          wasSpawned={pane.tab.wasSpawned}
         />
       )
     }
@@ -164,6 +165,9 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
     // plain `terminal` mode keep eager spawn (user-driven).
     const shouldGate = pane.tab.isMain && pane.tab.mode !== 'terminal'
     const TerminalCmp = shouldGate ? TerminalStarter : Terminal
+    // `wasSpawned` (from terminal_tabs) tells TerminalStarter to auto-mount
+    // instead of showing the Start chip — restores warm agents after a crash
+    // or quit. Only meaningful when gating (Terminal ignores the prop).
     const terminal = (
       <TerminalCmp
         ref={paneRefs.current[pane.sessionId]}
@@ -186,6 +190,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
         onRetry={pane.onRetry}
         onOpenUrl={onOpenUrl}
         onOpenFile={onOpenFile}
+        {...(shouldGate ? { wasSpawned: pane.tab.wasSpawned } : {})}
       />
     )
 

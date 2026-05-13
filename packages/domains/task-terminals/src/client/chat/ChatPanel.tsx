@@ -72,6 +72,14 @@ export interface ChatPanelProps {
   onOpenUrl?: (url: string) => void
   /** Cmd+Click on a file:line:col reference → editor pane. */
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
+  /**
+   * From `terminal_tabs.was_spawned`: was the chat subprocess alive when the
+   * app last touched this tab. True → after hydrate, auto-call chat.start so
+   * a warm session restores on reboot without the user typing first. The flag
+   * is sticky across shutdown (cleared only on user-initiated kill /
+   * subprocess exit), so it doubles as crash recovery.
+   */
+  wasSpawned?: boolean
 }
 
 const SUGGESTED_PROMPTS = [
@@ -81,7 +89,7 @@ const SUGGESTED_PROMPTS = [
 ]
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function ChatPanel(props, ref) {
-  const { tabId, taskId, mode, cwd, isActive = true, providerFlagsOverride, permissionNotice: overrideNotice, onSetDisplayMode, onOpenUrl, onOpenFile } = props
+  const { tabId, taskId, mode, cwd, isActive = true, providerFlagsOverride, permissionNotice: overrideNotice, onSetDisplayMode, onOpenUrl, onOpenFile, wasSpawned } = props
   const { state, timeline, inFlight, hydrating, permissionMode, permissionRequests, sendMessage, sendToolResult, respondPermission, abortAndPop, reset: resetTimeline } = useChatSession({
     tabId,
     taskId,
@@ -211,6 +219,25 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
       interrupt: (o) => chat?.interrupt(o) ?? Promise.resolve(null),
     }
   }, [])
+
+  // Warm-set restoration: when `terminal_tabs.was_spawned` is true on mount,
+  // a chat subprocess was alive when the app last touched this tab. Auto-call
+  // `chat.start` (idempotent) once hydration settles so the user lands in a
+  // live session without having to type first. Covers clean shutdown AND
+  // crash recovery — the flag is sticky across shutdown by design (see
+  // setChatShuttingDown in chat-transport-manager).
+  const autoStartedRef = useRef(false)
+  useEffect(() => {
+    if (!wasSpawned || hydrating || autoStartedRef.current) return
+    autoStartedRef.current = true
+    void chatApi.start({
+      tabId,
+      taskId,
+      mode,
+      cwd,
+      providerFlagsOverride: providerFlagsOverride ?? null,
+    })
+  }, [wasSpawned, hydrating, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
 
   const navigate = useMemo<NavigateActions>(
     () => ({

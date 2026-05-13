@@ -28,6 +28,38 @@ export function setDatabase(database: Database): void {
   db = database
 }
 
+/**
+ * Injected by composition root (apps/app) so we can flip the per-tab
+ * `was_spawned` flag in `terminal_tabs` without pty-manager importing the
+ * task-terminals package directly (would cycle: task-terminals depends on
+ * terminal). Called on successful spawn (true) and on exit (false), unless
+ * the app is shutting down — in which case we deliberately leave the flag
+ * set so the next boot can auto-restart this agent.
+ */
+type SpawnedSetter = (tabId: string, wasSpawned: boolean) => void
+let spawnedSetter: SpawnedSetter | null = null
+export function setSpawnedTabRecorder(fn: SpawnedSetter | null): void {
+  spawnedSetter = fn
+}
+
+/**
+ * App shutdown gate. When true, `finalizeSessionExit` skips clearing
+ * `was_spawned` so reboots can restore the warm set. Composition root
+ * MUST set this true before invoking `killAllPtys()` in `will-quit`.
+ */
+let isShuttingDown = false
+export function setShuttingDown(v: boolean): void {
+  isShuttingDown = v
+}
+
+/** Resolve the terminal_tabs row id this PTY session corresponds to.
+ *  Main pty session id is `${taskId}` (row id = taskId per tabs:ensureMain);
+ *  pane session id is `${taskId}:${tabId}` (row id = the tabId after colon). */
+function resolveTabRowId(sessionId: string): string {
+  const colon = sessionId.indexOf(':')
+  return colon >= 0 ? sessionId.slice(colon + 1) : sessionId
+}
+
 export type { BufferChunk }
 
 interface PtySession {
@@ -687,6 +719,20 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       syncQueryPending: '',
       lastEmittedTitle: '',
     })
+    // Record this tab as warm — survives across app shutdown so next boot
+    // auto-restarts. Cleared in finalizeSessionExit on natural/user exit.
+    try {
+      spawnedSetter?.(resolveTabRowId(sessionId), true)
+    } catch (err) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.was_spawned_set_failed',
+        sessionId,
+        taskId,
+        message: (err as Error).message
+      })
+    }
     notifySessionChange()
     stateMachine.register(sessionId, 'starting')
     // node-pty.spawn is synchronous — pid is live by the time we get here.
@@ -722,6 +768,15 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
     const finalizeSessionExit = (exitCode: number): void => {
       if (finalized) return
       finalized = true
+      // Clear the warm flag — UNLESS we're in app shutdown, in which case
+      // we deliberately preserve was_spawned so the next boot auto-restarts.
+      if (!isShuttingDown) {
+        try {
+          spawnedSetter?.(resolveTabRowId(sessionId), false)
+        } catch {
+          // Diagnostic logging here would compete with the exit-time race; swallow.
+        }
+      }
       clearStartupTimeout()
       clearEarlyExitWatchdog()
       // Clear pending timers

@@ -119,11 +119,11 @@ import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerFeedbackHandlers } from '@slayzone/feedback/main'
 import { registerSettingsHandlers, registerThemeHandlers, SettingsService } from '@slayzone/settings/main'
-import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners, setPtyEnricher, setPtySpawnedTabRecorder, setPtyShuttingDown, setChatSpawnedTabRecorder, setChatShuttingDown } from '@slayzone/terminal/main'
+import { registerPtyHandlers, registerUsageHandlers, killAllPtys, killPtysByTaskId, onTaskReachedTerminal, startIdleChecker, stopIdleChecker, syncTerminalModes, getPtyPids, onSessionChange, onGlobalStateChange, onPtyInputSubmit, registerChatHandlers, shutdownChatTransports, setOnHostKillHandler, broadcastRespawnRequest, backfillChatModes, hasSessionUserInput, markSessionUserInput, clearSessionUserInputMark, notifyGlobalStateListeners, setPtyEnricher, setPtySpawnedTabRecorder, setChatSpawnedTabRecorder, beginTerminalShutdown } from '@slayzone/terminal/main'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import { attachFloatingGlobalAgentPanel, setupFloatingGlobalAgentPanel } from './floating-global-agent-panel'
 import { attachTaskWindows, setupTaskWindows } from './task-windows'
-import { registerTerminalTabsHandlers, createPtyEnricher } from '@slayzone/task-terminals/main'
+import { registerTerminalTabsHandlers, createPtyEnricher, markTabSpawned } from '@slayzone/task-terminals/main'
 import { registerWorktreeHandlers, closeGitWatcher } from '@slayzone/worktrees/main'
 import { registerAgentTurnsHandlers, initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/main'
 import { registerDiagnosticsHandlers, registerProcessDiagnostics, recordDiagnosticEvent, stopDiagnostics, setIpcSuccessHook } from '@slayzone/diagnostics/main'
@@ -1260,6 +1260,14 @@ app.whenReady().then(async () => {
 
   registerTerminalTabsHandlers(ipcMain, db)
   setPtyEnricher(createPtyEnricher(db))
+  // Wire the per-tab `was_spawned` flag so pty + chat spawn/exit handlers
+  // can flip it without importing the task-terminals package (would cycle).
+  // Composition root resolves the dependency direction.
+  const recordSpawned = (tabId: string, wasSpawned: boolean): void => {
+    markTabSpawned(db, tabId, wasSpawned)
+  }
+  setPtySpawnedTabRecorder(recordSpawned)
+  setChatSpawnedTabRecorder(recordSpawned)
   logBoot('terminal-tabs handlers registered')
   registerChatHandlers(ipcMain, db, { onChatEvent: initChatTurnSubscriber(db) })
   // One-shot: backfill `chatMode` for tasks that pre-date the chat-mode UI so
@@ -2550,11 +2558,10 @@ app.on('will-quit', () => {
   stopAutoBackup()
   closeArtifactWatcher()
   closeGitWatcher()
-  // Flip the shutdown gate BEFORE killing — pty/chat exit handlers check this
-  // and skip clearing `terminal_tabs.was_spawned`. The flag therefore survives
-  // shutdown and the next boot reads it to auto-restart warm agents.
-  setPtyShuttingDown(true)
-  setChatShuttingDown(true)
+  // Flip the shutdown gates BEFORE killing — pty/chat exit handlers check
+  // these and skip clearing `terminal_tabs.was_spawned`. The flag therefore
+  // survives shutdown and the next boot reads it to auto-restart warm agents.
+  beginTerminalShutdown()
   killAllPtys()
   shutdownChatTransports()
   killAllProcesses()

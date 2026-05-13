@@ -1173,5 +1173,108 @@ await test('drainChatQueue skips when awaitingUserInput is true (mid AskUserQues
   expect(mgr.isSessionAwaitingUserInput('tab-ask-drain')).toBe(true)
 })
 
+// ---------------------------------------------------------------------------
+// was_spawned lifecycle — restore-warm-on-reboot
+// ---------------------------------------------------------------------------
+
+await test('spawnedSetter: fires (true) on spawn-success with tabId', async () => {
+  await setup()
+  const fake = makeFakeChild()
+  const recorder: Array<{ tabId: string; v: boolean }> = []
+  mgr.setSpawnedTabRecorder((tabId, v) => recorder.push({ tabId, v }))
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {},
+  })
+  try {
+    await createChat({
+      tabId: 'tab-warm-1',
+      taskId: 'task-warm',
+      mode: 'claude-code',
+      cwd: '/tmp',
+      conversationId: null,
+      providerFlags: [],
+    })
+    expect(recorder.length).toBe(1)
+    expect(recorder[0].tabId).toBe('tab-warm-1')
+    expect(recorder[0].v).toBe(true)
+  } finally {
+    mgr.setSpawnedTabRecorder(null)
+  }
+})
+
+await test('spawnedSetter: fires (false) on natural subprocess exit', async () => {
+  await setup()
+  const fake = makeFakeChild()
+  const recorder: Array<{ tabId: string; v: boolean }> = []
+  mgr.setSpawnedTabRecorder((tabId, v) => recorder.push({ tabId, v }))
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {},
+  })
+  try {
+    await createChat({
+      tabId: 'tab-warm-2',
+      taskId: 'task-warm',
+      mode: 'claude-code',
+      cwd: '/tmp',
+      conversationId: null,
+      providerFlags: [],
+    })
+    // Subprocess exits cleanly — exit handler should clear was_spawned.
+    fake.emit('exit', 0, null)
+    await new Promise((r) => setImmediate(r))
+    const clears = recorder.filter((r) => r.v === false)
+    expect(clears.length).toBe(1)
+    expect(clears[0].tabId).toBe('tab-warm-2')
+  } finally {
+    mgr.setSpawnedTabRecorder(null)
+  }
+})
+
+await test('spawnedSetter: shutdown gate preserves was_spawned on exit', async () => {
+  await setup()
+  const fake = makeFakeChild()
+  const recorder: Array<{ tabId: string; v: boolean }> = []
+  mgr.setSpawnedTabRecorder((tabId, v) => recorder.push({ tabId, v }))
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => fake as unknown as ChildProcess,
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {},
+  })
+  try {
+    await createChat({
+      tabId: 'tab-warm-3',
+      taskId: 'task-warm',
+      mode: 'claude-code',
+      cwd: '/tmp',
+      conversationId: null,
+      providerFlags: [],
+    })
+    // Simulate app.on('will-quit') → beginTerminalShutdown(): gate flips first,
+    // THEN killAll fires subprocess exits. Without the gate, this exit would
+    // clear was_spawned and defeat the warm-restore on next boot.
+    mgr.setShuttingDown(true)
+    fake.emit('exit', null, 'SIGTERM')
+    await new Promise((r) => setImmediate(r))
+    const clears = recorder.filter((r) => r.v === false)
+    expect(clears.length).toBe(0)
+    // Spawn call (true) still happened though.
+    const sets = recorder.filter((r) => r.v === true)
+    expect(sets.length).toBe(1)
+  } finally {
+    mgr.setShuttingDown(false)
+    mgr.setSpawnedTabRecorder(null)
+  }
+})
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

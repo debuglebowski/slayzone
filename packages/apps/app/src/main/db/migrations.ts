@@ -2586,6 +2586,16 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec(`ALTER TABLE tasks DROP COLUMN manager_mode`)
     }
+  },
+  {
+    version: 136,
+    up: (db) => {
+      // Per-tab "subprocess was alive at last touch" flag. Set on spawn,
+      // cleared on user-initiated kill / tab-close / natural subprocess exit.
+      // NOT cleared on app shutdown — that's the whole point: next boot reads
+      // this column to auto-restart agents that were warm when the app died.
+      db.exec(`ALTER TABLE terminal_tabs ADD COLUMN was_spawned INTEGER NOT NULL DEFAULT 0`)
+    }
   }
 ]
 

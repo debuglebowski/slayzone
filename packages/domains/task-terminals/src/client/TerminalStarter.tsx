@@ -6,11 +6,23 @@ import { getThemeTerminalColors } from '@slayzone/ui'
 import { MODE_ICONS } from './TerminalTabBar'
 import { getModeLabel } from './get-tab-label'
 
+export interface TerminalStarterProps extends TerminalProps {
+  /**
+   * Hint from `terminal_tabs.was_spawned`: the agent was alive when the app
+   * last touched this tab (set on spawn, cleared on natural/user exit, NOT
+   * cleared on app shutdown). True → skip the Start gate and auto-spawn so
+   * the user lands in their warm state without clicking Start again.
+   */
+  wasSpawned?: boolean
+}
+
 // Lazy-spawn wrapper: hold off mounting <Terminal> (and thus PTY creation)
 // until the user explicitly clicks Start. Reattach to an already-alive PTY
-// skips the gate so multi-window / hibernation flows are unchanged.
-export const TerminalStarter = forwardRef<TerminalHandle, TerminalProps>(function TerminalStarter(props, ref) {
-  const { sessionId, mode = 'claude-code' } = props
+// skips the gate so multi-window / hibernation flows are unchanged. The
+// `wasSpawned` hint also skips the gate so warm-set restoration on next boot
+// (after crash or quit) brings the agent back without user action.
+export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(function TerminalStarter(props, ref) {
+  const { sessionId, mode = 'claude-code', wasSpawned, ...terminalProps } = props
   const [started, setStarted] = useState(false)
   const [existsChecked, setExistsChecked] = useState(false)
   const innerRef = useRef<TerminalHandle | null>(null)
@@ -19,16 +31,25 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalProps>(functio
 
   // If a PTY already exists for this sessionId (hibernation resume, multi-window
   // reattach), skip the gate — `pty.exists` is the same probe Terminal.tsx uses.
+  // Likewise if the tab was last known to have a live subprocess (was_spawned
+  // sticky flag), auto-mount so reboot-after-crash brings the agent back.
   // Gate first paint behind this check so reattach doesn't flash the Start chip.
   useEffect(() => {
     let cancelled = false
+    if (wasSpawned) {
+      // No need to await the exists probe: the warm flag is authoritative for
+      // auto-restart. The Terminal component itself will spawn the PTY.
+      setStarted(true)
+      setExistsChecked(true)
+      return () => { cancelled = true }
+    }
     void window.api.pty.exists(sessionId).then((exists) => {
       if (cancelled) return
       if (exists) setStarted(true)
       setExistsChecked(true)
     })
     return () => { cancelled = true }
-  }, [sessionId])
+  }, [sessionId, wasSpawned])
 
   useImperativeHandle(ref, () => ({
     focus: () => innerRef.current?.focus(),
@@ -41,7 +62,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalProps>(functio
   }), [])
 
   if (started) {
-    return <Terminal {...props} ref={innerRef} />
+    return <Terminal {...terminalProps} sessionId={sessionId} mode={mode} ref={innerRef} />
   }
 
   // Suppress paint until exists-check resolves; avoids Start-chip flash on

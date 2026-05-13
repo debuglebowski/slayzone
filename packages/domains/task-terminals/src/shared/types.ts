@@ -12,6 +12,12 @@ export interface TerminalTab {
   isMain: boolean
   position: number
   createdAt: string
+  /**
+   * True when this tab's subprocess (PTY for xterm, chat child_process for chat)
+   * was last known to be alive. Set on spawn, cleared on user kill / natural exit.
+   * NOT cleared on app shutdown — so next boot auto-restarts warm agents.
+   */
+  wasSpawned: boolean
 }
 
 export interface TerminalGroup {

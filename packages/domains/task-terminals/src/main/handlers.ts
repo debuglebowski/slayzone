@@ -20,6 +20,7 @@ interface TabRow {
   is_main: number
   position: number
   created_at: string
+  was_spawned: number
 }
 
 function rowToTab(row: TabRow): TerminalTab {
@@ -32,8 +33,24 @@ function rowToTab(row: TabRow): TerminalTab {
     displayMode: (row.display_mode === 'chat' ? 'chat' : 'xterm') as TabDisplayMode,
     isMain: row.is_main === 1,
     position: row.position,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    wasSpawned: row.was_spawned === 1
   }
+}
+
+/**
+ * Mark a tab's subprocess liveness in DB. Called by pty-manager + chat-transport
+ * around spawn/exit so reboots can restore warm agents. Direct DB write — kept
+ * lean since hot-path called from spawn/exit handlers.
+ *
+ * Resolution rules for the tabId arg:
+ *   - PTY main session: pty sessionId is `${taskId}` → main tab row has `id = task_id` (see tabs:ensureMain insert)
+ *   - PTY pane: sessionId is `${taskId}:${tabId}` → tabId is the row id directly
+ *   - Chat: tabId is the row id directly
+ * Caller resolves the row id and passes it here; we just UPDATE by id.
+ */
+export function markTabSpawned(db: Database, tabId: string, wasSpawned: boolean): void {
+  db.prepare('UPDATE terminal_tabs SET was_spawned = ? WHERE id = ?').run(wasSpawned ? 1 : 0, tabId)
 }
 
 /** Pure DB write — insert a new tab (new group). Used by both IPC handler
@@ -66,7 +83,8 @@ export function createTabRow(db: Database, input: CreateTerminalTabInput): Termi
     displayMode,
     isMain: false,
     position,
-    createdAt: now
+    createdAt: now,
+    wasSpawned: false
   }
 }
 
@@ -152,7 +170,8 @@ export function splitTabRow(db: Database, tabId: string): TerminalTab | null {
     displayMode,
     isMain: false,
     position,
-    createdAt: now
+    createdAt: now,
+    wasSpawned: false
   }
 }
 
@@ -239,7 +258,8 @@ export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: Database): vo
       displayMode,
       isMain: true,
       position: 0,
-      createdAt: now
+      createdAt: now,
+      wasSpawned: false
     }
   })
 }

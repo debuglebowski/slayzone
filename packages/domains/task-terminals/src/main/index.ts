@@ -1,1 +1,1 @@
-export { registerTerminalTabsHandlers, createTabRow, splitTabRow, updateTabRow, createPtyEnricher } from './handlers'
+export { registerTerminalTabsHandlers, createTabRow, splitTabRow, updateTabRow, createPtyEnricher, markTabSpawned } from './handlers'
