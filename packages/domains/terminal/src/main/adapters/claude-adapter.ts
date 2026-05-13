@@ -44,8 +44,15 @@ export class ClaudeAdapter implements TerminalAdapter {
    * timer. The 5s `idleTimeoutMs` is a safety net if this signal is missed.
    */
   detectActivity(data: string, _current: ActivityState): ActivityState | null {
+    // Claude TUI separates bullet glyph and verb using CUF (cursor forward,
+    // `\x1b[<n>C`) rather than literal spaces — e.g. `·\x1b[1CBefuddling…`.
+    // Stripping CUF as part of the generic CSI pass would concatenate
+    // bullet+verb and defeat the `\s+` separator in SPINNER_LINE_RE /
+    // COMPLETION_LINE_RE. Convert CUF<n> → n spaces first so the visual
+    // layout survives the strip.
     const stripped = data
       .replace(/\x1b\]([^\x07\x1b]|\x1b(?!\\))*(\x07|\x1b\\|\x9c)/g, '')
+      .replace(/\x1b\[(\d*)C/g, (_m, n) => ' '.repeat(Math.max(1, parseInt(n || '1', 10))))
       .replace(/\x1b\[[?0-9;]*[A-Za-z]/g, '')
       .replace(/\x1b[()][AB012]/g, '')
 

@@ -56,6 +56,23 @@ test('detects spinner as working', () => {
   expect(adapter.detectActivity('✻ Clauding...', 'unknown')).toBe('working')
 })
 
+test('detects spinner when bullet/verb separated by CUF (not literal space)', () => {
+  // Claude TUI emits `·\x1b[1CBefuddling…` — bullet then cursor-forward then
+  // verb on the same visual line. Regression: stripping CUF as plain CSI
+  // concatenated bullet+verb and SPINNER_LINE_RE missed it, so detectActivity
+  // returned null for every spinner frame and the 5s silence timer flipped
+  // a still-thinking session to 'idle'.
+  expect(adapter.detectActivity('·\x1b[1CBefuddling…', 'unknown')).toBe('working')
+  expect(adapter.detectActivity('✶\x1b[2CCogitating', 'unknown')).toBe('working')
+  expect(adapter.detectActivity('\x1b[38;2;215;119;87m·\x1b[1CBefuddling…', 'unknown')).toBe('working')
+})
+
+test('detects completion stamp when fields separated by CUF', () => {
+  // Same TUI redraw style — `·\x1b[1CCooked\x1b[1Cfor\x1b[1C56s`. Without
+  // CUF→space conversion the `for ` literal in COMPLETION_LINE_RE fails.
+  expect(adapter.detectActivity('·\x1b[1CCooked\x1b[1Cfor\x1b[1C56s', 'unknown')).toBe('idle')
+})
+
 test('returns null for unrecognized output', () => {
   expect(adapter.detectActivity('Some random text', 'unknown')).toBe(null)
 })
