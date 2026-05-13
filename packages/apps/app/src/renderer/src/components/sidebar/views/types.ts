@@ -15,6 +15,8 @@ export interface SidebarViewContext {
   onCloseTab?: (taskId: string) => void
   /** Open a task as a background tab without changing focus. */
   onOpenTaskInBackground?: (taskId: string) => void
+  /** Create a temporary "scratch" task in the given project. */
+  onCreateTemporaryTask?: (projectId: string) => void
   onReorderProjects: (projectIds: string[]) => void
   idleByProject?: Map<string, number>
   /** Render a task-row context-menu wrapper. Caller wires update/archive/delete + tag handlers. */

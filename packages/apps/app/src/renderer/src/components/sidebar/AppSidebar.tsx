@@ -31,6 +31,7 @@ interface AppSidebarProps {
   onTaskClick?: (taskId: string) => void
   onCloseTab?: (taskId: string) => void
   onOpenTaskInBackground?: (taskId: string) => void
+  onCreateTemporaryTask?: (projectId: string) => void
   zenMode?: boolean
   onboardingChecklist: OnboardingChecklistState
   idleByProject?: Map<string, number>
@@ -112,6 +113,7 @@ export function AppSidebar({
   onTaskClick,
   onCloseTab,
   onOpenTaskInBackground,
+  onCreateTemporaryTask,
   zenMode,
   onboardingChecklist,
   idleByProject,
@@ -196,6 +198,7 @@ export function AppSidebar({
               onTaskClick,
               onCloseTab,
               onOpenTaskInBackground,
+              onCreateTemporaryTask,
               onReorderProjects,
               idleByProject,
               taskContextMenuRender,

@@ -25,11 +25,7 @@ test.describe('Temporary task cursor stability', () => {
     // Select the project first (required for temp task creation)
     await clickProject(mainWindow, projectAbbrev)
 
-    await mainWindow.evaluate(async () => {
-      const createScratch = (window as { __slayzone_createScratchTerminal?: () => Promise<void> }).__slayzone_createScratchTerminal
-      if (!createScratch) throw new Error('scratch terminal helper not exposed')
-      await createScratch()
-    })
+    await mainWindow.getByLabel('New temporary task', { exact: true }).click()
 
     await expect.poll(async () => {
       return mainWindow.evaluate(() => {

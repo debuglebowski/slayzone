@@ -1054,27 +1054,22 @@ function App(): React.JSX.Element {
   }
 
   // Scratch terminal
-  const handleCreateScratchTerminal = useCallback(async (): Promise<void> => {
-    if (!selectedProjectId) return
+  const handleCreateScratchTerminal = useCallback(async (projectIdArg?: string): Promise<void> => {
+    const projectId = projectIdArg ?? selectedProjectId
+    if (!projectId) return
     if (durationLocked) { toast(PROJECT_LOCKED_TOAST); return }
-    const existing = tasks.filter((t) => t.project_id === selectedProjectId).map((t) => t.title.match(/^Terminal (\d+)$/)).filter(Boolean).map((m) => parseInt(m![1], 10))
+    const project = projects.find((p) => p.id === projectId)
+    const existing = tasks.filter((t) => t.project_id === projectId).map((t) => t.title.match(/^Terminal (\d+)$/)).filter(Boolean).map((m) => parseInt(m![1], 10))
     const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
-    const status = getDefaultStatus(selectedProject?.columns_config)
-    const task = await window.api.db.createTask({ projectId: selectedProjectId, title: `Terminal ${next}`, status, isTemporary: true })
+    const status = getDefaultStatus(project?.columns_config)
+    const task = await window.api.db.createTask({ projectId, title: `Terminal ${next}`, status, isTemporary: true })
     track('temporary_task_created')
     setTasks((prev) => [task, ...prev])
     setTerminalFocusRequests((prev) => ({ ...prev, [task.id]: (prev[task.id] ?? 0) + 1 }))
     const lookup = useTabStore.getState()._taskLookup
     useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
-    openTask(task.id)
-  }, [selectedProjectId, selectedProject, tasks, setTasks, openTask, durationLocked])
-
-  useEffect(() => {
-    ;(window as { __slayzone_createScratchTerminal?: () => Promise<void> }).__slayzone_createScratchTerminal = handleCreateScratchTerminal
-    return () => {
-      delete (window as { __slayzone_createScratchTerminal?: () => Promise<void> }).__slayzone_createScratchTerminal
-    }
-  }, [handleCreateScratchTerminal])
+    openTask(task.id, project)
+  }, [selectedProjectId, projects, tasks, setTasks, openTask, durationLocked])
 
   // Expose a programmatic task-opener so domain UI (e.g. Manager sidebar) can open a task as a tab.
   useEffect(() => {
@@ -1217,7 +1212,7 @@ function App(): React.JSX.Element {
           </button>
         </TooltipTrigger><TooltipContent side="bottom" className="text-xs">{explodeMode ? 'Exit explode mode' : 'Explode mode'} ({explodeModeShortcut})</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild>
-          <button onClick={selectedProjectId && !durationLocked ? handleCreateScratchTerminal : undefined} disabled={!selectedProjectId || durationLocked}
+          <button aria-label="New temporary task" onClick={selectedProjectId && !durationLocked ? () => { void handleCreateScratchTerminal() } : undefined} disabled={!selectedProjectId || durationLocked}
             className={cn(btnSize, "flex items-center justify-center transition-colors", selectedProjectId && !durationLocked ? "text-muted-foreground hover:text-foreground" : "text-muted-foreground/40 cursor-not-allowed")}>
             <TerminalSquare className={iconSize} />
           </button>
@@ -1405,7 +1400,7 @@ function App(): React.JSX.Element {
           onSettings={handleOpenSettings}
           onLeaderboard={() => { useTabStore.getState().setActiveView('leaderboard') }}
           onUsageAnalytics={() => { useTabStore.getState().setActiveView('usage-analytics') }}
-          onTaskClick={openTask} onCloseTab={closeTabByTaskId} onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)} zenMode={zenMode} onboardingChecklist={onboardingChecklist} idleByProject={idleByProject} onReorderProjects={reorderProjects}
+          onTaskClick={openTask} onCloseTab={closeTabByTaskId} onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)} onCreateTemporaryTask={(projectId) => { void handleCreateScratchTerminal(projectId) }} zenMode={zenMode} onboardingChecklist={onboardingChecklist} idleByProject={idleByProject} onReorderProjects={reorderProjects}
           terminalStates={terminalStates} taskProgress={taskProgress} doneTaskIds={doneTaskIds} columnsByProjectId={columnsByProjectId}
           compactFooter={headerHidden ? compactFooterContent : undefined}
           updateState={

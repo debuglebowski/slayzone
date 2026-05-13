@@ -78,6 +78,7 @@ export function TreeView({
   onTaskClick,
   onCloseTab,
   onOpenTaskInBackground,
+  onCreateTemporaryTask,
   taskContextMenuRender,
   terminalStates,
   taskProgress,
@@ -98,7 +99,6 @@ export function TreeView({
   const treeIncludeAllSubtasks = treeSubtaskMode === 'all'
   const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
-  const treeGroupByStatus = useTabStore((s) => s.treeGroupByStatus)
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const pinnedSet = useMemo(() => new Set(treePinnedTaskIds), [treePinnedTaskIds])
 
@@ -410,10 +410,25 @@ export function TreeView({
     )
   }
 
+  const renderGroupAddButton = (groupKey: string, projectId: string, label: string): ReactNode => {
+    const isTemp = groupKey === '__temporary__'
+    if (isTemp && !onCreateTemporaryTask) return null
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          if (isTemp) onCreateTemporaryTask?.(projectId)
+          else useDialogStore.getState().openCreateTask({ projectId, status: groupKey as Task['status'] })
+        }}
+        aria-label={`New ${isTemp ? 'temporary ' : ''}task in ${label}`}
+        className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:bg-accent/40 hover:text-foreground transition-colors"
+      >
+        <Plus className="size-3" />
+      </button>
+    )
+  }
+
   const renderRootTasks = (rootTasks: Task[], projectId: string): ReactNode => {
-    if (!treeGroupByStatus) {
-      return rootTasks.map((task, i) => renderTask(task, 1, [i < rootTasks.length - 1]))
-    }
     const tempTasks: Task[] = []
     const persistentTasks: Task[] = []
     for (const t of rootTasks) {
@@ -446,17 +461,15 @@ export function TreeView({
       const style = getColumnStatusStyle(s, cols)
       groups.push({ key: s, label: style?.label ?? s, icon: style?.icon ?? null, iconClass: style?.iconClass, tasks: arr })
     }
-    const showLabel = groups.length > 1
     return groups.map((g) => {
       const Icon = g.icon
       return (
         <div key={g.key}>
-          {showLabel && (
-            <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              {Icon && <Icon className={cn('size-3', g.iconClass)} />}
-              <span>{g.label}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            {Icon && <Icon className={cn('size-3', g.iconClass)} />}
+            <span>{g.label}</span>
+            {renderGroupAddButton(g.key, projectId, g.label)}
+          </div>
           {g.tasks.map((task, i) => renderTask(task, 1, [i < g.tasks.length - 1]))}
         </div>
       )
