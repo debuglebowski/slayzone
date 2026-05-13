@@ -35,7 +35,7 @@ interface TerminalTabBarProps {
   onMainDisplayModeToggle?: (current: TabDisplayMode) => void
 }
 
-const MODE_ICONS: Partial<Record<TerminalMode, IconComponent>> = {
+export const MODE_ICONS: Partial<Record<TerminalMode, IconComponent>> = {
   'claude-code': ClaudeColor as IconComponent,
   'codex': CodexColor as IconComponent,
   'cursor-agent': CursorMono as IconComponent,

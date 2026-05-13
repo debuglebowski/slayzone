@@ -3,6 +3,7 @@ import { Terminal, type TerminalHandle } from '@slayzone/terminal/client/LazyTer
 import type { TabDisplayMode, TerminalTab } from '../shared/types'
 import { TerminalContextMenu } from './TerminalContextMenu'
 import { ChatPanel, type ChatPanelHandle } from './chat/ChatPanel'
+import { TerminalStarter } from './TerminalStarter'
 
 interface PaneProps {
   tab: TerminalTab
@@ -159,8 +160,12 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
     }
 
     const hasContextMenu = pane.onSplit && pane.onNewGroup
+    // Lazy-spawn gate: only the main AI-mode tab. Splits / extra groups /
+    // plain `terminal` mode keep eager spawn (user-driven).
+    const shouldGate = pane.tab.isMain && pane.tab.mode !== 'terminal'
+    const TerminalCmp = shouldGate ? TerminalStarter : Terminal
     const terminal = (
-      <Terminal
+      <TerminalCmp
         ref={paneRefs.current[pane.sessionId]}
         key={pane.sessionId}
         sessionId={pane.sessionId}

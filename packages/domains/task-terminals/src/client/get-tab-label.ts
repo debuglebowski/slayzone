@@ -1,4 +1,19 @@
 import type { TerminalTab } from '../shared/types'
+import type { TerminalMode } from '@slayzone/terminal/shared'
+
+/** Human label for a terminal mode (provider name). */
+export function getModeLabel(mode: TerminalMode): string {
+  switch (mode) {
+    case 'claude-code': return 'Claude Code'
+    case 'codex': return 'Codex'
+    case 'cursor-agent': return 'Cursor'
+    case 'gemini': return 'Gemini'
+    case 'opencode': return 'OpenCode'
+    case 'copilot': return 'Copilot'
+    case 'ccs': return 'CCS'
+    default: return 'Terminal'
+  }
+}
 
 /**
  * Resolve display label for a terminal tab.
@@ -6,18 +21,7 @@ import type { TerminalTab } from '../shared/types'
  */
 export function getTabLabel(tab: TerminalTab, processTitle?: string): string {
   if (tab.label) return tab.label
-  if (tab.isMain) {
-    switch (tab.mode) {
-      case 'claude-code': return 'Claude Code'
-      case 'codex': return 'Codex'
-      case 'cursor-agent': return 'Cursor'
-      case 'gemini': return 'Gemini'
-      case 'opencode': return 'OpenCode'
-      case 'copilot': return 'Copilot'
-      case 'ccs': return 'CCS'
-      default: return 'Terminal'
-    }
-  }
+  if (tab.isMain) return getModeLabel(tab.mode)
   if (processTitle) return processTitle
   return 'Terminal'
 }
