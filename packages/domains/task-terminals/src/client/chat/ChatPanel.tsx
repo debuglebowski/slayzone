@@ -301,6 +301,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
       } else if (item.kind === 'result') {
         flushPending()
         out.push(item)
+      } else if (item.kind === 'interrupted') {
+        flushPending()
+        out.push(item)
       }
     }
     flushPending()
