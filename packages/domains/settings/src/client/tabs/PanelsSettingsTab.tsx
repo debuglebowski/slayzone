@@ -201,6 +201,7 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
   )
   const [terminalFontFamily, setTerminalFontFamily] = useState('Menlo, Monaco, "Courier New", monospace')
   const [terminalScrollback, setTerminalScrollback] = useState('2000')
+  const [terminalAutoStart, setTerminalAutoStart] = useState(false)
   
   // Editor
   const [editorWordWrap, setEditorWordWrap] = useState<'on' | 'off'>('off')
@@ -280,10 +281,12 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
       window.api.settings.get('editor_markdown_view_mode'),
       window.api.settings.get('git_tab_order'),
       window.api.settings.get('git_tab_visibility'),
-    ]).then(([pc, tff, ts, eww, erw, ets, eit, dcl, diw, dcf, dtc, dsbs, dwr, dste, dsaob, bdu, bdz, bdd, cgc, emvm, gto, gtv]) => {
+      window.api.settings.get('terminal_auto_start'),
+    ]).then(([pc, tff, ts, eww, erw, ets, eit, dcl, diw, dcf, dtc, dsbs, dwr, dste, dsaob, bdu, bdz, bdd, cgc, emvm, gto, gtv, tas]) => {
       if (pc) setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
       if (tff) setTerminalFontFamily(tff)
       if (ts) setTerminalScrollback(ts)
+      if (tas === '1') setTerminalAutoStart(true)
       if (eww === 'on') setEditorWordWrap('on')
       if (erw === 'all') setEditorRenderWhitespace('all')
       if (ets === '4') setEditorTabSize('4')
@@ -549,6 +552,13 @@ export function PanelsSettingsTab({ activeTab, navigateTo, modes, defaultTermina
                 })()}
               </SelectContent>
             </Select>
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Auto-start sessions</span>
+            <div className="flex items-center gap-2">
+              <Switch checked={terminalAutoStart} onCheckedChange={(c) => { setTerminalAutoStart(c); window.api.settings.set('terminal_auto_start', c ? '1' : '0') }} />
+              <span className="text-xs text-muted-foreground">Spawn agent on tab open instead of showing the Start button.</span>
+            </div>
           </div>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Font family</span>

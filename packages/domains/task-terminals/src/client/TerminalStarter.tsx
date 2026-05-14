@@ -25,27 +25,24 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
   const { sessionId, mode = 'claude-code', wasSpawned, ...terminalProps } = props
   const [started, setStarted] = useState(false)
   const [existsChecked, setExistsChecked] = useState(false)
+  const [dontShowAgain, setDontShowAgain] = useState(false)
   const innerRef = useRef<TerminalHandle | null>(null)
   const { terminalThemeId, contentVariant } = useTheme()
   const themeColors = getThemeTerminalColors(terminalThemeId, contentVariant)
 
-  // If a PTY already exists for this sessionId (hibernation resume, multi-window
-  // reattach), skip the gate — `pty.exists` is the same probe Terminal.tsx uses.
-  // Likewise if the tab was last known to have a live subprocess (was_spawned
-  // sticky flag), auto-mount so reboot-after-crash brings the agent back.
-  // Gate first paint behind this check so reattach doesn't flash the Start chip.
   useEffect(() => {
     let cancelled = false
     if (wasSpawned) {
-      // No need to await the exists probe: the warm flag is authoritative for
-      // auto-restart. The Terminal component itself will spawn the PTY.
       setStarted(true)
       setExistsChecked(true)
       return () => { cancelled = true }
     }
-    void window.api.pty.exists(sessionId).then((exists) => {
+    void Promise.all([
+      window.api.pty.exists(sessionId),
+      window.api.settings.get('terminal_auto_start'),
+    ]).then(([exists, autoStart]) => {
       if (cancelled) return
-      if (exists) setStarted(true)
+      if (exists || autoStart === '1') setStarted(true)
       setExistsChecked(true)
     })
     return () => { cancelled = true }
@@ -65,8 +62,6 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     return <Terminal {...terminalProps} sessionId={sessionId} mode={mode} ref={innerRef} />
   }
 
-  // Suppress paint until exists-check resolves; avoids Start-chip flash on
-  // reattach paths (hibernation resume, multi-window).
   if (!existsChecked) {
     return (
       <div
@@ -79,23 +74,42 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
   const Icon = MODE_ICONS[mode]
   const label = getModeLabel(mode)
 
+  const handleStart = () => {
+    if (dontShowAgain) void window.api.settings.set('terminal_auto_start', '1')
+    setStarted(true)
+  }
+
   return (
     <div
-      className="h-full w-full flex flex-col items-center justify-center gap-3 px-6"
+      className="h-full w-full flex flex-col items-center justify-center gap-6 px-6"
       style={{ backgroundColor: themeColors.background ?? '#0a0a0a' }}
     >
-      <button
-        type="button"
-        autoFocus
-        onClick={() => setStarted(true)}
-        className="flex items-center gap-2 rounded-md border border-border bg-surface-1 hover:bg-surface-2 px-4 py-2 text-sm font-medium text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {Icon ? <Icon className="size-4" /> : <Play className="size-4" />}
-        Start {label}
-      </button>
-      <p className="max-w-sm text-center text-xs text-muted-foreground">
-        Manual start keeps idle tabs from burning resources or API credits.
-      </p>
+      <div className="space-y-2 text-center max-w-md">
+        <h2 className="text-2xl font-semibold text-foreground">{label} is idle</h2>
+        <p className="text-sm text-muted-foreground">
+          Saves CPU and API credits until you start it.
+        </p>
+      </div>
+      <div className="flex flex-col items-center gap-3">
+        <button
+          type="button"
+          autoFocus
+          onClick={handleStart}
+          className="flex items-center gap-2 rounded-md border border-border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-surface-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {Icon ? <Icon className="size-4" /> : <Play className="size-4" />}
+          Start {label}
+        </button>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={dontShowAgain}
+            onChange={(e) => setDontShowAgain(e.target.checked)}
+            className="cursor-pointer"
+          />
+          <span>Don&rsquo;t show this again</span>
+        </label>
+      </div>
     </div>
   )
 })
