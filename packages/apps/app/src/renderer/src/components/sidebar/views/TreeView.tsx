@@ -1,10 +1,27 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { BookOpen, ChevronDown, Clock, GitBranch, Home, Pin, Plus, Power, Search, Settings, X } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
-import { cn, TerminalProgressDot, PriorityIcon, getColumnStatusStyle, TASK_STATUS_ORDER, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from '@slayzone/ui'
+import {
+  DndContext,
+  PointerSensor,
+  pointerWithin,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { cn, TerminalProgressDot, PriorityIcon, getColumnStatusStyle, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from '@slayzone/ui'
 import { type Task } from '@slayzone/task/shared'
 import { useDialogStore, useTabStore } from '@slayzone/settings'
-import { useFilterStateMap, sortTasks, getViewConfig } from '@slayzone/tasks'
+import { PRIORITY_LABELS } from '@slayzone/tasks'
+import { groupTreeRows, orderTreeRows, type TreeGroup } from './treeGrouping'
 import { useActiveSessionTaskIds } from '@/components/agent-status/useIdleTasks'
 import { useStaleSkillCounts } from '@slayzone/ai-config/client'
 import { TreeDisplaySettings } from '../TreeDisplaySettings'
@@ -69,6 +86,281 @@ function TreeGuides({ depth, ancestorFlags }: { depth: number; ancestorFlags: bo
   )
 }
 
+interface TaskRowDragData {
+  kind: 'task'
+  projectId: string
+  /** Either a status id or 'p1'..'p5' depending on treeGroupBy. */
+  groupValue: string
+  parentId: string | null
+}
+
+interface GroupDropData {
+  kind: 'group'
+  projectId: string
+  groupValue: string
+}
+
+interface TaskBranchCtx {
+  childrenByParent: Map<string, Task[]>
+  activeTaskId: string | null
+  openTabTaskIds: Set<string>
+  doneTaskIds?: Set<string>
+  terminalStates?: Map<string, import('@slayzone/terminal/shared').TerminalState>
+  taskProgress?: Map<string, number>
+  columnsByProjectId?: Map<string, import('@slayzone/projects/shared').ColumnConfig[] | null>
+  pinnedSet: Set<string>
+  treeShowStatus: boolean
+  treeShowPriority: boolean
+  treeShowWorktree: boolean
+  treeCrossOutDone: boolean
+  treeGroupBy: 'status' | 'priority'
+  onTaskClick?: (taskId: string) => void
+  onCloseTab?: (taskId: string) => void
+  onOpenTaskInBackground?: (taskId: string) => void
+  taskContextMenuRender?: SidebarViewContext['taskContextMenuRender']
+  dragEnabled: boolean
+}
+
+function rowGroupValue(task: Task, groupBy: 'status' | 'priority'): string {
+  if (groupBy === 'priority') return `p${typeof task.priority === 'number' ? task.priority : 5}`
+  return task.status
+}
+
+function TaskRow({
+  task,
+  depth,
+  ancestorFlags,
+  ctx,
+}: {
+  task: Task
+  depth: number
+  ancestorFlags: boolean[]
+  ctx: TaskBranchCtx
+}): ReactNode {
+  const draggable = ctx.dragEnabled && !task.is_temporary
+  const dragData: TaskRowDragData = {
+    kind: 'task',
+    projectId: task.project_id,
+    groupValue: rowGroupValue(task, ctx.treeGroupBy),
+    parentId: task.parent_id ?? null,
+  }
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+    data: dragData,
+    disabled: !draggable,
+  })
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
+
+  const isActive = ctx.activeTaskId === task.id
+  const isOpenTab = ctx.openTabTaskIds.has(task.id)
+  const termState = ctx.terminalStates?.get(task.id)
+  const progress = ctx.taskProgress?.get(task.id)
+  const isDone = ctx.doneTaskIds?.has(task.id) ?? false
+  const cols = ctx.columnsByProjectId?.get(task.project_id) ?? null
+  const statusStyle = getColumnStatusStyle(task.status, cols)
+  const StatusIcon = statusStyle?.icon
+
+  const button = (
+    <button
+      ref={setNodeRef}
+      type="button"
+      data-sidebar-tree-item="task"
+      data-task-id={task.id}
+      data-active={isActive ? 'true' : undefined}
+      onClick={() => ctx.onTaskClick?.(task.id)}
+      onAuxClick={(e) => {
+        if (e.button !== 1) return
+        e.preventDefault()
+        e.stopPropagation()
+        if (isOpenTab) ctx.onCloseTab?.(task.id)
+        else ctx.onOpenTaskInBackground?.(task.id)
+      }}
+      onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
+      style={{ ...style, paddingLeft: tgPaddingLeft(depth), minHeight: TG_ROW_HEIGHT }}
+      className="group/treerow relative flex w-full items-center pr-1 text-sm text-left touch-none"
+      {...attributes}
+      {...listeners}
+    >
+      <TreeGuides depth={depth} ancestorFlags={ancestorFlags} />
+      <span
+        className={cn(
+          'relative flex flex-1 items-center gap-2 rounded-md px-1.5 py-1 min-w-0 transition-colors',
+          isActive
+            ? 'bg-white/10 text-foreground'
+            : isOpenTab
+              ? 'text-foreground hover:bg-accent/40'
+              : 'text-muted-foreground/45 hover:bg-accent/40 hover:text-accent-foreground'
+        )}
+      >
+        <TerminalProgressDot
+          state={termState}
+          progress={progress}
+          isDone={isDone}
+          needsAttention={Boolean(task.needs_attention)}
+          alwaysShow
+          tooltipSide="right"
+        />
+        <span
+          className={cn(
+            'truncate flex-1',
+            ctx.treeCrossOutDone && isDone && 'line-through text-muted-foreground/60'
+          )}
+        >
+          {task.title || 'Untitled'}
+        </span>
+        {task.needs_attention && (
+          <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+            Attention
+          </span>
+        )}
+        {ctx.treeShowWorktree && task.worktree_path && (
+          <GitBranch
+            aria-label="Worktree"
+            className={cn('size-3.5 shrink-0', !task.worktree_color && 'text-muted-foreground/60')}
+            style={task.worktree_color ? { color: task.worktree_color } : undefined}
+          />
+        )}
+        {ctx.pinnedSet.has(task.id) && (
+          <Pin
+            aria-label="Pinned"
+            className="size-3 shrink-0 text-muted-foreground/60 -rotate-45 fill-current"
+          />
+        )}
+        {ctx.treeShowPriority && task.priority != null && (
+          <PriorityIcon priority={task.priority} className="size-3.5 shrink-0" />
+        )}
+        {ctx.treeShowStatus && StatusIcon && (
+          <StatusIcon className={cn('size-3.5 shrink-0', statusStyle?.iconClass)} />
+        )}
+        {isOpenTab && ctx.onCloseTab ? (
+          <Tooltip delayDuration={500}>
+            <TooltipTrigger asChild>
+              <span
+                role="button"
+                aria-label="Close tab"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  ctx.onCloseTab?.(task.id)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  ctx.onCloseTab?.(task.id)
+                }}
+                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground shrink-0"
+              >
+                <X className="size-3.5" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right">Close tab (middle-click)</TooltipContent>
+          </Tooltip>
+        ) : !isOpenTab && ctx.onOpenTaskInBackground ? (
+          <Tooltip delayDuration={500}>
+            <TooltipTrigger asChild>
+              <span
+                role="button"
+                aria-label="Open in background tab"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  ctx.onOpenTaskInBackground?.(task.id)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  ctx.onOpenTaskInBackground?.(task.id)
+                }}
+                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground opacity-0 group-hover/treerow:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+              >
+                <Power className="size-3" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right">Open in background tab (middle-click)</TooltipContent>
+          </Tooltip>
+        ) : (
+          <span aria-hidden className="inline-block size-5 shrink-0" />
+        )}
+      </span>
+    </button>
+  )
+
+  return (
+    <div>
+      {ctx.taskContextMenuRender ? ctx.taskContextMenuRender(task, button) : button}
+    </div>
+  )
+}
+
+function TaskBranch({
+  task,
+  depth,
+  ancestorFlags,
+  ctx,
+}: {
+  task: Task
+  depth: number
+  ancestorFlags: boolean[]
+  ctx: TaskBranchCtx
+}): ReactNode {
+  const children = ctx.childrenByParent.get(task.id) ?? []
+  return (
+    <div>
+      <TaskRow task={task} depth={depth} ancestorFlags={ancestorFlags} ctx={ctx} />
+      {children.length > 0 && (
+        <SortableContext items={children.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+          {children.map((c, i) => (
+            <TaskBranch
+              key={c.id}
+              task={c}
+              depth={depth + 1}
+              ancestorFlags={[...ancestorFlags, i < children.length - 1]}
+              ctx={ctx}
+            />
+          ))}
+        </SortableContext>
+      )}
+    </div>
+  )
+}
+
+function StatusGroupDroppable({
+  projectId,
+  groupValue,
+  children,
+}: {
+  projectId: string
+  groupValue: string
+  children: ReactNode
+}): ReactNode {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `group:${projectId}:${groupValue}`,
+    data: { kind: 'group', projectId, groupValue } satisfies GroupDropData,
+  })
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid="tree-status-group"
+      data-project-id={projectId}
+      data-status={groupValue}
+      className={cn(
+        'rounded-md transition-colors',
+        isOver && 'bg-accent/15 ring-1 ring-accent/30'
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
 export function TreeView({
   projects,
   tasks,
@@ -84,6 +376,8 @@ export function TreeView({
   taskProgress,
   doneTaskIds,
   columnsByProjectId,
+  onTaskReorder,
+  onTaskMove,
 }: SidebarViewContext) {
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
@@ -103,6 +397,11 @@ export function TreeView({
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const pinnedSet = useMemo(() => new Set(treePinnedTaskIds), [treePinnedTaskIds])
+  const treeGroupBy = useTabStore((s) => s.treeGroupBy)
+  const treeOrderBy = useTabStore((s) => s.treeOrderBy)
+  const treeOrderDir = useTabStore((s) => s.treeOrderDir)
+  const treeGroupTemporary = useTabStore((s) => s.treeGroupTemporary)
+  const treeShowEmptyGroups = useTabStore((s) => s.treeShowEmptyGroups)
 
   const tabs = useTabStore((s) => s.tabs)
   const openTabTaskIds = useMemo(() => {
@@ -183,13 +482,9 @@ export function TreeView({
     return set
   }, [tasks, passesFilter, treeShowSubtasks, treeIncludeAllSubtasks, treeIncludeAllUndoneSubtasks, doneTaskIds])
 
-  // Per-project filters (mirrors kanban). Live-updates when user changes
-  // sortBy / groupBy in the kanban filter bar.
-  const projectIds = useMemo(() => projects.map((p) => p.id), [projects])
-  const filtersByProject = useFilterStateMap(projectIds)
-
-  // Visible tasks bucketed and sorted per project using each project's
-  // own kanban sort preference.
+  // Visible tasks bucketed and sorted per project using the tree-local order
+  // (no coupling to kanban filter). orderTreeRows always tiebreaks by `order`
+  // col so manual drag-reorder persists under any orderBy.
   const tasksByProject = useMemo(() => {
     const grouped = new Map<string, Task[]>()
     for (const t of tasks) {
@@ -200,12 +495,10 @@ export function TreeView({
     }
     const sorted = new Map<string, Task[]>()
     for (const [pid, arr] of grouped) {
-      const f = filtersByProject[pid]
-      const sortBy = f ? getViewConfig(f).sortBy : 'manual'
-      sorted.set(pid, sortTasks(arr, sortBy))
+      sorted.set(pid, orderTreeRows(arr, treeOrderBy, treeOrderDir))
     }
     return sorted
-  }, [tasks, visibleTaskIds, filtersByProject])
+  }, [tasks, visibleTaskIds, treeOrderBy, treeOrderDir])
 
   // For each in-progress task id → its in-progress children, in the
   // per-project sort order. Subtasks whose parent is not in-progress are
@@ -239,6 +532,22 @@ export function TreeView({
     }
     return m
   }, [tasksByProject, visibleTaskIds, treeShowSubtasks])
+
+  // Root tasks grouped by treeGroupBy per project. groupTreeRows handles
+  // temp segregation + empty-group rendering.
+  const rootGroupsByProject = useMemo(() => {
+    const result = new Map<string, TreeGroup[]>()
+    for (const [pid, roots] of rootTasksByProject) {
+      const cols = columnsByProjectId?.get(pid) ?? null
+      const groups = groupTreeRows(roots, treeGroupBy, cols, {
+        showEmpty: treeShowEmptyGroups,
+        statusFilter,
+        groupTemporary: treeGroupTemporary,
+      })
+      result.set(pid, groups)
+    }
+    return result
+  }, [rootTasksByProject, columnsByProjectId, treeGroupBy, treeShowEmptyGroups, statusFilter, treeGroupTemporary])
 
   const activeTaskId = useTabStore((s) => {
     const tab = s.tabs[s.activeTabIndex]
@@ -281,160 +590,96 @@ export function TreeView({
 
   const { counts: staleSkillCounts } = useStaleSkillCounts(visibleProjects)
 
-  const renderTask = (task: Task, depth: number, ancestorFlags: boolean[]): ReactNode => {
-    const isActive = activeTaskId === task.id
-    const isOpenTab = openTabTaskIds.has(task.id)
-    const children = childrenByParent.get(task.id) ?? []
-    const termState = terminalStates?.get(task.id)
-    const progress = taskProgress?.get(task.id)
-    const isDone = doneTaskIds?.has(task.id) ?? false
-    const cols = columnsByProjectId?.get(task.project_id) ?? null
-    const statusStyle = getColumnStatusStyle(task.status, cols)
-    const StatusIcon = statusStyle?.icon
-    const button = (
-      <button
-        type="button"
-        data-sidebar-tree-item="task"
-        data-task-id={task.id}
-        data-active={isActive ? 'true' : undefined}
-        onClick={() => onTaskClick?.(task.id)}
-        onAuxClick={(e) => {
-          if (e.button !== 1) return
-          e.preventDefault()
-          e.stopPropagation()
-          if (isOpenTab) onCloseTab?.(task.id)
-          else onOpenTaskInBackground?.(task.id)
-        }}
-        onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
-        style={{ paddingLeft: tgPaddingLeft(depth), minHeight: TG_ROW_HEIGHT }}
-        className="group/treerow relative flex w-full items-center pr-1 text-sm text-left"
-      >
-        <TreeGuides depth={depth} ancestorFlags={ancestorFlags} />
-        <span
-          className={cn(
-            'relative flex flex-1 items-center gap-2 rounded-md px-1.5 py-1 min-w-0 transition-colors',
-            isActive
-              ? 'bg-white/10 text-foreground'
-              : isOpenTab
-                ? 'text-foreground hover:bg-accent/40'
-                : 'text-muted-foreground/45 hover:bg-accent/40 hover:text-accent-foreground'
-          )}
-        >
-          <TerminalProgressDot
-            state={termState}
-            progress={progress}
-            isDone={isDone}
-            needsAttention={Boolean(task.needs_attention)}
-            alwaysShow
-            tooltipSide="right"
-          />
-          <span
-            className={cn(
-              'truncate flex-1',
-              treeCrossOutDone && isDone && 'line-through text-muted-foreground/60'
-            )}
-          >
-            {task.title || 'Untitled'}
-          </span>
-          {task.needs_attention && (
-            <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
-              Attention
-            </span>
-          )}
-          {treeShowWorktree && task.worktree_path && (
-            <GitBranch
-              aria-label="Worktree"
-              className={cn('size-3.5 shrink-0', !task.worktree_color && 'text-muted-foreground/60')}
-              style={task.worktree_color ? { color: task.worktree_color } : undefined}
-            />
-          )}
-          {pinnedSet.has(task.id) && (
-            <Pin
-              aria-label="Pinned"
-              className="size-3 shrink-0 text-muted-foreground/60 -rotate-45 fill-current"
-            />
-          )}
-          {treeShowPriority && task.priority != null && (
-            <PriorityIcon priority={task.priority} className="size-3.5 shrink-0" />
-          )}
-          {treeShowStatus && StatusIcon && (
-            <StatusIcon className={cn('size-3.5 shrink-0', statusStyle?.iconClass)} />
-          )}
-          {isOpenTab && onCloseTab ? (
-            <Tooltip delayDuration={500}>
-              <TooltipTrigger asChild>
-                <span
-                  role="button"
-                  aria-label="Close tab"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    onCloseTab(task.id)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return
-                    e.preventDefault()
-                    e.stopPropagation()
-                    onCloseTab(task.id)
-                  }}
-                  className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground shrink-0"
-                >
-                  <X className="size-3.5" />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="right">Close tab (middle-click)</TooltipContent>
-            </Tooltip>
-          ) : !isOpenTab && onOpenTaskInBackground ? (
-            <Tooltip delayDuration={500}>
-              <TooltipTrigger asChild>
-                <span
-                  role="button"
-                  aria-label="Open in background tab"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    onOpenTaskInBackground(task.id)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return
-                    e.preventDefault()
-                    e.stopPropagation()
-                    onOpenTaskInBackground(task.id)
-                  }}
-                  className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground opacity-0 group-hover/treerow:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
-                >
-                  <Power className="size-3" />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="right">Open in background tab (middle-click)</TooltipContent>
-            </Tooltip>
-          ) : (
-            <span aria-hidden className="inline-block size-5 shrink-0" />
-          )}
-        </span>
-      </button>
-    )
-    return (
-      <div key={task.id}>
-        {taskContextMenuRender ? taskContextMenuRender(task, button) : button}
-        {children.map((c, i) => renderTask(c, depth + 1, [...ancestorFlags, i < children.length - 1]))}
-      </div>
-    )
-  }
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-  const renderGroupAddButton = (groupKey: string, projectId: string, label: string): ReactNode => {
-    const isTemp = groupKey === '__temporary__'
-    if (isTemp && !onCreateTemporaryTask) return null
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over) return
+    const activeData = active.data.current as TaskRowDragData | undefined
+    if (!activeData || activeData.kind !== 'task') return
+    const overData = over.data.current as TaskRowDragData | GroupDropData | undefined
+    if (!overData) return
+
+    // Cross-project blocked.
+    if (overData.projectId !== activeData.projectId) return
+
+    // Subtask: only sibling reorder, no reparent. Subtasks stay nested under
+    // parent regardless of treeGroupBy, so cross-group check doesn't apply.
+    if (activeData.parentId) {
+      if (overData.kind !== 'task') return
+      if (overData.parentId !== activeData.parentId) return
+      if (active.id === over.id) return
+      const siblings = childrenByParent.get(activeData.parentId) ?? []
+      const oldIdx = siblings.findIndex((s) => s.id === active.id)
+      const newIdx = siblings.findIndex((s) => s.id === over.id)
+      if (oldIdx === -1 || newIdx === -1 || oldIdx === newIdx) return
+      const reordered = arrayMove(siblings, oldIdx, newIdx)
+      onTaskReorder?.(reordered.map((t) => t.id))
+      return
+    }
+
+    // Root task drag.
+    const groups = rootGroupsByProject.get(activeData.projectId)
+    if (!groups) return
+    const groupByKey = new Map(groups.map((g) => [g.key, g]))
+
+    // Block drops into the temp group — temp tasks aren't draggable + drop
+    // target there has no valid status/priority semantic.
+    if (overData.kind === 'group' && groupByKey.get(overData.groupValue)?.isTemp) return
+
+    if (overData.kind === 'group') {
+      const destValue = overData.groupValue
+      if (destValue === activeData.groupValue) return
+      const destGroup = groupByKey.get(destValue)
+      const destLen = destGroup?.tasks.length ?? 0
+      onTaskMove?.(active.id as string, destValue, destLen, treeGroupBy)
+      return
+    }
+
+    // overData is a task. Block dropping a root onto a subtask (would reparent).
+    if (overData.parentId) return
+
+    if (overData.groupValue === activeData.groupValue) {
+      // Same-group reorder.
+      const group = groupByKey.get(activeData.groupValue)
+      if (!group) return
+      const oldIdx = group.tasks.findIndex((t) => t.id === active.id)
+      const newIdx = group.tasks.findIndex((t) => t.id === over.id)
+      if (oldIdx === -1 || newIdx === -1 || oldIdx === newIdx) return
+      const reordered = arrayMove(group.tasks, oldIdx, newIdx)
+      onTaskReorder?.(reordered.map((t) => t.id))
+    } else {
+      // Cross-group drag onto a task — move source into target's group at target's index.
+      const destGroup = groupByKey.get(overData.groupValue)
+      if (!destGroup || destGroup.isTemp) return
+      const newIdx = destGroup.tasks.findIndex((t) => t.id === over.id)
+      if (newIdx === -1) return
+      onTaskMove?.(active.id as string, overData.groupValue, newIdx, treeGroupBy)
+    }
+  }, [childrenByParent, rootGroupsByProject, onTaskReorder, onTaskMove, treeGroupBy])
+
+  const renderGroupAddButton = (
+    group: TreeGroup,
+    projectId: string,
+    label: string
+  ): ReactNode => {
+    if (group.isTemp && !onCreateTemporaryTask) return null
     return (
       <button
         type="button"
         onClick={() => {
-          if (isTemp) onCreateTemporaryTask?.(projectId)
-          else useDialogStore.getState().openCreateTask({ projectId, status: groupKey as Task['status'] })
+          if (group.isTemp) {
+            onCreateTemporaryTask?.(projectId)
+            return
+          }
+          if (treeGroupBy === 'priority') {
+            const prio = parseInt(group.key.slice(1), 10)
+            useDialogStore.getState().openCreateTask({ projectId, priority: Number.isFinite(prio) ? prio : undefined })
+            return
+          }
+          useDialogStore.getState().openCreateTask({ projectId, status: group.key as Task['status'] })
         }}
-        aria-label={`New ${isTemp ? 'temporary ' : ''}task in ${label}`}
+        aria-label={`New ${group.isTemp ? 'temporary ' : ''}task in ${label}`}
         className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:bg-accent/40 hover:text-foreground transition-colors"
       >
         <Plus className="size-3" />
@@ -442,61 +687,89 @@ export function TreeView({
     )
   }
 
-  const renderRootTasks = (rootTasks: Task[], projectId: string): ReactNode => {
-    const tempTasks: Task[] = []
-    const persistentTasks: Task[] = []
-    for (const t of rootTasks) {
-      if (t.is_temporary) tempTasks.push(t)
-      else persistentTasks.push(t)
-    }
+  const renderTreeGroups = (
+    groups: TreeGroup[],
+    projectId: string,
+    branchCtx: TaskBranchCtx
+  ): ReactNode => {
     const cols = columnsByProjectId?.get(projectId) ?? null
-    const order: string[] = cols
-      ? [...cols].sort((a, b) => a.position - b.position).map((c) => c.id)
-      : [...TASK_STATUS_ORDER]
-    const byStatus = new Map<string, Task[]>()
-    for (const t of persistentTasks) {
-      const arr = byStatus.get(t.status) ?? []
-      arr.push(t)
-      byStatus.set(t.status, arr)
-    }
-    type Group = { key: string; label: string; icon: typeof Clock | null; iconClass?: string; tasks: Task[] }
-    const groups: Group[] = []
-    if (tempTasks.length > 0) {
-      groups.push({ key: '__temporary__', label: 'Temporary', icon: Clock, iconClass: 'text-muted-foreground/60', tasks: tempTasks })
-    }
-    for (const s of order) {
-      const arr = byStatus.get(s)
-      if (!arr || arr.length === 0) continue
-      const style = getColumnStatusStyle(s, cols)
-      groups.push({ key: s, label: style?.label ?? s, icon: style?.icon ?? null, iconClass: style?.iconClass, tasks: arr })
-    }
-    for (const [s, arr] of byStatus) {
-      if (order.includes(s)) continue
-      const style = getColumnStatusStyle(s, cols)
-      groups.push({ key: s, label: style?.label ?? s, icon: style?.icon ?? null, iconClass: style?.iconClass, tasks: arr })
-    }
     return groups.map((g) => {
-      const Icon = g.icon
-      return (
-        <div key={g.key}>
+      let label: string
+      let Icon: typeof Clock | null = null
+      let iconClass: string | undefined
+      if (g.isTemp) {
+        label = 'Temporary'
+        Icon = Clock
+        iconClass = 'text-muted-foreground/60'
+      } else if (treeGroupBy === 'priority') {
+        const prio = parseInt(g.key.slice(1), 10)
+        label = PRIORITY_LABELS[prio] ?? g.key
+      } else {
+        const style = getColumnStatusStyle(g.key, cols)
+        label = style?.label ?? g.key
+        Icon = style?.icon ?? null
+        iconClass = style?.iconClass
+      }
+
+      const groupBody = (
+        <>
           <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-            {Icon && <Icon className={cn('size-3', g.iconClass)} />}
-            <span>{g.label}</span>
-            {renderGroupAddButton(g.key, projectId, g.label)}
+            {Icon && <Icon className={cn('size-3', iconClass)} />}
+            <span>{label}</span>
+            {renderGroupAddButton(g, projectId, label)}
           </div>
-          {g.tasks.map((task, i) => renderTask(task, 1, [i < g.tasks.length - 1]))}
-        </div>
+          <SortableContext items={g.tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+            {g.tasks.map((task, i) => (
+              <TaskBranch
+                key={task.id}
+                task={task}
+                depth={1}
+                ancestorFlags={[i < g.tasks.length - 1]}
+                ctx={branchCtx}
+              />
+            ))}
+          </SortableContext>
+        </>
+      )
+      // Temp tasks aren't draggable + their group has no valid drop semantic,
+      // so skip the droppable wrapper.
+      if (g.isTemp) return <div key={g.key}>{groupBody}</div>
+      return (
+        <StatusGroupDroppable key={g.key} projectId={projectId} groupValue={g.key}>
+          {groupBody}
+        </StatusGroupDroppable>
       )
     })
   }
 
   const renderProject = (project: typeof sortedProjects[number]) => {
     const projectTasks = tasksByProject.get(project.id) ?? []
-    const rootTasks = rootTasksByProject.get(project.id) ?? []
+    const groups = rootGroupsByProject.get(project.id) ?? []
     const isOpen = openProjects[project.id] ?? false
     const isContextActive = selectedProjectId === project.id && activeView === 'context'
     const isHomeActive =
       selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
+    const dragEnabled = Boolean(onTaskReorder) && Boolean(onTaskMove)
+    const branchCtx: TaskBranchCtx = {
+      childrenByParent,
+      activeTaskId,
+      openTabTaskIds,
+      doneTaskIds,
+      terminalStates,
+      taskProgress,
+      columnsByProjectId,
+      pinnedSet,
+      treeShowStatus,
+      treeShowPriority,
+      treeShowWorktree,
+      treeCrossOutDone,
+      treeGroupBy,
+      onTaskClick,
+      onCloseTab,
+      onOpenTaskInBackground,
+      taskContextMenuRender,
+      dragEnabled,
+    }
     return (
       <Collapsible.Root
         key={project.id}
@@ -570,12 +843,12 @@ export function TreeView({
         </div>
         <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
           <div className="flex flex-col pr-2 pt-2 pb-2">
-            {projectTasks.length === 0 ? (
+            {projectTasks.length === 0 && groups.length === 0 ? (
               <span className="text-xs italic text-muted-foreground/60 px-2 py-1">
                 No active tasks
               </span>
             ) : (
-              renderRootTasks(rootTasks, project.id)
+              renderTreeGroups(groups, project.id, branchCtx)
             )}
           </div>
         </Collapsible.Content>
@@ -633,7 +906,9 @@ export function TreeView({
           </Tooltip>
         </div>
       </div>
-      {visibleProjects.map(renderProject)}
+      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragEnd={handleDragEnd}>
+        {visibleProjects.map(renderProject)}
+      </DndContext>
       {hiddenProjects.length > 0 && (
         <button
           type="button"

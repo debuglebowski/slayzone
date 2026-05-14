@@ -36,6 +36,8 @@ interface AppSidebarProps {
   onboardingChecklist: OnboardingChecklistState
   idleByProject?: Map<string, number>
   onReorderProjects: (projectIds: string[]) => void
+  onTaskReorder?: (taskIds: string[]) => void
+  onTaskMove?: (taskId: string, newColumnId: string, targetIndex: number, groupBy: 'status' | 'priority') => void
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode
   terminalStates?: Map<string, TerminalState>
   taskProgress?: Map<string, number>
@@ -118,6 +120,8 @@ export function AppSidebar({
   onboardingChecklist,
   idleByProject,
   onReorderProjects,
+  onTaskReorder,
+  onTaskMove,
   taskContextMenuRender,
   terminalStates,
   taskProgress,
@@ -200,6 +204,8 @@ export function AppSidebar({
               onOpenTaskInBackground,
               onCreateTemporaryTask,
               onReorderProjects,
+              onTaskReorder,
+              onTaskMove,
               idleByProject,
               taskContextMenuRender,
               terminalStates,

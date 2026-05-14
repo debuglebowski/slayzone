@@ -15,6 +15,7 @@ import {
   useTasksData,
   useUndoableTaskActions,
   useFilterState,
+  useFilterStore,
   applyFilters,
   getViewConfig,
   useSnoozeWakeUp,
@@ -163,6 +164,7 @@ function App(): React.JSX.Element {
   // Expose tab store for e2e tests
   if (!(window as any).__slayzone_tabStore) (window as any).__slayzone_tabStore = useTabStore
   if (!(window as any).__slayzone_dialogStore) (window as any).__slayzone_dialogStore = useDialogStore
+  if (!(window as any).__slayzone_filterStore) (window as any).__slayzone_filterStore = useFilterStore
 
   // Filter state (persisted per project)
   const [filter, setFilter] = useFilterState(selectedProjectId)
@@ -1115,6 +1117,7 @@ function App(): React.JSX.Element {
   const handleTaskClick = (task: Task, e: { metaKey: boolean; shiftKey?: boolean }): void => { if (e.metaKey) guardedOpenTaskInBackground(task.id); else openTask(task.id) }
   const handleTaskMove = (taskId: string, newColumnId: string, targetIndex: number): void => { moveTask(taskId, newColumnId, targetIndex, getViewConfig(filter).groupBy) }
   const handleTaskBulkMove = (taskIds: string[], newColumnId: string, targetIndex: number): void => { bulkMove(taskIds, newColumnId, targetIndex, getViewConfig(filter).groupBy) }
+  const handleSidebarTaskMove = (taskId: string, newColumnId: string, targetIndex: number, groupBy: 'status' | 'priority'): void => { moveTask(taskId, newColumnId, targetIndex, groupBy) }
 
   useEffect(() => {
     ;(window as { __slayzone_moveTaskForTest?: (taskId: string, newColumnId: string, targetIndex: number) => void }).__slayzone_moveTaskForTest = handleTaskMove
@@ -1403,7 +1406,7 @@ function App(): React.JSX.Element {
           onSettings={handleOpenSettings}
           onLeaderboard={() => { useTabStore.getState().setActiveView('leaderboard') }}
           onUsageAnalytics={() => { useTabStore.getState().setActiveView('usage-analytics') }}
-          onTaskClick={openTask} onCloseTab={closeTabByTaskId} onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)} onCreateTemporaryTask={(projectId) => { void handleCreateScratchTerminal(projectId) }} zenMode={zenMode} onboardingChecklist={onboardingChecklist} idleByProject={idleByProject} onReorderProjects={reorderProjects}
+          onTaskClick={openTask} onCloseTab={closeTabByTaskId} onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)} onCreateTemporaryTask={(projectId) => { void handleCreateScratchTerminal(projectId) }} zenMode={zenMode} onboardingChecklist={onboardingChecklist} idleByProject={idleByProject} onReorderProjects={reorderProjects} onTaskReorder={reorderTasks} onTaskMove={handleSidebarTaskMove}
           terminalStates={terminalStates} taskProgress={taskProgress} doneTaskIds={doneTaskIds} columnsByProjectId={columnsByProjectId}
           compactFooter={headerHidden ? compactFooterContent : undefined}
           updateState={

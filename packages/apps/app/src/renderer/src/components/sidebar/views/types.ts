@@ -29,6 +29,14 @@ export interface SidebarViewContext {
   doneTaskIds?: Set<string>
   /** Per-project kanban column config (used for task-status icon lookup). */
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
+  /** Reorder a flat list of task ids (writes "order" col). */
+  onTaskReorder?: (taskIds: string[]) => void
+  /**
+   * Move a task to a different group. `newColumnId` is interpreted by `groupBy`:
+   * - 'status': status id (e.g. 'in_progress')
+   * - 'priority': 'p1'..'p5'
+   */
+  onTaskMove?: (taskId: string, newColumnId: string, targetIndex: number, groupBy: 'status' | 'priority') => void
 }
 
 export interface SidebarView {
