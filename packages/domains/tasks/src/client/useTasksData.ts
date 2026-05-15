@@ -28,6 +28,7 @@ interface UseTasksDataReturn {
   bulkMove: (taskIds: string[], newColumnId: string, targetIndex: number, groupBy: GroupKey) => void
   reorderTasks: (taskIds: string[]) => void
   reparentTask: (taskId: string, newParentId: string | null, newSiblingTaskIds: string[]) => void
+  bulkReparent: (taskIds: string[], newParentId: string | null, newSiblingTaskIds: string[]) => void
   archiveTask: (taskId: string) => Promise<void>
   archiveTasks: (taskIds: string[]) => Promise<void>
   deleteTask: (taskId: string) => Promise<void>
@@ -272,6 +273,36 @@ export function useTasksData(): UseTasksDataReturn {
     ]).catch(() => setTasks(snapshot))
   }, [])
 
+  // Bulk variant — used when dragging a multi-selection in the tree view.
+  // All `taskIds` get the same `newParentId`; `newSiblingTaskIds` is the new
+  // ordered sibling list under that parent (which contains the moved ids in
+  // their target positions plus any pre-existing siblings).
+  const bulkReparent = useCallback((
+    taskIds: string[],
+    newParentId: string | null,
+    newSiblingTaskIds: string[]
+  ) => {
+    if (taskIds.length === 0) return
+    const idSet = new Set(taskIds)
+    let snapshot: Task[] = []
+    setTasks((prevTasks) => {
+      snapshot = prevTasks
+      return prevTasks.map((t) => {
+        if (idSet.has(t.id)) {
+          const newOrder = newSiblingTaskIds.indexOf(t.id)
+          return { ...t, parent_id: newParentId, order: newOrder >= 0 ? newOrder : t.order }
+        }
+        const idx = newSiblingTaskIds.indexOf(t.id)
+        if (idx >= 0) return { ...t, order: idx }
+        return t
+      })
+    })
+    Promise.all([
+      window.api.db.updateTasks({ ids: taskIds, updates: { parentId: newParentId } }),
+      window.api.db.reorderTasks(newSiblingTaskIds),
+    ]).catch(() => setTasks(snapshot))
+  }, [])
+
   // Archive single task
   const archiveTask = useCallback(async (taskId: string) => {
     const now = new Date().toISOString()
@@ -466,6 +497,7 @@ export function useTasksData(): UseTasksDataReturn {
     bulkMove,
     reorderTasks,
     reparentTask,
+    bulkReparent,
     archiveTask,
     archiveTasks,
     deleteTask,

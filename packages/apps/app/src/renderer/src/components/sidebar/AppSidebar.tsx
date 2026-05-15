@@ -39,7 +39,9 @@ interface AppSidebarProps {
   onTaskReorder?: (taskIds: string[]) => void
   onTaskMove?: (taskId: string, newColumnId: string, targetIndex: number, groupBy: 'status' | 'priority') => void
   onTaskReparent?: (taskId: string, newParentId: string | null, newSiblingTaskIds: string[]) => void
+  onTaskBulkReparent?: (taskIds: string[], newParentId: string | null, newSiblingTaskIds: string[]) => void
   onTaskFieldUpdate?: (taskId: string, updates: Partial<Task>) => void
+  onTaskBulkFieldUpdate?: (taskIds: string[], updates: Partial<Task>) => void
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode
   terminalStates?: Map<string, TerminalState>
   taskProgress?: Map<string, number>
@@ -125,7 +127,9 @@ export function AppSidebar({
   onTaskReorder,
   onTaskMove,
   onTaskReparent,
+  onTaskBulkReparent,
   onTaskFieldUpdate,
+  onTaskBulkFieldUpdate,
   taskContextMenuRender,
   terminalStates,
   taskProgress,
@@ -211,7 +215,9 @@ export function AppSidebar({
               onTaskReorder,
               onTaskMove,
               onTaskReparent,
+              onTaskBulkReparent,
               onTaskFieldUpdate,
+              onTaskBulkFieldUpdate,
               idleByProject,
               taskContextMenuRender,
               terminalStates,

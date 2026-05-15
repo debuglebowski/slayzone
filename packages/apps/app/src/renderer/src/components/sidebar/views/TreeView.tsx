@@ -111,6 +111,15 @@ interface TaskBranchCtx {
   columnsByProjectId?: Map<string, import('@slayzone/projects/shared').ColumnConfig[] | null>
   pinnedSet: Set<string>
   selectedTaskIds: Set<string>
+  /** For each selected task, whether it sits at the top/bottom of its
+   * contiguous selection run in the project's render order. Used to draw a
+   * single subtle border around the run when multi-selecting. Empty when
+   * fewer than 2 tasks are selected. */
+  selectionRunInfo: Map<string, { firstInRun: boolean; lastInRun: boolean }>
+  /** Id of the currently-dragged row (null when no drag). Used so all rows
+   * in a multi-drag can hide together — the dragged row plus every other
+   * selected row vanishes while the floating preview shows the count. */
+  activeDragTaskId: string | null
   treeShowStatus: boolean
   treeShowPriority: boolean
   treeShowWorktree: boolean
@@ -201,6 +210,17 @@ function TaskRow({
     data: dragData,
     disabled: !draggable,
   })
+  // Multi-drag: when the dragged row is part of a multi-selection, every
+  // selected row should appear to "lift" together. Hide all selected rows
+  // (not just the dragged one) so the floating +N preview is the only
+  // visible representation of the moving set.
+  const isMultiDragSourceActive =
+    ctx.activeDragTaskId !== null
+    && ctx.selectedTaskIds.has(ctx.activeDragTaskId)
+    && ctx.selectedTaskIds.size > 1
+  const hideForMultiDrag = isMultiDragSourceActive && ctx.selectedTaskIds.has(task.id)
+  const effectivelyHidden = isDragging || hideForMultiDrag
+
   // While dragging, the floating preview renders via DragOverlay (portal,
   // escapes the project's overflow-hidden clip). Hide source row but keep
   // its layout reserved — verticalListSortingStrategy measures each row's
@@ -209,8 +229,8 @@ function TaskRow({
   const style: CSSProperties = {
     transform: isDragging ? undefined : CSS.Transform.toString(transform),
     transition: isDragging ? undefined : transition,
-    opacity: isDragging ? 0 : 1,
-    pointerEvents: isDragging ? 'none' : undefined,
+    opacity: effectivelyHidden ? 0 : 1,
+    pointerEvents: effectivelyHidden ? 'none' : undefined,
   }
 
   const isActive = ctx.activeTaskId === task.id
@@ -248,14 +268,39 @@ function TaskRow({
       <TreeGuides depth={depth} ancestorFlags={ancestorFlags} />
       <span
         className={cn(
-          'relative flex flex-1 items-center gap-2 rounded-md px-1.5 py-1 min-w-0 transition-colors',
-          isSelected
-            ? 'bg-accent/60 text-accent-foreground ring-1 ring-accent ring-inset'
-            : isActive
-              ? 'bg-white/10 text-foreground'
-              : isOpenTab
-                ? 'text-foreground hover:bg-accent/40'
-                : 'text-muted-foreground/45 hover:bg-accent/40 hover:text-accent-foreground'
+          'relative flex flex-1 items-center gap-2 px-1.5 py-1 min-w-0 transition-colors',
+          // Selection visuals: single = bold ring; multi = subtle bg + a single
+          // border around contiguous run. Run-position (first/last) controls
+          // which sides get borders + corner rounding so adjacent selected
+          // rows fuse into one outlined block.
+          (() => {
+            if (!isSelected) {
+              return cn(
+                'rounded-md',
+                isActive
+                  ? 'bg-white/10 text-foreground'
+                  : isOpenTab
+                    ? 'text-foreground hover:bg-accent/40'
+                    : 'text-muted-foreground/45 hover:bg-accent/40 hover:text-accent-foreground'
+              )
+            }
+            const isMulti = ctx.selectedTaskIds.size > 1
+            if (!isMulti) {
+              return 'rounded-md bg-accent/60 text-accent-foreground ring-1 ring-accent ring-inset'
+            }
+            const run = ctx.selectionRunInfo.get(task.id)
+            const first = run?.firstInRun ?? true
+            const last = run?.lastInRun ?? true
+            return cn(
+              'bg-accent/30 text-foreground border-l border-r border-foreground/25',
+              first && 'border-t',
+              last && 'border-b',
+              first && last && 'rounded-md',
+              first && !last && 'rounded-t-md rounded-b-none',
+              !first && last && 'rounded-b-md rounded-t-none',
+              !first && !last && 'rounded-none'
+            )
+          })()
         )}
       >
         <TerminalProgressDot
@@ -407,17 +452,42 @@ function TaskBranch({
 // so it escapes the project's `overflow-hidden` collapsible wrapper. Without
 // this, the dragged row's transform is clipped at the project boundary and
 // vanishes after a few pixels of motion.
-function TaskDragPreview({ task }: { task: Task }): ReactNode {
+function TaskDragPreview({ tasks }: { tasks: Task[] }): ReactNode {
+  if (tasks.length === 0) return null
+  const lead = tasks[0]
+  const extra = tasks.length - 1
+  const isMulti = extra > 0
+  // Single-row card with source title + "+N" chip. When multi, two thin peeks
+  // behind hint at the stack without making a heavy visual.
   return (
-    <div className="flex items-center gap-2 rounded-md bg-surface-2/95 px-2 py-1 text-sm text-foreground shadow-lg ring-1 ring-border min-h-[28px]">
-      <TerminalProgressDot
-        state={undefined}
-        progress={undefined}
-        isDone={false}
-        needsAttention={Boolean(task.needs_attention)}
-        alwaysShow
-      />
-      <span className="truncate max-w-[260px]">{task.title || 'Untitled'}</span>
+    <div className="relative">
+      {isMulti && (
+        <>
+          <div
+            aria-hidden
+            className="absolute inset-0 -z-10 translate-x-1 translate-y-1 rounded-md bg-surface-2/60 ring-1 ring-border/60"
+          />
+          <div
+            aria-hidden
+            className="absolute inset-0 -z-20 translate-x-2 translate-y-2 rounded-md bg-surface-2/30 ring-1 ring-border/40"
+          />
+        </>
+      )}
+      <div className="relative flex items-center gap-2 rounded-md bg-surface-2/95 px-2 py-1 text-sm text-foreground shadow-lg ring-1 ring-border min-h-[28px]">
+        <TerminalProgressDot
+          state={undefined}
+          progress={undefined}
+          isDone={false}
+          needsAttention={Boolean(lead.needs_attention)}
+          alwaysShow
+        />
+        <span className="truncate max-w-[260px]">{lead.title || 'Untitled'}</span>
+        {isMulti && (
+          <span className="shrink-0 rounded bg-foreground/10 text-muted-foreground px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
+            +{extra}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -469,7 +539,9 @@ export function TreeView({
   onTaskReorder,
   onTaskMove,
   onTaskReparent,
+  onTaskBulkReparent,
   onTaskFieldUpdate,
+  onTaskBulkFieldUpdate,
 }: SidebarViewContext) {
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
@@ -815,10 +887,25 @@ export function TreeView({
     onTaskClick?.(taskId)
   }, [selectionAnchorId, tasksById, getSiblings, onTaskClick])
 
-  // Drop semantics: source always becomes a SIBLING of the target row. Never
-  // a child. Target's parent → source's new parent. Target root → source root
-  // (with target's group field). Target subtask → source subtask under same
-  // parent. Group-header drop = root in that group.
+  // Render-order list of moved task ids — the dragged set, in tree visual
+  // order. Used so a multi-drag reinserts moved tasks in their original
+  // relative order rather than selection iteration order.
+  const getMovedIdsInRenderOrder = useCallback((projectId: string, ids: Set<string>): string[] => {
+    if (ids.size === 0) return []
+    const groups = rootGroupsByProject.get(projectId) ?? []
+    const ordered: string[] = []
+    const walk = (t: Task) => {
+      if (ids.has(t.id) && t.project_id === projectId) ordered.push(t.id)
+      const kids = childrenByParent.get(t.id) ?? []
+      for (const k of kids) walk(k)
+    }
+    for (const g of groups) for (const root of g.tasks) walk(root)
+    return ordered
+  }, [rootGroupsByProject, childrenByParent])
+
+  // Drop semantics: dragged set always becomes SIBLINGS of the target row.
+  // Never children. Multi-drag (selection size > 1, drag handle row is in
+  // selection) moves all selected; otherwise just the dragged row.
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setActiveDragTaskId(null)
     const { active, over } = event
@@ -836,40 +923,64 @@ export function TreeView({
     if (!groups) return
     const groupByKey = new Map(groups.map((g) => [g.key, g]))
 
-    // === Drop on a group header — make source a root in that group. ===
+    // Build the moved set. Multi-drag only when the dragged row is part of a
+    // multi-selection; otherwise treat as single (don't sweep up selection
+    // unrelated to this drag).
+    const isMulti = selectedTaskIds.has(sourceId) && selectedTaskIds.size > 1
+    const movedIds = isMulti
+      ? getMovedIdsInRenderOrder(activeData.projectId, selectedTaskIds)
+      : [sourceId]
+    if (movedIds.length === 0) return
+
+    // === Drop on a group header — all moved become roots in that group. ===
     if (overData.kind === 'group') {
       const g = groupByKey.get(overData.groupValue)
       if (!g || g.isTemp || g.isPinned) return
-      const sameGroup = activeData.parentId === null && overData.groupValue === activeData.groupValue
-      if (sameGroup) return
-      if (activeData.parentId !== null) {
-        // Subtask → root: reparent + set group field.
-        const newSiblings = [...g.tasks.map((t) => t.id).filter((id) => id !== sourceId), sourceId]
-        onTaskReparent?.(sourceId, null, newSiblings)
-        const fieldUpdate: Partial<Task> = treeGroupBy === 'status'
-          ? { status: overData.groupValue as Task['status'] }
-          : { priority: parseInt(overData.groupValue.slice(1), 10) }
-        onTaskFieldUpdate?.(sourceId, fieldUpdate)
+      // Skip when nothing to do (single root already in same group, no-op).
+      if (
+        movedIds.length === 1 &&
+        activeData.parentId === null &&
+        overData.groupValue === activeData.groupValue
+      ) {
         return
       }
-      // Root → cross-group move.
-      onTaskMove?.(sourceId, overData.groupValue, g.tasks.length, treeGroupBy)
+      const movedSet = new Set(movedIds)
+      const newSiblings = [
+        ...g.tasks.map((t) => t.id).filter((id) => !movedSet.has(id)),
+        ...movedIds,
+      ]
+      const fieldUpdate: Partial<Task> = treeGroupBy === 'status'
+        ? { status: overData.groupValue as Task['status'] }
+        : { priority: parseInt(overData.groupValue.slice(1), 10) }
+      if (movedIds.length === 1) {
+        if (activeData.parentId !== null) {
+          onTaskReparent?.(sourceId, null, newSiblings)
+          onTaskFieldUpdate?.(sourceId, fieldUpdate)
+        } else {
+          onTaskMove?.(sourceId, overData.groupValue, g.tasks.length, treeGroupBy)
+        }
+      } else {
+        onTaskBulkReparent?.(movedIds, null, newSiblings)
+        onTaskBulkFieldUpdate?.(movedIds, fieldUpdate)
+      }
       return
     }
 
-    // === Drop on a task row — make source a sibling of target. ===
+    // === Drop on a task row — moved set becomes siblings of target. ===
     const targetId = over.id as string
-    if (sourceId === targetId) return
+    if (movedIds.includes(targetId) && movedIds.length === 1) return
     const target = tasksById.get(targetId)
     if (!target) return
     const targetParent = target.parent_id ?? null
 
-    // Cycle check — source becoming child of own descendant.
-    if (targetParent !== null && wouldCycle(sourceId, targetParent)) return
+    // Cycle check — none of the moved tasks may be ancestor of targetParent.
+    if (targetParent !== null) {
+      for (const m of movedIds) {
+        if (wouldCycle(m, targetParent)) return
+      }
+    }
 
-    // Determine "above or below target" by comparing pointer Y to target's
-    // mid-Y. dnd-kit doesn't pass pointer position directly to onDragEnd; we
-    // reconstruct it from activator pointer + drag delta.
+    // Pointer-Y vs target mid → above/below target.
     const startY =
       event.activatorEvent && 'clientY' in event.activatorEvent
         ? (event.activatorEvent as { clientY: number }).clientY
@@ -878,7 +989,6 @@ export function TreeView({
     const overRect = over.rect
     const insertBelow = pointerY > overRect.top + overRect.height / 2
 
-    // Build sibling list with source inserted above or below target accordingly.
     let siblings: Task[]
     let targetGroupKey: string | null = null
     if (targetParent === null) {
@@ -889,49 +999,91 @@ export function TreeView({
     } else {
       siblings = childrenByParent.get(targetParent) ?? []
     }
-    const filtered = siblings.filter((s) => s.id !== sourceId)
+
+    // Strip moved AND target out of siblings, find target's slot in the
+    // stripped list, then re-insert moved (in render order) at insert slot.
+    const movedSet = new Set(movedIds)
+    const filtered = siblings.filter((s) => !movedSet.has(s.id))
     const targetIdx = filtered.findIndex((s) => s.id === targetId)
     if (targetIdx === -1) return
     const insertIdx = insertBelow ? targetIdx + 1 : targetIdx
     const newSiblingIds = [
       ...filtered.slice(0, insertIdx).map((s) => s.id),
-      sourceId,
+      ...movedIds,
       ...filtered.slice(insertIdx).map((s) => s.id),
     ]
 
-    const sameParent = activeData.parentId === targetParent
-
-    if (sameParent) {
-      if (targetParent === null && targetGroupKey !== null && activeData.groupValue !== targetGroupKey) {
-        // Cross-group root reorder → moveTask handles status/priority + position.
-        onTaskMove?.(sourceId, targetGroupKey, insertIdx, treeGroupBy)
-        // Skip orderBy inherit when moveTask already wrote that same field.
-        if (!(treeOrderBy === 'priority' && treeGroupBy === 'priority')) {
-          inheritOrderByField(sourceId, targetId)
+    // Single-source no-op guard (reorder onto own current slot).
+    if (movedIds.length === 1) {
+      const sameParent = activeData.parentId === targetParent
+      if (sameParent) {
+        const oldIdx = siblings.findIndex((s) => s.id === sourceId)
+        if (oldIdx !== -1) {
+          const adjusted = oldIdx < insertIdx ? insertIdx - 1 : insertIdx
+          if (adjusted === oldIdx) return
         }
+      }
+    }
+
+    // Decide: do all moved already share the new parent? (Pure reorder vs reparent.)
+    const allSameParent = movedIds.every((id) => (tasksById.get(id)?.parent_id ?? null) === targetParent)
+
+    if (movedIds.length === 1) {
+      const sameParent = activeData.parentId === targetParent
+      if (sameParent) {
+        if (targetParent === null && targetGroupKey !== null && activeData.groupValue !== targetGroupKey) {
+          onTaskMove?.(sourceId, targetGroupKey, insertIdx, treeGroupBy)
+          if (!(treeOrderBy === 'priority' && treeGroupBy === 'priority')) {
+            inheritOrderByField(sourceId, targetId)
+          }
+          return
+        }
+        onTaskReorder?.(newSiblingIds)
+        inheritOrderByField(sourceId, targetId)
         return
       }
-      // Same group: no-op if dragged to its own slot.
-      const oldIdx = siblings.findIndex((s) => s.id === sourceId)
-      if (oldIdx !== -1) {
-        const adjustedInsertIdx = oldIdx < insertIdx ? insertIdx - 1 : insertIdx
-        if (adjustedInsertIdx === oldIdx) return
+      onTaskReparent?.(sourceId, targetParent, newSiblingIds)
+      if (targetParent === null && targetGroupKey !== null) {
+        const fieldUpdate: Partial<Task> = treeGroupBy === 'status'
+          ? { status: targetGroupKey as Task['status'] }
+          : { priority: parseInt(targetGroupKey.slice(1), 10) }
+        onTaskFieldUpdate?.(sourceId, fieldUpdate)
       }
-      onTaskReorder?.(newSiblingIds)
       inheritOrderByField(sourceId, targetId)
       return
     }
 
-    // Different parent → reparent.
-    onTaskReparent?.(sourceId, targetParent, newSiblingIds)
+    // Multi-drag dispatch.
+    if (allSameParent) {
+      onTaskReorder?.(newSiblingIds)
+    } else {
+      onTaskBulkReparent?.(movedIds, targetParent, newSiblingIds)
+    }
+    // Inherit groupBy field if becoming root in a group different from any
+    // moved task's current value. Apply uniformly to all moved.
     if (targetParent === null && targetGroupKey !== null) {
       const fieldUpdate: Partial<Task> = treeGroupBy === 'status'
         ? { status: targetGroupKey as Task['status'] }
         : { priority: parseInt(targetGroupKey.slice(1), 10) }
-      onTaskFieldUpdate?.(sourceId, fieldUpdate)
+      onTaskBulkFieldUpdate?.(movedIds, fieldUpdate)
     }
-    inheritOrderByField(sourceId, targetId)
-  }, [childrenByParent, rootGroupsByProject, onTaskReorder, onTaskMove, onTaskReparent, onTaskFieldUpdate, treeGroupBy, treeGroupPinned, treeOrderBy, pinnedSet, tasksById, wouldCycle, inheritOrderByField])
+    // orderBy inheritance per moved task — they all snap to target's value.
+    if (treeOrderBy === 'priority' || treeOrderBy === 'due_date') {
+      const fieldUpdate: Partial<Task> = treeOrderBy === 'priority'
+        ? { priority: target.priority }
+        : { due_date: target.due_date ?? null }
+      // Skip when groupBy already wrote the same field.
+      const skipOverlap = targetParent === null && targetGroupKey !== null
+        && ((treeOrderBy === 'priority' && treeGroupBy === 'priority'))
+      if (!skipOverlap) onTaskBulkFieldUpdate?.(movedIds, fieldUpdate)
+    }
+  }, [
+    childrenByParent, rootGroupsByProject, onTaskReorder, onTaskMove, onTaskReparent,
+    onTaskBulkReparent, onTaskFieldUpdate, onTaskBulkFieldUpdate,
+    treeGroupBy, treeGroupPinned, treeOrderBy, pinnedSet,
+    selectedTaskIds, getMovedIdsInRenderOrder,
+    tasksById, wouldCycle, inheritOrderByField,
+  ])
 
   const renderGroupAddButton = (
     group: TreeGroup,
@@ -1043,6 +1195,19 @@ export function TreeView({
       }
       return ids
     })()
+    // Compute first/last-in-run flags for each selected task, scanning
+    // adjacency in flat render order. Skipped when fewer than 2 selected
+    // (single-select uses its own visual treatment).
+    const selectionRunInfo = new Map<string, { firstInRun: boolean; lastInRun: boolean }>()
+    if (selectedTaskIds.size > 1) {
+      for (let i = 0; i < flatTaskIds.length; i++) {
+        const id = flatTaskIds[i]
+        if (!selectedTaskIds.has(id)) continue
+        const prevSelected = i > 0 && selectedTaskIds.has(flatTaskIds[i - 1])
+        const nextSelected = i < flatTaskIds.length - 1 && selectedTaskIds.has(flatTaskIds[i + 1])
+        selectionRunInfo.set(id, { firstInRun: !prevSelected, lastInRun: !nextSelected })
+      }
+    }
     const branchCtx: TaskBranchCtx = {
       childrenByParent,
       activeTaskId,
@@ -1053,6 +1218,8 @@ export function TreeView({
       columnsByProjectId,
       pinnedSet,
       selectedTaskIds,
+      selectionRunInfo,
+      activeDragTaskId,
       treeShowStatus,
       treeShowPriority,
       treeShowWorktree,
@@ -1219,8 +1386,16 @@ export function TreeView({
         <DragOverlay dropAnimation={null}>
           {activeDragTaskId
             ? (() => {
-                const t = tasks.find((x) => x.id === activeDragTaskId)
-                return t ? <TaskDragPreview task={t} /> : null
+                const active = tasksById.get(activeDragTaskId)
+                if (!active) return null
+                const isMulti = selectedTaskIds.has(activeDragTaskId) && selectedTaskIds.size > 1
+                const ids = isMulti
+                  ? getMovedIdsInRenderOrder(active.project_id, selectedTaskIds)
+                  : [activeDragTaskId]
+                const movedTasks = ids
+                  .map((id) => tasksById.get(id))
+                  .filter((t): t is Task => Boolean(t))
+                return <TaskDragPreview tasks={movedTasks} />
               })()
             : null}
         </DragOverlay>

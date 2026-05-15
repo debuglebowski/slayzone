@@ -66,6 +66,7 @@ test.describe('TreeView multi-select', () => {
   let rootA: string
   let rootB: string
   let rootC: string
+  let rootTodo: string
   let subA1: string
   let subA2: string
   let subA3: string
@@ -79,6 +80,7 @@ test.describe('TreeView multi-select', () => {
     rootA = (await s.createTask({ projectId, title: 'MS A', status: 'in_progress' })).id
     rootB = (await s.createTask({ projectId, title: 'MS B', status: 'in_progress' })).id
     rootC = (await s.createTask({ projectId, title: 'MS C', status: 'in_progress' })).id
+    rootTodo = (await s.createTask({ projectId, title: 'MS Todo', status: 'todo' })).id
 
     subA1 = (await mainWindow.evaluate(
       ({ pid, parentId }) => window.api.db.createTask({ projectId: pid, title: 'MS Sub A1', status: 'in_progress', parentId }),
@@ -123,11 +125,13 @@ test.describe('TreeView multi-select', () => {
     await seed(mainWindow).refreshData()
     await ensureProjectExpanded(mainWindow, projectName)
     await killAllPtys(mainWindow)
-    // Reset task order so render order is deterministic: A,B,C and A1,A2,A3.
-    await mainWindow.evaluate(async ({ a, b, c, s1, s2, s3 }) => {
+    // Reset task order/status so each test is independent.
+    await mainWindow.evaluate(async ({ a, b, c, todo, s1, s2, s3 }) => {
+      await window.api.db.updateTasks({ ids: [a, b, c, s1, s2, s3], updates: { status: 'in_progress' } })
+      await window.api.db.updateTasks({ ids: [todo], updates: { status: 'todo' } })
       await window.api.db.reorderTasks([a, b, c])
       await window.api.db.reorderTasks([s1, s2, s3])
-    }, { a: rootA, b: rootB, c: rootC, s1: subA1, s2: subA2, s3: subA3 })
+    }, { a: rootA, b: rootB, c: rootC, todo: rootTodo, s1: subA1, s2: subA2, s3: subA3 })
     await seed(mainWindow).refreshData()
     await expect(taskRow(mainWindow, rootA)).toBeVisible({ timeout: 5_000 })
     await expect(taskRow(mainWindow, rootB)).toBeVisible()
@@ -212,6 +216,81 @@ test.describe('TreeView multi-select', () => {
       () => getSelectedIds(mainWindow, [rootA, rootB, rootC, subA1, subA2, subA3]),
       { timeout: 3_000 }
     ).toEqual([rootA, subA2])
+  })
+
+  test('multi-drag: selected roots move together into target slot', async ({ mainWindow }) => {
+    // Make a 4th root D so we have a clear non-selected target to drop on.
+    const rootDObj = await mainWindow.evaluate(
+      (pid) => window.api.db.createTask({ projectId: pid, title: 'MS D', status: 'in_progress' }),
+      projectId
+    )
+    const rootD = rootDObj!.id
+    try {
+      await mainWindow.evaluate(async ({ a, b, c, d }) => {
+        await window.api.db.reorderTasks([a, b, c, d])
+      }, { a: rootA, b: rootB, c: rootC, d: rootD })
+      await seed(mainWindow).refreshData()
+      await expect(taskRow(mainWindow, rootD)).toBeVisible()
+
+      // Select A and B (multi).
+      await taskRow(mainWindow, rootA).click()
+      await taskRow(mainWindow, rootB).click({ modifiers: ['Meta'] })
+
+      // Drag from B (a selected row) onto bottom half of D — A and B should
+      // both land after D in render order A, B.
+      const srcBox = await taskRow(mainWindow, rootB).boundingBox()
+      const dstBox = await taskRow(mainWindow, rootD).boundingBox()
+      if (!srcBox || !dstBox) throw new Error('boxes unavailable')
+
+      await mainWindow.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2)
+      await mainWindow.mouse.down()
+      await mainWindow.mouse.move(srcBox.x + srcBox.width / 2 + 12, srcBox.y + srcBox.height / 2, { steps: 5 })
+      await mainWindow.mouse.move(dstBox.x + dstBox.width / 2, dstBox.y + dstBox.height - 4, { steps: 20 })
+      await mainWindow.mouse.up()
+
+      // Expected new order: C, D, A, B.
+      await expect.poll(async () => {
+        const tasksList = await seed(mainWindow).getTasks()
+        const byId = new Map(tasksList.map((t: { id: string }) => [t.id, t]))
+        return [
+          (byId.get(rootC) as { order: number } | undefined)?.order,
+          (byId.get(rootD) as { order: number } | undefined)?.order,
+          (byId.get(rootA) as { order: number } | undefined)?.order,
+          (byId.get(rootB) as { order: number } | undefined)?.order,
+        ]
+      }, { timeout: 5_000 }).toEqual([0, 1, 2, 3])
+    } finally {
+      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootD)
+    }
+  })
+
+  test('multi-drag: cross-group drop on group header changes status for all selected', async ({ mainWindow }) => {
+    // Select A and B, drop their drag onto the 'todo' group → both get status='todo'.
+    await taskRow(mainWindow, rootA).click()
+    await taskRow(mainWindow, rootB).click({ modifiers: ['Meta'] })
+
+    const srcBox = await taskRow(mainWindow, rootB).boundingBox()
+    const todoGroup = mainWindow.locator(`[data-testid="tree-status-group"][data-project-id="${projectId}"][data-status="todo"]`)
+    // Group may be empty (no rows under it) — its bounding box still exists for the header.
+    const dstBox = await todoGroup.boundingBox()
+    if (!srcBox || !dstBox) throw new Error('boxes unavailable')
+
+    await mainWindow.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2)
+    await mainWindow.mouse.down()
+    await mainWindow.mouse.move(srcBox.x + srcBox.width / 2 + 12, srcBox.y + srcBox.height / 2, { steps: 5 })
+    await mainWindow.mouse.move(dstBox.x + dstBox.width / 2, dstBox.y + dstBox.height / 2, { steps: 20 })
+    await mainWindow.mouse.up()
+
+    await expect.poll(async () => {
+      const tasksList = await seed(mainWindow).getTasks()
+      const byId = new Map(tasksList.map((t: { id: string }) => [t.id, t]))
+      return [
+        (byId.get(rootA) as { status: string } | undefined)?.status,
+        (byId.get(rootB) as { status: string } | undefined)?.status,
+      ]
+    }, { timeout: 5_000 }).toEqual(['todo', 'todo'])
+
+    // beforeEach resets status for the next test.
   })
 
   test('plain click clears an existing multi-selection', async ({ mainWindow }) => {
