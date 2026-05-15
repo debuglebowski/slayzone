@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import type { RestApiDeps } from './types'
 import { registerNotifyRoute } from './notify'
+import { registerAgentHookRoute } from './agent-hook'
 import { registerProcessesListRoute } from './processes/list'
 import { registerProcessesLogsRoute } from './processes/logs'
 import { registerProcessesDeleteRoute } from './processes/delete'
@@ -44,6 +45,9 @@ export type { RestApiDeps } from './types'
 export function registerRestApi(app: Express, deps: RestApiDeps): void {
   // Notify
   registerNotifyRoute(app, deps)
+
+  // Agent lifecycle hooks
+  registerAgentHookRoute(app, deps)
 
   // Processes
   registerProcessesListRoute(app, deps)

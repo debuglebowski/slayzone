@@ -3,6 +3,13 @@ export * from './dev-server'
 export * from './strip-underline'
 export * from './osc'
 export * from './agent-events'
+export {
+  HOOK_SUPPORTED_AGENT_IDS,
+  mapEventType,
+  type AgentId,
+  type AgentLifecycleEvent,
+  type AgentLifecycleEventType,
+} from './agent-event-handler'
 export * from './chat-mode'
 export * from './chat-model'
 export * from './chat-effort'

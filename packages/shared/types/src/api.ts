@@ -19,6 +19,7 @@ import type {
   CreateTerminalModeInput,
   UpdateTerminalModeInput,
   AgentEvent,
+  AgentLifecycleEvent as AgentLifecycleEventPayload,
   SkillInfo,
   CommandInfo,
   AgentInfo,
@@ -310,6 +311,14 @@ export interface ElectronAPI {
   agentTurns: {
     list: (worktreePath: string) => Promise<AgentTurnRange[]>
     onChanged: (callback: (worktreePath: string) => void) => () => void
+  }
+  agentLifecycle: {
+    /**
+     * Subscribe to hook-driven agent lifecycle events (Start/Stop/PermissionRequest/...).
+     * Event shape is `AgentLifecycleEvent` from `@slayzone/terminal/shared` —
+     * typed loosely here to avoid a cross-package type import in this barrel.
+     */
+    onEvent: (callback: (event: AgentLifecycleEventPayload) => void) => () => void
   }
   taskTags: {
     getAll: () => Promise<Record<string, string[]>>

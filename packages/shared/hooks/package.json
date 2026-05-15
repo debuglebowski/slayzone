@@ -1,0 +1,9 @@
+{
+  "name": "@slayzone/hooks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./notify.sh": "./src/notify.sh"
+  }
+}

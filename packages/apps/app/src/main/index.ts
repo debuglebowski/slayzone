@@ -1335,6 +1335,27 @@ app.whenReady().then(async () => {
     })
   })
 
+  // Install agent lifecycle hook script + Claude settings.json entries.
+  // Off boot critical path; failures must NOT block app startup (logged only).
+  // Skipped under Playwright unless the spec explicitly opts in — most E2E
+  // tests share one Electron window and would otherwise mutate the dev user's
+  // real ~/.claude/settings.json.
+  if (!process.env.PLAYWRIGHT || process.env.SLAYZONE_E2E_INSTALL_HOOKS === '1') {
+    setImmediate(async () => {
+      try {
+        const [{ installNotifyScript }, { installClaudeHooks }] = await Promise.all([
+          import('./agent-hooks/notify-script-installer'),
+          import('./agent-hooks/claude-hook-installer'),
+        ])
+        const { path: scriptPath } = await installNotifyScript()
+        await installClaudeHooks({ scriptPath })
+        logBoot('agent hooks installed')
+      } catch (err) {
+        console.error('[agent-hooks] install failed:', err)
+      }
+    })
+  }
+
   linearSyncPoller = startSyncPoller(db, notifyTasksChanged)
   discoveryPoller = startDiscoveryPoller(db, notifyTasksChanged)
   logBoot('integration pollers started (sync 10s, discovery 60s)')
@@ -2323,6 +2344,18 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       // 9. Re-init process manager
       initProcessManager(db)
       return { ok: true }
+    })
+
+    // E2E test bridges. Cheap, read-only. Gated to Playwright so they cannot
+    // be invoked from a production renderer.
+    ipcMain.handle('e2e:get-env', (_e, keys: string[]) => {
+      if (!Array.isArray(keys)) return {}
+      const out: Record<string, string | undefined> = {}
+      for (const k of keys) out[k] = process.env[k]
+      return out
+    })
+    ipcMain.handle('e2e:get-mcp-port', () => {
+      return (globalThis as Record<string, unknown>).__mcpPort ?? null
     })
   }
 

@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",

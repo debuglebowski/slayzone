@@ -84,6 +84,22 @@ const api: ElectronAPI = {
       return () => ipcRenderer.removeListener('agent-turns:changed', handler)
     }
   },
+  agentLifecycle: {
+    onEvent: (callback) => {
+      const handler = (_: unknown, event: Parameters<typeof callback>[0]): void => {
+        callback(event)
+        // Test bridge: stash the last event on window so Playwright can poll without
+        // having to install its own listener via page.evaluate inside the spec.
+        if (process.env.PLAYWRIGHT === '1') {
+          try {
+            ;(globalThis as Record<string, unknown>).__lastAgentLifecycleEvent = event
+          } catch { /* noop */ }
+        }
+      }
+      ipcRenderer.on('agent:lifecycle', handler)
+      return () => ipcRenderer.removeListener('agent:lifecycle', handler)
+    }
+  },
   taskTags: {
     getAll: () => ipcRenderer.invoke('db:taskTags:getAll'),
     getTagsForTask: (taskId) => ipcRenderer.invoke('db:taskTags:getForTask', taskId),

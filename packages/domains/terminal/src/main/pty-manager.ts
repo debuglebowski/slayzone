@@ -574,7 +574,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<{ success: bool
       }
     })
 
-    const mcpEnv = buildMcpEnv(db, taskId)
+    const mcpEnv = buildMcpEnv(db, taskId, terminalMode)
 
     const baseEnv = {
       ...process.env,

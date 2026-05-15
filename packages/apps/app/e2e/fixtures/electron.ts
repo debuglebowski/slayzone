@@ -259,6 +259,12 @@ async function launchElectronWithRetry(args: {
           // with main-process output emitted before its 'data' listener attaches.
           SLAYZONE_DEBUG_BOOT: launchEnv.SLAYZONE_DEBUG_BOOT ?? '1',
           SLAYZONE_BOOT_LOG_PATH: bootLogPath,
+          // Sandbox agent hook install paths so e2e never touches the dev user's
+          // real ~/.slayzone or ~/.claude/settings.json. `SLAYZONE_E2E_INSTALL_HOOKS=1`
+          // opts the install path back in despite PLAYWRIGHT=1 skipping it by default.
+          SLAYZONE_E2E_INSTALL_HOOKS: '1',
+          SLAYZONE_HOME_DIR: path.join(args.userDataDir, '.slayzone-home'),
+          SLAYZONE_CLAUDE_SETTINGS_PATH: path.join(args.userDataDir, '.claude', 'settings.json'),
         },
       })
 

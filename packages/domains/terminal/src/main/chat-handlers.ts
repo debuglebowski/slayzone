@@ -384,7 +384,7 @@ async function buildHydrateOpts(
 
   const enrichedPath = getEnrichedPath()
   const subprocessEnv: Record<string, string> = {
-    ...buildMcpEnv(db, opts.taskId),
+    ...buildMcpEnv(db, opts.taskId, opts.mode),
     ...(enrichedPath ? { PATH: enrichedPath } : {}),
   }
 
