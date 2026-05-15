@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronDown, ChevronRight, Flag, Plus, GripVertical, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, Circle, Repeat, LayoutTemplate, Paperclip, Power } from 'lucide-react'
+import { MoreHorizontal, Archive, Trash2, AlertTriangle, Loader2, Terminal as TerminalIcon, Globe, Settings2, GitBranch, FileCode, ChevronDown, ChevronRight, Flag, Plus, GripVertical, X, Info, CheckCircle2, XCircle, Stethoscope, Cpu, Circle, Repeat, LayoutTemplate, Paperclip, Power, Eye, Trophy, Award, Sparkles, PartyPopper, Shuffle, Swords, Flame, LayoutGrid } from 'lucide-react'
 import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
 import { DescriptionDialog } from './DescriptionDialog'
 import { ArtifactsPanel, type ArtifactsPanelHandle } from './ArtifactsPanel'
@@ -64,7 +64,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
 import { RichTextEditor } from '@slayzone/editor'
 import { normalizeDescription, stripMarkdown, getExtensionFromTitle, getEffectiveRenderMode, RENDER_MODE_INFO } from '@slayzone/task/shared'
-import { useTheme, useDialogStore, type SearchFileContext } from '@slayzone/settings/client'
+import { useTheme, useDialogStore, useTabStore, type SearchFileContext } from '@slayzone/settings/client'
 import { markSkipCache, usePty, useTerminalModes, getVisibleModes, getModeLabel, groupTerminalModes, useLoopMode, isLoopActive, stripAnsi, serializeTerminalHistory, LoopModeBanner, LoopModeDialog, SlayNudgeBanner, useSlayNudge, PtyStateDot, PtyProgressDot } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal/shared'
 import { TerminalContainer, type TerminalContainerHandle, MODE_ICONS } from '@slayzone/task-terminals'
@@ -285,6 +285,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const { editorThemeId, contentVariant } = useTheme()
   const { notesFontFamily, notesReadability, notesWidth, notesCheckedHighlight, notesShowToolbar, notesSpellcheck } = useAppearance()
+  const taskHeaderPanelMode = useTabStore((s) => s.taskHeaderPanelMode)
+  const taskHeaderPanelAlign = useTabStore((s) => s.taskHeaderPanelAlign)
+  const taskHeaderTitleAlign = useTabStore((s) => s.taskHeaderTitleAlign)
   const notesThemeColors: EditorThemeColors = useMemo(
     () => getThemeEditorColors(editorThemeId, contentVariant),
     [editorThemeId, contentVariant]
@@ -306,6 +309,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const completedStatus = useMemo(() => getDoneStatus(project?.columns_config), [project?.columns_config])
   const [statusPopoverOpen, setStatusPopoverOpen] = useState(false)
   const [priorityPopoverOpen, setPriorityPopoverOpen] = useState(false)
+  const [openCompletedAnyway, setOpenCompletedAnyway] = useState(false)
+  const [completedVariant, setCompletedVariant] = useState(0)
+  useEffect(() => { setOpenCompletedAnyway(false) }, [task?.id])
 
   // Sub-tasks
   const { subTasks, createSubTask, updateSubTask: handleUpdateSubTask, deleteSubTask: handleDeleteSubTask, handleDragEnd: handleSubTaskDragEnd } = useSubTasks(task?.id, initialData?.subTasks)
@@ -1803,7 +1809,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       {/* Header */}
       {!compact && !zenMode && <header className="shrink-0 relative">
         <div>
-          <div className="flex items-center justify-between gap-4 window-no-drag">
+          <div className={cn(
+            'flex items-center gap-4 window-no-drag',
+            taskHeaderTitleAlign === 'left' && taskHeaderPanelAlign === 'right' && 'justify-between',
+            taskHeaderTitleAlign === 'right' && taskHeaderPanelAlign === 'left' && 'justify-between flex-row-reverse',
+            taskHeaderTitleAlign === 'left' && taskHeaderPanelAlign === 'left' && 'justify-start',
+            taskHeaderTitleAlign === 'right' && taskHeaderPanelAlign === 'right' && 'justify-end'
+          )}>
             {task.is_temporary ? (
               <div className="flex shrink-0">
                 <div className="relative min-w-0 w-full">
@@ -1935,47 +1947,108 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
             <div className="flex items-center gap-1 min-w-0">
               {task && (isSecondaryWindow || !hasOpenSecondary) && (
-                <button
-                  type="button"
-                  aria-label={isSecondaryWindow ? 'Reattach task' : 'Detach task to new window'}
-                  onClick={() => {
-                    if (isSecondaryWindow) window.api.window.close()
-                    else window.api.taskWindow.open(task.id)
-                  }}
-                  className="shrink-0 flex items-center gap-1.5 rounded-full bg-muted/50 hover:bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <SquareArrowOutUpRight className="size-3.5" />
-                  {isSecondaryWindow ? 'Reattach' : 'Detach'}
-                </button>
+                taskHeaderPanelMode === 'menu' ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={isSecondaryWindow ? 'Reattach task' : 'Detach task to new window'}
+                        onClick={() => {
+                          if (isSecondaryWindow) window.api.window.close()
+                          else window.api.taskWindow.open(task.id)
+                        }}
+                        className="shrink-0 inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                      >
+                        <SquareArrowOutUpRight className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{isSecondaryWindow ? 'Reattach' : 'Detach'}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label={isSecondaryWindow ? 'Reattach task' : 'Detach task to new window'}
+                    onClick={() => {
+                      if (isSecondaryWindow) window.api.window.close()
+                      else window.api.taskWindow.open(task.id)
+                    }}
+                    className="shrink-0 flex items-center gap-1.5 rounded-full bg-muted/50 hover:bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <SquareArrowOutUpRight className="size-3.5" />
+                    {isSecondaryWindow ? 'Reattach' : 'Detach'}
+                  </button>
+                )
               )}
-              <PanelToggle
-                panels={(() => {
-                  const entries: Record<string, { id: string; icon: typeof Globe; label: string; shortcut?: string | null }> = {
-                    terminal: { id: 'terminal', icon: TerminalIcon, label: 'Agent', shortcut: panelTerminalShortcut },
-                    browser: { id: 'browser', icon: Globe, label: 'Browser', shortcut: panelBrowserShortcut },
-                    editor: { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut },
-                    artifacts: { id: 'artifacts', icon: Paperclip, label: 'Artifacts', shortcut: panelArtifactsShortcut },
-                    diff: { id: 'diff', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut },
-                    processes: { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut },
-                    settings: { id: 'settings', icon: Settings2, label: 'Settings', shortcut: panelSettingsShortcut },
-                  }
-                  for (const wp of enabledWebPanels) {
-                    entries[wp.id] = { id: wp.id, icon: Globe, label: wp.name, shortcut: wp.shortcut ? `⌘${wp.shortcut.toUpperCase()}` : undefined }
-                  }
-                  const ordered = orderedTaskIds
-                    .map(id => entries[id])
-                    .filter((e): e is NonNullable<typeof e> => !!e)
-                    .filter(p => {
-                      // PERMANENT: Agent (terminal) toggle MUST NEVER appear in secondary window. User explicit.
-                      if (isSecondaryWindow && p.id === 'terminal') return false
-                      const isBuiltin = ['terminal', 'browser', 'editor', 'artifacts', 'diff', 'processes', 'settings'].includes(p.id)
-                      if (isBuiltin) return isBuiltinEnabled(p.id, 'task') && !(task.is_temporary && p.id === 'settings')
-                      return true // web panels already filtered by enabledWebPanels
-                    })
-                  return ordered.map(p => ({ ...p, active: !!panelVisibility[p.id] }))
-                })()}
-                onChange={handlePanelToggle}
-              />
+              {(() => {
+                const entries: Record<string, { id: string; icon: typeof Globe; label: string; shortcut?: string | null }> = {
+                  terminal: { id: 'terminal', icon: TerminalIcon, label: 'Agent', shortcut: panelTerminalShortcut },
+                  browser: { id: 'browser', icon: Globe, label: 'Browser', shortcut: panelBrowserShortcut },
+                  editor: { id: 'editor', icon: FileCode, label: 'Editor', shortcut: panelEditorShortcut },
+                  artifacts: { id: 'artifacts', icon: Paperclip, label: 'Artifacts', shortcut: panelArtifactsShortcut },
+                  diff: { id: 'diff', icon: GitBranch, label: 'Git', shortcut: panelGitShortcut },
+                  processes: { id: 'processes', icon: Cpu, label: 'Processes', shortcut: panelProcessesShortcut },
+                  settings: { id: 'settings', icon: Settings2, label: 'Settings', shortcut: panelSettingsShortcut },
+                }
+                for (const wp of enabledWebPanels) {
+                  entries[wp.id] = { id: wp.id, icon: Globe, label: wp.name, shortcut: wp.shortcut ? `⌘${wp.shortcut.toUpperCase()}` : undefined }
+                }
+                const ordered = orderedTaskIds
+                  .map(id => entries[id])
+                  .filter((e): e is NonNullable<typeof e> => !!e)
+                  .filter(p => {
+                    // PERMANENT: Agent (terminal) toggle MUST NEVER appear in secondary window. User explicit.
+                    if (isSecondaryWindow && p.id === 'terminal') return false
+                    const isBuiltin = ['terminal', 'browser', 'editor', 'artifacts', 'diff', 'processes', 'settings'].includes(p.id)
+                    if (isBuiltin) return isBuiltinEnabled(p.id, 'task') && !(task.is_temporary && p.id === 'settings')
+                    return true // web panels already filtered by enabledWebPanels
+                  })
+                  .map(p => ({ ...p, active: !!panelVisibility[p.id] }))
+
+                if (taskHeaderPanelMode === 'menu') {
+                  const activeCount = ordered.filter(p => p.active).length
+                  return (
+                    <DropdownMenu>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label="Panels"
+                              className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 hover:bg-surface-3 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <LayoutGrid className="size-4" />
+                              {activeCount > 0 && (
+                                <span className="tabular-nums text-[10px] text-muted-foreground/80">{activeCount}</span>
+                              )}
+                            </button>
+                          </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">Panels</TooltipContent>
+                      </Tooltip>
+                      <DropdownMenuContent align={taskHeaderPanelAlign === 'left' ? 'start' : 'end'} className="min-w-[180px]">
+                        {ordered.map(p => {
+                          const Icon = p.icon
+                          return (
+                            <DropdownMenuItem
+                              key={p.id}
+                              onSelect={(e) => { e.preventDefault(); handlePanelToggle(p.id, !p.active) }}
+                              className={cn('cursor-pointer gap-2', p.active && 'bg-accent/50')}
+                            >
+                              <Icon className="size-4" />
+                              <span className="flex-1">{p.label}</span>
+                              {p.shortcut && (
+                                <span className="text-[10px] text-muted-foreground tabular-nums">{p.shortcut}</span>
+                              )}
+                            </DropdownMenuItem>
+                          )
+                        })}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )
+                }
+
+                return <PanelToggle panels={ordered} onChange={handlePanelToggle} />
+              })()}
             </div>
           </div>
           {parentTask && (
@@ -2010,36 +2083,130 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
       {/* Split view: terminal | browser | settings | git diff */}
       <div id="task-panels" ref={splitContainerRef} className="flex-1 flex min-h-0">
-        {isTaskCompleted ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="w-full max-w-xl min-h-52 rounded-lg border border-border bg-surface-3 px-5 py-7 text-center flex flex-col items-center justify-center">
-              <p className="text-2xl font-semibold">Task is completed</p>
-              <p className="mt-3 text-base text-muted-foreground">Change the status to view task details.</p>
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-                {resolveColumns(project?.columns_config)
-                  .filter((col) => col.category === 'started')
-                  .map((col) => {
-                    const optStyle = getColumnStatusStyle(col.id, project?.columns_config)
-                    const OptIcon = optStyle?.icon ?? Circle
-                    return (
-                      <button
-                        key={col.id}
-                        type="button"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-1 px-2.5 py-1.5 text-sm cursor-pointer hover:bg-accent"
-                        onClick={async () => {
-                          const updated = await window.api.db.updateTask({ id: task.id, status: col.id })
-                          handleTaskUpdate(updated)
-                        }}
-                      >
-                        <OptIcon className={cn('size-4', optStyle?.iconClass)} strokeWidth={3} />
-                        Move to {col.label}
-                      </button>
-                    )
-                  })}
-              </div>
+        {isTaskCompleted && !openCompletedAnyway ? (() => {
+          const actionButtons = (
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-1/80 backdrop-blur px-3 py-1.5 text-sm cursor-pointer hover:bg-accent"
+                onClick={() => setOpenCompletedAnyway(true)}
+              >
+                <Eye className="size-4" strokeWidth={3} />
+                Show details
+              </button>
+              {resolveColumns(project?.columns_config)
+                .filter((col) => col.category === 'started')
+                .map((col) => {
+                  const optStyle = getColumnStatusStyle(col.id, project?.columns_config)
+                  const OptIcon = optStyle?.icon ?? Circle
+                  return (
+                    <button
+                      key={col.id}
+                      type="button"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-1/80 backdrop-blur px-3 py-1.5 text-sm cursor-pointer hover:bg-accent"
+                      onClick={async () => {
+                        const updated = await window.api.db.updateTask({ id: task.id, status: col.id })
+                        handleTaskUpdate(updated)
+                      }}
+                    >
+                      <OptIcon className={cn('size-4', optStyle?.iconClass)} strokeWidth={3} />
+                      Move to {col.label}
+                    </button>
+                  )
+                })}
             </div>
-          </div>
-        ) : (<>
+          )
+          const variantLabels = ['Trophy hero', 'Sword slash', 'Confetti light', 'Medallion', 'Stamp']
+          const switcher = (
+            <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-md border border-border bg-surface-1/80 backdrop-blur px-2 py-1 text-xs text-muted-foreground">
+              <Shuffle className="size-3" strokeWidth={2.5} />
+              <select
+                value={completedVariant}
+                onChange={(e) => setCompletedVariant(Number(e.target.value))}
+                className="bg-transparent outline-none cursor-pointer text-foreground"
+              >
+                {variantLabels.map((label, i) => (
+                  <option key={i} value={i} className="bg-surface-1 text-foreground">{i + 1}. {label}</option>
+                ))}
+              </select>
+            </div>
+          )
+          const variants = [
+            // V1: Trophy hero — soft glow bg, big trophy
+            <div key="v1" className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+              {switcher}
+              <div className="absolute inset-0 bg-[radial-gradient(circle_closest-side_at_50%_50%,_rgba(245,158,11,0.12)_25%,_transparent_100%)] pointer-events-none" />
+              <div className="relative flex flex-col items-center text-center">
+                <div className="size-20 rounded-full bg-amber-500/15 flex items-center justify-center mb-5 ring-4 ring-amber-500/10">
+                  <Trophy className="size-10 text-amber-500" strokeWidth={2} />
+                </div>
+                <p className="text-5xl font-bold tracking-tight">Slayed!</p>
+                <p className="mt-3 text-base text-muted-foreground">Task wrapped. Take the win.</p>
+                {actionButtons}
+              </div>
+            </div>,
+            // V2: Sword slash — angled accent line + sword icon
+            <div key="v2" className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+              {switcher}
+              <div className="absolute inset-x-0 top-1/2 h-px bg-gradient-to-r from-transparent via-rose-500/40 to-transparent -rotate-6 pointer-events-none" />
+              <div className="absolute inset-x-0 top-1/2 h-px bg-gradient-to-r from-transparent via-rose-500/20 to-transparent rotate-3 translate-y-3 pointer-events-none" />
+              <div className="relative flex flex-col items-center text-center">
+                <Swords className="size-12 text-rose-500 mb-4 -rotate-12" strokeWidth={2} />
+                <p className="text-5xl font-bold tracking-tight">Task slayed</p>
+                <p className="mt-3 text-base text-muted-foreground">Clean cut. Onto the next.</p>
+                {actionButtons}
+              </div>
+            </div>,
+            // V3: Confetti light — few tasteful pieces, big check
+            <div key="v3" className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+              {switcher}
+              <PartyPopper className="absolute top-[18%] left-[22%] size-6 text-fuchsia-400/60 -rotate-12" />
+              <Sparkles className="absolute top-[24%] right-[24%] size-5 text-amber-400/60" />
+              <Sparkles className="absolute bottom-[26%] left-[28%] size-5 text-emerald-400/60" />
+              <PartyPopper className="absolute bottom-[20%] right-[22%] size-6 text-sky-400/60 rotate-12" />
+              <div className="relative flex flex-col items-center text-center">
+                <div className="size-20 rounded-full bg-emerald-500/15 flex items-center justify-center mb-5 ring-4 ring-emerald-500/10">
+                  <CheckCircle2 className="size-11 text-emerald-500" strokeWidth={2.25} />
+                </div>
+                <p className="text-5xl font-bold tracking-tight">You slayed it!</p>
+                <p className="mt-3 text-base text-muted-foreground">Another one in the books.</p>
+                {actionButtons}
+              </div>
+            </div>,
+            // V4: Medallion — gradient circle badge
+            <div key="v4" className="flex-1 flex flex-col items-center justify-center relative">
+              {switcher}
+              <div className="flex flex-col items-center text-center">
+                <div className="relative mb-5">
+                  <div className="size-24 rounded-full bg-gradient-to-br from-emerald-400/40 via-emerald-500/30 to-emerald-700/40 flex items-center justify-center ring-2 ring-emerald-500/50 shadow-[0_0_40px_rgba(16,185,129,0.25)]">
+                    <Flame className="size-12 text-emerald-400" strokeWidth={2} fill="currentColor" fillOpacity={0.2} />
+                  </div>
+                </div>
+                <p className="text-[11px] uppercase tracking-[0.4em] text-emerald-500 font-bold">Slayer</p>
+                <p className="mt-2 text-4xl font-bold tracking-tight">Task slayed</p>
+                <p className="mt-3 text-base text-muted-foreground">Earned. Want to peek inside?</p>
+                {actionButtons}
+              </div>
+            </div>,
+            // V5: Stamp — visible rotated SLAYED banner
+            <div key="v5" className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+              {switcher}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
+                <span className="text-emerald-500/[0.08] font-black tracking-[0.2em] text-[clamp(5rem,15vw,13rem)] leading-none -rotate-12">SLAYED</span>
+              </div>
+              <div className="relative flex flex-col items-center text-center">
+                <div className="-rotate-6 inline-flex items-center gap-2 rounded-md border-2 border-emerald-500/70 bg-emerald-500/10 px-4 py-1.5 mb-5">
+                  <CheckCircle2 className="size-5 text-emerald-500" strokeWidth={2.5} />
+                  <span className="text-emerald-500 font-bold tracking-[0.25em] uppercase text-sm">Slayed</span>
+                </div>
+                <p className="text-4xl font-bold tracking-tight">Stamped & done</p>
+                <p className="mt-3 text-base text-muted-foreground">Locked in the win column.</p>
+                {actionButtons}
+              </div>
+            </div>,
+          ]
+          return variants[completedVariant] ?? variants[0]
+        })() : (<>
         {!compact && !hasVisiblePanels && (
           <div className="flex-1 flex items-center justify-center">
             <div className="w-full max-w-xl min-h-52 rounded-lg border border-border bg-surface-3 px-5 py-7 text-center flex flex-col items-center justify-center">
