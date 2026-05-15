@@ -9,7 +9,7 @@ export const updateTaskInputSchema = z
   .object({
     id: z.string().uuid(),
     title: z.string().min(1).max(200).optional(),
-    description: z.string().max(5000).nullable().optional(),
+    description: z.string().max(10000).nullable().optional(),
     assignee: z.string().nullable().optional(),
     status: z.string().min(1).optional(),
     priority: z.number().int().min(1).max(5).optional(),

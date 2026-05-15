@@ -12,7 +12,7 @@ export const prioritySchema = z.number().int().min(1).max(5)
 export const createTaskSchema = z.object({
   projectId: z.string().min(1, 'Project required'),
   title: z.string().min(1, 'Title required').max(200, 'Title too long'),
-  description: z.string().max(5000),
+  description: z.string().max(10000),
   status: taskStatusEnum,
   priority: prioritySchema,
   dueDate: z.string().nullable(),
@@ -23,7 +23,7 @@ export const createTaskSchema = z.object({
 export const updateTaskSchema = z.object({
   id: z.string().uuid(),
   title: z.string().min(1).max(200),
-  description: z.string().max(5000).nullable(),
+  description: z.string().max(10000).nullable(),
   status: taskStatusEnum,
   priority: prioritySchema,
   dueDate: z.string().nullable()
