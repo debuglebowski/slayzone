@@ -1,5 +1,97 @@
 [
   {
+    "version": "0.30.0",
+    "date": "2026-05-15",
+    "tagline": "Tree overhaul, lazy agents",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Tree view overhaul",
+        "description": "Tree view now has per-status new-task buttons in group headers, a hide-closed toggle, inline rename on double-click, sibling multi-select, multi-drag with stacked preview, GroupBy 'none' + orderBy 'last_interaction', a 'Group pinned tasks' toggle, and reworked filters grouped into Tasks/Task/Filters."
+      },
+      {
+        "category": "feature",
+        "title": "Drag-and-drop in tree view",
+        "description": "Tree view now supports full sibling-drop dnd with a floating preview, decoupled from the kanban sort settings so it always works."
+      },
+      {
+        "category": "feature",
+        "title": "Lazy PTY — agents start on demand",
+        "description": "Terminals no longer spawn an agent until you click Start, with an auto-start setting + redesigned idle screen. Warm agents now persist across restarts and auto-resume on boot."
+      },
+      {
+        "category": "feature",
+        "title": "Provider switcher on the main tab",
+        "description": "Click anywhere on the main terminal tab to switch providers (Claude Code, Codex, Gemini, etc.) or right-click for the full menu."
+      },
+      {
+        "category": "feature",
+        "title": "Claude Chat is now its own provider",
+        "description": "Claude Chat lives alongside Claude Code in the provider menu, with its own session state."
+      },
+      {
+        "category": "feature",
+        "title": "Celebratory completion screens",
+        "description": "Closing a task now shows a celebratory completion screen themed to slay, with a grid of follow-up action buttons and dropdown variants."
+      },
+      {
+        "category": "feature",
+        "title": "Browser tabs: per-tab agent lock",
+        "description": "Lock a browser tab so the agent can see it but can't interact — CDP input gate with sticky persistence per tab."
+      },
+      {
+        "category": "feature",
+        "title": "Hook-driven agent lifecycle in terminal",
+        "description": "Terminal now uses hook events to detect agent start/stop, replacing fragile output-pattern matching."
+      },
+      {
+        "category": "feature",
+        "title": "Pasted images land in Uploads folder",
+        "description": "Images pasted into chat now save into a dedicated Uploads artifact folder per task."
+      },
+      {
+        "category": "feature",
+        "title": "Settings: Layout tab",
+        "description": "New Layout tab in settings consolidates task header alignment, menu mode, and other layout knobs."
+      },
+      {
+        "category": "feature",
+        "title": "CLI: slay tasks open --background",
+        "description": "Open a task in the background without stealing focus or activating its tab."
+      },
+      {
+        "category": "improvement",
+        "title": "Chat spawns subprocess lazily",
+        "description": "Chat no longer spawns the agent subprocess until you send your first message, cutting startup cost when you just want to read history."
+      },
+      {
+        "category": "improvement",
+        "title": "Mermaid renders as inline SVG",
+        "description": "Mermaid diagrams in markdown now render as inline SVG instead of canvas, sharper at any zoom level and copy-paste friendly."
+      },
+      {
+        "category": "improvement",
+        "title": "Unicode 15 grapheme widths in terminal",
+        "description": "Terminal now measures grapheme widths using Unicode 15 tables, so newer emoji and CJK characters render with correct cell width."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal: \"Turn interrupted\" shows even with tools hidden",
+        "description": "Cancelling a turn now displays the interrupted indicator regardless of the Show tools setting."
+      },
+      {
+        "category": "fix",
+        "title": "Claude spinner detection across split chunks",
+        "description": "Claude's working-spinner is now detected even when the bullet and verb are separated by CUF escape sequences, eliminating false idle states."
+      },
+      {
+        "category": "fix",
+        "title": "Browser tabs respond to CLI commands across all tasks",
+        "description": "CLI browser listeners no longer ignore tasks whose tab isn't currently active."
+      }
+    ]
+  },
+  {
     "version": "0.29.2",
     "date": "2026-05-12",
     "tagline": "Update flow, chat polish",

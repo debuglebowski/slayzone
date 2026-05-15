@@ -1,6 +1,68 @@
 # Changelog
 
 
+## v0.30.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.29.2...v0.30.0)
+
+### 🚀 Enhancements
+
+- **sidebar:** Per-status new-task buttons in tree group headers ([98f6a5ab](https://github.com/debuglebowski/slayzone/commit/98f6a5ab))
+- **sidebar:** Hide-closed toggle in tree view ([153cba3e](https://github.com/debuglebowski/slayzone/commit/153cba3e))
+- **task-terminals:** Provider switcher in main tab + right-click menu ([f46f315e](https://github.com/debuglebowski/slayzone/commit/f46f315e))
+- **sidebar:** Rework tree view filters ([fe910a85](https://github.com/debuglebowski/slayzone/commit/fe910a85))
+- **sidebar:** Show tree row close button by default ([0400e8f7](https://github.com/debuglebowski/slayzone/commit/0400e8f7))
+- **task-terminals:** Lazy PTY w/ Start button ([680872e0](https://github.com/debuglebowski/slayzone/commit/680872e0))
+- **cli:** Tasks open --background skips focus + tab activation ([ddb4951b](https://github.com/debuglebowski/slayzone/commit/ddb4951b))
+- **sidebar:** "Show all undone sub-tasks" tree toggle ([a3f17ca1](https://github.com/debuglebowski/slayzone/commit/a3f17ca1))
+- **terminal-tabs:** Persist was_spawned, auto-restart warm agents on boot ([7cd32f6e](https://github.com/debuglebowski/slayzone/commit/7cd32f6e))
+- **chat:** Land pasted images in "Uploads" artifact folder ([4eb283ad](https://github.com/debuglebowski/slayzone/commit/4eb283ad))
+- **providers:** Make Claude Chat its own provider ([50c2e114](https://github.com/debuglebowski/slayzone/commit/50c2e114))
+- **terminal-starter:** Explainer beneath Start button ([1f327b8c](https://github.com/debuglebowski/slayzone/commit/1f327b8c))
+- **terminal-tabs:** Open provider menu on click anywhere on main tab ([bca28872](https://github.com/debuglebowski/slayzone/commit/bca28872))
+- **terminal-starter:** Auto-start setting + redesigned idle screen ([70641570](https://github.com/debuglebowski/slayzone/commit/70641570))
+- **tree:** Dnd + settings decoupled from kanban ([6510e3c9](https://github.com/debuglebowski/slayzone/commit/6510e3c9))
+- **tree:** Add "Group pinned tasks" toggle, move temp toggle to Groups ([1260d624](https://github.com/debuglebowski/slayzone/commit/1260d624))
+- **tree:** Sibling-drop dnd + floating preview + flat sortable ([ed23c157](https://github.com/debuglebowski/slayzone/commit/ed23c157))
+- **tree:** Inline rename on dblclick + sibling multi-select ([ff8f8c7b](https://github.com/debuglebowski/slayzone/commit/ff8f8c7b))
+- **browser:** Agent-lock per-tab w/ CDP input gate + sticky persist ([80d96b6a](https://github.com/debuglebowski/slayzone/commit/80d96b6a))
+- **tree:** Multi-drag selection w/ run-border + stacked preview ([dc17dac9](https://github.com/debuglebowski/slayzone/commit/dc17dac9))
+- **tree:** GroupBy 'none' + orderBy 'last_interaction' ([d6a6b029](https://github.com/debuglebowski/slayzone/commit/d6a6b029))
+- **task:** Celebratory completion screens w/ slay theme + dropdown variants ([28601762](https://github.com/debuglebowski/slayzone/commit/28601762))
+- **terminal:** Hook-driven agent lifecycle events ([59728f92](https://github.com/debuglebowski/slayzone/commit/59728f92))
+- **settings:** Layout tab + task header alignment + menu mode ([fc01ad76](https://github.com/debuglebowski/slayzone/commit/fc01ad76))
+- **task:** Grid layout for completion action buttons ([bf46c4be](https://github.com/debuglebowski/slayzone/commit/bf46c4be))
+
+### 🩹 Fixes
+
+- **task:** Drop isActive guard on CLI browser listeners ([0c2e26cc](https://github.com/debuglebowski/slayzone/commit/0c2e26cc))
+- **task-terminals:** Show Turn interrupted when Show tools off ([ae95f83b](https://github.com/debuglebowski/slayzone/commit/ae95f83b))
+- **terminal:** Detect claude spinner with CUF-separated bullet+verb ([80391824](https://github.com/debuglebowski/slayzone/commit/80391824))
+- **markdown:** Render mermaid SVG inline, not via canvas ([c1d66cb9](https://github.com/debuglebowski/slayzone/commit/c1d66cb9))
+- **terminal-tabs:** Symmetric padding on main tab chevron ([666d72c4](https://github.com/debuglebowski/slayzone/commit/666d72c4))
+- **dev:** Raise renderer V8 heap to 8GB ([5db70eaf](https://github.com/debuglebowski/slayzone/commit/5db70eaf))
+- **terminal:** Load Unicode15 grapheme widths ([f09556e6](https://github.com/debuglebowski/slayzone/commit/f09556e6))
+
+### 💅 Refactors
+
+- **chat:** Position empty state at 30% from top ([0273c1a0](https://github.com/debuglebowski/slayzone/commit/0273c1a0))
+- **sidebar:** Regroup tree display settings into Tasks/Task/Filters ([3bb7b87c](https://github.com/debuglebowski/slayzone/commit/3bb7b87c))
+- **chat:** Lazy-spawn subprocess on first user message ([a1435834](https://github.com/debuglebowski/slayzone/commit/a1435834))
+- **feedback:** Extract IPC handlers to @slayzone/feedback domain pkg ([d080772e](https://github.com/debuglebowski/slayzone/commit/d080772e))
+- **settings:** Async SettingsService owns all settings SQL ([5beafbd3](https://github.com/debuglebowski/slayzone/commit/5beafbd3))
+
+### 📖 Documentation
+
+- **skills:** Drop --background from orchestrate, document in tasks ([92e6bb26](https://github.com/debuglebowski/slayzone/commit/92e6bb26))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.29.2 ([dfe9fbb6](https://github.com/debuglebowski/slayzone/commit/dfe9fbb6))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.29.2
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.29.1...v0.29.2)
