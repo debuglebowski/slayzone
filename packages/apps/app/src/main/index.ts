@@ -84,6 +84,15 @@ if (is.dev && !isPlaywright) {
   app.commandLine.appendSwitch('remote-debugging-port', '0')
 }
 
+// Raise renderer V8 heap. React 19 dev-mode `logComponentRender` calls
+// performance.measure(name, { detail: fiber }) — with big in-memory state
+// (1000+ tasks, many open tabs) the structured-clone of detail OOMs the
+// renderer, which then crashes and triggers a full reload via the
+// render-process-gone handler. 8 GB buys headroom until hidden tabs unmount.
+if (is.dev) {
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192')
+}
+
 // Linux XDG Base Directory compliance: move state data from ~/.config to ~/.local/state
 import { migrateXdgIfNeeded, migrateCliBinIfNeeded, getStateDir, installCli, checkCliInstalled, getCliBinTarget, getManualInstallHint } from '@slayzone/platform'
 if (process.platform === 'linux') {
