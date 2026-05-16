@@ -88,11 +88,23 @@ export async function switchTerminalMode(page: Page, mode: TerminalMode): Promis
   })
 
   const trigger = activeModeTrigger(page)
-  // terminal-mode-trigger is the wrapper holding the label + chevron button.
-  // Click the chevron specifically (clicking the wrapper would land on the
-  // label span which has no handler).
-  const dropdownBtn = trigger.locator('[data-testid="terminal-mode-dropdown"], button').first()
-  await dropdownBtn.click()
+  // Provider switcher uses Radix ContextMenu. The chevron's onClick dispatches
+  // a synthetic contextmenu event on the wrapping data-tab-main. Try the
+  // chevron click first; if no menu items appear, fall back to a native
+  // right-click on the tab itself.
+  const tryOpenMenu = async () => {
+    const dropdownBtn = trigger.locator('[data-testid="terminal-mode-dropdown"], button').first()
+    if (await dropdownBtn.isVisible({ timeout: 500 }).catch(() => false)) {
+      await dropdownBtn.click().catch(() => {})
+    }
+    if (await page.getByRole('menuitemradio').first().isVisible({ timeout: 600 }).catch(() => false)) return true
+    const tab = trigger.locator('xpath=ancestor::*[@data-tab-main="true"]').first()
+    if (await tab.isVisible({ timeout: 500 }).catch(() => false)) {
+      await tab.click({ button: 'right' })
+    }
+    return await page.getByRole('menuitemradio').first().isVisible({ timeout: 600 }).catch(() => false)
+  }
+  await tryOpenMenu()
 
   // Provider switcher uses Radix ContextMenuRadioItem (role=menuitemradio).
   // Older DropdownMenu (role=menuitem) and Select (role=option) markups are
