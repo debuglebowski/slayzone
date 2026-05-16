@@ -14,6 +14,7 @@ import {
   getViewsForTask,
   newTabBtn,
 } from '../fixtures/browser-view'
+import { getTestUrl, TEST_HOST_MATCH } from '../fixtures/test-server'
 
 type ElectronApp = import('playwright').ElectronApplication
 type Page = import('@playwright/test').Page
@@ -50,10 +51,10 @@ test.describe('External protocol blocking', () => {
       return viewId
     }, { timeout: 10000 }).toBeTruthy()
 
-    await testInvoke(page, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(page, 'browser:navigate', viewId, await getTestUrl('/'))
     await expect.poll(async () => {
       return String(await testInvoke(page, 'browser:get-url', viewId) ?? '')
-    }, { timeout: 15000 }).toContain('example.com')
+    }, { timeout: 15000 }).toContain(TEST_HOST_MATCH)
 
     await expect.poll(async () => {
       const readyState = await testInvoke(page, 'browser:execute-js', viewId, 'document.readyState')

@@ -9,6 +9,7 @@ import {
   readFullBuffer,
 } from '../fixtures/terminal'
 import { ensureBrowserPanelVisible, focusForAppShortcut, getActiveViewId, testInvoke } from '../fixtures/browser-view'
+import { getTestUrl, TEST_HOST_MATCH } from '../fixtures/test-server'
 import path from 'path'
 import fs from 'fs'
 
@@ -47,10 +48,10 @@ test.describe('Screenshot browser to terminal', () => {
     // Open browser panel
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/'))
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 15_000 }).toContain('example.com')
+    }, { timeout: 15_000 }).toContain(TEST_HOST_MATCH)
 
     // Wait for the active webview to become ready before expecting screenshot support.
     const btn = cameraButton(mainWindow)

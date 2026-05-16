@@ -4,6 +4,7 @@ import {
   ensureBrowserPanelVisible,
   openTaskViaSearch, getAllViewIds, getActiveViewId, getViewsForTask,
 } from '../fixtures/browser-view'
+import { getTestUrl, TEST_HOST_MATCH } from '../fixtures/test-server'
 
 test.describe('Browser view z-ordering (NativeViewLayer)', () => {
   let taskId: string
@@ -29,10 +30,10 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/'))
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 15000 }).toContain('example.com')
+    }, { timeout: 15000 }).toContain(TEST_HOST_MATCH)
 
     // View should be visible before dialog
     await expect.poll(async () => {

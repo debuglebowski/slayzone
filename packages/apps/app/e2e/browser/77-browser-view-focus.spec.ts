@@ -90,6 +90,10 @@ test.describe('Browser view focus (WebContentsView)', () => {
     await openTaskViaSearch(mainWindow, 'Focus task')
     await ensureBrowserPanelVisible(mainWindow)
 
+    // Glow only renders when multiple panels are visible (no contrast vs single panel),
+    // so make sure we have two visible panels before exercising focus.
+    await expect(mainWindow.locator('[data-panel-id="terminal"]:visible')).toBeVisible({ timeout: 3_000 })
+
     const browserPanel = mainWindow.locator('[data-panel-id="browser"]:visible').first()
 
     // Clear glow by focusing something else

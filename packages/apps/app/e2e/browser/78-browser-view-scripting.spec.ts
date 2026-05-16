@@ -4,6 +4,7 @@ import {
   ensureBrowserPanelVisible,
   openTaskViaSearch, getActiveViewId,
 } from '../fixtures/browser-view'
+import { getTestUrl, TEST_HOST_MATCH } from '../fixtures/test-server'
 
 test.describe('Browser view scripting & CSS (WebContentsView)', () => {
   let taskId: string
@@ -23,10 +24,10 @@ test.describe('Browser view scripting & CSS (WebContentsView)', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     // Navigate to a real page first so JS executes
-    await testInvoke(mainWindow, 'browser:navigate', viewId, 'https://example.com')
+    await testInvoke(mainWindow, 'browser:navigate', viewId, await getTestUrl('/'))
     await expect.poll(async () => {
       return (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string
-    }, { timeout: 10000 }).toContain('example.com')
+    }, { timeout: 10000 }).toContain(TEST_HOST_MATCH)
 
     const result = await testInvoke(mainWindow, 'browser:execute-js', viewId, '1 + 1')
     expect(result).toBe(2)

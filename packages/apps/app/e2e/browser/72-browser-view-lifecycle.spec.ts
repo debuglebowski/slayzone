@@ -198,7 +198,7 @@ test.describe('Browser view lifecycle (WebContentsView)', () => {
     let activeTabIndex = -1
     for (let index = 0; index < tabCountBefore + 1; index++) {
       const className = await tabEntries(mainWindow).nth(index).getAttribute('class')
-      if (className?.includes('border border-neutral')) {
+      if (className?.includes('bg-tab-active')) {
         activeTabIndex = index
         break
       }
@@ -210,11 +210,11 @@ test.describe('Browser view lifecycle (WebContentsView)', () => {
 
     await expect.poll(async () => {
       const className = await tabEntries(mainWindow).nth(targetTabIndex).getAttribute('class')
-      return className?.includes('border border-neutral') ?? false
+      return className?.includes('bg-tab-active') ?? false
     }, { timeout: 5_000 }).toBe(true)
 
     const originalClassName = await tabEntries(mainWindow).nth(activeTabIndex).getAttribute('class')
-    expect(originalClassName?.includes('border border-neutral') ?? false).toBe(false)
+    expect(originalClassName?.includes('bg-tab-active') ?? false).toBe(false)
 
     const viewCountAfterSwitch = await getViewsForTask(mainWindow, taskId)
     expect(viewCountAfterSwitch.length).toBeGreaterThanOrEqual(tabCountBefore + 1)
