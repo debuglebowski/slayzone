@@ -43,12 +43,13 @@ test.describe('Create task dialog & metadata editing', () => {
   test('created task appears on kanban', async ({ mainWindow }) => {
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
-    await expect(mainWindow.getByText('Dialog created task')).toBeVisible({ timeout: 5_000 })
+    // Toast may also include the title — scope to the kanban card.
+    await expect(mainWindow.getByRole('button', { name: 'Dialog created task' })).toBeVisible({ timeout: 5_000 })
   })
 
   test('change status in task detail metadata sidebar', async ({ mainWindow }) => {
-    // Open task detail
-    await mainWindow.getByText('Dialog created task').first().click()
+    // Open task detail — click the kanban card (button) to avoid hitting a leftover toast.
+    await mainWindow.getByRole('button', { name: 'Dialog created task' }).click()
     await expect(mainWindow.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible({ timeout: 5_000 })
 
     // Dismiss "Move to In Progress?" dialog if terminal input triggered it

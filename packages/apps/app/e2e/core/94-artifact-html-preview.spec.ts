@@ -53,7 +53,9 @@ test.describe('HTML artifact preview executes scripts', () => {
 
     const frame = previewFrame(mainWindow)
     await expect(frame.locator('#r')).toHaveText('initial', { timeout: 5_000 })
-    await frame.locator('#b').click()
+    // Sandboxed iframe (allow-scripts only) — programmatic click via evaluate
+    // is more reliable than Playwright's input dispatch into a sandbox.
+    await frame.locator('#b').evaluate((el: HTMLElement) => el.click())
     await expect(frame.locator('#r')).toHaveText('CLICKED', { timeout: 3_000 })
   })
 
