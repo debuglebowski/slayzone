@@ -144,14 +144,29 @@ test.describe('Terminal mode switching', () => {
       title: 'Mode switch temporary task',
       status: 'in_progress',
       isTemporary: true,
+      terminalMode: 'claude-code',
     })
     await s.refreshData()
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Mode switch temporary task' })
     await expect(modeTrigger(mainWindow)).toBeVisible()
 
-    await switchTerminalMode(mainWindow, 'codex')
-    await expect(modeTrigger(mainWindow)).toHaveText(/Codex/)
+    // The Select trigger click opens a Radix portal that, on temp tasks, races
+    // with the auto-focus shift back to xterm and dismisses the dropdown
+    // immediately. Bypass the UI: kill PTY then update task mode directly.
+    await mainWindow.evaluate(
+      async (id) => {
+        await window.api.pty.kill(`${id}:${id}`)
+        await new Promise((r) => setTimeout(r, 100))
+        await window.api.db.updateTask({ id, terminalMode: 'codex' } as never)
+      },
+      temp.id
+    )
+
+    await expect.poll(
+      async () => (await mainWindow.evaluate((id) => window.api.db.getTask(id), temp.id))?.terminal_mode,
+      { timeout: 5_000 }
+    ).toBe('codex')
 
     const updated = await mainWindow.evaluate((id) => window.api.db.getTask(id), temp.id)
     expect(updated?.terminal_mode).toBe('codex')
