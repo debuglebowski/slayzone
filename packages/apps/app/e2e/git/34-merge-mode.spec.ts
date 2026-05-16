@@ -17,6 +17,17 @@ async function openTaskViaSearch(page: import('@playwright/test').Page, title: s
   await expect(page.locator('[data-testid="terminal-mode-trigger"]:visible').first()).toBeVisible({ timeout: 5_000 })
 }
 
+async function ensureGitPanelVisible(page: import('@playwright/test').Page) {
+  const target = page.locator('[data-testid="task-git-panel"]:visible').last()
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await target.isVisible({ timeout: 500 }).catch(() => false)) return
+    await page.keyboard.press('Escape').catch(() => {})
+    await page.locator('#root').click({ position: { x: 16, y: 16 } }).catch(() => {})
+    await page.keyboard.press('Meta+g')
+  }
+  await expect(target).toBeVisible({ timeout: 5_000 })
+}
+
 function git(cmd: string, cwd = gitDir) {
   // Inject -c commit.gpgsign=false after 'git' to bypass 1Password GPG signing
   const safeCmd = cmd.replace(/^git /, 'git -c commit.gpgsign=false ')
@@ -33,6 +44,9 @@ function getMainBranch(): string {
 }
 
 function resetRepo() {
+  // Lazy-init: when running a subset of describes via --grep, the first
+  // describe's beforeAll may not run, leaving gitDir undefined.
+  if (!gitDir) initGitDir()
   try { git('git merge --abort') } catch { /* ignore */ }
   try {
     const mainWorktree = git('git rev-parse --show-toplevel').trim()
@@ -154,9 +168,7 @@ test.describe('Clean merge skips merge mode', () => {
 
     await openTaskViaSearch(mainWindow, 'MM clean task')
 
-    // Toggle git panel on (general tab — shows merge controls)
-    await mainWindow.keyboard.press('Meta+g')
-    await expect(mainWindow.getByTestId('task-git-panel').last()).toBeVisible({ timeout: 5_000 })
+    await ensureGitPanelVisible(mainWindow)
   })
 
   test('clean merge auto-completes without entering merge mode', async ({ mainWindow }) => {
@@ -206,9 +218,7 @@ test.describe('Phase 1 — uncommitted changes', () => {
 
     await openTaskViaSearch(mainWindow, 'MM dirty task')
 
-    // Toggle git panel on (general tab — shows merge controls)
-    await mainWindow.keyboard.press('Meta+g')
-    await expect(mainWindow.getByTestId('task-git-panel').last()).toBeVisible({ timeout: 5_000 })
+    await ensureGitPanelVisible(mainWindow)
   })
 
   test('uncommitted merge state opens diff view with merge controls', async ({ mainWindow }) => {
@@ -274,9 +284,7 @@ test.describe('Phase 2 — conflict resolution', () => {
 
     await openTaskViaSearch(mainWindow, 'MM conflict task')
 
-    // Toggle git panel on (general tab — shows merge controls)
-    await mainWindow.keyboard.press('Meta+g')
-    await expect(mainWindow.getByTestId('task-git-panel').last()).toBeVisible({ timeout: 5_000 })
+    await ensureGitPanelVisible(mainWindow)
   })
 
   test('enters conflict merge mode', async ({ mainWindow }) => {
