@@ -30,7 +30,12 @@ export const CLI_PATHS = {
 } as const
 
 function activeModeTrigger(page: Page) {
-  return page.locator('[data-testid="terminal-mode-trigger"]:visible').first()
+  // Multiple tabs from prior tests may have visible triggers (e.g. when a
+  // route swap is mid-flight). Prefer the trigger inside the currently
+  // active task tab (data-tab-main + data-state="active" if present), fall
+  // back to the last visible trigger which is the most-recently-mounted.
+  const active = page.locator('[data-tab-main="true"][data-state="active"] [data-testid="terminal-mode-trigger"]:visible').first()
+  return active.or(page.locator('[data-testid="terminal-mode-trigger"]:visible').last())
 }
 
 export function getMainSessionId(taskId: string): string {
