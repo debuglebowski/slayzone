@@ -231,27 +231,25 @@ test.describe('File editor', () => {
 
   // --- Quick open ---
 
-  // Quick-open is now part of the unified search dialog; switch to the Files filter.
-  const openFilesSearch = async (mainWindow: import('@playwright/test').Page) => {
+  // Quick-open is part of the unified search dialog. Open it, then type a query
+  // to surface results (filter buttons only render once `isSearching` is true).
+  const openSearchAndQuery = async (mainWindow: import('@playwright/test').Page, query: string) => {
     await pressShortcut(mainWindow, 'search')
-    await expect(mainWindow.getByPlaceholder('Search files, folders, commands, projects, and tasks...')).toBeVisible({ timeout: 3_000 })
-    await mainWindow.getByRole('button', { name: 'Files', exact: true }).click()
+    const input = mainWindow.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
+    await expect(input).toBeVisible({ timeout: 3_000 })
+    await input.fill(query)
+    return input
   }
 
   test('search shortcut opens quick open dialog', async ({ mainWindow }) => {
-    await openFilesSearch(mainWindow)
-    // Unified search shows results only after a query.
-    await mainWindow.getByPlaceholder('Search files, folders, commands, projects, and tasks...').fill('h')
+    await openSearchAndQuery(mainWindow, 'h')
     await expect(mainWindow.locator('[cmdk-item]').first()).toBeVisible({ timeout: 5_000 })
 
     await mainWindow.keyboard.press('Escape')
   })
 
   test('quick open filters files by query', async ({ mainWindow }) => {
-    await openFilesSearch(mainWindow)
-
-    const input = mainWindow.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
-    await input.fill('hello')
+    await openSearchAndQuery(mainWindow, 'hello')
 
     // Should show hello.ts
     await expect(mainWindow.locator('[cmdk-item]').filter({ hasText: 'hello.ts' })).toBeVisible()
@@ -261,10 +259,7 @@ test.describe('File editor', () => {
   })
 
   test('quick open does not show gitignored files', async ({ mainWindow }) => {
-    await openFilesSearch(mainWindow)
-
-    const input = mainWindow.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
-    await input.fill('pkg.json')
+    await openSearchAndQuery(mainWindow, 'pkg.json')
 
     // Should show "No files found" since node_modules/pkg.json is gitignored
     await expect(mainWindow.getByText('No files found.')).toBeVisible()
@@ -273,10 +268,7 @@ test.describe('File editor', () => {
   })
 
   test('selecting a file in quick open opens it', async ({ mainWindow }) => {
-    await openFilesSearch(mainWindow)
-
-    const input = mainWindow.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
-    await input.fill('index.ts')
+    await openSearchAndQuery(mainWindow, 'index.ts')
 
     // Select the first match
     await mainWindow.locator('[cmdk-item]').filter({ hasText: 'index.ts' }).first().click()
