@@ -23,10 +23,7 @@ test.describe('Terminal tab keyboard isolation', () => {
     await s.refreshData()
   })
 
-  // QUARANTINED 2026-05-16: Cmd+K is now bound to the global search shortcut
-  // (definitions.ts: id='search'), not "new terminal tab". Test predates the
-  // remap. Tab isolation per task is still covered indirectly elsewhere.
-  test.skip('Cmd+K only creates tab in active task, not hidden ones', async ({ mainWindow }) => {
+  test('new-tab op on active task does not add tabs to other tasks', async ({ mainWindow }) => {
     // Open task A
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'IsoTask Alpha' })
     await waitForPtySession(mainWindow, getMainSessionId(taskIdA), 20_000)
@@ -35,12 +32,11 @@ test.describe('Terminal tab keyboard isolation', () => {
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'IsoTask Bravo' })
     await waitForPtySession(mainWindow, getMainSessionId(taskIdB), 20_000)
 
-    // Task B is active. Dispatch Cmd+K directly (Electron native menu may intercept keyboard.press).
-    await mainWindow.evaluate(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))
-    })
+    // Original test pressed a "new tab" hotkey that was later remapped.
+    // Exercise the API the hotkey calls so the isolation invariant is
+    // verified independently of the keybinding du jour.
+    await mainWindow.evaluate((id) => window.api.tabs.create({ taskId: id, label: 'second' }), taskIdB)
 
-    // Wait for the new tab to appear in task B
     await expect
       .poll(async () => {
         const tabs = await mainWindow.evaluate((id) => window.api.tabs.list(id), taskIdB)
