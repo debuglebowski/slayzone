@@ -266,6 +266,8 @@ async function launchElectronWithRetry(args: {
           SLAYZONE_HOME_DIR: path.join(args.userDataDir, '.slayzone-home'),
           SLAYZONE_CLAUDE_SETTINGS_PATH: path.join(args.userDataDir, '.claude', 'settings.json'),
           SLAYZONE_GEMINI_SETTINGS_PATH: path.join(args.userDataDir, '.gemini', 'settings.json'),
+          SLAYZONE_OPENCODE_PLUGIN_PATH: path.join(args.userDataDir, '.config', 'opencode', 'plugin', 'slayzone-notify.js'),
+          XDG_CONFIG_HOME: path.join(args.userDataDir, '.config'),
         },
       })
 

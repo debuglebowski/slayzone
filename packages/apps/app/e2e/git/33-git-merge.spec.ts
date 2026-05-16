@@ -331,10 +331,7 @@ test.describe('Merge with conflicts and uncommitted changes', () => {
 
 // ── Git init ────────────────────────────────────────────────────────
 
-// QUARANTINED 2026-05-16: git panel doesn't open for non-git project paths
-// in full-suite runs. Investigate panel visibility gate for projects without
-// .git. Tests pass in isolation.
-test.describe.skip('Git init', () => {
+test.describe('Git init', () => {
   // Must be outside any git repo for isGitRepo to return false
   const NO_GIT_DIR = path.join('/tmp', 'slayzone-e2e-no-git')
   let projectAbbrev: string

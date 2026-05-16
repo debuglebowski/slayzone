@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-05-16T17:35:45.860Z",
+  "timestamp": "2026-05-16T18:38:41.037Z",
   "memory": {
     "usedMB": 87,
     "totalMB": 150,
@@ -15,37 +15,37 @@
     "styleElements": 3
   },
   "paint": {
-    "firstPaint": 76,
-    "firstContentfulPaint": 200
+    "firstPaint": 84,
+    "firstContentfulPaint": 208
   },
   "resources": {
     "count": 4,
     "slowest": [
       {
-        "name": "?ip=0&_=1778952949160&ver=1.347.2&compression=gzip-js",
-        "durationMs": 482
+        "name": "config?ip=0&_=1778956721327&ver=1.347.2",
+        "durationMs": 125
       },
       {
-        "name": "?ip=0&_=1778952949158&ver=1.347.2&compression=gzip-js",
-        "durationMs": 461
+        "name": "?v=2&config=true&ip=0&_=1778956721327&ver=1.347.2&compressio",
+        "durationMs": 59
       },
       {
-        "name": "config?ip=0&_=1778952946153&ver=1.347.2",
-        "durationMs": 114
+        "name": "?ip=0&_=1778956724330&ver=1.347.2&compression=gzip-js",
+        "durationMs": 55
       },
       {
-        "name": "?v=2&config=true&ip=0&_=1778952946154&ver=1.347.2&compressio",
-        "durationMs": 56
+        "name": "?ip=0&_=1778956724333&ver=1.347.2&compression=gzip-js",
+        "durationMs": 52
       }
     ]
   },
   "ipc": {
     "loadBoardDataMs": 1,
-    "createTaskMs": 1,
-    "getProjectsMs": 21
+    "createTaskMs": 2,
+    "getProjectsMs": 23
   },
   "interaction": {
-    "tabSwitchMs": 67,
+    "tabSwitchMs": 64,
     "taskOpenMs": 0,
     "refreshDataMs": 0
   },
@@ -53,6 +53,6 @@
     "taskCount": 100,
     "domNodesAtScale": 2070,
     "memoryAtScaleMB": 87,
-    "loadBoardDataAtScaleMs": 5
+    "loadBoardDataAtScaleMs": 7
   }
 }

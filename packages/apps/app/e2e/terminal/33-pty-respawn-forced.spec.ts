@@ -54,8 +54,8 @@ test.describe('Forced PTY respawn via REST', () => {
 
   // QUARANTINED 2026-05-16: REST endpoint waits for the renderer to ack via
   // onForceRespawn; the test installs its own listener that acks immediately,
-  // but res.ok still false (request times out). Needs requestForceRespawn ack
-  // pipeline investigation.
+  // but res.ok still false. The retry mechanism may also be racing the test
+  // subscriber.
   test.skip('REST broadcasts pty:respawn-forced to renderer', async ({ electronApp, mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Force respawn signal', status: 'in_progress' })

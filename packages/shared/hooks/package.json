@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./notify.sh": "./src/notify.sh",
-    "./codex-wrapper.sh": "./src/codex-wrapper.sh"
+    "./codex-wrapper.sh": "./src/codex-wrapper.sh",
+    "./opencode-plugin.js": "./src/opencode-plugin.js"
   }
 }

@@ -1348,16 +1348,19 @@ app.whenReady().then(async () => {
           { installClaudeHooks },
           { installCodexWrapper },
           { installGeminiHooks },
+          { installOpencodePlugin },
         ] = await Promise.all([
           import('./agent-hooks/notify-script-installer'),
           import('./agent-hooks/claude-hook-installer'),
           import('./agent-hooks/codex-wrapper-installer'),
           import('./agent-hooks/gemini-hook-installer'),
+          import('./agent-hooks/opencode-plugin-installer'),
         ])
         const { path: scriptPath } = await installNotifyScript()
         await installClaudeHooks({ scriptPath })
         await installCodexWrapper()
         await installGeminiHooks({ scriptPath })
+        await installOpencodePlugin({ notifyPath: scriptPath })
         logBoot('agent hooks installed')
       } catch (err) {
         console.error('[agent-hooks] install failed:', err)
@@ -2075,6 +2078,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
   ipcMain.handle('browser:remove-css', (_, viewId: string, key: string) => browserViewManager.removeCss(viewId, key))
   ipcMain.handle('browser:set-zoom', (_, viewId: string, factor: number) => browserViewManager.setZoom(viewId, factor))
   ipcMain.handle('browser:focus', (_, viewId: string) => browserViewManager.focus(viewId))
+  ipcMain.handle('browser:focus-renderer', () => browserViewManager.focusRenderer())
   ipcMain.handle('browser:find-in-page', (_, viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => browserViewManager.findInPage(viewId, text, options))
   ipcMain.handle('browser:stop-find-in-page', (_, viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection') => browserViewManager.stopFindInPage(viewId, action))
   ipcMain.handle('browser:set-keyboard-passthrough', (_, viewId: string, enabled: boolean) => browserViewManager.setKeyboardPassthrough(viewId, enabled))

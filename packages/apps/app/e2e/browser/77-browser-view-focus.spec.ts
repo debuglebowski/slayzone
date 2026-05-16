@@ -86,6 +86,29 @@ test.describe('Browser view focus (WebContentsView)', () => {
     await expect(searchInput).toBeVisible({ timeout: 3_000 })
   })
 
+  test('browser find shortcut focuses the find input', async ({ mainWindow }) => {
+    await openTaskViaSearch(mainWindow, 'Focus task')
+    await ensureBrowserPanelVisible(mainWindow)
+    const viewId = await getActiveViewId(mainWindow, taskId)
+
+    await testInvoke(mainWindow, 'browser:focus', viewId)
+    await testEmit(mainWindow, 'browser-view:shortcut', {
+      viewId,
+      key: 'f',
+      shift: false,
+      alt: false,
+      meta: true,
+      control: false,
+      kind: 'browser-tab',
+    })
+
+    const findInput = mainWindow.getByPlaceholder('Find in page...')
+    await expect(findInput).toBeVisible({ timeout: 3_000 })
+    await expect(findInput).toBeFocused({ timeout: 3_000 })
+    await mainWindow.keyboard.press('Escape')
+    await expect(findInput).not.toBeVisible({ timeout: 3_000 })
+  })
+
   test('glow shows on browser panel when focused', async ({ mainWindow }) => {
     await openTaskViaSearch(mainWindow, 'Focus task')
     await ensureBrowserPanelVisible(mainWindow)

@@ -55,3 +55,16 @@ export function getGeminiSettingsPath(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir()
   return path.join(home, '.gemini', 'settings.json')
 }
+
+/**
+ * Absolute path to the SlayZone-managed OpenCode plugin file. OpenCode loads
+ * `*.js` from `${XDG_CONFIG_HOME:-~/.config}/opencode/plugin/`. Honours
+ * `SLAYZONE_OPENCODE_PLUGIN_PATH` so tests can redirect without overriding HOME.
+ */
+export function getOpencodePluginPath(): string {
+  if (process.env.SLAYZONE_OPENCODE_PLUGIN_PATH) return process.env.SLAYZONE_OPENCODE_PLUGIN_PATH
+  const configHome =
+    process.env.XDG_CONFIG_HOME ||
+    path.join(process.env.HOME ?? process.env.USERPROFILE ?? os.homedir(), '.config')
+  return path.join(configHome, 'opencode', 'plugin', 'slayzone-notify.js')
+}

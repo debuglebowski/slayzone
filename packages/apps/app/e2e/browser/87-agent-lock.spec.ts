@@ -138,15 +138,18 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
     await expect.poll(async () => (await testInvoke(mainWindow, 'browser:is-locked', views[0])) as boolean).toBe(true)
   })
 
-  // QUARANTINED 2026-05-16: pre-condition "still locked from previous test"
-  // fails — browser:is-locked returns false even after the prior test
-  // re-locked. State doesn't persist into this test as expected. Either
-  // BrowserTabPlaceholder unmounts between tests or main-process lock state
-  // resets. Investigate independently from the autolock fix.
+  // QUARANTINED 2026-05-16: locked state set, navigate succeeds, but CLI
+  // click reports "Element not found: #b" — possibly the navigation route
+  // is short-circuited under lock, or page hasn't finished loading. Needs
+  // separate trace of the locked-tab CLI route.
   test.skip('agent CLI ops still work while the tab is locked', async ({ mainWindow }) => {
     const views = await getViewsForTask(mainWindow, taskId)
-    // Pre-condition: still locked from previous test.
-    expect((await testInvoke(mainWindow, 'browser:is-locked', views[0])) as boolean).toBe(true)
+    // Explicitly ensure locked state (prior tests may have left it unlocked).
+    await testInvoke(mainWindow, 'browser:set-locked', views[0], true)
+    await mainWindow.evaluate((d) => window.api.db.setBrowserTabLocked(d.taskId, d.tabId, true),
+      { taskId, tabId: views[0] }).catch(() => {})
+    await expect.poll(async () => (await testInvoke(mainWindow, 'browser:is-locked', views[0])) as boolean,
+      { timeout: 3_000 }).toBe(true)
 
     const URL_B = writeFixture('b', 'page-b')
     const r = runCli('tasks', 'browser', 'navigate', URL_B)

@@ -15,7 +15,7 @@ export type AgentId = 'claude-code' | 'codex' | 'gemini' | 'opencode'
  * Used at PTY/chat spawn time to gate `SLAYZONE_AGENT_HOOK_URL` injection.
  * Add an agent here once both its hook script + installer have shipped.
  */
-export const HOOK_SUPPORTED_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>(['claude-code', 'codex', 'gemini'])
+export const HOOK_SUPPORTED_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>(['claude-code', 'codex', 'gemini', 'opencode'])
 
 export type AgentLifecycleEventType =
   | 'agent-start'
