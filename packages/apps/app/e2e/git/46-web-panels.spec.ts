@@ -120,14 +120,14 @@ test.describe('Web panels', () => {
     }
   })
 
-  // QUARANTINED 2026-05-16: predefined external panels (Figma/Notion/GitHub/
-  // Excalidraw) no longer enumerated as standalone cards in Settings → Panels.
-  // Settings UI restructured; selector contract broke. Skip pending refactor.
-  test.skip('predefined externals are disabled by default', async ({ mainWindow }) => {
+  test('predefined externals are disabled by default', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
     for (const name of ['Figma', 'Notion', 'GitHub', 'Excalidraw']) {
-      await expect(findCard(dialog, name).getByRole('switch'))
+      // Each row now exposes two switches (home / task view). Both should be
+      // unchecked for a predefined external by default — check via .last()
+      // to grab the task-scope toggle.
+      await expect(findCard(dialog, name).getByRole('switch').last())
         .toHaveAttribute('data-state', 'unchecked')
     }
   })
@@ -136,6 +136,9 @@ test.describe('Web panels', () => {
   //    are Electron menu accelerators; k/b/e/g/s are reserved per
   //    RESERVED_PANEL_SHORTCUTS; y/n/h/x/u are predefined panel shortcuts) ──
 
+  // QUARANTINED 2026-05-16: TestPanel doesn't appear after Add Panel click.
+  // Either the shortcut 'l' is silently rejected, or the click misses (scroll
+  // offset after form expansion).
   test.skip('add custom web panel', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
@@ -153,10 +156,12 @@ test.describe('Web panels', () => {
     await expect(card.getByRole('switch')).toHaveAttribute('data-state', 'checked')
   })
 
-  test.skip('enable Figma panel', async ({ mainWindow }) => {
+  test('enable Figma panel', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
-    const switchEl = findCard(dialog, 'Figma').getByRole('switch')
+    // Use the task-scope (rightmost) switch; the home-scope one for predefined
+    // externals starts disabled.
+    const switchEl = findCard(dialog, 'Figma').getByRole('switch').last()
     await expect(switchEl).toHaveAttribute('data-state', 'unchecked')
     await switchEl.click()
     await expect(switchEl).toHaveAttribute('data-state', 'checked')
@@ -278,7 +283,7 @@ test.describe('Web panels', () => {
   // Fresh dialog open guarantees configuringNativeId is null (state from prior
   // test suites like 09-settings may linger otherwise).
 
-  test.skip('terminal row opens config section', async ({ mainWindow }) => {
+  test('terminal row opens config section', async ({ mainWindow }) => {
     await closePanelsTab(mainWindow)
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
@@ -286,7 +291,8 @@ test.describe('Web panels', () => {
     await expect(card).toBeVisible({ timeout: 5_000 })
 
     await card.click()
-    await expect(dialog.getByText('Default mode')).toBeVisible({ timeout: 5_000 })
+    // Label renamed from "Default mode" → "Default agent provider".
+    await expect(dialog.getByText('Default agent provider')).toBeVisible({ timeout: 5_000 })
     await dialog.getByTestId('settings-tab-panels').click()
     await expect(findCard(dialog, 'Agent')).toBeVisible({ timeout: 5_000 })
   })
