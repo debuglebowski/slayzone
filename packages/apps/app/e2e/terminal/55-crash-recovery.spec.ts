@@ -160,7 +160,21 @@ test.describe('Doctor from terminal menu', () => {
     mainWindow: import('@playwright/test').Page,
     mode: 'claude-code' | 'terminal'
   ) => {
-    await switchTerminalMode(mainWindow, mode)
+    // ContextMenu fixture is flaky in Playwright for non-'terminal' modes
+    // (see 22 quarantine). Bypass via DB write — the renderer re-renders
+    // the mode trigger on tasks:changed, which is what these tests probe.
+    if (mode === 'claude-code') {
+      await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'claude-code' }), taskId)
+      await mainWindow.evaluate(() => {
+        const refresh = (window as { __slayzone_refreshData?: () => Promise<void> | void }).__slayzone_refreshData
+        return refresh?.()
+      })
+      // Give the renderer a beat to reflect the mode change before the next
+      // step opens a menu that depends on terminal_mode.
+      await mainWindow.waitForTimeout(150)
+    } else {
+      await switchTerminalMode(mainWindow, mode)
+    }
   }
 
   test.beforeAll(async ({ mainWindow }) => {
@@ -198,7 +212,7 @@ test.describe('Doctor from terminal menu', () => {
     await mainWindow.keyboard.press('Escape')
   })
 
-  test.skip('Doctor dialog shows validation results for claude', async ({ mainWindow }) => {
+  test('Doctor dialog shows validation results for claude', async ({ mainWindow }) => {
     await setTerminalMode(mainWindow, 'claude-code')
     await openTerminalMenu(mainWindow)
     await expect(doctorMenuItem(mainWindow)).toBeVisible({ timeout: 3_000 })
@@ -225,7 +239,7 @@ test.describe('Doctor from terminal menu', () => {
     await expect(dialog).not.toBeVisible({ timeout: 2_000 })
   })
 
-  test.skip('Doctor not shown for terminal mode', async ({ mainWindow }) => {
+  test('Doctor not shown for terminal mode', async ({ mainWindow }) => {
     // Switch to terminal mode via UI to ensure rendered state is up to date.
     await setTerminalMode(mainWindow, 'terminal')
 
