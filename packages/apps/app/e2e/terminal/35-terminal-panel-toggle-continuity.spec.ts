@@ -11,8 +11,8 @@ import {
 
 const panelBtn = (page: import('@playwright/test').Page, label: string) =>
   page
-    .locator('.bg-surface-3.rounded-lg:visible')
-    .filter({ has: page.locator('button:has-text("Terminal")') })
+    .locator('.bg-surface-2.rounded-lg:visible')
+    .filter({ has: page.locator('button:has-text("Agent")') })
     .locator(`button:has-text("${label}")`)
 
 test.describe('Terminal panel toggle continuity', () => {
@@ -43,11 +43,11 @@ test.describe('Terminal panel toggle continuity', () => {
     await runCommand(mainWindow, sessionId, `echo ${marker}`)
     await waitForBufferContains(mainWindow, sessionId, marker)
 
-    await panelBtn(mainWindow, 'Terminal').click()
-    await expect(panelBtn(mainWindow, 'Terminal')).not.toHaveClass(/(?:^|\s)bg-muted(?:\s|$)/)
+    await panelBtn(mainWindow, 'Agent').click()
+    await expect(panelBtn(mainWindow, 'Agent')).not.toHaveClass(/(?:^|\s)bg-surface-3(?:\s|$)/)
 
-    await panelBtn(mainWindow, 'Terminal').click()
-    await expect(panelBtn(mainWindow, 'Terminal')).toHaveClass(/bg-muted/)
+    await panelBtn(mainWindow, 'Agent').click()
+    await expect(panelBtn(mainWindow, 'Agent')).toHaveClass(/bg-surface-3/)
 
     await waitForPtySession(mainWindow, sessionId)
     const buffer = await readFullBuffer(mainWindow, sessionId)
