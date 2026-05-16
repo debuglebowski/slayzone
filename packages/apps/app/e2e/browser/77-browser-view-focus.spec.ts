@@ -86,16 +86,11 @@ test.describe('Browser view focus (WebContentsView)', () => {
     await expect(searchInput).toBeVisible({ timeout: 3_000 })
   })
 
-  // QUARANTINED 2026-05-16: focusedPanel state now tracked via DOM focusin only;
-  // browser-view:focused IPC does not call setFocusedPanel anymore. Either the
-  // IPC wiring needs to be restored or this test needs to simulate DOM focusin
-  // on the WCV placeholder. Skipping until impl decision.
-  test.skip('glow shows on browser panel when WebContentsView gains focus', async ({ mainWindow }) => {
+  test('glow shows on browser panel when focused', async ({ mainWindow }) => {
     await openTaskViaSearch(mainWindow, 'Focus task')
     await ensureBrowserPanelVisible(mainWindow)
 
-    // Glow only renders when multiple panels are visible (no contrast vs single panel),
-    // so make sure we have two visible panels before exercising focus.
+    // Glow only renders when multiple panels are visible.
     await expect(mainWindow.locator('[data-panel-id="terminal"]:visible')).toBeVisible({ timeout: 3_000 })
 
     const browserPanel = mainWindow.locator('[data-panel-id="browser"]:visible').first()
@@ -104,8 +99,16 @@ test.describe('Browser view focus (WebContentsView)', () => {
     await focusForAppShortcut(mainWindow)
     await mainWindow.waitForTimeout(200)
 
-    // Simulate WebContentsView gaining focus via IPC
-    await testEmit(mainWindow, 'browser-view:focused', { viewId: 'test' })
+    // focusedPanel is driven by DOM focusin on elements inside [data-panel-id].
+    // The native WCV doesn't bubble focus into the renderer DOM, so simulate
+    // the focusin directly on the browser placeholder.
+    await mainWindow.evaluate(() => {
+      const placeholder = document.querySelector('[data-browser-panel]') as HTMLElement | null
+      if (!placeholder) return
+      placeholder.setAttribute('tabindex', '-1')
+      placeholder.focus()
+      placeholder.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    })
 
     // Glow should show on the browser panel
     await expect(browserPanel).toHaveClass(/shadow-\[0_0_18px/, { timeout: 3_000 })

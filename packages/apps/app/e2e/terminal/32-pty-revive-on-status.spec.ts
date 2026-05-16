@@ -66,9 +66,9 @@ test.describe('Issue #77: PTY revive on status transition', () => {
     await waitForNoPtySession(mainWindow, sessionId)
   })
 
-  // QUARANTINED 2026-05-16: pty:respawn-suggested event not received after
-  // done→in_progress status cycle. Event name / broadcast logic likely
-  // changed. Investigate against current revive-on-status logic.
+  // QUARANTINED 2026-05-16: subscriber installed but pty:respawn-suggested
+  // never fires. Either runtime adapter not configured in test env or
+  // updateTask path bypasses the revived branch. Needs main-process trace.
   test.skip('status → in_progress broadcasts pty:respawn-suggested (Part B)', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Revive-signal test', status: 'in_progress' })
