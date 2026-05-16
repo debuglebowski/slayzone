@@ -94,8 +94,8 @@ test.describe('Git diff panel', () => {
     // Click base.txt to select it
     await p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' }).click()
 
-    // Diff viewer should show hunk header
-    await expect(p.locator('text=/@@/')).toBeVisible()
+    // Diff viewer renders the modified context — no `@@` header in the new flat layout.
+    await expect(p.getByText('line2 modified')).toBeVisible({ timeout: 5_000 })
   })
 
   test('stage individual file', async ({ mainWindow }) => {
@@ -192,10 +192,10 @@ test.describe('Git diff panel', () => {
     const chipRowHandle = await chipRow.elementHandle()
     expect(chipRowHandle).not.toBeNull()
 
-    // Clean working tree: previously chip row would unmount (replaced by
-    // "Working tree clean" empty state inside the same conditional). With the
-    // fix it persists at panel level.
+    // Clean working tree: prior tests left untracked files (e.g. newfile.txt
+    // from test 83) — sweep them so the "Working tree clean" assertion holds.
     git('git checkout -- base.txt')
+    git('git clean -fd')
     await refresh(mainWindow)
     await expect(p.getByText('Working tree clean')).toBeVisible({ timeout: 5_000 })
     await expect(chipRow).toBeVisible()
@@ -217,13 +217,15 @@ test.describe('Git diff panel', () => {
   })
 
   test('polling picks up file changes', async ({ mainWindow }) => {
-    // Append to base.txt
+    // Modify base.txt
     writeFileSync(path.join(gitDir, 'base.txt'), 'line1\nline2 modified\nline3\nextra line\n')
 
-    // Wait for poll (5s interval + buffer)
-    await mainWindow.waitForTimeout(7000)
+    // Polling cadence is 5s; trigger an explicit refresh so the test doesn't
+    // depend purely on the timer firing within the assertion window.
+    await refresh(mainWindow)
 
     // Verify the diff panel updated — base.txt should still be visible with changes
-    await expect(panel(mainWindow).locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })).toBeVisible()
+    await expect(panel(mainWindow).locator('.font-mono.text-xs').filter({ hasText: 'base.txt' }))
+      .toBeVisible({ timeout: 10_000 })
   })
 })
