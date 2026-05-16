@@ -827,8 +827,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
       {/* Turns chip row — panel-level so its DOM identity (and horizontal scroll
           position) survives snapshot key changes that swap the main-content branch
           below (selecting a turn re-keys useGitDiffSnapshot → momentary snapshot=null
-          → main split unmounts). */}
-      {targetPath && diffContinuousFlow && flatEntries.length > 0 && (
+          → main split unmounts). Keep mounted across dirty↔clean transitions; the
+          "All turns" button is always meaningful when continuous-flow is on. */}
+      {targetPath && diffContinuousFlow && (
         <TooltipProvider delayDuration={300}>
         <div className="shrink-0 h-9 flex items-center px-2 bg-muted/30 border-b">
           <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto scrollbar-hide">

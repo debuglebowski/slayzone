@@ -168,10 +168,7 @@ test.describe('Git diff panel', () => {
     await expect(firstEntry).toHaveClass(/bg-primary\/10/)
   })
 
-  // QUARANTINED 2026-05-16: chip row now unmounts when flatEntries is empty
-  // (working tree clean). Either an intentional change vs. the original
-  // hoisted-chip-row regression fix, or a regression to revisit.
-  test.skip('turns chip row stays mounted across clean ↔ dirty transitions (continuous-flow)', async ({ mainWindow }) => {
+  test('turns chip row stays mounted across clean ↔ dirty transitions (continuous-flow)', async ({ mainWindow }) => {
     // Regression: chip row used to live inside the snapshot-gated main-content
     // branch, so it unmounted on every snapshot=null transition (turn click,
     // working-tree-clean state) — losing horizontal scroll position. Now hoisted
