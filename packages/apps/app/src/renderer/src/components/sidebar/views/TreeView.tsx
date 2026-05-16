@@ -16,6 +16,7 @@ import {
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
+  type SortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { cn, TerminalProgressDot, PriorityIcon, getColumnStatusStyle, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from '@slayzone/ui'
@@ -97,6 +98,19 @@ interface TaskRowDragData {
 
 interface GroupDropData {
   kind: 'group'
+  projectId: string
+  groupValue: string
+}
+
+/** Synthetic sortable item for each non-special group's header. Disabled for
+ * user drag (just `draggable: true` disabled) so the user can't pick up a
+ * header, but registered as a sortable so its rect participates in the strategy's
+ * index math + it's a real drop target. The custom strategy below clamps the
+ * over-index to the over-group's header during cross-group drag, which moves
+ * the header up to absorb the source slot's empty space instead of dragging
+ * the over-group's first row up into the source group. */
+interface HeaderSortableData {
+  kind: 'header'
   projectId: string
   groupValue: string
 }
@@ -493,13 +507,38 @@ function TaskDragPreview({ tasks }: { tasks: Task[] }): ReactNode {
   )
 }
 
+function HeaderSortable({
+  projectId,
+  groupKey,
+  className,
+  children,
+}: {
+  projectId: string
+  groupKey: string
+  className?: string
+  children: ReactNode
+}): ReactNode {
+  const { setNodeRef } = useSortable({
+    id: `header:${projectId}:${groupKey}`,
+    data: { kind: 'header', projectId, groupValue: groupKey } satisfies HeaderSortableData,
+    disabled: { draggable: true },
+  })
+  return (
+    <div ref={setNodeRef} className={className}>
+      {children}
+    </div>
+  )
+}
+
 function StatusGroupDroppable({
   projectId,
   groupValue,
+  className,
   children,
 }: {
   projectId: string
   groupValue: string
+  className?: string
   children: ReactNode
 }): ReactNode {
   const { setNodeRef, isOver } = useDroppable({
@@ -514,7 +553,8 @@ function StatusGroupDroppable({
       data-status={groupValue}
       className={cn(
         'rounded-md transition-colors',
-        isOver && 'bg-accent/15 ring-1 ring-accent/30'
+        isOver && 'bg-accent/15 ring-1 ring-accent/30',
+        className
       )}
     >
       {children}
@@ -915,7 +955,7 @@ export function TreeView({
     if (!activeData || activeData.kind !== 'task') return
     const sourceId = active.id as string
 
-    const overData = over.data.current as TaskRowDragData | GroupDropData | undefined
+    const overData = over.data.current as TaskRowDragData | GroupDropData | HeaderSortableData | undefined
     if (!overData) return
 
     if (overData.projectId !== activeData.projectId) return
@@ -932,6 +972,41 @@ export function TreeView({
       ? getMovedIdsInRenderOrder(activeData.projectId, selectedTaskIds)
       : [sourceId]
     if (movedIds.length === 0) return
+
+    // === Drop on a group header (synthetic sortable) — insert at START of
+    // that group (idx 0). Unlike the wrapper-droppable below which appends.
+    if (overData.kind === 'header') {
+      const g = groupByKey.get(overData.groupValue)
+      if (!g || g.isTemp || g.isPinned || g.isNone) return
+      if (
+        movedIds.length === 1 &&
+        activeData.parentId === null &&
+        overData.groupValue === activeData.groupValue &&
+        g.tasks[0]?.id === sourceId
+      ) {
+        return
+      }
+      const movedSet = new Set(movedIds)
+      const newSiblings = [
+        ...movedIds,
+        ...g.tasks.map((t) => t.id).filter((id) => !movedSet.has(id)),
+      ]
+      const fieldUpdate: Partial<Task> = treeGroupBy === 'status'
+        ? { status: overData.groupValue as Task['status'] }
+        : { priority: parseInt(overData.groupValue.slice(1), 10) }
+      if (movedIds.length === 1) {
+        if (activeData.parentId !== null) {
+          onTaskReparent?.(sourceId, null, newSiblings)
+          onTaskFieldUpdate?.(sourceId, fieldUpdate)
+        } else {
+          onTaskMove?.(sourceId, overData.groupValue, 0, treeGroupBy)
+        }
+      } else {
+        onTaskBulkReparent?.(movedIds, null, newSiblings)
+        onTaskBulkFieldUpdate?.(movedIds, fieldUpdate)
+      }
+      return
+    }
 
     // === Drop on a group header — all moved become roots in that group. ===
     if (overData.kind === 'group') {
@@ -1127,7 +1202,15 @@ export function TreeView({
     // header so the unanchored rows don't read as an orphan extension of the
     // group above. Solo-`none` stays headerless (no companions to disambiguate).
     const hasCompanions = groups.length > 1
-    return groups.map((g) => {
+    return groups.map((g, gi) => {
+      // Top padding on every group except the first acts as the static gap
+      // between groups; lives on the lower group so its droppable rect
+      // extends up into the gap zone.
+      const groupPadClass = gi === 0 ? undefined : 'pt-2'
+      // Only "real" groups (not pinned/temp/none) participate as sortable
+      // header items — pinned/temp/none don't have a drop semantic so they
+      // don't need to sit in the strategy's index space.
+      const headerIsSortable = !g.isPinned && !g.isTemp && !g.isNone
       let label: string
       let Icon: typeof Clock | null = null
       let iconClass: string | undefined
@@ -1152,14 +1235,26 @@ export function TreeView({
       }
 
       const showHeader = !g.isNone || hasCompanions
+      const headerClassName = 'flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60'
+      const headerInner = (
+        <>
+          {Icon && <Icon className={cn('size-3', iconClass)} />}
+          <span>{label}</span>
+          {renderGroupAddButton(g, projectId, label)}
+        </>
+      )
       const groupBody = (
         <>
           {showHeader && (
-            <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              {Icon && <Icon className={cn('size-3', iconClass)} />}
-              <span>{label}</span>
-              {renderGroupAddButton(g, projectId, label)}
-            </div>
+            headerIsSortable
+              ? (
+                <HeaderSortable projectId={projectId} groupKey={g.key} className={headerClassName}>
+                  {headerInner}
+                </HeaderSortable>
+              )
+              : (
+                <div className={headerClassName}>{headerInner}</div>
+              )
           )}
           {g.tasks.map((task, i) => (
             <TaskBranch
@@ -1173,9 +1268,11 @@ export function TreeView({
         </>
       )
       // Temp/pinned/none groups have no valid drop semantic, so skip droppable wrapper.
-      if (g.isTemp || g.isPinned || g.isNone) return <div key={g.key}>{groupBody}</div>
+      if (g.isTemp || g.isPinned || g.isNone) {
+        return <div key={g.key} className={groupPadClass}>{groupBody}</div>
+      }
       return (
-        <StatusGroupDroppable key={g.key} projectId={projectId} groupValue={g.key}>
+        <StatusGroupDroppable key={g.key} projectId={projectId} groupValue={g.key} className={groupPadClass}>
           {groupBody}
         </StatusGroupDroppable>
       )
@@ -1190,22 +1287,34 @@ export function TreeView({
     const isHomeActive =
       selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
     const dragEnabled = Boolean(onTaskReorder) && Boolean(onTaskMove)
-    // Flat list of all visible task IDs in render order (group → root →
-    // descendants pre-order). Single SortableContext over the whole tree so
-    // verticalListSortingStrategy animates siblings AND descendants when
-    // dragging across the hierarchy. handleDragEnd still enforces drop semantics.
-    const flatTaskIds: string[] = (() => {
-      const ids: string[] = []
-      const walk = (t: Task) => {
-        ids.push(t.id)
+    // Project-wide flat sortable IDs in render order. For each "real" group
+    // (status / priority — not pinned/temp/none) we push a synthetic header
+    // ID before its tasks. The header is a disabled sortable so it sits in
+    // the strategy's index space; cross-group drags clamp `overIndex` to the
+    // over group's header so only items between active and the header slide
+    // up — keeping every non-active row inside its own group.
+    //
+    // visualGroupById classifies each ID by the group it visually belongs to
+    // (header → its group; subtask → its visible root's group; root → its
+    // own group).
+    const flatTaskIds: string[] = []
+    const visualGroupById = new Map<string, string>()
+    {
+      const walk = (t: Task, groupKey: string) => {
+        flatTaskIds.push(t.id)
+        visualGroupById.set(t.id, groupKey)
         const kids = childrenByParent.get(t.id) ?? []
-        for (const k of kids) walk(k)
+        for (const k of kids) walk(k, groupKey)
       }
       for (const g of groups) {
-        for (const root of g.tasks) walk(root)
+        if (!g.isPinned && !g.isTemp && !g.isNone) {
+          const headerId = `header:${project.id}:${g.key}`
+          flatTaskIds.push(headerId)
+          visualGroupById.set(headerId, g.key)
+        }
+        for (const root of g.tasks) walk(root, g.key)
       }
-      return ids
-    })()
+    }
     // Compute first/last-in-run flags for each selected task, scanning
     // adjacency in flat render order. Skipped when fewer than 2 selected
     // (single-select uses its own visual treatment).
@@ -1247,6 +1356,28 @@ export function TreeView({
       onStartEdit: handleStartEdit,
       onCommitEdit: handleCommitEdit,
       onCancelEdit: handleCancelEdit,
+    }
+    // Group-aware sortable strategy.
+    //   - Same-group drag: stock `verticalListSortingStrategy`.
+    //   - Cross-group drag: clamp the over-index to the over-group's header
+    //     index, then defer to stock. Stock slides every item in the range
+    //     (activeIndex, overIndex] up by row height — that range is A's
+    //     remaining items + the over-group's header, so the header
+    //     participates in the slide and visually absorbs A's source slot
+    //     (A appears to shrink). B's content rows stay put.
+    const groupAwareStrategy: SortingStrategy = (args) => {
+      const { activeIndex, overIndex } = args
+      if (activeIndex < 0 || overIndex < 0) return null
+      const activeId = flatTaskIds[activeIndex]
+      const overId = flatTaskIds[overIndex]
+      if (!activeId || !overId) return null
+      const activeGroup = visualGroupById.get(activeId)
+      const overGroup = visualGroupById.get(overId)
+      if (!activeGroup || !overGroup) return null
+      if (activeGroup === overGroup) return verticalListSortingStrategy(args)
+      const headerIdx = flatTaskIds.indexOf(`header:${project.id}:${overGroup}`)
+      if (headerIdx < 0) return verticalListSortingStrategy(args)
+      return verticalListSortingStrategy({ ...args, overIndex: headerIdx })
     }
     return (
       <Collapsible.Root
@@ -1326,7 +1457,7 @@ export function TreeView({
                 No active tasks
               </span>
             ) : (
-              <SortableContext items={flatTaskIds} strategy={verticalListSortingStrategy}>
+              <SortableContext items={flatTaskIds} strategy={groupAwareStrategy}>
                 {renderTreeGroups(groups, project.id, branchCtx)}
               </SortableContext>
             )}
