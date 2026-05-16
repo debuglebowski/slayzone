@@ -8,7 +8,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SLAY_JS = path.resolve(__dirname, '..', '..', '..', 'cli', 'dist', 'slay.js')
 
 test.describe('Task progress', () => {
-  const PROJECT_ABBREV = 'TP'
+  // Project name 'Progress Test' → sidebar fallback letters 'PR'.
+  const PROJECT_ABBREV = 'PR'
   let projectId = ''
   let openTaskId = ''
   let cliTaskId = ''
@@ -82,37 +83,32 @@ test.describe('Task progress', () => {
     expect(under.status).not.toBe(0)
   })
 
-  // QUARANTINED 2026-05-16: kanban card visibility test — project's task list
-  // not rendering in the visible viewport during this suite. The DB tests
-  // above still cover CLI → DB progress write. UI assertion needs investigation
-  // (tree view default? hidden panel? project not selected?).
-  test.skip('kanban card shows progress ring after CLI update', async ({ mainWindow }) => {
+  test('kanban card shows progress ring after CLI update', async ({ mainWindow }) => {
     const r = runCli('tasks', 'progress', openTaskId.slice(0, 8), '40')
     expect(r.status).toBe(0)
 
-    // Use the dedicated data-task-id attribute on the kanban card (visible-only).
+    // Progress is now rendered by ProgressRing inside TerminalProgressDot;
+    // aria-label is "<percent>% complete".
     const card = mainWindow.locator(`[data-task-id="${openTaskId}"]:visible`).first()
     await expect(card).toBeVisible({ timeout: 5_000 })
-    await expect(card.locator('[aria-label*="Progress:"][aria-label*="40%"]').first()).toBeVisible({ timeout: 5_000 })
+    await expect(card.locator('[aria-label*="40% complete"]').first()).toBeVisible({ timeout: 5_000 })
   })
 
-  test.skip('progress indicator hidden on done tasks', async ({ mainWindow }) => {
-    // Done tasks may need show-done toggle. Use the kanban card data-task-id.
+  test('progress indicator hidden on done tasks', async ({ mainWindow }) => {
     const doneCard = mainWindow.locator(`[data-task-id="${doneTaskId}"]:visible`).first()
     if (!(await doneCard.count())) {
-      // Toggle show-done in case it's hidden.
       await mainWindow.keyboard.press('Shift+D').catch(() => {})
     }
     await expect(doneCard).toBeVisible({ timeout: 3_000 })
-    await expect(doneCard.locator('[aria-label*="Progress:"]')).toHaveCount(0)
+    await expect(doneCard.locator('[aria-label*="complete"]')).toHaveCount(0)
   })
 
-  test.skip('progress hidden on card when value is 0', async ({ mainWindow }) => {
+  test('progress hidden on card when value is 0', async ({ mainWindow }) => {
     const r = runCli('tasks', 'progress', openTaskId.slice(0, 8), '0')
     expect(r.status).toBe(0)
 
     const card = mainWindow.locator(`[data-task-id="${openTaskId}"]:visible`).first()
     await expect(card).toBeVisible({ timeout: 5_000 })
-    await expect(card.locator('[aria-label*="Progress:"]')).toHaveCount(0)
+    await expect(card.locator('[aria-label*="complete"]')).toHaveCount(0)
   })
 })
