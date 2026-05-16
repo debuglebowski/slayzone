@@ -12,7 +12,7 @@ export default defineConfig({
     actionTimeout: 5_000,
     trace: 'on-first-retry',
   },
-  testIgnore: ['**/.e2e-runtime/**'],
+  testIgnore: ['**/.e2e-runtime/**', '**/packages/packages/**'],
   projects: [
     {
       name: 'electron',
