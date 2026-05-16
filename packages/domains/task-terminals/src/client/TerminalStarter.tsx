@@ -98,7 +98,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
           className="flex items-center gap-2 rounded-md border border-border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-surface-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {Icon ? <Icon className="size-4" /> : <Play className="size-4" />}
-          Start {label}
+          Open {label}
         </button>
         <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
           <input
