@@ -645,16 +645,23 @@
   overflow: hidden;
   border-collapse: separate;
   border-spacing: 0;
-  width: auto;
+  width: 100%;
   max-width: 100%;
   margin-top: 0.75em;
   margin-bottom: 0.75em;
+}
+.mk-doc[data-readability="compact"] table {
+  width: auto;
 }
 .mk-doc th,
 .mk-doc td {
   border-bottom: 1px solid var(--color-border);
   border-right: 1px solid var(--color-border);
-  padding: 0.5rem;
+  padding: 0.45rem 0.5rem;
+}
+.mk-doc th p,
+.mk-doc td p {
+  margin: 0;
 }
 .mk-doc th:last-child,
 .mk-doc td:last-child {
