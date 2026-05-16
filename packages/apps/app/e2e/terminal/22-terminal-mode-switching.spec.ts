@@ -47,22 +47,13 @@ test.describe('Terminal mode switching', () => {
     await expect(page.locator('[role="menu"]')).toBeVisible()
   }
 
-  test('claude-code mode shows Sync name action in menu', async ({ mainWindow }) => {
-    await openTerminalMenu(mainWindow)
-    await expect(mainWindow.getByRole('menuitem', { name: 'Sync name' })).toBeVisible()
-    await mainWindow.keyboard.press('Escape')
-  })
+  // Note: 'Sync name' menu item was removed from the terminal header dropdown.
+  // Tests that asserted its presence/absence have been dropped.
 
   test('switch to Codex mode', async ({ mainWindow }) => {
     await switchTerminalMode(mainWindow, 'codex')
 
     await expect(modeTrigger(mainWindow)).toHaveText(/Codex/)
-  })
-
-  test('codex mode hides Sync name', async ({ mainWindow }) => {
-    await openTerminalMenu(mainWindow)
-    await expect(mainWindow.getByRole('menuitem', { name: 'Sync name' })).not.toBeVisible()
-    await mainWindow.keyboard.press('Escape')
   })
 
   test('mode persists across navigation', async ({ mainWindow }) => {

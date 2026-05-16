@@ -49,7 +49,7 @@ test.describe('Web panels', () => {
       }
       await panelsTab.click()
     }
-    await expect(findCard(settingsDialog(page), 'Terminal')).toBeVisible({ timeout: 3_000 })
+    await expect(findCard(settingsDialog(page), 'Agent')).toBeVisible({ timeout: 3_000 })
   }
 
   const closePanelsTab = async (page: import('@playwright/test').Page) => {
@@ -112,7 +112,7 @@ test.describe('Web panels', () => {
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
 
-    for (const name of ['Terminal', 'Browser', 'Editor', 'Git']) {
+    for (const name of ['Agent', 'Browser', 'Editor', 'Git']) {
       await expect(findCard(dialog, name)).toBeVisible({ timeout: 3_000 })
     }
     for (const name of ['Figma', 'Notion', 'GitHub', 'Excalidraw']) {
@@ -129,7 +129,9 @@ test.describe('Web panels', () => {
     }
   })
 
-  // ── Add custom panel (uses 'j' — letters like z/p/c/v are Electron menu accelerators) ──
+  // ── Add custom panel (uses 'l' — 'j' is now bound to panel-settings; z/p/c/v
+  //    are Electron menu accelerators; k/b/e/g/s are reserved per
+  //    RESERVED_PANEL_SHORTCUTS; y/n/h/x/u are predefined panel shortcuts) ──
 
   test('add custom web panel', async ({ mainWindow }) => {
     await openPanelsTab(mainWindow)
@@ -139,7 +141,7 @@ test.describe('Web panels', () => {
     await nameInput.scrollIntoViewIfNeeded()
     await nameInput.fill('TestPanel')
     await dialog.getByPlaceholder('URL').fill('example.com')
-    await dialog.getByPlaceholder('Key').last().fill('j')
+    await dialog.getByPlaceholder('Key').last().fill('l')
 
     await dialog.getByRole('button', { name: 'Add Panel' }).click()
 
@@ -185,27 +187,27 @@ test.describe('Web panels', () => {
     await openTaskViaSearch(mainWindow, 'WP test task')
   })
 
-  test('Cmd+J toggles custom web panel on', async ({ mainWindow }) => {
+  test('Cmd+L toggles custom web panel on', async ({ mainWindow }) => {
     // Focus a safe element first (avoid webview stealing keystrokes)
     const titleEl = mainWindow.locator('h1, [data-testid="task-title"]').first()
     if (await titleEl.isVisible().catch(() => false)) await titleEl.click()
 
-    await mainWindow.keyboard.press('Meta+j')
+    await mainWindow.keyboard.press('Meta+l')
     if (!(await mainWindow.locator('[data-panel-id^="web:"]:visible').first().isVisible().catch(() => false))) {
-      await mainWindow.keyboard.press('Meta+Shift+j')
+      await mainWindow.keyboard.press('Meta+Shift+l')
     }
 
     await expect(mainWindow.locator('[data-panel-id^="web:"]:visible').first()).toBeVisible({ timeout: 5_000 })
   })
 
-  test('Cmd+J toggles custom web panel off', async ({ mainWindow }) => {
+  test('Cmd+L toggles custom web panel off', async ({ mainWindow }) => {
     // Focus outside webview before pressing shortcut again
     const titleEl = mainWindow.locator('h1, [data-testid="task-title"]').first()
     if (await titleEl.isVisible().catch(() => false)) await titleEl.click()
 
-    await mainWindow.keyboard.press('Meta+j')
+    await mainWindow.keyboard.press('Meta+l')
     if ((await mainWindow.locator('[data-panel-id^="web:"]:visible').count()) > 0) {
-      await mainWindow.keyboard.press('Meta+Shift+j')
+      await mainWindow.keyboard.press('Meta+Shift+l')
     }
 
     await expect(mainWindow.locator('[data-panel-id^="web:"]:visible')).toHaveCount(0, { timeout: 3_000 })
@@ -239,7 +241,7 @@ test.describe('Web panels', () => {
       const nameInput = dialog.getByPlaceholder('Name')
       await nameInput.fill('TestPanel')
       await dialog.getByPlaceholder('URL').fill('example.com')
-      await dialog.getByPlaceholder('Key').last().fill('j')
+      await dialog.getByPlaceholder('Key').last().fill('l')
       await dialog.getByRole('button', { name: 'Add Panel' }).click()
     }
     await expect(card).toBeVisible({ timeout: 5_000 })
@@ -277,13 +279,13 @@ test.describe('Web panels', () => {
     await closePanelsTab(mainWindow)
     await openPanelsTab(mainWindow)
     const dialog = settingsDialog(mainWindow)
-    const card = findCard(dialog, 'Terminal')
+    const card = findCard(dialog, 'Agent')
     await expect(card).toBeVisible({ timeout: 5_000 })
 
     await card.click()
     await expect(dialog.getByText('Default mode')).toBeVisible({ timeout: 5_000 })
     await dialog.getByTestId('settings-tab-panels').click()
-    await expect(findCard(dialog, 'Terminal')).toBeVisible({ timeout: 5_000 })
+    await expect(findCard(dialog, 'Agent')).toBeVisible({ timeout: 5_000 })
   })
 
   test('browser row opens config section', async ({ mainWindow }) => {
