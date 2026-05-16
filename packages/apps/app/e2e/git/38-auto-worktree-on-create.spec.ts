@@ -36,12 +36,15 @@ test.describe('Auto worktree on task create', () => {
     })
 
     const expectedBranch = slugify(title)
+    // Default worktree template is "../{project-folder-name}-workspaces", so
+    // the path is now <parent>/<project-folder>-workspaces/<branch>.
+    const projectFolder = path.basename(TEST_PROJECT_PATH)
     await expect
       .poll(async () => {
         const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
         return task?.worktree_path ?? null
       })
-      .toBe(path.join(path.dirname(TEST_PROJECT_PATH), expectedBranch))
+      .toBe(path.join(path.dirname(TEST_PROJECT_PATH), `${projectFolder}-workspaces`, expectedBranch))
   })
 
   test('project override off disables auto-create even when global is on', async ({ mainWindow }) => {
@@ -82,11 +85,14 @@ test.describe('Auto worktree on task create', () => {
     })
 
     const expectedBranch = slugify(title)
+    // Default worktree template is "../{project-folder-name}-workspaces", so
+    // the path is now <parent>/<project-folder>-workspaces/<branch>.
+    const projectFolder = path.basename(TEST_PROJECT_PATH)
     await expect
       .poll(async () => {
         const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), created.id)
         return task?.worktree_path ?? null
       })
-      .toBe(path.join(path.dirname(TEST_PROJECT_PATH), expectedBranch))
+      .toBe(path.join(path.dirname(TEST_PROJECT_PATH), `${projectFolder}-workspaces`, expectedBranch))
   })
 })
