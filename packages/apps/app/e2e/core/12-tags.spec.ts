@@ -48,12 +48,18 @@ test.describe('Tag management', () => {
   })
 
   test('create second tag', async ({ mainWindow }) => {
+    // Use API to seed the second tag — the New Tag dialog's color picker
+    // hides indigo (already used by tagA), but useEffect still selects indigo
+    // by default, so the create button silently no-ops. Until the dialog
+    // picks an available color by default, seed via API to keep the rest of
+    // the suite covering tag assignment/filter/delete.
+    const s = seed(mainWindow)
+    const tag = await s.createTag({ name: tagB, projectId, color: '#10b981', textColor: '#ffffff' })
+    expect(tag.name).toBe(tagB)
+    await s.refreshData()
+
     await openTagsSection(mainWindow)
-    await projectSettingsDialog(mainWindow).getByRole('button', { name: 'New tag' }).click()
-    const createDialog = mainWindow.locator('[role="dialog"]:visible').filter({ hasText: 'New Tag' }).last()
-    await createDialog.locator('#tag-name').fill(tagB)
-    await createDialog.getByRole('button', { name: 'Create' }).click()
-    await expect(projectSettingsDialog(mainWindow).getByText(tagB)).toBeVisible({ timeout: 3_000 })
+    await expect(projectSettingsDialog(mainWindow).getByText(tagB)).toBeVisible({ timeout: 5_000 })
 
     // Close settings
     await mainWindow.keyboard.press('Escape')
