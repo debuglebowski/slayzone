@@ -7,7 +7,7 @@ import { TEST_PROJECT_PATH } from '../fixtures/electron'
 // already migrated to use window.api.browser.listViews, but the panel toggle
 // pipeline needs deeper investigation. Feature (handoff routing) still works
 // in app; only the e2e shim is broken.
-test.describe.skip.serial('Web panel handoff routing', () => {
+test.describe.skip('Web panel handoff routing', () => {
   const PANEL_ID = 'web:handoff-e2e'
   const PANEL_NAME = 'Handoff Panel'
   const PANEL_SHORTCUT = 'o'
