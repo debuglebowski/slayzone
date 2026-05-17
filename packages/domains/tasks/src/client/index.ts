@@ -8,3 +8,4 @@ export { applyFilters, groupTasksBy, sortTasks, PRIORITY_LABELS, type Column, ty
 export { getViewConfig, type FilterState, type ViewConfig, type SortKey } from './FilterState'
 export { useSnoozeWakeUp } from './useSnoozeWakeUp'
 export { TaskContextMenu } from './TaskContextMenu'
+export { BulkTaskContextMenu } from './BulkTaskContextMenu'

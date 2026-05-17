@@ -43,6 +43,7 @@ interface AppSidebarProps {
   onTaskFieldUpdate?: (taskId: string, updates: Partial<Task>) => void
   onTaskBulkFieldUpdate?: (taskIds: string[], updates: Partial<Task>) => void
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode
+  taskBulkContextMenuRender?: (taskIds: string[], child: ReactNode) => ReactNode
   terminalStates?: Map<string, TerminalState>
   taskProgress?: Map<string, number>
   doneTaskIds?: Set<string>
@@ -131,6 +132,7 @@ export function AppSidebar({
   onTaskFieldUpdate,
   onTaskBulkFieldUpdate,
   taskContextMenuRender,
+  taskBulkContextMenuRender,
   terminalStates,
   taskProgress,
   doneTaskIds,
@@ -224,6 +226,7 @@ export function AppSidebar({
               onTaskBulkFieldUpdate,
               idleByProject,
               taskContextMenuRender,
+              taskBulkContextMenuRender,
               terminalStates,
               taskProgress,
               doneTaskIds,

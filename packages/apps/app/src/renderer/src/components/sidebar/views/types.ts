@@ -21,6 +21,8 @@ export interface SidebarViewContext {
   idleByProject?: Map<string, number>
   /** Render a task-row context-menu wrapper. Caller wires update/archive/delete + tag handlers. */
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode
+  /** Render a bulk context-menu wrapper when multiple tasks are selected. */
+  taskBulkContextMenuRender?: (taskIds: string[], child: ReactNode) => ReactNode
   /** Per-task terminal state (mostly populated for open-tab tasks). */
   terminalStates?: Map<string, TerminalState>
   /** Per-task progress 0..100. */

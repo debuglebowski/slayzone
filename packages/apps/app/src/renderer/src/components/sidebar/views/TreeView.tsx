@@ -125,6 +125,7 @@ interface TaskBranchCtx {
   columnsByProjectId?: Map<string, import('@slayzone/projects/shared').ColumnConfig[] | null>
   pinnedSet: Set<string>
   selectedTaskIds: Set<string>
+  selectedTaskIdArr: string[]
   /** For each selected task, whether it sits at the top/bottom of its
    * contiguous selection run in the project's render order. Used to draw a
    * single subtle border around the run when multi-selecting. Empty when
@@ -145,6 +146,7 @@ interface TaskBranchCtx {
   onCloseTab?: (taskId: string) => void
   onOpenTaskInBackground?: (taskId: string) => void
   taskContextMenuRender?: SidebarViewContext['taskContextMenuRender']
+  taskBulkContextMenuRender?: SidebarViewContext['taskBulkContextMenuRender']
   dragEnabled: boolean
   editingTaskId: string | null
   onStartEdit: (taskId: string) => void
@@ -472,11 +474,14 @@ function TaskRow({
     </button>
   )
 
-  return (
-    <div>
-      {ctx.taskContextMenuRender ? ctx.taskContextMenuRender(task, button) : button}
-    </div>
-  )
+  const isInBulk = isSelected && ctx.selectedTaskIds.size > 1
+  let wrapped: ReactNode = button
+  if (isInBulk && ctx.taskBulkContextMenuRender) {
+    wrapped = ctx.taskBulkContextMenuRender(ctx.selectedTaskIdArr, button)
+  } else if (ctx.taskContextMenuRender) {
+    wrapped = ctx.taskContextMenuRender(task, button)
+  }
+  return <div>{wrapped}</div>
 }
 
 function TaskBranch({
@@ -625,6 +630,7 @@ export function TreeView({
   onOpenTaskInBackground,
   onCreateTemporaryTask,
   taskContextMenuRender,
+  taskBulkContextMenuRender,
   terminalStates,
   taskProgress,
   doneTaskIds,
@@ -666,6 +672,7 @@ export function TreeView({
   // dragging a parent transiently collapses its sub-tasks.
   const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
+  const selectedTaskIdArr = useMemo(() => [...selectedTaskIds], [selectedTaskIds])
   const treeGroupBy = useTabStore((s) => s.treeGroupBy)
   const treeOrderBy = useTabStore((s) => s.treeOrderBy)
   const treeOrderDir = useTabStore((s) => s.treeOrderDir)
@@ -1478,6 +1485,7 @@ export function TreeView({
       columnsByProjectId,
       pinnedSet,
       selectedTaskIds,
+      selectedTaskIdArr,
       selectionRunInfo,
       activeDragTaskId,
       treeShowStatus,
@@ -1491,6 +1499,7 @@ export function TreeView({
       onCloseTab,
       onOpenTaskInBackground,
       taskContextMenuRender,
+      taskBulkContextMenuRender,
       dragEnabled,
       editingTaskId,
       onStartEdit: handleStartEdit,

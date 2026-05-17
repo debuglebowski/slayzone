@@ -19,7 +19,8 @@ import {
   applyFilters,
   getViewConfig,
   useSnoozeWakeUp,
-  TaskContextMenu
+  TaskContextMenu,
+  BulkTaskContextMenu
 } from '@slayzone/tasks'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
 import { usePanelSizes } from '@slayzone/task/client/usePanelSizes'
@@ -1440,6 +1441,28 @@ function App(): React.JSX.Element {
               {child}
             </TaskContextMenu>
           )}
+          taskBulkContextMenuRender={(taskIds, child) => {
+            const idSet = new Set(taskIds)
+            const selectedTasks = tasks.filter((t) => idSet.has(t.id))
+            const firstProjectId = selectedTasks[0]?.project_id
+            const allSameProject = !!firstProjectId && selectedTasks.every((t) => t.project_id === firstProjectId)
+            return (
+              <BulkTaskContextMenu
+                taskIds={taskIds}
+                tasks={selectedTasks}
+                projects={projects}
+                columns={allSameProject ? columnsByProjectId.get(firstProjectId) ?? null : null}
+                tags={allSameProject ? tags.filter((t) => t.project_id === firstProjectId) : []}
+                taskTagsMap={taskTags}
+                onBulkUpdate={bulkContextMenuUpdate}
+                onBulkArchive={archiveTasks}
+                onBulkDelete={bulkDelete}
+                onTaskTagsChange={handleTaskTagsChange}
+              >
+                {child}
+              </BulkTaskContextMenu>
+            )
+          }}
         />
 
         <div id="right-column" className={`flex-1 flex min-w-0 bg-sidebar pb-2 pr-2 ${headerHidden ? 'pt-2' : ''} ${zenMode || sidebarAutoHide ? 'pl-2' : ''}`}>
