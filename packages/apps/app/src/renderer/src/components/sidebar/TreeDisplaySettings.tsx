@@ -30,6 +30,8 @@ export function TreeDisplaySettings() {
   const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
   const treeShowOnlyActive = useTabStore((s) => s.treeShowOnlyActive)
   const treeShowTemporary = useTabStore((s) => s.treeShowTemporary)
+  const treeShowBlocked = useTabStore((s) => s.treeShowBlocked)
+  const treeShowSnoozed = useTabStore((s) => s.treeShowSnoozed)
   const treeShowAllOpen = useTabStore((s) => s.treeShowAllOpen)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treeStatusFilter = useTabStore((s) => s.treeStatusFilter)
@@ -54,6 +56,8 @@ export function TreeDisplaySettings() {
   const setTreeCrossOutDone = useTabStore((s) => s.setTreeCrossOutDone)
   const setTreeShowOnlyActive = useTabStore((s) => s.setTreeShowOnlyActive)
   const setTreeShowTemporary = useTabStore((s) => s.setTreeShowTemporary)
+  const setTreeShowBlocked = useTabStore((s) => s.setTreeShowBlocked)
+  const setTreeShowSnoozed = useTabStore((s) => s.setTreeShowSnoozed)
   const setTreeShowAllOpen = useTabStore((s) => s.setTreeShowAllOpen)
   const setTreeShowWorktree = useTabStore((s) => s.setTreeShowWorktree)
   const setTreeStatusFilter = useTabStore((s) => s.setTreeStatusFilter)
@@ -177,7 +181,7 @@ export function TreeDisplaySettings() {
             />
             <Row
               id="tree-show-all-open"
-              label="Show all open tasks"
+              label="Show all open"
               hint="Always include tasks that have an open tab, regardless of filters"
               checked={treeShowAllOpen}
               onChange={setTreeShowAllOpen}
@@ -189,6 +193,25 @@ export function TreeDisplaySettings() {
               checked={treeShowTemporary}
               onChange={setTreeShowTemporary}
             />
+            <Row
+              id="tree-show-blocked"
+              label="Show blocked"
+              hint="Include tasks marked as blocked"
+              checked={treeShowBlocked}
+              onChange={setTreeShowBlocked}
+            />
+            <Row
+              id="tree-show-snoozed"
+              label="Show snoozed"
+              hint="Include tasks currently snoozed (snoozed_until in the future)"
+              checked={treeShowSnoozed}
+              onChange={setTreeShowSnoozed}
+            />
+          </div>
+
+          {/* Sub-tasks — descendant visibility */}
+          <div className="space-y-3">
+            <SectionHeader>Sub-tasks</SectionHeader>
             <Row
               id="tree-show-subtasks"
               label="Show sub-tasks"

@@ -653,6 +653,8 @@ export function TreeView({
   const treeCrossOutDone = useTabStore((s) => s.treeCrossOutDone)
   const treeShowOnlyActive = useTabStore((s) => s.treeShowOnlyActive)
   const treeShowTemporary = useTabStore((s) => s.treeShowTemporary)
+  const treeShowBlocked = useTabStore((s) => s.treeShowBlocked)
+  const treeShowSnoozed = useTabStore((s) => s.treeShowSnoozed)
   const treeShowAllOpen = useTabStore((s) => s.treeShowAllOpen)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
@@ -687,15 +689,17 @@ export function TreeView({
       const priorityOk = priorityFilter.size === 0 || priorityFilter.has(t.priority)
       if (!priorityOk) return false
       // Shortcuts: any of these passes the task straight through, bypassing
-      // temp, show-only-active, and status filters.
+      // temp/blocked/snoozed, show-only-active, and status filters.
       if (pinnedSet.has(t.id)) return true
       if (sessionTaskIds.has(t.id)) return true
       if (treeShowAllOpen && openTabTaskIds.has(t.id)) return true
       if (!treeShowTemporary && t.is_temporary) return false
+      if (!treeShowBlocked && t.is_blocked) return false
+      if (!treeShowSnoozed && !!t.snoozed_until && new Date(t.snoozed_until) > new Date()) return false
       if (treeShowOnlyActive) return false
       return statusFilter.has(t.status)
     },
-    [statusFilter, priorityFilter, pinnedSet, openTabTaskIds, sessionTaskIds, treeShowOnlyActive, treeShowTemporary, treeShowAllOpen]
+    [statusFilter, priorityFilter, pinnedSet, openTabTaskIds, sessionTaskIds, treeShowOnlyActive, treeShowTemporary, treeShowBlocked, treeShowSnoozed, treeShowAllOpen]
   )
 
   // A task is "visible" if it passes the filter OR if any descendant in the same
@@ -721,10 +725,13 @@ export function TreeView({
         list.push(t)
         childrenOf.set(t.parent_id, list)
       }
+      const isSnoozed = (x: Task) => !!x.snoozed_until && new Date(x.snoozed_until) > new Date()
       for (const t of tasks) {
         if (t.parent_id) continue
         if (t.archived_at) continue
         if (!treeShowTemporary && t.is_temporary) continue
+        if (!treeShowBlocked && t.is_blocked) continue
+        if (!treeShowSnoozed && isSnoozed(t)) continue
         // Strict root check — must directly match status + priority. Bypasses
         // (open tab, pinned, session) don't qualify a root to pull in its
         // subtree.
@@ -739,6 +746,9 @@ export function TreeView({
           if (excludeDone && cur.id !== t.id && doneTaskIds?.has(cur.id)) continue
           // Priority filter applies to descendants too.
           if (cur.id !== t.id && priorityFilter.size > 0 && !priorityFilter.has(cur.priority)) continue
+          // Blocked/snoozed filters apply to descendants too.
+          if (cur.id !== t.id && !treeShowBlocked && cur.is_blocked) continue
+          if (cur.id !== t.id && !treeShowSnoozed && isSnoozed(cur)) continue
           set.add(cur.id)
           const kids = childrenOf.get(cur.id)
           if (kids) for (const k of kids) stack.push(k)
@@ -771,7 +781,7 @@ export function TreeView({
       }
     }
     return set
-  }, [tasks, passesFilter, treeShowSubtasks, treeIncludeAllSubtasks, treeIncludeAllUndoneSubtasks, treeShowOnlyActive, doneTaskIds, priorityFilter, statusFilter, treeShowTemporary])
+  }, [tasks, passesFilter, treeShowSubtasks, treeIncludeAllSubtasks, treeIncludeAllUndoneSubtasks, treeShowOnlyActive, doneTaskIds, priorityFilter, statusFilter, treeShowTemporary, treeShowBlocked, treeShowSnoozed])
 
   // Visible tasks bucketed and sorted per project using the tree-local order
   // (no coupling to kanban filter). orderTreeRows always tiebreaks by `order`
