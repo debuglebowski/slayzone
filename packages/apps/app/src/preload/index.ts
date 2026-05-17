@@ -421,7 +421,9 @@ const api: ElectronAPI = {
   window: {
     close: () => ipcRenderer.invoke('window:close'),
     setTrafficLightPosition: (pos: { x: number; y: number } | null) =>
-      ipcRenderer.invoke('window:set-traffic-light-position', pos)
+      ipcRenderer.invoke('window:set-traffic-light-position', pos),
+    setWindowButtonVisibility: (visible: boolean) =>
+      ipcRenderer.invoke('window:set-window-button-visibility', visible)
   },
   files: {
     saveTempImage: (base64, mimeType) => ipcRenderer.invoke('files:saveTempImage', base64, mimeType),

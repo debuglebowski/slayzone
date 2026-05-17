@@ -181,6 +181,10 @@ export function AppSidebar({
   useEffect(() => () => cancelClose(), [cancelClose])
 
   const autoHideActive = sidebarAutoHide && !zenMode
+  const buttonsVisible = !zenMode && (!autoHideActive || hoverRevealed)
+  useEffect(() => {
+    window.api.window.setWindowButtonVisibility(buttonsVisible)
+  }, [buttonsVisible])
   const isResizable = !zenMode && !!view.resizable
   const effectiveWidth =
     isResizable

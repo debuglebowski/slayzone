@@ -1779,6 +1779,17 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     }
   )
 
+  // Show/hide macOS traffic-light buttons (close/min/max).
+  ipcMain.handle(
+    'window:set-window-button-visibility',
+    (event, visible: boolean) => {
+      if (process.platform !== 'darwin') return
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return
+      win.setWindowButtonVisibility(visible)
+    }
+  )
+
   // Dialog
   ipcMain.handle(
     'dialog:showOpenDialog',
