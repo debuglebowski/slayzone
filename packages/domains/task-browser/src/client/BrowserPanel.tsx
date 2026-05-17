@@ -1156,7 +1156,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     }
 
     focusLocalTarget()
-    void window.api.browser.focusRenderer().finally(() => {
+    void window.api.app.focusRenderer().finally(() => {
       requestAnimationFrame(focusLocalTarget)
     })
   }, [])

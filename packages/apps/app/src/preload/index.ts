@@ -228,6 +228,7 @@ const api: ElectronAPI = {
     isLoopModeEnabledSync: ipcRenderer.sendSync('app:is-loop-mode-enabled-sync') as boolean,
     getZoomFactor: () => ipcRenderer.invoke('app:get-zoom-factor'),
     adjustZoom: (command: 'in' | 'out' | 'reset') => ipcRenderer.invoke('app:adjust-zoom', command) as Promise<number>,
+    focusRenderer: () => ipcRenderer.invoke('app:focus-renderer'),
     isPlaywright: process.env.PLAYWRIGHT === '1',
     onGoHome: (callback: () => void) => {
       const handler = () => callback()
@@ -990,7 +991,6 @@ const api: ElectronAPI = {
     removeCss: (viewId, key) => ipcRenderer.invoke('browser:remove-css', viewId, key),
     setZoom: (viewId, factor) => ipcRenderer.invoke('browser:set-zoom', viewId, factor),
     focus: (viewId) => ipcRenderer.invoke('browser:focus', viewId),
-    focusRenderer: () => ipcRenderer.invoke('browser:focus-renderer'),
     findInPage: (viewId, text, options) => ipcRenderer.invoke('browser:find-in-page', viewId, text, options),
     stopFindInPage: (viewId, action) => ipcRenderer.invoke('browser:stop-find-in-page', viewId, action),
     getWebContentsId: (viewId) => ipcRenderer.invoke('browser:get-web-contents-id', viewId),

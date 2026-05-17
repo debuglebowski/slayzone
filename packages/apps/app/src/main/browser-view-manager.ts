@@ -457,11 +457,6 @@ export class BrowserViewManager {
     wc.focus()
   }
 
-  focusRenderer(): void {
-    if (!this.mainWindow || this.mainWindow.isDestroyed() || !this.mainWindow.isFocused()) return
-    this.mainWindow.webContents.focus()
-  }
-
   findInPage(viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }): number | null {
     const wc = this.getWebContents(viewId)
     if (!wc) return null

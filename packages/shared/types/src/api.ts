@@ -452,6 +452,7 @@ export interface ElectronAPI {
     isLoopModeEnabledSync: boolean
     getZoomFactor: () => Promise<number>
     adjustZoom: (command: 'in' | 'out' | 'reset') => Promise<number>
+    focusRenderer: () => Promise<void>
     isPlaywright: boolean
     onGoHome: (callback: () => void) => () => void
     onToggleGlobalAgentPanel: (callback: () => void) => () => void
@@ -1062,7 +1063,6 @@ export interface ElectronAPI {
     removeCss: (viewId: string, key: string) => Promise<void>
     setZoom: (viewId: string, factor: number) => Promise<void>
     focus: (viewId: string) => Promise<void>
-    focusRenderer: () => Promise<void>
     findInPage: (viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => Promise<number | null>
     stopFindInPage: (viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection') => Promise<void>
     getWebContentsId: (viewId: string) => Promise<number | null>
