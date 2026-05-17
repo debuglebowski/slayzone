@@ -660,6 +660,10 @@ export function TreeView({
   const treeCollapsedTaskIds = useTabStore((s) => s.treeCollapsedTaskIds)
   const collapsedSet = useMemo(() => new Set(treeCollapsedTaskIds), [treeCollapsedTaskIds])
   const toggleTreeCollapsedTask = useTabStore((s) => s.toggleTreeCollapsedTask)
+  // Hoisted above `childrenByParent` memo so it can react to drag start —
+  // dragging a parent transiently collapses its sub-tasks.
+  const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const treeGroupBy = useTabStore((s) => s.treeGroupBy)
   const treeOrderBy = useTabStore((s) => s.treeOrderBy)
   const treeOrderDir = useTabStore((s) => s.treeOrderDir)
@@ -817,15 +821,28 @@ export function TreeView({
     return s
   }, [allChildrenByParent])
 
+  // Transient collapse set: while a row with sub-tasks is being dragged,
+  // hide its children so the drag preview + sortable list stay compact.
+  // Restored on drag end/cancel (state cleared in those handlers).
+  const dragCollapseSet = useMemo(() => {
+    if (!activeDragTaskId) return null
+    const isMulti = selectedTaskIds.has(activeDragTaskId) && selectedTaskIds.size > 1
+    const ids = isMulti ? selectedTaskIds : new Set([activeDragTaskId])
+    const s = new Set<string>()
+    for (const id of ids) if (tasksWithChildren.has(id)) s.add(id)
+    return s.size > 0 ? s : null
+  }, [activeDragTaskId, selectedTaskIds, tasksWithChildren])
+
   const childrenByParent = useMemo(() => {
-    if (collapsedSet.size === 0) return allChildrenByParent
+    if (collapsedSet.size === 0 && !dragCollapseSet) return allChildrenByParent
     const m = new Map<string, Task[]>()
     for (const [pid, kids] of allChildrenByParent) {
       if (collapsedSet.has(pid)) continue
+      if (dragCollapseSet?.has(pid)) continue
       m.set(pid, kids)
     }
     return m
-  }, [allChildrenByParent, collapsedSet])
+  }, [allChildrenByParent, collapsedSet, dragCollapseSet])
 
   const rootTasksByProject = useMemo(() => {
     const m = new Map<string, Task[]>()
@@ -922,10 +939,6 @@ export function TreeView({
     return sortables.length > 0 ? sortables : all
   }, [])
 
-  // Track active drag for DragOverlay rendering. Storing just the id keeps
-  // state small; the task is looked up at render time.
-  const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null)
-
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveDragTaskId(event.active.id as string)
   }, [])
@@ -936,8 +949,9 @@ export function TreeView({
 
   // Multi-selection — Shift = sibling range, Cmd/Ctrl = toggle individual,
   // plain click = open + clear selection. anchor is the last single/cmd-click
-  // target, used as the base point for shift-range expansion.
-  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
+  // target, used as the base point for shift-range expansion. `activeDragTaskId`
+  // + `selectedTaskIds` are hoisted above so `childrenByParent` can collapse
+  // sub-tasks on drag start.
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null)
 
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
