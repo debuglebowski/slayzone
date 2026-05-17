@@ -192,6 +192,56 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
+  test('claude-code PreToolUse AskUserQuestion → idle (blocking tool, agent paused for user)', async () => {
+    // Claude Code does NOT fire Notification for AskUserQuestion — without
+    // this branch the session would pin on 'running' until 5min silence-timer.
+    findSessionSpy.mockReturnValue('task-aq')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-aq',
+        raw: { tool_name: 'AskUserQuestion' },
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-aq', 'idle', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreToolUse ExitPlanMode → idle (plan approval blocks)', async () => {
+    findSessionSpy.mockReturnValue('task-epm')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-epm',
+        raw: { tool_name: 'ExitPlanMode' },
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-epm', 'idle', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreToolUse Bash → running (non-blocking tool, unchanged)', async () => {
+    findSessionSpy.mockReturnValue('task-bash')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-bash',
+        raw: { tool_name: 'Bash' },
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-bash', 'running', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
   test('claude-code PostToolUse → markActive only, NO state transition (prevents sidebar flicker)', async () => {
     // Regression: agent-event-handler maps PostToolUse → 'agent-stop' which
     // would flip the session 'idle' between every tool. Keep state 'running'

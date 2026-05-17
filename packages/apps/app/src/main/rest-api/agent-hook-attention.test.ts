@@ -76,11 +76,12 @@ const rest = await mountRestApp(app)
 
 interface HookRes { ok?: boolean; error?: string }
 
-async function postHook(taskId: string, hookEvent: string): Promise<number> {
+async function postHook(taskId: string, hookEvent: string, raw?: unknown): Promise<number> {
   const res = await rest.request<HookRes>('POST', '/api/agent-hook', {
     agentId: 'claude-code',
     hookEvent,
     taskId,
+    ...(raw !== undefined ? { raw } : {}),
   })
   return res.status
 }
@@ -100,6 +101,26 @@ await describe('POST /api/agent-hook → handleAttentionTransition', () => {
     hasUserInput = true
     expect(await postHook(id, 'Notification')).toBe(200)
     expect(readFlag(id)).toBe(1)
+  })
+
+  test('PreToolUse AskUserQuestion + user input → needs_attention set (blocking tool)', async () => {
+    // Native blocking tool never fires Notification — PreToolUse must flip to
+    // idle on its own so attention transition picks up running→idle.
+    const id = seedTask()
+    currentState = 'running'
+    hasUserInput = true
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'AskUserQuestion' })).toBe(200)
+    expect(currentState).toBe('idle')
+    expect(readFlag(id)).toBe(1)
+  })
+
+  test('PreToolUse Bash → running (non-blocking tool unchanged)', async () => {
+    const id = seedTask()
+    currentState = 'idle'
+    hasUserInput = true
+    expect(await postHook(id, 'PreToolUse', { tool_name: 'Bash' })).toBe(200)
+    expect(currentState).toBe('running')
+    expect(readFlag(id)).toBe(0)
   })
 
   test('PostToolUse hook → markActive only, state stays running, flag stays 0', async () => {

@@ -28,26 +28,45 @@ const defaultBridge: TerminalStateBridge = {
 }
 
 /**
+ * Built-in Claude tools that BLOCK the agent waiting for a user keystroke.
+ * Claude Code does NOT fire `Notification` for these (Notification only fires
+ * for permission_prompt, idle_prompt, auth_success, and MCP elicitation_dialog
+ * — not for native blocking tools). Without this allowlist, PreToolUse pins
+ * the session on 'running' until the user answers, the silence-timer trips
+ * 5 minutes later, or the turn ends — sidebar shows the loading spinner the
+ * whole time and `needs_attention` never lights up.
+ *
+ * Add new built-in blocking tools here when Anthropic ships them.
+ */
+const CLAUDE_BLOCKING_TOOLS: ReadonlySet<string> = new Set(['AskUserQuestion', 'ExitPlanMode'])
+
+/**
  * Claude Code raw hook event → TerminalState. Keys on the RAW name (not the
  * normalized lifecycle type) because PreToolUse + PostToolUse both normalize
  * to start/stop pairs that would flicker the UI on every tool call inside a
  * single turn. Only the turn-boundary events drive state:
  *
- *   UserPromptSubmit / PreToolUse  → 'running' (active inside a turn)
- *   Stop / SessionEnd              → 'idle'   (turn complete / session over)
- *   Notification                   → 'idle'   (claude paused for user — sidebar dot)
+ *   UserPromptSubmit                → 'running' (active inside a turn)
+ *   PreToolUse (non-blocking tool)  → 'running'
+ *   PreToolUse (blocking tool)      → 'idle'   (agent paused for user)
+ *   Stop / SessionEnd               → 'idle'   (turn complete / session over)
+ *   Notification                    → 'idle'   (claude paused for user — sidebar dot)
  *   PostToolUse / SessionStart /
- *   SubagentStop / PreCompact      → null     (no-op; mid-turn or already-handled)
+ *   SubagentStop / PreCompact       → null     (no-op; mid-turn or already-handled)
  *
  * Mid-turn no-ops are deliberate: PostToolUse fires after every tool but the
  * agent is still working until Stop. Letting it flip to 'idle' caused the
  * sidebar to flicker on every tool call inside one turn.
  */
-function claudeCodeHookToTerminalState(hookEvent: string): TerminalState | null {
+function claudeCodeHookToTerminalState(hookEvent: string, raw?: unknown): TerminalState | null {
   switch (hookEvent) {
     case 'UserPromptSubmit':
-    case 'PreToolUse':
       return 'running'
+    case 'PreToolUse': {
+      const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
+      if (typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)) return 'idle'
+      return 'running'
+    }
     case 'Stop':
     case 'SessionEnd':
     case 'Notification':
@@ -110,7 +129,7 @@ export function registerAgentHookRoute(
     if (parsed.data.agentId === 'claude-code' && parsed.data.taskId) {
       const sessionId = bridge.findSession(parsed.data.taskId, 'claude-code')
       if (sessionId) {
-        const newState = claudeCodeHookToTerminalState(parsed.data.hookEvent)
+        const newState = claudeCodeHookToTerminalState(parsed.data.hookEvent, parsed.data.raw)
         recordDiagnosticEvent({
           level: 'info',
           source: 'pty',
