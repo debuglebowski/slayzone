@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { BookOpen, ChevronDown, Clock, GitBranch, Home, Pin, Plus, Power, Search, Settings, X } from 'lucide-react'
+import { BookOpen, ChevronDown, ChevronRight, Clock, GitBranch, Home, Pin, Plus, Power, Search, Settings, X } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import {
   DndContext,
@@ -9,6 +9,7 @@ import {
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
@@ -16,7 +17,6 @@ import {
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
-  type SortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { cn, TerminalProgressDot, PriorityIcon, getColumnStatusStyle, Tooltip, TooltipContent, TooltipTrigger, useShortcutDisplay } from '@slayzone/ui'
@@ -150,6 +150,12 @@ interface TaskBranchCtx {
   onStartEdit: (taskId: string) => void
   onCommitEdit: (taskId: string, value: string) => void
   onCancelEdit: () => void
+  /** Tasks that have at least one visible child in the tree — render
+   * collapse chevron. Computed from the un-collapse-filtered child map so
+   * collapsing a parent doesn't hide its own chevron. */
+  tasksWithChildren: Set<string>
+  collapsedTaskIds: Set<string>
+  onToggleCollapse: (taskId: string) => void
 }
 
 function RenameInput({
@@ -281,6 +287,44 @@ function TaskRow({
       {...listeners}
     >
       <TreeGuides depth={depth} ancestorFlags={ancestorFlags} />
+      {ctx.tasksWithChildren.has(task.id) && (
+        <span
+          role="button"
+          aria-label={ctx.collapsedTaskIds.has(task.id) ? 'Expand sub-tasks' : 'Collapse sub-tasks'}
+          tabIndex={0}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            ctx.onToggleCollapse(task.id)
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
+            e.stopPropagation()
+            ctx.onToggleCollapse(task.id)
+          }}
+          style={{
+            // Position at the elbow apex on this row — where the vertical
+            // ancestor guide curves to meet the row content. That's the
+            // visual "path split". Centered on (parentX, mid).
+            left: tgGuideX(depth - 1) - 6,
+            top: TG_ROW_HEIGHT / 2 - 6,
+          }}
+          className={cn(
+            'absolute z-20 inline-flex size-3 items-center justify-center rounded-sm bg-background text-foreground ring-1 ring-border transition-opacity',
+            'opacity-0 group-hover/treerow:opacity-100 hover:bg-accent hover:text-accent-foreground',
+            ctx.collapsedTaskIds.has(task.id) && 'opacity-100'
+          )}
+        >
+          {ctx.collapsedTaskIds.has(task.id) ? (
+            <ChevronRight className="size-2.5" />
+          ) : (
+            <ChevronDown className="size-2.5" />
+          )}
+        </span>
+      )}
       <span
         className={cn(
           'relative flex flex-1 items-center gap-2 px-1.5 py-1 min-w-0 transition-colors',
@@ -605,6 +649,9 @@ export function TreeView({
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const pinnedSet = useMemo(() => new Set(treePinnedTaskIds), [treePinnedTaskIds])
+  const treeCollapsedTaskIds = useTabStore((s) => s.treeCollapsedTaskIds)
+  const collapsedSet = useMemo(() => new Set(treeCollapsedTaskIds), [treeCollapsedTaskIds])
+  const toggleTreeCollapsedTask = useTabStore((s) => s.toggleTreeCollapsedTask)
   const treeGroupBy = useTabStore((s) => s.treeGroupBy)
   const treeOrderBy = useTabStore((s) => s.treeOrderBy)
   const treeOrderDir = useTabStore((s) => s.treeOrderDir)
@@ -650,7 +697,10 @@ export function TreeView({
     const taskById = new Map(tasks.map((t) => [t.id, t]))
     const set = new Set<string>()
 
-    if (treeShowSubtasks && (treeIncludeAllSubtasks || treeIncludeAllUndoneSubtasks)) {
+    // `treeShowOnlyActive` takes precedence — when on, skip the all-subtasks
+    // expansion so only bypass tasks (pinned/session/open-tab) + parent chain
+    // remain visible, regardless of root status match.
+    if (treeShowSubtasks && !treeShowOnlyActive && (treeIncludeAllSubtasks || treeIncludeAllUndoneSubtasks)) {
       const excludeDone = !treeIncludeAllSubtasks && treeIncludeAllUndoneSubtasks
       const childrenOf = new Map<string, Task[]>()
       for (const t of tasks) {
@@ -709,7 +759,7 @@ export function TreeView({
       }
     }
     return set
-  }, [tasks, passesFilter, treeShowSubtasks, treeIncludeAllSubtasks, treeIncludeAllUndoneSubtasks, doneTaskIds, priorityFilter, statusFilter, treeShowTemporary])
+  }, [tasks, passesFilter, treeShowSubtasks, treeIncludeAllSubtasks, treeIncludeAllUndoneSubtasks, treeShowOnlyActive, doneTaskIds, priorityFilter, statusFilter, treeShowTemporary])
 
   // Visible tasks bucketed and sorted per project using the tree-local order
   // (no coupling to kanban filter). orderTreeRows always tiebreaks by `order`
@@ -732,7 +782,12 @@ export function TreeView({
   // For each in-progress task id → its in-progress children, in the
   // per-project sort order. Subtasks whose parent is not in-progress are
   // promoted to the project root.
-  const childrenByParent = useMemo(() => {
+  //
+  // Two maps: `allChildrenByParent` is collapse-agnostic (drives the chevron
+  // visibility — collapsed parent still has a chevron). `childrenByParent`
+  // drops entries for collapsed parents so render + drag-flat skip those
+  // subtrees in one sweep.
+  const allChildrenByParent = useMemo(() => {
     if (!treeShowSubtasks) return new Map<string, Task[]>()
     const m = new Map<string, Task[]>()
     for (const arr of tasksByProject.values()) {
@@ -747,6 +802,22 @@ export function TreeView({
     }
     return m
   }, [tasksByProject, visibleTaskIds, treeShowSubtasks])
+
+  const tasksWithChildren = useMemo(() => {
+    const s = new Set<string>()
+    for (const [pid, kids] of allChildrenByParent) if (kids.length > 0) s.add(pid)
+    return s
+  }, [allChildrenByParent])
+
+  const childrenByParent = useMemo(() => {
+    if (collapsedSet.size === 0) return allChildrenByParent
+    const m = new Map<string, Task[]>()
+    for (const [pid, kids] of allChildrenByParent) {
+      if (collapsedSet.has(pid)) continue
+      m.set(pid, kids)
+    }
+    return m
+  }, [allChildrenByParent, collapsedSet])
 
   const rootTasksByProject = useMemo(() => {
     const m = new Map<string, Task[]>()
@@ -822,6 +893,25 @@ export function TreeView({
   const { counts: staleSkillCounts } = useStaleSkillCounts(visibleProjects)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  // Prefer sortable items (task rows + group headers) over the larger group
+  // wrapper droppables when the pointer is inside both. Wrapper rects span
+  // the whole group; in cross-group drag, A's wrapper rect overlaps with B's
+  // header's visual rect (post-transform) in the bottom-of-A zone — without
+  // this filter dnd-kit could pick A's wrapper as `over`, the strategy would
+  // bail with overIndex = -1, and items would snap back to original each
+  // frame the pointer touched the overlap, causing flicker.
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    const all = pointerWithin(args)
+    if (all.length <= 1) return all
+    const sortables = all.filter((c) => {
+      const data = args.droppableContainers.find((d) => d.id === c.id)?.data?.current as
+        | { kind?: string }
+        | undefined
+      return data?.kind === 'task' || data?.kind === 'header'
+    })
+    return sortables.length > 0 ? sortables : all
+  }, [])
 
   // Track active drag for DragOverlay rendering. Storing just the id keeps
   // state small; the task is looked up at render time.
@@ -1379,29 +1469,14 @@ export function TreeView({
       onStartEdit: handleStartEdit,
       onCommitEdit: handleCommitEdit,
       onCancelEdit: handleCancelEdit,
+      tasksWithChildren,
+      collapsedTaskIds: collapsedSet,
+      onToggleCollapse: toggleTreeCollapsedTask,
     }
-    // Group-aware sortable strategy.
-    //   - Same-group drag: stock `verticalListSortingStrategy`.
-    //   - Cross-group drag: clamp the over-index to the over-group's header
-    //     index, then defer to stock. Stock slides every item in the range
-    //     (activeIndex, overIndex] up by row height — that range is A's
-    //     remaining items + the over-group's header, so the header
-    //     participates in the slide and visually absorbs A's source slot
-    //     (A appears to shrink). B's content rows stay put.
-    const groupAwareStrategy: SortingStrategy = (args) => {
-      const { activeIndex, overIndex } = args
-      if (activeIndex < 0 || overIndex < 0) return null
-      const activeId = flatTaskIds[activeIndex]
-      const overId = flatTaskIds[overIndex]
-      if (!activeId || !overId) return null
-      const activeGroup = visualGroupById.get(activeId)
-      const overGroup = visualGroupById.get(overId)
-      if (!activeGroup || !overGroup) return null
-      if (activeGroup === overGroup) return verticalListSortingStrategy(args)
-      const headerIdx = flatTaskIds.indexOf(`header:${project.id}:${overGroup}`)
-      if (headerIdx < 0) return verticalListSortingStrategy(args)
-      return verticalListSortingStrategy({ ...args, overIndex: headerIdx })
-    }
+    // Stock `verticalListSortingStrategy` treats every sortable item
+    // uniformly — headers, root rows, sub-rows all slide as ordinary items.
+    // The drop semantics in `handleDragEnd` (header vs row vs group wrapper)
+    // still differentiate at drop time; the *visual* slide is uniform.
     return (
       <Collapsible.Root
         key={project.id}
@@ -1480,7 +1555,7 @@ export function TreeView({
                 No active tasks
               </span>
             ) : (
-              <SortableContext items={flatTaskIds} strategy={groupAwareStrategy}>
+              <SortableContext items={flatTaskIds} strategy={verticalListSortingStrategy}>
                 {renderTreeGroups(groups, project.id, branchCtx)}
               </SortableContext>
             )}
@@ -1542,7 +1617,7 @@ export function TreeView({
       </div>
       <DndContext
         sensors={sensors}
-        collisionDetection={pointerWithin}
+        collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
