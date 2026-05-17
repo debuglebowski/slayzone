@@ -51,66 +51,17 @@ test('idleTimeoutMs is a tight 5s fallback (active completion-stamp signal is pr
 
 console.log('\nClaudeAdapter.detectActivity\n')
 
-test('detects spinner as working', () => {
-  expect(adapter.detectActivity('· Thinking...', 'unknown')).toBe('working')
-  expect(adapter.detectActivity('✻ Clauding...', 'unknown')).toBe('working')
-})
-
-test('detects spinner when bullet/verb separated by CUF (not literal space)', () => {
-  // Claude TUI emits `·\x1b[1CBefuddling…` — bullet then cursor-forward then
-  // verb on the same visual line. Regression: stripping CUF as plain CSI
-  // concatenated bullet+verb and SPINNER_LINE_RE missed it, so detectActivity
-  // returned null for every spinner frame and the 5s silence timer flipped
-  // a still-thinking session to 'idle'.
-  expect(adapter.detectActivity('·\x1b[1CBefuddling…', 'unknown')).toBe('working')
-  expect(adapter.detectActivity('✶\x1b[2CCogitating', 'unknown')).toBe('working')
-  expect(adapter.detectActivity('\x1b[38;2;215;119;87m·\x1b[1CBefuddling…', 'unknown')).toBe('working')
-})
-
-test('detects completion stamp when fields separated by CUF', () => {
-  // Same TUI redraw style — `·\x1b[1CCooked\x1b[1Cfor\x1b[1C56s`. Without
-  // CUF→space conversion the `for ` literal in COMPLETION_LINE_RE fails.
-  expect(adapter.detectActivity('·\x1b[1CCooked\x1b[1Cfor\x1b[1C56s', 'unknown')).toBe('idle')
-})
-
-test('returns null for unrecognized output', () => {
+test('detectActivity is a no-op — hook events are the source of truth', () => {
+  // Legacy bullet/spinner regex was retired in favor of Claude Code hooks
+  // (see rest-api/agent-hook.ts + notify.sh). detectActivity must return
+  // null for every input so the state machine is exclusively hook-driven.
+  // Inputs below all matched the old regex and previously promoted state.
+  expect(adapter.detectActivity('· Thinking...', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('✻ Clauding...', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('·\x1b[1CBefuddling…', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('✻ Cooked for 56s', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('· Cogitated for 4m 24s', 'unknown')).toBe(null)
   expect(adapter.detectActivity('Some random text', 'unknown')).toBe(null)
-})
-
-test('completion stamp emits ACTIVE idle signal', () => {
-  // "Cooked for 56s" / "Cogitated for 4m 24s" = Claude finished — emit
-  // an explicit 'idle' so state-machine flips running→idle immediately
-  // instead of waiting on the silence-timer fallback (formerly 60s,
-  // now 5s — but active beats waiting either way).
-  expect(adapter.detectActivity('✻ Cooked for 56s', 'unknown')).toBe('idle')
-  expect(adapter.detectActivity('· Cogitated for 4m 24s', 'unknown')).toBe('idle')
-  expect(adapter.detectActivity('✽ Pondering for 2h', 'unknown')).toBe('idle')
-})
-
-test('live spinner wins over completion stamp in same chunk', () => {
-  // Single redraw can contain BOTH the previous turn's completion stamp
-  // (in scrollback) AND a fresh in-flight spinner. Must report 'working'
-  // — flipping to 'idle' here would prematurely end an active turn.
-  const chunk = '· Cogitated for 5s\n✻ Searching for files...'
-  expect(adapter.detectActivity(chunk, 'unknown')).toBe('working')
-})
-
-test('only completion stamps in chunk → idle (history redraw at rest)', () => {
-  // Resize / scroll redraw: every visible bullet is a finished turn.
-  // Claude is genuinely idle — emit 'idle' so the indicator updates fast.
-  const chunk = '· Cogitated for 5s\n✻ Cooked for 12s'
-  expect(adapter.detectActivity(chunk, 'unknown')).toBe('idle')
-})
-
-test('chrome bullet without spinner verb → null (no phantom working)', () => {
-  // TUI chrome (menus, footers, history scroll) may render bullet glyphs as
-  // list markers / decoration. These must NOT promote idle → running, or
-  // the silence timer 5s later flips back to idle and triggers a phantom
-  // attention notification.
-  expect(adapter.detectActivity('· Help', 'unknown')).toBe(null)
-  expect(adapter.detectActivity('✻ Settings', 'unknown')).toBe(null)
-  expect(adapter.detectActivity('· Press Esc to interrupt', 'unknown')).toBe(null)
-  expect(adapter.detectActivity('· Recent commit · main · 3 changes', 'unknown')).toBe(null)
 })
 
 console.log('\nClaudeAdapter.detectPrompt\n')

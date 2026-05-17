@@ -71,6 +71,7 @@ run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/create.test.t
 run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/delete.test.ts
 run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/unarchive.test.ts
 run_test_electron_loader packages/apps/app/src/main/rest-api/tasks/update.test.ts
+run_test_electron_loader packages/apps/app/src/main/rest-api/agent-hook-attention.test.ts
 run_test_electron_loader packages/apps/app/src/main/mcp-tools/archive-task.test.ts
 run_test_electron_loader packages/apps/app/src/main/mcp-tools/archive-many-task.test.ts
 run_test_electron_loader packages/apps/app/src/main/mcp-tools/create-task.test.ts

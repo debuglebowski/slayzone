@@ -1548,6 +1548,45 @@ export function hasPty(sessionId: string): boolean {
   return sessions.has(sessionId)
 }
 
+/** Find a live session by taskId + mode. Used by the agent-hook REST handler to
+ *  resolve `{ taskId, agentId }` → sessionId so hook events can drive state
+ *  transitions. Prefers the main session (`sessionId === taskId`) when multiple
+ *  panes share a mode. Returns null if no session matches. */
+export function findSessionByTaskIdAndMode(taskId: string, mode: TerminalMode): string | null {
+  let fallback: string | null = null
+  for (const [sessionId, session] of sessions) {
+    if (session.taskId !== taskId || session.mode !== mode) continue
+    if (sessionId === taskId) return sessionId
+    fallback ??= sessionId
+  }
+  return fallback
+}
+
+/** External entry point for hook-driven state transitions. Tags the
+ *  diagnostic trigger as `hook:<event>` so emit logs distinguish hook
+ *  signals from regex / silence-timer paths. Also refreshes `lastOutputTime`
+ *  — any hook firing is proof the agent is alive, so the silence-timer
+ *  fail-safe should re-arm. No-op if session is gone. */
+export function transitionStateFromHook(sessionId: string, newState: TerminalState, hookEvent: string): boolean {
+  const session = sessions.get(sessionId)
+  if (!session) return false
+  session.lastOutputTime = Date.now()
+  session.pendingTransitionTrigger = { source: `hook:${hookEvent}` }
+  transitionState(sessionId, newState)
+  return true
+}
+
+/** Refresh the silence-timer clock for a session WITHOUT changing state.
+ *  Used by hook events that prove activity but don't carry a state-transition
+ *  semantic (e.g. PostToolUse, SubagentStop, PreCompact for claude-code).
+ *  No-op if session is gone. Returns whether the refresh landed. */
+export function markSessionActiveFromHook(sessionId: string): boolean {
+  const session = sessions.get(sessionId)
+  if (!session) return false
+  session.lastOutputTime = Date.now()
+  return true
+}
+
 export function getBuffer(sessionId: string): string | null {
   const session = sessions.get(sessionId)
   return session?.buffer.toString() ?? null

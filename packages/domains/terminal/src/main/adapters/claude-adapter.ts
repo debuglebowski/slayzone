@@ -4,23 +4,26 @@ import { KITTY_SHIFT_ENTER, ENTER } from '@slayzone/terminal/shared'
 
 /**
  * Adapter for Claude Code CLI.
- * Uses pattern-based heuristics for activity detection in interactive mode.
+ *
+ * State source: Claude Code hooks (SessionStart, UserPromptSubmit, PreToolUse,
+ * Stop, Notification, ...) installed by `claude-hook-installer` and forwarded
+ * via `notify.sh` → `POST /api/agent-hook` → state machine. The legacy
+ * bullet-glyph regex (SPINNER_LINE_RE / COMPLETION_LINE_RE) was retired —
+ * `detectActivity` is now intentionally a no-op for this adapter.
+ *
+ * The silence timer (idleTimeoutMs) remains as a safety net for missed hooks.
  */
-// Bullet glyphs Claude TUI uses to mark spinner / progress / completion lines.
-const BULLET = '[·✻✽✶✳✢]'
-// Spinner lines pair the bullet with a present-participle verb ("Cogitating",
-// "Cooking", "Thinking", ...). Requiring `\S*ing\b` after the bullet rejects
-// chrome lines that also start with `·`/`✻` but lack a live verb (menu items,
-// status footers, scrolled history). Case-insensitive for safety.
-const SPINNER_LINE_RE = new RegExp(`^${BULLET}\\s+\\S*ing\\b`, 'i')
-const COMPLETION_LINE_RE = new RegExp(`^${BULLET}.*\\bfor \\d+[smh]`)
-
 export class ClaudeAdapter implements TerminalAdapter {
   readonly mode = 'claude-code' as const
-  // Active 'idle' signal (completion stamp) is the primary done-signal; this
-  // 5s fallback covers chunks where the stamp was scrolled off-screen or
-  // delivered alongside chrome that hides it from the per-line scan.
-  readonly idleTimeoutMs = 5_000
+  // Fail-safe for fully dropped hooks (e.g. user disabled the SlayZone entry
+  // in ~/.claude/settings.json, or notify.sh is missing). With hooks driving
+  // every transition AND refreshing the clock on each fire, the silence
+  // timer only matters when no hook lands for this entire window — which
+  // would only happen for an unhooked claude or one stuck on a single tool
+  // with no progress signal for 5+ minutes. 5s (the old TUI value) was way
+  // too tight: a single long Bash or "thinking" gap >5s tripped a false
+  // running→idle mid-turn → spurious needs_attention flag.
+  readonly idleTimeoutMs = 5 * 60 * 1000
 
   /** Claude Code enables Kitty keyboard protocol; internal newlines must be
    *  encoded as Shift+Enter so they're treated as newline-in-input (not submit). */
@@ -29,43 +32,11 @@ export class ClaudeAdapter implements TerminalAdapter {
   }
 
   /**
-   * Per-line bullet-glyph scan.
-   *
-   *   live spinner line  = bullet w/o "for Xs"   (e.g. "✻ Cogitating...")
-   *   completion stamp   = bullet w/  "for Xs"   (e.g. "· Cooked for 56s")
-   *
-   * Resolution rules for a single chunk:
-   *   - any live spinner present → `'working'`     (something is in flight)
-   *   - only completion stamps   → `'idle'`        (turn finished — active flip)
-   *   - no bullet lines at all   → `null`          (chrome / cursor blink)
-   *
-   * Active `'idle'` flip lets state-machine transition running→idle
-   * immediately on the completion stamp instead of waiting on the silence
-   * timer. The 5s `idleTimeoutMs` is a safety net if this signal is missed.
+   * Activity detection is delegated to Claude Code hooks — see
+   * `rest-api/agent-hook.ts` and `notify.sh`. This method exists only to
+   * satisfy the `TerminalAdapter` interface contract.
    */
-  detectActivity(data: string, _current: ActivityState): ActivityState | null {
-    // Claude TUI separates bullet glyph and verb using CUF (cursor forward,
-    // `\x1b[<n>C`) rather than literal spaces — e.g. `·\x1b[1CBefuddling…`.
-    // Stripping CUF as part of the generic CSI pass would concatenate
-    // bullet+verb and defeat the `\s+` separator in SPINNER_LINE_RE /
-    // COMPLETION_LINE_RE. Convert CUF<n> → n spaces first so the visual
-    // layout survives the strip.
-    const stripped = data
-      .replace(/\x1b\]([^\x07\x1b]|\x1b(?!\\))*(\x07|\x1b\\|\x9c)/g, '')
-      .replace(/\x1b\[(\d*)C/g, (_m, n) => ' '.repeat(Math.max(1, parseInt(n || '1', 10))))
-      .replace(/\x1b\[[?0-9;]*[A-Za-z]/g, '')
-      .replace(/\x1b[()][AB012]/g, '')
-
-    let sawLiveSpinner = false
-    let sawCompletion = false
-    for (const raw of stripped.split(/\r?\n/)) {
-      const line = raw.trimStart()
-      if (COMPLETION_LINE_RE.test(line)) sawCompletion = true
-      else if (SPINNER_LINE_RE.test(line)) sawLiveSpinner = true
-    }
-
-    if (sawLiveSpinner) return 'working'
-    if (sawCompletion) return 'idle'
+  detectActivity(_data: string, _current: ActivityState): ActivityState | null {
     return null
   }
 
