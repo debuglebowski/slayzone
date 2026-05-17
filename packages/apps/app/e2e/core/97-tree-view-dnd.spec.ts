@@ -56,6 +56,48 @@ async function dragFromTo(
   await page.mouse.up()
 }
 
+/** Start a drag and hover at dst without releasing — so we can sample
+ * pre-slide transforms while the drag is still live. Caller MUST release
+ * via `page.mouse.up()` afterwards. */
+async function dragHover(
+  page: Page,
+  src: { x: number; y: number },
+  dst: { x: number; y: number }
+) {
+  await page.mouse.move(src.x, src.y)
+  await page.mouse.down()
+  await page.mouse.move(src.x + 12, src.y, { steps: 5 })
+  await page.mouse.move(dst.x, dst.y, { steps: 20 })
+}
+
+/** Snapshot every visible task row's transform + rect mid-drag. */
+async function sampleRowTransforms(page: Page) {
+  return page.evaluate(() => {
+    const out: { id: string; transformY: number; topY: number }[] = []
+    const rows = document.querySelectorAll('[data-sidebar-tree-item="task"]')
+    for (const r of Array.from(rows) as HTMLElement[]) {
+      if (!r.dataset.taskId) continue
+      const t = getComputedStyle(r).transform
+      let ty = 0
+      if (t && t !== 'none') {
+        const m = t.match(/matrix\(([^)]+)\)/)
+        if (m) {
+          const parts = m[1].split(',').map((p) => parseFloat(p.trim()))
+          ty = parts[5] ?? 0
+        } else {
+          const m3d = t.match(/matrix3d\(([^)]+)\)/)
+          if (m3d) {
+            const parts = m3d[1].split(',').map((p) => parseFloat(p.trim()))
+            ty = parts[13] ?? 0
+          }
+        }
+      }
+      out.push({ id: r.dataset.taskId, transformY: ty, topY: r.getBoundingClientRect().top })
+    }
+    return out
+  })
+}
+
 async function getTaskById(page: Page, id: string) {
   const tasks = await seed(page).getTasks()
   return tasks.find((t: { id: string }) => t.id === id)
@@ -383,5 +425,243 @@ test.describe('TreeView drag and drop', () => {
     await expect(rows).toHaveCount(3)
     const ids = await rows.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.taskId))
     expect(ids).toEqual([rootC, rootB, rootA])
+  })
+
+  // Drop-position matches the pre-slide animation: with `closestCenter`
+  // collision + direction-aware `insertIdx`, the dragged row ends up exactly
+  // where dnd-kit's slide showed the gap, never off-by-one.
+
+  test('drop position: drag DOWN onto row places source AFTER target', async ({ mainWindow }) => {
+    const srcBox = await taskRow(mainWindow, rootA).boundingBox()
+    const dstBox = await taskRow(mainWindow, rootB).boundingBox()
+    if (!srcBox || !dstBox) throw new Error('row bounding boxes unavailable')
+    // Drag A (idx 0) onto B (idx 1) — `arrayMove(0, 1)` puts A at idx 1.
+    await dragFromTo(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    await expect.poll(async () => {
+      const a = await getTaskById(mainWindow, rootA)
+      const b = await getTaskById(mainWindow, rootB)
+      const c = await getTaskById(mainWindow, rootC)
+      return [a?.order, b?.order, c?.order]
+    }, { timeout: 5_000 }).toEqual([1, 0, 2])
+  })
+
+  test('drop position: drag UP onto row places source AT target slot', async ({ mainWindow }) => {
+    const srcBox = await taskRow(mainWindow, rootC).boundingBox()
+    const dstBox = await taskRow(mainWindow, rootA).boundingBox()
+    if (!srcBox || !dstBox) throw new Error('row bounding boxes unavailable')
+    // Drag C (idx 2) onto A (idx 0) — `arrayMove(2, 0)` → [C, A, B].
+    await dragFromTo(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    await expect.poll(async () => {
+      const a = await getTaskById(mainWindow, rootA)
+      const b = await getTaskById(mainWindow, rootB)
+      const c = await getTaskById(mainWindow, rootC)
+      return [a?.order, b?.order, c?.order]
+    }, { timeout: 5_000 }).toEqual([1, 2, 0])
+  })
+
+  test('drop position: drag onto adjacent row swaps them', async ({ mainWindow }) => {
+    // Drag B (idx 1) onto A (idx 0) — `arrayMove(1, 0)` → [B, A, C].
+    const srcBox = await taskRow(mainWindow, rootB).boundingBox()
+    const dstBox = await taskRow(mainWindow, rootA).boundingBox()
+    if (!srcBox || !dstBox) throw new Error('row bounding boxes unavailable')
+    await dragFromTo(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    await expect.poll(async () => {
+      const a = await getTaskById(mainWindow, rootA)
+      const b = await getTaskById(mainWindow, rootB)
+      const c = await getTaskById(mainWindow, rootC)
+      return [a?.order, b?.order, c?.order]
+    }, { timeout: 5_000 }).toEqual([1, 0, 2])
+  })
+
+  test('drop on group header: source becomes idx 0 of that group', async ({ mainWindow }) => {
+    // Drag rootA (in_progress, idx 0) onto the 'todo' group header.
+    // After: rootA.status='todo', rootA.order=0, rootTodo.order=1.
+    const srcBox = await taskRow(mainWindow, rootA).boundingBox()
+    if (!srcBox) throw new Error('source row missing')
+    // Header lives inside the 'todo' StatusGroupDroppable. Locate the header
+    // text and drop on it.
+    const todoHeader = mainWindow
+      .locator(`[data-testid="tree-status-group"][data-status="todo"]`)
+      .locator('text=Todo')
+      .first()
+    const headerBox = await todoHeader.boundingBox()
+    if (!headerBox) throw new Error('todo header box missing')
+    await dragFromTo(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: headerBox.x + headerBox.width / 2, y: headerBox.y + headerBox.height / 2 }
+    )
+    await expect.poll(async () => {
+      const a = await getTaskById(mainWindow, rootA)
+      const todo = await getTaskById(mainWindow, rootTodo)
+      return { aStatus: a?.status, aOrder: a?.order, todoOrder: todo?.order }
+    }, { timeout: 5_000 }).toEqual({ aStatus: 'todo', aOrder: 0, todoOrder: 1 })
+  })
+
+  test('drop on row in different group: source lands at that row\'s slot in target group', async ({ mainWindow }) => {
+    // Drag rootA (in_progress) onto rootTodo (only row in 'todo') —
+    // expect rootA at order=0 of todo, rootTodo at order=1.
+    const srcBox = await taskRow(mainWindow, rootA).boundingBox()
+    const dstBox = await taskRow(mainWindow, rootTodo).boundingBox()
+    if (!srcBox || !dstBox) throw new Error('row bounding boxes unavailable')
+    await dragFromTo(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    await expect.poll(async () => {
+      const a = await getTaskById(mainWindow, rootA)
+      const todo = await getTaskById(mainWindow, rootTodo)
+      return { aStatus: a?.status, aOrder: a?.order, todoOrder: todo?.order }
+    }, { timeout: 5_000 }).toEqual({ aStatus: 'todo', aOrder: 0, todoOrder: 1 })
+  })
+
+  // ====== Pre-slide visual tests ======
+  // Sample CSS transforms mid-drag (before release) so we lock in the
+  // pre-slide animation behavior. Catches every visual bug we hit:
+  //   - "Y drifts into A" — first row of target group leaves its section.
+  //   - "header doesn't slide" — header stays static while content moves.
+  //   - "items in groups below source don't pre-slide" — strategy clamp
+  //     was eating animations on cross-group drags.
+  //   - "drop position off-by-one" — visual gap vs final position mismatch.
+
+  test('pre-slide: same-group drag DOWN shifts items between active and over UP', async ({ mainWindow }) => {
+    // Drag A (idx 0) onto C (idx 2). Stock arrayMove(0, 2) → items B and C
+    // each shift UP by one row height.
+    const srcBox = await taskRow(mainWindow, rootA).boundingBox()
+    const dstBox = await taskRow(mainWindow, rootC).boundingBox()
+    if (!srcBox || !dstBox) throw new Error('row bounding boxes unavailable')
+    await dragHover(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    const samples = await sampleRowTransforms(mainWindow)
+    const byId = new Map(samples.map((s) => [s.id, s]))
+    // B and C should be shifted up by ~32 (row height). A is the active
+    // row — dnd-kit doesn't translate it via strategy (drag overlay floats it).
+    expect(byId.get(rootB)?.transformY).toBeLessThanOrEqual(-30)
+    expect(byId.get(rootC)?.transformY).toBeLessThanOrEqual(-30)
+    expect(byId.get(rootTodo)?.transformY ?? 0).toBe(0)
+    await mainWindow.mouse.up()
+  })
+
+  test('pre-slide: cross-group DOWNWARD drag does not drift target rows into source group', async ({ mainWindow }) => {
+    // Drag rootA (in_progress, idx 0) DOWN onto rootTodo (todo group).
+    // Critical regression test: rootTodo's POST-shift top should remain
+    // visually below in_progress group's content area — it must NOT slide
+    // up into the source group's territory.
+    const todoBoxPre = await taskRow(mainWindow, rootTodo).boundingBox()
+    const inProgressGroupBoxPre = await statusGroup(mainWindow, projectId, 'in_progress').boundingBox()
+    if (!todoBoxPre || !inProgressGroupBoxPre) throw new Error('boxes missing')
+    const inProgressBottomPre = inProgressGroupBoxPre.y + inProgressGroupBoxPre.height
+
+    const srcBox = await taskRow(mainWindow, rootA).boundingBox()
+    const dstBox = todoBoxPre
+    if (!srcBox) throw new Error('source box missing')
+    await dragHover(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    const samples = await sampleRowTransforms(mainWindow)
+    const todoSample = samples.find((s) => s.id === rootTodo)
+    if (!todoSample) throw new Error('rootTodo not sampled')
+    // rootTodo may shift up (stock arrayMove behavior between active and
+    // over), but it must stay paired with its `todo` header — assert its
+    // top is still at or below the original in_progress group's content
+    // bottom (i.e., never crosses into in_progress's visual territory).
+    // Allow a small tolerance for row + header height arithmetic.
+    expect(todoSample.topY).toBeGreaterThanOrEqual(inProgressBottomPre - 64)
+    await mainWindow.mouse.up()
+  })
+
+  test('pre-slide: group header rides with its content during cross-group drag', async ({ mainWindow }) => {
+    // Drag rootA downward toward rootTodo. The `todo` group header must
+    // shift by the same y-delta as rootTodo so the section stays cohesive
+    // (header doesn't "stick" while content moves, and vice versa). This
+    // is the regression check for the "header doesn't slide" complaint.
+    const todoHeader = mainWindow
+      .locator(`[data-testid="tree-status-group"][data-status="todo"]`)
+      .locator('text=Todo')
+      .first()
+    const headerPreBox = await todoHeader.boundingBox()
+    const todoPreBox = await taskRow(mainWindow, rootTodo).boundingBox()
+    if (!headerPreBox || !todoPreBox) throw new Error('boxes missing')
+    const preDelta = todoPreBox.y - headerPreBox.y
+
+    const srcBox = await taskRow(mainWindow, rootA).boundingBox()
+    const dstBox = todoPreBox
+    if (!srcBox) throw new Error('source box missing')
+    await dragHover(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    const headerPostBox = await todoHeader.boundingBox()
+    const todoPostBox = await taskRow(mainWindow, rootTodo).boundingBox()
+    if (!headerPostBox || !todoPostBox) throw new Error('post-drag boxes missing')
+    const postDelta = todoPostBox.y - headerPostBox.y
+    // Header + content delta should be preserved (±1px floating point).
+    expect(Math.abs(postDelta - preDelta)).toBeLessThanOrEqual(1)
+    await mainWindow.mouse.up()
+  })
+
+  test('pre-slide: subtasks shift with their parent root (no orphan drift)', async ({ mainWindow }) => {
+    // Drag rootB down past rootC. rootA's subtasks (subA1/A2/A3) are NOT
+    // between active and over, so their transform must stay identity —
+    // they should not get pulled along with the slide just because they
+    // happen to render in the flat sortable list.
+    await expect(taskRow(mainWindow, subA1)).toBeVisible()
+    const srcBox = await taskRow(mainWindow, rootB).boundingBox()
+    const dstBox = await taskRow(mainWindow, rootC).boundingBox()
+    if (!srcBox || !dstBox) throw new Error('row boxes missing')
+    await dragHover(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    const samples = await sampleRowTransforms(mainWindow)
+    const byId = new Map(samples.map((s) => [s.id, s]))
+    // Subtasks under A are above the active row, NOT in (activeIdx, overIdx]
+    // → identity transform.
+    expect(byId.get(subA1)?.transformY ?? 0).toBe(0)
+    expect(byId.get(subA2)?.transformY ?? 0).toBe(0)
+    expect(byId.get(subA3)?.transformY ?? 0).toBe(0)
+    // C is between activeIdx (B) and over (C) — should shift up.
+    expect(byId.get(rootC)?.transformY).toBeLessThanOrEqual(-30)
+    await mainWindow.mouse.up()
+  })
+
+  test('pre-slide: items outside (active, over] range stay identity', async ({ mainWindow }) => {
+    // Drag rootB onto rootC. Only items strictly between B and C (inclusive
+    // of C, exclusive of B) shift. rootA (above B) and rootTodo (below C,
+    // in a different group below) must remain at identity.
+    const srcBox = await taskRow(mainWindow, rootB).boundingBox()
+    const dstBox = await taskRow(mainWindow, rootC).boundingBox()
+    if (!srcBox || !dstBox) throw new Error('row boxes missing')
+    await dragHover(
+      mainWindow,
+      { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+      { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
+    )
+    const samples = await sampleRowTransforms(mainWindow)
+    const byId = new Map(samples.map((s) => [s.id, s]))
+    expect(byId.get(rootA)?.transformY ?? 0).toBe(0)
+    // rootTodo is past overIdx → identity.
+    expect(byId.get(rootTodo)?.transformY ?? 0).toBe(0)
+    await mainWindow.mouse.up()
   })
 })

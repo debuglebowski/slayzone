@@ -5,7 +5,7 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
-  pointerWithin,
+  closestCenter,
   useDroppable,
   useSensor,
   useSensors,
@@ -562,13 +562,21 @@ function HeaderSortable({
   className?: string
   children: ReactNode
 }): ReactNode {
-  const { setNodeRef } = useSortable({
+  const { setNodeRef, transform, transition } = useSortable({
     id: `header:${projectId}:${groupKey}`,
     data: { kind: 'header', projectId, groupValue: groupKey } satisfies HeaderSortableData,
     disabled: { draggable: true },
   })
+  // Apply transform/transition so the header slides like any other sortable
+  // item — without these, dnd-kit's strategy thinks the header moved (it's
+  // in the index space) but the DOM stays put, so neighbors visually overlap
+  // it during a cross-group drag.
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
   return (
-    <div ref={setNodeRef} className={className}>
+    <div ref={setNodeRef} style={style} className={className}>
       {children}
     </div>
   )
@@ -894,15 +902,16 @@ export function TreeView({
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-  // Prefer sortable items (task rows + group headers) over the larger group
-  // wrapper droppables when the pointer is inside both. Wrapper rects span
-  // the whole group; in cross-group drag, A's wrapper rect overlaps with B's
-  // header's visual rect (post-transform) in the bottom-of-A zone — without
-  // this filter dnd-kit could pick A's wrapper as `over`, the strategy would
-  // bail with overIndex = -1, and items would snap back to original each
-  // frame the pointer touched the overlap, causing flicker.
+  // `closestCenter` flips `over` at row-boundaries (vs `pointerWithin`
+  // which only knows if the pointer is inside a rect). That's what makes
+  // standard dnd-kit sortable drop "above target" feel right — to drop
+  // after a row, the user hovers the next row.
+  // Then prefer sortable items (task rows + group headers) over the larger
+  // group wrapper droppables when the pointer center is closest to both —
+  // wrapper rects span the whole group and would otherwise win over inner
+  // sortable items.
   const collisionDetection = useCallback<CollisionDetection>((args) => {
-    const all = pointerWithin(args)
+    const all = closestCenter(args)
     if (all.length <= 1) return all
     const sortables = all.filter((c) => {
       const data = args.droppableContainers.find((d) => d.id === c.id)?.data?.current as
@@ -1169,15 +1178,15 @@ export function TreeView({
       }
     }
 
-    // Pointer-Y vs target mid → above/below target.
-    const startY =
-      event.activatorEvent && 'clientY' in event.activatorEvent
-        ? (event.activatorEvent as { clientY: number }).clientY
-        : 0
-    const pointerY = startY + event.delta.y
-    const overRect = over.rect
-    const insertBelow = pointerY > overRect.top + overRect.height / 2
-
+    // Drop position matches stock `arrayMove(siblings, sourceIdx, targetIdx)`
+    // semantics — exactly what the strategy's pre-slide animation shows.
+    // Direction matters: source originally BEFORE target (dragging down) →
+    // insert AFTER target; source originally AFTER target (dragging up) →
+    // insert AT target's slot. The previous pointer-Y midpoint test
+    // compared against `over.rect`, which is the POST-transform tracked
+    // rect — once the strategy slid the target row, the midpoint check
+    // fired against a shifted baseline and produced an off-by-one vs. the
+    // visual gap.
     let siblings: Task[]
     let targetGroupKey: string | null = null
     if (targetParent === null) {
@@ -1189,29 +1198,29 @@ export function TreeView({
       siblings = childrenByParent.get(targetParent) ?? []
     }
 
-    // Strip moved AND target out of siblings, find target's slot in the
-    // stripped list, then re-insert moved (in render order) at insert slot.
     const movedSet = new Set(movedIds)
     const filtered = siblings.filter((s) => !movedSet.has(s.id))
-    const targetIdx = filtered.findIndex((s) => s.id === targetId)
-    if (targetIdx === -1) return
-    const insertIdx = insertBelow ? targetIdx + 1 : targetIdx
+    const filteredTargetIdx = filtered.findIndex((s) => s.id === targetId)
+    if (filteredTargetIdx === -1) return
+    const sourceOrigIdx = siblings.findIndex((s) => s.id === sourceId)
+    const targetOrigIdx = siblings.findIndex((s) => s.id === targetId)
+    // Cross-group drag has sourceOrigIdx === -1 (source not in target's
+    // siblings) — fall through to "insert at target's slot" semantics.
+    const insertIdx =
+      sourceOrigIdx !== -1 && sourceOrigIdx < targetOrigIdx
+        ? filteredTargetIdx + 1
+        : filteredTargetIdx
     const newSiblingIds = [
       ...filtered.slice(0, insertIdx).map((s) => s.id),
       ...movedIds,
       ...filtered.slice(insertIdx).map((s) => s.id),
     ]
 
-    // Single-source no-op guard (reorder onto own current slot).
-    if (movedIds.length === 1) {
-      const sameParent = activeData.parentId === targetParent
-      if (sameParent) {
-        const oldIdx = siblings.findIndex((s) => s.id === sourceId)
-        if (oldIdx !== -1) {
-          const adjusted = oldIdx < insertIdx ? insertIdx - 1 : insertIdx
-          if (adjusted === oldIdx) return
-        }
-      }
+    // Single-source no-op guard. Source's new index in the result is exactly
+    // `insertIdx` (in the source-removed `filtered` list). If that equals
+    // its original slot, the reorder is a no-op.
+    if (movedIds.length === 1 && activeData.parentId === targetParent) {
+      if (sourceOrigIdx !== -1 && insertIdx === sourceOrigIdx) return
     }
 
     // Decide: do all moved already share the new parent? (Pure reorder vs reparent.)
@@ -1319,7 +1328,10 @@ export function TreeView({
       // Top padding on every group except the first acts as the static gap
       // between groups; lives on the lower group so its droppable rect
       // extends up into the gap zone.
-      const groupPadClass = gi === 0 ? undefined : 'pt-2'
+      // Inter-group gap lives INSIDE the header's top padding (not on the
+      // wrapper) so the gap zone counts as part of the header's hit area —
+      // pointer in the gap maps to the header sortable, no flicker zone.
+      const headerPadTopClass = gi === 0 ? 'pt-2' : 'pt-4'
       // Only "real" groups (not pinned/temp/none) participate as sortable
       // header items — pinned/temp/none don't have a drop semantic so they
       // don't need to sit in the strategy's index space.
@@ -1348,7 +1360,7 @@ export function TreeView({
       }
 
       const showHeader = !g.isNone || hasCompanions
-      const headerClassName = 'flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60'
+      const headerClassName = cn('flex items-center gap-1.5 px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60', headerPadTopClass)
       const headerInner = (
         <>
           {Icon && <Icon className={cn('size-3', iconClass)} />}
@@ -1382,10 +1394,10 @@ export function TreeView({
       )
       // Temp/pinned/none groups have no valid drop semantic, so skip droppable wrapper.
       if (g.isTemp || g.isPinned || g.isNone) {
-        return <div key={g.key} className={groupPadClass}>{groupBody}</div>
+        return <div key={g.key}>{groupBody}</div>
       }
       return (
-        <StatusGroupDroppable key={g.key} projectId={projectId} groupValue={g.key} className={groupPadClass}>
+        <StatusGroupDroppable key={g.key} projectId={projectId} groupValue={g.key}>
           {groupBody}
         </StatusGroupDroppable>
       )
@@ -1400,32 +1412,23 @@ export function TreeView({
     const isHomeActive =
       selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
     const dragEnabled = Boolean(onTaskReorder) && Boolean(onTaskMove)
-    // Project-wide flat sortable IDs in render order. For each "real" group
-    // (status / priority — not pinned/temp/none) we push a synthetic header
-    // ID before its tasks. The header is a disabled sortable so it sits in
-    // the strategy's index space; cross-group drags clamp `overIndex` to the
-    // over group's header so only items between active and the header slide
-    // up — keeping every non-active row inside its own group.
-    //
-    // visualGroupById classifies each ID by the group it visually belongs to
-    // (header → its group; subtask → its visible root's group; root → its
-    // own group).
+    // Project-wide flat sortable IDs in render order. Each "real" group
+    // (status / priority — not pinned/temp/none) gets a synthetic header ID
+    // pushed before its tasks. The header is a disabled sortable so it
+    // sits in the strategy's index space and slides with its content
+    // during cross-group drags — keeping the group visually cohesive.
     const flatTaskIds: string[] = []
-    const visualGroupById = new Map<string, string>()
     {
-      const walk = (t: Task, groupKey: string) => {
+      const walk = (t: Task) => {
         flatTaskIds.push(t.id)
-        visualGroupById.set(t.id, groupKey)
         const kids = childrenByParent.get(t.id) ?? []
-        for (const k of kids) walk(k, groupKey)
+        for (const k of kids) walk(k)
       }
       for (const g of groups) {
         if (!g.isPinned && !g.isTemp && !g.isNone) {
-          const headerId = `header:${project.id}:${g.key}`
-          flatTaskIds.push(headerId)
-          visualGroupById.set(headerId, g.key)
+          flatTaskIds.push(`header:${project.id}:${g.key}`)
         }
-        for (const root of g.tasks) walk(root, g.key)
+        for (const root of g.tasks) walk(root)
       }
     }
     // Compute first/last-in-run flags for each selected task, scanning
@@ -1473,10 +1476,11 @@ export function TreeView({
       collapsedTaskIds: collapsedSet,
       onToggleCollapse: toggleTreeCollapsedTask,
     }
-    // Stock `verticalListSortingStrategy` treats every sortable item
-    // uniformly — headers, root rows, sub-rows all slide as ordinary items.
-    // The drop semantics in `handleDragEnd` (header vs row vs group wrapper)
-    // still differentiate at drop time; the *visual* slide is uniform.
+    // Every element in the tree (group headers, root rows, sub-rows) is a
+    // sortable item, so stock `verticalListSortingStrategy` slides them
+    // uniformly. Headers shift along with their content during cross-group
+    // drags, which keeps each group visually cohesive (no row drifts into
+    // another group without its header).
     return (
       <Collapsible.Root
         key={project.id}
