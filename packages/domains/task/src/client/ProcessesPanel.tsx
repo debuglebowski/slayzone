@@ -39,6 +39,7 @@ const STATUS_CONFIG: Record<ProcessStatus, { label: string; dot: string; badge: 
   error:     { label: 'Failed',    dot: 'bg-red-500',                badge: 'text-red-500 bg-red-500/10 border-red-500/20' },
 }
 
+// eslint-disable-next-line no-control-regex
 const ANSI_RX = /\x1b\[[0-9;]*m/g
 const URL_RX = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+)(?::\d+)?(?:\/[^\s"')]*)?)/i
 

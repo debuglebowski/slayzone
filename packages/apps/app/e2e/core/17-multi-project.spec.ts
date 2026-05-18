@@ -8,7 +8,7 @@ test.describe('Multi-project & persistence', () => {
     const s = seed(mainWindow)
 
     // Create two distinct projects with tasks
-    let projects = await s.getProjects()
+    const projects = await s.getProjects()
     const hasAlpha = projects.some((p: { name: string }) => p.name === 'Alpha Project')
     const hasBeta = projects.some((p: { name: string }) => p.name === 'Beta Project')
 

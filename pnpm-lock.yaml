@@ -31,9 +31,6 @@ importers:
       '@convex-dev/auth':
         specifier: ^0.0.90
         version: 0.0.90(patch_hash=0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256)(@auth/core@0.37.4)(convex@1.32.0(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)
-      '@electron-toolkit/eslint-config-prettier':
-        specifier: ^3.0.0
-        version: 3.0.0(eslint@9.39.4(jiti@2.6.1))(prettier@3.8.0)
       '@electron-toolkit/eslint-config-ts':
         specifier: ^3.1.0
         version: 3.1.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)

@@ -23,7 +23,7 @@ type Slot = {
 
 const slots: Slot[] = Array.from({ length: WORKER_POOL_SIZE }, () => ({
   worker: null,
-  pending: new Map<string, Pending>(),
+  pending: new Map<string, Pending>()
 }))
 const loggedErrorPaths = new Set<string>()
 let nextId = 0
@@ -169,10 +169,8 @@ export function tokenizeContent(content: string, path: string): Promise<HlSpan[]
   if (content.length > MAX_HIGHLIGHT_BYTES || countNewlines(content) + 1 > MAX_HIGHLIGHT_LINES) {
     if (!loggedSkipPaths.has(path)) {
       loggedSkipPaths.add(path)
-      // eslint-disable-next-line no-console
-      console.info(
-        `[highlight] skipped large file: ${path} (${content.length} bytes)`
-      )
+
+      console.info(`[highlight] skipped large file: ${path} (${content.length} bytes)`)
     }
     const empty: HlSpan[][] = []
     // Empty-spans marker: tiny payload, effectively 0 bytes.
@@ -209,7 +207,7 @@ export function tokenizeContent(content: string, path: string): Promise<HlSpan[]
       const entry = tokenizeCache.get(key)
       if (entry !== undefined && entry.value === promise) cacheDelete(key)
       throw err
-    },
+    }
   )
 
   // Store the in-flight Promise so concurrent callers dedupe onto it. Pending
@@ -220,7 +218,7 @@ export function tokenizeContent(content: string, path: string): Promise<HlSpan[]
   return promise.catch((err) => {
     if (!loggedErrorPaths.has(path)) {
       loggedErrorPaths.add(path)
-      // eslint-disable-next-line no-console
+
       console.warn(`[tokenize-worker] failed to tokenize ${path}:`, err)
     }
     return []

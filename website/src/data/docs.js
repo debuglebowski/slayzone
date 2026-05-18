@@ -122,7 +122,7 @@ export const docsSections = [
   },
   {
     id: 'slay-cli',
-    title: '\`slay\` CLI Reference',
+    title: '`slay` CLI Reference',
     body: `
       <p>You can control SlayZone from your regular terminal using the <code>slay</code> command. (Install it via <strong>Settings &rarr; About</strong>).</p>
       <pre><code># List your tasks

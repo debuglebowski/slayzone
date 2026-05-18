@@ -168,9 +168,11 @@ export function DeviceWebview({ url, preset, partition, isResizing, reloadTrigge
           <webview
             ref={webviewRef}
             src={initialSrc}
+            // eslint-disable-next-line react/no-unknown-property
             partition={partition}
             className="absolute inset-0"
             // @ts-expect-error - webview attributes not in React types
+            // eslint-disable-next-line react/no-unknown-property
             allowpopups="true"
           />
         )}

@@ -234,6 +234,7 @@ function compileMatcher(query: string, opts: { regex?: boolean; caseSensitive?: 
 
 function sanitizeSnippet(s: string): string {
   // Replace tabs/control chars with spaces, truncate
+  // eslint-disable-next-line no-control-regex
   const cleaned = s.replace(/[\t\x00-\x08\x0b-\x1f\x7f]/g, ' ')
   return cleaned.length > SNIPPET_MAX ? cleaned.slice(0, SNIPPET_MAX) + '…' : cleaned
 }

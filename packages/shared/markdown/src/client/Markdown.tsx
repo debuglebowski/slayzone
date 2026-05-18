@@ -11,8 +11,10 @@ const blockTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'b
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function withSourceLine(tag: string): (props: any) => ReactElement {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ({ node, ...rest }: any) =>
+  const Component = ({ node, ...rest }: any): ReactElement =>
     createElement(tag, { 'data-source-line': node?.position?.start?.line, ...rest })
+  Component.displayName = `MarkdownSourceLine(${tag})`
+  return Component
 }
 
 const sourceLineComponents = Object.fromEntries(blockTags.map(t => [t, withSourceLine(t)]))

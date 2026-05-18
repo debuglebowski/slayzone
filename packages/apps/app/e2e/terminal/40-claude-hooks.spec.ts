@@ -20,10 +20,15 @@ test.describe('Claude agent hooks', () => {
     await resetApp(mainWindow)
   })
 
-  test('boot installer wrote notify.sh + settings.json to sandbox paths', async ({ mainWindow }) => {
+  test('boot installer wrote notify.sh + settings.json to sandbox paths', async ({
+    mainWindow
+  }) => {
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
-      return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR', 'SLAYZONE_CLAUDE_SETTINGS_PATH'])
+      return window.__testInvoke('e2e:get-env', [
+        'SLAYZONE_HOME_DIR',
+        'SLAYZONE_CLAUDE_SETTINGS_PATH'
+      ])
     })) as Record<string, string>
 
     expect(env.SLAYZONE_HOME_DIR).toBeTruthy()
@@ -36,7 +41,6 @@ test.describe('Claude agent hooks', () => {
     const stat = fs.statSync(scriptPath)
     expect(stat.isFile()).toBe(true)
     if (process.platform !== 'win32') {
-      // eslint-disable-next-line no-bitwise
       expect(stat.mode & 0o777).toBe(0o755)
     }
 
@@ -74,7 +78,7 @@ test.describe('Claude agent hooks', () => {
       agentId: 'claude-code',
       hookEvent: 'UserPromptSubmit',
       sessionId: 'e2e-session',
-      taskId: 'e2e-task',
+      taskId: 'e2e-task'
     })
 
     const handle = await mainWindow.waitForFunction(
@@ -82,7 +86,7 @@ test.describe('Claude agent hooks', () => {
         const events = (window as Record<string, unknown>).__hookEvents as unknown[] | undefined
         return events && events.length > 0 ? events[0] : null
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     )
     const event = await handle.jsonValue()
     expect(event).toMatchObject({
@@ -90,7 +94,7 @@ test.describe('Claude agent hooks', () => {
       hookEvent: 'UserPromptSubmit',
       type: 'agent-start',
       sessionId: 'e2e-session',
-      taskId: 'e2e-task',
+      taskId: 'e2e-task'
     })
 
     await mainWindow.evaluate(() => {
@@ -117,13 +121,15 @@ test.describe('Claude agent hooks', () => {
 
     const { status } = await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'claude-code',
-      hookEvent: 'TotallyUnknown',
+      hookEvent: 'TotallyUnknown'
     })
     expect(status).toBe(204)
 
     // Give IPC a tick — should remain empty.
     await new Promise((r) => setTimeout(r, 250))
-    const events = await mainWindow.evaluate(() => (window as Record<string, unknown>).__hookEvents2)
+    const events = await mainWindow.evaluate(
+      () => (window as Record<string, unknown>).__hookEvents2
+    )
     expect((events as unknown[]).length).toBe(0)
 
     await mainWindow.evaluate(() => {
@@ -152,12 +158,15 @@ function postJson(url: string, body: unknown): Promise<{ status: number }> {
         port: u.port,
         method: 'POST',
         path: u.pathname,
-        headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload)
+        }
       },
       (res) => {
         res.resume()
         res.on('end', () => resolve({ status: res.statusCode ?? 0 }))
-      },
+      }
     )
     req.on('error', reject)
     req.write(payload)

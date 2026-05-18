@@ -23,7 +23,9 @@ test.describe('Codex agent hooks', () => {
     await resetApp(mainWindow)
   })
 
-  test('boot installer wrote codex wrapper to sandbox $SLAYZONE_HOME_DIR/bin/codex', async ({ mainWindow }) => {
+  test('boot installer wrote codex wrapper to sandbox $SLAYZONE_HOME_DIR/bin/codex', async ({
+    mainWindow
+  }) => {
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR'])
@@ -36,7 +38,6 @@ test.describe('Codex agent hooks', () => {
     const stat = fs.statSync(wrapperPath)
     expect(stat.isFile()).toBe(true)
     if (process.platform !== 'win32') {
-      // eslint-disable-next-line no-bitwise
       expect(stat.mode & 0o777).toBe(0o755)
     }
     const content = fs.readFileSync(wrapperPath, 'utf8')
@@ -47,7 +48,9 @@ test.describe('Codex agent hooks', () => {
     expect(content).toContain('grep -v')
   })
 
-  test('notify.sh accepts Codex-shape argv → POST → agent:lifecycle IPC for agentId=codex', async ({ mainWindow }) => {
+  test('notify.sh accepts Codex-shape argv → POST → agent:lifecycle IPC for agentId=codex', async ({
+    mainWindow
+  }) => {
     const port = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
@@ -77,23 +80,25 @@ test.describe('Codex agent hooks', () => {
         ...process.env,
         SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${port}/api/agent-hook`,
         SLAYZONE_AGENT_ID: 'codex',
-        SLAYZONE_TASK_ID: 'e2e-codex-task',
-      },
+        SLAYZONE_TASK_ID: 'e2e-codex-task'
+      }
     })
     expect(res.status).toBe(0)
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__codexHookEvents as unknown[] | undefined
+        const events = (window as Record<string, unknown>).__codexHookEvents as
+          | unknown[]
+          | undefined
         return events && events.length > 0 ? events[0] : null
       },
-      { timeout: 5000 },
+      { timeout: 5000 }
     )
     const event = await handle.jsonValue()
     expect(event).toMatchObject({
       agentId: 'codex',
       type: 'agent-stop',
-      taskId: 'e2e-codex-task',
+      taskId: 'e2e-codex-task'
     })
 
     await mainWindow.evaluate(() => {
@@ -102,7 +107,9 @@ test.describe('Codex agent hooks', () => {
     })
   })
 
-  test('wrapper synthetic Start payload (hook_event_name) maps to agent-start', async ({ mainWindow }) => {
+  test('wrapper synthetic Start payload (hook_event_name) maps to agent-start', async ({
+    mainWindow
+  }) => {
     const port = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
@@ -129,23 +136,27 @@ test.describe('Codex agent hooks', () => {
       env: {
         ...process.env,
         SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${port}/api/agent-hook`,
-        SLAYZONE_AGENT_ID: 'codex',
-      },
+        SLAYZONE_AGENT_ID: 'codex'
+      }
     })
     expect(res.status).toBe(0)
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__codexStartEvents as unknown[] | undefined
+        const events = (window as Record<string, unknown>).__codexStartEvents as
+          | unknown[]
+          | undefined
         return events && events.length > 0 ? events[0] : null
       },
-      { timeout: 5000 },
+      { timeout: 5000 }
     )
     const event = await handle.jsonValue()
     expect(event).toMatchObject({ agentId: 'codex', type: 'agent-start' })
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__codexStartUnsub as (() => void) | undefined
+      const unsub = (window as Record<string, unknown>).__codexStartUnsub as
+        | (() => void)
+        | undefined
       unsub?.()
     })
   })

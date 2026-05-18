@@ -41,7 +41,11 @@ describe('installOpencodePlugin', () => {
     const dir = tmpDir()
     const target = path.join(dir, 'deeply', 'nested', 'plugin', 'slayzone-notify.js')
     try {
-      const result = await installOpencodePlugin({ source: SAMPLE, targetPath: target, notifyPath: '/n.sh' })
+      const result = await installOpencodePlugin({
+        source: SAMPLE,
+        targetPath: target,
+        notifyPath: '/n.sh'
+      })
       expect(result.changed).toBe(true)
       expect(fs.existsSync(target)).toBe(true)
     } finally {
@@ -56,7 +60,7 @@ describe('installOpencodePlugin', () => {
     try {
       await installOpencodePlugin({ source: SAMPLE, targetPath: target, notifyPath: '/n.sh' })
       const stat = fs.statSync(target)
-      // eslint-disable-next-line no-bitwise
+
       expect(stat.mode & 0o777).toBe(0o644)
     } finally {
       cleanup(dir)
@@ -67,8 +71,16 @@ describe('installOpencodePlugin', () => {
     const dir = tmpDir()
     const target = path.join(dir, 'slayzone-notify.js')
     try {
-      const r1 = await installOpencodePlugin({ source: SAMPLE, targetPath: target, notifyPath: '/n.sh' })
-      const r2 = await installOpencodePlugin({ source: SAMPLE, targetPath: target, notifyPath: '/n.sh' })
+      const r1 = await installOpencodePlugin({
+        source: SAMPLE,
+        targetPath: target,
+        notifyPath: '/n.sh'
+      })
+      const r2 = await installOpencodePlugin({
+        source: SAMPLE,
+        targetPath: target,
+        notifyPath: '/n.sh'
+      })
       expect(r1.changed).toBe(true)
       expect(r2.changed).toBe(false)
     } finally {
@@ -80,8 +92,16 @@ describe('installOpencodePlugin', () => {
     const dir = tmpDir()
     const target = path.join(dir, 'slayzone-notify.js')
     try {
-      const r1 = await installOpencodePlugin({ source: SAMPLE, targetPath: target, notifyPath: '/old.sh' })
-      const r2 = await installOpencodePlugin({ source: SAMPLE, targetPath: target, notifyPath: '/new.sh' })
+      const r1 = await installOpencodePlugin({
+        source: SAMPLE,
+        targetPath: target,
+        notifyPath: '/old.sh'
+      })
+      const r2 = await installOpencodePlugin({
+        source: SAMPLE,
+        targetPath: target,
+        notifyPath: '/new.sh'
+      })
       expect(r1.changed).toBe(true)
       expect(r2.changed).toBe(true)
       expect(fs.readFileSync(target, 'utf8')).toContain('/new.sh')
@@ -91,10 +111,13 @@ describe('installOpencodePlugin', () => {
   })
 
   test('bundled plugin source has expected SlayZone v1 marker + placeholder', async () => {
-    const realSource = await import('@slayzone/hooks/opencode-plugin.js?raw' /* @vite-ignore */).catch(
-      () => null as unknown,
-    )
-    const text = typeof realSource === 'string' ? realSource : (realSource as { default?: string } | null)?.default
+    const realSource = await import(
+      '@slayzone/hooks/opencode-plugin.js?raw' /* @vite-ignore */
+    ).catch(() => null as unknown)
+    const text =
+      typeof realSource === 'string'
+        ? realSource
+        : (realSource as { default?: string } | null)?.default
     if (typeof text !== 'string') return // bundling fallback — covered by e2e
     expect(text).toContain('SlayZone opencode plugin v1')
     expect(text).toContain('{{NOTIFY_PATH}}')

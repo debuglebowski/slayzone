@@ -41,7 +41,10 @@ export function useImagePasteDrop<T>(opts: UseImagePasteDropOpts<T>): UseImagePa
   const [isDragging, setIsDragging] = useState(false)
   const dragDepth = useRef(0)
 
-  const extractImageFiles = useCallback(extractImageFilesFromDataTransfer, [])
+  const extractImageFiles = useCallback(
+    (dt: DataTransfer | null | undefined) => extractImageFilesFromDataTransfer(dt),
+    []
+  )
 
   const handleFiles = useCallback(async (files: File[]): Promise<boolean> => {
     if (files.length === 0) return false

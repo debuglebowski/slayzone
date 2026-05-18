@@ -9,7 +9,7 @@ import {
   type Edge,
   MarkerType,
   ReactFlowProvider,
-  useReactFlow,
+  useReactFlow
 } from '@xyflow/react'
 import { LayoutGrid, Plus } from 'lucide-react'
 import { Button } from '@slayzone/ui'
@@ -41,7 +41,9 @@ function getStoredPositions(scope: AiConfigScope): Record<string, { x: number; y
   try {
     const raw = localStorage.getItem(POSITION_KEY_PREFIX + scope)
     return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
+  } catch {
+    return {}
+  }
 }
 
 function storePositions(scope: AiConfigScope, positions: Record<string, { x: number; y: number }>) {
@@ -55,100 +57,107 @@ function SkillGraphCanvasInner({
   onSelectSkill,
   onUpdateItem,
   onCreateSkill,
-  syncHealthMap,
+  syncHealthMap
 }: SkillGraphCanvasProps) {
-  const skills = useMemo(() => items.filter(i => i.type === 'skill'), [items])
-  const slugToId = useMemo(() => new Map(skills.map(s => [s.slug, s.id])), [skills])
-  const idToItem = useMemo(() => new Map(skills.map(s => [s.id, s])), [skills])
+  const skills = useMemo(() => items.filter((i) => i.type === 'skill'), [items])
+  const slugToId = useMemo(() => new Map(skills.map((s) => [s.slug, s.id])), [skills])
+  const idToItem = useMemo(() => new Map(skills.map((s) => [s.id, s])), [skills])
   const { fitView } = useReactFlow()
   const initializedRef = useRef(false)
   const showLineCount = useContextManagerStore((s) => s.showLineCount)
 
-  const handleDeleteEdge = useCallback(async (edgeId: string) => {
-    const [sourceId, targetId] = edgeId.split('->')
-    if (!sourceId || !targetId) return
-    const sourceItem = idToItem.get(sourceId)
-    const targetItem = idToItem.get(targetId)
-    if (!sourceItem || !targetItem) return
+  const handleDeleteEdge = useCallback(
+    async (edgeId: string) => {
+      const [sourceId, targetId] = edgeId.split('->')
+      if (!sourceId || !targetId) return
+      const sourceItem = idToItem.get(sourceId)
+      const targetItem = idToItem.get(targetId)
+      if (!sourceItem || !targetItem) return
 
-    const parsed = parseSkillFrontmatter(sourceItem.content)
-    if (!parsed) return
+      const parsed = parseSkillFrontmatter(sourceItem.content)
+      if (!parsed) return
 
-    const currentDeps = parseDependsOn(parsed.frontmatter)
-    const newDeps = currentDeps.filter(s => s !== targetItem.slug)
-    const newFrontmatter = setDependsOn(parsed.frontmatter, newDeps)
-    const newContent = renderSkillFrontmatter(newFrontmatter) + '\n' + parsed.body.replace(/^\n+/, '')
+      const currentDeps = parseDependsOn(parsed.frontmatter)
+      const newDeps = currentDeps.filter((s) => s !== targetItem.slug)
+      const newFrontmatter = setDependsOn(parsed.frontmatter, newDeps)
+      const newContent =
+        renderSkillFrontmatter(newFrontmatter) + '\n' + parsed.body.replace(/^\n+/, '')
 
-    await onUpdateItem(sourceItem.id, { content: newContent })
-  }, [idToItem, onUpdateItem])
+      await onUpdateItem(sourceItem.id, { content: newContent })
+    },
+    [idToItem, onUpdateItem]
+  )
 
-  const buildGraph = useCallback((autoLayout: boolean) => {
-    const deps = buildDependencyGraph(skills)
-    const stored = autoLayout ? {} : getStoredPositions(scope)
+  const buildGraph = useCallback(
+    (autoLayout: boolean) => {
+      const deps = buildDependencyGraph(skills)
+      const stored = autoLayout ? {} : getStoredPositions(scope)
 
-    const widthFor = (item: AiConfigItem) => computeSkillNodeWidth(item.slug, {
-      hasStaleBadge: syncHealthMap?.get(item.id) === 'stale',
-      hasLineCount: showLineCount,
-    })
+      const widthFor = (item: AiConfigItem) =>
+        computeSkillNodeWidth(item.slug, {
+          hasStaleBadge: syncHealthMap?.get(item.id) === 'stale',
+          hasLineCount: showLineCount
+        })
 
-    const graphNodes = skills.map(item => ({ id: item.id, width: widthFor(item) }))
-    const graphEdges = deps
-      .map(d => ({
-        source: slugToId.get(d.sourceSlug) ?? '',
-        target: slugToId.get(d.targetSlug) ?? '',
-      }))
-      .filter(e => e.source && e.target)
+      const graphNodes = skills.map((item) => ({ id: item.id, width: widthFor(item) }))
+      const graphEdges = deps
+        .map((d) => ({
+          source: slugToId.get(d.sourceSlug) ?? '',
+          target: slugToId.get(d.targetSlug) ?? ''
+        }))
+        .filter((e) => e.source && e.target)
 
-    const dagrePositions = computeGraphLayout(graphNodes, graphEdges)
+      const dagrePositions = computeGraphLayout(graphNodes, graphEdges)
 
-    const nodes: Node<SkillNodeData>[] = skills.map(item => {
-      const validation = getSkillValidation(item)
-      const parsed = parseSkillFrontmatter(item.content)
-      const description = parsed?.frontmatter.description ?? ''
-      const pos = stored[item.id] ?? dagrePositions.get(item.id) ?? { x: 0, y: 0 }
-      return {
-        id: item.id,
-        type: 'skill',
-        position: pos,
-        data: {
-          item,
-          scope: item.scope,
-          validationStatus: validation?.status ?? null,
-          description,
-          selected: item.id === selectedSkillId,
-          width: widthFor(item),
-          syncHealth: syncHealthMap?.get(item.id),
-        },
-      }
-    })
-
-    const edges: Edge[] = deps
-      .filter(d => slugToId.has(d.sourceSlug) && slugToId.has(d.targetSlug))
-      .map(d => {
-        const sourceId = slugToId.get(d.sourceSlug)!
-        const targetId = slugToId.get(d.targetSlug)!
+      const nodes: Node<SkillNodeData>[] = skills.map((item) => {
+        const validation = getSkillValidation(item)
+        const parsed = parseSkillFrontmatter(item.content)
+        const description = parsed?.frontmatter.description ?? ''
+        const pos = stored[item.id] ?? dagrePositions.get(item.id) ?? { x: 0, y: 0 }
         return {
-          id: `${sourceId}->${targetId}`,
-          source: sourceId,
-          target: targetId,
-          type: 'dependency' as const,
-          selectable: d.type === 'explicit',
-          deletable: d.type === 'explicit',
+          id: item.id,
+          type: 'skill',
+          position: pos,
           data: {
-            depType: d.type,
-          } satisfies DependencyEdgeData,
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 28,
-            height: 28,
-            color: 'var(--color-muted-foreground)',
-          },
+            item,
+            scope: item.scope,
+            validationStatus: validation?.status ?? null,
+            description,
+            selected: item.id === selectedSkillId,
+            width: widthFor(item),
+            syncHealth: syncHealthMap?.get(item.id)
+          }
         }
       })
 
-    return { nodes, edges }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skills, slugToId, scope, selectedSkillId, syncHealthMap, showLineCount])
+      const edges: Edge[] = deps
+        .filter((d) => slugToId.has(d.sourceSlug) && slugToId.has(d.targetSlug))
+        .map((d) => {
+          const sourceId = slugToId.get(d.sourceSlug)!
+          const targetId = slugToId.get(d.targetSlug)!
+          return {
+            id: `${sourceId}->${targetId}`,
+            source: sourceId,
+            target: targetId,
+            type: 'dependency' as const,
+            selectable: d.type === 'explicit',
+            deletable: d.type === 'explicit',
+            data: {
+              depType: d.type
+            } satisfies DependencyEdgeData,
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              width: 28,
+              height: 28,
+              color: 'var(--color-muted-foreground)'
+            }
+          }
+        })
+
+      return { nodes, edges }
+    },
+    [skills, slugToId, scope, selectedSkillId, syncHealthMap, showLineCount]
+  )
 
   const initial = useMemo(() => buildGraph(false), [buildGraph])
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes)
@@ -174,42 +183,55 @@ function SkillGraphCanvasInner({
     setTimeout(() => fitView({ duration: 300 }), 50)
   }, [buildGraph, setNodes, setEdges, scope, fitView])
 
-  const handleNodeDragStop = useCallback((_: unknown, node: Node) => {
-    const stored = getStoredPositions(scope)
-    stored[node.id] = node.position
-    storePositions(scope, stored)
-  }, [scope])
+  const handleNodeDragStop = useCallback(
+    (_: unknown, node: Node) => {
+      const stored = getStoredPositions(scope)
+      stored[node.id] = node.position
+      storePositions(scope, stored)
+    },
+    [scope]
+  )
 
-  const handleEdgesDelete = useCallback(async (deletedEdges: Edge[]) => {
-    for (const edge of deletedEdges) {
-      const data = edge.data as DependencyEdgeData | undefined
-      if (data?.depType === 'explicit') {
-        await handleDeleteEdge(edge.id)
+  const handleEdgesDelete = useCallback(
+    async (deletedEdges: Edge[]) => {
+      for (const edge of deletedEdges) {
+        const data = edge.data as DependencyEdgeData | undefined
+        if (data?.depType === 'explicit') {
+          await handleDeleteEdge(edge.id)
+        }
       }
-    }
-  }, [handleDeleteEdge])
+    },
+    [handleDeleteEdge]
+  )
 
-  const handleConnect = useCallback(async (connection: Connection) => {
-    if (!connection.source || !connection.target) return
-    const sourceItem = idToItem.get(connection.source)
-    const targetItem = idToItem.get(connection.target)
-    if (!sourceItem || !targetItem) return
+  const handleConnect = useCallback(
+    async (connection: Connection) => {
+      if (!connection.source || !connection.target) return
+      const sourceItem = idToItem.get(connection.source)
+      const targetItem = idToItem.get(connection.target)
+      if (!sourceItem || !targetItem) return
 
-    const parsed = parseSkillFrontmatter(sourceItem.content)
-    if (!parsed) return
+      const parsed = parseSkillFrontmatter(sourceItem.content)
+      if (!parsed) return
 
-    const currentDeps = parseDependsOn(parsed.frontmatter)
-    if (currentDeps.includes(targetItem.slug)) return
+      const currentDeps = parseDependsOn(parsed.frontmatter)
+      if (currentDeps.includes(targetItem.slug)) return
 
-    const newFrontmatter = setDependsOn(parsed.frontmatter, [...currentDeps, targetItem.slug])
-    const newContent = renderSkillFrontmatter(newFrontmatter) + '\n' + parsed.body.replace(/^\n+/, '')
+      const newFrontmatter = setDependsOn(parsed.frontmatter, [...currentDeps, targetItem.slug])
+      const newContent =
+        renderSkillFrontmatter(newFrontmatter) + '\n' + parsed.body.replace(/^\n+/, '')
 
-    await onUpdateItem(sourceItem.id, { content: newContent })
-  }, [idToItem, onUpdateItem])
+      await onUpdateItem(sourceItem.id, { content: newContent })
+    },
+    [idToItem, onUpdateItem]
+  )
 
-  const handleNodeClick = useCallback((_: unknown, node: Node) => {
-    onSelectSkill(node.id)
-  }, [onSelectSkill])
+  const handleNodeClick = useCallback(
+    (_: unknown, node: Node) => {
+      onSelectSkill(node.id)
+    },
+    [onSelectSkill]
+  )
 
   const handlePaneClick = useCallback(() => {
     onSelectSkill(null)

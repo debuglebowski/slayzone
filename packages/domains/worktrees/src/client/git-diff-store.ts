@@ -96,8 +96,7 @@ const WATCHER_FALLBACK_POLL_MS = 30_000
 let pageHidden = false
 
 function handleVisibilityChange(): void {
-  const nowHidden =
-    typeof document !== 'undefined' && document.visibilityState === 'hidden'
+  const nowHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
   if (nowHidden === pageHidden) return
   pageHidden = nowHidden
   if (pageHidden) {
@@ -121,7 +120,9 @@ function handleVisibilityChange(): void {
       const watcher = pathWatchers.get(entry.targetPath)
       if (watcher?.watcherActive) continue
       const scheduleDelay = delay
-      setTimeout(() => { void runFetch(entry) }, scheduleDelay)
+      setTimeout(() => {
+        void runFetch(entry)
+      }, scheduleDelay)
       delay = Math.min(delay + 50, 950)
     }
   }
@@ -165,7 +166,7 @@ function makeKey(
     ignoreWhitespace,
     fromSha: fromSha ?? null,
     toSha: toSha ?? null,
-    contextLines,
+    contextLines
   })
 }
 
@@ -196,7 +197,7 @@ async function runFetch(entry: StoreEntry): Promise<void> {
     const next = await window.api.git.getWorkingDiff(entry.targetPath, {
       contextLines: entry.contextLines,
       ignoreWhitespace: entry.ignoreWhitespace,
-      ...range,
+      ...range
     })
     // If this entry was torn down or a newer fetch superseded us, drop result.
     if (entries.get(entry.key) !== entry || entry.fetchSeq !== seq) return
@@ -211,7 +212,7 @@ async function runFetch(entry: StoreEntry): Promise<void> {
     updateState(entry, {
       snapshot: null,
       loading: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: err instanceof Error ? err.message : String(err)
     })
   }
 }
@@ -286,7 +287,7 @@ function acquirePathWatcher(targetPath: string, entry: StoreEntry): void {
       listenerDispose: null,
       failureListenerDispose: null,
       watcherActive: false,
-      startPromise: null,
+      startPromise: null
     }
     pathWatchers.set(targetPath, state)
   }
@@ -351,21 +352,35 @@ function releasePathWatcher(targetPath: string, entry: StoreEntry): void {
   if (state.entries.size > 0) return
   // Last subscriber — tear down.
   if (state.listenerDispose) {
-    try { state.listenerDispose() } catch { /* ignore */ }
+    try {
+      state.listenerDispose()
+    } catch {
+      /* ignore */
+    }
     state.listenerDispose = null
   }
   if (state.failureListenerDispose) {
-    try { state.failureListenerDispose() } catch { /* ignore */ }
+    try {
+      state.failureListenerDispose()
+    } catch {
+      /* ignore */
+    }
     state.failureListenerDispose = null
   }
   const api = typeof window !== 'undefined' ? window.api : undefined
   if (state.watcherActive && api?.git?.watchStop) {
     // Best-effort — we don't await.
-    void api.git.watchStop(targetPath).catch(() => { /* ignore */ })
+    void api.git.watchStop(targetPath).catch(() => {
+      /* ignore */
+    })
   } else if (state.startPromise && api?.git?.watchStop) {
     // Started while we were in flight — stop after start resolves, to keep
     // main-process refcount balanced.
-    void state.startPromise.then(() => api.git.watchStop(targetPath).catch(() => { /* ignore */ }))
+    void state.startPromise.then(() =>
+      api.git.watchStop(targetPath).catch(() => {
+        /* ignore */
+      })
+    )
   }
   state.watcherActive = false
   pathWatchers.delete(targetPath)
@@ -381,7 +396,13 @@ interface SubscribeArgs {
 }
 
 function subscribeEntry(args: SubscribeArgs, listener: () => void): () => void {
-  const key = makeKey(args.targetPath, args.ignoreWhitespace, args.fromSha, args.toSha, args.contextLines)
+  const key = makeKey(
+    args.targetPath,
+    args.ignoreWhitespace,
+    args.fromSha,
+    args.toSha,
+    args.contextLines
+  )
   let entry = entries.get(key)
   const created = !entry
   if (!entry) {
@@ -397,7 +418,7 @@ function subscribeEntry(args: SubscribeArgs, listener: () => void): () => void {
       fromSha: args.fromSha,
       toSha: args.toSha,
       contextLines: args.contextLines,
-      fetchSeq: 0,
+      fetchSeq: 0
     }
     entries.set(key, entry)
   }
@@ -463,9 +484,10 @@ export function useGitDiffSnapshot(
 ): UseGitDiffSnapshotResult {
   const contextLines: GitDiffContextLines = params.contextLines ?? 'all'
   const active = params.visible && !!targetPath
-  const key = active && targetPath
-    ? makeKey(targetPath, params.ignoreWhitespace, params.fromSha, params.toSha, contextLines)
-    : null
+  const key =
+    active && targetPath
+      ? makeKey(targetPath, params.ignoreWhitespace, params.fromSha, params.toSha, contextLines)
+      : null
 
   // Subscribe + getSnapshot must be stable across renders at the same key so
   // useSyncExternalStore does not tear down / recreate every render. We
@@ -478,11 +500,18 @@ export function useGitDiffSnapshot(
       fromSha: params.fromSha,
       toSha: params.toSha,
       contextLines,
-      pollIntervalMs: params.pollIntervalMs,
+      pollIntervalMs: params.pollIntervalMs
     }
     return (listener: () => void) => subscribeEntry(args, listener)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, targetPath, params.ignoreWhitespace, params.fromSha, params.toSha, contextLines, params.pollIntervalMs])
+  }, [
+    active,
+    targetPath,
+    params.ignoreWhitespace,
+    params.fromSha,
+    params.toSha,
+    contextLines,
+    params.pollIntervalMs
+  ])
 
   const getSnapshot = useMemo(() => {
     if (!key) return () => EMPTY_STATE
@@ -531,14 +560,25 @@ export function _resetStore(): void {
   entries.clear()
   for (const [p, state] of pathWatchers) {
     if (state.listenerDispose) {
-      try { state.listenerDispose() } catch { /* ignore */ }
+      try {
+        state.listenerDispose()
+      } catch {
+        /* ignore */
+      }
     }
     if (state.failureListenerDispose) {
-      try { state.failureListenerDispose() } catch { /* ignore */ }
+      try {
+        state.failureListenerDispose()
+      } catch {
+        /* ignore */
+      }
     }
     if (state.watcherActive) {
       const api = typeof window !== 'undefined' ? window.api : undefined
-      if (api?.git?.watchStop) void api.git.watchStop(p).catch(() => { /* ignore */ })
+      if (api?.git?.watchStop)
+        void api.git.watchStop(p).catch(() => {
+          /* ignore */
+        })
     }
   }
   pathWatchers.clear()

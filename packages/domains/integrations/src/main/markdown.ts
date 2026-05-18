@@ -25,6 +25,7 @@ export function markdownToHtml(md: string): string {
     if (!trimmed) continue
 
     // Code block placeholder
+    // eslint-disable-next-line no-control-regex
     const cbMatch = trimmed.match(/^\x00CB(\d+)\x00$/)
     if (cbMatch) {
       html.push(codeBlocks[parseInt(cbMatch[1])])

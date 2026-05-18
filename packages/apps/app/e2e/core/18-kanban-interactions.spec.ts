@@ -7,7 +7,7 @@ test.describe('Kanban interactions', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
-    let projects = await s.getProjects()
+    const projects = await s.getProjects()
 
     // Find or create a dedicated project
     let kanbanProject = projects.find((p: { name: string }) => p.name === 'Kanban Test')

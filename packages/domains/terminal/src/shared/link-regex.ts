@@ -1,6 +1,6 @@
 // From xterm.js addon-web-links — matches http:// and https:// URLs.
 // Excludes unsafe chars from RFC 3986/1738, trailing punctuation, and brackets.
-export const URL_REGEX = /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/
+export const URL_REGEX = /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/
 
 // Matches file paths with optional line:col suffix.
 // Patterns: ./relative/path.ts, ../up/path.js, src/foo.tsx:42:10, /absolute/path.rs:10

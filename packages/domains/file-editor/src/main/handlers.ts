@@ -270,6 +270,7 @@ export function registerFileEditorHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('fs:showInFinder', (_event, rootPath: string, targetPath: string): void => {
     const abs = targetPath ? assertWithinRoot(rootPath, targetPath) : path.resolve(rootPath)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { shell } = require('electron') as typeof import('electron')
     shell.showItemInFolder(abs)
   })

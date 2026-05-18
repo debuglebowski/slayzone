@@ -10,7 +10,9 @@ function tmpDir(): string {
 
 function cleanup(...dirs: string[]) {
   for (const d of dirs) {
-    try { fs.rmSync(d, { recursive: true, force: true }) } catch {}
+    try {
+      fs.rmSync(d, { recursive: true, force: true })
+    } catch {}
   }
 }
 
@@ -21,7 +23,11 @@ describe('installCodexWrapper', () => {
     const dir = tmpDir()
     const target = path.join(dir, '.slayzone', 'bin', 'codex')
     try {
-      const result = await installCodexWrapper({ source: SAMPLE, targetPath: target, skipVersionProbe: true })
+      const result = await installCodexWrapper({
+        source: SAMPLE,
+        targetPath: target,
+        skipVersionProbe: true
+      })
       expect(result.changed).toBe(true)
       expect(result.path).toBe(target)
       expect(fs.readFileSync(target, 'utf8')).toBe(SAMPLE)
@@ -37,7 +43,7 @@ describe('installCodexWrapper', () => {
     try {
       await installCodexWrapper({ source: SAMPLE, targetPath: target, skipVersionProbe: true })
       const stat = fs.statSync(target)
-      // eslint-disable-next-line no-bitwise
+
       expect(stat.mode & 0o777).toBe(0o755)
     } finally {
       cleanup(dir)
@@ -48,8 +54,16 @@ describe('installCodexWrapper', () => {
     const dir = tmpDir()
     const target = path.join(dir, 'codex')
     try {
-      const r1 = await installCodexWrapper({ source: SAMPLE, targetPath: target, skipVersionProbe: true })
-      const r2 = await installCodexWrapper({ source: SAMPLE, targetPath: target, skipVersionProbe: true })
+      const r1 = await installCodexWrapper({
+        source: SAMPLE,
+        targetPath: target,
+        skipVersionProbe: true
+      })
+      const r2 = await installCodexWrapper({
+        source: SAMPLE,
+        targetPath: target,
+        skipVersionProbe: true
+      })
       expect(r1.changed).toBe(true)
       expect(r2.changed).toBe(false)
     } finally {
@@ -60,8 +74,13 @@ describe('installCodexWrapper', () => {
   test('wrapper script source skips self via grep -v of $SLAYZONE_HOME_DIR/bin/codex', async () => {
     // Validates the live bundled wrapper, not a fixture, so a refactor that
     // drops the self-skip resolver gets caught here.
-    const realSource = await import('@slayzone/hooks/codex-wrapper.sh?raw' /* @vite-ignore */).catch(() => null as unknown)
-    const text = typeof realSource === 'string' ? realSource : (realSource as { default?: string } | null)?.default
+    const realSource = await import(
+      '@slayzone/hooks/codex-wrapper.sh?raw' /* @vite-ignore */
+    ).catch(() => null as unknown)
+    const text =
+      typeof realSource === 'string'
+        ? realSource
+        : (realSource as { default?: string } | null)?.default
     if (typeof text !== 'string') return // bundling fallback — covered by e2e
     expect(text).toContain('which -a codex')
     expect(text).toContain('grep -v')
@@ -71,13 +90,21 @@ describe('installCodexWrapper', () => {
 
 describe('parseCodexVersion', () => {
   test('parses "codex 0.131.0"', () => {
-    expect(parseCodexVersion('codex 0.131.0')).toEqual({ major: 0, minor: 131, raw: 'codex 0.131.0' })
+    expect(parseCodexVersion('codex 0.131.0')).toEqual({
+      major: 0,
+      minor: 131,
+      raw: 'codex 0.131.0'
+    })
   })
   test('parses bare semver', () => {
     expect(parseCodexVersion('0.129.0')).toEqual({ major: 0, minor: 129, raw: '0.129.0' })
   })
   test('parses prerelease', () => {
-    expect(parseCodexVersion('0.130.0-alpha.3')).toEqual({ major: 0, minor: 130, raw: '0.130.0-alpha.3' })
+    expect(parseCodexVersion('0.130.0-alpha.3')).toEqual({
+      major: 0,
+      minor: 130,
+      raw: '0.130.0-alpha.3'
+    })
   })
   test('returns null on garbage', () => {
     expect(parseCodexVersion('not-a-version')).toBeNull()

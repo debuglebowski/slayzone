@@ -569,6 +569,7 @@ SUMMARY: <2-3 sentences explaining what each branch changed and why they conflic
   })
 
   ipcMain.handle('git:revealInFinder', (_, path: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { shell } = require('electron')
     shell.openPath(path)
   })

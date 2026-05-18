@@ -72,7 +72,9 @@ export function useBrowserViewLifecycle(opts: UseBrowserViewLifecycleOpts): { vi
       }
       setViewId(null)
     }
-  }, [tabId, taskId]) // eslint-disable-line react-hooks/exhaustive-deps — url/partition are initial values only
+    // url/partition are initial values only — intentional
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId, taskId])
 
   return { viewId }
 }

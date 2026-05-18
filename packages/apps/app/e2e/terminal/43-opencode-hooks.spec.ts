@@ -22,10 +22,15 @@ test.describe('OpenCode agent hooks', () => {
     await resetApp(mainWindow)
   })
 
-  test('boot installer wrote plugin to sandbox path w/ NOTIFY_PATH substituted', async ({ mainWindow }) => {
+  test('boot installer wrote plugin to sandbox path w/ NOTIFY_PATH substituted', async ({
+    mainWindow
+  }) => {
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
-      return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR', 'SLAYZONE_OPENCODE_PLUGIN_PATH'])
+      return window.__testInvoke('e2e:get-env', [
+        'SLAYZONE_HOME_DIR',
+        'SLAYZONE_OPENCODE_PLUGIN_PATH'
+      ])
     })) as Record<string, string>
 
     expect(env.SLAYZONE_HOME_DIR).toBeTruthy()
@@ -37,7 +42,6 @@ test.describe('OpenCode agent hooks', () => {
     const stat = fs.statSync(pluginPath)
     expect(stat.isFile()).toBe(true)
     if (process.platform !== 'win32') {
-      // eslint-disable-next-line no-bitwise
       expect(stat.mode & 0o777).toBe(0o644)
     }
 
@@ -50,7 +54,9 @@ test.describe('OpenCode agent hooks', () => {
     expect(content).toContain('SlayzoneNotifyPlugin')
   })
 
-  test('POST /api/agent-hook dispatches opencode agent:lifecycle to renderer', async ({ mainWindow }) => {
+  test('POST /api/agent-hook dispatches opencode agent:lifecycle to renderer', async ({
+    mainWindow
+  }) => {
     const port = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
@@ -71,37 +77,47 @@ test.describe('OpenCode agent hooks', () => {
       agentId: 'opencode',
       hookEvent: 'Start',
       sessionId: 'oc-e2e-session',
-      taskId: 'oc-e2e-task',
+      taskId: 'oc-e2e-task'
     })
     await postJson(`http://127.0.0.1:${port}/api/agent-hook`, {
       agentId: 'opencode',
       hookEvent: 'Stop',
       sessionId: 'oc-e2e-session',
-      taskId: 'oc-e2e-task',
+      taskId: 'oc-e2e-task'
     })
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__opencodeHookEvents as unknown[] | undefined
+        const events = (window as Record<string, unknown>).__opencodeHookEvents as
+          | unknown[]
+          | undefined
         return events && events.length >= 2 ? events : null
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     )
     const events = (await handle.jsonValue()) as Array<{
       agentId: string
       hookEvent: string
       type: string
     }>
-    expect(events[0]).toMatchObject({ agentId: 'opencode', hookEvent: 'Start', type: 'agent-start' })
+    expect(events[0]).toMatchObject({
+      agentId: 'opencode',
+      hookEvent: 'Start',
+      type: 'agent-start'
+    })
     expect(events[1]).toMatchObject({ agentId: 'opencode', hookEvent: 'Stop', type: 'agent-stop' })
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__opencodeHookUnsub as (() => void) | undefined
+      const unsub = (window as Record<string, unknown>).__opencodeHookUnsub as
+        | (() => void)
+        | undefined
       unsub?.()
     })
   })
 
-  test('PermissionRequest hookEvent maps to permission-request lifecycle', async ({ mainWindow }) => {
+  test('PermissionRequest hookEvent maps to permission-request lifecycle', async ({
+    mainWindow
+  }) => {
     const port = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
@@ -121,21 +137,25 @@ test.describe('OpenCode agent hooks', () => {
       agentId: 'opencode',
       hookEvent: 'PermissionRequest',
       sessionId: 'oc-perm',
-      taskId: 'oc-task',
+      taskId: 'oc-task'
     })
 
     const handle = await mainWindow.waitForFunction(
       () => {
-        const events = (window as Record<string, unknown>).__opencodePermEvents as unknown[] | undefined
+        const events = (window as Record<string, unknown>).__opencodePermEvents as
+          | unknown[]
+          | undefined
         return events && events.length > 0 ? events[0] : null
       },
-      { timeout: 3000 },
+      { timeout: 3000 }
     )
     const event = (await handle.jsonValue()) as { type: string }
     expect(event.type).toBe('permission-request')
 
     await mainWindow.evaluate(() => {
-      const unsub = (window as Record<string, unknown>).__opencodePermUnsub as (() => void) | undefined
+      const unsub = (window as Record<string, unknown>).__opencodePermUnsub as
+        | (() => void)
+        | undefined
       unsub?.()
     })
   })
@@ -160,12 +180,15 @@ function postJson(url: string, body: unknown): Promise<{ status: number }> {
         port: u.port,
         method: 'POST',
         path: u.pathname,
-        headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload)
+        }
       },
       (res) => {
         res.resume()
         res.on('end', () => resolve({ status: res.statusCode ?? 0 }))
-      },
+      }
     )
     req.on('error', reject)
     req.write(payload)

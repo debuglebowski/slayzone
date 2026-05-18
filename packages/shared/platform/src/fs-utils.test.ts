@@ -10,7 +10,9 @@ function tmpDir(): string {
 
 function cleanup(...dirs: string[]) {
   for (const d of dirs) {
-    try { fs.rmSync(d, { recursive: true, force: true }) } catch {}
+    try {
+      fs.rmSync(d, { recursive: true, force: true })
+    } catch {}
   }
 }
 
@@ -59,7 +61,7 @@ describe('writeFileIfChanged', () => {
       const target = path.join(dir, 'script.sh')
       await writeFileIfChanged(target, '#!/bin/sh\necho hi\n', 0o755)
       const stat = fs.statSync(target)
-      // eslint-disable-next-line no-bitwise
+
       expect(stat.mode & 0o777).toBe(0o755)
     } finally {
       cleanup(dir)

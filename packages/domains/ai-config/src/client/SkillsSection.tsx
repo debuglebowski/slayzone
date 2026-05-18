@@ -203,20 +203,9 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
 
   const sortedItems = useMemo(() => [...items].sort((a, b) => a.slug.localeCompare(b.slug)), [items])
 
-  // Computer level — show computer files filtered to skills
-  if (level === 'computer') {
-    return <ComputerContextFiles filter="skill" />
-  }
-
-  // Project + Library levels — graph or list view with editor panel
+  // Project + Library levels — graph or list view with editor panel.
+  // Resize drag — hooks must be unconditional (called before any early return).
   const selectedItem = items.find(i => i.id === selectedSkillId) ?? null
-  const validation = selectedItem ? getSkillValidation(selectedItem) : null
-
-  const headerTarget = document.getElementById('context-manager-header-actions')
-  const editorTarget = document.getElementById('context-manager-editor-panel')
-  const handleTarget = document.getElementById('context-manager-resize-handle')
-
-  // Resize drag
   const skillEditorWidth = useContextManagerStore((s) => s.skillEditorWidth)
   const setSkillEditorWidth = useContextManagerStore((s) => s.setSkillEditorWidth)
   const dragging = useRef(false)
@@ -240,13 +229,26 @@ export function SkillsSection({ level, projectId, projectPath }: SkillsSectionPr
 
   // Apply width to editor panel (null = 50% of available)
   useEffect(() => {
+    if (level === 'computer') return
+    const editorTarget = document.getElementById('context-manager-editor-panel')
     if (editorTarget && selectedItem) {
       editorTarget.style.width = skillEditorWidth ? `${skillEditorWidth}px` : '50%'
     }
     return () => {
-      if (editorTarget) editorTarget.style.width = ''
+      const t = document.getElementById('context-manager-editor-panel')
+      if (t) t.style.width = ''
     }
-  }, [editorTarget, selectedItem, skillEditorWidth])
+  }, [level, selectedItem, skillEditorWidth])
+
+  // Computer level — show computer files filtered to skills
+  if (level === 'computer') {
+    return <ComputerContextFiles filter="skill" />
+  }
+
+  const validation = selectedItem ? getSkillValidation(selectedItem) : null
+  const headerTarget = document.getElementById('context-manager-header-actions')
+  const editorTarget = document.getElementById('context-manager-editor-panel')
+  const handleTarget = document.getElementById('context-manager-resize-handle')
 
   return (
     <>
