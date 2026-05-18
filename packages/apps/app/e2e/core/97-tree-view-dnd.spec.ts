@@ -5,7 +5,9 @@ type TreePatch = Record<string, unknown>
 
 async function patchStore(page: Page, patch: TreePatch) {
   await page.evaluate((p) => {
-    const store = (window as unknown as { __slayzone_tabStore?: { setState: (s: unknown) => void } }).__slayzone_tabStore
+    const store = (
+      window as unknown as { __slayzone_tabStore?: { setState: (s: unknown) => void } }
+    ).__slayzone_tabStore
     if (!store) throw new Error('__slayzone_tabStore not exposed')
     store.setState(p)
   }, patch)
@@ -13,9 +15,13 @@ async function patchStore(page: Page, patch: TreePatch) {
 
 async function setTabs(page: Page, taskIds: string[]) {
   await page.evaluate((ids) => {
-    const store = (window as unknown as { __slayzone_tabStore?: { setState: (s: unknown) => void } }).__slayzone_tabStore
+    const store = (
+      window as unknown as { __slayzone_tabStore?: { setState: (s: unknown) => void } }
+    ).__slayzone_tabStore
     if (!store) throw new Error('__slayzone_tabStore not exposed')
-    const tabs: Array<{ type: 'home' } | { type: 'task'; taskId: string; title: string }> = [{ type: 'home' }]
+    const tabs: Array<{ type: 'home' } | { type: 'task'; taskId: string; title: string }> = [
+      { type: 'home' }
+    ]
     for (const id of ids) tabs.push({ type: 'task', taskId: id, title: 'tab' })
     store.setState({ tabs, activeTabIndex: 0 })
   }, taskIds)
@@ -40,17 +46,15 @@ function taskRow(page: Page, taskId: string) {
 }
 
 function statusGroup(page: Page, projectId: string, status: string) {
-  return page.locator(`[data-testid="tree-status-group"][data-project-id="${projectId}"][data-status="${status}"]`)
+  return page.locator(
+    `[data-testid="tree-status-group"][data-project-id="${projectId}"][data-status="${status}"]`
+  )
 }
 
 type Point = { x: number; y: number }
 type DstArg = Point | (() => Promise<Point>)
 
-async function dragFromTo(
-  page: Page,
-  src: Point,
-  dst: DstArg
-) {
+async function dragFromTo(page: Page, src: Point, dst: DstArg) {
   await page.mouse.move(src.x, src.y)
   await page.mouse.down()
   // Exceed PointerSensor activation distance (5px). dnd-kit fires
@@ -74,11 +78,7 @@ async function dragFromTo(
  * applied to siblings via `style.transition`, so a row's `transform`
  * computed style ramps from 0 to its final shift over that window. Sampling
  * mid-transition yields a partial value (~-18 instead of -32). */
-async function dragHover(
-  page: Page,
-  src: Point,
-  dst: DstArg
-) {
+async function dragHover(page: Page, src: Point, dst: DstArg) {
   await page.mouse.move(src.x, src.y)
   await page.mouse.down()
   await page.mouse.move(src.x + 12, src.y, { steps: 5 })
@@ -143,30 +143,70 @@ async function getTaskById(page: Page, id: string) {
   return tasks.find((t: { id: string }) => t.id === id)
 }
 
-async function setProjectSortBy(page: Page, projectId: string, sortBy: 'manual' | 'priority' | 'due_date' | 'title' | 'created') {
-  await page.evaluate(({ pid, sb }) => {
-    const store = (window as unknown as {
-      __slayzone_filterStore?: {
-        getState: () => {
-          filters: Record<string, unknown>
-          setFilter: (pid: string, filter: unknown) => void
+async function setProjectSortBy(
+  page: Page,
+  projectId: string,
+  sortBy: 'manual' | 'priority' | 'due_date' | 'title' | 'created'
+) {
+  await page.evaluate(
+    ({ pid, sb }) => {
+      const store = (
+        window as unknown as {
+          __slayzone_filterStore?: {
+            getState: () => {
+              filters: Record<string, unknown>
+              setFilter: (pid: string, filter: unknown) => void
+            }
+          }
+        }
+      ).__slayzone_filterStore
+      if (!store) throw new Error('__slayzone_filterStore not exposed')
+      const state = store.getState()
+      const existing = (state.filters[pid] as Record<string, unknown> | undefined) ?? {
+        viewMode: 'board',
+        board: {
+          groupBy: 'status',
+          sortBy: 'manual',
+          showEmptyColumns: true,
+          completedFilter: 'all',
+          showArchived: false,
+          showSubTasks: false,
+          showBlockedColumn: false,
+          blockedColumnAfter: null,
+          showSnoozedColumn: false,
+          snoozedColumnAfter: null
+        },
+        list: {
+          groupBy: 'status',
+          sortBy: 'manual',
+          showEmptyColumns: true,
+          completedFilter: 'all',
+          showArchived: false,
+          showSubTasks: false,
+          showBlockedColumn: false,
+          blockedColumnAfter: null,
+          showSnoozedColumn: false,
+          snoozedColumnAfter: null
+        },
+        priority: null,
+        dueDateRange: 'all',
+        tagIds: [],
+        cardProperties: {
+          priority: true,
+          dueDate: true,
+          terminal: true,
+          linear: true,
+          blocked: true,
+          subtasks: true,
+          merge: true,
+          tags: true
         }
       }
-    }).__slayzone_filterStore
-    if (!store) throw new Error('__slayzone_filterStore not exposed')
-    const state = store.getState()
-    const existing = (state.filters[pid] as Record<string, unknown> | undefined) ?? {
-      viewMode: 'board',
-      board: { groupBy: 'status', sortBy: 'manual', showEmptyColumns: true, completedFilter: 'all', showArchived: false, showSubTasks: false, showBlockedColumn: false, blockedColumnAfter: null, showSnoozedColumn: false, snoozedColumnAfter: null },
-      list: { groupBy: 'status', sortBy: 'manual', showEmptyColumns: true, completedFilter: 'all', showArchived: false, showSubTasks: false, showBlockedColumn: false, blockedColumnAfter: null, showSnoozedColumn: false, snoozedColumnAfter: null },
-      priority: null,
-      dueDateRange: 'all',
-      tagIds: [],
-      cardProperties: { priority: true, dueDate: true, terminal: true, linear: true, blocked: true, subtasks: true, merge: true, tags: true },
-    }
-    const board = (existing.board as Record<string, unknown> | undefined) ?? {}
-    state.setFilter(pid, { ...existing, board: { ...board, sortBy: sb } })
-  }, { pid: projectId, sb: sortBy })
+      const board = (existing.board as Record<string, unknown> | undefined) ?? {}
+      state.setFilter(pid, { ...existing, board: { ...board, sortBy: sb } })
+    },
+    { pid: projectId, sb: sortBy }
+  )
 }
 
 test.describe('TreeView drag and drop', () => {
@@ -186,7 +226,11 @@ test.describe('TreeView drag and drop', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     const s = seed(mainWindow)
-    const p = await s.createProject({ name: projectName, color: '#22c55e', path: TEST_PROJECT_PATH })
+    const p = await s.createProject({
+      name: projectName,
+      color: '#22c55e',
+      path: TEST_PROJECT_PATH
+    })
     projectId = p.id
 
     rootA = (await s.createTask({ projectId, title: 'DnD A', status: 'in_progress' })).id
@@ -195,15 +239,33 @@ test.describe('TreeView drag and drop', () => {
     rootTodo = (await s.createTask({ projectId, title: 'DnD Todo', status: 'todo' })).id
 
     subA1 = (await mainWindow.evaluate(
-      ({ pid, parentId }) => window.api.db.createTask({ projectId: pid, title: 'Sub A1', status: 'in_progress', parentId }),
+      ({ pid, parentId }) =>
+        window.api.db.createTask({
+          projectId: pid,
+          title: 'Sub A1',
+          status: 'in_progress',
+          parentId
+        }),
       { pid: projectId, parentId: rootA }
     ))!.id
     subA2 = (await mainWindow.evaluate(
-      ({ pid, parentId }) => window.api.db.createTask({ projectId: pid, title: 'Sub A2', status: 'in_progress', parentId }),
+      ({ pid, parentId }) =>
+        window.api.db.createTask({
+          projectId: pid,
+          title: 'Sub A2',
+          status: 'in_progress',
+          parentId
+        }),
       { pid: projectId, parentId: rootA }
     ))!.id
     subA3 = (await mainWindow.evaluate(
-      ({ pid, parentId }) => window.api.db.createTask({ projectId: pid, title: 'Sub A3', status: 'in_progress', parentId }),
+      ({ pid, parentId }) =>
+        window.api.db.createTask({
+          projectId: pid,
+          title: 'Sub A3',
+          status: 'in_progress',
+          parentId
+        }),
       { pid: projectId, parentId: rootA }
     ))!.id
 
@@ -231,7 +293,7 @@ test.describe('TreeView drag and drop', () => {
       treeOrderBy: 'manual',
       treeOrderDir: 'asc',
       treeGroupTemporary: true,
-      treeShowEmptyGroups: false,
+      treeShowEmptyGroups: false
     })
     // Anchor open tab keeps the project in TreeView's "active" set.
     await setTabs(mainWindow, [rootA])
@@ -239,12 +301,18 @@ test.describe('TreeView drag and drop', () => {
     await ensureProjectExpanded(mainWindow, projectName)
     await killAllPtys(mainWindow)
     // Reset order/status/priority so each test is independent.
-    await mainWindow.evaluate(async ({ a, b, c, todo, s1, s2, s3 }) => {
-      await window.api.db.updateTasks({ ids: [a, b, c, s1, s2, s3], updates: { status: 'in_progress', priority: 3 } })
-      await window.api.db.updateTasks({ ids: [todo], updates: { status: 'todo', priority: 3 } })
-      await window.api.db.reorderTasks([a, b, c, todo])
-      await window.api.db.reorderTasks([s1, s2, s3])
-    }, { a: rootA, b: rootB, c: rootC, todo: rootTodo, s1: subA1, s2: subA2, s3: subA3 })
+    await mainWindow.evaluate(
+      async ({ a, b, c, todo, s1, s2, s3 }) => {
+        await window.api.db.updateTasks({
+          ids: [a, b, c, s1, s2, s3],
+          updates: { status: 'in_progress', priority: 3 }
+        })
+        await window.api.db.updateTasks({ ids: [todo], updates: { status: 'todo', priority: 3 } })
+        await window.api.db.reorderTasks([a, b, c, todo])
+        await window.api.db.reorderTasks([s1, s2, s3])
+      },
+      { a: rootA, b: rootB, c: rootC, todo: rootTodo, s1: subA1, s2: subA2, s3: subA3 }
+    )
     await seed(mainWindow).refreshData()
     // Wait for rows.
     await expect(taskRow(mainWindow, rootA)).toBeVisible({ timeout: 5_000 })
@@ -266,15 +334,22 @@ test.describe('TreeView drag and drop', () => {
     )
 
     // Expect DB order: B, C, A (A dragged past C).
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const b = await getTaskById(mainWindow, rootB)
-      const c = await getTaskById(mainWindow, rootC)
-      return [a?.order, b?.order, c?.order]
-    }, { timeout: 5_000 }).toEqual([2, 0, 1])
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const b = await getTaskById(mainWindow, rootB)
+          const c = await getTaskById(mainWindow, rootC)
+          return [a?.order, b?.order, c?.order]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([2, 0, 1])
   })
 
-  test('drag still works when kanban sortBy=priority (same priority reorder)', async ({ mainWindow }) => {
+  test('drag still works when kanban sortBy=priority (same priority reorder)', async ({
+    mainWindow
+  }) => {
     // Match user scenario: kanban grouped by status, ordered by priority.
     await setProjectSortBy(mainWindow, projectId, 'priority')
     // All three have the same priority (null/default), so sortTasks ties by `order`.
@@ -289,12 +364,17 @@ test.describe('TreeView drag and drop', () => {
       rowDropPoint(mainWindow, rootC, { yOffset: -4, yFrac: 1 })
     )
 
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const b = await getTaskById(mainWindow, rootB)
-      const c = await getTaskById(mainWindow, rootC)
-      return [a?.order, b?.order, c?.order]
-    }, { timeout: 5_000 }).toEqual([2, 0, 1])
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const b = await getTaskById(mainWindow, rootB)
+          const c = await getTaskById(mainWindow, rootC)
+          return [a?.order, b?.order, c?.order]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([2, 0, 1])
   })
 
   test('drag root onto another status group changes status', async ({ mainWindow }) => {
@@ -310,7 +390,9 @@ test.describe('TreeView drag and drop', () => {
       { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
     )
 
-    await expect.poll(async () => (await getTaskById(mainWindow, rootA))?.status, { timeout: 5_000 }).toBe('todo')
+    await expect
+      .poll(async () => (await getTaskById(mainWindow, rootA))?.status, { timeout: 5_000 })
+      .toBe('todo')
   })
 
   test('drag subtask past sibling reorders within parent', async ({ mainWindow }) => {
@@ -329,21 +411,29 @@ test.describe('TreeView drag and drop', () => {
     )
 
     // Expected sibling order: A2, A3, A1.
-    await expect.poll(async () => {
-      const s1 = await getTaskById(mainWindow, subA1)
-      const s2 = await getTaskById(mainWindow, subA2)
-      const s3 = await getTaskById(mainWindow, subA3)
-      return [s1?.order, s2?.order, s3?.order]
-    }, { timeout: 5_000 }).toEqual([2, 0, 1])
+    await expect
+      .poll(
+        async () => {
+          const s1 = await getTaskById(mainWindow, subA1)
+          const s2 = await getTaskById(mainWindow, subA2)
+          const s3 = await getTaskById(mainWindow, subA3)
+          return [s1?.order, s2?.order, s3?.order]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([2, 0, 1])
   })
 
   test('groupBy=priority: cross-group drag changes task priority', async ({ mainWindow }) => {
     // Set distinct priorities: A=3, B=2, C=1. Switch to priority grouping.
-    await mainWindow.evaluate(async ({ a, b, c }) => {
-      await window.api.db.updateTasks({ ids: [a], updates: { priority: 3 } })
-      await window.api.db.updateTasks({ ids: [b], updates: { priority: 2 } })
-      await window.api.db.updateTasks({ ids: [c], updates: { priority: 1 } })
-    }, { a: rootA, b: rootB, c: rootC })
+    await mainWindow.evaluate(
+      async ({ a, b, c }) => {
+        await window.api.db.updateTasks({ ids: [a], updates: { priority: 3 } })
+        await window.api.db.updateTasks({ ids: [b], updates: { priority: 2 } })
+        await window.api.db.updateTasks({ ids: [c], updates: { priority: 1 } })
+      },
+      { a: rootA, b: rootB, c: rootC }
+    )
     await patchStore(mainWindow, { treeGroupBy: 'priority' })
     await seed(mainWindow).refreshData()
     await expect(taskRow(mainWindow, rootA)).toBeVisible()
@@ -360,14 +450,19 @@ test.describe('TreeView drag and drop', () => {
       { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
     )
 
-    await expect.poll(async () => (await getTaskById(mainWindow, rootA))?.priority, { timeout: 5_000 }).toBe(1)
+    await expect
+      .poll(async () => (await getTaskById(mainWindow, rootA))?.priority, { timeout: 5_000 })
+      .toBe(1)
   })
 
   test('groupBy=priority: same-priority reorder persists via order col', async ({ mainWindow }) => {
     // All three tasks share priority 2. Switch to priority grouping.
-    await mainWindow.evaluate(async ({ ids }) => {
-      await window.api.db.updateTasks({ ids, updates: { priority: 2 } })
-    }, { ids: [rootA, rootB, rootC] })
+    await mainWindow.evaluate(
+      async ({ ids }) => {
+        await window.api.db.updateTasks({ ids, updates: { priority: 2 } })
+      },
+      { ids: [rootA, rootB, rootC] }
+    )
     await patchStore(mainWindow, { treeGroupBy: 'priority' })
     await seed(mainWindow).refreshData()
 
@@ -380,12 +475,17 @@ test.describe('TreeView drag and drop', () => {
       rowDropPoint(mainWindow, rootC, { yOffset: -4, yFrac: 1 })
     )
 
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const b = await getTaskById(mainWindow, rootB)
-      const c = await getTaskById(mainWindow, rootC)
-      return [a?.order, b?.order, c?.order]
-    }, { timeout: 5_000 }).toEqual([2, 0, 1])
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const b = await getTaskById(mainWindow, rootB)
+          const c = await getTaskById(mainWindow, rootC)
+          return [a?.order, b?.order, c?.order]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([2, 0, 1])
   })
 
   test('orderBy=title: drag reorder still persists via order tiebreak', async ({ mainWindow }) => {
@@ -403,18 +503,29 @@ test.describe('TreeView drag and drop', () => {
       rowDropPoint(mainWindow, rootC, { yOffset: -4, yFrac: 1 })
     )
 
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const b = await getTaskById(mainWindow, rootB)
-      const c = await getTaskById(mainWindow, rootC)
-      return [a?.order, b?.order, c?.order]
-    }, { timeout: 5_000 }).toEqual([2, 0, 1])
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const b = await getTaskById(mainWindow, rootB)
+          const c = await getTaskById(mainWindow, rootC)
+          return [a?.order, b?.order, c?.order]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([2, 0, 1])
   })
 
   test('groupTemporary=false: temp task renders in its status bucket', async ({ mainWindow }) => {
     // Create a temp task in_progress for this test only.
     const tempId = await mainWindow.evaluate(
-      (pid) => window.api.db.createTask({ projectId: pid, title: 'Temp mixed', status: 'in_progress', isTemporary: true }),
+      (pid) =>
+        window.api.db.createTask({
+          projectId: pid,
+          title: 'Temp mixed',
+          status: 'in_progress',
+          isTemporary: true
+        }),
       projectId
     )
     try {
@@ -430,18 +541,22 @@ test.describe('TreeView drag and drop', () => {
       await expect(tempInsideInProgress).toBeVisible()
 
       // No __temporary__ section.
-      const tempGroup = mainWindow.locator(`[data-testid="tree-status-group"][data-status="__temporary__"]`)
+      const tempGroup = mainWindow.locator(
+        `[data-testid="tree-status-group"][data-status="__temporary__"]`
+      )
       await expect(tempGroup).toHaveCount(0)
     } finally {
       await mainWindow.evaluate((id) => window.api.db.deleteTask(id), tempId!.id)
     }
   })
 
-  test('showEmptyGroups=true + groupBy=status: empty status column header renders', async ({ mainWindow }) => {
+  test('showEmptyGroups=true + groupBy=status: empty status column header renders', async ({
+    mainWindow
+  }) => {
     await patchStore(mainWindow, {
       treeShowEmptyGroups: true,
       // Allow all status columns to show through the filter.
-      treeStatusFilter: ['inbox', 'backlog', 'todo', 'in_progress', 'review', 'done', 'canceled'],
+      treeStatusFilter: ['inbox', 'backlog', 'todo', 'in_progress', 'review', 'done', 'canceled']
     })
     await seed(mainWindow).refreshData()
 
@@ -457,8 +572,8 @@ test.describe('TreeView drag and drop', () => {
     // Manual order (A,B,C) reversed → DOM order: C, B, A.
     const rows = mainWindow.locator(
       `[data-sidebar-tree-item="task"][data-task-id="${rootA}"], ` +
-      `[data-sidebar-tree-item="task"][data-task-id="${rootB}"], ` +
-      `[data-sidebar-tree-item="task"][data-task-id="${rootC}"]`
+        `[data-sidebar-tree-item="task"][data-task-id="${rootB}"], ` +
+        `[data-sidebar-tree-item="task"][data-task-id="${rootC}"]`
     )
     await expect(rows).toHaveCount(3)
     const ids = await rows.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.taskId))
@@ -478,12 +593,17 @@ test.describe('TreeView drag and drop', () => {
       { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
       rowDropPoint(mainWindow, rootB)
     )
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const b = await getTaskById(mainWindow, rootB)
-      const c = await getTaskById(mainWindow, rootC)
-      return [a?.order, b?.order, c?.order]
-    }, { timeout: 5_000 }).toEqual([1, 0, 2])
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const b = await getTaskById(mainWindow, rootB)
+          const c = await getTaskById(mainWindow, rootC)
+          return [a?.order, b?.order, c?.order]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([1, 0, 2])
   })
 
   test('drop position: drag UP onto row places source AT target slot', async ({ mainWindow }) => {
@@ -496,12 +616,17 @@ test.describe('TreeView drag and drop', () => {
       { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
       { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
     )
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const b = await getTaskById(mainWindow, rootB)
-      const c = await getTaskById(mainWindow, rootC)
-      return [a?.order, b?.order, c?.order]
-    }, { timeout: 5_000 }).toEqual([1, 2, 0])
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const b = await getTaskById(mainWindow, rootB)
+          const c = await getTaskById(mainWindow, rootC)
+          return [a?.order, b?.order, c?.order]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([1, 2, 0])
   })
 
   test('drop position: drag onto adjacent row swaps them', async ({ mainWindow }) => {
@@ -514,12 +639,17 @@ test.describe('TreeView drag and drop', () => {
       { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
       { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
     )
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const b = await getTaskById(mainWindow, rootB)
-      const c = await getTaskById(mainWindow, rootC)
-      return [a?.order, b?.order, c?.order]
-    }, { timeout: 5_000 }).toEqual([1, 0, 2])
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const b = await getTaskById(mainWindow, rootB)
+          const c = await getTaskById(mainWindow, rootC)
+          return [a?.order, b?.order, c?.order]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([1, 0, 2])
   })
 
   test('drop on group header: source becomes idx 0 of that group', async ({ mainWindow }) => {
@@ -540,14 +670,21 @@ test.describe('TreeView drag and drop', () => {
       { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
       { x: headerBox.x + headerBox.width / 2, y: headerBox.y + headerBox.height / 2 }
     )
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const todo = await getTaskById(mainWindow, rootTodo)
-      return { aStatus: a?.status, aOrder: a?.order, todoOrder: todo?.order }
-    }, { timeout: 5_000 }).toEqual({ aStatus: 'todo', aOrder: 0, todoOrder: 1 })
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const todo = await getTaskById(mainWindow, rootTodo)
+          return { aStatus: a?.status, aOrder: a?.order, todoOrder: todo?.order }
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual({ aStatus: 'todo', aOrder: 0, todoOrder: 1 })
   })
 
-  test('drag from lower group to last spot in upper group lands at end of upper group', async ({ mainWindow }) => {
+  test('drag from lower group to last spot in upper group lands at end of upper group', async ({
+    mainWindow
+  }) => {
     // Test project has no custom columns → groups order by task-insertion:
     // in_progress (created first) ABOVE todo. Drag rootTodo (lower group)
     // up to just below rootC (last row of upper group, in_progress).
@@ -563,23 +700,30 @@ test.describe('TreeView drag and drop', () => {
       rowDropPoint(mainWindow, rootC, { yFrac: 1, yOffset: 2 })
     )
 
-    await expect.poll(async () => {
-      const t = await getTaskById(mainWindow, rootTodo)
-      const c = await getTaskById(mainWindow, rootC)
-      if (!t || !c) return null
-      // Key invariants: rootTodo is now an in_progress task, placed AFTER
-      // rootC (= visually at end of the upper group). The exact order
-      // integer for rootC depends on the status-filtered list order
-      // moveTask sees (subtasks counted), but rootC must stay before
-      // rootTodo.
-      return {
-        tStatus: t.status,
-        afterRootC: t.order > c.order,
-      }
-    }, { timeout: 5_000 }).toEqual({ tStatus: 'in_progress', afterRootC: true })
+    await expect
+      .poll(
+        async () => {
+          const t = await getTaskById(mainWindow, rootTodo)
+          const c = await getTaskById(mainWindow, rootC)
+          if (!t || !c) return null
+          // Key invariants: rootTodo is now an in_progress task, placed AFTER
+          // rootC (= visually at end of the upper group). The exact order
+          // integer for rootC depends on the status-filtered list order
+          // moveTask sees (subtasks counted), but rootC must stay before
+          // rootTodo.
+          return {
+            tStatus: t.status,
+            afterRootC: t.order > c.order
+          }
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual({ tStatus: 'in_progress', afterRootC: true })
   })
 
-  test('drop on row in different group: source lands at that row\'s slot in target group', async ({ mainWindow }) => {
+  test("drop on row in different group: source lands at that row's slot in target group", async ({
+    mainWindow
+  }) => {
     // Drag rootA (in_progress) onto rootTodo (only row in 'todo') —
     // expect rootA at order=0 of todo, rootTodo at order=1.
     const srcBox = await taskRow(mainWindow, rootA).boundingBox()
@@ -590,11 +734,16 @@ test.describe('TreeView drag and drop', () => {
       { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
       { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 }
     )
-    await expect.poll(async () => {
-      const a = await getTaskById(mainWindow, rootA)
-      const todo = await getTaskById(mainWindow, rootTodo)
-      return { aStatus: a?.status, aOrder: a?.order, todoOrder: todo?.order }
-    }, { timeout: 5_000 }).toEqual({ aStatus: 'todo', aOrder: 0, todoOrder: 1 })
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const todo = await getTaskById(mainWindow, rootTodo)
+          return { aStatus: a?.status, aOrder: a?.order, todoOrder: todo?.order }
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual({ aStatus: 'todo', aOrder: 0, todoOrder: 1 })
   })
 
   // ====== Pre-slide visual tests ======
@@ -606,7 +755,9 @@ test.describe('TreeView drag and drop', () => {
   //     was eating animations on cross-group drags.
   //   - "drop position off-by-one" — visual gap vs final position mismatch.
 
-  test('pre-slide: same-group drag DOWN shifts items between active and over UP', async ({ mainWindow }) => {
+  test('pre-slide: same-group drag DOWN shifts items between active and over UP', async ({
+    mainWindow
+  }) => {
     // Drag A (idx 0) onto C (idx 2). Stock arrayMove(0, 2) → items B and C
     // each shift UP by one row height.
     const srcBox = await taskRow(mainWindow, rootA).boundingBox()
@@ -626,7 +777,9 @@ test.describe('TreeView drag and drop', () => {
     await mainWindow.mouse.up()
   })
 
-  test('pre-slide: cross-group drag does not drift target row into source group', async ({ mainWindow }) => {
+  test('pre-slide: cross-group drag does not drift target row into source group', async ({
+    mainWindow
+  }) => {
     // Drag rootC (in_progress, no subtasks) DOWN onto rootTodo. Test
     // project has no custom columns, so in_progress renders ABOVE todo
     // (task-insertion order). `verticalListSortingStrategy` shifts items
@@ -652,7 +805,9 @@ test.describe('TreeView drag and drop', () => {
     await mainWindow.mouse.up()
   })
 
-  test('pre-slide: group header stays anchored while content slides beneath it', async ({ mainWindow }) => {
+  test('pre-slide: group header stays anchored while content slides beneath it', async ({
+    mainWindow
+  }) => {
     // Drag rootC (in_progress, no subtasks — so `dragCollapseSet` does
     // not collapse anything and the layout above the todo header stays
     // stable) downward toward rootTodo. The `todo` group header is a
@@ -680,7 +835,9 @@ test.describe('TreeView drag and drop', () => {
     await mainWindow.mouse.up()
   })
 
-  test('pre-slide: subtasks shift with their parent root (no orphan drift)', async ({ mainWindow }) => {
+  test('pre-slide: subtasks shift with their parent root (no orphan drift)', async ({
+    mainWindow
+  }) => {
     // Drag rootB down past rootC. rootA's subtasks (subA1/A2/A3) are NOT
     // between active and over, so their transform must stay identity —
     // they should not get pulled along with the slide just because they
@@ -706,7 +863,9 @@ test.describe('TreeView drag and drop', () => {
     await mainWindow.mouse.up()
   })
 
-  test('pre-slide: cross-group drag shifts first row independently from its header', async ({ mainWindow }) => {
+  test('pre-slide: cross-group drag shifts first row independently from its header', async ({
+    mainWindow
+  }) => {
     // Drag rootC (upper, in_progress, no subtasks) DOWN onto rootTodo
     // (lower, todo first/only row). Only rootTodo shifts — the todo
     // group's header is a plain div with no CSS transform applied by the
