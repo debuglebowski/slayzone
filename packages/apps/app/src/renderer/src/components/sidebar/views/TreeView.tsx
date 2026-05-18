@@ -26,7 +26,6 @@ import {
   DragOverlay,
   PointerSensor,
   closestCenter,
-  useDroppable,
   useSensor,
   useSensors,
   type CollisionDetection,
@@ -512,34 +511,6 @@ function TaskRow({
   return <div>{wrapped}</div>
 }
 
-function TaskBranch({
-  task,
-  depth,
-  ancestorFlags,
-  ctx
-}: {
-  task: Task
-  depth: number
-  ancestorFlags: boolean[]
-  ctx: TaskBranchCtx
-}): ReactNode {
-  const children = ctx.childrenByParent.get(task.id) ?? []
-  return (
-    <div>
-      <TaskRow task={task} depth={depth} ancestorFlags={ancestorFlags} ctx={ctx} />
-      {children.map((c, i) => (
-        <TaskBranch
-          key={c.id}
-          task={c}
-          depth={depth + 1}
-          ancestorFlags={[...ancestorFlags, i < children.length - 1]}
-          ctx={ctx}
-        />
-      ))}
-    </div>
-  )
-}
-
 // Floating drag preview — renders portal'd to document.body via DragOverlay,
 // so it escapes the project's `overflow-hidden` collapsible wrapper. Without
 // this, the dragged row's transform is clipped at the project boundary and
@@ -584,59 +555,115 @@ function TaskDragPreview({ tasks }: { tasks: Task[] }): ReactNode {
   )
 }
 
-function GroupHeader({
-  groupKey,
-  className,
-  children
+function HeaderRow({
+  rowId,
+  projectId,
+  group,
+  padTopClass,
+  cols,
+  treeGroupBy,
+  onCreateTemporaryTask
 }: {
-  groupKey: string
-  className?: string
-  children: ReactNode
+  rowId: string
+  projectId: string
+  group: TreeGroup
+  padTopClass: string
+  cols: import('@slayzone/projects/shared').ColumnConfig[] | null
+  treeGroupBy: 'none' | 'status' | 'priority'
+  onCreateTemporaryTask?: (projectId: string) => void
 }): ReactNode {
-  // Plain div — NOT a sortable. Headers stay anchored to the page while
-  // tasks slide beneath them. Treating headers as sortable items makes
-  // them slide in lockstep with their group, which reads visually as
-  // "header attached to the first row" and obscures the per-row
-  // pre-slide animation. Drop semantics still work via task collisions
-  // alone.
+  // Sortable participant for tween-only — header slides with surrounding rows
+  // during pre-slide but cannot be dragged as a source. `draggable: true`
+  // disables drag listeners; `droppable` enabled only for groups where a drop
+  // would make sense (skip temp/pinned/none). Drop on header routes through
+  // the `kind: 'group'` branch in `handleDragEnd`, landing the dragged set at
+  // index 0 of the group.
+  const isDroppable = !group.isTemp && !group.isPinned && !group.isNone
+  const { setNodeRef, transform, transition, isOver } = useSortable({
+    id: rowId,
+    data: { kind: 'group', projectId, groupValue: group.key } satisfies GroupDropData,
+    disabled: { draggable: true, droppable: !isDroppable }
+  })
+
+  let label: string
+  let Icon: typeof Clock | null = null
+  let iconClass: string | undefined
+  if (group.isPinned) {
+    label = 'Pinned'
+    Icon = Pin
+    iconClass = 'text-muted-foreground/60 -rotate-45 fill-current'
+  } else if (group.isTemp) {
+    label = 'Temporary'
+    Icon = Clock
+    iconClass = 'text-muted-foreground/60'
+  } else if (group.isNone) {
+    label = 'Other'
+  } else if (treeGroupBy === 'priority') {
+    const prio = parseInt(group.key.slice(1), 10)
+    label = PRIORITY_LABELS[prio] ?? group.key
+  } else {
+    const style = getColumnStatusStyle(group.key, cols)
+    label = style?.label ?? group.key
+    Icon = style?.icon ?? null
+    iconClass = style?.iconClass
+  }
+
+  const showAdd = !group.isPinned && !group.isNone && !(group.isTemp && !onCreateTemporaryTask)
+
   return (
-    <div className={className} data-sidebar-tree-item="header" data-group-key={groupKey}>
-      {children}
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition
+      }}
+      data-sidebar-tree-item="header"
+      data-group-key={group.key}
+      data-testid={isDroppable ? 'tree-status-group' : undefined}
+      data-project-id={projectId}
+      data-status={group.key}
+      className={cn(
+        'flex items-center gap-1.5 px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60 transition-colors',
+        padTopClass,
+        isOver && isDroppable && 'bg-accent/15 rounded-md ring-1 ring-accent/30'
+      )}
+    >
+      {Icon && <Icon className={cn('size-3', iconClass)} />}
+      <span>{label}</span>
+      {showAdd && (
+        <button
+          type="button"
+          onClick={() => {
+            if (group.isTemp) {
+              onCreateTemporaryTask?.(projectId)
+              return
+            }
+            if (treeGroupBy === 'priority') {
+              const prio = parseInt(group.key.slice(1), 10)
+              useDialogStore.getState().openCreateTask({
+                projectId,
+                priority: Number.isFinite(prio) ? prio : undefined
+              })
+              return
+            }
+            useDialogStore.getState().openCreateTask({
+              projectId,
+              status: group.key as Task['status']
+            })
+          }}
+          aria-label={`New ${group.isTemp ? 'temporary ' : ''}task in ${label}`}
+          className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:bg-accent/40 hover:text-foreground transition-colors"
+        >
+          <Plus className="size-3" />
+        </button>
+      )}
     </div>
   )
 }
 
-function StatusGroupDroppable({
-  projectId,
-  groupValue,
-  className,
-  children
-}: {
-  projectId: string
-  groupValue: string
-  className?: string
-  children: ReactNode
-}): ReactNode {
-  const { setNodeRef, isOver } = useDroppable({
-    id: `group:${projectId}:${groupValue}`,
-    data: { kind: 'group', projectId, groupValue } satisfies GroupDropData
-  })
-  return (
-    <div
-      ref={setNodeRef}
-      data-testid="tree-status-group"
-      data-project-id={projectId}
-      data-status={groupValue}
-      className={cn(
-        'rounded-md transition-colors',
-        isOver && 'bg-accent/15 ring-1 ring-accent/30',
-        className
-      )}
-    >
-      {children}
-    </div>
-  )
-}
+type RowItem =
+  | { kind: 'header'; rowId: string; group: TreeGroup; padTopClass: string }
+  | { kind: 'task'; rowId: string; task: Task; depth: number; ancestorFlags: boolean[] }
 
 export function TreeView({
   projects,
@@ -1259,18 +1286,6 @@ export function TreeView({
         }
       }
 
-      // Direction-aware insertion. `closestCenter` flips `over` at row
-      // centers, so by the time we land here the pointer has effectively
-      // crossed every row between source and over. Two cases:
-      //   - Same-group, source above over (dragging DOWN): insert AFTER
-      //     over (matches stock `arrayMove`).
-      //   - Same-group, source below over (dragging UP): insert AT over's
-      //     slot, pushing over down.
-      //   - Cross-group, source above over (dragging DOWN into target):
-      //     insert AT over's slot.
-      //   - Cross-group, source below over (dragging UP into target):
-      //     insert AFTER over — this is the "end of upper group" case.
-      // Collapses to: insertIdx = (sameGroup === sourceAbove) ? +1 : +0.
       let siblings: Task[]
       let targetGroupKey: string | null = null
       if (targetParent === null) {
@@ -1288,10 +1303,68 @@ export function TreeView({
       if (filteredTargetIdx === -1) return
       const sourceOrigIdx = siblings.findIndex((s) => s.id === sourceId)
       const sameGroup = sourceOrigIdx !== -1
-      const sourceTop = active.rect.current.initial?.top ?? 0
-      const overTop = over.rect.top
-      const sourceAbove = sourceTop < overTop
-      const insertIdx = sameGroup === sourceAbove ? filteredTargetIdx + 1 : filteredTargetIdx
+      // Drop direction splits by whether source and target share a sibling list:
+      //
+      //   Same-group: arrayMove(srcIdx, overIdx) semantic. Source ends at
+      //   over's pre-shift slot. Direction by source-vs-target original index:
+      //     - source above target → insert AFTER target (over slid up under source)
+      //     - source below target → insert AT target (over slid down)
+      //
+      //   Cross-group: pointer position relative to target's current visual
+      //   center decides. Above (or exactly at) center → insert BEFORE (source
+      //   replaces over's slot). Below center → insert AFTER. This is what
+      //   makes "drop just above target's first row" reachable on cross-group
+      //   drags, since pre-slide doesn't show a gap above the first row of
+      //   the target group via the same-group convention.
+      let insertIdx: number
+      if (sameGroup) {
+        // Same-group: arrayMove(srcIdx, overIdx) semantic. Source ends at
+        // over's pre-shift slot in the new array.
+        //   srcIdx < overIdx (drag DOWN): over slides up under source →
+        //     insert AFTER over in filtered.
+        //   srcIdx > overIdx (drag UP): over slides down past source →
+        //     insert AT over in filtered.
+        const origTargetIdx = siblings.findIndex((s) => s.id === targetId)
+        insertIdx = sourceOrigIdx < origTargetIdx ? filteredTargetIdx + 1 : filteredTargetIdx
+      } else {
+        // Cross-group: branch by source's visual position relative to target
+        // in the flat render order. Flat-idx is scroll/transform invariant
+        // (rect-top comparison flips sign under auto-scroll + strategy shift).
+        const flat: string[] = []
+        {
+          const projectGroups = rootGroupsByProject.get(activeData.projectId) ?? []
+          const walk = (t: Task): void => {
+            flat.push(t.id)
+            const kids = childrenByParent.get(t.id) ?? []
+            for (const k of kids) walk(k)
+          }
+          for (const g of projectGroups) for (const t of g.tasks) walk(t)
+        }
+        const srcFlatIdx = flat.indexOf(sourceId)
+        const tgtFlatIdx = flat.indexOf(targetId)
+        const sourceAboveOver =
+          srcFlatIdx !== -1 && tgtFlatIdx !== -1 ? srcFlatIdx < tgtFlatIdx : true
+        if (sourceAboveOver) {
+          // Source above target: source takes target's slot (target shifts
+          // down). Drop intent uniform across pointer-positions on the
+          // target row — always BEFORE. This matches dnd-kit's `arrayMove`
+          // convention applied across groups.
+          insertIdx = filteredTargetIdx
+        } else {
+          // Source below target: pointer fraction within target decides.
+          //   Top half → BEFORE target (drop at top of target's group).
+          //   Bottom half → AFTER target (drop at end of target's group,
+          //   e.g. last spot of an upper group reached via the inter-group
+          //   gap below the target row).
+          const translated = active.rect.current.translated
+          const sourceCenterY = translated
+            ? translated.top + translated.height / 2
+            : (active.rect.current.initial?.top ?? 0) +
+              (active.rect.current.initial?.height ?? 0) / 2
+          const overCenterY = over.rect.top + over.rect.height / 2
+          insertIdx = sourceCenterY < overCenterY ? filteredTargetIdx : filteredTargetIdx + 1
+        }
+      }
       const newSiblingIds = [
         ...filtered.slice(0, insertIdx).map((s) => s.id),
         ...movedIds,
@@ -1412,112 +1485,32 @@ export function TreeView({
     ]
   )
 
-  const renderGroupAddButton = (group: TreeGroup, projectId: string, label: string): ReactNode => {
-    if (group.isPinned) return null
-    if (group.isNone) return null
-    if (group.isTemp && !onCreateTemporaryTask) return null
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          if (group.isTemp) {
-            onCreateTemporaryTask?.(projectId)
-            return
-          }
-          if (treeGroupBy === 'priority') {
-            const prio = parseInt(group.key.slice(1), 10)
-            useDialogStore
-              .getState()
-              .openCreateTask({ projectId, priority: Number.isFinite(prio) ? prio : undefined })
-            return
-          }
-          useDialogStore
-            .getState()
-            .openCreateTask({ projectId, status: group.key as Task['status'] })
-        }}
-        aria-label={`New ${group.isTemp ? 'temporary ' : ''}task in ${label}`}
-        className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:bg-accent/40 hover:text-foreground transition-colors"
-      >
-        <Plus className="size-3" />
-      </button>
-    )
-  }
-
-  const renderTreeGroups = (
-    groups: TreeGroup[],
-    projectId: string,
-    branchCtx: TaskBranchCtx
-  ): ReactNode => {
-    const cols = columnsByProjectId?.get(projectId) ?? null
-    // When `none` is paired with pinned/temp, the leftover bucket still needs a
-    // header so the unanchored rows don't read as an orphan extension of the
-    // group above. Solo-`none` stays headerless (no companions to disambiguate).
+  // Flatten groups → linear row list interleaving headers and tasks (DFS for
+  // sub-tasks). Render order = sortable measurement order. Solo-`none` group
+  // skips its header — no companions to disambiguate, so the rows just look
+  // like the project's default list.
+  const buildRowList = (groups: TreeGroup[], projectId: string): RowItem[] => {
+    const rows: RowItem[] = []
     const hasCompanions = groups.length > 1
-    return groups.map((g, gi) => {
-      const headerPadTopClass = gi === 0 ? 'pt-2' : 'pt-4'
-      let label: string
-      let Icon: typeof Clock | null = null
-      let iconClass: string | undefined
-      if (g.isPinned) {
-        label = 'Pinned'
-        Icon = Pin
-        iconClass = 'text-muted-foreground/60 -rotate-45 fill-current'
-      } else if (g.isTemp) {
-        label = 'Temporary'
-        Icon = Clock
-        iconClass = 'text-muted-foreground/60'
-      } else if (g.isNone) {
-        label = 'Other'
-      } else if (treeGroupBy === 'priority') {
-        const prio = parseInt(g.key.slice(1), 10)
-        label = PRIORITY_LABELS[prio] ?? g.key
-      } else {
-        const style = getColumnStatusStyle(g.key, cols)
-        label = style?.label ?? g.key
-        Icon = style?.icon ?? null
-        iconClass = style?.iconClass
-      }
-
+    for (let gi = 0; gi < groups.length; gi++) {
+      const g = groups[gi]
       const showHeader = !g.isNone || hasCompanions
-      const headerClassName = cn(
-        'flex items-center gap-1.5 px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60',
-        headerPadTopClass
-      )
-      const headerInner = (
-        <>
-          {Icon && <Icon className={cn('size-3', iconClass)} />}
-          <span>{label}</span>
-          {renderGroupAddButton(g, projectId, label)}
-        </>
-      )
-      const groupBody = (
-        <>
-          {showHeader && (
-            <GroupHeader groupKey={g.key} className={headerClassName}>
-              {headerInner}
-            </GroupHeader>
-          )}
-          {g.tasks.map((task, i) => (
-            <TaskBranch
-              key={task.id}
-              task={task}
-              depth={1}
-              ancestorFlags={[i < g.tasks.length - 1]}
-              ctx={branchCtx}
-            />
-          ))}
-        </>
-      )
-      // Temp/pinned/none groups have no valid drop semantic, so skip droppable wrapper.
-      if (g.isTemp || g.isPinned || g.isNone) {
-        return <div key={g.key}>{groupBody}</div>
+      if (showHeader) {
+        rows.push({
+          kind: 'header',
+          rowId: `header:${projectId}:${g.key}`,
+          group: g,
+          padTopClass: gi === 0 ? 'pt-2' : 'pt-4'
+        })
       }
-      return (
-        <StatusGroupDroppable key={g.key} projectId={projectId} groupValue={g.key}>
-          {groupBody}
-        </StatusGroupDroppable>
-      )
-    })
+      const walk = (t: Task, depth: number, ancestorFlags: boolean[]): void => {
+        rows.push({ kind: 'task', rowId: t.id, task: t, depth, ancestorFlags })
+        const kids = childrenByParent.get(t.id) ?? []
+        kids.forEach((k, i) => walk(k, depth + 1, [...ancestorFlags, i < kids.length - 1]))
+      }
+      g.tasks.forEach((t, i) => walk(t, 1, [i < g.tasks.length - 1]))
+    }
+    return rows
   }
 
   const renderProject = (project: (typeof sortedProjects)[number]) => {
@@ -1528,21 +1521,13 @@ export function TreeView({
     const isHomeActive =
       selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
     const dragEnabled = Boolean(onTaskReorder) && Boolean(onTaskMove)
-    // Project-wide flat sortable IDs in render order — TASKS ONLY.
-    // Headers are plain divs, NOT sortables: tasks slide individually
-    // beneath their headers during pre-slide, keeping the header
-    // anchored as a static label rather than dragged along with content.
-    const flatTaskIds: string[] = []
-    {
-      const walk = (t: Task) => {
-        flatTaskIds.push(t.id)
-        const kids = childrenByParent.get(t.id) ?? []
-        for (const k of kids) walk(k)
-      }
-      for (const g of groups) {
-        for (const root of g.tasks) walk(root)
-      }
-    }
+    const cols = columnsByProjectId?.get(project.id) ?? null
+    // Flat row list: headers + tasks in DFS order. Header rows participate
+    // in the SortableContext so they tween together with surrounding rows,
+    // but their drag listeners are disabled — they slide, they don't drag.
+    const rows = buildRowList(groups, project.id)
+    const rowIds = rows.map((r) => r.rowId)
+    const flatTaskIds = rows.flatMap((r) => (r.kind === 'task' ? [r.rowId] : []))
     // Compute first/last-in-run flags for each selected task, scanning
     // adjacency in flat render order. Skipped when fewer than 2 selected
     // (single-select uses its own visual treatment).
@@ -1590,11 +1575,12 @@ export function TreeView({
       collapsedTaskIds: collapsedSet,
       onToggleCollapse: toggleTreeCollapsedTask
     }
-    // Every element in the tree (group headers, root rows, sub-rows) is a
-    // sortable item, so stock `verticalListSortingStrategy` slides them
-    // uniformly. Headers shift along with their content during cross-group
-    // drags, which keeps each group visually cohesive (no row drifts into
-    // another group without its header).
+    // Every element (group headers, root rows, sub-rows) is a sortable item
+    // in one flat list, so `verticalListSortingStrategy` slides them
+    // uniformly. Headers are sortable participants with drag DISABLED — they
+    // tween with surrounding rows during pre-slide but can't be dragged as a
+    // source. Drop on a header routes through `kind: 'group'` → insert at
+    // index 0 of that group.
     return (
       <Collapsible.Root
         key={project.id}
@@ -1670,8 +1656,29 @@ export function TreeView({
                 No active tasks
               </span>
             ) : (
-              <SortableContext items={flatTaskIds} strategy={verticalListSortingStrategy}>
-                {renderTreeGroups(groups, project.id, branchCtx)}
+              <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
+                {rows.map((r) =>
+                  r.kind === 'header' ? (
+                    <HeaderRow
+                      key={r.rowId}
+                      rowId={r.rowId}
+                      projectId={project.id}
+                      group={r.group}
+                      padTopClass={r.padTopClass}
+                      cols={cols}
+                      treeGroupBy={treeGroupBy}
+                      onCreateTemporaryTask={onCreateTemporaryTask}
+                    />
+                  ) : (
+                    <TaskRow
+                      key={r.rowId}
+                      task={r.task}
+                      depth={r.depth}
+                      ancestorFlags={r.ancestorFlags}
+                      ctx={branchCtx}
+                    />
+                  )
+                )}
               </SortableContext>
             )}
           </div>

@@ -532,13 +532,15 @@ test.describe('TreeView drag and drop', () => {
       await patchStore(mainWindow, { treeGroupTemporary: false, treeShowTemporary: true })
       await seed(mainWindow).refreshData()
 
-      // The temp task should appear in the in_progress group.
+      // The temp task should appear in the in_progress group. Flat render →
+      // we can't query "task inside group container" any more; assert task
+      // is rendered AND its in_progress header exists AND no __temporary__
+      // section was created.
       const tempRow = taskRow(mainWindow, tempId!.id)
       await expect(tempRow).toBeVisible({ timeout: 5_000 })
 
-      const inProgressGroup = statusGroup(mainWindow, projectId, 'in_progress')
-      const tempInsideInProgress = inProgressGroup.locator(`[data-task-id="${tempId!.id}"]`)
-      await expect(tempInsideInProgress).toBeVisible()
+      const inProgressHeader = statusGroup(mainWindow, projectId, 'in_progress')
+      await expect(inProgressHeader).toBeVisible()
 
       // No __temporary__ section.
       const tempGroup = mainWindow.locator(
@@ -805,21 +807,17 @@ test.describe('TreeView drag and drop', () => {
     await mainWindow.mouse.up()
   })
 
-  test('pre-slide: group header stays anchored while content slides beneath it', async ({
+  test('pre-slide: group header slides with content (sortable, drag-disabled)', async ({
     mainWindow
   }) => {
     // Drag rootC (in_progress, no subtasks — so `dragCollapseSet` does
     // not collapse anything and the layout above the todo header stays
     // stable) downward toward rootTodo. The `todo` group header is a
-    // plain (non-sortable) label — it must STAY at its original y while
-    // rootTodo slides up underneath it. Inverse of treating headers as
-    // sortable rows.
-    const todoHeader = mainWindow
-      .locator(`[data-testid="tree-status-group"][data-status="todo"]`)
-      .locator('text=Todo')
-      .first()
-    const headerPreBox = await todoHeader.boundingBox()
-    if (!headerPreBox) throw new Error('header box missing')
+    // sortable participant with drag disabled — it tweens together with
+    // the rest of the row list. While the drag is live, the header's
+    // CSS transformY should be a negative shift (~ -activeRowHeight).
+    const samples1 = await sampleRowTransforms(mainWindow)
+    expect(samples1.find((s) => s.id === 'header:todo')).toBeDefined()
 
     const srcBox = await taskRow(mainWindow, rootC).boundingBox()
     if (!srcBox) throw new Error('source box missing')
@@ -828,10 +826,11 @@ test.describe('TreeView drag and drop', () => {
       { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
       rowDropPoint(mainWindow, rootTodo)
     )
-    const headerPostBox = await todoHeader.boundingBox()
-    if (!headerPostBox) throw new Error('post-drag header box missing')
-    // Header y must NOT change — it's a static label.
-    expect(Math.abs(headerPostBox.y - headerPreBox.y)).toBeLessThanOrEqual(1)
+    const samples2 = await sampleRowTransforms(mainWindow)
+    const headerSample = samples2.find((s) => s.id === 'header:todo')
+    if (!headerSample) throw new Error('todo header not sampled')
+    // Header must slide up alongside its content — no longer anchored.
+    expect(headerSample.transformY).toBeLessThan(0)
     await mainWindow.mouse.up()
   })
 
@@ -863,14 +862,15 @@ test.describe('TreeView drag and drop', () => {
     await mainWindow.mouse.up()
   })
 
-  test('pre-slide: cross-group drag shifts first row independently from its header', async ({
+  test('pre-slide: cross-group drag shifts header AND first row together', async ({
     mainWindow
   }) => {
     // Drag rootC (upper, in_progress, no subtasks) DOWN onto rootTodo
-    // (lower, todo first/only row). Only rootTodo shifts — the todo
-    // group's header is a plain div with no CSS transform applied by the
-    // sortable strategy. Regression check for the "header is attached to
-    // first task" complaint.
+    // (lower, todo first/only row). Header is now a sortable participant
+    // with drag disabled — it slides together with the rows under it. Both
+    // the todo header AND rootTodo should shift up by the active row's
+    // height while the cursor hovers over rootTodo. No "header attached to
+    // first row" discrepancy — they tween in lockstep.
     const srcBox = await taskRow(mainWindow, rootC).boundingBox()
     if (!srcBox) throw new Error('src missing')
     await dragHover(
@@ -883,7 +883,7 @@ test.describe('TreeView drag and drop', () => {
     const firstRow = samples.find((s) => s.id === rootTodo)
     if (!header || !firstRow) throw new Error('header or rootTodo not sampled')
     expect(firstRow.transformY).toBeLessThan(0)
-    expect(header.transformY).toBe(0)
+    expect(header.transformY).toBeLessThan(0)
     await mainWindow.mouse.up()
   })
 
@@ -905,5 +905,327 @@ test.describe('TreeView drag and drop', () => {
     // rootTodo is past overIdx → identity.
     expect(byId.get(rootTodo)?.transformY ?? 0).toBe(0)
     await mainWindow.mouse.up()
+  })
+
+  // ====== 3-group inter-group drop slots ======
+  // User reports two drop slots that "the pre-slide doesn't let you target":
+  //  1) "between target group's header and its first item" (drop into top of
+  //     a lower group when dragging from a higher group).
+  //  2) "last spot of the upper group" (drop at the END of a higher group
+  //     when dragging from a lower group).
+  //
+  // Visual layout (top → bottom): in_progress, done, todo
+  //   A = in_progress (top)
+  //   B = done        (middle, populated locally per test with rootDone)
+  //   C = todo        (bottom, anchored by rootTodo)
+  //
+  // The dragged item starts in B (middle group). Both slots must be
+  // reachable: B→C means drag DOWN into top of C; B→A means drag UP into
+  // last spot of A.
+
+  test("3-group drag B→C: drop just above C's first row lands source at idx 0 of C", async ({
+    mainWindow
+  }) => {
+    const rootDone = await mainWindow.evaluate(
+      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      projectId
+    )
+    if (!rootDone) throw new Error('failed to create rootDone')
+    try {
+      // Lock rootDone's order ABOVE rootTodo's so the visible group order is
+      // deterministic: in_progress (top, A) → done (middle, B) → todo (bottom,
+      // C). Without this, rootDone defaults to order=0 (tied with rootA), and
+      // `groupTreeRows` byKey insertion order can place 'done' group above
+      // 'in_progress' depending on tasks-array iteration order.
+      await mainWindow.evaluate(
+        async ({ d, td }) => {
+          await window.api.db.updateTask({ id: d, order: 2.5 })
+          await window.api.db.updateTask({ id: td, order: 3 })
+        },
+        { d: rootDone.id, td: rootTodo }
+      )
+      await seed(mainWindow).refreshData()
+      await expect(taskRow(mainWindow, rootDone.id)).toBeVisible({ timeout: 5_000 })
+
+      // Source = rootDone (B, middle). Target = rootTodo (C, bottom).
+      // Drag DOWN. Drop 2px above rootTodo's CURRENT top (the slot between
+      // todo header and rootTodo).
+      const srcBox = await taskRow(mainWindow, rootDone.id).boundingBox()
+      if (!srcBox) throw new Error('source box missing')
+      await dragFromTo(
+        mainWindow,
+        { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+        rowDropPoint(mainWindow, rootTodo, { yFrac: 0, yOffset: -2 })
+      )
+      await expect
+        .poll(
+          async () => {
+            const d = await getTaskById(mainWindow, rootDone.id)
+            const t = await getTaskById(mainWindow, rootTodo)
+            if (!d || !t) return null
+            return {
+              dStatus: d.status,
+              beforeRootTodo: d.order < t.order
+            }
+          },
+          { timeout: 5_000 }
+        )
+        .toEqual({ dStatus: 'todo', beforeRootTodo: true })
+    } finally {
+      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+    }
+  })
+
+  test("3-group drag B→A: drop just below A's last row lands source at end of A", async ({
+    mainWindow
+  }) => {
+    const rootDone = await mainWindow.evaluate(
+      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      projectId
+    )
+    if (!rootDone) throw new Error('failed to create rootDone')
+    try {
+      // Lock rootDone's order ABOVE rootTodo's so the visible group order is
+      // deterministic: in_progress (top, A) → done (middle, B) → todo (bottom,
+      // C). Without this, rootDone defaults to order=0 (tied with rootA), and
+      // `groupTreeRows` byKey insertion order can place 'done' group above
+      // 'in_progress' depending on tasks-array iteration order.
+      await mainWindow.evaluate(
+        async ({ d, td }) => {
+          await window.api.db.updateTask({ id: d, order: 2.5 })
+          await window.api.db.updateTask({ id: td, order: 3 })
+        },
+        { d: rootDone.id, td: rootTodo }
+      )
+      await seed(mainWindow).refreshData()
+      await expect(taskRow(mainWindow, rootDone.id)).toBeVisible({ timeout: 5_000 })
+
+      // Source = rootDone (B, middle). Target = rootC (last item of A=in_progress).
+      // Drag UP. Drop 6px below rootC's CURRENT bottom (inter-group gap).
+      const srcBox = await taskRow(mainWindow, rootDone.id).boundingBox()
+      if (!srcBox) throw new Error('source box missing')
+      await dragFromTo(
+        mainWindow,
+        { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+        rowDropPoint(mainWindow, rootC, { yFrac: 1, yOffset: 6 })
+      )
+      await expect
+        .poll(
+          async () => {
+            const d = await getTaskById(mainWindow, rootDone.id)
+            const c = await getTaskById(mainWindow, rootC)
+            if (!d || !c) return null
+            return {
+              dStatus: d.status,
+              afterRootC: d.order > c.order
+            }
+          },
+          { timeout: 5_000 }
+        )
+        .toEqual({ dStatus: 'in_progress', afterRootC: true })
+    } finally {
+      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+    }
+  })
+
+  // Drop-point variations to stress where pre-slide animation shows the gap
+  // vs where the drop actually lands. With source ABOVE target in flat order
+  // (B→C drag DOWN), `verticalListSortingStrategy` shifts target row UP by
+  // source.height — visually opening a gap BELOW target's current position
+  // (= at target's original slot). Users may aim at any of:
+  //   (a) just above target's CURRENT top — header bbox region
+  //   (b) target's CURRENT center
+  //   (c) target's CURRENT bottom — boundary to the visual gap
+  //   (d) inside the visual gap (= target's ORIGINAL slot)
+  // All four must produce the same drop: source at idx 0 of target group.
+
+  test('3-group B→C variations: drop at target current TOP lands at idx 0 of C', async ({
+    mainWindow
+  }) => {
+    const rootDone = await mainWindow.evaluate(
+      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      projectId
+    )
+    if (!rootDone) throw new Error('failed to create rootDone')
+    try {
+      // Lock rootDone's order ABOVE rootTodo's so the visible group order is
+      // deterministic: in_progress (top, A) → done (middle, B) → todo (bottom,
+      // C). Without this, rootDone defaults to order=0 (tied with rootA), and
+      // `groupTreeRows` byKey insertion order can place 'done' group above
+      // 'in_progress' depending on tasks-array iteration order.
+      await mainWindow.evaluate(
+        async ({ d, td }) => {
+          await window.api.db.updateTask({ id: d, order: 2.5 })
+          await window.api.db.updateTask({ id: td, order: 3 })
+        },
+        { d: rootDone.id, td: rootTodo }
+      )
+      await seed(mainWindow).refreshData()
+      await expect(taskRow(mainWindow, rootDone.id)).toBeVisible({ timeout: 5_000 })
+      const srcBox = await taskRow(mainWindow, rootDone.id).boundingBox()
+      if (!srcBox) throw new Error('src missing')
+      await dragFromTo(
+        mainWindow,
+        { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+        rowDropPoint(mainWindow, rootTodo, { yFrac: 0.05 })
+      )
+      await expect
+        .poll(
+          async () => {
+            const d = await getTaskById(mainWindow, rootDone.id)
+            const t = await getTaskById(mainWindow, rootTodo)
+            if (!d || !t) return null
+            return { dStatus: d.status, beforeRootTodo: d.order < t.order }
+          },
+          { timeout: 5_000 }
+        )
+        .toEqual({ dStatus: 'todo', beforeRootTodo: true })
+    } finally {
+      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+    }
+  })
+
+  test('3-group B→C variations: drop at target current CENTER lands at idx 0 of C', async ({
+    mainWindow
+  }) => {
+    const rootDone = await mainWindow.evaluate(
+      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      projectId
+    )
+    if (!rootDone) throw new Error('failed to create rootDone')
+    try {
+      // Lock rootDone's order ABOVE rootTodo's so the visible group order is
+      // deterministic: in_progress (top, A) → done (middle, B) → todo (bottom,
+      // C). Without this, rootDone defaults to order=0 (tied with rootA), and
+      // `groupTreeRows` byKey insertion order can place 'done' group above
+      // 'in_progress' depending on tasks-array iteration order.
+      await mainWindow.evaluate(
+        async ({ d, td }) => {
+          await window.api.db.updateTask({ id: d, order: 2.5 })
+          await window.api.db.updateTask({ id: td, order: 3 })
+        },
+        { d: rootDone.id, td: rootTodo }
+      )
+      await seed(mainWindow).refreshData()
+      await expect(taskRow(mainWindow, rootDone.id)).toBeVisible({ timeout: 5_000 })
+      const srcBox = await taskRow(mainWindow, rootDone.id).boundingBox()
+      if (!srcBox) throw new Error('src missing')
+      await dragFromTo(
+        mainWindow,
+        { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+        rowDropPoint(mainWindow, rootTodo, { yFrac: 0.5 })
+      )
+      await expect
+        .poll(
+          async () => {
+            const d = await getTaskById(mainWindow, rootDone.id)
+            const t = await getTaskById(mainWindow, rootTodo)
+            if (!d || !t) return null
+            return { dStatus: d.status, beforeRootTodo: d.order < t.order }
+          },
+          { timeout: 5_000 }
+        )
+        .toEqual({ dStatus: 'todo', beforeRootTodo: true })
+    } finally {
+      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+    }
+  })
+
+  test('3-group B→C variations: drop at target current BOTTOM lands at idx 0 of C', async ({
+    mainWindow
+  }) => {
+    const rootDone = await mainWindow.evaluate(
+      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      projectId
+    )
+    if (!rootDone) throw new Error('failed to create rootDone')
+    try {
+      // Lock rootDone's order ABOVE rootTodo's so the visible group order is
+      // deterministic: in_progress (top, A) → done (middle, B) → todo (bottom,
+      // C). Without this, rootDone defaults to order=0 (tied with rootA), and
+      // `groupTreeRows` byKey insertion order can place 'done' group above
+      // 'in_progress' depending on tasks-array iteration order.
+      await mainWindow.evaluate(
+        async ({ d, td }) => {
+          await window.api.db.updateTask({ id: d, order: 2.5 })
+          await window.api.db.updateTask({ id: td, order: 3 })
+        },
+        { d: rootDone.id, td: rootTodo }
+      )
+      await seed(mainWindow).refreshData()
+      await expect(taskRow(mainWindow, rootDone.id)).toBeVisible({ timeout: 5_000 })
+      const srcBox = await taskRow(mainWindow, rootDone.id).boundingBox()
+      if (!srcBox) throw new Error('src missing')
+      await dragFromTo(
+        mainWindow,
+        { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+        rowDropPoint(mainWindow, rootTodo, { yFrac: 0.95 })
+      )
+      await expect
+        .poll(
+          async () => {
+            const d = await getTaskById(mainWindow, rootDone.id)
+            const t = await getTaskById(mainWindow, rootTodo)
+            if (!d || !t) return null
+            return { dStatus: d.status, beforeRootTodo: d.order < t.order }
+          },
+          { timeout: 5_000 }
+        )
+        .toEqual({ dStatus: 'todo', beforeRootTodo: true })
+    } finally {
+      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+    }
+  })
+
+  test('3-group B→C variations: drop in PRE-SLIDE GAP (target original slot) lands at idx 0 of C', async ({
+    mainWindow
+  }) => {
+    const rootDone = await mainWindow.evaluate(
+      (pid) => window.api.db.createTask({ projectId: pid, title: 'DnD Done', status: 'done' }),
+      projectId
+    )
+    if (!rootDone) throw new Error('failed to create rootDone')
+    try {
+      // Lock rootDone's order ABOVE rootTodo's so the visible group order is
+      // deterministic: in_progress (top, A) → done (middle, B) → todo (bottom,
+      // C). Without this, rootDone defaults to order=0 (tied with rootA), and
+      // `groupTreeRows` byKey insertion order can place 'done' group above
+      // 'in_progress' depending on tasks-array iteration order.
+      await mainWindow.evaluate(
+        async ({ d, td }) => {
+          await window.api.db.updateTask({ id: d, order: 2.5 })
+          await window.api.db.updateTask({ id: td, order: 3 })
+        },
+        { d: rootDone.id, td: rootTodo }
+      )
+      await seed(mainWindow).refreshData()
+      await expect(taskRow(mainWindow, rootDone.id)).toBeVisible({ timeout: 5_000 })
+      // Capture rootTodo position BEFORE drag — that's the "visible gap"
+      // position the user sees during pre-slide (target shifted up by
+      // source.height, leaving its original slot empty).
+      const dstBoxPre = await taskRow(mainWindow, rootTodo).boundingBox()
+      const srcBox = await taskRow(mainWindow, rootDone.id).boundingBox()
+      if (!srcBox || !dstBoxPre) throw new Error('boxes missing')
+      await dragFromTo(
+        mainWindow,
+        { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
+        // Static point — user aiming at where rootTodo USED to be (= the
+        // visible pre-slide gap).
+        { x: dstBoxPre.x + dstBoxPre.width / 2, y: dstBoxPre.y + dstBoxPre.height / 2 }
+      )
+      await expect
+        .poll(
+          async () => {
+            const d = await getTaskById(mainWindow, rootDone.id)
+            const t = await getTaskById(mainWindow, rootTodo)
+            if (!d || !t) return null
+            return { dStatus: d.status, beforeRootTodo: d.order < t.order }
+          },
+          { timeout: 5_000 }
+        )
+        .toEqual({ dStatus: 'todo', beforeRootTodo: true })
+    } finally {
+      await mainWindow.evaluate((id) => window.api.db.deleteTask(id), rootDone.id)
+    }
   })
 })
