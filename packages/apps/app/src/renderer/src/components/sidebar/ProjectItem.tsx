@@ -34,7 +34,7 @@ export function ProjectItem({
   const lettersClass =
     letters.length >= 5 ? 'text-[8px]' : letters.length > 2 ? 'text-[9px]' : 'text-xs'
   const iconSrc = project.icon_image_path
-    ? `slz-file://${project.icon_image_path}?v=${encodeURIComponent(project.updated_at)}`
+    ? `slz-file://app${project.icon_image_path}?v=${encodeURIComponent(project.updated_at)}`
     : null
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.id

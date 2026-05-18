@@ -159,7 +159,7 @@ function ImageViewer({
 
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
-      if (p) setSrc(`slz-file://${p}?v=${contentVersion}`)
+      if (p) setSrc(`slz-file://app${p}?v=${contentVersion}`)
     })
   }, [artifactId, contentVersion, getFilePath])
 
@@ -192,7 +192,7 @@ function PdfViewer({
 
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
-      if (p) setSrc(`slz-file://${p}?v=${contentVersion}`)
+      if (p) setSrc(`slz-file://app${p}?v=${contentVersion}`)
     })
   }, [artifactId, contentVersion, getFilePath])
 
@@ -683,7 +683,7 @@ function HtmlPreviewFrame({
   const [src, setSrc] = useState<string | null>(null)
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
-      if (p) setSrc(`slz-file://${p}?v=${contentVersion}`)
+      if (p) setSrc(`slz-file://app${p}?v=${contentVersion}`)
     })
   }, [artifactId, contentVersion, getFilePath])
   if (!src)

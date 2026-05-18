@@ -146,7 +146,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
             >
               {iconImagePath ? (
                 <img
-                  src={`slz-file://${iconImagePath}?v=${encodeURIComponent(iconCacheKey)}`}
+                  src={`slz-file://app${iconImagePath}?v=${encodeURIComponent(iconCacheKey)}`}
                   alt=""
                   className="w-full h-full object-cover"
                   draggable={false}

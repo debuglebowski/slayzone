@@ -87,7 +87,7 @@ export function WebPanelView({
   const { viewId, state, actions, placeholderRef } = useBrowserView({
     tabId: panelId,
     taskId,
-    url: (url || 'about:blank').replace(/^file:\/\//, 'slz-file://'),
+    url: (url || 'about:blank').replace(/^file:\/\//, 'slz-file://app'),
     partition: 'persist:web-panels',
     kind: 'web-panel',
     desktopHandoffPolicy,

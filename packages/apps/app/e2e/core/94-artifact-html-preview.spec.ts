@@ -141,9 +141,11 @@ test.describe('HTML artifact preview executes scripts', () => {
     await artifactRow(mainWindow, 'sandbox-test.html').click()
 
     const frame = previewFrame(mainWindow)
-    // Sandbox without allow-same-origin → origin is "null"
-    await expect(frame.locator('#origin')).toHaveText('null', { timeout: 5_000 })
-    // Cross-origin parent access blocked
+    // slz-file is a standard, secure scheme (needed for Storage APIs in artifact
+    // previews) — sandbox without allow-same-origin still surfaces the scheme as
+    // origin rather than the spec-default "null". The cross-origin barrier is
+    // what we really care about; assert that parent access is blocked.
+    await expect(frame.locator('#origin')).toHaveText(/slz-file:\/\//, { timeout: 5_000 })
     await expect(frame.locator('#parent')).toHaveText('BLOCKED', { timeout: 3_000 })
   })
 })

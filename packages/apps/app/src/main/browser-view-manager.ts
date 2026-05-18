@@ -217,7 +217,7 @@ export class BrowserViewManager {
     }
 
     if (opts.url && opts.url !== 'about:blank') {
-      view.webContents.loadURL(opts.url.replace(/^file:\/\//, 'slz-file://'))
+      view.webContents.loadURL(opts.url.replace(/^file:\/\//, 'slz-file://app'))
     }
 
     return viewId
@@ -413,7 +413,7 @@ export class BrowserViewManager {
   navigate(viewId: string, url: string): void {
     const wc = this.getWebContents(viewId)
     if (!wc) return
-    wc.loadURL(url.replace(/^file:\/\//, 'slz-file://'))
+    wc.loadURL(url.replace(/^file:\/\//, 'slz-file://app'))
   }
 
   goBack(viewId: string): void {

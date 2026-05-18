@@ -48,7 +48,7 @@ export function DeviceWebview({
     ua?: string
   } | null>(null)
 
-  const [initialSrc] = useState(() => (url || 'about:blank').replace(/^file:\/\//, 'slz-file://'))
+  const [initialSrc] = useState(() => (url || 'about:blank').replace(/^file:\/\//, 'slz-file://app'))
   const loadedUrlRef = useRef(url)
 
   // Track container size
@@ -136,7 +136,7 @@ export function DeviceWebview({
     if (!wv || !webviewReady || !url || url === 'about:blank') return
     if (url === loadedUrlRef.current) return
     loadedUrlRef.current = url
-    wv.loadURL(url.replace(/^file:\/\//, 'slz-file://'))
+    wv.loadURL(url.replace(/^file:\/\//, 'slz-file://app'))
   }, [url, webviewReady])
 
   // Reload when trigger increments

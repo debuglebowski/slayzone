@@ -178,8 +178,8 @@ function MarkdownFilePane({
 
   const resolveSrc = useCallback(
     (src: string): string => {
-      if (src.startsWith('/')) return `slz-file://${src}`
-      return `slz-file://${posixResolve(fileDirAbs, src)}`
+      if (src.startsWith('/')) return `slz-file://app${src}`
+      return `slz-file://app${posixResolve(fileDirAbs, src)}`
     },
     [fileDirAbs]
   )
@@ -200,7 +200,7 @@ function MarkdownFilePane({
       }
       if (resolvedHref.startsWith('slz-file://')) {
         const absPath = resolvedHref
-          .replace(/^slz-file:\/\//, '')
+          .replace(/^slz-file:\/\/app/, '')
           .replace(/\?.*$/, '')
           .replace(/#.*$/, '')
         const projectPrefix = projectPath.endsWith('/') ? projectPath : projectPath + '/'
@@ -789,7 +789,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
           {activeFile && isImage ? (
             <div className="flex-1 min-h-0 flex items-center justify-center overflow-auto p-4 bg-[repeating-conic-gradient(hsl(var(--muted))_0%_25%,transparent_0%_50%)_50%/16px_16px]">
               <img
-                src={`slz-file://${projectPath}/${activeFile.path}${fileVersions.get(activeFile.path) ? `?v=${fileVersions.get(activeFile.path)}` : ''}`}
+                src={`slz-file://app${projectPath}/${activeFile.path}${fileVersions.get(activeFile.path) ? `?v=${fileVersions.get(activeFile.path)}` : ''}`}
                 className="max-w-full max-h-full object-contain"
                 draggable={false}
               />

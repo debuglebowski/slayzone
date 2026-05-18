@@ -1639,11 +1639,17 @@ app
     // Serve local files via slz-file:// (Chromium blocks file:// in webviews and cross-origin renderers)
     const userHome = homedir()
     const slzFileHandler = async (request: Request) => {
-      // slz-file:///path/to/file → /path/to/file (strip query string used for cache busting)
-      const rawPath = decodeURIComponent(request.url.replace(/^slz-file:\/\//, ''))
-      const filePath = normalize(rawPath.split('?')[0])
+      // URLs are constructed in the renderer as `slz-file://app${absolutePath}`.
+      // The 'app' sentinel host fills Chromium's authority slot so the URL
+      // canonicalizer doesn't move the first path segment into the host (which
+      // would lowercase it + mangle Unicode under `standard:true` privilege).
+      const parsed = new URL(request.url)
+      if (parsed.hostname !== 'app') {
+        return new Response('Forbidden', { status: 403 })
+      }
+      const filePath = normalize(decodeURIComponent(parsed.pathname))
 
-      // Block path traversal outside user home directory
+      // Block path traversal outside user home directory.
       if (!filePath.startsWith(userHome + sep)) {
         return new Response(
           `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Forbidden</title>
@@ -1762,7 +1768,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     ) => {
       // Redirect file:// → slz-file:// so local files load via our secure handler
       if (details.url.startsWith('file://')) {
-        callback({ redirectURL: details.url.replace(/^file:\/\//, 'slz-file://') })
+        callback({ redirectURL: details.url.replace(/^file:\/\//, 'slz-file://app') })
         return
       }
       if (shouldCancelLoopbackHandoffRequest(details)) {
