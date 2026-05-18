@@ -554,8 +554,10 @@ export interface ElectronAPI {
     onData: (callback: (sessionId: string, data: string, seq: number) => void) => () => void
     onExit: (callback: (sessionId: string, exitCode: number) => void) => () => void
     onRespawnSuggested: (callback: (taskId: string) => void) => () => void
-    onForceRespawn: (callback: (taskId: string, reqId: number) => void) => () => void
-    ackForceRespawn: (reqId: number, ok: boolean) => void
+    onEnsureAlive: (
+      callback: (taskId: string, reqId: number, force: boolean) => void
+    ) => () => void
+    ackEnsureAlive: (reqId: number, result: 'ok' | 'already-alive' | 'error') => void
     onSessionNotFound: (callback: (sessionId: string) => void) => () => void
     onStateChange: (
       callback: (sessionId: string, newState: TerminalState, oldState: TerminalState) => void

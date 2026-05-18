@@ -35,13 +35,57 @@ function rowToTab(row: TabRow): TerminalTab {
  * lean since hot-path called from spawn/exit handlers.
  *
  * Resolution rules for the tabId arg:
- *   - PTY main session: pty sessionId is `${taskId}` → main tab row has `id = task_id` (see tabs:ensureMain insert)
+ *   - PTY main session: sessionId is `${taskId}:${taskId}` → main tab row has `id = task_id` (see ensureMainTab insert)
  *   - PTY pane: sessionId is `${taskId}:${tabId}` → tabId is the row id directly
  *   - Chat: tabId is the row id directly
  * Caller resolves the row id and passes it here; we just UPDATE by id.
  */
 export function markTabSpawned(db: Database, tabId: string, wasSpawned: boolean): void {
   db.prepare('UPDATE terminal_tabs SET was_spawned = ? WHERE id = ?').run(wasSpawned ? 1 : 0, tabId)
+}
+
+/**
+ * Idempotent main-tab insert/update. Shared between the `tabs:ensureMain` IPC
+ * handler (renderer mount) and the REST `startMainPty` helper (CLI cold-start)
+ * so both code paths produce identical rows. Returns the canonical TerminalTab.
+ *
+ * Main-tab convention: row `id = task_id`, group_id = task_id, is_main = 1.
+ * Used in conjunction with the renderer's `getMainSessionId(t) => ${t}:${t}`.
+ */
+export function ensureMainTab(db: Database, taskId: string, mode: string): TerminalTab {
+  const existing = db.prepare(
+    'SELECT * FROM terminal_tabs WHERE task_id = ? AND is_main = 1'
+  ).get(taskId) as TabRow | undefined
+
+  if (existing) {
+    if (existing.mode !== mode) {
+      db.prepare('UPDATE terminal_tabs SET mode = ? WHERE id = ?').run(mode, existing.id)
+      existing.mode = mode
+    }
+    if (!existing.group_id) {
+      db.prepare('UPDATE terminal_tabs SET group_id = ? WHERE id = ?').run(existing.id, existing.id)
+      existing.group_id = existing.id
+    }
+    return rowToTab(existing)
+  }
+
+  const now = new Date().toISOString()
+  db.prepare(`
+    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
+    VALUES (?, ?, NULL, ?, 1, 0, ?, ?)
+  `).run(taskId, taskId, mode, taskId, now)
+
+  return {
+    id: taskId,
+    taskId,
+    groupId: taskId,
+    label: null,
+    mode: mode as TerminalTab['mode'],
+    isMain: true,
+    position: 0,
+    createdAt: now,
+    wasSpawned: false
+  }
 }
 
 /** Pure DB write — insert a new tab (new group). Used by both IPC handler
@@ -208,41 +252,6 @@ export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: Database): vo
 
   // Ensure main tab exists for a task (creates if missing)
   ipcMain.handle('tabs:ensureMain', (_, taskId: string, mode: string): TerminalTab => {
-    const existing = db.prepare(
-      'SELECT * FROM terminal_tabs WHERE task_id = ? AND is_main = 1'
-    ).get(taskId) as TabRow | undefined
-
-    if (existing) {
-      // Update mode if it changed (e.g. user switched terminal mode on task)
-      if (existing.mode !== mode) {
-        db.prepare('UPDATE terminal_tabs SET mode = ? WHERE id = ?').run(mode, existing.id)
-        existing.mode = mode
-      }
-      // Backfill group_id if missing (pre-v39 rows)
-      if (!existing.group_id) {
-        db.prepare('UPDATE terminal_tabs SET group_id = ? WHERE id = ?').run(existing.id, existing.id)
-        existing.group_id = existing.id
-      }
-      return rowToTab(existing)
-    }
-
-    // Create main tab - use taskId as id (unique since one main per task)
-    const now = new Date().toISOString()
-    db.prepare(`
-      INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
-      VALUES (?, ?, NULL, ?, 1, 0, ?, ?)
-    `).run(taskId, taskId, mode, taskId, now)
-
-    return {
-      id: taskId,
-      taskId,
-      groupId: taskId,
-      label: null,
-      mode: mode as TerminalTab['mode'],
-      isMain: true,
-      position: 0,
-      createdAt: now,
-      wasSpawned: false
-    }
+    return ensureMainTab(db, taskId, mode)
   })
 }

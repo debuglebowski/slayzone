@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { apiGet, apiPost, apiDelete, apiFetch } from '../api'
+import { openDb } from '../db'
 
 interface PtyInfo {
   sessionId: string
@@ -189,10 +190,25 @@ export function ptyCommand(): Command {
     .option('--timeout <ms>', 'Timeout for --wait in milliseconds', '60000')
     .action(async (idPrefix, text: string | undefined, opts: { wait?: boolean; timeout: string }) => {
       const sessions = await apiGet<PtyInfo[]>('/api/pty')
-      const session = resolveSession(sessions, idPrefix)
+      // Cold-task fallback: if prefix doesn't match a live session, try
+      // resolving it as a task id — server auto-spawns the main PTY on submit.
+      const liveMatches = sessions.filter(s => s.sessionId.startsWith(idPrefix))
+      let sessionId: string
+      let mode: string
+      if (liveMatches.length >= 1) {
+        const session = resolveSession(sessions, idPrefix)
+        sessionId = session.sessionId
+        mode = session.mode
+      } else {
+        const taskId = await resolveTaskIdPrefix(idPrefix)
+        sessionId = `${taskId}:${taskId}`
+        // Cold task → mode unknown client-side; server reads from task row.
+        // Default to 'terminal' for the wait decision below.
+        mode = 'terminal'
+      }
 
       // Default: wait for AI modes (anything that's not the plain shell)
-      const shouldWait = opts.wait ?? session.mode !== 'terminal'
+      const shouldWait = opts.wait ?? mode !== 'terminal'
 
       // Read from stdin if no text argument
       if (!text) {
@@ -202,12 +218,12 @@ export function ptyCommand(): Command {
       }
 
       if (shouldWait) {
-        await waitForState(session.sessionId, 'idle', parseInt(opts.timeout, 10))
+        await waitForState(sessionId, 'idle', parseInt(opts.timeout, 10))
       }
 
       // Per-mode wire encoding (Kitty Shift+Enter, plain CR, etc.) lives in the
       // adapter on the server. CLI just hands over the raw text.
-      await apiPost<{ ok: boolean }>(`/api/pty/${encodedId(session.sessionId)}/submit`, { text })
+      await apiPost<{ ok: boolean }>(`/api/pty/${encodedId(sessionId)}/submit`, { text })
     })
 
   // slay pty wait <id>
@@ -261,6 +277,26 @@ export function ptyCommand(): Command {
       }
       await apiPost<{ ok: boolean }>('/api/pty/respawn', { taskId })
       console.log(`Respawn requested: ${taskId}`)
+    })
+
+  // slay pty start <task-id>
+  cmd
+    .command('start <task-id>')
+    .description("Start a task's main PTY (idempotent — no-op if alive). Task-id prefix supported")
+    .option('--no-wait', 'Return immediately without waiting for the PTY to spawn')
+    .option('--timeout <ms>', 'Wait timeout in milliseconds', '5000')
+    .action(async (taskIdPrefix: string, opts: { wait?: boolean; timeout: string }) => {
+      // Resolve prefix from tasks table — `pty start` works on cold tasks
+      // (no live session) so the live-session prefix match used by other verbs
+      // wouldn't find anything.
+      const taskId = await resolveTaskIdPrefix(taskIdPrefix)
+      const timeoutMs = opts.wait === false ? 0 : parseInt(opts.timeout, 10)
+      const r = await apiPost<{ ok: boolean; alreadyAlive?: boolean; sessionId?: string }>(
+        '/api/pty/start',
+        { taskId, timeoutMs }
+      )
+      if (r.alreadyAlive) console.log(`Already alive: ${r.sessionId}`)
+      else console.log(`Started: ${r.sessionId}`)
     })
 
   // slay pty kill <id>
@@ -347,6 +383,24 @@ export function ptyCommand(): Command {
     })
 
   return cmd
+}
+
+async function resolveTaskIdPrefix(prefix: string): Promise<string> {
+  const db = openDb()
+  const rows = db.query<{ id: string }>(
+    `SELECT id FROM tasks WHERE id LIKE :prefix || '%' LIMIT 2`,
+    { ':prefix': prefix }
+  )
+  db.close()
+  if (rows.length === 0) {
+    console.error(`Task not found: ${prefix}`)
+    process.exit(1)
+  }
+  if (rows.length > 1) {
+    console.error(`Ambiguous task-id prefix "${prefix}". Matches: ${rows.map(r => r.id.slice(0, 8)).join(', ')}`)
+    process.exit(1)
+  }
+  return rows[0].id
 }
 
 async function waitForSession(sessionId: string, timeoutMs: number): Promise<void> {

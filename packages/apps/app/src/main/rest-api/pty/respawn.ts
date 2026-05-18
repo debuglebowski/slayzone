@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { requestForceRespawn } from '@slayzone/terminal/main'
+import { requestEnsureAlive } from '@slayzone/terminal/main'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import type { RestApiDeps } from '../types'
 
@@ -18,11 +18,11 @@ export function registerPtyRespawnRoute(app: Express, deps: RestApiDeps): void {
       return
     }
     // Open the task tab so its TaskDetailPage mounts and attaches the
-    // onForceRespawn listener. requestForceRespawn retries until acked or
+    // onEnsureAlive listener. requestEnsureAlive retries until acked or
     // times out, so race with mount is handled.
     broadcastToWindows('app:open-task', taskId)
-    const result = await requestForceRespawn(taskId, FORCE_RESPAWN_TIMEOUT_MS)
-    if (result === 'ok') { res.json({ ok: true }); return }
+    const result = await requestEnsureAlive(taskId, { force: true, timeoutMs: FORCE_RESPAWN_TIMEOUT_MS })
+    if (result === 'ok' || result === 'already-alive') { res.json({ ok: true }); return }
     if (result === 'no-window') { res.status(503).json({ error: 'No window available' }); return }
     if (result === 'error') { res.status(500).json({ error: 'Renderer reported respawn failure' }); return }
     res.status(408).json({ error: 'Renderer did not acknowledge respawn within timeout — task tab may be closed or app unresponsive' })

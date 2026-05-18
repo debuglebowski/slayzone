@@ -1686,64 +1686,90 @@ export function broadcastRespawnRequest(taskId: string): void {
   })
 }
 
-/** Pending force-respawn ack waiters, keyed by per-call reqId. Each REST call
+/** Pending ensure-alive ack waiters, keyed by per-call reqId. Each REST call
  *  gets its own reqId so the renderer can dedupe stale retries (race between
- *  ack send and retry interval firing) without affecting concurrent calls. */
-let nextForceRespawnReqId = 1
-const pendingForceRespawnAcks = new Map<number, (ok: boolean) => void>()
+ *  ack send and retry interval firing) without affecting concurrent calls.
+ *  Ack payload: 'ok' | 'already-alive' | 'error'. */
+let nextEnsureAliveReqId = 1
+const pendingEnsureAliveAcks = new Map<
+  number,
+  (result: 'ok' | 'already-alive' | 'error') => void
+>()
 
-ipcMain.on('pty:respawn-forced:ack', (_e, reqId: number, ok: boolean) => {
-  const resolve = pendingForceRespawnAcks.get(reqId)
-  if (!resolve) return
-  pendingForceRespawnAcks.delete(reqId)
-  resolve(ok)
-})
+ipcMain.on(
+  'pty:ensure-alive:ack',
+  (_e, reqId: number, result: 'ok' | 'already-alive' | 'error') => {
+    const resolve = pendingEnsureAliveAcks.get(reqId)
+    if (!resolve) return
+    pendingEnsureAliveAcks.delete(reqId)
+    resolve(result)
+  }
+)
 
-const FORCE_RESPAWN_RETRY_MS = 250
+const ENSURE_ALIVE_RETRY_MS = 250
 
-/** Force a respawn of a task's main PTY regardless of liveness or mode.
+export type EnsureAliveResult = 'ok' | 'already-alive' | 'error' | 'no-window' | 'timeout'
+
+/** Ensure a task's main PTY is alive.
+ *  - force=true: kill + respawn regardless of liveness (used by `slay pty respawn`).
+ *  - force=false: no-op if alive, else mount + spawn (used by `slay pty start`,
+ *    `slay tasks open --start`, and auto-start in write/submit).
+ *
  *  Awaits the renderer's ack to confirm a TaskDetailPage actually handled it.
  *  Retries the broadcast on an interval so a freshly-mounted TaskDetailPage
  *  (e.g. just opened via `app:open-task`) still catches the request after its
- *  useEffect attaches the listener. Used by CLI `slay pty respawn`. */
-export function requestForceRespawn(
+ *  useEffect attaches the listener. */
+export function requestEnsureAlive(
   taskId: string,
-  timeoutMs: number
-): Promise<'ok' | 'error' | 'no-window' | 'timeout'> {
-  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve('no-window')
+  opts: { force: boolean; timeoutMs: number }
+): Promise<EnsureAliveResult> {
+  // Prefer cached mainWindow (set on ready-to-show), but fall back to any live
+  // BrowserWindow. The cached singleton lags startup-order: CLI calls before
+  // `ready-to-show` fires would otherwise see 'no-window' even with a window
+  // present. Splash window uses a `data:` URL — exclude it.
+  const liveWindow = (mainWindow && !mainWindow.isDestroyed())
+    ? mainWindow
+    : BrowserWindow.getAllWindows().find(
+        (w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:')
+      ) ?? null
+  if (!liveWindow) return Promise.resolve('no-window')
+  // Note: callers should pre-check liveness (the main sessionId convention
+  // lives in the renderer, e.g. `${taskId}:${taskId}` — see TaskDetailPage's
+  // getMainSessionId). The renderer-side handler will ack 'already-alive' if
+  // it observes a live session at receive time.
   recordDiagnosticEvent({
     level: 'info',
     source: 'pty',
-    event: 'pty.respawn_forced',
+    event: opts.force ? 'pty.respawn_forced' : 'pty.ensure_alive',
     sessionId: taskId,
     taskId
   })
-  const reqId = nextForceRespawnReqId++
+  const reqId = nextEnsureAliveReqId++
   return new Promise((resolve) => {
     let resolved = false
-    const finish = (r: 'ok' | 'error' | 'timeout'): void => {
+    const finish = (r: EnsureAliveResult): void => {
       if (resolved) return
       resolved = true
       clearInterval(retry)
       clearTimeout(timer)
-      pendingForceRespawnAcks.delete(reqId)
+      pendingEnsureAliveAcks.delete(reqId)
       resolve(r)
     }
-    pendingForceRespawnAcks.set(reqId, (ok) => finish(ok ? 'ok' : 'error'))
+    pendingEnsureAliveAcks.set(reqId, (result) => finish(result))
     const send = (): void => {
-      if (!mainWindow || mainWindow.isDestroyed()) {
+      if (liveWindow.isDestroyed()) {
         finish('timeout')
         return
       }
       try {
-        mainWindow.webContents.send('pty:respawn-forced', taskId, reqId)
+        liveWindow.webContents.send('pty:ensure-alive', taskId, reqId, opts.force)
       } catch {
         // window destroyed mid-send — let timeout catch it
       }
     }
     send()
-    const retry = setInterval(send, FORCE_RESPAWN_RETRY_MS)
-    const timer = setTimeout(() => finish('timeout'), timeoutMs)
+    const retry = setInterval(send, ENSURE_ALIVE_RETRY_MS)
+    const timer = setTimeout(() => finish('timeout'), opts.timeoutMs)
   })
 }
 

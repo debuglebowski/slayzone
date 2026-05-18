@@ -8,7 +8,7 @@ import {
 /**
  * `POST /api/pty/respawn` (CLI: `slay pty respawn`) must:
  *   1. Auto-open the task tab (so TaskDetailPage's listener is mounted)
- *   2. Broadcast `pty:respawn-forced` IPC for the requested task id
+ *   2. Broadcast `pty:ensure-alive` IPC (force=true) for the requested task id
  *   3. Restart the PTY unconditionally (regardless of mode or liveness)
  *
  * Distinct from `pty:respawn-suggested` — forced path skips the
@@ -53,10 +53,10 @@ test.describe('Forced PTY respawn via REST', () => {
   })
 
   // QUARANTINED 2026-05-16: REST endpoint waits for the renderer to ack via
-  // onForceRespawn; the test installs its own listener that acks immediately,
+  // onEnsureAlive; the test installs its own listener that acks immediately,
   // but res.ok still false. The retry mechanism may also be racing the test
   // subscriber.
-  test.skip('REST broadcasts pty:respawn-forced to renderer', async ({ electronApp, mainWindow }) => {
+  test.skip('REST broadcasts pty:ensure-alive (force=true) to renderer', async ({ electronApp, mainWindow }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({ projectId, title: 'Force respawn signal', status: 'in_progress' })
     await mainWindow.evaluate((id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }), task.id)
@@ -65,10 +65,10 @@ test.describe('Forced PTY respawn via REST', () => {
     // Subscribe & ack so the REST call's await resolves. TaskDetailPage isn't
     // mounted in this signal-only test; we stand in for it.
     await mainWindow.evaluate((id) => {
-      (window as unknown as { __forceRespawnCalls: string[] }).__forceRespawnCalls = []
-      window.api.pty.onForceRespawn((t, reqId) => {
-        (window as unknown as { __forceRespawnCalls: string[] }).__forceRespawnCalls.push(t)
-        window.api.pty.ackForceRespawn(reqId, true)
+      (window as unknown as { __ensureAliveCalls: string[] }).__ensureAliveCalls = []
+      window.api.pty.onEnsureAlive((t, reqId, _force) => {
+        (window as unknown as { __ensureAliveCalls: string[] }).__ensureAliveCalls.push(t)
+        window.api.pty.ackEnsureAlive(reqId, 'ok')
       })
       return id
     }, task.id)
@@ -78,7 +78,7 @@ test.describe('Forced PTY respawn via REST', () => {
 
     await expect.poll(async () =>
       mainWindow.evaluate(
-        (id) => (window as unknown as { __forceRespawnCalls: string[] }).__forceRespawnCalls.filter((t) => t === id).length,
+        (id) => (window as unknown as { __ensureAliveCalls: string[] }).__ensureAliveCalls.filter((t) => t === id).length,
         task.id
       )
     ).toBeGreaterThan(0)

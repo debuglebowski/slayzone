@@ -1,9 +1,13 @@
 import http from 'node:http'
 import { openDb, getMcpPort } from '../../db'
+import { apiPost } from '../../api'
 import { resolveId } from './_shared'
 
 export interface OpenOpts {
   background?: boolean
+  start?: boolean
+  wait?: boolean
+  timeout?: string
 }
 
 export async function openAction(idPrefix: string | undefined, opts: OpenOpts = {}): Promise<void> {
@@ -46,5 +50,16 @@ export async function openAction(idPrefix: string | undefined, opts: OpenOpts = 
     req.setTimeout(3000, () => { req.destroy(); console.error('Timed out reaching SlayZone app'); process.exit(1) })
     req.end()
   })
+
+  if (opts.start) {
+    const timeoutMs = opts.wait === false ? 0 : parseInt(opts.timeout ?? '5000', 10)
+    const r = await apiPost<{ ok: boolean; alreadyAlive?: boolean; sessionId?: string }>(
+      '/api/pty/start',
+      { taskId: task.id, timeoutMs }
+    )
+    const startLabel = r.alreadyAlive ? 'already alive' : 'started'
+    console.log(`${opts.background ? 'Opening (bg)' : 'Opening'} + ${startLabel}: ${task.id.slice(0, 8)}  ${task.title}`)
+    return
+  }
   console.log(`${opts.background ? 'Opening (bg)' : 'Opening'}: ${task.id.slice(0, 8)}  ${task.title}`)
 }

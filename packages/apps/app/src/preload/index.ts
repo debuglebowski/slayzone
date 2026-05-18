@@ -476,13 +476,16 @@ const api: ElectronAPI = {
       ipcRenderer.on('pty:respawn-suggested', handler)
       return () => ipcRenderer.removeListener('pty:respawn-suggested', handler)
     },
-    onForceRespawn: (callback: (taskId: string, reqId: number) => void) => {
-      const handler = (_event: unknown, taskId: string, reqId: number) => callback(taskId, reqId)
-      ipcRenderer.on('pty:respawn-forced', handler)
-      return () => ipcRenderer.removeListener('pty:respawn-forced', handler)
+    onEnsureAlive: (
+      callback: (taskId: string, reqId: number, force: boolean) => void
+    ) => {
+      const handler = (_event: unknown, taskId: string, reqId: number, force: boolean) =>
+        callback(taskId, reqId, force)
+      ipcRenderer.on('pty:ensure-alive', handler)
+      return () => ipcRenderer.removeListener('pty:ensure-alive', handler)
     },
-    ackForceRespawn: (reqId: number, ok: boolean) => {
-      ipcRenderer.send('pty:respawn-forced:ack', reqId, ok)
+    ackEnsureAlive: (reqId: number, result: 'ok' | 'already-alive' | 'error') => {
+      ipcRenderer.send('pty:ensure-alive:ack', reqId, result)
     },
     onSessionNotFound: (callback: (sessionId: string) => void) => {
       const handler = (_event: unknown, sessionId: string) => callback(sessionId)

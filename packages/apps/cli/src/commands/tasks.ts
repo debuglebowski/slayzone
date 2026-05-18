@@ -102,6 +102,9 @@ export function tasksCommand(): Command {
     .command('open [id]')
     .description('Open a task in the SlayZone app (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
     .option('--background', 'Open as background tab — do not switch focus or activate the tab')
+    .option('--start', "Also start the task's main PTY (skip the idle gate)")
+    .option('--no-wait', 'With --start: return immediately without waiting for the PTY to spawn')
+    .option('--timeout <ms>', 'With --start: spawn wait timeout in milliseconds', '5000')
     .action(openAction)
 
   // slay tasks subtasks [id]

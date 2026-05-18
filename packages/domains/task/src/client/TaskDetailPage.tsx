@@ -907,50 +907,80 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     return unsubscribe
   }, [task, getMainSessionId, handleRestartTerminal, handleResetTerminal])
 
-  // Force respawn: CLI-triggered (`slay pty respawn`). Each REST call gets a
-  // unique reqId from main. We dedupe stale retries (race: ack in-flight while
-  // main fires one more retry) by tracking handled reqIds. Concurrent reqIds
-  // arriving during an in-flight restart are coalesced — they all receive the
-  // current run's outcome, since respawn is idempotent.
-  const forceRespawnInFlightRef = useRef(false)
-  const forceRespawnPendingReqsRef = useRef<Set<number>>(new Set())
-  const forceRespawnHandledReqsRef = useRef<number[]>([])
+  // Ensure-alive: CLI-triggered (`slay pty respawn` w/ force=true, or
+  // `slay pty start` / `slay tasks open --start` / auto-start w/ force=false).
+  // Each REST call gets a unique reqId from main. We dedupe stale retries
+  // (race: ack in-flight while main fires one more retry) by tracking handled
+  // reqIds. Concurrent reqIds arriving during an in-flight run are coalesced —
+  // they all receive the current run's outcome (idempotent).
+  const ensureAliveInFlightRef = useRef(false)
+  const ensureAlivePendingReqsRef = useRef<Set<number>>(new Set())
+  const ensureAliveHandledReqsRef = useRef<number[]>([])
   useEffect(() => {
     if (!task) return
-    return window.api.pty.onForceRespawn(async (taskId, reqId) => {
+    return window.api.pty.onEnsureAlive(async (taskId, reqId, force) => {
       if (taskId !== task.id) return
       // Stale retry for an already-completed reqId — re-ack idempotently.
-      if (forceRespawnHandledReqsRef.current.includes(reqId)) {
-        window.api.pty.ackForceRespawn(reqId, true)
+      if (ensureAliveHandledReqsRef.current.includes(reqId)) {
+        window.api.pty.ackEnsureAlive(reqId, 'ok')
         return
+      }
+      // Fast path for non-forced ensure when PTY already alive — no work, no
+      // coalescing. Main's `hasPty` short-circuit usually catches this before
+      // the broadcast, but a race during spawn can land us here.
+      if (!force) {
+        const sid = getMainSessionId(task.id)
+        try {
+          if (await window.api.pty.exists(sid)) {
+            ensureAliveHandledReqsRef.current.push(reqId)
+            window.api.pty.ackEnsureAlive(reqId, 'already-alive')
+            return
+          }
+        } catch {
+          window.api.pty.ackEnsureAlive(reqId, 'error')
+          return
+        }
       }
       // In-flight: coalesce. The current run's result will ack this reqId too.
-      if (forceRespawnInFlightRef.current) {
-        forceRespawnPendingReqsRef.current.add(reqId)
+      if (ensureAliveInFlightRef.current) {
+        ensureAlivePendingReqsRef.current.add(reqId)
         return
       }
-      forceRespawnInFlightRef.current = true
-      forceRespawnPendingReqsRef.current.add(reqId)
-      let ok = false
+      ensureAliveInFlightRef.current = true
+      ensureAlivePendingReqsRef.current.add(reqId)
+      let result: 'ok' | 'error' = 'error'
       try {
-        await handleRestartTerminal()
-        ok = true
+        if (force) {
+          await handleRestartTerminal()
+          result = 'ok'
+        } else {
+          // Server has flipped `terminal_tabs.was_spawned=1` and broadcast
+          // `tabs:changed`, so useTaskTerminals will re-fetch and TerminalStarter
+          // will auto-mount <Terminal>, which spawns via pty:create IPC. Poll
+          // pty.exists until alive or timeout.
+          const sid = getMainSessionId(task.id)
+          const deadline = Date.now() + 5000
+          while (Date.now() < deadline) {
+            try {
+              if (await window.api.pty.exists(sid)) { result = 'ok'; break }
+            } catch { break }
+            await new Promise(r => setTimeout(r, 100))
+          }
+        }
       } finally {
-        const reqs = [...forceRespawnPendingReqsRef.current]
-        forceRespawnPendingReqsRef.current.clear()
+        const reqs = [...ensureAlivePendingReqsRef.current]
+        ensureAlivePendingReqsRef.current.clear()
         for (const r of reqs) {
-          forceRespawnHandledReqsRef.current.push(r)
-          window.api.pty.ackForceRespawn(r, ok)
+          ensureAliveHandledReqsRef.current.push(r)
+          window.api.pty.ackEnsureAlive(r, result)
         }
-        // Bound the handled-reqs cache; only need it long enough to absorb
-        // stale retries that race with the ack.
-        if (forceRespawnHandledReqsRef.current.length > 100) {
-          forceRespawnHandledReqsRef.current = forceRespawnHandledReqsRef.current.slice(-50)
+        if (ensureAliveHandledReqsRef.current.length > 100) {
+          ensureAliveHandledReqsRef.current = ensureAliveHandledReqsRef.current.slice(-50)
         }
-        forceRespawnInFlightRef.current = false
+        ensureAliveInFlightRef.current = false
       }
     })
-  }, [task, handleRestartTerminal])
+  }, [task, handleRestartTerminal, getMainSessionId])
 
   // Doctor: validate CLI binary and dependencies
   const handleDoctor = useCallback(async () => {

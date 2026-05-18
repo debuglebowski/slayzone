@@ -27,6 +27,7 @@ import { registerPtyWriteRoute } from './pty/write'
 import { registerPtySubmitRoute } from './pty/submit'
 import { registerPtyKillRoute } from './pty/kill'
 import { registerPtyRespawnRoute } from './pty/respawn'
+import { registerPtyStartRoute } from './pty/start'
 import { registerBrowserUrlRoute } from './browser/url'
 import { registerBrowserNavigateRoute } from './browser/navigate'
 import { registerBrowserClickRoute } from './browser/click'
@@ -83,6 +84,7 @@ export function registerRestApi(app: Express, deps: RestApiDeps): void {
   registerPtySubmitRoute(app, deps)
   registerPtyKillRoute(app, deps)
   registerPtyRespawnRoute(app, deps)
+  registerPtyStartRoute(app, deps)
 
   // Terminal tabs
   registerTabsCreateRoute(app, deps)
