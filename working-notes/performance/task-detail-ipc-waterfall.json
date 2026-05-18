@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-05-16T19:57:34.447Z",
-  "taskId": "2c201e7c-1f7b-4569-9c6f-d6ad3e23280b",
+  "timestamp": "2026-05-18T06:35:07.826Z",
+  "taskId": "6e4cb54f-c49a-469e-99e1-52a9deb316be",
   "timings": [
     {
       "name": "db.getTask",
@@ -8,11 +8,11 @@
     },
     {
       "name": "tags.getTags",
-      "durationMs": 0.4
+      "durationMs": 0.3
     },
     {
       "name": "taskTags.getTagsForTask",
-      "durationMs": 0.4
+      "durationMs": 0.3
     },
     {
       "name": "db.getProjects",
@@ -20,9 +20,9 @@
     },
     {
       "name": "db.getSubTasks",
-      "durationMs": 0.6
+      "durationMs": 0.5
     }
   ],
   "totalMs": 0.6,
-  "parallelBatchMs": 0.6
+  "parallelBatchMs": 0.5
 }

@@ -1,163 +1,163 @@
 {
-  "timestamp": "2026-05-16T19:57:32.055Z",
+  "timestamp": "2026-05-18T06:35:05.443Z",
   "marks": [
     {
       "name": "sz:tabStore:start",
-      "startTime": 155.2
+      "startTime": 172.4
     },
     {
       "name": "sz:tabStore:end",
-      "startTime": 174.9
+      "startTime": 199.5
     },
     {
       "name": "sz:reactMount",
-      "startTime": 175
+      "startTime": 199.8
     },
     {
       "name": "sz:app:render",
-      "startTime": 176
+      "startTime": 201.2
     },
     {
       "name": "sz:suspense:taskShell:mount",
-      "startTime": 186.8
+      "startTime": 214.2
     },
     {
       "name": "sz:appearance:start",
-      "startTime": 187
+      "startTime": 214.3
     },
     {
       "name": "sz:loadBoardData:start",
-      "startTime": 187.2
+      "startTime": 214.8
     },
     {
       "name": "sz:app:mounted",
-      "startTime": 187.5
+      "startTime": 215.1
     },
     {
       "name": "sz:telemetry:start",
-      "startTime": 187.9
+      "startTime": 215.6
     },
     {
       "name": "sz:theme:start",
-      "startTime": 187.9
+      "startTime": 215.6
     },
     {
       "name": "sz:pty:start",
-      "startTime": 188.1
+      "startTime": 215.8
     },
     {
       "name": "sz:app:render",
-      "startTime": 188.2
+      "startTime": 216
     },
     {
       "name": "sz:appearance:end",
-      "startTime": 197.5
+      "startTime": 229.3
     },
     {
       "name": "sz:loadBoardData:end",
-      "startTime": 197.8
+      "startTime": 229.8
     },
     {
       "name": "sz:dataReady",
-      "startTime": 197.8
+      "startTime": 229.8
     },
     {
       "name": "sz:app:render",
-      "startTime": 198.4
+      "startTime": 230.5
     },
     {
       "name": "sz:app:render",
-      "startTime": 210.3
-    },
-    {
-      "name": "sz:app:render",
-      "startTime": 217.7
-    },
-    {
-      "name": "sz:theme:end",
-      "startTime": 218.6
-    },
-    {
-      "name": "sz:pty:end",
-      "startTime": 218.6
-    },
-    {
-      "name": "sz:app:render",
-      "startTime": 220
-    },
-    {
-      "name": "sz:app:render",
-      "startTime": 234.8
-    },
-    {
-      "name": "sz:telemetry:end",
       "startTime": 246
     },
     {
+      "name": "sz:app:render",
+      "startTime": 255.7
+    },
+    {
+      "name": "sz:theme:end",
+      "startTime": 256.6
+    },
+    {
+      "name": "sz:pty:end",
+      "startTime": 256.6
+    },
+    {
+      "name": "sz:app:render",
+      "startTime": 256.8
+    },
+    {
+      "name": "sz:app:render",
+      "startTime": 266.5
+    },
+    {
+      "name": "sz:telemetry:end",
+      "startTime": 282.4
+    },
+    {
       "name": "sz:suspense:taskShell:unmount",
-      "startTime": 491.3
+      "startTime": 521.2
     }
   ],
   "phases": {
     "tabStore": {
       "startMs": 0,
-      "endMs": 19.7,
-      "durationMs": 19.7
+      "endMs": 27.1,
+      "durationMs": 27.1
     },
     "theme": {
-      "startMs": 32.7,
-      "endMs": 63.4,
-      "durationMs": 30.7
+      "startMs": 43.2,
+      "endMs": 84.2,
+      "durationMs": 41
     },
     "pty": {
-      "startMs": 32.9,
-      "endMs": 63.4,
-      "durationMs": 30.5
+      "startMs": 43.4,
+      "endMs": 84.2,
+      "durationMs": 40.8
     },
     "appearance": {
-      "startMs": 31.8,
-      "endMs": 42.3,
-      "durationMs": 10.5
+      "startMs": 41.9,
+      "endMs": 56.9,
+      "durationMs": 15
     },
     "telemetry": {
-      "startMs": 32.7,
-      "endMs": 90.8,
-      "durationMs": 58.1
+      "startMs": 43.2,
+      "endMs": 110,
+      "durationMs": 66.8
     },
     "loadBoardData": {
-      "startMs": 32,
-      "endMs": 42.6,
-      "durationMs": 10.6
+      "startMs": 42.4,
+      "endMs": 57.4,
+      "durationMs": 15
     }
   },
   "waterfall": [
     "Phase                    Start     Dur  Timeline",
     "────────────────────────────────────────────────────────────────────────────────────────────",
-    "Tab Store                  0ms  19.7ms  |███",
-    "React Mount             19.8ms          |   ▼",
-    "Theme                   32.7ms  30.7ms  |     ████",
-    "PTY Seed                32.9ms  30.5ms  |     ████",
-    "Appearance              31.8ms  10.5ms  |     █",
-    "Telemetry               32.7ms  58.1ms  |     █████████",
-    "Load Board                32ms  10.6ms  |     █",
-    "Data Ready              42.6ms          |      ▼",
-    "Suspense #1             31.6ms 304.5ms  |     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░"
+    "Tab Store                  0ms  27.1ms  |████",
+    "React Mount             27.4ms          |    ▼",
+    "Theme                   43.2ms    41ms  |      ██████",
+    "PTY Seed                43.4ms  40.8ms  |      ██████",
+    "Appearance              41.9ms    15ms  |      ██",
+    "Telemetry               43.2ms  66.8ms  |      ██████████",
+    "Load Board              42.4ms    15ms  |      ██",
+    "Data Ready              57.4ms          |        ▼",
+    "Suspense #1             41.8ms   307ms  |      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░"
   ],
   "summary": {
-    "tabStoreMs": 19.7,
-    "reactMountAt": 19.8,
-    "loadBoardDataMs": 10.6,
-    "dataReadyAt": 42.6,
-    "themeMs": 30.7,
-    "ptyMs": 30.5,
-    "appearanceMs": 10.5,
-    "telemetryMs": 58.1,
-    "appFirstRenderAt": 20.8,
-    "appMountedAt": 32.3,
+    "tabStoreMs": 27.1,
+    "reactMountAt": 27.4,
+    "loadBoardDataMs": 15,
+    "dataReadyAt": 57.4,
+    "themeMs": 41,
+    "ptyMs": 40.8,
+    "appearanceMs": 15,
+    "telemetryMs": 66.8,
+    "appFirstRenderAt": 28.8,
+    "appMountedAt": 42.7,
     "suspenseFallbackCount": 1,
     "suspenseFallbackDurations": [
-      304.5
+      307
     ],
-    "totalStartupMs": 42.6
+    "totalStartupMs": 57.4
   }
 }
