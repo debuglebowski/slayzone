@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { RotateCw, X, Globe, Copy, Check, RotateCcw } from 'lucide-react'
 import { IconButton, Tooltip, TooltipTrigger, TooltipContent, useAppearance } from '@slayzone/ui'
 import { useBrowserView } from '@slayzone/task-browser'
+import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import {
   inferHostScopeFromUrl,
   inferProtocolFromUrl,
@@ -87,7 +88,7 @@ export function WebPanelView({
   const { viewId, state, actions, placeholderRef } = useBrowserView({
     tabId: panelId,
     taskId,
-    url: (url || 'about:blank').replace(/^file:\/\//, 'slz-file://app'),
+    url: fileUrlToSlzFileUrl(url || 'about:blank'),
     partition: 'persist:web-panels',
     kind: 'web-panel',
     desktopHandoffPolicy,

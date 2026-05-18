@@ -10,6 +10,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Project } from '@slayzone/projects/shared'
+import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 
 interface ProjectItemProps {
   project: Project
@@ -34,7 +35,7 @@ export function ProjectItem({
   const lettersClass =
     letters.length >= 5 ? 'text-[8px]' : letters.length > 2 ? 'text-[9px]' : 'text-xs'
   const iconSrc = project.icon_image_path
-    ? `slz-file://app${project.icon_image_path}?v=${encodeURIComponent(project.updated_at)}`
+    ? toSlzFileUrl(project.icon_image_path, project.updated_at)
     : null
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.id

@@ -34,6 +34,7 @@
     "@slayzone/history": "workspace:*",
     "@slayzone/integrations": "workspace:*",
     "@slayzone/markdown": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/suspense": "workspace:*",

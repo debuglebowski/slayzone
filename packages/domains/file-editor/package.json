@@ -40,6 +40,7 @@
     "@slayzone/editor": "workspace:*",
     "@slayzone/icons": "workspace:*",
     "@slayzone/markdown": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",

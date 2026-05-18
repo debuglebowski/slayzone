@@ -1,5 +1,6 @@
 import { clipboard, Menu, shell, WebContentsView, session, type BrowserWindow } from 'electron'
 import { join } from 'path'
+import { fileUrlToSlzFileUrl } from '@slayzone/platform'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import type { BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import type { DesktopHandoffPolicy } from '@slayzone/task/shared'
@@ -217,7 +218,7 @@ export class BrowserViewManager {
     }
 
     if (opts.url && opts.url !== 'about:blank') {
-      view.webContents.loadURL(opts.url.replace(/^file:\/\//, 'slz-file://app'))
+      view.webContents.loadURL(fileUrlToSlzFileUrl(opts.url))
     }
 
     return viewId
@@ -413,7 +414,7 @@ export class BrowserViewManager {
   navigate(viewId: string, url: string): void {
     const wc = this.getWebContents(viewId)
     if (!wc) return
-    wc.loadURL(url.replace(/^file:\/\//, 'slz-file://app'))
+    wc.loadURL(fileUrlToSlzFileUrl(url))
   }
 
   goBack(viewId: string): void {

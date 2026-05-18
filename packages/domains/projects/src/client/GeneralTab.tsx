@@ -5,6 +5,7 @@ import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
 import { ColorPicker } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
+import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { SettingsTabIntro } from './project-settings-shared'
 
 interface GeneralTabProps {
@@ -146,7 +147,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
             >
               {iconImagePath ? (
                 <img
-                  src={`slz-file://app${iconImagePath}?v=${encodeURIComponent(iconCacheKey)}`}
+                  src={toSlzFileUrl(iconImagePath, iconCacheKey)}
                   alt=""
                   className="w-full h-full object-cover"
                   draggable={false}

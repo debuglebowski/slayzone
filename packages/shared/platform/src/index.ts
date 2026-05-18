@@ -22,6 +22,15 @@ export {
   type CliInstallResult
 } from './cli-install'
 export { DB_PRAGMAS } from './db'
+// Re-export so main-process code can pull URL helpers from the main barrel.
+// Renderer code MUST import from '@slayzone/platform/slz-file-url' to avoid
+// pulling node:fs into the browser bundle.
+export {
+  SLZ_FILE_HOST,
+  SLZ_FILE_PREFIX,
+  toSlzFileUrl,
+  fileUrlToSlzFileUrl
+} from './slz-file-url'
 export {
   withResultDedup,
   isIpcUnchangedSentinel,

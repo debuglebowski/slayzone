@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { DeviceEmulation } from '../shared'
 
 interface WebviewElement extends HTMLElement {
@@ -48,7 +49,7 @@ export function DeviceWebview({
     ua?: string
   } | null>(null)
 
-  const [initialSrc] = useState(() => (url || 'about:blank').replace(/^file:\/\//, 'slz-file://app'))
+  const [initialSrc] = useState(() => fileUrlToSlzFileUrl(url || 'about:blank'))
   const loadedUrlRef = useRef(url)
 
   // Track container size
@@ -136,7 +137,7 @@ export function DeviceWebview({
     if (!wv || !webviewReady || !url || url === 'about:blank') return
     if (url === loadedUrlRef.current) return
     loadedUrlRef.current = url
-    wv.loadURL(url.replace(/^file:\/\//, 'slz-file://app'))
+    wv.loadURL(fileUrlToSlzFileUrl(url))
   }, [url, webviewReady])
 
   // Reload when trigger increments

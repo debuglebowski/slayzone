@@ -87,6 +87,7 @@ import {
 } from '@slayzone/ui'
 import type { ArtifactVersion, DiffResult } from '@slayzone/task-artifacts/shared'
 import { RichTextEditor, MarkdownSettingsPopover } from '@slayzone/editor'
+import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task/shared'
 import {
@@ -159,7 +160,7 @@ function ImageViewer({
 
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
-      if (p) setSrc(`slz-file://app${p}?v=${contentVersion}`)
+      if (p) setSrc(toSlzFileUrl(p, contentVersion))
     })
   }, [artifactId, contentVersion, getFilePath])
 
@@ -192,7 +193,7 @@ function PdfViewer({
 
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
-      if (p) setSrc(`slz-file://app${p}?v=${contentVersion}`)
+      if (p) setSrc(toSlzFileUrl(p, contentVersion))
     })
   }, [artifactId, contentVersion, getFilePath])
 
@@ -683,7 +684,7 @@ function HtmlPreviewFrame({
   const [src, setSrc] = useState<string | null>(null)
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
-      if (p) setSrc(`slz-file://app${p}?v=${contentVersion}`)
+      if (p) setSrc(toSlzFileUrl(p, contentVersion))
     })
   }, [artifactId, contentVersion, getFilePath])
   if (!src)

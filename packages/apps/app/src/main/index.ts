@@ -138,7 +138,9 @@ import {
   installCli,
   checkCliInstalled,
   getCliBinTarget,
-  getManualInstallHint
+  getManualInstallHint,
+  SLZ_FILE_HOST,
+  fileUrlToSlzFileUrl
 } from '@slayzone/platform'
 if (process.platform === 'linux') {
   const result = migrateXdgIfNeeded()
@@ -1639,12 +1641,12 @@ app
     // Serve local files via slz-file:// (Chromium blocks file:// in webviews and cross-origin renderers)
     const userHome = homedir()
     const slzFileHandler = async (request: Request) => {
-      // URLs are constructed in the renderer as `slz-file://app${absolutePath}`.
-      // The 'app' sentinel host fills Chromium's authority slot so the URL
-      // canonicalizer doesn't move the first path segment into the host (which
-      // would lowercase it + mangle Unicode under `standard:true` privilege).
+      // URLs are constructed via @slayzone/platform's toSlzFileUrl, which
+      // fills the authority slot with SLZ_FILE_HOST so Chromium's standard-URL
+      // canonicalizer can't move the first path segment into the host
+      // (lowercasing + Unicode-mangling it).
       const parsed = new URL(request.url)
-      if (parsed.hostname !== 'app') {
+      if (parsed.hostname !== SLZ_FILE_HOST) {
         return new Response('Forbidden', { status: 403 })
       }
       const filePath = normalize(decodeURIComponent(parsed.pathname))
@@ -1768,7 +1770,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     ) => {
       // Redirect file:// → slz-file:// so local files load via our secure handler
       if (details.url.startsWith('file://')) {
-        callback({ redirectURL: details.url.replace(/^file:\/\//, 'slz-file://app') })
+        callback({ redirectURL: fileUrlToSlzFileUrl(details.url) })
         return
       }
       if (shouldCancelLoopbackHandoffRequest(details)) {

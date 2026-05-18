@@ -573,6 +573,9 @@ importers:
       '@slayzone/markdown':
         specifier: workspace:*
         version: link:../../shared/markdown
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -688,6 +691,9 @@ importers:
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../integrations
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -853,6 +859,9 @@ importers:
       '@slayzone/markdown':
         specifier: workspace:*
         version: link:../../shared/markdown
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../projects
@@ -960,6 +969,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@slayzone/integrations": "workspace:*",
+    "@slayzone/platform": "workspace:*",
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
