@@ -684,7 +684,9 @@ const api: ElectronAPI = {
       taskId: string
       mode: string
       cwd: string
-      chatMode: 'plan' | 'auto-accept' | 'auto' | 'bypass'
+      // Provider-specific runtime/permission mode id. Main-side handler
+      // validates against the mode's catalog.
+      chatMode: string
     }) => ipcRenderer.invoke('chat:setMode', opts),
     getModel: (taskId: string, mode: string) => ipcRenderer.invoke('chat:getModel', taskId, mode),
     setModel: (opts: {
@@ -692,7 +694,9 @@ const api: ElectronAPI = {
       taskId: string
       mode: string
       cwd: string
-      chatModel: 'sonnet' | 'opus' | 'haiku'
+      // Provider-specific model id — Claude alias or Codex model id. The
+      // main-side handler validates against the mode's catalog.
+      chatModel: string
     }) => ipcRenderer.invoke('chat:setModel', opts),
     getEffort: (taskId: string, mode: string) => ipcRenderer.invoke('chat:getEffort', taskId, mode),
     setEffort: (opts: {

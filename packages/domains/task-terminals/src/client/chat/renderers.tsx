@@ -12,6 +12,7 @@ import {
   Pencil,
   Search,
   CheckSquare,
+  ListChecks,
   ClipboardList,
   FilePlus,
   HelpCircle,
@@ -235,6 +236,46 @@ export function InterruptedBlock(_props: { item: Extract<TimelineItem, { kind: '
   return (
     <div className="px-4 pl-[4.25rem] py-0.5 text-[11px] text-amber-600 dark:text-amber-400">
       Turn interrupted
+    </div>
+  )
+}
+
+export function PlanBlock({ item }: { item: Extract<TimelineItem, { kind: 'plan' }> }) {
+  const done = item.steps.filter((s) => s.status === 'completed').length
+  return (
+    <div className="mx-4 my-1 rounded-md border border-border/60 bg-muted/20">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-muted-foreground border-b border-border/40">
+        <ListChecks className="size-3" />
+        <span>Plan</span>
+        <span className="ml-auto tabular-nums">
+          {done}/{item.steps.length}
+        </span>
+      </div>
+      {item.explanation ? (
+        <div className="px-3 pt-2 text-[11px] text-muted-foreground">{item.explanation}</div>
+      ) : null}
+      <ul className="p-3 text-xs grid gap-1.5">
+        {item.steps.map((s, i) => (
+          <li key={i} className="flex items-center gap-2">
+            <span
+              className={cn(
+                'inline-block size-2 rounded-full shrink-0',
+                s.status === 'completed' && 'bg-emerald-500',
+                s.status === 'inProgress' && 'bg-amber-500',
+                s.status === 'pending' && 'bg-muted-foreground/30'
+              )}
+            />
+            <span
+              className={cn(
+                s.status === 'completed' && 'line-through text-muted-foreground',
+                s.status === 'inProgress' && 'font-medium'
+              )}
+            >
+              {s.step}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -1274,6 +1315,8 @@ export function renderTimelineItem(item: TimelineItem, key: React.Key): React.JS
       return <StderrBlock key={key} item={item} />
     case 'interrupted':
       return <InterruptedBlock key={key} item={item} />
+    case 'plan':
+      return <PlanBlock key={key} item={item} />
     case 'unknown':
       return <UnknownBlock key={key} item={item} />
   }

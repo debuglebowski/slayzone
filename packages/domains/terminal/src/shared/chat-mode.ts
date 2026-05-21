@@ -28,8 +28,12 @@ export function rawPermissionModeToChatMode(raw: string | null | undefined): Cha
   }
 }
 
-/** Inverse: produce CLI flags for a given ChatMode. */
-export function chatModeToFlags(mode: ChatMode): string[] {
+/**
+ * Inverse: produce CLI flags for a Claude `ChatMode`. Non-Claude modes
+ * (codex-chat carries its policy over the JSON-RPC protocol, not flags)
+ * yield no flags — that backend ignores `providerFlags` entirely.
+ */
+export function chatModeToFlags(mode: string): string[] {
   switch (mode) {
     case 'plan':
       return ['--permission-mode', 'plan']
@@ -39,6 +43,8 @@ export function chatModeToFlags(mode: ChatMode): string[] {
       return ['--permission-mode', 'auto']
     case 'bypass':
       return ['--allow-dangerously-skip-permissions']
+    default:
+      return []
   }
 }
 
@@ -49,7 +55,7 @@ export function chatModeToFlags(mode: ChatMode): string[] {
  * `--allow-dangerously-skip-permissions` flag (no in-flight control equivalent),
  * so it requires a process restart instead.
  */
-export function chatModeToCliPermissionMode(mode: ChatMode): string | null {
+export function chatModeToCliPermissionMode(mode: string): string | null {
   switch (mode) {
     case 'plan':
       return 'plan'
@@ -57,7 +63,9 @@ export function chatModeToCliPermissionMode(mode: ChatMode): string | null {
       return 'acceptEdits'
     case 'auto':
       return 'auto'
-    case 'bypass':
+    default:
+      // `bypass` (Claude flag-only) and any non-Claude mode → no live
+      // `set_permission_mode` equivalent; caller falls back accordingly.
       return null
   }
 }

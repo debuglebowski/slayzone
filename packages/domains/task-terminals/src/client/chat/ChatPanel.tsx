@@ -17,7 +17,11 @@ import { useChatModel } from './useChatModel'
 import { useChatEffort } from './useChatEffort'
 import { useChatQueue } from './useChatQueue'
 import { useChatSearch } from './useChatSearch'
-import { modelSupportsEffort } from '@slayzone/terminal/shared'
+import {
+  chatModesForMode,
+  modelsForMode,
+  modelSupportsEffortForMode
+} from '@slayzone/terminal/shared'
 import {
   cn,
   toast,
@@ -676,7 +680,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           if (autocomplete.show) return
           e.preventDefault()
           if (inFlight) return
-          const next = nextAgentMode(chatMode, autoCapability.optedIn)
+          const next = nextAgentMode(chatMode, autoCapability.optedIn, chatModesForMode(mode))
           handleModeChange(next).catch(() => {
             /* toast already shown by hook */
           })
@@ -1239,6 +1243,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                   <>
                     <AgentModePill
                       mode={chatMode}
+                      modes={chatModesForMode(mode)}
                       onChange={(next) => {
                         handleModeChange(next).catch(() => {
                           /* toast already shown by hook */
@@ -1252,15 +1257,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     {chatModel && (
                       <AgentModelPill
                         model={chatModel}
+                        models={modelsForMode(mode)}
                         onChange={(next) => {
                           void handleModelChange(next)
                         }}
                         disabled={modelChanging || inFlight}
-                        compact
                         variant="text"
                       />
                     )}
-                    {chatModel && modelSupportsEffort(chatModel) && (
+                    {chatModel && modelSupportsEffortForMode(mode, chatModel) && (
                       <AgentEffortPill
                         effort={chatEffort}
                         onChange={(next) => {

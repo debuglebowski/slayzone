@@ -19,8 +19,8 @@ export const CHAT_MODELS: ChatModel[] = ['opus', 'sonnet', 'haiku']
 /** Hard fallback when neither DB nor `~/.claude/settings.json` resolves. */
 export const DEFAULT_CHAT_MODEL: ChatModel = 'opus'
 
-/** CLI flags for a given ChatModel. Always `--model <alias>`. */
-export function chatModelToFlags(model: ChatModel): string[] {
+/** CLI flags for a given model id. Always `--model <id>`. */
+export function chatModelToFlags(model: string): string[] {
   return ['--model', model]
 }
 

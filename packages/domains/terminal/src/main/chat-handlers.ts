@@ -53,7 +53,9 @@ import {
   chatModeToCliPermissionMode,
   type ChatMode as ChatModeShared
 } from '../shared/chat-mode'
-import { chatModelToFlags, isChatModel, type ChatModel } from '../shared/chat-model'
+import { chatModelToFlags } from '../shared/chat-model'
+import { defaultModelForMode, isValidModelForMode } from '../shared/chat-model-catalog'
+import { defaultChatModeForMode, isValidChatModeForMode } from '../shared/chat-mode-catalog'
 import { chatEffortToFlags, isChatEffort, type ChatEffort } from '../shared/chat-effort'
 
 export interface ChatHandlerOpts {
@@ -101,7 +103,7 @@ export const chatModeToFlags = chatModeToFlagsShared
  * child crashes immediately on every chat spawn for that task. All other modes
  * pass through untouched.
  */
-async function resolveSafeChatMode(stored: ChatMode): Promise<ChatMode> {
+async function resolveSafeChatMode(stored: string): Promise<string> {
   if (stored !== 'auto') return stored
   const cap = await getAutoModeEligibility()
   return cap.optedIn ? 'auto' : 'auto-accept'
@@ -117,10 +119,10 @@ interface ProviderConfigEntry {
    */
   chatConversationId?: string | null
   flags?: string | null
-  /** Chat permission/operating mode. See `ChatMode`. */
-  chatMode?: ChatMode | null
-  /** Claude model alias for chat. See `ChatModel`. */
-  chatModel?: ChatModel | null
+  /** Chat permission/runtime mode (Claude `ChatMode` / Codex runtime mode). */
+  chatMode?: string | null
+  /** Provider-specific chat model id (Claude alias / Codex model id). */
+  chatModel?: string | null
   /** Reasoning effort level. `null`/missing = inherit provider default. */
   chatEffort?: ChatEffort | null
 }
@@ -155,7 +157,7 @@ function writeChatConversationId(db: Database, taskId: string, mode: string, id:
   db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
 }
 
-function writeChatModel(db: Database, taskId: string, mode: string, chatModel: ChatModel): void {
+function writeChatModel(db: Database, taskId: string, mode: string, chatModel: string): void {
   const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
     | { provider_config: string | null }
     | undefined
@@ -196,7 +198,7 @@ function writeChatEffort(
   db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
 }
 
-function writeChatMode(db: Database, taskId: string, mode: string, chatMode: ChatMode): void {
+function writeChatMode(db: Database, taskId: string, mode: string, chatMode: string): void {
   const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
     | { provider_config: string | null }
     | undefined
@@ -366,8 +368,8 @@ async function buildHydrateOpts(
     chatEffortOverride
   }: {
     fresh: boolean
-    chatModeOverride?: ChatMode
-    chatModelOverride?: ChatModel
+    chatModeOverride?: string
+    chatModelOverride?: string
     chatEffortOverride?: ChatEffort | null
   }
 ): Promise<Parameters<typeof hydrateSession>[0]> {
@@ -379,7 +381,7 @@ async function buildHydrateOpts(
   // terminal_modes default_flags is intentionally NOT consulted for chat — chat owns
   // its own permission UX through chatMode. Terminal still uses default_flags.
   let providerFlags: string[]
-  let resolvedChatMode: ChatMode | null = null
+  let resolvedChatMode: string | null = null
   if (chatModeOverride) {
     // Explicit chatMode change (chat:setMode): override wins over both per-call
     // flag overrides and providerCfg.flags — the user explicitly asked for a
@@ -391,23 +393,30 @@ async function buildHydrateOpts(
   } else if (providerCfg.flags) {
     providerFlags = parseShellArgs(providerCfg.flags)
   } else {
-    const stored = providerCfg.chatMode ?? DEFAULT_CHAT_MODE_NEW_TASK
+    const stored = providerCfg.chatMode ?? defaultChatModeForMode(opts.mode)
     resolvedChatMode = await resolveSafeChatMode(stored)
     providerFlags = chatModeToFlags(resolvedChatMode)
   }
 
-  // Append --model when set. Override > stored > default. providerFlags from
-  // explicit `flags` may already contain --model; we don't dedupe — that path
-  // is power-user override and the chat model dropdown is hidden behind the
-  // chatModel field. When `flags` is set, chatModel is not appended (the
-  // explicit flag string is the source of truth).
-  const storedChatModel = isChatModel(providerCfg.chatModel) ? providerCfg.chatModel : null
-  const resolvedChatModel: ChatModel =
-    chatModelOverride ?? storedChatModel ?? (await resolveAccountDefaultModel())
+  // Resolve the model: override > stored (validated against the mode's
+  // catalog) > provider default. `codex-chat` defaults to a Codex model;
+  // claude-chat falls back to the account default from ~/.claude/settings.json.
+  const storedChatModel = isValidModelForMode(opts.mode, providerCfg.chatModel)
+    ? providerCfg.chatModel
+    : null
+  const resolvedChatModel: string =
+    chatModelOverride ??
+    storedChatModel ??
+    (opts.mode === 'codex-chat'
+      ? defaultModelForMode(opts.mode)
+      : await resolveAccountDefaultModel())
   const resolvedChatEffort: ChatEffort | null =
     chatEffortOverride !== undefined ? chatEffortOverride : (providerCfg.chatEffort ?? null)
+  // Append --model/--effort flags only for flag-driven providers (claude-chat).
+  // codex-chat carries model/effort over the JSON-RPC `turn/start` params, not
+  // CLI flags — its backend ignores `providerFlags` entirely.
   const usedExplicitFlags = !chatModeOverride && (opts.providerFlagsOverride || providerCfg.flags)
-  if (!usedExplicitFlags) {
+  if (!usedExplicitFlags && opts.mode !== 'codex-chat') {
     providerFlags = [...providerFlags, ...chatModelToFlags(resolvedChatModel)]
     providerFlags = [...providerFlags, ...chatEffortToFlags(resolvedChatEffort)]
   }
@@ -739,15 +748,20 @@ export function registerChatHandlers(
   ipcMain.handle(
     'chat:inspectPermissions',
     (_, taskId: string, mode: string): ReturnType<typeof inspectPermissionFlags> => {
+      // codex-chat governs permissions through the JSON-RPC approval protocol,
+      // not CLI flags — the flag-based safety check doesn't apply.
+      if (mode === 'codex-chat') {
+        return { ok: true, hasSkipPerms: false, hasPermissionMode: false, permissionModeValue: null }
+      }
       const providerCfg = readProviderConfig(db, taskId, mode)
       const flagsString = providerCfg.flags ?? readTaskModeDefaultFlags(db, mode) ?? ''
       return inspectPermissionFlags(parseShellArgs(flagsString))
     }
   )
 
-  ipcMain.handle('chat:getMode', async (_, taskId: string, mode: string): Promise<ChatMode> => {
+  ipcMain.handle('chat:getMode', async (_, taskId: string, mode: string): Promise<string> => {
     const cfg = readProviderConfig(db, taskId, mode)
-    const stored = cfg.chatMode ?? DEFAULT_CHAT_MODE_NEW_TASK
+    const stored = cfg.chatMode ?? defaultChatModeForMode(mode)
     // Hide stale `auto` from UI when capability is gone — pill would otherwise
     // show violet, and the next mode change would attempt a forbidden flag.
     return resolveSafeChatMode(stored)
@@ -760,7 +774,11 @@ export function registerChatHandlers(
 
   ipcMain.handle(
     'chat:setMode',
-    async (_, opts: ChatCreateOpts & { chatMode: ChatMode }): Promise<ChatSessionInfo> => {
+    async (_, opts: ChatCreateOpts & { chatMode: string }): Promise<ChatSessionInfo> => {
+      // Reject a mode that isn't valid for this terminal mode's vocabulary.
+      if (!isValidChatModeForMode(opts.mode, opts.chatMode)) {
+        throw new Error(`Invalid chat mode for mode ${opts.mode}: ${String(opts.chatMode)}`)
+      }
       // Server-side guard: ignore `auto` when capability is missing. Renderer
       // already filters in the pill, but a stale renderer or a direct IPC call
       // shouldn't be able to persist a forbidden mode.
@@ -779,10 +797,12 @@ export function registerChatHandlers(
       }
 
       // Fast path: live `set_permission_mode` control_request. Preserves the
-      // warm subprocess + conversation state. Only available when the live
-      // session has a control channel AND the target maps to a CLI
-      // permission_mode value (bypass uses a separate flag → null → fallback).
-      const cliMode = chatModeToCliPermissionMode(safe)
+      // warm subprocess + conversation state. For claude-chat this maps to a
+      // CLI permission_mode value (bypass → null → fallback). For codex-chat
+      // the runtime mode itself rides the control request — the driver applies
+      // it to the next `turn/start`, no respawn.
+      const cliMode =
+        opts.mode === 'codex-chat' ? safe : chatModeToCliPermissionMode(safe)
       const liveInfo = getSessionInfo(opts.tabId)
       if (cliMode && liveState && liveState !== 'not-spawned' && liveInfo && !liveInfo.ended) {
         try {
@@ -820,21 +840,22 @@ export function registerChatHandlers(
     }
   )
 
-  ipcMain.handle('chat:getModel', async (_, taskId: string, mode: string): Promise<ChatModel> => {
+  ipcMain.handle('chat:getModel', async (_, taskId: string, mode: string): Promise<string> => {
     const cfg = readProviderConfig(db, taskId, mode)
     const stored = cfg.chatModel
-    if (isChatModel(stored)) return stored
-    // No (or legacy/invalid) stored value → fall back to account default
-    // resolved from `~/.claude/settings.json`. Pro accounts → sonnet,
-    // Max accounts → opus, etc. Hard fallback DEFAULT_CHAT_MODEL.
+    if (isValidModelForMode(mode, stored)) return stored
+    // No (or legacy/invalid) stored value → provider default. codex-chat uses
+    // its own default; claude-chat resolves the account default from
+    // `~/.claude/settings.json` (Pro → sonnet, Max → opus, …).
+    if (mode === 'codex-chat') return defaultModelForMode(mode)
     return resolveAccountDefaultModel()
   })
 
   ipcMain.handle(
     'chat:setModel',
-    async (_, opts: ChatCreateOpts & { chatModel: ChatModel }): Promise<ChatSessionInfo> => {
-      if (!isChatModel(opts.chatModel)) {
-        throw new Error(`Invalid chat model: ${String(opts.chatModel)}`)
+    async (_, opts: ChatCreateOpts & { chatModel: string }): Promise<ChatSessionInfo> => {
+      if (!isValidModelForMode(opts.mode, opts.chatModel)) {
+        throw new Error(`Invalid chat model for mode ${opts.mode}: ${String(opts.chatModel)}`)
       }
 
       // Pre-spawn fast path: DB write + skeleton mutation only.

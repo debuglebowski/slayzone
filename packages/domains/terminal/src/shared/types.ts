@@ -16,6 +16,7 @@ export const BuiltinTerminalMode = {
   ClaudeCode: 'claude-code',
   ClaudeChat: 'claude-chat',
   Codex: 'codex',
+  CodexChat: 'codex-chat',
   Gemini: 'gemini',
   Antigravity: 'antigravity',
   CursorAgent: 'cursor-agent',
@@ -29,7 +30,7 @@ export const BuiltinTerminalMode = {
  * (`terminal/main/agents/registry.ts`) is typed against this list — adding a
  * mode here forces a corresponding adapter entry at compile time.
  */
-export const CHAT_SUPPORTED_MODES = ['claude-chat'] as const
+export const CHAT_SUPPORTED_MODES = ['claude-chat', 'codex-chat'] as const
 export type ChatSupportedMode = (typeof CHAT_SUPPORTED_MODES)[number]
 export function isChatSupported(mode: string): mode is ChatSupportedMode {
   return (CHAT_SUPPORTED_MODES as readonly string[]).includes(mode)
@@ -138,6 +139,22 @@ export const DEFAULT_TERMINAL_MODES: TerminalModeInfo[] = [
     enabled: true,
     isBuiltin: true,
     order: 1
+  },
+  {
+    // Codex Chat — structured (non-PTY) chat backed by `codex app-server`'s
+    // JSON-RPC protocol. Coexists with the PTY `codex` mode above.
+    // `initialCommand`/`resumeCommand` are null: chat is spawned by the
+    // chat-transport-manager, not the PTY manager.
+    id: BuiltinTerminalMode.CodexChat,
+    label: 'Codex Chat',
+    type: 'codex',
+    initialCommand: null,
+    resumeCommand: null,
+    headlessCommand: 'codex exec {flags} {prompt}',
+    defaultFlags: '',
+    enabled: true,
+    isBuiltin: true,
+    order: 1.5
   },
   {
     id: BuiltinTerminalMode.Gemini,

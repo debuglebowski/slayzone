@@ -7,7 +7,8 @@ import {
   DropdownMenuTrigger
 } from './dropdown-menu'
 
-export type AgentMode = 'plan' | 'auto-accept' | 'auto' | 'bypass'
+/** An opaque, provider-specific permission/runtime mode id. */
+export type AgentMode = string
 
 /** Capability info for the `auto` mode (Max/Team/Enterprise + opt-in). */
 export interface AutoModeCapability {
@@ -28,24 +29,42 @@ interface ModeMeta {
   text: string
 }
 
-const MODE_META: Record<AgentMode, ModeMeta> = {
+const SKY = {
+  chip: 'bg-sky-500/15 text-sky-600 dark:text-sky-300 ring-sky-500/30',
+  chipHover: 'hover:bg-sky-500/25',
+  text: 'text-sky-600 dark:text-sky-300'
+}
+const EMERALD = {
+  chip: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 ring-emerald-500/30',
+  chipHover: 'hover:bg-emerald-500/25',
+  text: 'text-emerald-600 dark:text-emerald-300'
+}
+const AMBER = {
+  chip: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30',
+  chipHover: 'hover:bg-amber-500/25',
+  text: 'text-amber-700 dark:text-amber-300'
+}
+
+/**
+ * Mode metadata keyed by mode id. Covers both the Claude permission modes
+ * (plan/auto-accept/auto/bypass) and the Codex runtime modes
+ * (approval-required/auto-accept-edits/full-access).
+ */
+const MODE_META: Record<string, ModeMeta> = {
+  // ---- Claude ----
   plan: {
     label: 'Plan mode',
     short: 'Plan',
     description: 'Read-only — investigation phase. No edits, no shell.',
     icon: Eye,
-    chip: 'bg-sky-500/15 text-sky-600 dark:text-sky-300 ring-sky-500/30',
-    chipHover: 'hover:bg-sky-500/25',
-    text: 'text-sky-600 dark:text-sky-300'
+    ...SKY
   },
   'auto-accept': {
     label: 'Auto-accept edits',
     short: 'Auto-accept',
     description: 'Edits and tool calls auto-approved. Recommended default.',
     icon: ShieldCheck,
-    chip: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 ring-emerald-500/30',
-    chipHover: 'hover:bg-emerald-500/25',
-    text: 'text-emerald-600 dark:text-emerald-300'
+    ...EMERALD
   },
   auto: {
     label: 'Auto mode',
@@ -61,20 +80,57 @@ const MODE_META: Record<AgentMode, ModeMeta> = {
     short: 'Bypass',
     description: 'All permission checks skipped. Use with caution.',
     icon: AlertTriangle,
-    chip: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30',
-    chipHover: 'hover:bg-amber-500/25',
-    text: 'text-amber-700 dark:text-amber-300'
+    ...AMBER
+  },
+  // ---- Codex ----
+  'approval-required': {
+    label: 'Approval required',
+    short: 'Approval',
+    description: 'Read-only sandbox — asks before running commands or edits.',
+    icon: Eye,
+    ...SKY
+  },
+  'auto-accept-edits': {
+    label: 'Auto-accept edits',
+    short: 'Auto-accept',
+    description: 'Edits and commands in the workspace auto-approved.',
+    icon: ShieldCheck,
+    ...EMERALD
+  },
+  'full-access': {
+    label: 'Full access',
+    short: 'Full access',
+    description: 'All actions auto-approved, no sandbox. Use with caution.',
+    icon: AlertTriangle,
+    ...AMBER
   }
 }
 
-const MODE_ORDER: AgentMode[] = ['plan', 'auto-accept', 'auto', 'bypass']
+const FALLBACK_META: ModeMeta = {
+  label: 'Mode',
+  short: 'Mode',
+  description: '',
+  icon: ShieldCheck,
+  ...EMERALD
+}
 
-/** Cycle to next mode, wrapping around. Skips `auto` when not enabled. */
-export function nextAgentMode(mode: AgentMode, autoEnabled = false): AgentMode {
-  const order = autoEnabled ? MODE_ORDER : MODE_ORDER.filter((m) => m !== 'auto')
-  const i = order.indexOf(mode)
-  if (i === -1) return order[0]
-  return order[(i + 1) % order.length]
+const CLAUDE_MODE_ORDER: AgentMode[] = ['plan', 'auto-accept', 'auto', 'bypass']
+
+/**
+ * Cycle to the next mode, wrapping around. `order` overrides the default
+ * Claude list (e.g. the Codex mode set). When using the Claude list, `auto`
+ * is skipped unless `autoEnabled`.
+ */
+export function nextAgentMode(
+  mode: AgentMode,
+  autoEnabled = false,
+  order?: AgentMode[]
+): AgentMode {
+  const list =
+    order ?? (autoEnabled ? CLAUDE_MODE_ORDER : CLAUDE_MODE_ORDER.filter((m) => m !== 'auto'))
+  const i = list.indexOf(mode)
+  if (i === -1) return list[0]
+  return list[(i + 1) % list.length]
 }
 
 export interface AgentModePillProps {
@@ -87,9 +143,15 @@ export interface AgentModePillProps {
   variant?: 'pill' | 'text'
   className?: string
   /**
-   * Auto-mode capability. When omitted or `eligible: false`, the `auto` option
-   * is hidden entirely. When eligible but not opted in, the option is shown
-   * disabled with a hint to opt in via the `claude` CLI.
+   * Ordered mode ids to offer. Defaults to the Claude permission modes; the
+   * codex-chat caller passes its own runtime-mode set. When omitted, the
+   * `auto` option is gated by `autoCapability`.
+   */
+  modes?: AgentMode[]
+  /**
+   * Auto-mode capability (Claude only). When omitted or `eligible: false`, the
+   * `auto` option is hidden. When eligible but not opted in, it's shown
+   * disabled with an opt-in hint. Ignored when `modes` is supplied explicitly.
    */
   autoCapability?: AutoModeCapability
 }
@@ -101,11 +163,13 @@ export function AgentModePill({
   compact,
   variant = 'pill',
   className,
+  modes,
   autoCapability
 }: AgentModePillProps) {
-  const meta = MODE_META[mode]
+  const meta = MODE_META[mode] ?? FALLBACK_META
   const Icon = meta.icon
-  const visibleModes = MODE_ORDER.filter((m) => m !== 'auto' || autoCapability?.eligible === true)
+  const visibleModes =
+    modes ?? CLAUDE_MODE_ORDER.filter((m) => m !== 'auto' || autoCapability?.eligible === true)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -131,7 +195,7 @@ export function AgentModePill({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72">
         {visibleModes.map((m) => {
-          const itemMeta = MODE_META[m]
+          const itemMeta = MODE_META[m] ?? FALLBACK_META
           const ItemIcon = itemMeta.icon
           const selected = m === mode
           // `auto` is selectable only when eligible AND opted in. Eligible-but-not-opted-in

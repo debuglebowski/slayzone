@@ -3,12 +3,21 @@ import { randomUUID } from 'node:crypto'
 import readline from 'node:readline'
 import type { AgentEvent } from '../shared/agent-events'
 import type { ChatSessionStateEntry } from '../shared/types'
-import type { AgentAdapter } from './agents/types'
-import { getAdapter } from './agents/registry'
+import type {
+  AgentBackend,
+  ChatDriverContext,
+  ChatSessionDriver,
+  PermissionDecision
+} from './agents/types'
+import { getBackend } from './agents/registry'
 import { whichBinary as realWhichBinary } from './shell-env'
 import type { BufferedEvent } from './chat-events-store'
-import type { ChatMode } from '../shared/chat-mode'
-import type { ChatModel } from '../shared/chat-model'
+// `chatMode` is an opaque, provider-specific runtime/permission mode id
+// (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
+// typed `string`. `shared/chat-mode-catalog.ts` owns the per-mode vocabulary.
+// `chatModel` is an opaque, provider-specific model id (`claude --model`
+// alias for claude-chat, Codex model id for codex-chat) — typed as `string`.
+// The provider-aware catalog (`shared/chat-model-catalog.ts`) owns validity.
 import type { ChatEffort } from '../shared/chat-effort'
 import { markSessionUserInput, clearSessionUserInputMark } from './user-input-tracker'
 
@@ -156,17 +165,11 @@ export interface ChatSessionInfo {
    * don't track a permission mode. Renderer prefers this over `chat:getMode`
    * (DB cache) on mount when a session exists.
    */
-  chatMode?: ChatMode | null
-  /** Resolved chat model alias this session was spawned with. */
-  chatModel?: ChatModel | null
+  chatMode?: string | null
+  /** Resolved chat model id this session was spawned with. */
+  chatModel?: string | null
   /** Resolved reasoning effort this session was spawned with. `null` = inherit. */
   chatEffort?: ChatEffort | null
-}
-
-interface PendingControl {
-  resolve: (data: unknown) => void
-  reject: (err: Error) => void
-  timer: NodeJS.Timeout
 }
 
 interface Session {
@@ -183,7 +186,12 @@ interface Session {
   taskId: string
   mode: string
   cwd: string
-  adapter: AgentAdapter
+  backend: AgentBackend
+  /**
+   * Per-spawn protocol driver. Null while the session is `not-spawned`;
+   * created in `spawnSubprocess` and disposed in the `exit` handler.
+   */
+  driver: ChatSessionDriver | null
   /**
    * The OS subprocess. Null when the session is hydrated-only (`not-spawned`
    * state) — buffer + metadata exist, but no child has been started. Set by
@@ -206,19 +214,11 @@ interface Session {
   /** Opts needed to respawn. */
   respawnOpts: CreateChatOpts
   /** Resolved chat permission mode this session was spawned with. */
-  chatMode: ChatMode | null
-  /** Resolved chat model alias this session was spawned with. */
-  chatModel: ChatModel | null
+  chatMode: string | null
+  /** Resolved chat model id this session was spawned with. */
+  chatModel: string | null
   /** Resolved reasoning effort this session was spawned with. */
   chatEffort: ChatEffort | null
-  /**
-   * In-flight `control_request` promises, keyed by request_id. Transport
-   * resolves on matching `control_response` from the adapter. Cleared on
-   * session end / process exit (any pending promises reject).
-   */
-  pendingControl: Map<string, PendingControl>
-  /** Monotonic counter for generating unique request_ids per session. */
-  controlReqCounter: number
   onPersistSessionId?: (id: string) => void
   onInvalidResume?: () => void
   /**
@@ -372,7 +372,7 @@ function commitEvent(session: Session, event: AgentEvent): void {
   }
 
   // Surface discovered session id for persistence (resume-on-reopen).
-  const extracted = session.adapter.extractSessionId(event)
+  const extracted = session.driver?.extractSessionId(event) ?? null
   if (extracted && session.onPersistSessionId) {
     session.onPersistSessionId(extracted)
   }
@@ -515,13 +515,13 @@ export interface CreateChatOpts {
    */
   initialNextSeq?: number
   /**
-   * Resolved chat permission mode this spawn corresponds to. Stored on the
-   * Session and surfaced via ChatSessionInfo. When null, adapter doesn't
-   * use a permission-mode concept (non-claude agents).
+   * Resolved chat permission/runtime mode this spawn corresponds to. Stored
+   * on the Session and surfaced via ChatSessionInfo. When null, the provider
+   * doesn't use a mode concept.
    */
-  chatMode?: ChatMode | null
-  /** Resolved chat model alias for the spawn (claude --model). */
-  chatModel?: ChatModel | null
+  chatMode?: string | null
+  /** Resolved chat model id for the spawn (provider-specific). */
+  chatModel?: string | null
   /** Resolved reasoning effort for the spawn (claude --effort). */
   chatEffort?: ChatEffort | null
 }
@@ -569,9 +569,9 @@ export function hydrateSession(opts: CreateChatOpts): ChatSessionInfo {
     }
   }
 
-  const adapter = getAdapter(opts.mode)
-  if (!adapter) {
-    throw new ChatTransportError(`No agent adapter registered for mode "${opts.mode}"`)
+  const backend = getBackend(opts.mode)
+  if (!backend) {
+    throw new ChatTransportError(`No agent backend registered for mode "${opts.mode}"`)
   }
 
   // Seed buffer/seq from persisted history when chat-handlers passed it in.
@@ -596,7 +596,8 @@ export function hydrateSession(opts: CreateChatOpts): ChatSessionInfo {
     taskId: opts.taskId,
     mode: opts.mode,
     cwd: opts.cwd,
-    adapter,
+    backend,
+    driver: null,
     child: null,
     buffer: seededBuffer,
     nextSeq: seededNextSeq,
@@ -611,8 +612,6 @@ export function hydrateSession(opts: CreateChatOpts): ChatSessionInfo {
     chatMode: opts.chatMode ?? null,
     chatModel: opts.chatModel ?? null,
     chatEffort: opts.chatEffort ?? null,
-    pendingControl: new Map(),
-    controlReqCounter: 0,
     onPersistSessionId: opts.onPersistSessionId,
     onInvalidResume: opts.onInvalidResume,
     staged: [],
@@ -694,12 +693,12 @@ export async function ensureSpawned(tabId: string): Promise<ChatSessionInfo> {
  */
 async function spawnSubprocess(session: Session): Promise<void> {
   const opts = session.respawnOpts
-  const adapter = session.adapter
+  const backend = session.backend
 
-  const binary = await deps.whichBinary(adapter.binaryName)
+  const binary = await deps.whichBinary(backend.binaryName)
   if (!binary) {
     throw new ChatTransportError(
-      `Binary "${adapter.binaryName}" not found on PATH. Install it or fix your shell's PATH.`
+      `Binary "${backend.binaryName}" not found on PATH. Install it or fix your shell's PATH.`
     )
   }
 
@@ -707,7 +706,7 @@ async function spawnSubprocess(session: Session): Promise<void> {
   // spawn-id per OS process so the renderer can scope bg shells to this run.
   const sessionId = session.sessionId
   session.spawnId = randomUUID()
-  const { args } = adapter.buildSpawnArgs({
+  const { args } = backend.buildSpawnArgs({
     sessionId,
     resume: Boolean(opts.conversationId),
     cwd: opts.cwd,
@@ -737,6 +736,30 @@ async function spawnSubprocess(session: Session): Promise<void> {
   // promotes to `idle` once the kernel reports the pid.
   transitionState(session, 'starting')
 
+  // Mint a fresh per-spawn protocol driver and build its IO context. The
+  // driver owns ALL provider-protocol logic (handshake, line parsing,
+  // request correlation); the transport only moves bytes in and AgentEvents
+  // out. `driver.start(ctx)` runs once on the `'spawn'` event below.
+  const driver = backend.createDriver()
+  session.driver = driver
+  const driverCtx: ChatDriverContext = {
+    write: (line) => {
+      try {
+        session.child?.stdin?.write(line + '\n')
+      } catch {
+        /* best-effort; a dead pipe surfaces via process exit */
+      }
+    },
+    emit: (event) => handleEvent(session, event),
+    cwd: opts.cwd,
+    sessionId,
+    resume: Boolean(opts.conversationId),
+    providerFlags: opts.providerFlags,
+    chatModel: session.chatModel,
+    chatEffort: session.chatEffort,
+    chatMode: session.chatMode
+  }
+
   // --- spawn: subprocess confirmed alive ---
   // Tie state machine to actual OS process lifecycle. `'spawn'` fires after the
   // kernel has the pid; before any agent event arrives. Without this, sessions
@@ -755,58 +778,27 @@ async function spawnSubprocess(session: Session): Promise<void> {
     if (session.terminalState === 'starting') {
       transitionState(session, 'idle')
     }
+    // Hand the driver its IO context. For a stream provider this just stores
+    // `ctx`; for a JSON-RPC provider it kicks off the `initialize` handshake.
+    // `'spawn'` always precedes the first stdout `'line'`, so `handleLine`
+    // never runs before `start`.
+    void Promise.resolve(driver.start(driverCtx)).catch((err) => {
+      handleEvent(session, {
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+        detail: { phase: 'driver-start' }
+      })
+    })
   })
 
-  // --- stdout: readline buffers partial lines for us ---
+  // --- stdout: readline buffers partial lines; driver owns parsing ---
   const rl = readline.createInterface({ input: child.stdout!, crlfDelay: Infinity })
   rl.on('line', (line) => {
-    const ev = adapter.parseLine(line)
-    if (!ev) return
-    // Control responses route to the pending sender promise — they're transport
-    // plumbing, not chat timeline events. Skip broadcast/persist/buffer.
-    if (ev.kind === 'control-response') {
-      const pending = session.pendingControl.get(ev.requestId)
-      if (pending) {
-        clearTimeout(pending.timer)
-        session.pendingControl.delete(ev.requestId)
-        if (ev.isError) pending.reject(new Error(ev.error ?? 'control_request failed'))
-        else pending.resolve(ev.data)
-      }
-      return
+    try {
+      driver.handleLine(line)
+    } catch (err) {
+      console.error('[chat-transport] driver.handleLine threw:', err)
     }
-    // Plan-mode `ExitPlanMode` arrives via stdio permission-prompt because we
-    // pass `--permission-prompt-tool stdio` (claude-code-adapter.ts). The
-    // renderer's footer flow ("Approve & exit plan") is keyed off the SDK's
-    // `result.permissionDenials` — but the SDK only emits that AFTER receiving
-    // a control_response. Without an answer here the SDK blocks indefinitely
-    // and the chat sticks in `inFlight` with a "ExitPlanMode…" indicator.
-    // Auto-deny so the SDK delivers tool_result + result-with-denial; the
-    // existing renderer footer handles user approval (mode flip + re-send).
-    if (
-      ev.kind === 'permission-request' &&
-      ev.toolName === 'ExitPlanMode' &&
-      session.adapter.serializeControlResponse
-    ) {
-      const line = session.adapter.serializeControlResponse({
-        requestId: ev.requestId,
-        response: { behavior: 'deny', message: 'Plan mode requires explicit approval' }
-      })
-      if (line != null) {
-        try {
-          session.child?.stdin?.write(line + '\n')
-        } catch {
-          /* best-effort; SDK timeout will surface via process exit */
-        }
-      }
-      return
-    }
-    if (ev.kind === 'unknown' && ev.reason === 'unknown-type') {
-      // Surface unknown top-level types once, tagged for log filtering.
-      const raw = ev.raw as { type?: string } | null
-      const t = raw?.type ?? '<no-type>'
-      console.warn(`[chat-parser] unknown event type=${t}`)
-    }
-    handleEvent(session, ev)
   })
 
   // --- stderr: debounced buffer, emit as kind:'stderr' ---
@@ -841,11 +833,12 @@ async function spawnSubprocess(session: Session): Promise<void> {
         console.error('[chat-transport] markTabSpawned(false) failed:', err)
       }
     }
-    // Reject any in-flight control_request promises so callers don't hang.
-    for (const [id, pending] of session.pendingControl) {
-      clearTimeout(pending.timer)
-      pending.reject(new Error('session ended before control_response'))
-      session.pendingControl.delete(id)
+    // Tear down the driver — rejects its in-flight control/request promises
+    // so callers don't hang.
+    try {
+      session.driver?.dispose()
+    } catch (err) {
+      console.error('[chat-transport] driver.dispose threw:', err)
     }
     // If this session was already replaced in the tab (e.g. reset: kill+create raced and the
     // new session is already live), swallow the exit so the UI doesn't revert to "Session ended".
@@ -870,9 +863,8 @@ async function spawnSubprocess(session: Session): Promise<void> {
 
 export function sendUserMessage(tabId: string, text: string): boolean {
   const session = sessions.get(tabId)
-  if (!session || session.ended || !session.child) return false
-  const line = session.adapter.serializeUserMessage(text, session.sessionId)
-  session.child.stdin?.write(line + '\n')
+  if (!session || session.ended || !session.child || !session.driver) return false
+  session.driver.sendUserMessage(text)
   // Record into the session buffer so tab reloads / replay reconstruct user messages.
   handleEvent(session, { kind: 'user-message', text })
   markSessionUserInput(`${session.taskId}:${session.tabId}`)
@@ -884,7 +876,7 @@ export function sendUserMessage(tabId: string, text: string): boolean {
  * stdin. Used by inline-answer flows like AskUserQuestion so the SDK's turn
  * machinery sees a normal completion instead of an orphaned tool_use that
  * skews stop_reason / usage accounting. Returns false when the session is
- * gone or the adapter lacks a structured-input channel — caller falls back
+ * gone or the driver lacks a structured-input channel — caller falls back
  * to `sendUserMessage`.
  */
 export function sendToolResult(
@@ -892,25 +884,16 @@ export function sendToolResult(
   args: { toolUseId: string; content: string; isError?: boolean }
 ): boolean {
   const session = sessions.get(tabId)
-  if (!session || session.ended || !session.child) return false
-  if (!session.adapter.serializeToolResult) return false
-  const line = session.adapter.serializeToolResult({
-    toolUseId: args.toolUseId,
-    content: args.content,
-    isError: args.isError,
-    sessionId: session.sessionId
-  })
-  if (line == null) return false
-  session.child.stdin?.write(line + '\n')
-  return true
+  if (!session || session.ended || !session.child || !session.driver) return false
+  if (!session.driver.sendToolResult) return false
+  return session.driver.sendToolResult(args)
 }
 
 /**
- * Send a `control_request` over stdin and resolve when the matching
- * `control_response` arrives (correlated by `request_id`). Rejects on adapter
- * lacking a control channel, on timeout, on response `subtype:'error'`, or on
- * session exit before a response arrives. Used to flip permission mode /
- * model / interrupt without restarting the subprocess.
+ * Send a control request to the driver and resolve when the provider
+ * acknowledges. Rejects on driver lacking a control channel, on timeout, on
+ * provider error, or on session exit before a response arrives. Used to flip
+ * permission mode / model / interrupt without restarting the subprocess.
  */
 export function sendControlRequest(
   tabId: string,
@@ -918,33 +901,13 @@ export function sendControlRequest(
   timeoutMs = 30_000
 ): Promise<unknown> {
   const session = sessions.get(tabId)
-  if (!session || session.ended || !session.child) {
+  if (!session || session.ended || !session.child || !session.driver) {
     return Promise.reject(new Error('no live session'))
   }
-  if (!session.adapter.serializeControlRequest) {
-    return Promise.reject(new Error('adapter has no control channel'))
+  if (!session.driver.applyControl) {
+    return Promise.reject(new Error('driver has no control channel'))
   }
-  session.controlReqCounter++
-  const requestId = `req_${session.controlReqCounter}_${Date.now().toString(36)}`
-  const line = session.adapter.serializeControlRequest({ requestId, request })
-  if (line == null) {
-    return Promise.reject(new Error('adapter refused to serialize control_request'))
-  }
-  const child = session.child
-  return new Promise<unknown>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      session.pendingControl.delete(requestId)
-      reject(new Error(`control_request timeout after ${timeoutMs}ms`))
-    }, timeoutMs)
-    session.pendingControl.set(requestId, { resolve, reject, timer })
-    try {
-      child.stdin?.write(line + '\n')
-    } catch (err) {
-      clearTimeout(timer)
-      session.pendingControl.delete(requestId)
-      reject(err instanceof Error ? err : new Error(String(err)))
-    }
-  })
+  return session.driver.applyControl(request, timeoutMs)
 }
 
 /**
@@ -952,7 +915,7 @@ export function sendControlRequest(
  * `set_permission_mode` control_request so `getSessionInfo` reflects the new
  * mode without waiting for a turn-init drift sync.
  */
-export function updateSessionChatMode(tabId: string, mode: ChatMode | null): void {
+export function updateSessionChatMode(tabId: string, mode: string | null): void {
   const session = sessions.get(tabId)
   if (!session) return
   session.chatMode = mode
@@ -963,7 +926,7 @@ export function updateSessionChatMode(tabId: string, mode: ChatMode | null): voi
  * `set_model` control_request so `getSessionInfo` reflects the new model
  * without waiting for a turn-init drift sync.
  */
-export function updateSessionChatModel(tabId: string, model: ChatModel | null): void {
+export function updateSessionChatModel(tabId: string, model: string | null): void {
   const session = sessions.get(tabId)
   if (!session) return
   session.chatModel = model
@@ -983,37 +946,18 @@ export function updateSessionChatEffort(tabId: string, effort: ChatEffort | null
 /**
  * Reply to an inbound `control_request` (e.g. `subtype:'can_use_tool'` from
  * `--permission-prompt-tool stdio`). The renderer has surfaced the prompt
- * to the user and gathered their decision; this writes the success/error
- * `control_response` on stdin so the CLI unblocks the tool. Returns false
- * when session/adapter can't carry the reply — caller handles fallback.
+ * to the user and gathered their decision; the driver translates it to the
+ * provider's approval reply. Returns false when session/driver can't carry
+ * the reply — caller handles fallback.
  */
 export function respondToPermissionRequest(
   tabId: string,
-  args: {
-    requestId: string
-    decision:
-      | {
-          behavior: 'allow'
-          updatedInput?: Record<string, unknown>
-          updatedPermissions?: unknown[]
-        }
-      | { behavior: 'deny'; message: string; interrupt?: boolean }
-  }
+  args: { requestId: string; decision: PermissionDecision }
 ): boolean {
   const session = sessions.get(tabId)
-  if (!session || session.ended || !session.child) return false
-  if (!session.adapter.serializeControlResponse) return false
-  const line = session.adapter.serializeControlResponse({
-    requestId: args.requestId,
-    response: args.decision as unknown as Record<string, unknown>
-  })
-  if (line == null) return false
-  try {
-    session.child.stdin?.write(line + '\n')
-    return true
-  } catch {
-    return false
-  }
+  if (!session || session.ended || !session.child || !session.driver) return false
+  if (!session.driver.respondPermission) return false
+  return session.driver.respondPermission(args)
 }
 
 /**
@@ -1106,6 +1050,7 @@ function isProgressEventKind(kind: AgentEvent['kind']): boolean {
     case 'stream-block-delta':
     case 'stream-block-stop':
     case 'stream-message-stop':
+    case 'agent-plan':
       return true
     default:
       return false

@@ -32,6 +32,26 @@ export type AgentEvent =
   | ControlResponseEvent
   | PermissionRequestEvent
   | SessionSpawnEvent
+  | AgentPlanEvent
+
+/**
+ * Agent task plan, emitted by Codex `turn/plan/updated`. Codex pushes this
+ * repeatedly as the plan evolves within a turn; the reducer collapses
+ * consecutive updates in the same turn into one timeline card. Claude's
+ * nearest analog is the `TodoWrite` tool — kept as a first-class event so
+ * Codex plans render without depending on tool-call shape.
+ */
+export interface AgentPlanEvent {
+  kind: 'agent-plan'
+  /** Optional one-line rationale from the agent. */
+  explanation?: string
+  steps: AgentPlanStep[]
+}
+
+export interface AgentPlanStep {
+  step: string
+  status: 'pending' | 'inProgress' | 'completed'
+}
 
 /**
  * Streaming events from Claude Code's `--verbose` stream-json output.

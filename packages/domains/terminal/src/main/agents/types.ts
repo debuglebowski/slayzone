@@ -86,3 +86,92 @@ export interface AgentAdapter {
    */
   extractSessionId(event: AgentEvent): string | null
 }
+
+/**
+ * Decision payload for an inbound permission request, surfaced from the
+ * renderer via `chat:respondPermission`. The shape mirrors Claude Code's
+ * `control_response` for `can_use_tool`; provider drivers translate it to
+ * their own approval vocabulary.
+ */
+export type PermissionDecision =
+  | { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] }
+  | { behavior: 'deny'; message: string; interrupt?: boolean }
+
+/**
+ * IO seam handed to a `ChatSessionDriver` once its OS subprocess is alive.
+ * The driver writes protocol bytes via `write` and pushes normalized
+ * `AgentEvent`s into the transport pipeline via `emit`. The transport owns
+ * buffering / persistence / broadcast / the state machine — the driver never
+ * touches those directly.
+ */
+export interface ChatDriverContext {
+  /** Write one protocol line to child stdin. The transport appends the newline. */
+  write(line: string): void
+  /** Route one normalized event through the transport (buffer + persist + broadcast + state). */
+  emit(event: AgentEvent): void
+  /** Working directory the subprocess was spawned in. */
+  cwd: string
+  /** Resume id when `resume` is true, otherwise a fresh uuid. */
+  sessionId: string
+  /** True when this spawn should resume an existing conversation/thread. */
+  resume: boolean
+  /** Shell-parsed provider flags. */
+  providerFlags: string[]
+  /** Resolved chat model alias for this spawn (`null` = provider default). */
+  chatModel: string | null
+  /** Resolved reasoning effort for this spawn (`null` = inherit). */
+  chatEffort: string | null
+  /** Resolved runtime/permission mode for this spawn (`null` = provider default). */
+  chatMode: string | null
+}
+
+/**
+ * Stateful, per-spawn protocol driver. One instance is created by the
+ * transport for each OS subprocess (`AgentBackend.createDriver`) and torn
+ * down on process exit. Unlike the stateless `AgentAdapter`, a driver may
+ * own a handshake, request/response correlation state, and pending promises
+ * — which is what a bidirectional JSON-RPC provider (Codex) requires and a
+ * one-directional stream provider (Claude) simply ignores.
+ */
+export interface ChatSessionDriver {
+  /**
+   * Called exactly once after the OS process emits `'spawn'`, before any
+   * `handleLine`/`sendUserMessage` call. Receives the IO context. A JSON-RPC
+   * provider runs its `initialize`/handshake here; a stream provider just
+   * stores the context. May be async — the transport does not block on it.
+   */
+  start(ctx: ChatDriverContext): void | Promise<void>
+  /** Handle one stdout line. Emits zero or more events via `ctx.emit`. Must never throw. */
+  handleLine(line: string): void
+  /** Dispatch a user message to the provider. */
+  sendUserMessage(text: string): void
+  /**
+   * Resolve a pending tool call with a structured result. Return false when
+   * the provider has no structured-input channel — the transport falls back
+   * to `sendUserMessage`.
+   */
+  sendToolResult?(args: { toolUseId: string; content: string; isError?: boolean }): boolean
+  /**
+   * Apply a control operation (permission-mode / model / interrupt). The
+   * `request` payload is provider-specific. Resolves when the provider
+   * acknowledges, rejects on timeout / unsupported / session exit.
+   */
+  applyControl?(request: Record<string, unknown>, timeoutMs: number): Promise<unknown>
+  /** Reply to an inbound permission request. Return false when unsupported. */
+  respondPermission?(args: { requestId: string; decision: PermissionDecision }): boolean
+  /** Extract a session/conversation id from an event for resume persistence. */
+  extractSessionId(event: AgentEvent): string | null
+  /** Teardown — reject pending promises, clear timers. Called on process exit. */
+  dispose(): void
+}
+
+/**
+ * Per-mode protocol backend. Supplies the spawn command and mints a fresh
+ * stateful `ChatSessionDriver` for every OS subprocess. Replaces the old
+ * singleton `AgentAdapter` as the registry value type.
+ */
+export interface AgentBackend {
+  readonly binaryName: string
+  buildSpawnArgs(opts: AgentSpawnOpts): SpawnArgs
+  createDriver(): ChatSessionDriver
+}

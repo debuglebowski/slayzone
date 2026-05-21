@@ -88,6 +88,56 @@ const ev = {
 
 console.log('\nChat timeline reducer tests\n')
 
+test('agent-plan: first update appends a plan card', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'agent-plan', steps: [{ step: 'a', status: 'pending' }] }
+  })
+  const plans = s.timeline.filter((i) => i.kind === 'plan')
+  expect(plans.length).toBe(1)
+})
+
+test('agent-plan: consecutive updates in one turn collapse into a single card', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'agent-plan', steps: [{ step: 'a', status: 'pending' }] }
+  })
+  s = reducer(s, {
+    type: 'event',
+    event: {
+      kind: 'agent-plan',
+      steps: [
+        { step: 'a', status: 'completed' },
+        { step: 'b', status: 'inProgress' }
+      ]
+    }
+  })
+  const plans = s.timeline.filter((i) => i.kind === 'plan')
+  expect(plans.length).toBe(1)
+  const plan = plans[0]
+  expect(plan.kind === 'plan' && plan.steps.length).toBe(2)
+})
+
+test('agent-plan: a new turn gets its own plan card', () => {
+  let s = initialState()
+  s = reducer(s, { type: 'event', event: ev.turnInit() })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'agent-plan', steps: [{ step: 'a', status: 'pending' }] }
+  })
+  s = reducer(s, { type: 'event', event: { kind: 'user-message', text: 'next' } })
+  s = reducer(s, {
+    type: 'event',
+    event: { kind: 'agent-plan', steps: [{ step: 'b', status: 'pending' }] }
+  })
+  const plans = s.timeline.filter((i) => i.kind === 'plan')
+  expect(plans.length).toBe(2)
+})
+
 test('call + result → one tool item with status done', () => {
   let s = initialState()
   s = reducer(s, { type: 'event', event: ev.turnInit() })

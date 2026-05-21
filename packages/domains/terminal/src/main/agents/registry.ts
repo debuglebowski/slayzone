@@ -1,24 +1,26 @@
-import type { AgentAdapter } from './types'
-import { claudeCodeAdapter } from './claude-code-adapter'
+import type { AgentBackend } from './types'
+import { claudeChatBackend } from './claude-session-driver'
+import { codexChatBackend } from './codex/codex-chat-session'
 import { CHAT_SUPPORTED_MODES, type ChatSupportedMode } from '../../shared/types'
 
 /**
- * TerminalMode → AgentAdapter mapping. Keys must match
- * `CHAT_SUPPORTED_MODES` exactly — TS enforces it.
- * `'claude-code'` is intentionally absent: PTY-only mode after the split;
- * chat lives in `'claude-chat'` which reuses the same adapter object.
+ * TerminalMode → AgentBackend mapping. Keys must match `CHAT_SUPPORTED_MODES`
+ * exactly — TS enforces it, and the boot-time loop below fails fast on drift.
+ * `'claude-code'`/`'codex'` are intentionally absent: those are PTY-only
+ * modes; chat lives in `'claude-chat'` / `'codex-chat'`.
  */
-const REGISTRY: Record<ChatSupportedMode, AgentAdapter> = {
-  'claude-chat': claudeCodeAdapter
+const REGISTRY: Record<ChatSupportedMode, AgentBackend> = {
+  'claude-chat': claudeChatBackend,
+  'codex-chat': codexChatBackend
 }
 
 // Defense-in-depth: catch drift between CHAT_SUPPORTED_MODES and REGISTRY at boot.
 for (const mode of CHAT_SUPPORTED_MODES) {
-  if (!REGISTRY[mode]) throw new Error(`Missing adapter for chat-capable mode '${mode}'`)
+  if (!REGISTRY[mode]) throw new Error(`Missing agent backend for chat-capable mode '${mode}'`)
 }
 
-export function getAdapter(mode: string): AgentAdapter | null {
-  return (REGISTRY as Record<string, AgentAdapter>)[mode] ?? null
+export function getBackend(mode: string): AgentBackend | null {
+  return (REGISTRY as Record<string, AgentBackend>)[mode] ?? null
 }
 
 export function supportsChatMode(mode: string): boolean {

@@ -1,4 +1,9 @@
-import type { AgentEvent, ToolCallEvent, ToolResultEvent } from '../shared/agent-events'
+import type {
+  AgentEvent,
+  AgentPlanStep,
+  ToolCallEvent,
+  ToolResultEvent
+} from '../shared/agent-events'
 import {
   extractBgShellSpawn,
   extractShellIdFromSpawnResult,
@@ -93,6 +98,13 @@ export type TimelineItem =
     }
   | { kind: 'stderr'; text: string; timestamp: number; parentToolUseId?: string }
   | { kind: 'interrupted'; timestamp: number; parentToolUseId?: string }
+  | {
+      kind: 'plan'
+      steps: AgentPlanStep[]
+      explanation?: string
+      timestamp: number
+      parentToolUseId?: string
+    }
   | { kind: 'unknown'; reason: string; timestamp: number; parentToolUseId?: string }
 
 export interface ToolInvocation {
@@ -939,6 +951,31 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent): ChatTimelineSt
         subAgentIndex: nextIdx,
         childIndex
       }
+    }
+    case 'agent-plan': {
+      // Codex pushes `turn/plan/updated` repeatedly as the plan evolves.
+      // Collapse consecutive updates within the same turn into one card:
+      // scan back from the tail; if a `plan` item precedes any turn boundary
+      // (user-text / result / session-start), replace it in place — else
+      // append a fresh card for this turn.
+      const item: TimelineItem = {
+        kind: 'plan',
+        steps: event.steps,
+        explanation: event.explanation,
+        timestamp: ts
+      }
+      for (let i = state.timeline.length - 1; i >= 0; i--) {
+        const it = state.timeline[i]
+        if (it.kind === 'user-text' || it.kind === 'result' || it.kind === 'session-start') {
+          break
+        }
+        if (it.kind === 'plan') {
+          const next = state.timeline.slice()
+          next[i] = { ...item, timestamp: it.timestamp }
+          return { ...state, timeline: next }
+        }
+      }
+      return { ...state, timeline: [...state.timeline, item] }
     }
     case 'compact-boundary':
       return state

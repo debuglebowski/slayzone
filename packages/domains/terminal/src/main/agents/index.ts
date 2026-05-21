@@ -3,4 +3,13 @@
  * code can call `parseLine` without dragging electron-only main barrel deps.
  */
 export { claudeCodeAdapter } from './claude-code-adapter'
-export type { AgentAdapter, AgentSpawnOpts, SpawnArgs } from './types'
+export { claudeChatBackend } from './claude-session-driver'
+export type {
+  AgentAdapter,
+  AgentBackend,
+  AgentSpawnOpts,
+  ChatDriverContext,
+  ChatSessionDriver,
+  PermissionDecision,
+  SpawnArgs
+} from './types'
