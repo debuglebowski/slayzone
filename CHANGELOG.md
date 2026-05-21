@@ -1,6 +1,66 @@
 # Changelog
 
 
+## v0.32.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.31.0...v0.32.0)
+
+### 🚀 Enhancements
+
+- **projects:** Add delete-project danger zone in settings ([9a3f89e3](https://github.com/debuglebowski/slayzone/commit/9a3f89e3))
+- **ui:** Drag-reorder panel toggle buttons ([d704adac](https://github.com/debuglebowski/slayzone/commit/d704adac))
+- **terminal:** Add Antigravity (agy) provider support ([4b9c5bc3](https://github.com/debuglebowski/slayzone/commit/4b9c5bc3))
+- **tasks:** Add Mark as unread to context menu ([cd171762](https://github.com/debuglebowski/slayzone/commit/cd171762))
+- **terminal:** Add Codex Chat mode ([cb24c675](https://github.com/debuglebowski/slayzone/commit/cb24c675))
+- **terminal:** Codex logo for codex-chat tabs ([b52ed696](https://github.com/debuglebowski/slayzone/commit/b52ed696))
+- **terminal:** Liveness watchdog for chat sessions ([8092997d](https://github.com/debuglebowski/slayzone/commit/8092997d))
+
+### 🔥 Performance
+
+- **build:** Use SWC React transform in dev ([66e32bb7](https://github.com/debuglebowski/slayzone/commit/66e32bb7))
+
+### 🩹 Fixes
+
+- **task:** Settings cards expand + full-height fill ([73ef40be](https://github.com/debuglebowski/slayzone/commit/73ef40be))
+- **tasks:** Persist title in tree-view rename ([a6e6db93](https://github.com/debuglebowski/slayzone/commit/a6e6db93))
+- **agent-hooks:** Windows hook paths + cross-platform slay init ([2466d3d4](https://github.com/debuglebowski/slayzone/commit/2466d3d4))
+- **agent-hooks:** Replace Codex bash wrapper with native hooks.json ([b462b376](https://github.com/debuglebowski/slayzone/commit/b462b376))
+- **ui:** Align spinner + progress ring in TerminalProgressDot ([589388ba](https://github.com/debuglebowski/slayzone/commit/589388ba))
+- **ui:** Layer hover-revealed sidebar above browser panel ([cde5d56c](https://github.com/debuglebowski/slayzone/commit/cde5d56c))
+- **terminal:** Load WebglAddon after open() to fix scrambled glyphs ([c0967e0e](https://github.com/debuglebowski/slayzone/commit/c0967e0e))
+- **terminal:** Remove silence-timer status reset for hook-driven agents ([fa2984cb](https://github.com/debuglebowski/slayzone/commit/fa2984cb))
+- **browser:** Stop "app" prefix accumulating in file:// URLs ([f8594f0c](https://github.com/debuglebowski/slayzone/commit/f8594f0c))
+- **task:** Make panel resize move the shared boundary ([38435954](https://github.com/debuglebowski/slayzone/commit/38435954))
+- **app:** Flush dev perf.measure buffer to prevent renderer OOM ([a113d0a8](https://github.com/debuglebowski/slayzone/commit/a113d0a8))
+- **terminal:** Harden WebGL renderer lifecycle ([46e29096](https://github.com/debuglebowski/slayzone/commit/46e29096))
+- **terminal:** Keep color index 4 when stripping SGR underline ([5aa132cb](https://github.com/debuglebowski/slayzone/commit/5aa132cb))
+- **terminal:** Tear down Codex session on fatal start error ([589046e9](https://github.com/debuglebowski/slayzone/commit/589046e9))
+- **app:** Resize home and side panels via the shared boundary ([0530a182](https://github.com/debuglebowski/slayzone/commit/0530a182))
+- **terminal:** Load webfont before opening xterm to fix cold-start glyph scramble ([a7bfffb9](https://github.com/debuglebowski/slayzone/commit/a7bfffb9))
+
+### 💅 Refactors
+
+- **task:** Move task UI state to tasks columns (v140 migration) ([b53478de](https://github.com/debuglebowski/slayzone/commit/b53478de))
+- **sidebar:** Move temp task group to bottom, exclude from DnD ([cd42554a](https://github.com/debuglebowski/slayzone/commit/cd42554a))
+
+### 📖 Documentation
+
+- Remove --dev flag from slay CLI instructions ([9deeb3ac](https://github.com/debuglebowski/slayzone/commit/9deeb3ac))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.31.0 ([07534943](https://github.com/debuglebowski/slayzone/commit/07534943))
+- Gitignore working-notes/performance/*.json ([1e413814](https://github.com/debuglebowski/slayzone/commit/1e413814))
+- **terminal:** Pin xterm to 6.1 beta channel ([610e526a](https://github.com/debuglebowski/slayzone/commit/610e526a))
+
+### 🎨 Styles
+
+- **sidebar:** Add bottom padding to tree view project cards ([88f1c2aa](https://github.com/debuglebowski/slayzone/commit/88f1c2aa))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.31.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.30.0...v0.31.0)

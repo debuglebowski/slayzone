@@ -1,5 +1,87 @@
 [
   {
+    "version": "0.32.0",
+    "date": "2026-05-21",
+    "tagline": "Codex Chat, more agents",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Codex Chat mode",
+        "description": "Run Codex as a chat session alongside the terminal, with its own logo on codex-chat tabs and a liveness watchdog that detects dead sessions."
+      },
+      {
+        "category": "feature",
+        "title": "Antigravity (agy) provider support",
+        "description": "Added Antigravity as a selectable terminal agent provider."
+      },
+      {
+        "category": "feature",
+        "title": "Drag-reorder panel toggle buttons",
+        "description": "Reorder the panel toggle buttons by dragging them into the layout you want."
+      },
+      {
+        "category": "feature",
+        "title": "Delete a project from settings",
+        "description": "Project settings now has a danger zone for permanently deleting a project."
+      },
+      {
+        "category": "feature",
+        "title": "Mark a task as unread",
+        "description": "Task context menu gains a Mark as unread action."
+      },
+      {
+        "category": "improvement",
+        "title": "Panel resize moves the shared boundary",
+        "description": "Dragging to resize a panel now moves the boundary shared with its neighbor instead of resizing in isolation."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal glyphs render cleanly on open",
+        "description": "Fixed scrambled glyphs on cold start and a hardened WebGL renderer lifecycle, so the terminal renders correctly from the first frame."
+      },
+      {
+        "category": "fix",
+        "title": "Tree-view rename persists",
+        "description": "Renaming a task inline in the tree now saves the new title reliably."
+      },
+      {
+        "category": "fix",
+        "title": "Settings cards expand to full height",
+        "description": "Task settings cards now expand and fill the available height."
+      },
+      {
+        "category": "fix",
+        "title": "Agent hooks work on Windows",
+        "description": "Fixed Windows hook paths and cross-platform slay init, plus native hooks.json for Codex."
+      },
+      {
+        "category": "fix",
+        "title": "Codex session cleaned up on fatal start error",
+        "description": "A Codex session that fails to start is now torn down instead of leaving a stuck tab."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal underline no longer drops a color",
+        "description": "Color index 4 is preserved when stripping SGR underline styling."
+      },
+      {
+        "category": "fix",
+        "title": "Browser file:// URLs no longer accumulate an 'app' prefix",
+        "description": "Navigating local files in the browser panel keeps the URL clean."
+      },
+      {
+        "category": "fix",
+        "title": "Hover-revealed sidebar layers above the browser panel",
+        "description": "The sidebar now appears above the browser panel when revealed on hover."
+      },
+      {
+        "category": "fix",
+        "title": "Spinner and progress ring align",
+        "description": "The terminal progress dot's spinner and progress ring are now aligned."
+      }
+    ]
+  },
+  {
     "version": "0.31.0",
     "date": "2026-05-20",
     "tagline": "Sub-tasks, hook-driven agents",
