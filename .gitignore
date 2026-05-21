@@ -40,3 +40,5 @@ playwright-report/
 # Performance profiling artifacts
 *.cpuprofile
 working-notes/performance/**/*.json
+
+working-notes/performance/*.json
