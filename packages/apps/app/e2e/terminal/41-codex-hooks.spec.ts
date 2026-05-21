@@ -1,54 +1,52 @@
 import { test, expect, resetApp } from '../fixtures/electron'
 import fs from 'fs'
-import path from 'path'
-import http from 'http'
 import { spawnSync } from 'child_process'
 
 /**
  * Codex hook-driven agent lifecycle E2E.
  *
- * Validates the load-bearing links:
- *   1. Boot installer writes codex-wrapper.sh to $SLAYZONE_HOME_DIR/bin/codex
- *      with executable mode.
- *   2. notify.sh accepts Codex-shape argv payloads (real codex passes JSON
- *      via argv $1, not stdin) — agentId=codex envelope POST →
- *      /api/agent-hook → IPC broadcast.
+ * Codex integration uses Codex's native hooks system — SlayZone writes
+ * `~/.codex/hooks.json`; Codex itself runs the hook. (The legacy
+ * `~/.slayzone/bin/codex` bash wrapper was removed: it could not run on
+ * Windows.)
  *
- * The real wrapper subprocess + JSONL tail behaviour is exercised by unit /
- * integration tests + manual verification; here we cover the wire format
- * and installer in real Electron.
+ * Validates the load-bearing links:
+ *   1. Boot installer writes a managed `hooks.json` covering the lifecycle events.
+ *   2. notify.sh accepts a Codex-native hook payload (JSON via stdin, event in
+ *      `hook_event_name`) — agentId=codex envelope POST → /api/agent-hook →
+ *      IPC broadcast with the correctly normalized lifecycle type.
  */
 test.describe('Codex agent hooks', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
   })
 
-  test('boot installer wrote codex wrapper to sandbox $SLAYZONE_HOME_DIR/bin/codex', async ({
-    mainWindow
-  }) => {
+  test('boot installer wrote a managed ~/.codex/hooks.json', async ({ mainWindow }) => {
     const env = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
-      return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR'])
+      return window.__testInvoke('e2e:get-env', ['SLAYZONE_CODEX_HOOKS_PATH'])
     })) as Record<string, string>
 
-    expect(env.SLAYZONE_HOME_DIR).toBeTruthy()
-    const wrapperPath = path.join(env.SLAYZONE_HOME_DIR, 'bin', 'codex')
-    await waitForFile(wrapperPath, 5000)
+    expect(env.SLAYZONE_CODEX_HOOKS_PATH).toBeTruthy()
+    await waitForFile(env.SLAYZONE_CODEX_HOOKS_PATH, 5000)
 
-    const stat = fs.statSync(wrapperPath)
-    expect(stat.isFile()).toBe(true)
-    if (process.platform !== 'win32') {
-      expect(stat.mode & 0o777).toBe(0o755)
+    const config = JSON.parse(fs.readFileSync(env.SLAYZONE_CODEX_HOOKS_PATH, 'utf8'))
+    expect(config.hooks).toBeDefined()
+    for (const ev of ['SessionStart', 'UserPromptSubmit', 'Stop', 'PermissionRequest']) {
+      const list = config.hooks[ev]
+      expect(Array.isArray(list)).toBe(true)
+      expect(list.length).toBeGreaterThanOrEqual(1)
+      const managed = list.find((e: { hooks?: Array<{ _slayzoneManaged?: boolean }> }) =>
+        e.hooks?.some((h) => h._slayzoneManaged === true)
+      )
+      expect(managed).toBeTruthy()
+      // notify.sh is invoked explicitly via bash for cross-platform reliability.
+      expect(managed.hooks[0].command).toContain('bash ')
+      expect(managed.hooks[0].command).toContain('notify.sh')
     }
-    const content = fs.readFileSync(wrapperPath, 'utf8')
-    expect(content).toContain('# slayzone codex wrapper v1')
-    // Self-skip resolver must be present so the wrapper doesn't infinite-loop
-    // when ~/.slayzone/bin is on PATH.
-    expect(content).toContain('which -a codex')
-    expect(content).toContain('grep -v')
   })
 
-  test('notify.sh accepts Codex-shape argv → POST → agent:lifecycle IPC for agentId=codex', async ({
+  test('notify.sh accepts a Codex stdin hook payload → agent:lifecycle IPC for agentId=codex', async ({
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
@@ -62,7 +60,7 @@ test.describe('Codex agent hooks', () => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR'])
     })) as Record<string, string>
-    const scriptPath = path.join(env.SLAYZONE_HOME_DIR, 'hooks', 'notify.sh')
+    const scriptPath = `${env.SLAYZONE_HOME_DIR}/hooks/notify.sh`
     await waitForFile(scriptPath, 5000)
 
     await mainWindow.evaluate(() => {
@@ -73,9 +71,9 @@ test.describe('Codex agent hooks', () => {
       ;(window as Record<string, unknown>).__codexHookUnsub = unsub
     })
 
-    // Codex native notify callback shape — passes JSON as argv $1 with "type".
-    const argv = JSON.stringify({ type: 'agent-turn-complete', turn_id: 'e2e' })
-    const res = spawnSync('bash', [scriptPath, argv], {
+    // Codex native hooks deliver the event as JSON on stdin (hook_event_name).
+    const res = spawnSync('bash', [scriptPath], {
+      input: JSON.stringify({ hook_event_name: 'Stop', session_id: 'e2e' }),
       env: {
         ...process.env,
         SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${port}/api/agent-hook`,
@@ -107,9 +105,7 @@ test.describe('Codex agent hooks', () => {
     })
   })
 
-  test('wrapper synthetic Start payload (hook_event_name) maps to agent-start', async ({
-    mainWindow
-  }) => {
+  test('UserPromptSubmit stdin payload maps to agent-start', async ({ mainWindow }) => {
     const port = (await mainWindow.evaluate(() => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-mcp-port', [])
@@ -121,7 +117,7 @@ test.describe('Codex agent hooks', () => {
       // @ts-expect-error -- test bridge
       return window.__testInvoke('e2e:get-env', ['SLAYZONE_HOME_DIR'])
     })) as Record<string, string>
-    const scriptPath = path.join(env.SLAYZONE_HOME_DIR, 'hooks', 'notify.sh')
+    const scriptPath = `${env.SLAYZONE_HOME_DIR}/hooks/notify.sh`
 
     await mainWindow.evaluate(() => {
       ;(window as Record<string, unknown>).__codexStartEvents = []
@@ -131,8 +127,8 @@ test.describe('Codex agent hooks', () => {
       ;(window as Record<string, unknown>).__codexStartUnsub = unsub
     })
 
-    const argv = JSON.stringify({ hook_event_name: 'Start' })
-    const res = spawnSync('bash', [scriptPath, argv], {
+    const res = spawnSync('bash', [scriptPath], {
+      input: JSON.stringify({ hook_event_name: 'UserPromptSubmit' }),
       env: {
         ...process.env,
         SLAYZONE_AGENT_HOOK_URL: `http://127.0.0.1:${port}/api/agent-hook`,

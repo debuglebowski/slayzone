@@ -55,9 +55,9 @@ const ALIAS_TABLE: Record<string, AgentLifecycleEventType> = {
   permissionrequest: 'permission-request',
   precompact: 'agent-stop',
 
-  // Codex / generic aliases (forward-looking; mirrors Superset coverage).
-  // Bare Start/Stop come from the codex wrapper's synthetic
-  // {"hook_event_name":"Start"} payloads (see codex-wrapper.sh).
+  // Codex / generic aliases. Codex now emits the standard Claude-style names
+  // (SessionStart/UserPromptSubmit/Stop/PermissionRequest) via its native
+  // hooks system; these extra aliases stay for legacy/generic payloads.
   // `permissionrequest` already mapped above under Claude block; `stop` reused.
   start: 'agent-start',
   task_started: 'agent-start',

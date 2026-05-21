@@ -3,6 +3,7 @@ export {
   getSlayzoneHomeDir,
   getClaudeSettingsPath,
   getGeminiSettingsPath,
+  getCodexHooksPath,
   getOpencodePluginPath
 } from './dirs'
 export { ensureDataRoot, getTrpcPort, getServerPort, getServerHost } from './paths'

@@ -26,43 +26,29 @@ function expect(actual: unknown) {
   }
 }
 
-console.log('\nCodexAdapter.detectActivity\n')
+console.log('\nCodexAdapter.detectActivity (hook-driven; only approval modal → idle)\n')
 
-test('detects "esc to interrupt" as working', () => {
+test('"esc to interrupt" → null (working is hook-driven via UserPromptSubmit/PreToolUse)', () => {
   const data = '• Planning typecheck and minor updates (3m 37s • esc to interrupt)'
-  expect(adapter.detectActivity(data, 'unknown')).toBe('working')
+  expect(adapter.detectActivity(data, 'unknown')).toBe(null)
 })
 
-test('detects "esc to interrupt" with ANSI codes as working', () => {
+test('"esc to interrupt" with ANSI codes → null', () => {
   const data = '\x1b[1m• Planning\x1b[0m (1m 2s • \x1b[2mesc to interrupt\x1b[0m)'
-  expect(adapter.detectActivity(data, 'unknown')).toBe('working')
+  expect(adapter.detectActivity(data, 'unknown')).toBe(null)
 })
 
-test('detects "esc to interrupt" case-insensitively', () => {
-  expect(adapter.detectActivity('Esc to interrupt', 'unknown')).toBe('working')
-  expect(adapter.detectActivity('ESC TO INTERRUPT', 'unknown')).toBe('working')
+test('alternative interrupt-hint phrases → null', () => {
+  expect(adapter.detectActivity('Escape to cancel', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('Ctrl+C to stop', 'unknown')).toBe(null)
 })
 
-test('keeps working latched when chunk lacks indicator', () => {
-  expect(adapter.detectActivity('Some output without the indicator', 'working')).toBe(null)
-})
-
-test('returns null for text when not currently working', () => {
+test('plain output → null', () => {
   expect(adapter.detectActivity('Some random text', 'unknown')).toBe(null)
 })
 
-test('returns null for whitespace-only output when working', () => {
+test('whitespace-only output → null', () => {
   expect(adapter.detectActivity('   \n\r  ', 'working')).toBe(null)
-})
-
-test('"esc to interrupt" takes priority even when currently working', () => {
-  const data = '• Editing files (5s • esc to interrupt)'
-  expect(adapter.detectActivity(data, 'working')).toBe('working')
-})
-
-test('detects alternative working indicator phrases', () => {
-  expect(adapter.detectActivity('Escape to cancel', 'unknown')).toBe('working')
-  expect(adapter.detectActivity('Ctrl+C to stop', 'unknown')).toBe('working')
 })
 
 console.log('\nCodexAdapter.detectActivity (modal → idle)\n')
@@ -120,13 +106,21 @@ test('MCP elicitation modal → idle', () => {
   expect(adapter.detectActivity(MCP_MODAL, 'working')).toBe('idle')
 })
 
-test('working indicator wins over modal-looking text', () => {
+test('approval modal → idle even with an interrupt hint present', () => {
   const data = `${EXEC_MODAL}\n• Editing files (5s • esc to interrupt)`
-  expect(adapter.detectActivity(data, 'unknown')).toBe('working')
+  expect(adapter.detectActivity(data, 'unknown')).toBe('idle')
 })
 
 test('plain output without modal markers → null', () => {
   expect(adapter.detectActivity('  1. one\n  2. two\n  3. three', 'unknown')).toBe(null)
+})
+
+console.log('\nCodexAdapter config\n')
+
+test('transitionOnInput is default (TUI adapter — silence-timer fallback stays primed)', () => {
+  // Hook-driven like ClaudeAdapter: must NOT be output-driven (`false`), else
+  // every TUI redraw refreshes the idle clock and defeats the 5-min fallback.
+  expect(adapter.transitionOnInput !== false).toBe(true)
 })
 
 console.log('\nCodexAdapter.detectPrompt\n')

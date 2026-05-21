@@ -80,6 +80,47 @@ function claudeCodeHookToTerminalState(hookEvent: string, raw?: unknown): Termin
   }
 }
 
+/**
+ * Codex raw hook event → TerminalState. Codex's hooks system emits the same
+ * standard event names as Claude with matching turn-boundary semantics, so the
+ * mapping mirrors `claudeCodeHookToTerminalState`. Codex surfaces approvals via
+ * the dedicated `PermissionRequest` event — no blocking-tool allowlist needed.
+ *
+ *   UserPromptSubmit / PreToolUse → 'running'
+ *   Stop / PermissionRequest      → 'idle'
+ *   SessionStart / PostToolUse    → null  (no-op; markActive refreshes the clock)
+ */
+function codexHookToTerminalState(hookEvent: string): TerminalState | null {
+  switch (hookEvent) {
+    case 'UserPromptSubmit':
+    case 'PreToolUse':
+      return 'running'
+    case 'Stop':
+    case 'PermissionRequest':
+      return 'idle'
+    default:
+      return null
+  }
+}
+
+/**
+ * Agents whose PTY state machine is driven by hook signals instead of adapter
+ * output detection. Claude Code and Codex both have reliable native lifecycle
+ * hooks; gemini/opencode still rely on adapter detection.
+ */
+const HOOK_DRIVEN_AGENTS: ReadonlySet<string> = new Set(['claude-code', 'codex'])
+
+/** Dispatch to the per-agent raw-hook-event → TerminalState mapper. */
+function hookToTerminalState(
+  agentId: string,
+  hookEvent: string,
+  raw?: unknown
+): TerminalState | null {
+  return agentId === 'codex'
+    ? codexHookToTerminalState(hookEvent)
+    : claudeCodeHookToTerminalState(hookEvent, raw)
+}
+
 /** Stringify + clamp for diagnostic storage. Keeps raw hook payloads from
  *  blowing up the diagnostics DB while still capturing tool_name,
  *  stop_hook_active, transcript_path, etc. Returns the original on
@@ -141,14 +182,18 @@ export function registerAgentHookRoute(
     }
     broadcastToWindows('agent:lifecycle', event)
 
-    // Drive the PTY state machine from the hook signal — this is the source of
-    // truth for claude-code (replaces the bullet-glyph regex in ClaudeAdapter).
-    // Other agents still rely on adapter detection until their detectActivity
-    // is similarly retired.
-    if (parsed.data.agentId === 'claude-code' && parsed.data.taskId) {
-      const sessionId = bridge.findSession(parsed.data.taskId, 'claude-code')
+    // Drive the PTY state machine from the hook signal — the source of truth
+    // for hook-driven agents (replaces adapter output detection / bullet-glyph
+    // regex). gemini/opencode still rely on adapter detection.
+    if (HOOK_DRIVEN_AGENTS.has(parsed.data.agentId) && parsed.data.taskId) {
+      const mode = parsed.data.agentId as TerminalMode
+      const sessionId = bridge.findSession(parsed.data.taskId, mode)
       if (sessionId) {
-        const newState = claudeCodeHookToTerminalState(parsed.data.hookEvent, parsed.data.raw)
+        const newState = hookToTerminalState(
+          parsed.data.agentId,
+          parsed.data.hookEvent,
+          parsed.data.raw
+        )
         recordDiagnosticEvent({
           level: 'info',
           source: 'pty',

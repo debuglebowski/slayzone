@@ -1569,19 +1569,21 @@ app
           const [
             { installNotifyScript },
             { installClaudeHooks },
-            { installCodexWrapper },
+            { installCodexHooks, uninstallCodexWrapper },
             { installGeminiHooks },
             { installOpencodePlugin }
           ] = await Promise.all([
             import('./agent-hooks/notify-script-installer'),
             import('./agent-hooks/claude-hook-installer'),
-            import('./agent-hooks/codex-wrapper-installer'),
+            import('./agent-hooks/codex-hook-installer'),
             import('./agent-hooks/gemini-hook-installer'),
             import('./agent-hooks/opencode-plugin-installer')
           ])
           const { path: scriptPath } = await installNotifyScript()
           await installClaudeHooks({ scriptPath })
-          await installCodexWrapper()
+          await installCodexHooks({ scriptPath })
+          // Remove the legacy ~/.slayzone/bin/codex bash wrapper from prior installs.
+          await uninstallCodexWrapper()
           await installGeminiHooks({ scriptPath })
           await installOpencodePlugin({ notifyPath: scriptPath })
           logBoot('agent hooks installed')

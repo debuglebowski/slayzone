@@ -57,6 +57,16 @@ export function getGeminiSettingsPath(): string {
 }
 
 /**
+ * Absolute path to the user's Codex CLI hooks.json (hooks system, stable
+ * 0.129+). Honours `SLAYZONE_CODEX_HOOKS_PATH` for tests.
+ */
+export function getCodexHooksPath(): string {
+  if (process.env.SLAYZONE_CODEX_HOOKS_PATH) return process.env.SLAYZONE_CODEX_HOOKS_PATH
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir()
+  return path.join(home, '.codex', 'hooks.json')
+}
+
+/**
  * Absolute path to the SlayZone-managed OpenCode plugin file. OpenCode loads
  * `*.js` from `${XDG_CONFIG_HOME:-~/.config}/opencode/plugin/`. Honours
  * `SLAYZONE_OPENCODE_PLUGIN_PATH` so tests can redirect without overriding HOME.

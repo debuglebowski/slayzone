@@ -369,10 +369,82 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('non-claude agent (codex) → broadcast only, no state-machine drive', async () => {
+  test('codex UserPromptSubmit → state machine running (looked up by codex mode)', async () => {
+    findSessionSpy.mockReturnValue('cx-1')
     const srv = await startServer()
     try {
-      await postJson(srv.port, { agentId: 'codex', hookEvent: 'task_complete', taskId: 'task-5' })
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'cx-1'
+      })
+      expect(findSessionSpy).toHaveBeenCalledWith('cx-1', 'codex')
+      expect(transitionSpy).toHaveBeenCalledWith('cx-1', 'running', 'UserPromptSubmit')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex Stop → state machine idle', async () => {
+    findSessionSpy.mockReturnValue('cx-2')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'codex', hookEvent: 'Stop', taskId: 'cx-2' })
+      expect(transitionSpy).toHaveBeenCalledWith('cx-2', 'idle', 'Stop')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex PermissionRequest → idle (paused for user approval)', async () => {
+    findSessionSpy.mockReturnValue('cx-3')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'PermissionRequest',
+        taskId: 'cx-3'
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('cx-3', 'idle', 'PermissionRequest')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex PreToolUse → running (no blocking-tool allowlist; approvals are PermissionRequest)', async () => {
+    findSessionSpy.mockReturnValue('cx-4')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'PreToolUse',
+        taskId: 'cx-4',
+        raw: { tool_name: 'shell' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('cx-4', 'running', 'PreToolUse')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex SessionStart / PostToolUse → markActive only, no transition', async () => {
+    findSessionSpy.mockReturnValue('cx-5')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'codex', hookEvent: 'SessionStart', taskId: 'cx-5' })
+      await postJson(srv.port, { agentId: 'codex', hookEvent: 'PostToolUse', taskId: 'cx-5' })
+      expect(transitionSpy).not.toHaveBeenCalled()
+      expect(markActiveSpy).toHaveBeenCalledWith('cx-5')
+      expect(markActiveSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('gemini → broadcast only, no state-machine drive (still adapter-detected)', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'gemini', hookEvent: 'Stop', taskId: 'gm-1' })
       expect(broadcastSpy).toHaveBeenCalledTimes(1)
       expect(findSessionSpy).not.toHaveBeenCalled()
       expect(transitionSpy).not.toHaveBeenCalled()
