@@ -1,0 +1,35 @@
+{
+  "name": "@slayzone/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "slayzone-server": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/transport": "workspace:*",
+    "@trpc/server": "^11.17.0",
+    "better-sqlite3": "^12.8.0",
+    "bufferutil": "^4.1.0",
+    "superjson": "^2.2.1",
+    "utf-8-validate": "^6.0.6",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.19.1",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -23,7 +23,7 @@ export {
   getManualInstallHint,
   type CliInstallResult
 } from './cli-install'
-export { DB_PRAGMAS } from './db'
+export { DB_PRAGMAS, getDbName, type SlayzoneDb } from './db'
 export {
   setShellOverride,
   getShellOverride,

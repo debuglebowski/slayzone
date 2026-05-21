@@ -1,8 +1,8 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { IncomingMessage } from 'node:http'
 
 export type TrpcServerDeps = {
-  db: Database
+  db: SlayzoneDb
   dataRoot: string
 }
 

@@ -368,6 +368,49 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/apps/server:
+    dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
+      '@trpc/server':
+        specifier: ^11.17.0
+        version: 11.17.0(typescript@5.9.3)
+      better-sqlite3:
+        specifier: ^12.8.0
+        version: 12.8.0
+      bufferutil:
+        specifier: ^4.1.0
+        version: 4.1.0
+      superjson:
+        specifier: ^2.2.1
+        version: 2.2.6
+      utf-8-validate:
+        specifier: ^6.0.6
+        version: 6.0.6
+      ws:
+        specifier: ^8.18.0
+        version: 8.18.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.19.1
+        version: 22.19.7
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/domains/agent-turns:
     dependencies:
       '@slayzone/terminal':
@@ -1489,6 +1532,9 @@ importers:
 
   packages/shared/platform:
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -20585,7 +20631,7 @@ snapshots:
 
   tsx@4.21.0:
     dependencies:
-      esbuild: 0.27.2
+      esbuild: 0.27.4
       get-tsconfig: 4.13.6
     optionalDependencies:
       fsevents: 2.3.3

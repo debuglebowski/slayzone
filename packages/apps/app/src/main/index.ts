@@ -162,7 +162,13 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
 
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
-import { getDatabase, closeDatabase, getDiagnosticsDatabase, closeDiagnosticsDatabase } from './db'
+import {
+  getDatabase,
+  closeDatabase,
+  getDatabasePath,
+  getDiagnosticsDatabase,
+  closeDiagnosticsDatabase
+} from './db'
 import { runMigrations, LATEST_MIGRATION_VERSION } from './db/migrations'
 import { normalizeProjectStatusData } from './db/status-normalization'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
@@ -426,6 +432,10 @@ let linearSyncPoller: NodeJS.Timeout | null = null
 let discoveryPoller: NodeJS.Timeout | null = null
 let mcpCleanup: (() => void) | null = null
 let trpcCleanup: (() => void) | null = null
+let sidecarCleanup: (() => void) | null = null
+let quitSubprocessCleanupStarted = false
+let quitDrainComplete = false
+const QUIT_SUBPROCESS_DRAIN_MS = 750
 type OAuthCallbackPayload = { code?: string; error?: string }
 const oauthCallbackQueue: OAuthCallbackPayload[] = []
 const oauthCallbackWaiters = new Set<(payload: OAuthCallbackPayload) => void>()
@@ -442,6 +452,24 @@ type ProtocolClientStatus = {
   attempted: boolean
   registered: boolean
   reason: ProtocolClientStatusReason
+}
+
+function shutdownSubprocessesForQuit(): void {
+  if (quitSubprocessCleanupStarted) return
+  quitSubprocessCleanupStarted = true
+  const steps: Array<[string, () => void]> = [
+    ['beginTerminalShutdown', beginTerminalShutdown],
+    ['killAllPtys', killAllPtys],
+    ['shutdownChatTransports', shutdownChatTransports],
+    ['killAllProcesses', killAllProcesses]
+  ]
+  for (const [name, fn] of steps) {
+    try {
+      fn()
+    } catch (err) {
+      console.error(`[main] quit subprocess cleanup failed in ${name}:`, err)
+    }
+  }
 }
 let protocolClientStatus: ProtocolClientStatus = {
   scheme: APP_PROTOCOL_SCHEME,
@@ -1555,6 +1583,45 @@ app
         })
         .catch((err) => {
           console.error('[tRPC] Failed to start server:', err)
+        })
+    })
+
+    // Dark-launch the @slayzone/server side-car (slice 2.5). It is spawned +
+    // supervised but nothing depends on it yet — the renderer still uses the
+    // in-process tRPC server above. A permanent failure here is log-only, no
+    // user impact. Slice 2.6 flips the renderer onto the side-car.
+    setImmediate(() => {
+      logBoot('sidecar server supervisor import dispatched')
+      import('./sidecar-server-supervisor')
+        .then(({ startSidecarServer }) => {
+          const scriptPath = is.dev
+            ? join(app.getAppPath(), '../server/dist/bin.js')
+            : join(process.resourcesPath, 'server', 'bin.js')
+          const supervisor = startSidecarServer({
+            execPath: process.execPath,
+            scriptPath,
+            host: '127.0.0.1',
+            env: {
+              ...process.env,
+              SLAYZONE_STORE_DIR: ensureDataRoot(),
+              SLAYZONE_DB_PATH: getDatabasePath()
+            },
+            logger: (line) => logBoot(line),
+            onReady: () => {
+              /* supervisor logger already emits the ready line */
+            },
+            onPermanentFailure: (info) => {
+              console.error(
+                '[supervisor] sidecar permanent failure (dark-launch, non-fatal):',
+                info
+              )
+            }
+          })
+          sidecarCleanup = () => void supervisor.stop()
+          logBoot('sidecar server supervisor started')
+        })
+        .catch((err) => {
+          console.error('[sidecar] Failed to start supervisor:', err)
         })
     })
 
@@ -3171,8 +3238,19 @@ app.on('window-all-closed', () => {
   }
 })
 
+app.on('before-quit', (event) => {
+  if (quitDrainComplete) return
+  event.preventDefault()
+  shutdownSubprocessesForQuit()
+  setTimeout(() => {
+    quitDrainComplete = true
+    app.quit()
+  }, QUIT_SUBPROCESS_DRAIN_MS)
+})
+
 // Clean up database connection and active processes before quitting
 app.on('will-quit', () => {
+  shutdownSubprocessesForQuit()
   oauthCallbackQueue.length = 0
   oauthCallbackWaiters.clear()
   if (linearSyncPoller) {
@@ -3185,6 +3263,7 @@ app.on('will-quit', () => {
   }
   mcpCleanup?.()
   trpcCleanup?.()
+  sidecarCleanup?.()
   // Record completion BEFORE closing diagnostics DB; a row written here is the last
   // event of the session and proves the chain ran. stopDiagnostics() can clear timers
   // safely after.
@@ -3199,13 +3278,6 @@ app.on('will-quit', () => {
   stopAutoBackup()
   closeArtifactWatcher()
   closeGitWatcher()
-  // Flip the shutdown gates BEFORE killing — pty/chat exit handlers check
-  // these and skip clearing `terminal_tabs.was_spawned`. The flag therefore
-  // survives shutdown and the next boot reads it to auto-restart warm agents.
-  beginTerminalShutdown()
-  killAllPtys()
-  shutdownChatTransports()
-  killAllProcesses()
   closeDatabase()
   closeDiagnosticsDatabase()
   // Sentinel last: presence on next boot ⇒ clean shutdown reached this line.
