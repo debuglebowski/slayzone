@@ -498,6 +498,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         const urlHint = '— ⌘+Click open · ⌘⇧+Click external'
         const fileHint = '— ⌘+Click open'
 
+        // xterm measures the character cell from whatever font is loaded when
+        // open() runs. If the terminal webfont has not loaded yet (cold start)
+        // it measures a fallback face and bakes in the wrong cell size — the
+        // WebGL glyph atlas then renders scrambled, and only a panel resize
+        // (which forces xterm to re-measure) corrects it. `document.fonts.ready`
+        // is not sufficient: it resolves early when the font has not been
+        // requested. Explicitly request the face and wait for it, bounded so a
+        // missing/slow font cannot block terminal creation.
+        await Promise.race([
+          document.fonts
+            .load(`${terminalFontSize}px ${terminalFontFamily}`)
+            .catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, 1500))
+        ])
+        if (signal.aborted) return
+
         // Create new terminal
         const terminal = new XTerm({
           allowProposedApi: true,
@@ -618,10 +634,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // committed before the addon rasterizes its glyph atlas. See webgl-loader.ts.
         webglRafIdRef.current = requestAnimationFrame(() => {
           webglRafIdRef.current = null
-          void loadWebglRenderer({
+          loadWebglRenderer({
             terminal,
             createAddon: () => new WebglAddon(),
-            fontsReady: document.fonts.ready,
             isAborted: () => signal.aborted,
             isCurrentTerminal: () => terminalRef.current === terminal,
             isWebglDisabled: () => webglDisabled,

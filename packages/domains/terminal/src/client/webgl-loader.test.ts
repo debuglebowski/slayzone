@@ -1,6 +1,6 @@
 /**
- * Lifecycle tests for loadWebglRenderer — verifies the WebGL renderer load/abort/
- * context-loss/font-settle logic without a GPU or a real xterm instance.
+ * Lifecycle tests for loadWebglRenderer — verifies the WebGL renderer
+ * load / guard / context-loss logic without a GPU or a real xterm instance.
  * Run with: pnpm exec tsx packages/domains/terminal/src/client/webgl-loader.test.ts
  */
 import type { WebglAddon } from '@xterm/addon-webgl'
@@ -9,18 +9,16 @@ import { loadWebglRenderer, type LoadWebglOptions } from './webgl-loader'
 let passed = 0
 let failed = 0
 
-function test(name: string, fn: () => Promise<void> | void): Promise<void> {
-  return Promise.resolve()
-    .then(fn)
-    .then(() => {
-      console.log(`  ✓ ${name}`)
-      passed++
-    })
-    .catch((e) => {
-      console.error(`  ✗ ${name}`)
-      console.error(`    ${e instanceof Error ? e.message : e}`)
-      failed++
-    })
+function test(name: string, fn: () => void): void {
+  try {
+    fn()
+    console.log(`  ✓ ${name}`)
+    passed++
+  } catch (e) {
+    console.error(`  ✗ ${name}`)
+    console.error(`    ${e instanceof Error ? e.message : e}`)
+    failed++
+  }
 }
 
 function ok(cond: boolean, msg: string): void {
@@ -31,8 +29,7 @@ function ok(cond: boolean, msg: string): void {
 function makeStubAddon() {
   const calls = {
     contextLossHandler: null as null | (() => void),
-    disposed: 0,
-    clearedAtlas: 0
+    disposed: 0
   }
   const addon = {
     onContextLoss(cb: () => void) {
@@ -40,9 +37,6 @@ function makeStubAddon() {
     },
     dispose() {
       calls.disposed++
-    },
-    clearTextureAtlas() {
-      calls.clearedAtlas++
     }
   }
   return { addon: addon as unknown as WebglAddon, calls }
@@ -98,7 +92,6 @@ function harness(over: Partial<{ createThrows: boolean }> = {}): Harness {
       if (over.createThrows) throw new Error('WebGL unavailable')
       return addon
     },
-    fontsReady: Promise.resolve(),
     isAborted: () => state.aborted,
     isCurrentTerminal: () => state.current,
     isWebglDisabled: () => state.webglDisabled,
@@ -114,52 +107,60 @@ function harness(over: Partial<{ createThrows: boolean }> = {}): Harness {
   return { opts, state, addonCalls, termCalls, stubAddon: addon }
 }
 
-async function run(): Promise<void> {
+function run(): void {
   console.log('\nloadWebglRenderer')
   console.log('─'.repeat(40))
 
-  await test('happy path: loads addon, settles fonts, clears atlas', async () => {
+  test('happy path: constructs addon, registers context-loss, stores active', () => {
     const h = harness()
-    await loadWebglRenderer(h.opts)
+    loadWebglRenderer(h.opts)
     ok(h.state.createCalls === 1, 'createAddon called once')
     ok(h.termCalls.loadAddon === 1, 'loadAddon called')
+    ok(h.termCalls.loadedAddon === h.stubAddon, 'the constructed addon was loaded')
     ok(h.state.activeAddon === h.stubAddon, 'addon stored as active')
-    ok(h.addonCalls.clearedAtlas === 1, 'atlas cleared after font-settle')
-    ok(h.termCalls.refresh === 1, 'screen refreshed after font-settle')
+    ok(h.addonCalls.contextLossHandler !== null, 'context-loss handler registered')
   })
 
-  await test('aborted before start: no addon constructed', async () => {
+  test('aborted: no addon constructed', () => {
     const h = harness()
     h.state.aborted = true
-    await loadWebglRenderer(h.opts)
+    loadWebglRenderer(h.opts)
     ok(h.state.createCalls === 0, 'createAddon not called')
   })
 
-  await test('webglDisabled latch: no addon constructed', async () => {
+  test('webglDisabled latch: no addon constructed', () => {
     const h = harness()
     h.state.webglDisabled = true
-    await loadWebglRenderer(h.opts)
+    loadWebglRenderer(h.opts)
     ok(h.state.createCalls === 0, 'createAddon not called')
   })
 
-  await test('stale terminal: no addon constructed', async () => {
+  test('stale terminal: no addon constructed', () => {
     const h = harness()
     h.state.current = false
-    await loadWebglRenderer(h.opts)
+    loadWebglRenderer(h.opts)
     ok(h.state.createCalls === 0, 'createAddon not called')
   })
 
-  await test('construction throws: latches WebGL off, no loadAddon', async () => {
+  test('addon already active: skips, no second addon constructed', () => {
+    const h = harness()
+    h.state.activeAddon = makeStubAddon().addon
+    loadWebglRenderer(h.opts)
+    ok(h.state.createCalls === 0, 'createAddon not called')
+    ok(h.termCalls.loadAddon === 0, 'loadAddon not called')
+  })
+
+  test('construction throws: latches WebGL off, no loadAddon', () => {
     const h = harness({ createThrows: true })
-    await loadWebglRenderer(h.opts)
+    loadWebglRenderer(h.opts)
     ok(h.state.onWebglDisabledCalls === 1, 'onWebglDisabled called')
     ok(h.state.webglDisabled === true, 'webglDisabled latched true')
     ok(h.termCalls.loadAddon === 0, 'loadAddon not called')
   })
 
-  await test('context loss: disposes addon, clears active ref, repaints', async () => {
+  test('context loss: disposes addon, clears active ref, repaints', () => {
     const h = harness()
-    await loadWebglRenderer(h.opts)
+    loadWebglRenderer(h.opts)
     ok(h.addonCalls.contextLossHandler !== null, 'context-loss handler registered')
     const refreshBefore = h.termCalls.refresh
     h.addonCalls.contextLossHandler!()
@@ -168,26 +169,9 @@ async function run(): Promise<void> {
     ok(h.termCalls.refresh === refreshBefore + 1, 'screen repainted on context loss')
   })
 
-  await test('aborted during font-settle: atlas not cleared', async () => {
-    const h = harness()
-    const p = loadWebglRenderer(h.opts) // runs synchronously up to the fonts await
-    h.state.aborted = true
-    await p
-    ok(h.termCalls.loadAddon === 1, 'addon still loaded')
-    ok(h.addonCalls.clearedAtlas === 0, 'atlas NOT cleared after abort')
-  })
-
-  await test('addon replaced during font-settle: atlas not cleared', async () => {
-    const h = harness()
-    const p = loadWebglRenderer(h.opts)
-    h.state.activeAddon = makeStubAddon().addon // a different addon won the slot
-    await p
-    ok(h.addonCalls.clearedAtlas === 0, 'atlas NOT cleared for superseded addon')
-  })
-
   console.log('─'.repeat(40))
   console.log(`\n${passed} passed, ${failed} failed\n`)
   process.exit(failed > 0 ? 1 : 0)
 }
 
-void run()
+run()
