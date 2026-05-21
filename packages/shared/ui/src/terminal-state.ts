@@ -19,7 +19,7 @@ const TERMINAL_STATE_STYLES: Record<string, TerminalStateStyle> = {
 export const ATTENTION_STATE_STYLE: TerminalStateStyle = {
   color: 'bg-amber-400 animate-pulse',
   textColor: 'text-amber-500',
-  label: 'Needs attention'
+  label: 'Unread'
 }
 
 export function getTerminalStateStyle(state: string | undefined): TerminalStateStyle | null {

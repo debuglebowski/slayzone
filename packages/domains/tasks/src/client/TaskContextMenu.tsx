@@ -49,7 +49,8 @@ import {
   Check,
   Power,
   Pin,
-  PinOff
+  PinOff,
+  Bell
 } from 'lucide-react'
 import { track } from '@slayzone/telemetry/client'
 import { format } from 'date-fns'
@@ -73,6 +74,8 @@ interface TaskContextMenuProps {
   /** When defined, renders a Pin/Unpin item. */
   isPinned?: boolean
   onTogglePin?: () => void
+  /** When true (agent idle + task already read), renders a "Mark as unread" item. */
+  canMarkUnread?: boolean
   children: React.ReactNode
 }
 
@@ -99,6 +102,7 @@ export function TaskContextMenu({
   onShutdownAgent,
   isPinned,
   onTogglePin,
+  canMarkUnread,
   children
 }: TaskContextMenuProps): React.JSX.Element {
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
@@ -176,6 +180,11 @@ export function TaskContextMenu({
       track('task_blocked', {})
       onUpdateTask(task.id, { is_blocked: true } as Partial<Task>)
     }
+  }
+
+  const handleMarkUnread = (): void => {
+    track('task_marked_unread')
+    onUpdateTask(task.id, { needs_attention: true } as Partial<Task>)
   }
 
   const handleSetBlockedWithComment = async (): Promise<void> => {
@@ -341,17 +350,27 @@ export function TaskContextMenu({
             </ContextMenuSubContent>
           </ContextMenuSub>
 
-          {onTogglePin && (
+          {(onTogglePin || canMarkUnread) && (
             <>
               <ContextMenuSeparator />
-              <ContextMenuItem onSelect={onTogglePin}>
-                {isPinned ? (
-                  <PinOff className="mr-2 size-3.5" />
-                ) : (
-                  <Pin className="mr-2 size-3.5" />
-                )}
-                {isPinned ? 'Unpin' : 'Pin'}
-              </ContextMenuItem>
+              {onTogglePin && (
+                <ContextMenuItem onSelect={onTogglePin}>
+                  {isPinned ? (
+                    <PinOff className="mr-2 size-3.5" />
+                  ) : (
+                    <Pin className="mr-2 size-3.5" />
+                  )}
+                  {isPinned ? 'Unpin' : 'Pin'}
+                </ContextMenuItem>
+              )}
+              {/* Mark as unread — re-arms the attention dot. No manual "mark read":
+                  it clears automatically next time the user navigates into the task. */}
+              {canMarkUnread && (
+                <ContextMenuItem onSelect={handleMarkUnread}>
+                  <Bell className="mr-2 size-3.5" />
+                  Mark as unread
+                </ContextMenuItem>
+              )}
             </>
           )}
 

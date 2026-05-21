@@ -23,7 +23,8 @@ function toUpdateTaskFields(updates: Partial<Task>) {
     projectId: updates.project_id,
     snoozedUntil: updates.snoozed_until,
     isBlocked: updates.is_blocked,
-    blockedComment: updates.blocked_comment
+    blockedComment: updates.blocked_comment,
+    needsAttention: updates.needs_attention
   }
 }
 

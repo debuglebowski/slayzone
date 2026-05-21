@@ -647,8 +647,12 @@ export interface Task {
   repo_name: string | null
   // External link (populated via JOIN)
   linear_url: string | null
-  // Set when an agent PTY for this task transitioned running → idle|error and the
-  // user has not yet focused the task. Cleared when the task tab gains focus.
+  // Unread flag — drives the amber "Unread" dot/badge. Set automatically when an
+  // agent PTY transitions running → idle|error before the user has opened the task,
+  // OR manually via the task context menu ("Mark as unread", available while the
+  // agent is idle). Cleared when the user navigates into the task (makes it the
+  // active tab) — NOT while it merely stays active, so a manual "Mark as unread"
+  // persists until the next open.
   needs_attention: boolean
   // True once user dismisses the dev-server URL toast for this task — toast never
   // reappears for the task again.

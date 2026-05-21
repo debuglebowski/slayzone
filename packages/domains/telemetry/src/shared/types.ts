@@ -37,6 +37,7 @@ export type TelemetryEventName =
   | 'task_unsnoozed'
   | 'task_blocked'
   | 'task_unblocked'
+  | 'task_marked_unread'
   | 'due_date_set'
   | 'copy_title'
   | 'copy_link'
@@ -172,6 +173,7 @@ export interface TelemetryEventProps {
   task_unsnoozed: Record<string, never>
   task_blocked: { hasComment?: string }
   task_unblocked: Record<string, never>
+  task_marked_unread: Record<string, never>
   due_date_set: Record<string, never>
   copy_title: Record<string, never>
   copy_link: Record<string, never>

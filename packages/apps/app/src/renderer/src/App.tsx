@@ -750,12 +750,35 @@ function App(): React.JSX.Element {
     void window.api.taskWindow.setPrimaryActive(id)
   }, [activeTab])
 
-  // Clear needs_attention flag when user focuses a task tab.
+  // Mark a task "read" (clear needs_attention) when the user *navigates into* it —
+  // i.e. it becomes the active tab. Deliberately NOT cleared while the task merely
+  // stays active: that is what lets "Mark as unread" stick even though the task is
+  // on screen. Two refs handle the timing:
+  //  - activatedTaskRef: id of the current activation. A change => a fresh open.
+  //  - readConsumedRef: the id we've already issued the read-clear for this
+  //    activation. Ensures a late tasksMap update (task data arriving after the tab
+  //    switch) still clears exactly once, and a tasksMap update caused by a later
+  //    "Mark as unread" does NOT re-clear it.
+  const activatedTaskRef = useRef<string | null>(null)
+  const readConsumedRef = useRef<string | null>(null)
   useEffect(() => {
-    if (activeTab?.type !== 'task') return
-    const task = tasksMap.get(activeTab.taskId)
-    if (!task?.needs_attention) return
-    void window.api.db.updateTask({ id: activeTab.taskId, needsAttention: false }).catch(() => {})
+    const activeTaskId = activeTab?.type === 'task' ? activeTab.taskId : null
+    if (!activeTaskId) {
+      activatedTaskRef.current = null
+      return
+    }
+    // Fresh activation: reset the once-per-activation read guard.
+    if (activeTaskId !== activatedTaskRef.current) {
+      activatedTaskRef.current = activeTaskId
+      readConsumedRef.current = null
+    }
+    if (readConsumedRef.current === activeTaskId) return
+    const task = tasksMap.get(activeTaskId)
+    if (!task) return // data not loaded yet — wait for the next tasksMap update
+    readConsumedRef.current = activeTaskId
+    if (task.needs_attention) {
+      void window.api.db.updateTask({ id: activeTaskId, needsAttention: false }).catch(() => {})
+    }
   }, [activeTab, tasksMap])
   useEffect(() => {
     if (activeTaskProjectId && activeTaskProjectId !== selectedProjectId)
@@ -2234,6 +2257,9 @@ function App(): React.JSX.Element {
                 }
                 isPinned={!!task.pinned}
                 onTogglePin={() => setTaskPinned(task.id, !task.pinned)}
+                canMarkUnread={
+                  terminalStates.get(task.id) === 'idle' && !task.needs_attention
+                }
               >
                 {child}
               </TaskContextMenu>
