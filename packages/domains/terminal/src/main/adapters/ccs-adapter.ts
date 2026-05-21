@@ -15,7 +15,9 @@ import { whichBinary, validateShellEnv } from '../shell-env'
  */
 export class CcsAdapter implements TerminalAdapter {
   readonly mode = 'ccs' as const
-  readonly idleTimeoutMs = null // same as Claude (CCS runs Claude underneath)
+  // Hook-driven: CCS runs Claude underneath, so Claude's hooks fire. No
+  // silence-timer fallback — Infinity makes the inactivity checker skip this.
+  readonly idleTimeoutMs = Infinity
 
   encodeSubmit = defaultEncodeSubmit
 

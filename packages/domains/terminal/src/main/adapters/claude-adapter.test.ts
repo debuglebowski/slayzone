@@ -33,21 +33,20 @@ function expect(actual: unknown) {
 
 console.log('\nClaudeAdapter config\n')
 
-test('transitionOnInput is not explicitly false (uses TUI default = idle clock gated by adapter activity)', () => {
-  // The idle timer must actually fire on this full-screen TUI — otherwise
-  // cursor blink keeps lastOutputTime fresh and state stays 'running'. Default
-  // (undefined or true) gives that behavior; an explicit `false` would re-
-  // introduce the historical stuck-running bug.
+test('transitionOnInput is not explicitly false (TUI default → Enter flips to running)', () => {
+  // Claude is hook-driven with no silence-timer fallback. The TUI default
+  // keeps the Enter → 'running' flip for instant feedback before the
+  // UserPromptSubmit hook lands; an explicit `false` would drop that.
   expect(adapter.transitionOnInput !== false).toBe(true)
 })
 
-test('idleTimeoutMs is a 5-minute safety net (hooks + interrupt marker are primary)', () => {
-  // Hook events (Stop, Notification, SessionEnd) drive working→idle on the
-  // happy path. detectActivity catches the user-interrupt marker. This timer
-  // only fires when both paths miss — e.g. user disabled the SlayZone hook
-  // entry or notify.sh is gone. 5s (the legacy spinner-era value) was too
-  // tight: a single long Bash run >5s tripped a false running→idle mid-turn.
-  expect(adapter.idleTimeoutMs).toBe(5 * 60 * 1000)
+test('idleTimeoutMs is Infinity — no silence-timer fallback (hook-driven)', () => {
+  // Hook events (Stop, Notification, SessionEnd) drive running→idle;
+  // detectActivity catches the user-interrupt marker. There is no time-based
+  // fallback — it only ever misfired (a long Bash run tripped a false
+  // running→idle mid-turn). Infinity makes the inactivity checker skip this
+  // adapter (shouldFlipToIdle: `now - t >= Infinity` is always false).
+  expect(adapter.idleTimeoutMs).toBe(Infinity)
 })
 
 console.log('\nClaudeAdapter.detectActivity\n')

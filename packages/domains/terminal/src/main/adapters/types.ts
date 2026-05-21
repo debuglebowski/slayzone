@@ -69,7 +69,9 @@ export interface ValidationResult {
 export interface TerminalAdapter {
   readonly mode: TerminalMode
 
-  /** Idle timeout in ms (null = use default 60s) */
+  /** Silence-timeout in ms before the inactivity checker flips running→idle.
+   *  `null` = use default 60s. `Infinity` = no silence timer (hook-driven
+   *  adapters whose running→idle is fully signal-driven). */
   readonly idleTimeoutMs: number | null
 
   /** Startup timeout in ms before PTY is killed (null/undefined = use default 10s) */

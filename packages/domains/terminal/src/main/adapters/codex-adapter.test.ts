@@ -117,10 +117,18 @@ test('plain output without modal markers → null', () => {
 
 console.log('\nCodexAdapter config\n')
 
-test('transitionOnInput is default (TUI adapter — silence-timer fallback stays primed)', () => {
-  // Hook-driven like ClaudeAdapter: must NOT be output-driven (`false`), else
-  // every TUI redraw refreshes the idle clock and defeats the 5-min fallback.
+test('transitionOnInput is default (TUI adapter — Enter flips to running)', () => {
+  // Hook-driven like ClaudeAdapter, no silence-timer fallback. TUI default
+  // keeps the Enter → 'running' flip for instant feedback before the
+  // UserPromptSubmit hook lands.
   expect(adapter.transitionOnInput !== false).toBe(true)
+})
+
+test('idleTimeoutMs is Infinity — no silence-timer fallback (hook-driven)', () => {
+  // Hooks drive running→idle; the approval-modal check in detectActivity
+  // covers lagging hooks. No time-based fallback — Infinity makes the
+  // inactivity checker skip this adapter.
+  expect(adapter.idleTimeoutMs).toBe(Infinity)
 })
 
 console.log('\nCodexAdapter.detectPrompt\n')

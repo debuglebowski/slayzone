@@ -16,16 +16,21 @@ import { whichBinary, validateShellEnv } from '../shell-env'
  */
 export class AntigravityAdapter implements TerminalAdapter {
   readonly mode = 'antigravity' as const
-  // TUI redraws in bursts; short idle timeout to detect when response is done
-  readonly idleTimeoutMs = 2500
-  // detectActivity is coarse (any chunk > 50 chars → working). Stay output-
-  // driven so small redraw chunks during real work still pin the idle clock
-  // open — otherwise it would flip to idle mid-response.
-  readonly transitionOnInput = false
+  // No silence-timer fallback: hooks (installed by antigravity-hook-installer)
+  // drive running→idle. Infinity makes the inactivity checker skip this adapter.
+  readonly idleTimeoutMs = Infinity
+  // `transitionOnInput` left at the TUI default (like Claude/Codex): Enter
+  // flips to 'running' for instant feedback before the PreInvocation hook
+  // lands. An explicit `false` would also pin the idle clock open on every
+  // TUI redraw — antigravity redraws constantly.
   // Heavy CLI bundle; allow generous startup window for first output.
   readonly startupTimeoutMs = 20_000
 
   encodeSubmit = defaultEncodeSubmit
+
+  /** Antigravity's approval-modal marker. Shared by `detectActivity` (→ 'idle')
+   *  and `detectPrompt` (→ 'permission'). No `g` flag, so safe to reuse. */
+  private static readonly APPROVAL_RE = /Approve\?\s*\(y\/n(\/always)?\)/i
 
   private static stripAnsi(data: string): string {
     return data
@@ -34,9 +39,21 @@ export class AntigravityAdapter implements TerminalAdapter {
       .replace(/\x1b[()][AB012]/g, '') // Character set
   }
 
+  /**
+   * Activity detection is hook-driven: PreInvocation → running, Stop → idle
+   * (see `antigravity-hook-installer`). Raw output must NOT promote to
+   * 'working' — antigravity's TUI redraws constantly, so a length-based
+   * heuristic re-flipped 'running' right after a Stop hook settled the
+   * session to 'idle'.
+   *
+   * The ONE output signal kept is the approval modal: antigravity registers
+   * no permission hook (`PreToolUse` is intentionally omitted), so a pending
+   * y/n prompt has no hook to flip it. Detect it → 'idle' (the agent is
+   * blocked on the user); `detectPrompt` separately raises needs-attention.
+   */
   detectActivity(data: string, _current: ActivityState): ActivityState | null {
-    const stripped = AntigravityAdapter.stripAnsi(data).trimStart()
-    if (stripped.length > 50) return 'working'
+    const stripped = AntigravityAdapter.stripAnsi(data)
+    if (AntigravityAdapter.APPROVAL_RE.test(stripped)) return 'idle'
     return null
   }
 
@@ -82,7 +99,7 @@ export class AntigravityAdapter implements TerminalAdapter {
   detectPrompt(data: string): PromptInfo | null {
     const stripped = AntigravityAdapter.stripAnsi(data)
 
-    if (/Approve\?\s*\(y\/n(\/always)?\)/i.test(stripped)) {
+    if (AntigravityAdapter.APPROVAL_RE.test(stripped)) {
       return {
         type: 'permission',
         text: data,

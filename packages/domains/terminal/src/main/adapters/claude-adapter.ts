@@ -17,19 +17,19 @@ import { KITTY_SHIFT_ENTER, ENTER } from '@slayzone/terminal/shared'
  * bullet-glyph regex (SPINNER_LINE_RE / COMPLETION_LINE_RE) was retired —
  * `detectActivity` is now intentionally a no-op for this adapter.
  *
- * The silence timer (idleTimeoutMs) remains as a safety net for missed hooks.
+ * No silence-timer fallback: hooks + the interrupt marker (see detectActivity)
+ * are the sole running→idle signals. idleTimeoutMs = Infinity disables the
+ * inactivity checker for this adapter.
  */
 export class ClaudeAdapter implements TerminalAdapter {
   readonly mode = 'claude-code' as const
-  // Fail-safe for fully dropped hooks (e.g. user disabled the SlayZone entry
-  // in ~/.claude/settings.json, or notify.sh is missing). With hooks driving
-  // every transition AND refreshing the clock on each fire, the silence
-  // timer only matters when no hook lands for this entire window — which
-  // would only happen for an unhooked claude or one stuck on a single tool
-  // with no progress signal for 5+ minutes. 5s (the old TUI value) was way
-  // too tight: a single long Bash or "thinking" gap >5s tripped a false
-  // running→idle mid-turn → spurious needs_attention flag.
-  readonly idleTimeoutMs = 5 * 60 * 1000
+  // No silence-timer fallback. Hooks (Stop/Notification/SessionEnd) drive
+  // running→idle; the interrupt marker in detectActivity covers the one
+  // hook-less case (ESC mid-thinking). A time-based fallback only ever
+  // misfired here — a long Bash run or "thinking" gap tripped a false
+  // running→idle mid-turn → spurious needs_attention. Infinity makes the
+  // inactivity checker skip this adapter (shouldFlipToIdle is always false).
+  readonly idleTimeoutMs = Infinity
 
   /** Claude Code enables Kitty keyboard protocol; internal newlines must be
    *  encoded as Shift+Enter so they're treated as newline-in-input (not submit). */
@@ -43,7 +43,7 @@ export class ClaudeAdapter implements TerminalAdapter {
    * user-interrupt path: claude does NOT fire the `Stop` hook when the user
    * presses ESC during the pure thinking phase (no tool call in flight),
    * confirmed via diagnostic trace. Without an output signal the spinner
-   * would stick until the 5-min `idleTimeoutMs` silence-timer fallback.
+   * would stick on 'running' indefinitely — there is no silence-timer fallback.
    *
    * Claude's TUI prints `⎿  Interrupted · What should Claude do instead?`
    * (with the box-drawing ⎿ glyph, U+23BF) immediately after the user
@@ -53,8 +53,8 @@ export class ClaudeAdapter implements TerminalAdapter {
    *
    * Architectural debt: deliberately reintroduces narrow output parsing
    * after we retired the bullet-glyph spinner regex. Justified because
-   * (a) hooks fail upstream, (b) silence-timer is too slow, (c) signal is
-   * evidence-based (claude actually printed it), (d) scope is one regex,
+   * (a) hooks fail upstream, (b) there is no silence-timer fallback, (c) signal
+   * is evidence-based (claude actually printed it), (d) scope is one regex,
    * one direction. Remove if Anthropic fixes Stop-on-ESC. Tracking:
    * https://github.com/anthropics/claude-code/issues (TODO: file).
    */

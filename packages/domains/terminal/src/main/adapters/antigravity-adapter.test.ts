@@ -81,4 +81,41 @@ test('returns null for normal output', () => {
   expect(adapter.detectError('Some normal output')).toBe(null)
 })
 
+console.log('\nAntigravityAdapter.detectActivity\n')
+
+test('long raw output does NOT promote to working (hook-driven — no re-flip after Stop)', () => {
+  // Regression: antigravity is hook-driven (PreInvocation → running, Stop →
+  // idle — see antigravity-hook-installer). A length-based 'working' heuristic
+  // re-flipped running right after a Stop hook settled the session to idle,
+  // because the TUI keeps redrawing. detectActivity must NOT report 'working'.
+  expect(adapter.detectActivity('x'.repeat(200), 'idle')).toBe(null)
+  expect(
+    adapter.detectActivity('the agent printed a fairly long status line here now', 'idle')
+  ).toBe(null)
+})
+
+test('approval modal → idle (no permission hook; output is the only signal)', () => {
+  // Antigravity registers PreInvocation/PostToolUse/Stop — no permission hook.
+  // A pending y/n approval prompt has no hook to flip it, so detectActivity
+  // reports 'idle' (the agent is waiting on the user → needs attention).
+  expect(adapter.detectActivity('Approve? (y/n)', 'unknown')).toBe('idle')
+  expect(adapter.detectActivity('Run this command? Approve? (y/n/always)', 'unknown')).toBe('idle')
+  // ANSI-wrapped marker still matches.
+  expect(adapter.detectActivity('\x1b[1mApprove?\x1b[0m (y/n)', 'unknown')).toBe('idle')
+})
+
+test('plain output without modal → null', () => {
+  expect(adapter.detectActivity('Reading file foo.ts', 'unknown')).toBe(null)
+  expect(adapter.detectActivity('', 'unknown')).toBe(null)
+})
+
+console.log('\nAntigravityAdapter config\n')
+
+test('transitionOnInput is not explicitly false (TUI default → Enter flips to running)', () => {
+  // Hook-driven like Claude/Codex: the TUI default keeps the Enter → 'running'
+  // flip for instant feedback before the PreInvocation hook lands. An explicit
+  // `false` would also pin the idle clock open on every TUI redraw.
+  expect(adapter.transitionOnInput !== false).toBe(true)
+})
+
 console.log('\nDone\n')
