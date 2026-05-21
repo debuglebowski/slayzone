@@ -6,11 +6,12 @@
     <title>SlayZone</title>
     <style>html, body { margin: 0; background: #0a0a0a; }</style>
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo-solid.svg" />
-    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; frame-src 'self' slz-file:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.posthog.com https://*.i.posthog.com https://*.convex.cloud wss://*.convex.cloud https://*.convex.site wss://*.convex.site https://api.github.com; img-src 'self' data: https: slz-file:"
-    />
+    <!--
+      Content-Security-Policy is not written here. A wildcard-port floor is
+      injected as a <meta> tag at build time (cspFloorPlugin in
+      electron.vite.config.ts), and the main process emits an exact-port CSP
+      header at runtime. Both come from main/renderer-csp.ts.
+    -->
   </head>
 
   <body>

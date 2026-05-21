@@ -35,6 +35,7 @@ import {
   clearBrowserRegistry
 } from './browser-registry'
 import { BrowserViewManager, type CreateViewOpts, type ViewBounds } from './browser-view-manager'
+import { attachRendererCsp } from './renderer-csp'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   inferHostScopeFromUrl,
@@ -65,6 +66,28 @@ function getEffectiveKeys(id: string, overrides: Record<string, string | null>):
   if (id in overrides) return overrides[id]
   const def = shortcutDefinitions.find((d) => d.id === id)
   return def?.defaultKeys ?? null
+}
+
+/**
+ * Resolves the in-process tRPC WS port once the server is listening, or 0
+ * after `timeoutMs`. The port is published on `globalThis.__trpcPort` by
+ * startTrpcServer; it lands shortly after boot since the server starts off
+ * the critical path. Consumed by the `app:get-trpc-port` IPC and the renderer
+ * CSP header builder.
+ */
+function awaitTrpcPort(timeoutMs = 5000): Promise<number> {
+  const existing = (globalThis as Record<string, unknown>).__trpcPort
+  if (typeof existing === 'number') return Promise.resolve(existing)
+  return new Promise<number>((resolve) => {
+    const start = Date.now()
+    const check = (): void => {
+      const port = (globalThis as Record<string, unknown>).__trpcPort
+      if (typeof port === 'number') resolve(port)
+      else if (Date.now() - start > timeoutMs) resolve(0)
+      else setTimeout(check, 25)
+    }
+    check()
+  })
 }
 
 // Custom protocol for serving local files in browser panel webviews
@@ -1907,6 +1930,12 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     webPanelSession.protocol.handle('slz-file', slzFileHandler)
     session.defaultSession.protocol.handle('slz-file', slzFileHandler)
 
+    // Emit the renderer Content-Security-Policy as a response header so it can
+    // name the dynamic in-process tRPC WS port exactly (a static meta tag
+    // can't). Registered before any window loads — createWindow() runs at the
+    // end of whenReady — so every app document is covered.
+    attachRendererCsp(session.defaultSession, awaitTrpcPort)
+
     // Block external app protocol launches from webviews by registering no-op handlers.
     // External protocol URLs (figma://, slack://, etc.) bypass will-navigate entirely —
     // Chromium passes them straight to the OS. Registering the scheme in the session
@@ -2123,20 +2152,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     })
 
     ipcMain.handle('app:getVersion', () => app.getVersion())
-    ipcMain.handle('app:get-trpc-port', async () => {
-      const g = globalThis as Record<string, unknown>
-      if (typeof g.__trpcPort === 'number') return g.__trpcPort as number
-      return new Promise<number>((resolve) => {
-        const start = Date.now()
-        const check = (): void => {
-          const port = (globalThis as Record<string, unknown>).__trpcPort
-          if (typeof port === 'number') resolve(port)
-          else if (Date.now() - start > 5000) resolve(0)
-          else setTimeout(check, 25)
-        }
-        check()
-      })
-    })
+    ipcMain.handle('app:get-trpc-port', () => awaitTrpcPort())
     // Read-only side-car (dark-launch) status for the Diagnostics settings tab.
     ipcMain.handle('app:get-sidecar-status', () => {
       return (
