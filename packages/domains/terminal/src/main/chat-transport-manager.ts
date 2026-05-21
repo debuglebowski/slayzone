@@ -586,7 +586,14 @@ function commitEvent(session: Session, event: AgentEvent): void {
     ) {
       session.awaitingUserInput = false
     }
-    if (event.kind === 'user-message' || event.kind === 'turn-init' || event.kind === 'tool-call') {
+    // `turn-init` is session metadata (id/model/cwd/tools), NOT a turn-open
+    // signal. Claude's SDK emits it mid-first-turn so it *looks* turn-aligned,
+    // but Codex's driver emits a synthetic one at handshake — before any turn.
+    // Treating it as turn-open left Codex sessions stuck `running` post-spawn/
+    // -resume. A real turn always opens with the transport-synthesized
+    // `user-message` (every dispatch path routes through `sendUserMessage`);
+    // `tool-call` stays as a mid-turn safety net.
+    if (event.kind === 'user-message' || event.kind === 'tool-call') {
       transitionState(session, 'running')
     } else if (event.kind === 'result') {
       transitionState(session, event.isError ? 'error' : 'idle')
@@ -600,8 +607,7 @@ function commitEvent(session: Session, event: AgentEvent): void {
   // window so a long healthy turn is never false-killed; a turn that goes
   // fully silent past the bound is force-killed.
   if (session.terminalState === 'running') {
-    const opensTurn =
-      event.kind === 'user-message' || event.kind === 'turn-init' || event.kind === 'tool-call'
+    const opensTurn = event.kind === 'user-message' || event.kind === 'tool-call'
     if (opensTurn || isProgressEventKind(event.kind)) {
       session.watchdogLastProgress = Date.now()
       armWatchdog(session)
@@ -1332,12 +1338,17 @@ export function popLastUserMessage(tabId: string): { popped: boolean; text: stri
 
 /**
  * Scan a seeded buffer's tail to detect an unfinished turn — the last
- * stateful event is a turn-starter (user-message/turn-init/tool-call) with
+ * stateful event is a turn-starter (user-message/tool-call) with
  * no subsequent terminal marker (result/process-exit/interrupted/
  * user-message-popped). Used by hydrateSession to keep the renderer's
  * userMessagesSent/resultCount balance honest after a restore: without a
  * synthetic interrupted, inFlight would stay true forever even though the
  * fresh subprocess (post --resume) sits idle waiting for input.
+ *
+ * `turn-init` is deliberately NOT a turn-starter here: Codex emits a synthetic
+ * one at handshake, so a buffer whose tail is `turn-init` (session spawned,
+ * no message ever sent) is idle, not mid-turn. A real unfinished turn still
+ * tails with `user-message`/`tool-call`, which always precede `turn-init`.
  */
 function tailIsUnfinishedTurn(buffer: BufferedEvent[]): boolean {
   for (let i = buffer.length - 1; i >= 0; i--) {
@@ -1350,7 +1361,7 @@ function tailIsUnfinishedTurn(buffer: BufferedEvent[]): boolean {
     ) {
       return false
     }
-    if (k === 'user-message' || k === 'turn-init' || k === 'tool-call') {
+    if (k === 'user-message' || k === 'tool-call') {
       return true
     }
   }

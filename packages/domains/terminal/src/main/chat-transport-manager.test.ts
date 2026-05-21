@@ -1081,17 +1081,9 @@ await test('permission-request → flips terminal state to idle + sets awaitingU
     conversationId: null,
     providerFlags: []
   })
-  // turn-init lifts state → running
-  fake._stdout.write(
-    JSON.stringify({
-      type: 'system',
-      subtype: 'init',
-      session_id: 'sess-1',
-      model: 'claude',
-      cwd: '/tmp',
-      tools: []
-    }) + '\n'
-  )
+  // A user message opens the turn → running. (`turn-init` is session
+  // metadata, not a turn-open signal — see commitEvent.)
+  mgr.sendUserMessage('tab-ask-state', 'hi')
   await new Promise((r) => setImmediate(r))
   expect(mgr.getSessionTerminalState('tab-ask-state')).toBe('running')
 
@@ -1425,6 +1417,51 @@ await test('codex-chat: a fatal driver-start failure kills the subprocess + goes
   expect(stateChanges.includes('dead')).toBe(true)
 })
 
+await test('codex-chat: handshake with no user message rests at `idle`, not `running`', async () => {
+  // Regression: the driver emits a synthetic `turn-init` at handshake to seed
+  // the timeline. That event is session metadata — it must NOT flip the state
+  // machine to `running`, or a freshly spawned / resumed codex-chat session
+  // shows a perpetual spinner until the first message is sent.
+  await setup()
+  const stateChanges: string[] = []
+  const fakes: Array<ReturnType<typeof makeFakeChild>> = []
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/codex',
+    spawn: () => {
+      const f = makeFakeChild()
+      fakes.push(f)
+      return f as unknown as ChildProcess
+    },
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: (_tabId, state) => stateChanges.push(state)
+  })
+  await createChat(
+    {
+      tabId: 'tab-codex-idle',
+      taskId: 'task-codex',
+      mode: 'codex-chat',
+      cwd: '/tmp',
+      conversationId: null,
+      providerFlags: []
+    },
+    { autoSpawn: false }
+  )
+  const child = fakes[0]
+  ;(child as unknown as EventEmitter).emit('spawn') // starting → idle
+  await new Promise((r) => setTimeout(r, 40))
+  // Complete the handshake — initialize + thread/start both succeed. The
+  // driver emits its synthetic `turn-init`; no user message follows.
+  child._stdout.write(JSON.stringify({ id: 1, result: { userAgent: 'x', codexHome: '/h' } }) + '\n')
+  await new Promise((r) => setTimeout(r, 30))
+  child._stdout.write(
+    JSON.stringify({ id: 2, result: { thread: { id: 't' }, model: 'gpt', cwd: '/tmp' } }) + '\n'
+  )
+  await new Promise((r) => setTimeout(r, 50))
+  expect(mgr.getSessionTerminalState('tab-codex-idle')).toBe('idle')
+  expect(stateChanges.includes('running')).toBe(false)
+})
+
 // --- liveness watchdog ---
 
 /**
@@ -1482,7 +1519,12 @@ async function watchdogHarness(opts: { alive?: boolean } = {}) {
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-/** Drive a fresh codex-chat child through spawn + handshake → `running`. */
+/**
+ * Drive a fresh codex-chat child through spawn + handshake, then send a user
+ * message so a real turn opens → `running`. The handshake alone leaves the
+ * session `idle` (its synthetic `turn-init` is session metadata, not a
+ * turn-open signal); a `user-message` is what flips it to `running`.
+ */
 async function driveCodexToRunning(child: ReturnType<typeof makeFakeChild>): Promise<void> {
   ;(child as unknown as EventEmitter).emit('spawn')
   await wait(30)
@@ -1492,6 +1534,8 @@ async function driveCodexToRunning(child: ReturnType<typeof makeFakeChild>): Pro
     JSON.stringify({ id: 2, result: { thread: { id: 't' }, model: 'gpt', cwd: '/tmp' } }) + '\n'
   )
   await wait(40)
+  mgr.sendUserMessage('tab-wd', 'go')
+  await wait(20)
 }
 
 await test('watchdog: stuck `starting`, process dead → reaps to `dead`', async () => {
