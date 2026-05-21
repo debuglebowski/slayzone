@@ -13,6 +13,37 @@ async function patchStore(page: Page, patch: TreePatch) {
   }, patch)
 }
 
+// Pin state is a task-intrinsic column (`tasks.pinned` / `pin_order`), not
+// view-store state — drive it through the DB. Passing `[]` unpins everything.
+async function setPinned(page: Page, taskIds: string[]) {
+  await page.evaluate(async (ids) => {
+    const data = await window.api.db.loadBoardData()
+    const tasks = data.tasks as Array<{ id: string; pinned?: boolean }>
+    const pinSet = new Set(ids)
+    for (const t of tasks) {
+      if (t.pinned && !pinSet.has(t.id)) {
+        await window.api.db.updateTask({ id: t.id, pinned: false, pinOrder: 0 })
+      }
+    }
+    for (let i = 0; i < ids.length; i++) {
+      await window.api.db.updateTask({ id: ids[i], pinned: true, pinOrder: i })
+    }
+  }, taskIds)
+  await seed(page).refreshData()
+}
+
+// Read the pinned task ids (in pin_order) straight from the DB.
+async function getPinnedIds(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const data = await window.api.db.loadBoardData()
+    const tasks = data.tasks as Array<{ id: string; pinned?: boolean; pin_order: number }>
+    return tasks
+      .filter((t) => t.pinned)
+      .sort((a, b) => a.pin_order - b.pin_order)
+      .map((t) => t.id)
+  })
+}
+
 async function setTabs(page: Page, taskIds: string[]) {
   await page.evaluate((ids) => {
     const store = (
@@ -284,7 +315,6 @@ test.describe('TreeView drag and drop', () => {
       treeShowAllSubtasks: false,
       treeShowOnlyActive: false,
       treeShowTemporary: true,
-      treePinnedTaskIds: [],
       treeCrossOutDone: false,
       treeShowStatus: false,
       treeShowPriority: false,
@@ -313,6 +343,7 @@ test.describe('TreeView drag and drop', () => {
       },
       { a: rootA, b: rootB, c: rootC, todo: rootTodo, s1: subA1, s2: subA2, s3: subA3 }
     )
+    await setPinned(mainWindow, [])
     await seed(mainWindow).refreshData()
     // Wait for rows.
     await expect(taskRow(mainWindow, rootA)).toBeVisible({ timeout: 5_000 })
@@ -1218,13 +1249,10 @@ test.describe('TreeView drag and drop', () => {
 
   test('drop within pinned group reorders pinned tasks', async ({ mainWindow }) => {
     // Pin rootA and rootB; drag rootA past rootB to reverse their order
-    // inside the pinned bucket. Pin state survives, only the `order` col
-    // changes via reorderTasks (same-group arrayMove path).
-    await patchStore(mainWindow, {
-      treeGroupPinned: true,
-      treePinnedTaskIds: [rootA, rootB]
-    })
-    await seed(mainWindow).refreshData()
+    // inside the pinned bucket. Pin state survives; only `pin_order` changes
+    // (the pinned-group reorder path).
+    await patchStore(mainWindow, { treeGroupPinned: true })
+    await setPinned(mainWindow, [rootA, rootB])
     await expect(taskRow(mainWindow, rootA)).toBeVisible({ timeout: 5_000 })
     await expect(taskRow(mainWindow, rootB)).toBeVisible()
 
@@ -1236,36 +1264,16 @@ test.describe('TreeView drag and drop', () => {
       rowDropPoint(mainWindow, rootB)
     )
     await expect
-      .poll(
-        async () => {
-          const a = await getTaskById(mainWindow, rootA)
-          const b = await getTaskById(mainWindow, rootB)
-          if (!a || !b) return null
-          const state = await mainWindow.evaluate(() => {
-            const store = (
-              window as unknown as {
-                __slayzone_tabStore?: { getState: () => { treePinnedTaskIds: string[] } }
-              }
-            ).__slayzone_tabStore
-            return store?.getState().treePinnedTaskIds ?? []
-          })
-          return { aPinned: state.includes(rootA), bPinned: state.includes(rootB), aAfterB: a.order > b.order }
-        },
-        { timeout: 5_000 }
-      )
-      .toEqual({ aPinned: true, bPinned: true, aAfterB: true })
-    await patchStore(mainWindow, { treePinnedTaskIds: [], treeGroupPinned: false })
+      .poll(() => getPinnedIds(mainWindow), { timeout: 5_000 })
+      .toEqual([rootB, rootA])
+    await setPinned(mainWindow, [])
+    await patchStore(mainWindow, { treeGroupPinned: false })
   })
 
   test('drag out of pinned group unpins the task', async ({ mainWindow }) => {
-    // Pin rootA, then drag it onto rootC (in_progress). Expected: rootA
-    // unpinned, status stays 'in_progress' (pinning is independent of
-    // status — and rootA was already in_progress).
-    await patchStore(mainWindow, {
-      treeGroupPinned: true,
-      treePinnedTaskIds: [rootA]
-    })
-    await seed(mainWindow).refreshData()
+    // Pin rootA, then drag it onto rootTodo. Expected: rootA unpinned.
+    await patchStore(mainWindow, { treeGroupPinned: true })
+    await setPinned(mainWindow, [rootA])
     await expect(taskRow(mainWindow, rootA)).toBeVisible({ timeout: 5_000 })
 
     const srcBox = await taskRow(mainWindow, rootA).boundingBox()
@@ -1275,30 +1283,15 @@ test.describe('TreeView drag and drop', () => {
       { x: srcBox.x + srcBox.width / 2, y: srcBox.y + srcBox.height / 2 },
       rowDropPoint(mainWindow, rootTodo)
     )
-    await expect
-      .poll(
-        async () =>
-          mainWindow.evaluate(() => {
-            const store = (
-              window as unknown as {
-                __slayzone_tabStore?: { getState: () => { treePinnedTaskIds: string[] } }
-              }
-            ).__slayzone_tabStore
-            return store?.getState().treePinnedTaskIds ?? []
-          }),
-        { timeout: 5_000 }
-      )
-      .toEqual([])
-    await patchStore(mainWindow, { treePinnedTaskIds: [], treeGroupPinned: false })
+    await expect.poll(() => getPinnedIds(mainWindow), { timeout: 5_000 }).toEqual([])
+    await setPinned(mainWindow, [])
+    await patchStore(mainWindow, { treeGroupPinned: false })
   })
 
   test('drop into pinned group pins the task', async ({ mainWindow }) => {
     // Pin rootB so the pinned bucket renders at the top of the tree.
-    await patchStore(mainWindow, {
-      treeGroupPinned: true,
-      treePinnedTaskIds: [rootB]
-    })
-    await seed(mainWindow).refreshData()
+    await patchStore(mainWindow, { treeGroupPinned: true })
+    await setPinned(mainWindow, [rootB])
     await expect(taskRow(mainWindow, rootB)).toBeVisible({ timeout: 5_000 })
 
     const srcBox = await taskRow(mainWindow, rootA).boundingBox()
@@ -1316,21 +1309,11 @@ test.describe('TreeView drag and drop', () => {
       }
     )
     await expect
-      .poll(
-        async () =>
-          mainWindow.evaluate(() => {
-            const store = (
-              window as unknown as {
-                __slayzone_tabStore?: { getState: () => { treePinnedTaskIds: string[] } }
-              }
-            ).__slayzone_tabStore
-            return store?.getState().treePinnedTaskIds ?? []
-          }),
-        { timeout: 5_000 }
-      )
+      .poll(() => getPinnedIds(mainWindow), { timeout: 5_000 })
       .toEqual(expect.arrayContaining([rootA, rootB]))
-    // Clean up: unpin rootA to restore default state.
-    await patchStore(mainWindow, { treePinnedTaskIds: [], treeGroupPinned: false })
+    // Clean up: unpin to restore default state.
+    await setPinned(mainWindow, [])
+    await patchStore(mainWindow, { treeGroupPinned: false })
   })
 
 })

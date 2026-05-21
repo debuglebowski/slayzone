@@ -51,6 +51,9 @@ interface AppSidebarProps {
   ) => void
   onTaskFieldUpdate?: (taskId: string, updates: Partial<Task>) => void
   onTaskBulkFieldUpdate?: (taskIds: string[], updates: Partial<Task>) => void
+  onSetTasksPinned?: (taskIds: string[], pinned: boolean) => void
+  onSetCollapsed?: (taskId: string, collapsed: boolean) => void
+  onPinnedReorder?: (taskIds: string[]) => void
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode
   taskBulkContextMenuRender?: (taskIds: string[], child: ReactNode) => ReactNode
   terminalStates?: Map<string, TerminalState>
@@ -142,6 +145,9 @@ export function AppSidebar({
   onTaskBulkReparent,
   onTaskFieldUpdate,
   onTaskBulkFieldUpdate,
+  onSetTasksPinned,
+  onSetCollapsed,
+  onPinnedReorder,
   taskContextMenuRender,
   taskBulkContextMenuRender,
   terminalStates,
@@ -232,6 +238,9 @@ export function AppSidebar({
               onTaskBulkReparent,
               onTaskFieldUpdate,
               onTaskBulkFieldUpdate,
+              onSetTasksPinned,
+              onSetCollapsed,
+              onPinnedReorder,
               idleByProject,
               taskContextMenuRender,
               taskBulkContextMenuRender,

@@ -54,6 +54,10 @@ interface UseTasksDataReturn {
   bulkDelete: (taskIds: string[]) => Promise<void>
   contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>
   bulkContextMenuUpdate: (taskIds: string[], updates: Partial<Task>) => Promise<void>
+  setTaskPinned: (taskId: string, pinned: boolean) => void
+  setTasksPinned: (taskIds: string[], pinned: boolean) => void
+  setTaskCollapsed: (taskId: string, collapsed: boolean) => void
+  reorderPinnedTasks: (taskIds: string[]) => void
   clearBlockers: (taskId: string) => Promise<void>
 
   // Project handlers
@@ -438,6 +442,76 @@ export function useTasksData(): UseTasksDataReturn {
     }
   }, [])
 
+  // Reorder the pinned group — writes `pin_order = index` for the ordered ids
+  // in one bulk IPC. Optimistic with rollback.
+  const reorderPinnedTasks = useCallback((taskIds: string[]) => {
+    if (taskIds.length === 0) return
+    const orderById = new Map(taskIds.map((id, i) => [id, i]))
+    let snapshot: Task[] = []
+    setTasks((prev) => {
+      snapshot = prev
+      return prev.map((t) =>
+        orderById.has(t.id)
+          ? { ...t, pinned: true, pin_order: orderById.get(t.id) as number }
+          : t
+      )
+    })
+    window.api.db.reorderPinnedTasks(taskIds).catch(() => setTasks(snapshot))
+  }, [])
+
+  // Pin / unpin tasks in the sidebar tree. Pinning appends after the current
+  // pinned list and renumbers it (one bulk IPC); unpinning clears `pinned` /
+  // `pin_order` (one bulk IPC). `pinned` / `pin_order` are task-intrinsic cols.
+  const setTasksPinned = useCallback((taskIds: string[], pinned: boolean) => {
+    if (taskIds.length === 0) return
+    const idSet = new Set(taskIds)
+    let snapshot: Task[] = []
+    let orderedPinnedIds: string[] = []
+    setTasks((prev) => {
+      snapshot = prev
+      if (pinned) {
+        const existing = prev
+          .filter((t) => t.pinned && !idSet.has(t.id))
+          .sort((a, b) => a.pin_order - b.pin_order)
+          .map((t) => t.id)
+        orderedPinnedIds = [...existing, ...taskIds]
+        const orderById = new Map(orderedPinnedIds.map((id, i) => [id, i]))
+        return prev.map((t) =>
+          orderById.has(t.id)
+            ? { ...t, pinned: true, pin_order: orderById.get(t.id) as number }
+            : t
+        )
+      }
+      return prev.map((t) =>
+        idSet.has(t.id) ? { ...t, pinned: false, pin_order: 0 } : t
+      )
+    })
+    const write = pinned
+      ? window.api.db.reorderPinnedTasks(orderedPinnedIds)
+      : window.api.db.updateTasks({
+          ids: taskIds,
+          updates: { pinned: false, pinOrder: 0 }
+        })
+    write.catch(() => setTasks(snapshot))
+  }, [])
+
+  const setTaskPinned = useCallback(
+    (taskId: string, pinned: boolean) => setTasksPinned([taskId], pinned),
+    [setTasksPinned]
+  )
+
+  // Collapse / expand a task's sub-tasks in the sidebar tree.
+  const setTaskCollapsed = useCallback((taskId: string, collapsed: boolean) => {
+    let snapshot: Task[] = []
+    setTasks((prev) => {
+      snapshot = prev
+      return prev.map((t) => (t.id === taskId ? { ...t, tree_collapsed: collapsed } : t))
+    })
+    window.api.db
+      .updateTask({ id: taskId, treeCollapsed: collapsed })
+      .catch(() => setTasks(snapshot))
+  }, [])
+
   // Clear all dependency blockers (used when dragging out of __blocked__ col)
   const clearBlockers = useCallback(async (taskId: string) => {
     await window.api.taskDependencies.setBlockers(taskId, [])
@@ -514,6 +588,10 @@ export function useTasksData(): UseTasksDataReturn {
     bulkDelete,
     contextMenuUpdate,
     bulkContextMenuUpdate,
+    setTaskPinned,
+    setTasksPinned,
+    setTaskCollapsed,
+    reorderPinnedTasks,
     clearBlockers,
     updateProject,
     reorderProjects,

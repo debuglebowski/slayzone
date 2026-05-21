@@ -290,6 +290,10 @@ function App(): React.JSX.Element {
     bulkDelete: rawBulkDelete,
     contextMenuUpdate: rawContextMenuUpdate,
     bulkContextMenuUpdate: rawBulkContextMenuUpdate,
+    setTaskPinned,
+    setTasksPinned,
+    setTaskCollapsed,
+    reorderPinnedTasks,
     clearBlockers,
     updateProject,
     reorderProjects,
@@ -330,7 +334,6 @@ function App(): React.JSX.Element {
   const activeView = useTabStore((s) => s.activeView)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const sidebarView = useTabStore((s) => s.sidebarView)
-  const treePinnedTaskIds = useTabStore((s) => s.treePinnedTaskIds)
   const selectedProjectId = useTabStore((s) => s.selectedProjectId)
   const {
     setActiveTabIndex,
@@ -2194,6 +2197,9 @@ function App(): React.JSX.Element {
             onTaskBulkFieldUpdate={(taskIds, updates) => {
               void rawBulkContextMenuUpdate(taskIds, updates)
             }}
+            onSetTasksPinned={setTasksPinned}
+            onSetCollapsed={setTaskCollapsed}
+            onPinnedReorder={reorderPinnedTasks}
             terminalStates={terminalStates}
             taskProgress={taskProgress}
             doneTaskIds={doneTaskIds}
@@ -2226,8 +2232,8 @@ function App(): React.JSX.Element {
                 onShutdownAgent={
                   activeAgentTaskIds.has(task.id) ? () => shutdownAgentForTask(task.id) : undefined
                 }
-                isPinned={treePinnedTaskIds.includes(task.id)}
-                onTogglePin={() => useTabStore.getState().toggleTreePinnedTask(task.id)}
+                isPinned={!!task.pinned}
+                onTogglePin={() => setTaskPinned(task.id, !task.pinned)}
               >
                 {child}
               </TaskContextMenu>

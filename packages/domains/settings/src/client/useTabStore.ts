@@ -105,11 +105,6 @@ interface TabState {
   // Tree-view: show worktree pill on tasks that have a worktree_path.
   treeShowWorktree: boolean
   // Tree-view: group root tasks by status within each project.
-  // Tree-view: tasks always visible regardless of status filter / sessions.
-  treePinnedTaskIds: string[]
-  // Tree-view: ids of tasks whose sub-tasks are collapsed (hidden) in sidebar.
-  // Per-task persistent — survives reloads.
-  treeCollapsedTaskIds: string[]
   // Tree-view layout — decoupled from kanban filter.
   treeGroupBy: TreeGroupBy
   treeOrderBy: TreeOrderBy
@@ -165,8 +160,6 @@ interface TabState {
   setTaskHeaderPanelMode: (mode: TaskHeaderPanelMode) => void
   setTaskHeaderPanelAlign: (align: TaskHeaderAlign) => void
   setTaskHeaderTitleAlign: (align: TaskHeaderAlign) => void
-  toggleTreePinnedTask: (taskId: string) => void
-  toggleTreeCollapsedTask: (taskId: string) => void
   setTabs: (tabs: Tab[]) => void
   reorderTabs: (from: number, to: number) => void
   openTask: (taskId: string) => void
@@ -204,8 +197,6 @@ interface TabState {
     treeHideInactive?: boolean
     treeHideClosed?: boolean
     treeShowWorktree?: boolean
-    treePinnedTaskIds?: string[]
-    treeCollapsedTaskIds?: string[]
     treeGroupBy?: TreeGroupBy
     treeOrderBy?: TreeOrderBy
     treeOrderDir?: TreeOrderDir
@@ -268,8 +259,6 @@ export const useTabStore = create<TabState>()(
     treeShowSnoozed: true,
     treeShowAllOpen: true,
     treeShowWorktree: true,
-    treePinnedTaskIds: [],
-    treeCollapsedTaskIds: [],
     treeGroupBy: 'status',
     treeOrderBy: 'manual',
     treeOrderDir: 'asc',
@@ -345,20 +334,6 @@ export const useTabStore = create<TabState>()(
     setTaskHeaderPanelMode: (mode) => set({ taskHeaderPanelMode: mode }),
     setTaskHeaderPanelAlign: (align) => set({ taskHeaderPanelAlign: align }),
     setTaskHeaderTitleAlign: (align) => set({ taskHeaderTitleAlign: align }),
-
-    toggleTreePinnedTask: (taskId) =>
-      set((s) => ({
-        treePinnedTaskIds: s.treePinnedTaskIds.includes(taskId)
-          ? s.treePinnedTaskIds.filter((id) => id !== taskId)
-          : [...s.treePinnedTaskIds, taskId]
-      })),
-
-    toggleTreeCollapsedTask: (taskId) =>
-      set((s) => ({
-        treeCollapsedTaskIds: s.treeCollapsedTaskIds.includes(taskId)
-          ? s.treeCollapsedTaskIds.filter((id) => id !== taskId)
-          : [...s.treeCollapsedTaskIds, taskId]
-      })),
 
     setTabs: (tabs) => set({ tabs }),
 
@@ -541,16 +516,6 @@ export const useTabStore = create<TabState>()(
         treeShowAllOpen: typeof state.treeShowAllOpen === 'boolean' ? state.treeShowAllOpen : true,
         treeShowWorktree:
           typeof state.treeShowWorktree === 'boolean' ? state.treeShowWorktree : true,
-        treePinnedTaskIds:
-          Array.isArray(state.treePinnedTaskIds) &&
-          state.treePinnedTaskIds.every((id) => typeof id === 'string')
-            ? state.treePinnedTaskIds
-            : [],
-        treeCollapsedTaskIds:
-          Array.isArray(state.treeCollapsedTaskIds) &&
-          state.treeCollapsedTaskIds.every((id) => typeof id === 'string')
-            ? state.treeCollapsedTaskIds
-            : [],
         treeGroupBy:
           state.treeGroupBy === 'priority' || state.treeGroupBy === 'none'
             ? state.treeGroupBy
@@ -644,8 +609,6 @@ useTabStore.subscribe(
     treeShowSnoozed: state.treeShowSnoozed,
     treeShowAllOpen: state.treeShowAllOpen,
     treeShowWorktree: state.treeShowWorktree,
-    treePinnedTaskIds: state.treePinnedTaskIds,
-    treeCollapsedTaskIds: state.treeCollapsedTaskIds,
     treeGroupBy: state.treeGroupBy,
     treeOrderBy: state.treeOrderBy,
     treeOrderDir: state.treeOrderDir,

@@ -395,6 +395,8 @@ export interface ElectronAPI {
     archiveTasks: (ids: string[]) => Promise<void>
     unarchiveTask: (id: string) => Promise<Task>
     reorderTasks: (taskIds: string[]) => Promise<void>
+    /** Set the complete ordered list of pinned tasks (`pinned` + `pin_order`). */
+    reorderPinnedTasks: (taskIds: string[]) => Promise<void>
     /** Dedicated write path for per-tab lock flag — bypasses updateTask which strips `locked` to prevent stale writeback clobber. */
     setBrowserTabLocked: (taskId: string, tabId: string, locked: boolean) => Promise<boolean>
   }

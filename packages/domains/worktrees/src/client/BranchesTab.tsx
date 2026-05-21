@@ -27,6 +27,20 @@ const DEFAULT_CONFIG: CommitGraphConfig = {
 
 // --- Shared hook: all branch graph state + data fetching ---
 
+/**
+ * Persistence seam for a graph instance's display config. The task variant
+ * routes to the `tasks.commit_graph_config` column; the project variant routes
+ * to the `commit_graph:project:<id>` settings key. `key` is a stable identity
+ * for effect deps (changes only when the underlying task/project changes).
+ */
+export interface CommitGraphPersistence {
+  key: string
+  load: () => Promise<Partial<CommitGraphConfig> | null>
+  /** Persist the config (already stripped of the runtime-only `baseBranch`). */
+  save: (config: Omit<CommitGraphConfig, 'baseBranch'>) => void
+  clear: () => Promise<void>
+}
+
 export interface BranchGraphState {
   dagGraph: ResolvedGraph | null
   loading: boolean
@@ -45,8 +59,8 @@ export function useBranchGraph(
   projectPath: string | null,
   visible: boolean,
   defaultBaseBranch?: string,
-  /** Unique key for persisting this instance's display config (e.g. 'task:123', 'project:/path') */
-  configKey?: string
+  /** Per-instance config persistence (task column or project settings key). */
+  persistence?: CommitGraphPersistence
 ): BranchGraphState {
   const [dagGraph, setDagGraph] = useState<ResolvedGraph | null>(null)
   const [filter, setFilter] = useState('')
@@ -57,14 +71,15 @@ export function useBranchGraph(
   const [currentBranch, setCurrentBranch] = useState<string>('')
   const [config, setConfig] = useState<CommitGraphConfig>(DEFAULT_CONFIG)
 
+  // `persistence` is memoized by callers (stable per task/project), so it is
+  // safe to use directly as an effect/callback dependency.
+
   // Load per-instance config (if saved), otherwise global defaults
   useEffect(() => {
     const load = async () => {
-      const instanceJson = configKey
-        ? await window.api.settings.get(`commit_graph:${configKey}`)
-        : null
-      if (instanceJson) {
-        setConfig({ ...JSON.parse(instanceJson), baseBranch: '' })
+      const instance = persistence ? await persistence.load() : null
+      if (instance) {
+        setConfig({ ...DEFAULT_CONFIG, ...instance, baseBranch: '' })
         return
       }
       const globalJson = await window.api.settings.get('commit_graph_config')
@@ -75,27 +90,27 @@ export function useBranchGraph(
       }
     }
     load()
-  }, [configKey])
+  }, [persistence])
 
   // Save full config to this instance
   const updateConfig = useCallback(
     (updater: React.SetStateAction<CommitGraphConfig>) => {
       setConfig((prev) => {
         const next = typeof updater === 'function' ? updater(prev) : updater
-        if (configKey) {
+        if (persistence) {
           const { baseBranch: _, ...persisted } = next
-          window.api.settings.set(`commit_graph:${configKey}`, JSON.stringify(persisted))
+          persistence.save(persisted)
         }
         return next
       })
     },
-    [configKey]
+    [persistence]
   )
 
   // Reset to global defaults (clear per-instance config)
   const resetConfig = useCallback(async () => {
-    if (configKey) {
-      await window.api.settings.set(`commit_graph:${configKey}`, '')
+    if (persistence) {
+      await persistence.clear()
     }
     const globalJson = await window.api.settings.get('commit_graph_config')
     if (globalJson) {
@@ -103,7 +118,7 @@ export function useBranchGraph(
     } else {
       setConfig(DEFAULT_CONFIG)
     }
-  }, [configKey])
+  }, [persistence])
 
   const effectiveBaseBranch = useMemo(
     () => config.baseBranch || defaultBaseBranch || currentBranch || 'main',

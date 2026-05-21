@@ -17,11 +17,17 @@ export interface TreeGroup {
 }
 
 /**
- * Tree-local sort. ALWAYS tiebreaks by `order` col so manual drag-reorder
- * persists under any orderBy. Independent of kanban's `sortTasks` so kanban
- * tiebreaker semantics stay untouched.
+ * Tree-local sort. Tiebreaks by `tiebreakKey` so manual drag-reorder persists
+ * under any orderBy — `order` for normal groups, `pin_order` for the pinned
+ * group (whose manual order is task-intrinsic). Independent of kanban's
+ * `sortTasks` so kanban tiebreaker semantics stay untouched.
  */
-export function orderTreeRows(tasks: Task[], orderBy: TreeOrderBy, dir: TreeOrderDir): Task[] {
+export function orderTreeRows(
+  tasks: Task[],
+  orderBy: TreeOrderBy,
+  dir: TreeOrderDir,
+  tiebreakKey: 'order' | 'pin_order' = 'order'
+): Task[] {
   const sorted = [...tasks].sort((a, b) => {
     let cmp = 0
     switch (orderBy) {
@@ -57,7 +63,7 @@ export function orderTreeRows(tasks: Task[], orderBy: TreeOrderBy, dir: TreeOrde
         cmp = 0
     }
     if (cmp !== 0) return cmp
-    return a.order - b.order
+    return a[tiebreakKey] - b[tiebreakKey]
   })
   return dir === 'desc' ? sorted.reverse() : sorted
 }

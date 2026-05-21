@@ -145,7 +145,6 @@ test.describe('TreeView multi-select', () => {
       treeShowAllSubtasks: false,
       treeShowOnlyActive: false,
       treeShowTemporary: true,
-      treePinnedTaskIds: [],
       treeCrossOutDone: false,
       treeShowStatus: false,
       treeShowPriority: false,

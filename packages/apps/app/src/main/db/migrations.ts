@@ -59,7 +59,7 @@ function readCanonicalSkillMetadata(metadataJson: string): {
   }
 }
 
-const migrations: Migration[] = [
+export const migrations: Migration[] = [
   {
     version: 1,
     up: (db) => {
@@ -2789,6 +2789,85 @@ const migrations: Migration[] = [
         UPDATE tasks SET last_interaction_at = NULL WHERE last_interaction_at = 0;
         CREATE INDEX IF NOT EXISTS idx_tasks_last_interaction ON tasks(last_interaction_at DESC);
       `)
+    }
+  },
+  {
+    version: 140,
+    up: (db) => {
+      // Move genuinely task-intrinsic UI state out of global settings blobs and
+      // into `tasks` columns, so it travels with the task row and survives the
+      // app's wholesale `viewState` rewrites:
+      //   - viewState.treePinnedTaskIds   → tasks.pinned + tasks.pin_order
+      //   - viewState.treeCollapsedTaskIds → tasks.tree_collapsed
+      //   - settings 'commit_graph:task:<id>' → tasks.commit_graph_config
+      // Window state that merely references a task id (tabs, closedTabs,
+      // projectLastActiveTab) and project-scoped keys stay in their blobs.
+      db.exec(`
+        ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN pin_order INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN tree_collapsed INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN commit_graph_config TEXT DEFAULT NULL;
+      `)
+
+      // Backfill pin/collapse state from the `viewState` blob.
+      const viewStateRow = db
+        .prepare("SELECT value FROM settings WHERE key = 'viewState'")
+        .get() as { value: string } | undefined
+      let viewState: Record<string, unknown> | null = null
+      if (viewStateRow?.value) {
+        try {
+          const parsed = JSON.parse(viewStateRow.value)
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            viewState = parsed as Record<string, unknown>
+          }
+        } catch {
+          viewState = null
+        }
+      }
+
+      if (viewState) {
+        const pinned = viewState.treePinnedTaskIds
+        if (Array.isArray(pinned)) {
+          const setPinned = db.prepare(
+            'UPDATE tasks SET pinned = 1, pin_order = ? WHERE id = ?'
+          )
+          pinned.forEach((id, index) => {
+            if (typeof id === 'string') setPinned.run(index, id)
+          })
+        }
+
+        const collapsed = viewState.treeCollapsedTaskIds
+        if (Array.isArray(collapsed)) {
+          const setCollapsed = db.prepare(
+            'UPDATE tasks SET tree_collapsed = 1 WHERE id = ?'
+          )
+          for (const id of collapsed) {
+            if (typeof id === 'string') setCollapsed.run(id)
+          }
+        }
+
+        // Strip the moved fields from the blob.
+        delete viewState.treePinnedTaskIds
+        delete viewState.treeCollapsedTaskIds
+        db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(
+          JSON.stringify(viewState),
+          'viewState'
+        )
+      }
+
+      // Backfill per-task commit-graph config from settings 'commit_graph:task:<id>'.
+      const prefix = 'commit_graph:task:'
+      const graphRows = db
+        .prepare("SELECT key, value FROM settings WHERE key LIKE 'commit_graph:task:%'")
+        .all() as Array<{ key: string; value: string | null }>
+      const setGraphConfig = db.prepare(
+        'UPDATE tasks SET commit_graph_config = ? WHERE id = ?'
+      )
+      for (const row of graphRows) {
+        const taskId = row.key.slice(prefix.length)
+        if (taskId && row.value) setGraphConfig.run(row.value, taskId)
+      }
+      db.prepare("DELETE FROM settings WHERE key LIKE 'commit_graph:task:%'").run()
     }
   }
 ]

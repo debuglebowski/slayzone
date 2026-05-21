@@ -116,7 +116,10 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
     is_blocked: Boolean(row.is_blocked),
     active_artifact_id: (row.active_artifact_id as string) ?? null,
     needs_attention: Boolean(row.needs_attention),
-    dev_url_toast_dismissed: Boolean(row.dev_url_toast_dismissed)
+    dev_url_toast_dismissed: Boolean(row.dev_url_toast_dismissed),
+    pinned: Boolean(row.pinned),
+    tree_collapsed: Boolean(row.tree_collapsed),
+    commit_graph_config: safeJsonParse(row.commit_graph_config)
   } as Task
 }
 
@@ -797,6 +800,22 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   if (data.devUrlToastDismissed !== undefined) {
     fields.push('dev_url_toast_dismissed = ?')
     values.push(data.devUrlToastDismissed ? 1 : 0)
+  }
+  if (data.pinned !== undefined) {
+    fields.push('pinned = ?')
+    values.push(data.pinned ? 1 : 0)
+  }
+  if (data.pinOrder !== undefined) {
+    fields.push('pin_order = ?')
+    values.push(data.pinOrder)
+  }
+  if (data.treeCollapsed !== undefined) {
+    fields.push('tree_collapsed = ?')
+    values.push(data.treeCollapsed ? 1 : 0)
+  }
+  if (data.commitGraphConfig !== undefined) {
+    fields.push('commit_graph_config = ?')
+    values.push(data.commitGraphConfig ? JSON.stringify(data.commitGraphConfig) : null)
   }
 
   if (fields.length === 0) {

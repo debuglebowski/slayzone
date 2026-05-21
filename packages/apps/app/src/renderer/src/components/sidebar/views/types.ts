@@ -56,6 +56,12 @@ export interface SidebarViewContext {
   onTaskFieldUpdate?: (taskId: string, updates: Partial<Task>) => void
   /** Bulk variant of field update — used for groupBy inheritance on multi-drag. */
   onTaskBulkFieldUpdate?: (taskIds: string[], updates: Partial<Task>) => void
+  /** Pin / unpin tasks in the sidebar tree (writes `tasks.pinned` + `pin_order`). */
+  onSetTasksPinned?: (taskIds: string[], pinned: boolean) => void
+  /** Collapse / expand a task's sub-tasks in the sidebar tree (writes `tasks.tree_collapsed`). */
+  onSetCollapsed?: (taskId: string, collapsed: boolean) => void
+  /** Reorder the pinned group — writes `tasks.pin_order` for the ordered ids. */
+  onPinnedReorder?: (taskIds: string[]) => void
 }
 
 export interface SidebarView {

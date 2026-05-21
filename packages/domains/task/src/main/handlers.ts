@@ -76,6 +76,7 @@ import {
   loadBoardDataOp,
   removeBlockerOp,
   reorderTasksOp,
+  reorderPinnedTasksOp,
   setBrowserTabLockedOp,
   restoreTaskOp,
   setBlockersOp,
@@ -108,10 +109,6 @@ export function registerTaskHandlers(
   if (stale.length > 0) {
     const placeholders = stale.map(() => '?').join(',')
     db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...stale.map((r) => r.id))
-    // Clean up per-task commit graph settings
-    for (const { id } of stale) {
-      db.prepare(`DELETE FROM settings WHERE key = ?`).run(`commit_graph:task:${id}`)
-    }
     console.log(`Purged ${stale.length} soft-deleted task(s)`)
   }
 
@@ -157,9 +154,6 @@ export function registerTaskHandlers(
   if (staleTemp.length > 0) {
     const placeholders = staleTemp.map(() => '?').join(',')
     db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...staleTemp.map((r) => r.id))
-    for (const { id } of staleTemp) {
-      db.prepare(`DELETE FROM settings WHERE key = ?`).run(`commit_graph:task:${id}`)
-    }
     console.log(`Purged ${staleTemp.length} stale temporary task(s)`)
   }
 
@@ -182,6 +176,9 @@ export function registerTaskHandlers(
   ipcMain.handle('db:tasks:archiveMany', (_, ids: string[]) => archiveManyTasksOp(db, ids, deps))
   ipcMain.handle('db:tasks:unarchive', (_, id: string) => unarchiveTaskOp(db, id, deps))
   ipcMain.handle('db:tasks:reorder', (_, taskIds: string[]) => reorderTasksOp(db, taskIds))
+  ipcMain.handle('db:tasks:reorderPinned', (_, taskIds: string[]) =>
+    reorderPinnedTasksOp(db, taskIds)
+  )
   ipcMain.handle(
     'db:tasks:setBrowserTabLocked',
     (_, taskId: string, tabId: string, locked: boolean) =>

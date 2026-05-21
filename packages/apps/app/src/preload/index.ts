@@ -74,6 +74,7 @@ const api: ElectronAPI = {
     archiveTasks: (ids) => ipcRenderer.invoke('db:tasks:archiveMany', ids),
     unarchiveTask: (id) => ipcRenderer.invoke('db:tasks:unarchive', id),
     reorderTasks: (taskIds) => ipcRenderer.invoke('db:tasks:reorder', taskIds),
+    reorderPinnedTasks: (taskIds) => ipcRenderer.invoke('db:tasks:reorderPinned', taskIds),
     setBrowserTabLocked: (taskId, tabId, locked) =>
       ipcRenderer.invoke('db:tasks:setBrowserTabLocked', taskId, tabId, locked)
   },

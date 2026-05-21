@@ -1,12 +1,17 @@
 /**
  * Task General tab: header, status chips, commit graph (BranchesTab DAG)
  */
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { GitBranch, FolderOpen, ArrowLeft, Cloud, CloudOff } from 'lucide-react'
 import { Button, toast } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { useConsolidatedGeneralData } from './useConsolidatedGeneralData'
-import { useBranchGraph, BranchGraphToolbar, BranchGraphCard } from './BranchesTab'
+import {
+  useBranchGraph,
+  BranchGraphToolbar,
+  BranchGraphCard,
+  type CommitGraphPersistence
+} from './BranchesTab'
 import { RemoteSection } from './RemoteSection'
 import { CopyFilesDialog } from './CopyFilesDialog'
 import { CreatePrDialog, LinkPrDialog } from './PullRequestTab'
@@ -47,11 +52,25 @@ export function GeneralTabContent({
   onSwitchTab
 }: GeneralTabContentProps) {
   const data = useConsolidatedGeneralData(task, projectPath, visible, pollIntervalMs, onUpdateTask)
+  // Per-task commit-graph config lives on the `tasks.commit_graph_config` column.
+  const graphPersistence = useMemo<CommitGraphPersistence>(
+    () => ({
+      key: `task:${task.id}`,
+      load: async () => task.commit_graph_config,
+      save: (cfg) => {
+        void onUpdateTask({ id: task.id, commitGraphConfig: cfg }).then(onTaskUpdated)
+      },
+      clear: async () => {
+        onTaskUpdated(await onUpdateTask({ id: task.id, commitGraphConfig: null }))
+      }
+    }),
+    [task.id, task.commit_graph_config, onUpdateTask, onTaskUpdated]
+  )
   const branchGraph = useBranchGraph(
     data.targetPath,
     visible,
     data.parentBranch ?? undefined,
-    `task:${task.id}`
+    graphPersistence
   )
   const [createPrOpen, setCreatePrOpen] = useState(false)
   const [linkPrOpen, setLinkPrOpen] = useState(false)

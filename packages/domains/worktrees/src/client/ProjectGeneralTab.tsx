@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useMemo } from 'react'
 import { GitBranch, ChevronDown, Check, Loader2, Plus, Copy, FolderGit2 } from 'lucide-react'
 import {
   Button,
@@ -13,7 +13,12 @@ import {
 } from '@slayzone/ui'
 import type { StatusSummary, AheadBehind } from '../shared/types'
 import { RemoteSection } from './RemoteSection'
-import { useBranchGraph, BranchGraphToolbar, BranchGraphCard } from './BranchesTab'
+import {
+  useBranchGraph,
+  BranchGraphToolbar,
+  BranchGraphCard,
+  type CommitGraphPersistence
+} from './BranchesTab'
 
 interface ProjectGeneralTabProps {
   projectId: string
@@ -44,11 +49,32 @@ export function ProjectGeneralTab({
   const [switching, setSwitching] = useState(false)
   const [branchError, setBranchError] = useState<string | null>(null)
 
+  // Per-project commit-graph config stays in the `commit_graph:project:<id>`
+  // settings key (project-scoped config migration is a separate follow-up).
+  const graphPersistence = useMemo<CommitGraphPersistence>(
+    () => ({
+      key: `project:${projectId}`,
+      load: async () => {
+        const json = await window.api.settings.get(`commit_graph:project:${projectId}`)
+        return json ? JSON.parse(json) : null
+      },
+      save: (cfg) => {
+        void window.api.settings.set(
+          `commit_graph:project:${projectId}`,
+          JSON.stringify(cfg)
+        )
+      },
+      clear: async () => {
+        await window.api.settings.set(`commit_graph:project:${projectId}`, '')
+      }
+    }),
+    [projectId]
+  )
   const branchGraph = useBranchGraph(
     projectPath,
     visible && isGitRepo === true,
     undefined,
-    `project:${projectId}`
+    graphPersistence
   )
 
   const lastHashRef = useRef<string>('')
