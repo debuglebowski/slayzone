@@ -245,30 +245,47 @@ function rowGroupValue(
 }
 
 
-function TaskRow({
-  task,
-  depth,
-  ancestorFlags,
-  ctx
-}: {
+/** Props shared by every tree-row component. */
+interface TaskRowProps {
   task: Task
   depth: number
   ancestorFlags: boolean[]
+  // Set for every row in the temporary group (temp roots AND their subtasks),
+  // not just tasks whose own `is_temporary` is set. Drives the DnD dispatch.
+  inTempGroup: boolean
   ctx: TaskBranchCtx
-}): ReactNode {
+}
+
+/**
+ * Drag-and-drop wiring a row needs in order to render. Sortable rows fill this
+ * from `useSortable`; plain rows (temporary tasks — kept outside the DnD
+ * system) pass `INERT_SORTABLE` so they never register a draggable/droppable
+ * node or receive slide transforms.
+ */
+interface RowSortable {
+  setNodeRef?: (node: HTMLElement | null) => void
+  attributes?: ReturnType<typeof useSortable>['attributes']
+  listeners?: DraggableSyntheticListeners
+  transform: ReturnType<typeof useSortable>['transform']
+  transition?: string
+  isDragging: boolean
+}
+
+const INERT_SORTABLE: RowSortable = {
+  transform: null,
+  transition: undefined,
+  isDragging: false
+}
+
+function TaskRowView({
+  task,
+  depth,
+  ancestorFlags,
+  ctx,
+  sortable
+}: TaskRowProps & { sortable: RowSortable }): ReactNode {
   const isEditing = ctx.editingTaskId === task.id
-  const draggable = ctx.dragEnabled && !task.is_temporary && !isEditing
-  const dragData: TaskRowDragData = {
-    kind: 'task',
-    projectId: task.project_id,
-    groupValue: rowGroupValue(task, ctx.treeGroupBy, ctx.treeGroupPinned, ctx.pinnedSet),
-    parentId: task.parent_id ?? null
-  }
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: task.id,
-    data: dragData,
-    disabled: !draggable
-  })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable
   // Multi-drag: when the dragged row is part of a multi-selection, every
   // selected row should appear to "lift" together. Hide all selected rows
   // (not just the dragged one) so the floating +N preview is the only
@@ -522,6 +539,54 @@ function TaskRow({
   return <div>{wrapped}</div>
 }
 
+/**
+ * Sortable variant — the normal case. Owns the `useSortable` binding so
+ * `TaskRowView` stays presentational and `PlainTaskRow` can skip the hook.
+ */
+function SortableTaskRow(props: TaskRowProps): ReactNode {
+  const { task, ctx } = props
+  const isEditing = ctx.editingTaskId === task.id
+  const draggable = ctx.dragEnabled && !isEditing
+  const dragData: TaskRowDragData = {
+    kind: 'task',
+    projectId: task.project_id,
+    groupValue: rowGroupValue(task, ctx.treeGroupBy, ctx.treeGroupPinned, ctx.pinnedSet),
+    parentId: task.parent_id ?? null
+  }
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+    data: dragData,
+    disabled: !draggable
+  })
+  return (
+    <TaskRowView
+      {...props}
+      sortable={{ setNodeRef, attributes, listeners, transform, transition, isDragging }}
+    />
+  )
+}
+
+/**
+ * Plain variant for temporary tasks — no `useSortable`, no drag listeners, not
+ * a drop target. Temp rows also sit outside `SortableContext` (see
+ * `buildRowList`), so they neither drag nor slide during others' drags.
+ */
+function PlainTaskRow(props: TaskRowProps): ReactNode {
+  return <TaskRowView {...props} sortable={INERT_SORTABLE} />
+}
+
+/**
+ * Dispatcher. The whole temporary group is excluded from drag-and-drop —
+ * keyed on `inTempGroup` (group membership), not the task's own
+ * `is_temporary`, so a non-temp subtask of a temp root is excluded too.
+ * Returning a distinct component type per branch also makes React remount
+ * cleanly if a row crosses the boundary (temp task promoted to permanent),
+ * avoiding a hook-count mismatch from a conditional `useSortable`.
+ */
+function TaskRow(props: TaskRowProps): ReactNode {
+  return props.inTempGroup ? <PlainTaskRow {...props} /> : <SortableTaskRow {...props} />
+}
+
 // Floating drag preview — renders portal'd to document.body via DragOverlay,
 // so it escapes the project's `overflow-hidden` collapsible wrapper. Without
 // this, the dragged row's transform is clipped at the project boundary and
@@ -586,15 +651,7 @@ function ProjectDragPreview({
   )
 }
 
-function HeaderRow({
-  rowId,
-  projectId,
-  group,
-  padTopClass,
-  cols,
-  treeGroupBy,
-  onCreateTemporaryTask
-}: {
+interface HeaderRowProps {
   rowId: string
   projectId: string
   group: TreeGroup
@@ -602,19 +659,30 @@ function HeaderRow({
   cols: import('@slayzone/projects/shared').ColumnConfig[] | null
   treeGroupBy: 'none' | 'status' | 'priority'
   onCreateTemporaryTask?: (projectId: string) => void
-}): ReactNode {
-  // Sortable participant for tween-only — header slides with surrounding rows
-  // during pre-slide but cannot be dragged as a source. `draggable: true`
-  // disables drag listeners; `droppable` enabled only for groups where a drop
-  // would make sense (skip temp/pinned/none). Drop on header routes through
-  // the `kind: 'group'` branch in `handleDragEnd`, landing the dragged set at
-  // index 0 of the group.
+}
+
+/** DnD wiring for a header row; the temporary header passes an inert object. */
+interface HeaderSortable {
+  setNodeRef?: (node: HTMLElement | null) => void
+  transform: ReturnType<typeof useSortable>['transform']
+  transition?: string
+  isOver: boolean
+}
+
+function HeaderRowView({
+  projectId,
+  group,
+  padTopClass,
+  cols,
+  treeGroupBy,
+  onCreateTemporaryTask,
+  sortable
+}: HeaderRowProps & { sortable: HeaderSortable }): ReactNode {
+  const { setNodeRef, transform, transition, isOver } = sortable
+  // Status/priority headers are drop targets — a drop routes through the
+  // `kind: 'group'` branch in `handleDragEnd`, landing the dragged set at
+  // index 0 of the group. Pinned/none/temp headers reject drops.
   const isDroppable = !group.isTemp && !group.isPinned && !group.isNone
-  const { setNodeRef, transform, transition, isOver } = useSortable({
-    id: rowId,
-    data: { kind: 'group', projectId, groupValue: group.key } satisfies GroupDropData,
-    disabled: { draggable: true, droppable: !isDroppable }
-  })
 
   let label: string
   let Icon: typeof Clock | null = null
@@ -692,9 +760,49 @@ function HeaderRow({
   )
 }
 
+/**
+ * Sortable header — a tween-only participant (slides with surrounding rows
+ * during pre-slide) and, for status/priority groups, a drop target.
+ * `draggable: true` disables drag listeners — headers slide, never drag.
+ */
+function SortableHeaderRow(props: HeaderRowProps): ReactNode {
+  const { rowId, projectId, group } = props
+  const isDroppable = !group.isTemp && !group.isPinned && !group.isNone
+  const { setNodeRef, transform, transition, isOver } = useSortable({
+    id: rowId,
+    data: { kind: 'group', projectId, groupValue: group.key } satisfies GroupDropData,
+    disabled: { draggable: true, droppable: !isDroppable }
+  })
+  return <HeaderRowView {...props} sortable={{ setNodeRef, transform, transition, isOver }} />
+}
+
+/** Plain header for the temporary group — kept outside the DnD system. */
+function PlainHeaderRow(props: HeaderRowProps): ReactNode {
+  return (
+    <HeaderRowView
+      {...props}
+      sortable={{ transform: null, transition: undefined, isOver: false }}
+    />
+  )
+}
+
+/** Dispatcher — the temporary group's header skips `useSortable` entirely. */
+function HeaderRow(props: HeaderRowProps): ReactNode {
+  return props.group.isTemp ? <PlainHeaderRow {...props} /> : <SortableHeaderRow {...props} />
+}
+
 type RowItem =
   | { kind: 'header'; rowId: string; group: TreeGroup; padTopClass: string }
-  | { kind: 'task'; rowId: string; task: Task; depth: number; ancestorFlags: boolean[] }
+  | {
+      kind: 'task'
+      rowId: string
+      task: Task
+      depth: number
+      ancestorFlags: boolean[]
+      // True for every row inside the temporary group, including non-temp
+      // subtasks of a temp root — so the whole subtree stays out of DnD.
+      inTempGroup: boolean
+    }
 
 /**
  * Wraps a project block in a sortable. `renderProject` is a `.map` closure, so
@@ -1726,28 +1834,38 @@ export function TreeView({
   // sub-tasks). Render order = sortable measurement order. Solo-`none` group
   // skips its header — no companions to disambiguate, so the rows just look
   // like the project's default list.
-  const buildRowList = (groups: TreeGroup[], projectId: string): { rows: RowItem[] } => {
+  const buildRowList = (
+    groups: TreeGroup[],
+    projectId: string
+  ): { rows: RowItem[]; sortableRowIds: string[] } => {
     const rows: RowItem[] = []
+    // Ids that participate in `SortableContext`. The temporary group is
+    // excluded wholesale — its rows render plain and never slide during a drag.
+    const sortableRowIds: string[] = []
     const hasCompanions = groups.length > 1
     for (let gi = 0; gi < groups.length; gi++) {
       const g = groups[gi]
+      const inDnd = !g.isTemp
       const showHeader = !g.isNone || hasCompanions
       if (showHeader) {
+        const headerRowId = `header:${projectId}:${g.key}`
         rows.push({
           kind: 'header',
-          rowId: `header:${projectId}:${g.key}`,
+          rowId: headerRowId,
           group: g,
           padTopClass: gi === 0 ? 'pt-2' : 'pt-4'
         })
+        if (inDnd) sortableRowIds.push(headerRowId)
       }
       const walk = (t: Task, depth: number, ancestorFlags: boolean[]): void => {
-        rows.push({ kind: 'task', rowId: t.id, task: t, depth, ancestorFlags })
+        rows.push({ kind: 'task', rowId: t.id, task: t, depth, ancestorFlags, inTempGroup: g.isTemp })
+        if (inDnd) sortableRowIds.push(t.id)
         const kids = childrenByParent.get(t.id) ?? []
         kids.forEach((k, i) => walk(k, depth + 1, [...ancestorFlags, i < kids.length - 1]))
       }
       g.tasks.forEach((t, i) => walk(t, 1, [i < g.tasks.length - 1]))
     }
-    return { rows }
+    return { rows, sortableRowIds }
   }
 
   const renderProject = (project: (typeof sortedProjects)[number]) => {
@@ -1759,11 +1877,11 @@ export function TreeView({
       selectedProjectId === project.id && activeTabType === 'home' && !isContextActive
     const dragEnabled = Boolean(onTaskReorder) && Boolean(onTaskMove)
     const cols = columnsByProjectId?.get(project.id) ?? null
-    // Flat row list: headers + tasks in DFS order. Header rows participate
-    // in the SortableContext so they tween together with surrounding rows,
-    // but their drag listeners are disabled — they slide, they don't drag.
-    const { rows } = buildRowList(groups, project.id)
-    const rowIds = rows.map((r) => r.rowId)
+    // Flat row list: headers + tasks in DFS order. Non-temp header rows
+    // participate in the SortableContext so they tween together with
+    // surrounding rows, but their drag listeners are disabled — they slide,
+    // they don't drag. The temporary group is excluded from `sortableRowIds`.
+    const { rows, sortableRowIds } = buildRowList(groups, project.id)
     const flatTaskIds = rows.flatMap((r) => (r.kind === 'task' ? [r.rowId] : []))
     // Compute first/last-in-run flags for each selected task, scanning
     // adjacency in flat render order. Skipped when fewer than 2 selected
@@ -1812,12 +1930,13 @@ export function TreeView({
       collapsedTaskIds: collapsedSet,
       onToggleCollapse: handleToggleCollapse
     }
-    // Every element (group headers, root rows, sub-rows) is a sortable item
-    // in one flat list, so `verticalListSortingStrategy` slides them
-    // uniformly. Headers are sortable participants with drag DISABLED — they
-    // tween with surrounding rows during pre-slide but can't be dragged as a
-    // source. Drop on a header routes through `kind: 'group'` → insert at
-    // index 0 of that group.
+    // Every non-temp element (group headers, root rows, sub-rows) is a
+    // sortable item in one flat list, so `verticalListSortingStrategy` slides
+    // them uniformly. Headers are sortable participants with drag DISABLED —
+    // they tween with surrounding rows during pre-slide but can't be dragged
+    // as a source. Drop on a header routes through `kind: 'group'` → insert at
+    // index 0 of that group. The temporary group is excluded entirely: its
+    // rows render plain (no `useSortable`) and never drag, drop, or slide.
     return (
       <SortableProject key={project.id} projectId={project.id} disabled={!showAll}>
         {({ setNodeRef, style, listeners }) => (
@@ -1900,7 +2019,10 @@ export function TreeView({
                     No active tasks
                   </span>
                 ) : (
-                  <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
+                  <SortableContext
+                    items={sortableRowIds}
+                    strategy={verticalListSortingStrategy}
+                  >
                     {rows.map((r) =>
                       r.kind === 'header' ? (
                         <HeaderRow
@@ -1919,6 +2041,7 @@ export function TreeView({
                           task={r.task}
                           depth={r.depth}
                           ancestorFlags={r.ancestorFlags}
+                          inTempGroup={r.inTempGroup}
                           ctx={branchCtx}
                         />
                       )

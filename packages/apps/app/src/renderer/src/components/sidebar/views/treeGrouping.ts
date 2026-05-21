@@ -107,8 +107,13 @@ export function groupTreeRows(
   if (pinnedTasks.length > 0) {
     groups.push({ key: PINNED_GROUP_KEY, isTemp: false, isPinned: true, tasks: pinnedTasks })
   }
-  if (tempTasks.length > 0) {
-    groups.push({ key: TEMP_GROUP_KEY, isTemp: true, isPinned: false, tasks: tempTasks })
+
+  // Temporary group renders last — append right before each return path.
+  const appendTemp = (): TreeGroup[] => {
+    if (tempTasks.length > 0) {
+      groups.push({ key: TEMP_GROUP_KEY, isTemp: true, isPinned: false, tasks: tempTasks })
+    }
+    return groups
   }
 
   if (groupBy === 'none') {
@@ -123,7 +128,7 @@ export function groupTreeRows(
         tasks: persistent
       })
     }
-    return groups
+    return appendTemp()
   }
 
   if (groupBy === 'status') {
@@ -161,7 +166,7 @@ export function groupTreeRows(
         groups.push({ key: k, isTemp: false, isPinned: false, tasks: arr })
       }
     }
-    return groups
+    return appendTemp()
   }
 
   // groupBy === 'priority'
@@ -180,5 +185,5 @@ export function groupTreeRows(
     if (!opts.showEmpty && arr.length === 0) continue
     groups.push({ key: `p${p}`, isTemp: false, isPinned: false, tasks: arr })
   }
-  return groups
+  return appendTemp()
 }
