@@ -43,7 +43,8 @@ export {
   SLZ_FILE_HOST,
   SLZ_FILE_PREFIX,
   toSlzFileUrl,
-  fileUrlToSlzFileUrl
+  fileUrlToSlzFileUrl,
+  slzFileUrlToFileUrl
 } from './slz-file-url'
 export {
   withResultDedup,

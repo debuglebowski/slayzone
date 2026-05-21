@@ -28,5 +28,23 @@ export function toSlzFileUrl(absolutePath: string, version?: string | number): s
  * (`file://host/share/...`) would produce a broken URL — not supported.
  */
 export function fileUrlToSlzFileUrl(url: string): string {
-  return url.replace(/^file:\/\//, SLZ_FILE_PREFIX)
+  // Heal URLs corrupted by a past round-trip bug that left one or more stray
+  // `app` host segments (`file://app/...`, `file://appapp/...`). Collapse them
+  // back to the empty-host form before transforming. `app` is never a valid
+  // file:// host on the platforms we support, so this is safe.
+  const healed = url.replace(/^file:\/\/(?:app)+\//, 'file:///')
+  return healed.replace(/^file:\/\//, SLZ_FILE_PREFIX)
+}
+
+/**
+ * Inverse of `fileUrlToSlzFileUrl`. Strips the whole `slz-file://app` prefix
+ * (scheme + sentinel host) back to the empty-host `file:///abs/path` form.
+ * Stripping only the scheme would leave `app` stranded in the path, and a
+ * later round-trip through `fileUrlToSlzFileUrl` would compound it into
+ * `slz-file://appapp/...`. Non-matching URLs pass through unchanged.
+ */
+export function slzFileUrlToFileUrl(url: string): string {
+  return url.startsWith(SLZ_FILE_PREFIX)
+    ? `file://${url.slice(SLZ_FILE_PREFIX.length)}`
+    : url
 }

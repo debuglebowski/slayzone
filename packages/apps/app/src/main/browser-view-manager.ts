@@ -1,6 +1,6 @@
 import { clipboard, Menu, shell, WebContentsView, session, type BrowserWindow } from 'electron'
 import { join } from 'path'
-import { fileUrlToSlzFileUrl } from '@slayzone/platform'
+import { fileUrlToSlzFileUrl, slzFileUrlToFileUrl } from '@slayzone/platform'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import type { BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import type { DesktopHandoffPolicy } from '@slayzone/task/shared'
@@ -1167,7 +1167,7 @@ export class BrowserViewManager {
       send({
         viewId,
         type: 'did-navigate',
-        url: url.replace(/^slz-file:\/\//, 'file://'),
+        url: slzFileUrlToFileUrl(url),
         canGoBack: wc.navigationHistory.canGoBack(),
         canGoForward: wc.navigationHistory.canGoForward()
       })
@@ -1180,7 +1180,7 @@ export class BrowserViewManager {
       send({
         viewId,
         type: 'did-navigate',
-        url: url.replace(/^slz-file:\/\//, 'file://'),
+        url: slzFileUrlToFileUrl(url),
         canGoBack: wc.navigationHistory.canGoBack(),
         canGoForward: wc.navigationHistory.canGoForward()
       })
