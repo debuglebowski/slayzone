@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "//xterm": "@xterm/* + @xterm/headless are pinned (exact, no ^) to the xterm 6.1 beta channel for ScreenDprMonitor + texture-atlas race fixes. Move all 7 in lockstep. Re-bump when xterm 6.1 ships stable, or to a newer beta if a relevant fix lands.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
@@ -24,12 +25,12 @@
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/addon-search": "^0.16.0",
-    "@xterm/addon-serialize": "^0.14.0",
-    "@xterm/addon-unicode-graphemes": "^0.4.0",
-    "@xterm/addon-webgl": "^0.19.0",
-    "@xterm/xterm": "^6.0.0",
+    "@xterm/addon-fit": "0.12.0-beta.219",
+    "@xterm/addon-search": "0.17.0-beta.219",
+    "@xterm/addon-serialize": "0.15.0-beta.219",
+    "@xterm/addon-unicode-graphemes": "0.5.0-beta.219",
+    "@xterm/addon-webgl": "0.20.0-beta.219",
+    "@xterm/xterm": "6.1.0-beta.219",
     "lucide-react": "^0.562.0",
     "node-pty": "^1.1.0"
   },
@@ -40,7 +41,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.7",
-    "@xterm/headless": "6.0.0",
+    "@xterm/headless": "6.1.0-beta.219",
     "typescript": "^5.9.3"
   }
 }
