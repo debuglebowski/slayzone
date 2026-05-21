@@ -14,6 +14,7 @@ import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
+import { loadWebglRenderer } from './webgl-loader'
 import '@xterm/xterm/css/xterm.css'
 
 // Strip trailing whitespace from each line of selection text.
@@ -36,6 +37,10 @@ underlineOverride.textContent = `
   }
 `
 document.head.appendChild(underlineOverride)
+
+// Once WebGL construction fails (driver blocklist, lost GPU), every subsequent
+// terminal skips it and uses the DOM renderer — no repeated throw, no half-init.
+let webglDisabled = false
 
 import {
   getTerminal,
@@ -174,6 +179,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const fitAddonRef = useRef<FitAddon | null>(null)
   const serializeAddonRef = useRef<SerializeAddon | null>(null)
   const searchAddonRef = useRef<SearchAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
+  const webglRafIdRef = useRef<number | null>(null)
   const clearedSeqRef = useRef<number | null>(null)
   const initializedRef = useRef(false)
   const lastRenderedSeqRef = useRef<number>(-1)
@@ -389,6 +396,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             fitAddonRef.current = cached.fitAddon
             serializeAddonRef.current = cached.serializeAddon
             searchAddonRef.current = cached.searchAddon
+            webglAddonRef.current = cached.webglAddon ?? null
             registerActiveAddon(sessionId, cached.serializeAddon)
             if (cached.lastRenderedSeq !== undefined) {
               lastRenderedSeqRef.current = cached.lastRenderedSeq
@@ -406,6 +414,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
               window.api.pty.resize(sessionId, cached.terminal.cols, cached.terminal.rows)
             }
             cached.terminal.write('\x1b[0m') // Reset ANSI state on reattach
+
+            // The WebGL atlas was built under the previous container geometry, and
+            // possibly a different monitor DPR, while the terminal was detached —
+            // rebuild it and repaint so glyphs don't render scrambled after reattach.
+            if (cached.webglAddon) {
+              try {
+                cached.webglAddon.clearTextureAtlas()
+                cached.terminal.refresh(0, cached.terminal.rows - 1)
+              } catch {
+                /* terminal disposed */
+              }
+            }
 
             // Sync state from backend (fixes stuck loading spinner on reattach)
             const actualState = await window.api.pty.getState(sessionId)
@@ -591,22 +611,29 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // Simple fit - container is guaranteed to have dimensions from waitForDimensions
         fitAddon.fit()
 
-        // WebGL renderer — 5-10x faster than Canvas 2D.
+        // WebGL renderer — 5-10x faster than the DOM renderer.
         // Safe because filterBufferData() strips SGR 4 (underline) codes server-side
         // before data reaches the renderer. CSS override kept as safety net.
-        // MUST load after open() + fit() — WebglAddon builds its glyph atlas from
-        // the measured char-cell size. Loading pre-open measures 0-size cells →
-        // corrupt atlas → scrambled/overlapping glyphs.
-        try {
-          const webglAddon = new WebglAddon()
-          webglAddon.onContextLoss(() => {
-            console.warn('[terminal] WebGL context lost, falling back to DOM renderer')
-            webglAddon.dispose()
+        // Deferred to the next animation frame so layout (post open()+fit()) has
+        // committed before the addon rasterizes its glyph atlas. See webgl-loader.ts.
+        webglRafIdRef.current = requestAnimationFrame(() => {
+          webglRafIdRef.current = null
+          void loadWebglRenderer({
+            terminal,
+            createAddon: () => new WebglAddon(),
+            fontsReady: document.fonts.ready,
+            isAborted: () => signal.aborted,
+            isCurrentTerminal: () => terminalRef.current === terminal,
+            isWebglDisabled: () => webglDisabled,
+            onWebglDisabled: () => {
+              webglDisabled = true
+            },
+            getActiveAddon: () => webglAddonRef.current,
+            setActiveAddon: (addon) => {
+              webglAddonRef.current = addon
+            }
           })
-          terminal.loadAddon(webglAddon)
-        } catch {
-          // WebGL not available, continue with canvas renderer
-        }
+        })
 
         // Let Ctrl+Tab and Ctrl+Shift+Tab bubble up for tab switching
         // Intercept Cmd+F / Ctrl+F for terminal search
@@ -773,6 +800,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         clearTimeout(resizeDebounceRef.current)
         resizeDebounceRef.current = null
       }
+      // Cancel a pending WebGL load if the component unmounts before its rAF fires.
+      if (webglRafIdRef.current !== null) {
+        cancelAnimationFrame(webglRafIdRef.current)
+        webglRafIdRef.current = null
+      }
       unregisterActiveAddon(sessionId)
       // Serialize state before caching
       let serializedState: string | undefined
@@ -799,6 +831,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             fitAddon: fitAddonRef.current,
             serializeAddon: serializeAddonRef.current,
             searchAddon: searchAddonRef.current,
+            webglAddon: webglAddonRef.current ?? undefined,
             element,
             serializedState,
             mode,
@@ -810,6 +843,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       fitAddonRef.current = null
       serializeAddonRef.current = null
       searchAddonRef.current = null
+      webglAddonRef.current = null
       initializedRef.current = false
 
       // Clean up test helper reference

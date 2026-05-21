@@ -2,6 +2,7 @@ import type { Terminal as XTerm, ITheme } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
 import type { SerializeAddon } from '@xterm/addon-serialize'
 import type { SearchAddon } from '@xterm/addon-search'
+import type { WebglAddon } from '@xterm/addon-webgl'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 
 export interface CachedTerminal {
@@ -9,6 +10,7 @@ export interface CachedTerminal {
   fitAddon: FitAddon
   serializeAddon: SerializeAddon
   searchAddon: SearchAddon
+  webglAddon?: WebglAddon
   element: HTMLElement
   serializedState?: string
   mode?: TerminalMode
