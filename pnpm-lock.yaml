@@ -395,6 +395,9 @@ importers:
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../file-editor
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui

@@ -12,10 +12,10 @@
 #   SLAYZONE_TASK_ID         - active task id
 #   SLAYZONE_PROJECT_ID      - active project id
 #
-# Input shapes:
-#   Claude/Mastra/Droid:  JSON via stdin    + hook event in env (CLAUDE_HOOK_EVENT)
-#   Codex (native notify): JSON via argv $1 + event under "type" field
-#   Codex wrapper synthetic: JSON via argv $1 + event under "hook_event_name"
+# Input shapes (handled transparently):
+#   stdin  + event in payload "hook_event_name" — Claude Code, Codex, Gemini hooks
+#   stdin  + event in env (CLAUDE_HOOK_EVENT)   — Claude/Mastra/Droid
+#   argv $1 + event under "type"/"hook_event_name" — legacy / defensive fallback
 #
 # Contract: ALWAYS exit 0. Hook failures must NOT bubble into the agent TUI
 # (Claude renders red error walls otherwise). Silent on any failure.
@@ -31,7 +31,7 @@ set -e
 # Emit before payload read so it fires even if downstream POST fails.
 printf '{}\n'
 
-# Codex passes JSON as argv $1; Claude pipes via stdin.
+# Hooks pipe JSON via stdin; argv $1 is a defensive fallback for legacy callers.
 if [ -n "$1" ]; then
   PAYLOAD="$1"
 else
@@ -58,14 +58,26 @@ CWD_FIELD=""
 
 ENVELOPE="{\"agentId\":\"$SLAYZONE_AGENT_ID\",\"hookEvent\":\"$HOOK_EVENT\"$TASK_FIELD$CWD_FIELD,\"raw\":$PAYLOAD}"
 
-# Fire-and-forget. Curl errors swallowed; never block the agent.
-curl -s \
-  --connect-timeout 2 \
-  --max-time 5 \
-  -X POST \
-  -H 'Content-Type: application/json' \
-  --data-binary "$ENVELOPE" \
-  "$SLAYZONE_AGENT_HOOK_URL" \
-  >/dev/null 2>&1 || true
+# Fire-and-forget. Errors swallowed; never block the agent.
+# curl is the primary path — present on macOS, most Linux, and bundled with
+# Git for Windows (whose bash runs this script). wget is a fallback for minimal
+# environments; if neither exists the POST is skipped silently.
+if command -v curl >/dev/null 2>&1; then
+  curl -s \
+    --connect-timeout 2 \
+    --max-time 5 \
+    -X POST \
+    -H 'Content-Type: application/json' \
+    --data-binary "$ENVELOPE" \
+    "$SLAYZONE_AGENT_HOOK_URL" \
+    >/dev/null 2>&1 || true
+elif command -v wget >/dev/null 2>&1; then
+  wget -q -O /dev/null \
+    --timeout=5 \
+    --header='Content-Type: application/json' \
+    --post-data="$ENVELOPE" \
+    "$SLAYZONE_AGENT_HOOK_URL" \
+    >/dev/null 2>&1 || true
+fi
 
 exit 0

@@ -1,6 +1,7 @@
 import fs from 'fs/promises'
 import path from 'path'
 import { getClaudeSettingsPath, writeFileIfChanged } from '@slayzone/platform'
+import { formatHookCommand } from './hook-paths'
 
 const MARKER_KEY = '_slayzoneManaged'
 
@@ -119,7 +120,7 @@ function buildManagedEntry(event: string, scriptPath: string): ClaudeHookEntry {
     hooks: [
       {
         type: 'command',
-        command: scriptPath,
+        command: formatHookCommand(scriptPath),
         [MARKER_KEY]: true
       }
     ]

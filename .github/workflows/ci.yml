@@ -56,3 +56,33 @@ jobs:
           POSTHOG_API_KEY: ci
           POSTHOG_HOST: https://app.posthog.com
           VITE_CONVEX_URL: https://example.invalid
+
+  # Windows job: the cross-platform shell + agent-hook path code (issue #88) is
+  # only meaningfully exercised on a real Windows runner — Git Bash is
+  # preinstalled here, so the hook-execution test reproduces the bug end-to-end.
+  check-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test platform (shell primitives)
+        run: pnpm --filter @slayzone/platform test
+
+      - name: Test agent-hooks
+        run: pnpm --filter @slayzone/app test:agent-hooks

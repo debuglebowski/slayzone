@@ -1,4 +1,5 @@
 import { getOpencodePluginPath, writeFileIfChanged } from '@slayzone/platform'
+import { toPosixPath } from './hook-paths'
 // Vite resolves `?raw` to the file contents as a string at build time. Static
 // import (not dynamic) so the plugin source lands in this module's chunk and
 // no runtime file lookup is required in the packaged app.
@@ -41,7 +42,10 @@ export async function installOpencodePlugin(
   const rawSource =
     opts.source ??
     (typeof opencodePluginSource === 'string' ? opencodePluginSource : String(opencodePluginSource))
-  const content = rawSource.split(NOTIFY_PATH_PLACEHOLDER).join(opts.notifyPath)
+  // Forward-slash the path: the plugin substitutes it into a JS string literal
+  // and then shells out `bash <path>` — backslashes would break both the JS
+  // literal and bash's path parsing on Windows.
+  const content = rawSource.split(NOTIFY_PATH_PLACEHOLDER).join(toPosixPath(opts.notifyPath))
   const changed = await writeFileIfChanged(target, content, 0o644)
   return { path: target, changed }
 }

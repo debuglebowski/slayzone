@@ -1,79 +1,33 @@
 import { execFile, execFileSync } from 'child_process'
-import fs from 'node:fs'
-import { platform, userInfo } from 'os'
+import { platform } from 'os'
 import { promisify } from 'util'
+import {
+  resolveUserShell,
+  getShellStartupArgs,
+  quoteForShell,
+  shellExists,
+  getShellOverride
+} from '@slayzone/platform'
 import type { ValidationResult } from './adapters/types'
 
 const execFileAsync = promisify(execFile)
 
-/** In-memory shell override — used by E2E tests via IPC, never persisted. */
-let shellOverride: string | null = null
-
-export function setShellOverride(value: string | null): void {
-  shellOverride = value?.trim() || null
-}
-
-function shellExists(shellPath: string): boolean {
-  if (platform() === 'win32') return fs.existsSync(shellPath)
-  try {
-    fs.accessSync(shellPath, fs.constants.X_OK)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function defaultShellForPlatform(): string {
-  if (platform() === 'win32') return process.env.COMSPEC || 'cmd.exe'
-  if (platform() === 'darwin') return '/bin/zsh'
-  return '/bin/bash'
-}
-
 /**
- * Resolve the shell used to launch terminal sessions.
- * Priority:
- * 1) in-memory override (tests only)
- * 2) SHELL env var
- * 3) os.userInfo().shell
- * 4) platform fallback
+ * Cross-platform shell primitives now live in `@slayzone/platform` so non-terminal
+ * packages can share them. Re-exported here unchanged so existing terminal-domain
+ * imports (`./shell-env`, the `@slayzone/terminal` barrel) keep resolving.
  */
-export function resolveUserShell(): string {
-  if (shellOverride && shellExists(shellOverride)) return shellOverride
-
-  const fromEnv = process.env.SHELL?.trim()
-  if (fromEnv && shellExists(fromEnv)) return fromEnv
-
-  try {
-    const fromUser = userInfo().shell?.trim()
-    if (fromUser && shellExists(fromUser)) return fromUser
-  } catch {
-    // ignore userInfo lookup failures
-  }
-
-  return defaultShellForPlatform()
-}
-
-/**
- * Backwards-compatible alias used by existing adapters.
- */
-export function getDefaultShell(): string {
-  return resolveUserShell()
-}
-
-/**
- * Startup args used to emulate typical interactive login terminal behavior.
- */
-export function getShellStartupArgs(shellPath: string): string[] {
-  if (platform() === 'win32') return []
-
-  const shell = shellPath.toLowerCase()
-  const name = shell.split('/').pop() ?? shell
-  if (name === 'zsh' || name === 'bash' || name === 'fish') {
-    return ['-i', '-l']
-  }
-
-  return []
-}
+export {
+  setShellOverride,
+  shellExists,
+  defaultShellForPlatform,
+  resolveUserShell,
+  getDefaultShell,
+  getShellStartupArgs,
+  quoteForShell,
+  buildExecCommand,
+  buildShellInvocation
+} from '@slayzone/platform'
 
 /**
  * Cached PATH from a login+interactive shell. Captures nvm/pnpm/asdf/brew
@@ -125,22 +79,6 @@ function resolveEnrichedPath(): string | null {
   return null
 }
 
-export function quoteForShell(arg: string): string {
-  if (platform() === 'win32') {
-    if (arg.length === 0) return '""'
-    if (!/[\s"&|<>^%!]/.test(arg)) return arg
-    return `"${arg.replace(/"/g, '""')}"`
-  }
-  if (arg.length === 0) return "''"
-  return `'${arg.replace(/'/g, `'"'"'`)}'`
-}
-
-export function buildExecCommand(binary: string, args: string[] = []): string {
-  const escaped = [binary, ...args].map(quoteForShell).join(' ')
-  if (platform() === 'win32') return escaped
-  return `exec ${escaped}`
-}
-
 /**
  * Target soft limit for RLIMIT_NOFILE in PTY-spawned shells. macOS default is
  * 256, which is too low for Bun-compiled CLIs (e.g. Factory.ai droid) that
@@ -175,11 +113,12 @@ export function wrapShellWithUlimit(
  * Check if shell environment is available for terminal launching.
  */
 export function validateShellEnv(): ValidationResult {
-  if (shellOverride && !shellExists(shellOverride)) {
+  const override = getShellOverride()
+  if (override && !shellExists(override)) {
     return {
       check: 'Shell detected',
       ok: false,
-      detail: `Shell override not found: ${shellOverride}`,
+      detail: `Shell override not found: ${override}`,
       fix: 'Clear the shell override or set it to a valid absolute path'
     }
   }

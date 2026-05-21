@@ -3,6 +3,7 @@ import path from 'path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { getGeminiSettingsPath, writeFileIfChanged } from '@slayzone/platform'
+import { formatHookCommand } from './hook-paths'
 
 const execFileAsync = promisify(execFile)
 
@@ -153,7 +154,7 @@ function buildManagedEntry(event: string, scriptPath: string): GeminiHookEntry {
     hooks: [
       {
         type: 'command',
-        command: scriptPath,
+        command: formatHookCommand(scriptPath),
         [MARKER_KEY]: true
       }
     ]

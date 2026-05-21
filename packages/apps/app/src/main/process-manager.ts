@@ -5,7 +5,8 @@ import type { BrowserWindow } from 'electron'
 import type { Database } from 'better-sqlite3'
 import { createStatsPoller } from './pid-stats'
 import { extractOscTitle } from '@slayzone/terminal/shared'
-import { resolveUserShell, getEnrichedPath } from '@slayzone/terminal/main'
+import { getEnrichedPath } from '@slayzone/terminal/main'
+import { buildShellInvocation } from '@slayzone/platform'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
 
@@ -170,18 +171,14 @@ function handleProcessData(proc: ManagedProcess, data: Buffer): void {
 function doSpawn(proc: ManagedProcess): void {
   proc.spawnedAt = new Date().toISOString()
   startStatsPolling()
-  const shell = resolveUserShell()
-  const isFish = shell.endsWith('/fish')
   const isWin = process.platform === 'win32'
-  // fish needs -i (interactive) for PATH init inside `if status is-interactive` blocks
-  // bash/zsh only need -l (login) to source profile — -i without a TTY causes side effects
-  const shellArgs = isWin
-    ? ['/c', proc.command]
-    : [...(isFish ? ['-i', '-l'] : ['-l']), '-c', proc.command]
+  // buildShellInvocation handles fish (-i -l for PATH init inside
+  // `if status is-interactive` blocks), bash/zsh (-l only), and Windows (cmd /c).
+  const { file, args } = buildShellInvocation(proc.command)
   const env: Record<string, string | undefined> = { ...process.env }
   const enrichedPath = getEnrichedPath()
   if (enrichedPath) env.PATH = enrichedPath
-  const child = spawn(shell, shellArgs, { cwd: proc.cwd, env, detached: !isWin })
+  const child = spawn(file, args, { cwd: proc.cwd, env, detached: !isWin })
 
   proc.child = child
   proc.pid = child.pid ?? null

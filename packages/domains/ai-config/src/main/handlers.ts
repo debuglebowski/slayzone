@@ -2,8 +2,8 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { userInfo } from 'node:os'
 import { app } from 'electron'
+import { buildShellInvocation, quoteForShell } from '@slayzone/platform'
 import type { IpcMain } from 'electron'
 import type { Database } from 'better-sqlite3'
 import type {
@@ -2715,14 +2715,11 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     (_event, projectPath: string, projectId?: string): { ok: boolean; error?: string } => {
       try {
         const cwd = path.resolve(projectPath)
-        const shell = process.env.SHELL || userInfo().shell || '/bin/zsh'
-        const isFish = shell.endsWith('/fish')
-        const shellArgs = isFish ? ['-i', '-l'] : ['-l']
-        const quote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
         const devFlag = app.isPackaged ? '' : ' --dev'
-        const projectFlag = projectId ? ` --project ${quote(projectId)}` : ''
+        const projectFlag = projectId ? ` --project ${quoteForShell(projectId)}` : ''
         const cmd = `slay${devFlag} init${projectFlag}`
-        execFileSync(shell, [...shellArgs, '-c', cmd], { cwd, timeout: 10000 })
+        const { file, args } = buildShellInvocation(cmd)
+        execFileSync(file, args, { cwd, timeout: 10000 })
         return { ok: true }
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) }
