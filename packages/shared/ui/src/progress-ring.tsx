@@ -7,6 +7,7 @@ interface ProgressRingProps {
   size: number
   strokeWidth?: number
   className?: string
+  style?: React.CSSProperties
   trackClassName?: string
   rangeClassName?: string
   'aria-label'?: string
@@ -17,6 +18,7 @@ function ProgressRing({
   size,
   strokeWidth = 2,
   className,
+  style,
   trackClassName = 'stroke-muted',
   rangeClassName = 'stroke-primary',
   'aria-label': ariaLabel
@@ -32,6 +34,7 @@ function ProgressRing({
       height={size}
       viewBox={`0 0 ${size} ${size}`}
       className={cn('shrink-0', className)}
+      style={style}
       role="img"
       aria-label={ariaLabel ?? `${Math.round(clamped)}% complete`}
     >

@@ -17,6 +17,8 @@ export interface TerminalProgressDotProps {
   /** Override style with a pulsing amber "needs attention" indicator. */
   needsAttention?: boolean
   size?: number
+  /** Larger footprint while running / loading. Default: same as `size`. */
+  activeSize?: number
   className?: string
 }
 
@@ -29,6 +31,7 @@ export function TerminalProgressDot({
   noTooltip = false,
   needsAttention = false,
   size = 14,
+  activeSize = size,
   className
 }: TerminalProgressDotProps): React.JSX.Element | null {
   const baseStyle = getTerminalStateStyle(state)
@@ -41,37 +44,48 @@ export function TerminalProgressDot({
   const stateLabel = stateStyle?.label ?? 'No session'
   const isRunning = !needsAttention && state === 'running'
 
-  // Single size source: wrapper tracks `size`. Inner indicator nests small
-  // when the progress ring is shown, else fills the wrapper. Running (spinner)
-  // and idle (dot) share one footprint within each case.
-  const innerSize = Math.round(size * (showProgress ? 0.57 : 0.85))
+  // Wrapper footprint is the constant max of size/activeSize, so the row layout
+  // never shifts when a terminal goes active. The indicator renders at `size`
+  // normally and `activeSize` only while running — a mere progress value does
+  // not enlarge it. Always <= footprint, so it sits inside the wrapper (no
+  // flex-shrink, no clipping). Blob and ring stay even-sized; with an even
+  // footprint the free space splits to whole pixels — pixel-perfect concentric.
+  const renderSize = isRunning ? activeSize : size
+  const footprint = Math.max(size, activeSize)
+  const innerSize = Math.round((renderSize * 0.85) / 2) * 2
+  // Progress ring is sized off `size`, not `renderSize`, so its radius stays
+  // fixed regardless of terminal state.
+  const ringSize = size + 6
+  const ringInset = (footprint - ringSize) / 2
 
   const blob = (
     <span
       className={cn('relative inline-flex items-center justify-center shrink-0', className)}
-      style={{ width: size, height: size }}
+      style={{ width: footprint, height: footprint }}
     >
       {showProgress && (
         <ProgressRing
           value={progress!}
-          size={size}
+          size={ringSize}
           strokeWidth={1.5}
-          className="absolute inset-0"
+          className="absolute"
+          style={{ left: ringInset, top: ringInset }}
         />
       )}
       {showState &&
         (isRunning ? (
           <Loader2
             size={innerSize}
+            strokeWidth={2.75}
             className={cn(
-              'relative z-10 animate-spin',
+              'relative z-10 shrink-0 animate-spin',
               stateStyle?.textColor ?? 'text-green-500'
             )}
             aria-label={stateLabel}
           />
         ) : (
           <span
-            className={cn('relative z-10 rounded-full', dotColor)}
+            className={cn('relative z-10 shrink-0 rounded-full', dotColor)}
             style={{ width: innerSize, height: innerSize }}
             aria-label={stateLabel}
           />

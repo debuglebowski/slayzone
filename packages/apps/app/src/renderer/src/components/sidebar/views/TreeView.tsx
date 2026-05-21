@@ -426,6 +426,8 @@ function TaskRowView({
           needsAttention={Boolean(task.needs_attention)}
           alwaysShow
           tooltipSide="right"
+          size={8}
+          activeSize={12}
         />
         {isEditing ? (
           <RenameInput
