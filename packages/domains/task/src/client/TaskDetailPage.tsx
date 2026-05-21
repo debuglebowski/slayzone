@@ -707,7 +707,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
 
   // Global panel configuration (which panels are enabled, custom web panels)
-  const { enabledWebPanels, isBuiltinEnabled, getOrderedTaskIds } = usePanelConfig()
+  const { config: panelConfig, updateConfig: updatePanelConfig, enabledWebPanels, isBuiltinEnabled, getOrderedTaskIds } =
+    usePanelConfig()
   const orderedTaskIds = useMemo(() => getOrderedTaskIds(), [getOrderedTaskIds])
   const panelOrderIdx = useMemo(() => {
     const m: Record<string, number> = {}
@@ -719,6 +720,25 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const panelOrderStyle = (id: string): { order: number } => ({ order: panelOrderIdx[id] ?? 0 })
   const getFirstVisibleTaskPanelId = (): string | null =>
     orderedTaskIds.find((id) => panelVisibility[id] && !ownership.hasOtherOwner(id)) ?? null
+
+  // Drag-reorder of the PanelToggle button row. Receives the reordered subset of
+  // task-view panel ids (only the buttons actually shown) and merges it back into
+  // the global panel_config.order — the same setting the Settings modal writes,
+  // so panels reflow to match. Hidden/filtered-out panels keep their slots.
+  const handlePanelReorder = useCallback(
+    (reorderedTaskIds: string[]) => {
+      const order = panelConfig.order ?? []
+      const toOrderId = (taskId: string): string => (taskId === 'diff' ? 'git' : taskId)
+      const reorderedOrderIds = reorderedTaskIds.map(toOrderId)
+      const visibleSet = new Set(reorderedOrderIds)
+      let vi = 0
+      const next = order.map((id) =>
+        visibleSet.has(id) ? (reorderedOrderIds[vi++] ?? id) : id
+      )
+      void updatePanelConfig({ ...panelConfig, order: next })
+    },
+    [panelConfig, updatePanelConfig]
+  )
 
   // Auto-claim panels for this window when visible AND no current owner.
   // First-owner priority: subsequent windows opening same panel render a
@@ -2570,7 +2590,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     )
                   }
 
-                  return <PanelToggle panels={ordered} onChange={handlePanelToggle} />
+                  return (
+                    <PanelToggle
+                      panels={ordered}
+                      onChange={handlePanelToggle}
+                      onReorder={handlePanelReorder}
+                    />
+                  )
                 })()}
               </div>
             </div>
