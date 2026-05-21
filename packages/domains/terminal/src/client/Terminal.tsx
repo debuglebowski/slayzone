@@ -579,20 +579,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           [sessionId]: linkProvider
         }
 
-        // WebGL renderer — 5-10x faster than Canvas 2D.
-        // Safe because filterBufferData() strips SGR 4 (underline) codes server-side
-        // before data reaches the renderer. CSS override kept as safety net.
-        try {
-          const webglAddon = new WebglAddon()
-          webglAddon.onContextLoss(() => {
-            console.warn('[terminal] WebGL context lost, falling back to DOM renderer')
-            webglAddon.dispose()
-          })
-          terminal.loadAddon(webglAddon)
-        } catch {
-          // WebGL not available, continue with canvas renderer
-        }
-
         terminalRef.current = terminal
         fitAddonRef.current = fitAddon
         serializeAddonRef.current = serializeAddon
@@ -604,6 +590,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         terminal.clear() // Ensure terminal starts completely fresh
         // Simple fit - container is guaranteed to have dimensions from waitForDimensions
         fitAddon.fit()
+
+        // WebGL renderer — 5-10x faster than Canvas 2D.
+        // Safe because filterBufferData() strips SGR 4 (underline) codes server-side
+        // before data reaches the renderer. CSS override kept as safety net.
+        // MUST load after open() + fit() — WebglAddon builds its glyph atlas from
+        // the measured char-cell size. Loading pre-open measures 0-size cells →
+        // corrupt atlas → scrambled/overlapping glyphs.
+        try {
+          const webglAddon = new WebglAddon()
+          webglAddon.onContextLoss(() => {
+            console.warn('[terminal] WebGL context lost, falling back to DOM renderer')
+            webglAddon.dispose()
+          })
+          terminal.loadAddon(webglAddon)
+        } catch {
+          // WebGL not available, continue with canvas renderer
+        }
 
         // Let Ctrl+Tab and Ctrl+Shift+Tab bubble up for tab switching
         // Intercept Cmd+F / Ctrl+F for terminal search
