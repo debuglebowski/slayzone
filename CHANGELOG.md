@@ -1,6 +1,24 @@
 # Changelog
 
 
+## v0.32.2
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.32.1...v0.32.2)
+
+### 🩹 Fixes
+
+- **terminal:** Correct WebGL atlas after every post-startup fit ([1c83c987](https://github.com/debuglebowski/slayzone/commit/1c83c987))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.32.1 ([8cffd084](https://github.com/debuglebowski/slayzone/commit/8cffd084))
+- **terminal:** Instrument WebGL atlas geometry to trace scramble ([45a8c880](https://github.com/debuglebowski/slayzone/commit/45a8c880))
+- **terminal:** Quiet per-event diag logging ([f90fb2de](https://github.com/debuglebowski/slayzone/commit/f90fb2de))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.32.1
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.32.0...v0.32.1)

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.32.2",
+    "date": "2026-05-22",
+    "tagline": "Scramble-free terminals",
+    "items": [
+      {
+        "category": "fix",
+        "title": "Terminals stay legible after resize",
+        "description": "Fixed scrambled terminal glyphs caused by a stale WebGL atlas after a window, panel, or font resize."
+      }
+    ]
+  },
+  {
     "version": "0.32.1",
     "date": "2026-05-22",
     "tagline": "Codex Chat polish",
