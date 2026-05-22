@@ -21,24 +21,32 @@ export interface LoadWebglOptions {
   /** Current addon stored for this terminal (so context-loss / replacement is detectable). */
   getActiveAddon: () => WebglAddon | null
   setActiveAddon: (addon: WebglAddon | null) => void
-  /** Schedules the post-load atlas correction (production: `requestAnimationFrame`). */
+  /** Schedules a post-load atlas correction for the next frame (production: `requestAnimationFrame`). */
   requestFrame: (cb: () => void) => void
+  /** Schedules a delayed post-load atlas correction (production: `setTimeout`). */
+  requestTimeout: (cb: () => void, ms: number) => void
 }
+
+/** Delays (ms after load) of the straggler atlas corrections — see {@link loadWebglRenderer}. */
+const CORRECTION_DELAYS_MS = [250, 750]
 
 /**
  * Load the WebGL renderer onto an already-opened terminal, then re-rasterize its
- * glyph atlas one frame later so the first paint is not scrambled.
+ * glyph atlas across a short startup window so the first paint is not scrambled.
  *
  * Must be called a frame after `open()`+`fit()` so layout has committed — the addon
  * rasterizes its glyph atlas from the measured char-cell size, and building it against
  * stale geometry produces scrambled/overlapping glyphs.
  *
- * Even one frame after `open()`+`fit()` the atlas can be rasterized against not-yet-
- * settled DPR / container geometry. `requestFrame` schedules a render-only correction
- * — `clearTextureAtlas()` + `refresh()` — once more layout has committed. It does not
- * resize, so no SIGWINCH reaches the PTY. It re-rasterizes an atlas built against stale
- * DPR/geometry; it cannot fix a wrong *cell measurement* (only xterm re-measuring does
- * that — font correctness stays the caller's responsibility, see Terminal.tsx).
+ * Even after `open()`+`fit()` the atlas can be rasterized against not-yet-settled DPR /
+ * container geometry — the first paint then shows scrambled glyphs or blank tiles. A
+ * plain re-render with settled metrics fixes it (confirmed: scrolling clears the
+ * corruption). Since there is no signal for "metrics have settled", the correction —
+ * `clearTextureAtlas()` + `refresh()` — runs once next frame and again at each
+ * {@link CORRECTION_DELAYS_MS} so a late settle is still caught. It is render-only: no
+ * resize, so the PTY never sees a SIGWINCH. It cannot fix a wrong *cell measurement*
+ * (only xterm re-measuring does — font correctness stays the caller's responsibility,
+ * see Terminal.tsx); it does fix an atlas rasterized against stale DPR/geometry.
  *
  * Failure handling:
  * - construction throwing latches WebGL off for all future terminals (DOM fallback);
@@ -75,13 +83,11 @@ export function loadWebglRenderer(opts: LoadWebglOptions): void {
   opts.terminal.loadAddon(addon)
   opts.setActiveAddon(addon)
 
-  // Cold-start correction: the atlas was just rasterized from whatever DPR /
-  // container geometry was resolved this instant. Re-rasterize it one frame
-  // later, after layout has settled, so the first paint is not scrambled.
-  // Render-only — no resize, so the PTY never sees a SIGWINCH.
-  opts.requestFrame(() => {
-    // The terminal may have unmounted, been replaced, or lost its context
-    // between frames — only correct the atlas if this addon is still live.
+  // Cold-start correction — re-rasterize the atlas across a short startup window
+  // so a paint made before DPR/geometry settled does not stay scrambled. The
+  // terminal may have unmounted, been replaced, or lost its context between
+  // schedules, so re-check liveness on every run. Render-only — no SIGWINCH.
+  const correct = (): void => {
     if (opts.isAborted() || !opts.isCurrentTerminal() || opts.getActiveAddon() !== addon) {
       return
     }
@@ -89,7 +95,9 @@ export function loadWebglRenderer(opts: LoadWebglOptions): void {
       addon.clearTextureAtlas()
       opts.terminal.refresh(0, opts.terminal.rows - 1)
     } catch {
-      /* terminal disposed between frames */
+      /* terminal disposed between schedules */
     }
-  })
+  }
+  opts.requestFrame(correct)
+  for (const ms of CORRECTION_DELAYS_MS) opts.requestTimeout(correct, ms)
 }

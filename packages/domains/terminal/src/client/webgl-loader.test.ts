@@ -72,12 +72,15 @@ interface Harness {
     createCalls: number
     onWebglDisabledCalls: number
     frames: Array<() => void>
+    timers: Array<{ cb: () => void; ms: number }>
   }
   addonCalls: ReturnType<typeof makeStubAddon>['calls']
   termCalls: ReturnType<typeof makeStubTerminal>['calls']
   stubAddon: WebglAddon
   /** Run every callback the loader scheduled via requestFrame (simulates rAF firing). */
   flushFrames: () => void
+  /** Run every callback the loader scheduled via requestTimeout (simulates setTimeout firing). */
+  flushTimers: () => void
 }
 
 /** Build a loader-options harness with overridable behavior. */
@@ -91,7 +94,8 @@ function harness(over: Partial<{ createThrows: boolean }> = {}): Harness {
     activeAddon: null as WebglAddon | null,
     createCalls: 0,
     onWebglDisabledCalls: 0,
-    frames: [] as Array<() => void>
+    frames: [] as Array<() => void>,
+    timers: [] as Array<{ cb: () => void; ms: number }>
   }
   const opts: LoadWebglOptions = {
     terminal,
@@ -113,13 +117,20 @@ function harness(over: Partial<{ createThrows: boolean }> = {}): Harness {
     },
     requestFrame: (cb) => {
       state.frames.push(cb)
+    },
+    requestTimeout: (cb, ms) => {
+      state.timers.push({ cb, ms })
     }
   }
   const flushFrames = (): void => {
     const pending = state.frames.splice(0)
     for (const cb of pending) cb()
   }
-  return { opts, state, addonCalls, termCalls, stubAddon: addon, flushFrames }
+  const flushTimers = (): void => {
+    const pending = state.timers.splice(0)
+    for (const { cb } of pending) cb()
+  }
+  return { opts, state, addonCalls, termCalls, stubAddon: addon, flushFrames, flushTimers }
 }
 
 function run(): void {
@@ -173,30 +184,39 @@ function run(): void {
     ok(h.termCalls.loadAddon === 0, 'loadAddon not called')
   })
 
-  test('cold-start correction: re-rasterizes atlas + repaints on the next frame', () => {
+  test('cold-start correction: re-rasterizes + repaints on the frame then each straggler', () => {
     const h = harness()
     loadWebglRenderer(h.opts)
-    ok(h.addonCalls.clearedAtlas === 0, 'atlas not cleared synchronously')
+    ok(h.addonCalls.clearedAtlas === 0, 'nothing corrected synchronously')
     ok(h.termCalls.refresh === 0, 'screen not refreshed synchronously')
     h.flushFrames()
-    ok(h.addonCalls.clearedAtlas === 1, 'atlas re-rasterized on next frame')
-    ok(h.termCalls.refresh === 1, 'screen repainted on next frame')
+    ok(h.addonCalls.clearedAtlas === 1, 'atlas re-rasterized on the next frame')
+    ok(h.termCalls.refresh === 1, 'screen repainted on the next frame')
+    ok(
+      h.state.timers.map((t) => t.ms).join(',') === '250,750',
+      'straggler corrections scheduled at 250ms + 750ms'
+    )
+    h.flushTimers()
+    ok(h.addonCalls.clearedAtlas === 3, 'atlas re-rasterized again on each straggler')
+    ok(h.termCalls.refresh === 3, 'screen repainted again on each straggler')
   })
 
-  test('cold-start correction skipped: terminal unmounted before the frame', () => {
+  test('cold-start correction skipped: terminal unmounted before correcting', () => {
     const h = harness()
     loadWebglRenderer(h.opts)
     h.state.aborted = true
     h.flushFrames()
+    h.flushTimers()
     ok(h.addonCalls.clearedAtlas === 0, 'atlas not cleared after abort')
     ok(h.termCalls.refresh === 0, 'screen not refreshed after abort')
   })
 
-  test('cold-start correction skipped: addon superseded before the frame', () => {
+  test('cold-start correction skipped: addon superseded before correcting', () => {
     const h = harness()
     loadWebglRenderer(h.opts)
     h.state.activeAddon = makeStubAddon().addon // a different addon won the slot
     h.flushFrames()
+    h.flushTimers()
     ok(h.addonCalls.clearedAtlas === 0, 'atlas not cleared for superseded addon')
   })
 

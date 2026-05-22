@@ -647,7 +647,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             setActiveAddon: (addon) => {
               webglAddonRef.current = addon
             },
-            requestFrame: (cb) => requestAnimationFrame(cb)
+            requestFrame: (cb) => requestAnimationFrame(cb),
+            requestTimeout: (cb, ms) => window.setTimeout(cb, ms)
           })
         })
 
