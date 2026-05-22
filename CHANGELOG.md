@@ -1,6 +1,41 @@
 # Changelog
 
 
+## v0.32.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.32.0...v0.32.1)
+
+### 🚀 Enhancements
+
+- **server:** Add @slayzone/server side-car shell (slice 2.5) ([e99ba8fa](https://github.com/debuglebowski/slayzone/commit/e99ba8fa))
+- **ui:** Resize tree-view terminal status indicator ([f632f3ba](https://github.com/debuglebowski/slayzone/commit/f632f3ba))
+- **terminal:** Add Codex Chat collaboration and Fast Mode controls ([273bbe5e](https://github.com/debuglebowski/slayzone/commit/273bbe5e))
+- **server:** Add side-car status panel to Diagnostics settings ([8e405846](https://github.com/debuglebowski/slayzone/commit/8e405846))
+
+### 🩹 Fixes
+
+- **terminal:** Make shutdown deterministic ([adda9f05](https://github.com/debuglebowski/slayzone/commit/adda9f05))
+- **terminal:** Stop treating turn-init as a turn-open signal ([21206f24](https://github.com/debuglebowski/slayzone/commit/21206f24))
+- **app:** Emit renderer CSP at runtime so it allows the tRPC WS port ([f25e4631](https://github.com/debuglebowski/slayzone/commit/f25e4631))
+- **terminal:** Restore cold-start atlas correction ([76589422](https://github.com/debuglebowski/slayzone/commit/76589422))
+- **build:** Sync pnpm-lock with @slayzone/server dep ([8de34192](https://github.com/debuglebowski/slayzone/commit/8de34192))
+- **terminal:** Re-correct WebGL atlas across the startup window ([97e07867](https://github.com/debuglebowski/slayzone/commit/97e07867))
+- **csp:** Relax dev script-src so Vite Fast Refresh preamble loads ([76784124](https://github.com/debuglebowski/slayzone/commit/76784124))
+- **sidebar:** Restore tree window dragging ([6858f046](https://github.com/debuglebowski/slayzone/commit/6858f046))
+- **sidebar:** Align tree window buttons ([68870bfb](https://github.com/debuglebowski/slayzone/commit/68870bfb))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.32.0 ([fdb7ec29](https://github.com/debuglebowski/slayzone/commit/fdb7ec29))
+
+### ✅ Tests
+
+- **server:** Add side-car supervisor crash-recovery test (slice 2.5.1) ([e05a01eb](https://github.com/debuglebowski/slayzone/commit/e05a01eb))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.32.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.31.0...v0.32.0)

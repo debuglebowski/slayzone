@@ -1,5 +1,42 @@
 [
   {
+    "version": "0.32.1",
+    "date": "2026-05-22",
+    "tagline": "Codex Chat polish",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Codex Chat collaboration and Fast Mode",
+        "description": "Codex Chat sessions gain collaboration and Fast Mode controls."
+      },
+      {
+        "category": "feature",
+        "title": "Side-car status panel",
+        "description": "Diagnostics settings now shows a live status panel for the background side-car process."
+      },
+      {
+        "category": "fix",
+        "title": "Tree window dragging restored",
+        "description": "Fixed the popped-out tree window so it drags again, with correctly aligned window buttons."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal renders cleanly on cold start",
+        "description": "Restored WebGL atlas correction so terminal glyphs render correctly from the first frame."
+      },
+      {
+        "category": "fix",
+        "title": "Deterministic terminal shutdown",
+        "description": "Terminal shutdown now completes deterministically instead of leaving sessions in a stuck state."
+      },
+      {
+        "category": "fix",
+        "title": "Accurate turn detection",
+        "description": "Turn initialization is no longer mistaken for a turn opening, fixing agent activity state."
+      }
+    ]
+  },
+  {
     "version": "0.32.0",
     "date": "2026-05-21",
     "tagline": "Codex Chat, more agents",
