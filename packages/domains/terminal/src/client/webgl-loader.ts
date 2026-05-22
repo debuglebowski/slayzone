@@ -34,6 +34,35 @@ export interface LoadWebglOptions {
 const CORRECTION_DELAYS_MS = [250, 750]
 
 /**
+ * Re-rasterize the WebGL glyph atlas against the terminal's current cell metrics
+ * and repaint every visible row.
+ *
+ * The atlas is rasterized from the measured char-cell size. Any time that size
+ * can have moved — a `fit()` after a layout reflow, a font change, a DPR change —
+ * the atlas built against the old size renders every glyph from a stale tile and
+ * the screen scrambles. The startup window in {@link loadWebglRenderer} only
+ * covers the first ~750ms; callers that resize the terminal *after* that window
+ * must call this so the atlas tracks the new geometry.
+ *
+ * Render-only: `clearTextureAtlas()` + `refresh()`, no resize, so the PTY never
+ * sees a SIGWINCH. Safe to call when the atlas is already correct (the next paint
+ * simply re-rasterizes identical tiles). Swallows the post-dispose throw.
+ */
+export function correctAtlas(
+  addon: WebglAddon,
+  terminal: Pick<XTerm, 'refresh' | 'rows'>,
+  sessionId = 'unknown'
+): void {
+  try {
+    addon.clearTextureAtlas()
+    terminal.refresh(0, terminal.rows - 1)
+    diag(sessionId, 'atlas-correct', { terminal })
+  } catch {
+    /* terminal disposed */
+  }
+}
+
+/**
  * Load the WebGL renderer onto an already-opened terminal, then re-rasterize its
  * glyph atlas across a short startup window so the first paint is not scrambled.
  *
@@ -50,6 +79,11 @@ const CORRECTION_DELAYS_MS = [250, 750]
  * resize, so the PTY never sees a SIGWINCH. It cannot fix a wrong *cell measurement*
  * (only xterm re-measuring does — font correctness stays the caller's responsibility,
  * see Terminal.tsx); it does fix an atlas rasterized against stale DPR/geometry.
+ *
+ * This window only covers startup. A `fit()` after a later reflow / font / DPR
+ * change re-rasterizes the atlas against geometry that may not have settled, and
+ * has no correction here — the caller must invoke {@link correctAtlas} after every
+ * post-startup `fit()` (see Terminal.tsx).
  *
  * Failure handling:
  * - construction throwing latches WebGL off for all future terminals (DOM fallback);
@@ -98,13 +132,7 @@ export function loadWebglRenderer(opts: LoadWebglOptions): void {
     if (opts.isAborted() || !opts.isCurrentTerminal() || opts.getActiveAddon() !== addon) {
       return
     }
-    try {
-      addon.clearTextureAtlas()
-      opts.terminal.refresh(0, opts.terminal.rows - 1)
-      diag(sid, 'atlas-correct', { terminal: opts.terminal })
-    } catch {
-      /* terminal disposed between schedules */
-    }
+    correctAtlas(addon, opts.terminal, sid)
   }
   opts.requestFrame(correct)
   for (const ms of CORRECTION_DELAYS_MS) opts.requestTimeout(correct, ms)

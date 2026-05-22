@@ -4,7 +4,7 @@
  * Run with: pnpm exec tsx packages/domains/terminal/src/client/webgl-loader.test.ts
  */
 import type { WebglAddon } from '@xterm/addon-webgl'
-import { loadWebglRenderer, type LoadWebglOptions } from './webgl-loader'
+import { loadWebglRenderer, correctAtlas, type LoadWebglOptions } from './webgl-loader'
 
 let passed = 0
 let failed = 0
@@ -229,6 +229,26 @@ function run(): void {
     ok(h.addonCalls.disposed === 1, 'addon disposed')
     ok(h.state.activeAddon === null, 'active addon ref cleared')
     ok(h.termCalls.refresh === refreshBefore + 1, 'screen repainted on context loss')
+  })
+
+  test('correctAtlas: re-rasterizes the atlas and repaints every visible row', () => {
+    const { addon, calls: addonCalls } = makeStubAddon()
+    const { terminal, calls: termCalls } = makeStubTerminal()
+    correctAtlas(addon, terminal)
+    ok(addonCalls.clearedAtlas === 1, 'atlas re-rasterized once')
+    ok(termCalls.refresh === 1, 'screen repainted once')
+  })
+
+  test('correctAtlas: swallows a post-dispose throw', () => {
+    const { terminal, calls: termCalls } = makeStubTerminal()
+    const throwingAddon = {
+      clearTextureAtlas() {
+        throw new Error('addon disposed')
+      }
+    } as unknown as WebglAddon
+    // Must not throw out — a terminal disposed between fit and correction is normal.
+    correctAtlas(throwingAddon, terminal)
+    ok(termCalls.refresh === 0, 'refresh not reached after the throw')
   })
 
   console.log('─'.repeat(40))

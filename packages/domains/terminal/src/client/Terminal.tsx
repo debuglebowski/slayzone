@@ -14,7 +14,7 @@ import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
-import { loadWebglRenderer } from './webgl-loader'
+import { loadWebglRenderer, correctAtlas } from './webgl-loader'
 import { diag } from './terminal-webgl-diag'
 import '@xterm/xterm/css/xterm.css'
 
@@ -182,6 +182,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const searchAddonRef = useRef<SearchAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
   const webglRafIdRef = useRef<number | null>(null)
+  const atlasCorrectionRafRef = useRef<number | null>(null)
   const clearedSeqRef = useRef<number | null>(null)
   const initializedRef = useRef(false)
   const lastRenderedSeqRef = useRef<number>(-1)
@@ -252,6 +253,24 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const resolvedTerminalTheme = getThemeTerminalColors(terminalThemeId, contentVariant)
   const resolvedTerminalVariant = contentVariant
+
+  // Re-rasterize the WebGL atlas after a post-startup `fit()`. A fit changes the
+  // char-cell geometry; webgl-loader only corrects the atlas across the startup
+  // window, so a resize / font change after that leaves the atlas built against
+  // stale metrics and the screen scrambles. rAF-debounced so a resize drag (many
+  // fits per second) coalesces to one correction on the settled frame. No-op when
+  // the DOM renderer is active (no addon).
+  const scheduleAtlasCorrection = useCallback((): void => {
+    if (atlasCorrectionRafRef.current !== null) {
+      cancelAnimationFrame(atlasCorrectionRafRef.current)
+    }
+    atlasCorrectionRafRef.current = requestAnimationFrame(() => {
+      atlasCorrectionRafRef.current = null
+      const addon = webglAddonRef.current
+      const terminal = terminalRef.current
+      if (addon && terminal) correctAtlas(addon, terminal, sessionId)
+    })
+  }, [sessionId])
 
   const [ptyState, setPtyState] = useState<TerminalState>(() => getState(sessionId))
 
@@ -830,6 +849,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         cancelAnimationFrame(webglRafIdRef.current)
         webglRafIdRef.current = null
       }
+      // Cancel a pending post-fit atlas correction.
+      if (atlasCorrectionRafRef.current !== null) {
+        cancelAnimationFrame(atlasCorrectionRafRef.current)
+        atlasCorrectionRafRef.current = null
+      }
       unregisterActiveAddon(sessionId)
       // Serialize state before caching
       let serializedState: string | undefined
@@ -986,9 +1010,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (sid !== sessionId || !fitAddonRef.current || !terminalRef.current) return
       fitAddonRef.current.fit()
       diag(sessionId, 'fit', { site: 'resize-needed', terminal: terminalRef.current })
+      scheduleAtlasCorrection()
       window.api.pty.resize(sessionId, terminalRef.current.cols, terminalRef.current.rows)
     })
-  }, [sessionId])
+  }, [sessionId, scheduleAtlasCorrection])
 
   // Safety net: prevent permanent 'starting' state after init completes.
   // If the backend dies or IPC events are lost, this watchdog transitions
@@ -1072,6 +1097,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
       fitAddonRef.current?.fit()
       diag(sessionId, 'fit', { site: 'resize-observer', terminal: terminalRef.current })
+      scheduleAtlasCorrection()
     }
 
     window.addEventListener('resize', handleResize)
@@ -1084,7 +1110,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       window.removeEventListener('resize', handleResize)
       observer.disconnect()
     }
-  }, [initTerminal, sessionId])
+  }, [initTerminal, sessionId, scheduleAtlasCorrection])
 
   // Update font size at runtime when setting changes
   useEffect(() => {
@@ -1093,7 +1119,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     t.options.fontSize = terminalFontSize
     fitAddonRef.current?.fit()
     diag(sessionId, 'fit', { site: 'font-size', terminal: t })
-  }, [terminalFontSize, sessionId])
+    scheduleAtlasCorrection()
+  }, [terminalFontSize, sessionId, scheduleAtlasCorrection])
 
   // Update font family at runtime
   useEffect(() => {
@@ -1102,7 +1129,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     t.options.fontFamily = terminalFontFamily
     fitAddonRef.current?.fit()
     diag(sessionId, 'fit', { site: 'font-family', terminal: t })
-  }, [terminalFontFamily, sessionId])
+    scheduleAtlasCorrection()
+  }, [terminalFontFamily, sessionId, scheduleAtlasCorrection])
 
   // Update scrollback buffer at runtime.
   useEffect(() => {
