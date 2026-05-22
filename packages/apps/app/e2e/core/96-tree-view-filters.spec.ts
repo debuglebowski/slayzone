@@ -189,6 +189,36 @@ test.describe('TreeView setting combinations', () => {
     await expect(taskRow(mainWindow, rootDone)).toHaveCount(0)
   })
 
+  test('top toolbar remains a window drag region', async ({ mainWindow }) => {
+    const regions = await mainWindow.evaluate(() => {
+      const searchButton = document.querySelector<HTMLButtonElement>('button[aria-label="Search"]')
+      const settingsButton = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="View settings"]'
+      )
+      const addButton = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Add project"]'
+      )
+      const toolbar = searchButton?.parentElement?.parentElement as HTMLElement | null
+      if (!toolbar || !searchButton || !settingsButton || !addButton) {
+        throw new Error('Tree toolbar not found')
+      }
+      const region = (el: Element) => getComputedStyle(el).getPropertyValue('-webkit-app-region')
+      return {
+        toolbar: region(toolbar),
+        search: region(searchButton),
+        settings: region(settingsButton),
+        add: region(addButton)
+      }
+    })
+
+    expect(regions).toEqual({
+      toolbar: 'drag',
+      search: 'no-drag',
+      settings: 'no-drag',
+      add: 'no-drag'
+    })
+  })
+
   test('archived task never shows', async ({ mainWindow }) => {
     await patchStore(mainWindow, { treeStatusFilter: ['in_progress', 'todo', 'done'] })
     await expect(taskRow(mainWindow, rootArchived)).toHaveCount(0)

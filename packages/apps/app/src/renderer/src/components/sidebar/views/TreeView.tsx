@@ -2067,7 +2067,10 @@ export function TreeView({
           rightmost button aligns with project Settings icon by construction.
           pl clears macOS traffic lights (80px total - SidebarGroup p-2 (8) -
           this wrapper's px-1 (4) = 68px). */}
-      <div className="relative flex items-center h-11" style={{ paddingLeft: 68 }}>
+      <div
+        className="relative flex items-center h-11 window-drag-region"
+        style={{ paddingLeft: 68 }}
+      >
         <div
           aria-hidden
           className="pointer-events-none absolute left-1/2 -translate-x-1/2 flex items-center gap-1 select-none text-xs font-medium tracking-wide text-foreground @max-[300px]:hidden"
@@ -2083,7 +2086,7 @@ export function TreeView({
                 type="button"
                 onClick={() => openSearch()}
                 aria-label="Search"
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors window-no-drag"
               >
                 <Search className="size-3.5" />
               </button>
@@ -2099,7 +2102,7 @@ export function TreeView({
                 type="button"
                 aria-label="Add project"
                 onClick={() => useDialogStore.getState().openCreateProject()}
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors mr-0.5"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors mr-0.5 window-no-drag"
               >
                 <Plus className="size-3.5" />
               </button>

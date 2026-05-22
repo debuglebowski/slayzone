@@ -2291,8 +2291,11 @@ function App(): React.JSX.Element {
 
           <div
             id="right-column"
-            className={`flex-1 flex min-w-0 bg-sidebar pb-2 pr-2 ${headerHidden ? 'pt-2' : ''} ${zenMode || sidebarAutoHide ? 'pl-2' : ''}`}
+            className={`relative flex-1 flex min-w-0 bg-sidebar pb-2 pr-2 ${headerHidden ? 'pt-2' : ''} ${zenMode || sidebarAutoHide ? 'pl-2' : ''}`}
           >
+            {headerHidden && (
+              <div aria-hidden className="absolute inset-x-0 top-0 h-2 window-drag-region" />
+            )}
             <div id="right-main" className="flex-1 flex flex-col min-w-0 min-h-0">
               {!headerHidden && (
                 <div className={zenMode || sidebarAutoHide ? 'pl-16' : ''}>
