@@ -21,20 +21,24 @@ export interface LoadWebglOptions {
   /** Current addon stored for this terminal (so context-loss / replacement is detectable). */
   getActiveAddon: () => WebglAddon | null
   setActiveAddon: (addon: WebglAddon | null) => void
+  /** Schedules the post-load atlas correction (production: `requestAnimationFrame`). */
+  requestFrame: (cb: () => void) => void
 }
 
 /**
- * Load the WebGL renderer onto an already-opened terminal.
+ * Load the WebGL renderer onto an already-opened terminal, then re-rasterize its
+ * glyph atlas one frame later so the first paint is not scrambled.
  *
  * Must be called a frame after `open()`+`fit()` so layout has committed — the addon
  * rasterizes its glyph atlas from the measured char-cell size, and building it against
  * stale geometry produces scrambled/overlapping glyphs.
  *
- * Font correctness is the *caller's* responsibility: xterm measures the char cell from
- * whatever font is loaded at `open()` time, so the terminal must not be opened until its
- * webfont has loaded (see Terminal.tsx). The addon inherits that measurement — there is
- * no atlas correction here because `clearTextureAtlas()` only re-rasterizes, it does not
- * re-measure the cell; a stale cell stays stale until xterm itself re-measures.
+ * Even one frame after `open()`+`fit()` the atlas can be rasterized against not-yet-
+ * settled DPR / container geometry. `requestFrame` schedules a render-only correction
+ * — `clearTextureAtlas()` + `refresh()` — once more layout has committed. It does not
+ * resize, so no SIGWINCH reaches the PTY. It re-rasterizes an atlas built against stale
+ * DPR/geometry; it cannot fix a wrong *cell measurement* (only xterm re-measuring does
+ * that — font correctness stays the caller's responsibility, see Terminal.tsx).
  *
  * Failure handling:
  * - construction throwing latches WebGL off for all future terminals (DOM fallback);
@@ -70,4 +74,22 @@ export function loadWebglRenderer(opts: LoadWebglOptions): void {
 
   opts.terminal.loadAddon(addon)
   opts.setActiveAddon(addon)
+
+  // Cold-start correction: the atlas was just rasterized from whatever DPR /
+  // container geometry was resolved this instant. Re-rasterize it one frame
+  // later, after layout has settled, so the first paint is not scrambled.
+  // Render-only — no resize, so the PTY never sees a SIGWINCH.
+  opts.requestFrame(() => {
+    // The terminal may have unmounted, been replaced, or lost its context
+    // between frames — only correct the atlas if this addon is still live.
+    if (opts.isAborted() || !opts.isCurrentTerminal() || opts.getActiveAddon() !== addon) {
+      return
+    }
+    try {
+      addon.clearTextureAtlas()
+      opts.terminal.refresh(0, opts.terminal.rows - 1)
+    } catch {
+      /* terminal disposed between frames */
+    }
+  })
 }

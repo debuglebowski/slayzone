@@ -29,7 +29,8 @@ function ok(cond: boolean, msg: string): void {
 function makeStubAddon() {
   const calls = {
     contextLossHandler: null as null | (() => void),
-    disposed: 0
+    disposed: 0,
+    clearedAtlas: 0
   }
   const addon = {
     onContextLoss(cb: () => void) {
@@ -37,6 +38,9 @@ function makeStubAddon() {
     },
     dispose() {
       calls.disposed++
+    },
+    clearTextureAtlas() {
+      calls.clearedAtlas++
     }
   }
   return { addon: addon as unknown as WebglAddon, calls }
@@ -67,10 +71,13 @@ interface Harness {
     activeAddon: WebglAddon | null
     createCalls: number
     onWebglDisabledCalls: number
+    frames: Array<() => void>
   }
   addonCalls: ReturnType<typeof makeStubAddon>['calls']
   termCalls: ReturnType<typeof makeStubTerminal>['calls']
   stubAddon: WebglAddon
+  /** Run every callback the loader scheduled via requestFrame (simulates rAF firing). */
+  flushFrames: () => void
 }
 
 /** Build a loader-options harness with overridable behavior. */
@@ -83,7 +90,8 @@ function harness(over: Partial<{ createThrows: boolean }> = {}): Harness {
     webglDisabled: false,
     activeAddon: null as WebglAddon | null,
     createCalls: 0,
-    onWebglDisabledCalls: 0
+    onWebglDisabledCalls: 0,
+    frames: [] as Array<() => void>
   }
   const opts: LoadWebglOptions = {
     terminal,
@@ -102,9 +110,16 @@ function harness(over: Partial<{ createThrows: boolean }> = {}): Harness {
     getActiveAddon: () => state.activeAddon,
     setActiveAddon: (a) => {
       state.activeAddon = a
+    },
+    requestFrame: (cb) => {
+      state.frames.push(cb)
     }
   }
-  return { opts, state, addonCalls, termCalls, stubAddon: addon }
+  const flushFrames = (): void => {
+    const pending = state.frames.splice(0)
+    for (const cb of pending) cb()
+  }
+  return { opts, state, addonCalls, termCalls, stubAddon: addon, flushFrames }
 }
 
 function run(): void {
@@ -156,6 +171,33 @@ function run(): void {
     ok(h.state.onWebglDisabledCalls === 1, 'onWebglDisabled called')
     ok(h.state.webglDisabled === true, 'webglDisabled latched true')
     ok(h.termCalls.loadAddon === 0, 'loadAddon not called')
+  })
+
+  test('cold-start correction: re-rasterizes atlas + repaints on the next frame', () => {
+    const h = harness()
+    loadWebglRenderer(h.opts)
+    ok(h.addonCalls.clearedAtlas === 0, 'atlas not cleared synchronously')
+    ok(h.termCalls.refresh === 0, 'screen not refreshed synchronously')
+    h.flushFrames()
+    ok(h.addonCalls.clearedAtlas === 1, 'atlas re-rasterized on next frame')
+    ok(h.termCalls.refresh === 1, 'screen repainted on next frame')
+  })
+
+  test('cold-start correction skipped: terminal unmounted before the frame', () => {
+    const h = harness()
+    loadWebglRenderer(h.opts)
+    h.state.aborted = true
+    h.flushFrames()
+    ok(h.addonCalls.clearedAtlas === 0, 'atlas not cleared after abort')
+    ok(h.termCalls.refresh === 0, 'screen not refreshed after abort')
+  })
+
+  test('cold-start correction skipped: addon superseded before the frame', () => {
+    const h = harness()
+    loadWebglRenderer(h.opts)
+    h.state.activeAddon = makeStubAddon().addon // a different addon won the slot
+    h.flushFrames()
+    ok(h.addonCalls.clearedAtlas === 0, 'atlas not cleared for superseded addon')
   })
 
   test('context loss: disposes addon, clears active ref, repaints', () => {
