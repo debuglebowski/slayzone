@@ -527,7 +527,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         }
 
         const modKey = formatKeysForDisplay('mod')
-        const urlHint = `— ${modKey}+Click open · ${formatKeysForDisplay('mod+shift')}+Click external`
+        const shiftKey = formatKeysForDisplay('shift')
+        const urlHint = `— ${modKey}+Click open · ${modKey}+${shiftKey}+Click external`
         const fileHint = `— ${modKey}+Click open`
 
         // xterm measures the character cell from whatever font is loaded when

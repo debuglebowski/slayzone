@@ -282,6 +282,11 @@ describe('isPrimaryModifier', () => {
   it('returns false when no modifier is pressed', () => {
     expect(isPrimaryModifier({ metaKey: false, ctrlKey: false })).toBe(false)
   })
+
+  it('off macOS, does not fire when meta (Win/Super) is also held', () => {
+    // Mirrors the registry rejecting non-mac events with metaKey set.
+    expect(isPrimaryModifier({ metaKey: true, ctrlKey: true })).toBe(isMac)
+  })
 })
 
 describe('getBlockedWebPanelKeys', () => {
