@@ -13,3 +13,14 @@ export function detectPlatform(): Platform {
   }
   return cached
 }
+
+/**
+ * Whether the platform's primary shortcut modifier is pressed for an event.
+ * Maps to Cmd (metaKey) on macOS and Ctrl (ctrlKey) everywhere else — the same
+ * `mod` semantics used by the shortcut registry, but for raw mouse/keyboard
+ * handlers that can't go through `matchesShortcut`. On Windows/Linux metaKey is
+ * the Super/Win key, so handlers must not gate on it.
+ */
+export function isPrimaryModifier(e: { metaKey: boolean; ctrlKey: boolean }): boolean {
+  return detectPlatform() === 'mac' ? e.metaKey : e.ctrlKey
+}

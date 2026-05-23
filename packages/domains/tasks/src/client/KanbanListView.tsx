@@ -44,6 +44,7 @@ import {
   PriorityIcon
 } from '@slayzone/ui'
 import { IconButton } from '@slayzone/ui'
+import { isPrimaryModifier } from '@slayzone/ui'
 import { ChevronDown, Plus, AlertCircle, AlarmClockOff, Check, GitMerge, Link2 } from 'lucide-react'
 import { usePty, useActiveTaskIds } from '@slayzone/terminal'
 import { useDialogStore } from '@slayzone/settings/client'
@@ -203,7 +204,7 @@ function ListRowContent({
         isDragging && 'opacity-50',
         isTerminalStatus(task.status, columns) && 'opacity-60'
       )}
-      onClick={(e) => onClick?.(task, e)}
+      onClick={(e) => onClick?.(task, { metaKey: isPrimaryModifier(e) })}
     >
       {/* Priority bar */}
       {(cp?.priority ?? true) && <PriorityBar priority={task.priority} />}

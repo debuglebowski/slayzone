@@ -8,7 +8,13 @@ import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHand
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { matchesShortcut, useShortcutStore, PulseGrid } from '@slayzone/ui'
+import {
+  matchesShortcut,
+  isPrimaryModifier,
+  formatKeysForDisplay,
+  useShortcutStore,
+  PulseGrid
+} from '@slayzone/ui'
 import { WebLinkProvider, FileLinkProvider } from './web-link-provider'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
@@ -520,8 +526,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           if (tooltipEl) tooltipEl.style.display = 'none'
         }
 
-        const urlHint = '— ⌘+Click open · ⌘⇧+Click external'
-        const fileHint = '— ⌘+Click open'
+        const modKey = formatKeysForDisplay('mod')
+        const urlHint = `— ${modKey}+Click open · ${formatKeysForDisplay('mod+shift')}+Click external`
+        const fileHint = `— ${modKey}+Click open`
 
         // xterm measures the character cell from whatever font is loaded when
         // open() runs. If the terminal webfont has not loaded yet (cold start)
@@ -555,11 +562,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // a confirm() dialog + window.open().
           linkHandler: {
             activate: (event: MouseEvent, uri: string) => {
-              if (event.metaKey && event.shiftKey) {
+              if (isPrimaryModifier(event) && event.shiftKey) {
                 void window.api.shell.openExternal(uri)
-              } else if (event.metaKey && onOpenUrlRef.current) {
+              } else if (isPrimaryModifier(event) && onOpenUrlRef.current) {
                 onOpenUrlRef.current(uri)
-              } else if (event.metaKey) {
+              } else if (isPrimaryModifier(event)) {
                 void window.api.shell.openExternal(uri)
               }
             },
@@ -587,11 +594,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         const linkProvider = new WebLinkProvider(
           terminal,
           (event, uri) => {
-            if (event.metaKey && event.shiftKey) {
+            if (isPrimaryModifier(event) && event.shiftKey) {
               void window.api.shell.openExternal(uri)
-            } else if (event.metaKey && onOpenUrlRef.current) {
+            } else if (isPrimaryModifier(event) && onOpenUrlRef.current) {
               onOpenUrlRef.current(uri)
-            } else if (event.metaKey) {
+            } else if (isPrimaryModifier(event)) {
               void window.api.shell.openExternal(uri)
             }
           },
@@ -606,7 +613,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           new FileLinkProvider(
             terminal,
             (event, filePath, line, col) => {
-              if (!event.metaKey) return
+              if (!isPrimaryModifier(event)) return
               // Resolve relative paths against terminal cwd
               const resolved = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
               const isInProject = resolved.startsWith(cwd + '/') || resolved === cwd

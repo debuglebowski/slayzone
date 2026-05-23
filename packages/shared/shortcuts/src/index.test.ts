@@ -8,6 +8,7 @@ import {
   shortcutDefinitions,
   MENU_SHORTCUT_DEFAULTS,
   detectPlatform,
+  isPrimaryModifier,
   getBlockedWebPanelKeys,
   type ElectronInput
 } from './index'
@@ -267,6 +268,19 @@ describe('detectPlatform', () => {
   it('returns mac or other', () => {
     const result = detectPlatform()
     expect(['mac', 'other']).toContain(result)
+  })
+})
+
+describe('isPrimaryModifier', () => {
+  const isMac = detectPlatform() === 'mac'
+
+  it('treats Cmd as primary on macOS and Ctrl elsewhere', () => {
+    expect(isPrimaryModifier({ metaKey: true, ctrlKey: false })).toBe(isMac)
+    expect(isPrimaryModifier({ metaKey: false, ctrlKey: true })).toBe(!isMac)
+  })
+
+  it('returns false when no modifier is pressed', () => {
+    expect(isPrimaryModifier({ metaKey: false, ctrlKey: false })).toBe(false)
   })
 })
 

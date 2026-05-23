@@ -23,7 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { Calendar } from '@slayzone/ui'
 import { Checkbox } from '@slayzone/ui'
 import { ProjectSelect } from '@slayzone/projects'
-import { buildStatusOptions, cn } from '@slayzone/ui'
+import { buildStatusOptions, cn, formatKeysForDisplay, isPrimaryModifier } from '@slayzone/ui'
 
 interface CreateTaskDialogProps {
   open: boolean
@@ -186,10 +186,10 @@ export function CreateTaskDialog({
           <form
             onSubmit={form.handleSubmit(onSubmit)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.metaKey && e.shiftKey) {
+              if (e.key === 'Enter' && isPrimaryModifier(e) && e.shiftKey) {
                 e.preventDefault()
                 form.handleSubmit(onSubmit)()
-              } else if (e.key === 'Enter' && e.metaKey) {
+              } else if (e.key === 'Enter' && isPrimaryModifier(e)) {
                 e.preventDefault()
                 if (onCreatedAndOpen) {
                   form.handleSubmit((data) => createTask(data, { andOpen: true }))()
@@ -450,7 +450,7 @@ export function CreateTaskDialog({
               <Button type="submit" variant={onCreatedAndOpen ? 'outline' : 'default'}>
                 Create
                 <kbd className="ml-2 opacity-70" style={{ fontFamily: 'system-ui' }}>
-                  {onCreatedAndOpen ? '⇧⌘↩' : '⌘↩'}
+                  {formatKeysForDisplay(onCreatedAndOpen ? 'shift+mod+enter' : 'mod+enter')}
                 </kbd>
               </Button>
               {onCreatedAndOpen && (
@@ -460,7 +460,7 @@ export function CreateTaskDialog({
                 >
                   Create + open
                   <kbd className="ml-2 text-muted-foreground" style={{ fontFamily: 'system-ui' }}>
-                    ⌘↩
+                    {formatKeysForDisplay('mod+enter')}
                   </kbd>
                 </Button>
               )}
