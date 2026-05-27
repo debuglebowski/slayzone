@@ -508,6 +508,94 @@ async function getIgnoredTopLevelEntries(repoPath: string): Promise<string[] | n
   }
 }
 
+/** Discriminated entry describing how a path should be copied to a worktree. */
+type IgnoredCopyEntry =
+  | { kind: 'whole'; path: string } // path itself is ignored — safe to copy entire tree
+  | { kind: 'file'; path: string } // single ignored file under a tracked parent
+
+/**
+ * Returns true if `relPath` itself is matched by gitignore rules — i.e. the
+ * whole subtree under it can be copied without overwriting tracked content.
+ * Returns false if `relPath` is a tracked path (even if it has ignored children).
+ */
+async function isPathFullyIgnored(repoPath: string, relPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['check-ignore', '--quiet', '--', relPath], {
+      cwd: repoPath,
+      stdio: 'ignore'
+    })
+    child.on('close', (code) => resolve(code === 0))
+    child.on('error', () => resolve(false))
+  })
+}
+
+/**
+ * Expand a user-specified path into safe copy entries. If the path itself is
+ * gitignored, returns a single 'whole' entry. Otherwise (tracked path with
+ * ignored descendants), enumerates the ignored files under it and returns
+ * one 'file' entry per file. Prevents nesting bug where `cp -cR src dst` with
+ * an existing `dst` directory copies src INTO dst on macOS.
+ */
+async function expandIgnoredCopyPath(
+  repoPath: string,
+  relPath: string
+): Promise<IgnoredCopyEntry[]> {
+  const sourcePath = path.resolve(repoPath, relPath)
+  if (!existsSync(sourcePath)) return []
+  if (await isPathFullyIgnored(repoPath, relPath)) {
+    return [{ kind: 'whole', path: relPath }]
+  }
+  try {
+    // -z must appear BEFORE `--` or it's parsed as a pathspec instead of an
+    // option, producing newline-delimited output that breaks split('\0').
+    const stdout = await execGit(
+      ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', relPath],
+      { cwd: repoPath }
+    )
+    const files = stdout
+      .split('\0')
+      .filter(Boolean)
+      .filter((f) => !isAlwaysExcluded(f.split('/').pop()!))
+    return files.map((p) => ({ kind: 'file', path: p }))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Build safe copy entries for 'all' behavior. Single ls-files call; per
+ * top-level entry, decide whole-vs-partial via check-ignore.
+ */
+async function getAllIgnoredCopyEntries(repoPath: string): Promise<IgnoredCopyEntry[] | null> {
+  try {
+    const allFiles = (
+      await execGitFileList(['ls-files', '--others', '--ignored', '--exclude-standard'], {
+        cwd: repoPath
+      })
+    ).filter((f) => !isAlwaysExcluded(f.split('/').pop()!))
+
+    const byTop = new Map<string, string[]>()
+    for (const f of allFiles) {
+      const top = f.split('/')[0]
+      const list = byTop.get(top)
+      if (list) list.push(f)
+      else byTop.set(top, [f])
+    }
+
+    const entries: IgnoredCopyEntry[] = []
+    for (const [top, files] of byTop) {
+      if (await isPathFullyIgnored(repoPath, top)) {
+        entries.push({ kind: 'whole', path: top })
+      } else {
+        for (const f of files) entries.push({ kind: 'file', path: f })
+      }
+    }
+    return entries
+  } catch {
+    return null
+  }
+}
+
 /**
  * Copy with APFS clonefile (`cp -cR`) on macOS, fall back to `fs.cp` on
  * non-darwin, non-APFS volumes, or any clone failure. Clone is copy-on-write
@@ -538,27 +626,31 @@ export async function copyIgnoredFiles(
   behavior: 'all' | 'custom',
   customPaths: string[]
 ): Promise<void> {
-  let filesToCopy: string[] = []
+  let entries: IgnoredCopyEntry[] = []
 
   if (behavior === 'all') {
-    const topLevel = await getIgnoredTopLevelEntries(repoPath)
-    if (!topLevel) return
-    filesToCopy = topLevel
+    const all = await getAllIgnoredCopyEntries(repoPath)
+    if (!all) return
+    entries = all
   } else {
     const hasGlobs = customPaths.some((p) => /[*?{[]/.test(p))
+    let pathsToExpand: string[] = []
     if (hasGlobs) {
       const topLevel = await getIgnoredTopLevelEntries(repoPath)
       if (!topLevel) return
       const matchers = customPaths.map(globToRegex)
-      filesToCopy = topLevel.filter((entry) => matchers.some((re) => re.test(entry)))
+      pathsToExpand = topLevel.filter((entry) => matchers.some((re) => re.test(entry)))
     } else {
-      filesToCopy = customPaths
+      pathsToExpand = customPaths
+    }
+    for (const p of pathsToExpand) {
+      entries.push(...(await expandIgnoredCopyPath(repoPath, p)))
     }
   }
 
-  for (const relPath of filesToCopy) {
-    const sourcePath = path.resolve(repoPath, relPath)
-    const destPath = path.resolve(worktreePath, relPath)
+  for (const entry of entries) {
+    const sourcePath = path.resolve(repoPath, entry.path)
+    const destPath = path.resolve(worktreePath, entry.path)
 
     // Path containment check — prevent traversal
     if (
@@ -569,8 +661,8 @@ export async function copyIgnoredFiles(
         level: 'warn',
         source: 'git',
         event: 'worktree.copy_skipped_traversal',
-        message: `Skipped "${relPath}" - path escapes repo/worktree root`,
-        payload: { repoPath, worktreePath, relPath }
+        message: `Skipped "${entry.path}" - path escapes repo/worktree root`,
+        payload: { repoPath, worktreePath, relPath: entry.path }
       })
       continue
     }
@@ -588,8 +680,8 @@ export async function copyIgnoredFiles(
         level: 'warn',
         source: 'git',
         event: 'worktree.copy_failed',
-        message: `Failed to copy "${relPath}": ${err instanceof Error ? err.message : String(err)}`,
-        payload: { repoPath, worktreePath, relPath }
+        message: `Failed to copy "${entry.path}": ${err instanceof Error ? err.message : String(err)}`,
+        payload: { repoPath, worktreePath, relPath: entry.path }
       })
     }
   }
@@ -598,8 +690,8 @@ export async function copyIgnoredFiles(
     level: 'info',
     source: 'git',
     event: 'worktree.copy_done',
-    message: `Copied ${filesToCopy.length} ignored file(s) to worktree`,
-    payload: { repoPath, worktreePath, behavior, count: filesToCopy.length }
+    message: `Copied ${entries.length} ignored entry/entries to worktree`,
+    payload: { repoPath, worktreePath, behavior, count: entries.length }
   })
 }
 

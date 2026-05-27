@@ -220,6 +220,72 @@ await test('fallback path works when clonefile disabled', async () => {
   git(`git worktree remove "${wtPath}" --force`)
 })
 
+await test('does not nest when top-level dir is tracked but has ignored children', async () => {
+  // Repro: main repo has tracked `src/` with ignored child `src/build/out.js`.
+  // Worktree-creation copy must NOT result in nested `wt/src/src/...`.
+  // (Before fix: macOS `cp -cR /main/src /wt/src` with existing dest nests INTO it.)
+  const partialRepo = path.join(root, 'partial-tracked-repo')
+  fs.mkdirSync(partialRepo)
+  git('git init', partialRepo)
+  fs.writeFileSync(path.join(partialRepo, '.gitignore'), 'build/\nsettings.local.json\n')
+  fs.mkdirSync(path.join(partialRepo, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(partialRepo, 'src', 'index.js'), 'tracked from main')
+  fs.mkdirSync(path.join(partialRepo, '.claude'), { recursive: true })
+  fs.writeFileSync(path.join(partialRepo, '.claude', 'agents.md'), 'tracked agents')
+  git('git add -A', partialRepo)
+  git('git commit -m "init"', partialRepo)
+
+  // Ignored children under tracked dirs
+  fs.mkdirSync(path.join(partialRepo, 'src', 'build'), { recursive: true })
+  fs.writeFileSync(path.join(partialRepo, 'src', 'build', 'out.js'), 'ignored output')
+  fs.writeFileSync(path.join(partialRepo, '.claude', 'settings.local.json'), '{"local":true}')
+
+  const wtPath = path.join(root, 'wt-partial-tracked')
+  await createWorktree(partialRepo, wtPath, 'partial-tracked-test')
+
+  // Sanity: worktree has tracked content from initial commit
+  expect(fs.existsSync(path.join(wtPath, 'src', 'index.js'))).toBe(true)
+  expect(fs.existsSync(path.join(wtPath, '.claude', 'agents.md'))).toBe(true)
+
+  await copyIgnoredFiles(partialRepo, wtPath, 'all', [])
+
+  // Ignored children must be copied to expected (non-nested) paths
+  expect(fs.existsSync(path.join(wtPath, 'src', 'build', 'out.js'))).toBe(true)
+  expect(fs.existsSync(path.join(wtPath, '.claude', 'settings.local.json'))).toBe(true)
+  // No nesting allowed
+  expect(fs.existsSync(path.join(wtPath, 'src', 'src'))).toBe(false)
+  expect(fs.existsSync(path.join(wtPath, '.claude', '.claude'))).toBe(false)
+  // Tracked content unmodified
+  expect(fs.readFileSync(path.join(wtPath, 'src', 'index.js'), 'utf-8')).toBe('tracked from main')
+  expect(fs.readFileSync(path.join(wtPath, '.claude', 'agents.md'), 'utf-8')).toBe('tracked agents')
+
+  execSync(`git worktree remove "${wtPath}" --force`, { cwd: partialRepo })
+})
+
+await test('custom path that names a tracked dir does not nest', async () => {
+  const partialRepo = path.join(root, 'partial-custom-repo')
+  fs.mkdirSync(partialRepo)
+  git('git init', partialRepo)
+  fs.writeFileSync(path.join(partialRepo, '.gitignore'), 'cache/\n')
+  fs.mkdirSync(path.join(partialRepo, 'pkg'), { recursive: true })
+  fs.writeFileSync(path.join(partialRepo, 'pkg', 'tracked.js'), 'tracked')
+  git('git add -A', partialRepo)
+  git('git commit -m "init"', partialRepo)
+  fs.mkdirSync(path.join(partialRepo, 'pkg', 'cache'), { recursive: true })
+  fs.writeFileSync(path.join(partialRepo, 'pkg', 'cache', 'blob.bin'), 'cached')
+
+  const wtPath = path.join(root, 'wt-partial-custom')
+  await createWorktree(partialRepo, wtPath, 'partial-custom-test')
+
+  await copyIgnoredFiles(partialRepo, wtPath, 'custom', ['pkg'])
+
+  expect(fs.existsSync(path.join(wtPath, 'pkg', 'cache', 'blob.bin'))).toBe(true)
+  expect(fs.existsSync(path.join(wtPath, 'pkg', 'pkg'))).toBe(false)
+  expect(fs.readFileSync(path.join(wtPath, 'pkg', 'tracked.js'), 'utf-8')).toBe('tracked')
+
+  execSync(`git worktree remove "${wtPath}" --force`, { cwd: partialRepo })
+})
+
 await test('preserves symlinks (pnpm node_modules pattern)', async () => {
   // Isolated repo so we don't pollute shared repoPath state
   const symRepo = path.join(root, 'sym-repo')
