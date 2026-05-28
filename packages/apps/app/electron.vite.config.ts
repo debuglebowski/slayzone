@@ -74,14 +74,13 @@ function discoverDomainClientEntries(): string[] {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, root, '')
 
-  // In dev, flip process.env.NODE_ENV to 'production' so React (and other
-  // node_modules that branch on it) use their prod bundles — no StrictMode
-  // double-invoke, no dev-only invariant checks, no warning overhead. Combined
-  // with esbuild.jsxDev=false (emits jsx not jsxDEV) so everything points at
-  // react/jsx-runtime rather than react/jsx-dev-runtime. import.meta.env.DEV
-  // and __DEV__ stay true so HMR + app dev logic are unaffected.
-  // SLAYZONE_REACT_DEV=1 opts out. SLAYZONE_PROFILE=1 also opts out — profiling
-  // requires dev React internals.
+  // In dev, alias react/react-dom to their production CJS bundles to cut
+  // render cost (no dev invariants, no Object.freeze on props/state, no
+  // rules-of-hooks validation overhead). HMR is disabled (server.hmr: false)
+  // so the react-refresh incompatibility with prod React doesn't apply.
+  // Regex aliases = exact match only, no prefix mangling of subpath imports.
+  // Absolute paths bypass React 19's exports map which doesn't expose ./cjs/*.
+  // SLAYZONE_REACT_DEV=1 opts out. SLAYZONE_PROFILE=1 also opts out.
   const useReactProdInDev =
     mode !== 'production' && env.SLAYZONE_REACT_DEV !== '1' && env.SLAYZONE_PROFILE !== '1'
 
@@ -115,6 +114,12 @@ export default defineConfig(({ mode }) => {
     },
     renderer: {
       envDir: root,
+      server: {
+        // HMR disabled — prod React (used for perf) strips the DevTools
+        // internals react-refresh needs for targeted component hot-reload.
+        // Full page reload still happens automatically via Vite on file change.
+        hmr: false
+      },
       define: {
         __POSTHOG_API_KEY__: JSON.stringify(
           env.POSTHOG_DISABLED === '1'
@@ -123,39 +128,41 @@ export default defineConfig(({ mode }) => {
         ),
         __POSTHOG_HOST__: JSON.stringify(env.POSTHOG_HOST ?? 'https://eu.i.posthog.com'),
         __DEV__: JSON.stringify(mode !== 'production'),
-        __SLAYZONE_PROFILE__: JSON.stringify(env.SLAYZONE_PROFILE === '1'),
-        // Flip process.env.NODE_ENV to 'production' in dev so React (and other
-        // node_modules that gate on it) use their prod bundles — no StrictMode
-        // double-invoke, no dev invariants, no warning paths. Your own source
-        // uses __DEV__ / import.meta.env.DEV which remain true, so HMR and
-        // dev-only app logic are unaffected. SLAYZONE_REACT_DEV=1 opts out.
-        ...(useReactProdInDev ? { 'process.env.NODE_ENV': '"production"' } : {})
+        __SLAYZONE_PROFILE__: JSON.stringify(env.SLAYZONE_PROFILE === '1')
       },
       resolve: {
-        alias: {
-          '@renderer': resolve('src/renderer/src'),
-          '@': resolve('src/renderer/src'),
-          'convex/_generated': resolve(root, 'convex/_generated'),
-          'posthog-js': 'posthog-js/dist/module.no-external.js',
+        // Array form required for regex — string alias keys are prefix-based
+        // in Vite and would mangle subpath imports (e.g. 'react' → 'react/jsx-runtime').
+        alias: [
+          { find: '@renderer', replacement: resolve('src/renderer/src') },
+          { find: '@', replacement: resolve('src/renderer/src') },
+          { find: 'convex/_generated', replacement: resolve(root, 'convex/_generated') },
+          { find: 'posthog-js', replacement: 'posthog-js/dist/module.no-external.js' },
           // When SLAYZONE_PROFILE=1, swap to React's profiling builds so the
           // <Profiler> component actually fires onRender in production builds.
           // Otherwise React strips Profiler to a no-op in prod and the perf
           // harness sees zero commits.
           ...(env.SLAYZONE_PROFILE === '1'
-            ? {
-                'react-dom/client': 'react-dom/profiling',
-                'scheduler/tracing': 'scheduler/tracing-profiling'
-              }
-            : {}),
-        }
+            ? [
+                { find: 'react-dom/client', replacement: 'react-dom/profiling' },
+                { find: 'scheduler/tracing', replacement: 'scheduler/tracing-profiling' }
+              ]
+            : []),
+          ...(useReactProdInDev
+            ? [
+                { find: /^react$/, replacement: resolve(root, 'node_modules/react/cjs/react.production.js') },
+                { find: /^react\/jsx-runtime$/, replacement: resolve(root, 'node_modules/react/cjs/react-jsx-runtime.production.js') },
+                { find: /^react\/jsx-dev-runtime$/, replacement: resolve(root, 'node_modules/react/cjs/react-jsx-dev-runtime.development.js') },
+                { find: /^react-dom$/, replacement: resolve(root, 'node_modules/react-dom/cjs/react-dom.production.js') },
+                { find: /^react-dom\/client$/, replacement: resolve(root, 'node_modules/react-dom/cjs/react-dom-client.production.js') }
+              ]
+            : [])
+        ]
       },
-      // esbuild.jsxDev controls whether the automatic JSX transform emits
-      // jsxDEV (→ react/jsx-dev-runtime) or jsx (→ react/jsx-runtime).
-      // Vite defaults this to !isProduction; we override to false so the
-      // transform always emits jsx — consistent with the prod React bundles
-      // loaded via the NODE_ENV define. No carve-out for jsx-dev-runtime needed.
       ...(useReactProdInDev ? { esbuild: { jsxDev: false } } : {}),
       plugins: [
+        // Babel + React Compiler in all modes — auto-memoization cuts re-renders
+        // in both dev and prod. No SWC: compiler has no SWC equivalent.
         react({ babel: { plugins: ['babel-plugin-react-compiler'] } }),
         tailwindcss(),
         cspFloorPlugin(mode !== 'production'),
@@ -167,10 +174,6 @@ export default defineConfig(({ mode }) => {
       optimizeDeps: {
         exclude: slayzoneDeps,
         entries: discoverDomainClientEntries(),
-        // Vite's `define` above rewrites source files but NOT pre-bundled deps
-        // in .vite/deps (those are processed by esbuild before Vite's transform
-        // pipeline runs). Mirror the define here so pre-bundled node_modules
-        // also pick their production branches.
         ...(useReactProdInDev
           ? { esbuildOptions: { define: { 'process.env.NODE_ENV': '"production"' } } }
           : {})

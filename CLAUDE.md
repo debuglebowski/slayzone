@@ -60,7 +60,11 @@ Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 
 **React transform**: Babel + `babel-plugin-react-compiler` in all modes (dev + prod). Auto-memoization active everywhere; compiler rule violations surface at build time.
 
-**React prod in dev**: `pnpm dev` sets `process.env.NODE_ENV='production'` (Vite `define` + `optimizeDeps.esbuildOptions.define`) and `esbuild.jsxDev: false` → React and other node_modules use prod bundles, esbuild emits `jsx` (not `jsxDEV`) so `react/jsx-runtime` is used throughout. `import.meta.env.DEV` and `__DEV__` stay `true` — HMR and app dev logic unaffected. Flip with `SLAYZONE_REACT_DEV=1` to restore React dev warnings. `SLAYZONE_PROFILE=1` overrides — profiling requires dev React.
+**React transform**: Babel + `babel-plugin-react-compiler` in all modes (dev + prod). Auto-memoization active everywhere; compiler rule violations surface at build time.
+
+**React prod in dev**: `pnpm dev` aliases `react`, `react/jsx-runtime`, `react/jsx-dev-runtime`, `react-dom`, `react-dom/client` directly to their `cjs/*.production.js` bundles via regex array aliases (exact match — no prefix mangling). Also sets `esbuild.jsxDev: false` and `esbuildOptions.define NODE_ENV=production` for pre-bundled deps. `import.meta.env.DEV` and `__DEV__` stay `true`. Flip with `SLAYZONE_REACT_DEV=1` to restore React dev warnings. `SLAYZONE_PROFILE=1` overrides.
+
+**HMR disabled in dev**: `server.hmr: false` — prod React strips `scheduleRefresh` from its DevTools internals, making react-refresh a silent no-op. File changes still trigger automatic full page reload via Vite.
 
 ## Theming
 
