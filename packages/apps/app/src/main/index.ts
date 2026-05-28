@@ -152,6 +152,11 @@ if (is.dev) {
   app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192')
 }
 
+// GPU compositor flags — smoother raster on M-series Macs.
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('enable-features', 'CanvasOopRasterization')
+
 // Linux XDG Base Directory compliance: move state data from ~/.config to ~/.local/state
 import {
   migrateXdgIfNeeded,
