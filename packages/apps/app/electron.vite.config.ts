@@ -36,6 +36,20 @@ function cspFloorPlugin(dev: boolean): Plugin {
   }
 }
 
+// plugin-react-swc forces SWC sourceMaps: true with no public toggle. Strip
+// post-hoc to cut V8 parse/decode overhead during dev cold-start + HMR.
+// Dev only (apply: 'serve') — prod build keeps full maps for Sentry.
+function stripDevSourcemapsPlugin(): Plugin {
+  return {
+    name: 'slayzone:strip-dev-sourcemaps',
+    apply: 'serve',
+    enforce: 'post',
+    transform(code) {
+      return { code, map: null }
+    }
+  }
+}
+
 function discoverDomainClientEntries(): string[] {
   const entries: string[] = []
   const dirs = [resolve(root, 'packages/domains'), resolve(root, 'packages/shared')]
@@ -131,6 +145,7 @@ export default defineConfig(({ mode }) => {
           : reactSwc(),
         tailwindcss(),
         cspFloorPlugin(mode !== 'production'),
+        stripDevSourcemapsPlugin(),
         // Bundle analyzer is a rollup plugin; only useful at build time.
         mode === 'production' &&
           visualizer({ filename: 'bundle-report.html', gzipSize: true, template: 'treemap' })
