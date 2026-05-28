@@ -1789,17 +1789,21 @@ function App(): React.JSX.Element {
   }, [editingProject, refetchAuthFailures])
   const [dismissedAuthFailureIds, setDismissedAuthFailureIds] = useState<Set<string>>(new Set())
   const visibleAuthFailures = useMemo(
-    () => authFailedConnections.filter((f) => !dismissedAuthFailureIds.has(f.connection.id)),
-    [authFailedConnections, dismissedAuthFailureIds]
+    () =>
+      authFailedConnections.filter(
+        (f) =>
+          !dismissedAuthFailureIds.has(f.connection.id) &&
+          selectedProjectId !== null &&
+          f.projectIds.includes(selectedProjectId)
+      ),
+    [authFailedConnections, dismissedAuthFailureIds, selectedProjectId]
   )
   const reconnectAuthFailure = useCallback(() => {
-    const first = visibleAuthFailures[0]
-    if (!first) return
-    const project =
-      projects.find((p) => first.projectIds.includes(p.id)) ?? projects[0]
+    if (!selectedProjectId) return
+    const project = projects.find((p) => p.id === selectedProjectId)
     if (!project) return
     openProjectSettings(project, { initialTab: 'integrations' })
-  }, [visibleAuthFailures, projects, openProjectSettings])
+  }, [selectedProjectId, projects, openProjectSettings])
   const dismissAuthFailures = useCallback(() => {
     setDismissedAuthFailureIds(
       (prev) => new Set([...prev, ...visibleAuthFailures.map((f) => f.connection.id)])

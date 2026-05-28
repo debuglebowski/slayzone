@@ -27,11 +27,11 @@ export function useAuthFailedConnections(): {
           const usage = await window.api.integrations.getConnectionUsage(connection.id)
           return {
             connection,
-            projectIds: usage.projects.map((p) => p.project_id)
+            projectIds: usage.projects.filter((p) => p.has_mapping).map((p) => p.project_id)
           }
         })
       )
-      setFailed(enriched)
+      setFailed(enriched.filter((f) => f.projectIds.length > 0))
     } catch {
       // ignore — banner just stays in last-known state
     }
