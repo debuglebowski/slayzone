@@ -3,6 +3,22 @@ import type { WebglAddon } from '@xterm/addon-webgl'
 import { diag } from './terminal-webgl-diag'
 
 /**
+ * Why the WebGL renderer was swapped out for the DOM renderer. Each value
+ * corresponds to a distinct detection signal in scramble-detector.ts.
+ *
+ * - `context-loss`  — GPU context dropped (`webglcontextlost` event). System
+ *                     suspend / driver reset / OOM. The signal xterm exposes
+ *                     natively via `WebglAddon.onContextLoss`.
+ * - `frame-time`    — Startup heartbeat measured first ~N rAF deltas and the
+ *                     average exceeded the threshold (VS Code's
+ *                     `gpuAcceleration: auto` pattern).
+ * - `canary`        — Canary glyph probe read back pixels diverging from the
+ *                     baseline hash — the atlas scrambled.
+ * - `manual`        — User flipped the `forceCompatibilityRenderer` setting.
+ */
+export type DowngradeReason = 'context-loss' | 'frame-time' | 'canary' | 'manual'
+
+/**
  * Dependencies for {@link loadWebglRenderer}. Everything the routine touches is
  * injected so the lifecycle logic can be unit-tested without a GPU or a real xterm.
  */
@@ -26,12 +42,73 @@ export interface LoadWebglOptions {
   requestFrame: (cb: () => void) => void
   /** Schedules a delayed post-load atlas correction (production: `setTimeout`). */
   requestTimeout: (cb: () => void, ms: number) => void
+  /**
+   * Invoked after a successful downgrade to the DOM renderer (`downgradeToDom`).
+   * Lets the React component show a toast and persist a session-scoped flag so
+   * a follow-up WebGL load is not re-attempted on the next mount.
+   */
+  onDowngrade?: (reason: DowngradeReason) => void
   /** Session id — diagnostics only (TEMPORARY, see terminal-webgl-diag.ts). */
   sessionId?: string
 }
 
 /** Delays (ms after load) of the straggler atlas corrections — see {@link loadWebglRenderer}. */
 const CORRECTION_DELAYS_MS = [250, 750]
+
+/**
+ * Tear down the WebGL renderer and let xterm fall back to its built-in DOM
+ * renderer. Shared by every detection signal (context loss, frame-time
+ * heartbeat, canary probe) and the manual settings flag — so the disposal
+ * sequence stays identical regardless of who triggered it.
+ *
+ * After this returns, no `WebglAddon` is attached to the terminal and xterm
+ * paints subsequent frames via its built-in DOM renderer. Idempotent: a second
+ * call against the same addon is a no-op (the addon already had `dispose`
+ * called and the active-addon slot is null).
+ *
+ * Render path: visible rows are repainted so DOM cells do not inherit stale
+ * pixels left over from the last WebGL frame. The `addon.dispose()` throw is
+ * swallowed for the same reason `correctAtlas` does — the terminal may have
+ * been disposed between the signal firing and this call.
+ */
+export function downgradeToDom(
+  addon: WebglAddon,
+  terminal: Pick<XTerm, 'refresh' | 'rows'>,
+  opts: {
+    setActiveAddon: (addon: WebglAddon | null) => void
+    getActiveAddon: () => WebglAddon | null
+    onDowngrade?: (reason: DowngradeReason) => void
+    sessionId?: string
+  },
+  reason: DowngradeReason
+): void {
+  // onDowngrade fires *before* the addon is disposed so the renderer's
+  // canvas + GL context are still valid for the caller's snapshot capture
+  // (GPU info, screenshot via toDataURL — preserveDrawingBuffer=true on the
+  // addon makes the canvas readable here). After this returns we drop the
+  // addon and hand the terminal back to xterm's built-in DOM renderer.
+  const sid = opts.sessionId ?? 'unknown'
+  try {
+    opts.onDowngrade?.(reason)
+  } catch {
+    /* snapshot capture must never block the downgrade itself */
+  }
+  try {
+    addon.dispose()
+  } catch {
+    /* addon already disposed */
+  }
+  // Only clear the active-addon slot if it still points to *this* addon — a
+  // newer one may have replaced it (e.g. a manual retry between detection +
+  // downgrade) and clobbering would orphan the live renderer.
+  if (opts.getActiveAddon() === addon) opts.setActiveAddon(null)
+  try {
+    terminal.refresh(0, terminal.rows - 1)
+  } catch {
+    /* terminal disposed */
+  }
+  diag(sid, 'webgl-context-loss', { terminal })
+}
 
 /**
  * Re-rasterize the WebGL glyph atlas against the terminal's current cell metrics
@@ -108,16 +185,17 @@ export function loadWebglRenderer(opts: LoadWebglOptions): void {
 
   addon.onContextLoss(() => {
     console.warn('[terminal] WebGL context lost, falling back to DOM renderer')
-    diag(sid, 'webgl-context-loss', { terminal: opts.terminal })
-    addon.dispose()
-    if (opts.getActiveAddon() === addon) opts.setActiveAddon(null)
-    // Repaint every visible row — the DOM renderer takes over but won't redraw
-    // cells last painted by WebGL, leaving stale glyphs on screen.
-    try {
-      opts.terminal.refresh(0, opts.terminal.rows - 1)
-    } catch {
-      /* terminal disposed */
-    }
+    downgradeToDom(
+      addon,
+      opts.terminal,
+      {
+        setActiveAddon: opts.setActiveAddon,
+        getActiveAddon: opts.getActiveAddon,
+        onDowngrade: opts.onDowngrade,
+        sessionId: sid
+      },
+      'context-loss'
+    )
   })
 
   opts.terminal.loadAddon(addon)

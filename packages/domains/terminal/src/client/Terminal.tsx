@@ -8,13 +8,15 @@ import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHand
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { matchesShortcut, useShortcutStore, PulseGrid } from '@slayzone/ui'
+import { matchesShortcut, useShortcutStore, PulseGrid, toast } from '@slayzone/ui'
 import { WebLinkProvider, FileLinkProvider } from './web-link-provider'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
-import { loadWebglRenderer, correctAtlas } from './webgl-loader'
+import { loadWebglRenderer, correctAtlas, type DowngradeReason } from './webgl-loader'
+import { monitorFrameTime, createScrambleProbe, type ScrambleProbe } from './scramble-detector'
+import { captureDowngradeSnapshot, reportDowngradeSnapshot } from './scramble-telemetry'
 import { diag } from './terminal-webgl-diag'
 import '@xterm/xterm/css/xterm.css'
 
@@ -42,6 +44,57 @@ document.head.appendChild(underlineOverride)
 // Once WebGL construction fails (driver blocklist, lost GPU), every subsequent
 // terminal skips it and uses the DOM renderer — no repeated throw, no half-init.
 let webglDisabled = false
+
+// Sessions where the WebGL renderer was swapped out for the DOM renderer by
+// a detection signal (context-loss / frame-time / canary / manual). Scoped to
+// the current renderer process — a reload re-attempts WebGL. The user can
+// re-enable WebGL for the live session via the toast's "Retry WebGL" action.
+//
+// Distinct from {@link webglDisabled}: that one is a *process-wide* latch for
+// construction failures (driver blocklist), this is a *per-session* latch for
+// post-construction misbehavior. Different scopes, different reasons.
+const downgradedSessions = new Set<string>()
+
+// Test-only registry: maps sessionId → the live `handleDowngrade` closure for
+// that terminal. Exposed via `window.__slayzone_scrambleDetector` so the e2e
+// suite can simulate a detector fire (toast + retry path) without touching
+// real GPU state. Populated when initTerminal constructs handleDowngrade,
+// cleared in the unmount cleanup. Production code never reads this — the
+// detectors call handleDowngrade directly via the `onDowngrade` option.
+const fakeDowngradeRegistry = new Map<string, (reason: DowngradeReason) => void>()
+
+if (typeof window !== 'undefined') {
+  ;(
+    window as unknown as {
+      __slayzone_scrambleDetector: {
+        fireDowngrade: (sessionId: string, reason: DowngradeReason) => boolean
+        sessions: () => string[]
+      }
+    }
+  ).__slayzone_scrambleDetector = {
+    fireDowngrade: (sessionId, reason): boolean => {
+      const fn = fakeDowngradeRegistry.get(sessionId)
+      if (!fn) return false
+      fn(reason)
+      return true
+    },
+    sessions: (): string[] => Array.from(fakeDowngradeRegistry.keys())
+  }
+}
+
+/** Short human-readable cause shown in the downgrade toast description. */
+function describeDowngradeReason(reason: DowngradeReason): string {
+  switch (reason) {
+    case 'context-loss':
+      return 'GPU context lost'
+    case 'frame-time':
+      return 'slow rendering at startup'
+    case 'canary':
+      return 'glyph corruption detected'
+    case 'manual':
+      return 'manual override'
+  }
+}
 
 import {
   getTerminal,
@@ -183,6 +236,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const webglAddonRef = useRef<WebglAddon | null>(null)
   const webglRafIdRef = useRef<number | null>(null)
   const atlasCorrectionRafRef = useRef<number | null>(null)
+  // Signal B (frame-time heartbeat) cleanup handle.
+  const frameTimeStopRef = useRef<(() => void) | null>(null)
+  // Signal C (WebGL canvas scramble probe) handle.
+  const scrambleProbeRef = useRef<ScrambleProbe | null>(null)
   const clearedSeqRef = useRef<number | null>(null)
   const initializedRef = useRef(false)
   const lastRenderedSeqRef = useRef<number>(-1)
@@ -249,7 +306,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     cleanupTask
   } = usePty()
   const { terminalThemeId, contentVariant } = useTheme()
-  const { terminalFontSize, terminalFontFamily, terminalScrollback } = useAppearance()
+  const {
+    terminalFontSize,
+    terminalFontFamily,
+    terminalScrollback,
+    terminalForceCompatibilityRenderer
+  } = useAppearance()
+  // Ref so the inline-defined `triggerWebglLoad` + cache-reattach path see
+  // the current setting value without closure staleness.
+  const forceCompatRef = useRef(terminalForceCompatibilityRenderer)
+  forceCompatRef.current = terminalForceCompatibilityRenderer
 
   const resolvedTerminalTheme = getThemeTerminalColors(terminalThemeId, contentVariant)
   const resolvedTerminalVariant = contentVariant
@@ -268,7 +334,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       atlasCorrectionRafRef.current = null
       const addon = webglAddonRef.current
       const terminal = terminalRef.current
-      if (addon && terminal) correctAtlas(addon, terminal, sessionId)
+      if (addon && terminal) {
+        correctAtlas(addon, terminal, sessionId)
+        // The atlas was just intentionally re-rasterized — the scramble probe's
+        // current baseline points at the *old* atlas pixels and would now flag
+        // every cell as drift. Re-baseline so the probe tracks the new atlas.
+        scrambleProbeRef.current?.rebaseline()
+      }
     })
   }, [sessionId])
 
@@ -397,6 +469,138 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         didInit = true
         initializedRef.current = true
 
+        // Renderer-health helpers — shared by both the cached-reattach path and
+        // the fresh-allocation path. Defined here so the toast's Retry action
+        // (which fires long after init returned) keeps a live closure on the
+        // current session's refs.
+
+        const handleDowngrade = (reason: DowngradeReason): void => {
+          // Snapshot first — addon + WebGL canvas must still be live so the
+          // GPU info + canvas screenshot capture works (downgradeToDom now
+          // fires onDowngrade BEFORE dispose for exactly this reason).
+          const liveAddon = webglAddonRef.current
+          const liveTerm = terminalRef.current
+          if (liveAddon && liveTerm) {
+            try {
+              const snapshot = captureDowngradeSnapshot(
+                liveAddon,
+                liveTerm,
+                reason,
+                sessionId,
+                mode
+              )
+              reportDowngradeSnapshot(snapshot)
+            } catch {
+              // Snapshot capture must never block the downgrade itself.
+            }
+          }
+
+          // Stop probing against the addon we're about to dispose.
+          frameTimeStopRef.current?.()
+          frameTimeStopRef.current = null
+          scrambleProbeRef.current?.dispose()
+          scrambleProbeRef.current = null
+
+          // Test-fake path reaches handleDowngrade directly; production path
+          // is downgradeToDom → onDowngrade → here, with downgradeToDom about
+          // to dispose right after we return. Disposing here is safe in both
+          // paths (idempotent) and ensures the test path also tears down the
+          // live addon.
+          if (liveAddon && liveTerm) {
+            try {
+              liveAddon.dispose()
+            } catch {
+              /* already disposed */
+            }
+            webglAddonRef.current = null
+            try {
+              liveTerm.refresh(0, liveTerm.rows - 1)
+            } catch {
+              /* terminal disposed */
+            }
+          }
+
+          downgradedSessions.add(sessionId)
+          toast('Terminal switched to compatibility renderer', {
+            description: `Cause: ${describeDowngradeReason(reason)}`,
+            action: {
+              label: 'Retry WebGL',
+              onClick: () => {
+                downgradedSessions.delete(sessionId)
+                triggerWebglLoad()
+              }
+            },
+            duration: 8000
+          })
+        }
+
+        // Make this session's handleDowngrade reachable from the e2e suite.
+        // Overwrites any closure from a previous init for the same sessionId.
+        fakeDowngradeRegistry.set(sessionId, handleDowngrade)
+
+        const installRendererMonitors = (addon: WebglAddon, terminalInst: XTerm): void => {
+          // Tear down any previous monitors before installing fresh — covers
+          // the Retry-WebGL path and cache-reattach where an addon-instance is
+          // re-adopted from a now-defunct previous component.
+          frameTimeStopRef.current?.()
+          scrambleProbeRef.current?.dispose()
+
+          const shared = {
+            addon,
+            terminal: terminalInst,
+            getActiveAddon: () => webglAddonRef.current,
+            setActiveAddon: (a: WebglAddon | null) => {
+              webglAddonRef.current = a
+            },
+            isAborted: () => signal.aborted,
+            isCurrent: () => webglAddonRef.current === addon,
+            onDowngrade: handleDowngrade,
+            sessionId
+          }
+          frameTimeStopRef.current = monitorFrameTime(shared)
+          scrambleProbeRef.current = createScrambleProbe(shared)
+        }
+
+        const triggerWebglLoad = (): void => {
+          const terminalInst = terminalRef.current
+          if (!terminalInst) return
+          if (forceCompatRef.current) return
+          if (downgradedSessions.has(sessionId)) return
+          if (webglRafIdRef.current !== null) {
+            cancelAnimationFrame(webglRafIdRef.current)
+          }
+          webglRafIdRef.current = requestAnimationFrame(() => {
+            webglRafIdRef.current = null
+            loadWebglRenderer({
+              terminal: terminalInst,
+              // `preserveDrawingBuffer: true` keeps the WebGL back buffer
+              // valid for readback between rAFs. Required by the Signal C
+              // scramble probe in scramble-detector.ts — without it,
+              // `gl.readPixels` outside the draw frame returns zeros. Costs
+              // a small amount of GPU memory + disables a compositor fast
+              // path; trade is necessary because the CPU-side atlas canvas
+              // is not where scramble manifests.
+              createAddon: () => new WebglAddon({ preserveDrawingBuffer: true }),
+              isAborted: () => signal.aborted,
+              isCurrentTerminal: () => terminalRef.current === terminalInst,
+              isWebglDisabled: () => webglDisabled,
+              onWebglDisabled: () => {
+                webglDisabled = true
+              },
+              getActiveAddon: () => webglAddonRef.current,
+              setActiveAddon: (a) => {
+                webglAddonRef.current = a
+              },
+              requestFrame: (cb) => requestAnimationFrame(cb),
+              requestTimeout: (cb, ms) => window.setTimeout(cb, ms),
+              onDowngrade: handleDowngrade,
+              sessionId
+            })
+            const addon = webglAddonRef.current
+            if (addon) installRendererMonitors(addon, terminalInst)
+          })
+        }
+
         // Check if we have a cached terminal for this task
         const cached = getTerminal(sessionId)
         if (cached) {
@@ -442,15 +646,42 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             // possibly a different monitor DPR, while the terminal was detached —
             // rebuild it and repaint so glyphs don't render scrambled after reattach.
             if (cached.webglAddon) {
-              try {
-                cached.webglAddon.clearTextureAtlas()
-                cached.terminal.refresh(0, cached.terminal.rows - 1)
-                diag(sessionId, 'atlas-correct', {
-                  site: 'reattach',
-                  terminal: cached.terminal
-                })
-              } catch {
-                /* terminal disposed */
+              if (forceCompatRef.current) {
+                // User flipped the force-compat setting while this terminal
+                // was cached — dispose the cached WebGL addon so the DOM
+                // renderer takes over on this reattach. No flicker window
+                // because this runs before the first paint of the remounted
+                // terminal.
+                try {
+                  cached.webglAddon.dispose()
+                } catch {
+                  /* already disposed */
+                }
+                webglAddonRef.current = null
+                try {
+                  cached.terminal.refresh(0, cached.terminal.rows - 1)
+                } catch {
+                  /* terminal disposed */
+                }
+                downgradedSessions.add(sessionId)
+              } else {
+                try {
+                  cached.webglAddon.clearTextureAtlas()
+                  cached.terminal.refresh(0, cached.terminal.rows - 1)
+                  diag(sessionId, 'atlas-correct', {
+                    site: 'reattach',
+                    terminal: cached.terminal
+                  })
+                } catch {
+                  /* terminal disposed */
+                }
+                // Install scramble-detector against the re-adopted addon. The
+                // previous component's monitors were disposed on unmount; without
+                // re-installing here, Signals B+C would be silent for the rest
+                // of this session.
+                if (!downgradedSessions.has(sessionId)) {
+                  installRendererMonitors(cached.webglAddon, cached.terminal)
+                }
               }
             }
 
@@ -658,28 +889,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // WebGL renderer — 5-10x faster than the DOM renderer.
         // Safe because filterBufferData() strips SGR 4 (underline) codes server-side
         // before data reaches the renderer. CSS override kept as safety net.
-        // Deferred to the next animation frame so layout (post open()+fit()) has
-        // committed before the addon rasterizes its glyph atlas. See webgl-loader.ts.
-        webglRafIdRef.current = requestAnimationFrame(() => {
-          webglRafIdRef.current = null
-          loadWebglRenderer({
-            terminal,
-            createAddon: () => new WebglAddon(),
-            isAborted: () => signal.aborted,
-            isCurrentTerminal: () => terminalRef.current === terminal,
-            isWebglDisabled: () => webglDisabled,
-            onWebglDisabled: () => {
-              webglDisabled = true
-            },
-            getActiveAddon: () => webglAddonRef.current,
-            setActiveAddon: (addon) => {
-              webglAddonRef.current = addon
-            },
-            requestFrame: (cb) => requestAnimationFrame(cb),
-            requestTimeout: (cb, ms) => window.setTimeout(cb, ms),
-            sessionId
-          })
-        })
+        // Deferred to the next animation frame inside `triggerWebglLoad` (defined
+        // above) so layout (post open()+fit()) has committed before the addon
+        // rasterizes its glyph atlas. The detector toast's "Retry WebGL" action
+        // re-enters the same path. See webgl-loader.ts + scramble-detector.ts.
+        triggerWebglLoad()
 
         // Let Ctrl+Tab and Ctrl+Shift+Tab bubble up for tab switching
         // Intercept Cmd+F / Ctrl+F for terminal search
@@ -856,6 +1070,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         cancelAnimationFrame(atlasCorrectionRafRef.current)
         atlasCorrectionRafRef.current = null
       }
+      // Dispose scramble-detector handles. The cached addon stays in the
+      // module cache, but its monitors die with this component — the
+      // re-mounting component re-installs them via `installRendererMonitors`.
+      frameTimeStopRef.current?.()
+      frameTimeStopRef.current = null
+      scrambleProbeRef.current?.dispose()
+      scrambleProbeRef.current = null
+      fakeDowngradeRegistry.delete(sessionId)
       unregisterActiveAddon(sessionId)
       // Serialize state before caching
       let serializedState: string | undefined
@@ -1213,6 +1435,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       if (!isActiveRef.current) return
       if (document.visibilityState !== 'visible') return
       scheduleAtlasCorrection()
+      // Also nudge the scramble probe — return-to-foreground is the moment
+      // a silently-evicted atlas first becomes user-visible, and waiting for
+      // the next 5s probe tick leaves a window of visible scramble.
+      scrambleProbeRef.current?.probe()
     }
 
     const interval = window.setInterval(tryCorrect, 30_000)
@@ -1225,6 +1451,46 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       window.removeEventListener('focus', tryCorrect)
     }
   }, [scheduleAtlasCorrection])
+
+  // Respond to live `forceCompatibilityRenderer` toggles. The setting is also
+  // honoured at terminal creation via `forceCompatRef.current` inside
+  // `triggerWebglLoad`; this effect handles the case where the user flips it
+  // while a terminal is already running.
+  //
+  // ON  → dispose the live WebGL addon + monitors, latch the session so a
+  //       subsequent retry-WebGL action would be a no-op until the setting
+  //       flips back off. No toast — the toggle they just clicked is the
+  //       feedback.
+  // OFF → clear the session latch so the *next* terminal mount can re-enable
+  //       WebGL. The current already-DOM terminal stays DOM until next mount;
+  //       reopening the tab brings WebGL back. Conservative choice: avoids
+  //       silently re-loading WebGL behind the user's back.
+  useEffect(() => {
+    if (terminalForceCompatibilityRenderer) {
+      const addon = webglAddonRef.current
+      const terminal = terminalRef.current
+      if (addon && terminal) {
+        try {
+          addon.dispose()
+        } catch {
+          /* already disposed */
+        }
+        webglAddonRef.current = null
+        try {
+          terminal.refresh(0, terminal.rows - 1)
+        } catch {
+          /* terminal disposed */
+        }
+        frameTimeStopRef.current?.()
+        frameTimeStopRef.current = null
+        scrambleProbeRef.current?.dispose()
+        scrambleProbeRef.current = null
+      }
+      downgradedSessions.add(sessionId)
+    } else {
+      downgradedSessions.delete(sessionId)
+    }
+  }, [terminalForceCompatibilityRenderer, sessionId])
 
   // Update scrollback buffer at runtime.
   useEffect(() => {

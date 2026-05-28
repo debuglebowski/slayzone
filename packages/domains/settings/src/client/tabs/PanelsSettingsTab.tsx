@@ -338,6 +338,8 @@ export function PanelsSettingsTab({
   )
   const [terminalScrollback, setTerminalScrollback] = useState('2000')
   const [terminalAutoStart, setTerminalAutoStart] = useState(false)
+  const [terminalForceCompatibilityRenderer, setTerminalForceCompatibilityRenderer] =
+    useState(false)
 
   // Editor
   const [editorWordWrap, setEditorWordWrap] = useState<'on' | 'off'>('off')
@@ -419,7 +421,8 @@ export function PanelsSettingsTab({
       window.api.settings.get('editor_markdown_view_mode'),
       window.api.settings.get('git_tab_order'),
       window.api.settings.get('git_tab_visibility'),
-      window.api.settings.get('terminal_auto_start')
+      window.api.settings.get('terminal_auto_start'),
+      window.api.settings.get('terminal_force_compatibility_renderer')
     ]).then(
       ([
         pc,
@@ -444,13 +447,15 @@ export function PanelsSettingsTab({
         emvm,
         gto,
         gtv,
-        tas
+        tas,
+        tfcr
       ]) => {
         if (pc)
           setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
         if (tff) setTerminalFontFamily(tff)
         if (ts) setTerminalScrollback(ts)
         if (tas === '1') setTerminalAutoStart(true)
+        if (tfcr === '1') setTerminalForceCompatibilityRenderer(true)
         if (eww === 'on') setEditorWordWrap('on')
         if (erw === 'all') setEditorRenderWhitespace('all')
         if (ets === '4') setEditorTabSize('4')
@@ -895,6 +900,24 @@ export function PanelsSettingsTab({
                 if (n >= 0) window.api.settings.set('terminal_scrollback', String(n))
               }}
             />
+          </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Compatibility renderer</span>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={terminalForceCompatibilityRenderer}
+                onCheckedChange={(c) => {
+                  setTerminalForceCompatibilityRenderer(c)
+                  window.api.settings.set(
+                    'terminal_force_compatibility_renderer',
+                    c ? '1' : '0'
+                  )
+                }}
+              />
+              <span className="text-xs text-muted-foreground">
+                Force DOM renderer (disable WebGL) — use if you repeatedly hit glyph scrambling.
+              </span>
+            </div>
           </div>
         </div>
       )}

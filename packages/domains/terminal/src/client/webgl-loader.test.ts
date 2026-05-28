@@ -4,7 +4,13 @@
  * Run with: pnpm exec tsx packages/domains/terminal/src/client/webgl-loader.test.ts
  */
 import type { WebglAddon } from '@xterm/addon-webgl'
-import { loadWebglRenderer, correctAtlas, type LoadWebglOptions } from './webgl-loader'
+import {
+  loadWebglRenderer,
+  correctAtlas,
+  downgradeToDom,
+  type DowngradeReason,
+  type LoadWebglOptions
+} from './webgl-loader'
 
 let passed = 0
 let failed = 0
@@ -73,6 +79,7 @@ interface Harness {
     onWebglDisabledCalls: number
     frames: Array<() => void>
     timers: Array<{ cb: () => void; ms: number }>
+    downgrades: DowngradeReason[]
   }
   addonCalls: ReturnType<typeof makeStubAddon>['calls']
   termCalls: ReturnType<typeof makeStubTerminal>['calls']
@@ -95,7 +102,8 @@ function harness(over: Partial<{ createThrows: boolean }> = {}): Harness {
     createCalls: 0,
     onWebglDisabledCalls: 0,
     frames: [] as Array<() => void>,
-    timers: [] as Array<{ cb: () => void; ms: number }>
+    timers: [] as Array<{ cb: () => void; ms: number }>,
+    downgrades: [] as DowngradeReason[]
   }
   const opts: LoadWebglOptions = {
     terminal,
@@ -120,6 +128,9 @@ function harness(over: Partial<{ createThrows: boolean }> = {}): Harness {
     },
     requestTimeout: (cb, ms) => {
       state.timers.push({ cb, ms })
+    },
+    onDowngrade: (reason) => {
+      state.downgrades.push(reason)
     }
   }
   const flushFrames = (): void => {
@@ -220,7 +231,7 @@ function run(): void {
     ok(h.addonCalls.clearedAtlas === 0, 'atlas not cleared for superseded addon')
   })
 
-  test('context loss: disposes addon, clears active ref, repaints', () => {
+  test('context loss: disposes addon, clears active ref, repaints, fires onDowngrade', () => {
     const h = harness()
     loadWebglRenderer(h.opts)
     ok(h.addonCalls.contextLossHandler !== null, 'context-loss handler registered')
@@ -229,6 +240,86 @@ function run(): void {
     ok(h.addonCalls.disposed === 1, 'addon disposed')
     ok(h.state.activeAddon === null, 'active addon ref cleared')
     ok(h.termCalls.refresh === refreshBefore + 1, 'screen repainted on context loss')
+    ok(
+      h.state.downgrades.length === 1 && h.state.downgrades[0] === 'context-loss',
+      'onDowngrade fired with reason=context-loss'
+    )
+  })
+
+  test('downgradeToDom: disposes, clears active, repaints, fires onDowngrade with reason', () => {
+    const { addon, calls: addonCalls } = makeStubAddon()
+    const { terminal, calls: termCalls } = makeStubTerminal()
+    let active: WebglAddon | null = addon
+    const downgrades: DowngradeReason[] = []
+    downgradeToDom(
+      addon,
+      terminal,
+      {
+        setActiveAddon: (a) => {
+          active = a
+        },
+        getActiveAddon: () => active,
+        onDowngrade: (r) => downgrades.push(r),
+        sessionId: 'test'
+      },
+      'canary'
+    )
+    ok(addonCalls.disposed === 1, 'addon disposed')
+    ok(active === null, 'active addon cleared')
+    ok(termCalls.refresh === 1, 'screen repainted')
+    ok(downgrades.length === 1 && downgrades[0] === 'canary', 'onDowngrade fired with reason')
+  })
+
+  test('downgradeToDom: idempotent — second call against superseded addon is harmless', () => {
+    const { addon, calls: addonCalls } = makeStubAddon()
+    const { terminal } = makeStubTerminal()
+    const newer = makeStubAddon().addon
+    let active: WebglAddon | null = newer // newer addon already replaced the slot
+    const downgrades: DowngradeReason[] = []
+    downgradeToDom(
+      addon,
+      terminal,
+      {
+        setActiveAddon: (a) => {
+          active = a
+        },
+        getActiveAddon: () => active,
+        onDowngrade: (r) => downgrades.push(r),
+        sessionId: 'test'
+      },
+      'frame-time'
+    )
+    ok(addonCalls.disposed === 1, 'old addon still disposed')
+    ok(active === newer, 'newer addon slot untouched')
+    ok(downgrades[0] === 'frame-time', 'onDowngrade still fires with caller-supplied reason')
+  })
+
+  test('downgradeToDom: swallows post-dispose addon throw', () => {
+    const { terminal, calls: termCalls } = makeStubTerminal()
+    const throwingAddon = {
+      dispose() {
+        throw new Error('already disposed')
+      }
+    } as unknown as WebglAddon
+    let active: WebglAddon | null = throwingAddon
+    const downgrades: DowngradeReason[] = []
+    // Must not throw — a terminal disposed concurrently with a detector fire is normal.
+    downgradeToDom(
+      throwingAddon,
+      terminal,
+      {
+        setActiveAddon: (a) => {
+          active = a
+        },
+        getActiveAddon: () => active,
+        onDowngrade: (r) => downgrades.push(r),
+        sessionId: 'test'
+      },
+      'manual'
+    )
+    ok(active === null, 'active addon ref still cleared after throw')
+    ok(termCalls.refresh === 1, 'refresh still attempted after dispose throw')
+    ok(downgrades[0] === 'manual', 'onDowngrade still fires after dispose throw')
   })
 
   test('correctAtlas: re-rasterizes the atlas and repaints every visible row', () => {

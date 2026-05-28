@@ -19,6 +19,15 @@ export interface AppearanceSettings {
   // Terminal
   terminalFontFamily: string
   terminalScrollback: number
+  /**
+   * Force the DOM-based xterm renderer instead of the WebGL renderer.
+   *
+   * Default false (WebGL on). Set true to permanently opt out of WebGL for
+   * users repeatedly hit by atlas-scramble / context-loss issues — bypasses
+   * the auto-detector's session-scoped fallback so the DOM renderer is
+   * picked on every fresh terminal in this session and every future one.
+   */
+  terminalForceCompatibilityRenderer: boolean
   // Diff
   diffContextLines: '0' | '3' | '5' | 'all'
   diffIgnoreWhitespace: boolean
@@ -60,6 +69,7 @@ export const appearanceDefaults: AppearanceSettings = {
   editorRenderWhitespace: 'none',
   terminalFontFamily: 'Menlo, Monaco, "Courier New", monospace',
   terminalScrollback: 2000,
+  terminalForceCompatibilityRenderer: false,
   diffContextLines: '3',
   diffIgnoreWhitespace: false,
   diffContinuousFlow: false,

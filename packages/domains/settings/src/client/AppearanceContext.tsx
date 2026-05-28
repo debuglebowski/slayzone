@@ -41,6 +41,7 @@ export function AppearanceProvider({
       window.api.settings.get('editor_render_whitespace'),
       window.api.settings.get('terminal_font_family'),
       window.api.settings.get('terminal_scrollback'),
+      window.api.settings.get('terminal_force_compatibility_renderer'),
       window.api.settings.get('diff_context_lines'),
       window.api.settings.get('diff_ignore_whitespace'),
       window.api.settings.get('diff_continuous_flow'),
@@ -77,6 +78,7 @@ export function AppearanceProvider({
         renderWs,
         termFamily,
         termScrollback,
+        termForceCompat,
         diffContext,
         diffWs,
         diffContinuous,
@@ -122,6 +124,7 @@ export function AppearanceProvider({
           editorRenderWhitespace: renderWs === 'all' ? 'all' : 'none',
           terminalFontFamily: termFamily || d.terminalFontFamily,
           terminalScrollback: termScrollback ? parseInt(termScrollback, 10) : d.terminalScrollback,
+          terminalForceCompatibilityRenderer: termForceCompat === '1',
           diffContextLines:
             diffContext === '0' || diffContext === '5' || diffContext === 'all' ? diffContext : '3',
           diffIgnoreWhitespace: diffWs === '1',
