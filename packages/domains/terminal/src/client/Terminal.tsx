@@ -972,10 +972,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     if (!isActive || !terminalRef.current) return
     let cancelled = false
     const replay = async () => {
-      setIsReplaying(true)
       try {
         const missed = await window.api.pty.getBufferSince(sessionId, lastRenderedSeqRef.current)
         if (cancelled || !missed || missed.chunks.length === 0) return
+        // Only show overlay when there's actually data to write
+        setIsReplaying(true)
         for (const chunk of missed.chunks) {
           const cutoff = clearedSeqRef.current
           if (cutoff !== null && chunk.seq <= cutoff) continue
