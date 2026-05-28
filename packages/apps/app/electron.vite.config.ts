@@ -76,6 +76,16 @@ function discoverDomainClientEntries(): string[] {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, root, '')
 
+  // Dev points React's entry files straight at their production CJS bundles
+  // so cold render + re-render cost matches the shipped app (no StrictMode
+  // double-invoke, no dev-only invariants, no warning paths). Set
+  // SLAYZONE_REACT_DEV=1 to opt back into React's development build when you
+  // need its warnings or strict-mode bug-detection. Profile mode
+  // (SLAYZONE_PROFILE=1) keeps React on its profiling build, so it also
+  // disables this swap.
+  const useReactProdInDev =
+    mode !== 'production' && env.SLAYZONE_REACT_DEV !== '1' && env.SLAYZONE_PROFILE !== '1'
+
   return {
     main: {
       plugins: [externalizeDepsPlugin({ exclude: slayzoneDeps })],
@@ -130,6 +140,21 @@ export default defineConfig(({ mode }) => {
             ? {
                 'react-dom/client': 'react-dom/profiling',
                 'scheduler/tracing': 'scheduler/tracing-profiling'
+              }
+            : {}),
+          // Skip React's `if (process.env.NODE_ENV === 'production')` shim
+          // files and resolve straight to the production CJS bundles. Narrow
+          // scope: only react/react-dom flip to prod paths, everything else
+          // (Convex, tRPC, etc.) still sees NODE_ENV='development'.
+          // jsx-dev-runtime is intentionally NOT aliased — SWC's Fast Refresh
+          // transform emits `jsxDEV(...)` calls which only exist in the dev
+          // factory.
+          ...(useReactProdInDev
+            ? {
+                react: 'react/cjs/react.production.js',
+                'react/jsx-runtime': 'react/cjs/react-jsx-runtime.production.js',
+                'react-dom': 'react-dom/cjs/react-dom.production.js',
+                'react-dom/client': 'react-dom/cjs/react-dom-client.production.js'
               }
             : {})
         }

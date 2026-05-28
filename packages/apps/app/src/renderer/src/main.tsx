@@ -42,20 +42,6 @@ window.addEventListener('unhandledrejection', (event) => {
   })
 })
 
-// Dev-only: React 19 dev builds emit a `performance.measure()` per render to
-// populate Chrome DevTools' React performance track. The User Timing buffer is
-// unbounded, and this renderer never reloads (it's a long-lived desktop window),
-// so those measures accumulate for the entire session — millions of entries,
-// gigabytes of off-heap Blink storage, eventual renderer OOM. A browser tab
-// flushes this on reload; a desktop window must flush it itself. Production
-// builds emit no such measures, so this is gated to dev.
-if (import.meta.env.DEV) {
-  setInterval(() => {
-    performance.clearMeasures()
-    performance.clearMarks()
-  }, 30_000)
-}
-
 // Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
 if (isFloatingGlobalAgentPanel) {
   createRoot(document.getElementById('root')!).render(

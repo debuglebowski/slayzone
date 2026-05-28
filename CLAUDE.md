@@ -47,6 +47,19 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for system architecture and [PHILOSOPHY
 | `pnpm test:e2e`  | Run E2E tests (requires build) |
 | `pnpm lint`      | Lint all packages              |
 
+## Dev Env Flags
+
+Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
+
+| Flag                            | Default | Effect                                                                                                       |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `SLAYZONE_REACT_DEV=1`          | off     | Use React's **development** build instead of the prod-aliased dev default. Re-enables StrictMode + warnings. |
+| `SLAYZONE_PROFILE=1`            | off     | Swap to React's profiling builds so `<Profiler>` fires `onRender`. Required by `e2e/perf/scenarios.spec.ts`. |
+| `SLAYZONE_DEBUG_BOOT=1`         | off     | Verbose main-process boot logging.                                                                           |
+| `SLAYZONE_REGISTER_DEV_PROTOCOL=1` | off  | Register the `slayzone://` custom protocol in dev. Needed when testing OAuth deep-link callbacks.            |
+
+**React build aliasing**: dev `pnpm dev` aliases `react`, `react/jsx-runtime`, `react-dom`, `react-dom/client` straight to their `cjs/*.production.js` bundles → no StrictMode double-invoke, no dev warnings, no invariant checks. Runtime feels like prod. Flip with `SLAYZONE_REACT_DEV=1` when you need React's bug-detection. `SLAYZONE_PROFILE=1` overrides — profiling requires dev React.
+
 ## Theming
 
 All colors must reference theme tokens. Never use raw Tailwind palette classes (`bg-neutral-*`, `text-zinc-*`, `border-gray-*`) or arbitrary hex (`bg-[#1a1a1a]`) — they bypass the theme and break under custom themes.
