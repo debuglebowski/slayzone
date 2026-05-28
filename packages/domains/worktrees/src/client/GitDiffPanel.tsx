@@ -547,15 +547,25 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     }
   }, [snapshot, targetPath])
 
-  // Clear selection when file no longer exists
+  // Keep a file selected at all times in non-continuous-flow mode — the right
+  // pane needs SOMETHING to render. Auto-pick the first entry on mount, after a
+  // selection vanishes (file committed/discarded), and any time the list grows
+  // from empty. Continuous-flow doesn't depend on selection so it stays opt-in.
   useEffect(() => {
-    if (
-      selectedFile &&
-      !flatEntries.some((f) => f.path === selectedFile.path && f.source === selectedFile.source)
-    ) {
-      setSelectedFile(null)
+    if (diffContinuousFlow) return
+    if (flatEntries.length === 0) {
+      if (selectedFile) setSelectedFile(null)
+      return
     }
-  }, [flatEntries, selectedFile])
+    const stillValid =
+      selectedFile &&
+      flatEntries.some(
+        (f) => f.path === selectedFile.path && f.source === selectedFile.source
+      )
+    if (!stillValid) {
+      setSelectedFile({ path: flatEntries[0].path, source: flatEntries[0].source })
+    }
+  }, [flatEntries, selectedFile, diffContinuousFlow])
 
   // Prune userToggledFilesRef entries whose files no longer exist in the diff.
   // Otherwise the set grows unbounded over a long session as files churn.
@@ -1126,8 +1136,11 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
       {/* Main content: horizontal split */}
       {targetPath && !error && snapshot && hasAnyChanges && (
         <div ref={splitContainerRef} className="flex-1 min-h-0 flex">
-          {/* Left: file lists + commit */}
-          {!diffTreeCollapsed && (
+          {/* Left: file lists + commit.
+              Always shown in non-continuous-flow mode — the right pane needs a
+              file selected to render anything, so the list must stay reachable.
+              The `diff_tree_collapsed` toggle only applies in continuous-flow. */}
+          {(!diffTreeCollapsed || !diffContinuousFlow) && (
             <div
               className="shrink-0 flex flex-col min-h-0 border-r"
               style={{ width: fileListWidth }}
@@ -1236,8 +1249,10 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
             </div>
           )}
 
-          {/* Resize handle */}
-          {!diffTreeCollapsed && <HorizontalResizeHandle onDrag={handleResize} />}
+          {/* Resize handle — match the file-list visibility condition. */}
+          {(!diffTreeCollapsed || !diffContinuousFlow) && (
+            <HorizontalResizeHandle onDrag={handleResize} />
+          )}
 
           {/* Right: diff viewer */}
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">

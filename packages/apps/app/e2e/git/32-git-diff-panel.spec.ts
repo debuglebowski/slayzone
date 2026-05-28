@@ -178,28 +178,25 @@ test.describe('Git diff panel', () => {
 
   test('arrow key navigation selects files', async ({ mainWindow }) => {
     const p = panel(mainWindow)
+    const firstEntry = p.locator('.font-mono.text-xs').first()
+    const secondEntry = p.locator('.font-mono.text-xs').nth(1)
+
+    // Auto-select invariant: first entry is selected on mount.
+    await expect(firstEntry).toHaveClass(/bg-primary\/10/)
+
     // Focus the file list container (scrollable div with tabIndex)
     const fileList = p.locator('.overflow-y-auto[tabindex="0"]')
     await fileList.click()
 
-    // Press ArrowDown to select first file
+    // ArrowDown moves to second
     await mainWindow.keyboard.press('ArrowDown')
-
-    // First entry should have bg-accent (selected) — but not hover:bg-accent/50
-    const firstEntry = p.locator('.font-mono.text-xs').first()
-    await expect(firstEntry).toHaveClass(/bg-primary\/10/)
-
-    // Press ArrowDown again to select second file
-    await mainWindow.keyboard.press('ArrowDown')
-
-    // First should no longer be selected, second should be
     await expect(firstEntry).not.toHaveClass(/bg-primary\/10/)
-    const secondEntry = p.locator('.font-mono.text-xs').nth(1)
     await expect(secondEntry).toHaveClass(/bg-primary\/10/)
 
-    // ArrowUp goes back
+    // ArrowUp goes back to first
     await mainWindow.keyboard.press('ArrowUp')
     await expect(firstEntry).toHaveClass(/bg-primary\/10/)
+    await expect(secondEntry).not.toHaveClass(/bg-primary\/10/)
   })
 
   test('turns chip row stays mounted across clean ↔ dirty transitions (continuous-flow)', async ({
@@ -270,5 +267,37 @@ test.describe('Git diff panel', () => {
     await expect(
       panel(mainWindow).locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })
     ).toBeVisible({ timeout: 10_000 })
+  })
+
+  test('non-continuous-flow always shows the file tree and auto-selects a file', async ({
+    mainWindow
+  }) => {
+    // Invariants in non-continuous-flow mode:
+    //   1. File tree is always visible — `diff_tree_collapsed` only applies in CF.
+    //   2. A file is always selected when changes exist — right pane needs content.
+    // Together these eliminate the "diff panel shows nothing" dead-end the user
+    // could hit by toggling tree-collapsed before picking a file.
+    await mainWindow.evaluate(async () => {
+      await window.api.settings.set('diff_tree_collapsed', '1')
+      await window.api.settings.set('diff_continuous_flow', '0')
+      window.dispatchEvent(new Event('sz:settings-changed'))
+    })
+
+    writeFileSync(path.join(gitDir, 'base.txt'), 'line1\nline2 auto-select-test\nline3\n')
+    await refresh(mainWindow)
+
+    const p = panel(mainWindow)
+    // Invariant 1: file tree visible despite diff_tree_collapsed=1
+    await expect(
+      p.locator('.font-mono.text-xs').filter({ hasText: 'base.txt' })
+    ).toBeVisible({ timeout: 5_000 })
+    // Invariant 2: a file is auto-selected, so the diff body renders
+    await expect(p.getByText('auto-select-test')).toBeVisible({ timeout: 5_000 })
+
+    // Restore default for following tests
+    await mainWindow.evaluate(async () => {
+      await window.api.settings.set('diff_tree_collapsed', '0')
+      window.dispatchEvent(new Event('sz:settings-changed'))
+    })
   })
 })

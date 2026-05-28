@@ -442,25 +442,33 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
             )}
             {activeTab === 'changes' && (
               <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <IconButton
-                      aria-label={diffTreeCollapsed ? 'Show file tree' : 'Hide file tree'}
-                      variant="ghost"
-                      className={cn('h-7 w-7', diffTreeCollapsed && 'bg-primary/15 text-primary')}
-                      onClick={() => setBoolSetting('diff_tree_collapsed', !diffTreeCollapsed)}
-                    >
-                      {diffTreeCollapsed ? (
-                        <PanelLeftOpen className="h-3.5 w-3.5" />
-                      ) : (
-                        <PanelLeftClose className="h-3.5 w-3.5" />
-                      )}
-                    </IconButton>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {diffTreeCollapsed ? 'Show file tree' : 'Hide file tree'}
-                  </TooltipContent>
-                </Tooltip>
+                {/* Tree-collapse toggle is only meaningful in continuous-flow mode
+                    — in regular mode the list stays open so the right pane always
+                    has a selected file to render. */}
+                {diffContinuousFlow && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <IconButton
+                        aria-label={diffTreeCollapsed ? 'Show file tree' : 'Hide file tree'}
+                        variant="ghost"
+                        className={cn(
+                          'h-7 w-7',
+                          diffTreeCollapsed && 'bg-primary/15 text-primary'
+                        )}
+                        onClick={() => setBoolSetting('diff_tree_collapsed', !diffTreeCollapsed)}
+                      >
+                        {diffTreeCollapsed ? (
+                          <PanelLeftOpen className="h-3.5 w-3.5" />
+                        ) : (
+                          <PanelLeftClose className="h-3.5 w-3.5" />
+                        )}
+                      </IconButton>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {diffTreeCollapsed ? 'Show file tree' : 'Hide file tree'}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <IconButton
