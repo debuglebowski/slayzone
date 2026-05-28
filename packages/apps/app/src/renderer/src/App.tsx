@@ -2433,6 +2433,7 @@ function App(): React.JSX.Element {
                       </button>
                     </div>
                   ) : null}
+                  <div className="flex-1 min-h-0 flex overflow-hidden">
                   <div
                     ref={explodeGridRef}
                     className={cn(
@@ -3040,6 +3041,7 @@ function App(): React.JSX.Element {
                       currentProjectName={projects.find((p) => p.id === selectedProjectId)?.name}
                     />
                   )}
+                  </div>
                 </div>
               </div>
             </div>
