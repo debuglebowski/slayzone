@@ -16,6 +16,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { loadWebglRenderer, correctAtlas, type DowngradeReason } from './webgl-loader'
 import { monitorFrameTime, createScrambleProbe, type ScrambleProbe } from './scramble-detector'
+import { decideThrottle, DEFAULT_THROTTLE_OPTIONS } from './paint-throttle'
 import { captureDowngradeSnapshot, reportDowngradeSnapshot } from './scramble-telemetry'
 import { diag } from './terminal-webgl-diag'
 import '@xterm/xterm/css/xterm.css'
@@ -279,6 +280,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const onOpenFileRef = useRef(onOpenFile)
   onOpenFileRef.current = onOpenFile
   const hasCalledFirstInputRef = useRef(false)
+
+  // Adaptive paint cadence (see SLOW_DRIP_THRESHOLD_MS etc. at module top).
+  // Bumped from both the keystroke `onData` handler and the PTY data
+  // subscription so either user activity or fresh data drops the throttle.
+  const lastActivityTimeRef = useRef<number>(performance.now())
+  const floodScoreRef = useRef<number>(0)
+  const skipCounterRef = useRef<number>(0)
+  // Populated by the batcher useEffect with a synchronous flush. The
+  // reactivation effect calls this BEFORE the replay path's getBufferSince
+  // so any throttled-but-pending chunks land in lastRenderedSeqRef first,
+  // preventing replay from re-fetching them and double-writing.
+  const forceFlushRef = useRef<(() => void) | null>(null)
 
   // Refs for creation-only props — these are only read during PTY creation (the
   // !exists branch), never during reattach. Using refs avoids recreating initTerminal
@@ -971,6 +984,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // bytes into the process stdin, breaking interactive prompts (e.g. gh CLI).
         // User keystrokes and paste data never contain OSC sequences.
         terminal.onData((data) => {
+          // Mark user activity so the next batcher flush paints at 60fps
+          // (echo round-trip has zero added latency from the throttle).
+          lastActivityTimeRef.current = performance.now()
           if (!hasCalledFirstInputRef.current) {
             hasCalledFirstInputRef.current = true
             onFirstInputRef.current?.()
@@ -1128,24 +1144,60 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, [initTerminal, sessionId])
 
   // Subscribe to PTY events via context (survives view switches)
-  // Batch writes with rAF to avoid per-chunk canvas repaints during fast output
+  // Batch writes with rAF to avoid per-chunk canvas repaints during fast output.
+  // On slow-drip output the batcher additionally throttles to ~20fps — see the
+  // adaptive cadence constants at the top of this module.
   useEffect(() => {
     let pendingChunks: string[] = []
     let pendingSeq = -1
     let rafId: number | null = null
 
-    const flush = () => {
+    const flush = (): void => {
       rafId = null
       if (pendingChunks.length === 0) return
-      if (terminalRef.current) {
-        // Second-pass underline strip — catches split sequences across chunks
-        // (now joined) and any codes the server filter missed.
-        // Required for WebGL renderer which ignores CSS overrides.
-        terminalRef.current.write(stripUnderlineCodes(pendingChunks.join('')))
-        lastRenderedSeqRef.current = pendingSeq
+      if (!terminalRef.current) return
+
+      // Second-pass underline strip — catches split sequences across chunks
+      // (now joined) and any codes the server filter missed. Required for
+      // the WebGL renderer which ignores CSS overrides.
+      const joined = stripUnderlineCodes(pendingChunks.join(''))
+
+      const decision = decideThrottle(
+        performance.now(),
+        joined.length,
+        {
+          lastActivityTime: lastActivityTimeRef.current,
+          floodScore: floodScoreRef.current,
+          skipCounter: skipCounterRef.current
+        },
+        DEFAULT_THROTTLE_OPTIONS
+      )
+      floodScoreRef.current = decision.nextFloodScore
+      skipCounterRef.current = decision.nextSkipCounter
+      if (decision.skip) {
+        // Re-arm one rAF, do NOT write. Chunks stay queued; the next
+        // (or eventually un-throttled) flush drains them in one write.
+        rafId = requestAnimationFrame(flush)
+        return
       }
+
+      terminalRef.current.write(joined)
+      lastRenderedSeqRef.current = pendingSeq
       pendingChunks = []
       pendingSeq = -1
+    }
+
+    // Synchronous flush for the reactivation effect — drains any throttled
+    // chunks BEFORE the replay path calls getBufferSince(lastRenderedSeq),
+    // otherwise replay re-fetches them and double-writes.
+    forceFlushRef.current = (): void => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+        rafId = null
+      }
+      skipCounterRef.current = 0
+      lastActivityTimeRef.current = performance.now()
+      flush()
     }
 
     const unsubData = subscribe(sessionId, (data, seq) => {
@@ -1157,6 +1209,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // we just wrote — re-writing here would duplicate output.
       if (seq <= lastRenderedSeqRef.current) return
       if (!terminalRef.current) return
+      lastActivityTimeRef.current = performance.now()
       pendingChunks.push(data)
       pendingSeq = seq
       if (rafId === null) {
@@ -1182,7 +1235,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId)
+      // Drain through one final synchronous flush. Reset skip counter so the
+      // shutdown flush is unconditional and any pending chunks land before
+      // tear-down (matches the previous behavior — no chunks deferred past
+      // unmount).
+      skipCounterRef.current = 0
+      lastActivityTimeRef.current = performance.now()
       flush()
+      forceFlushRef.current = null
       unsubData()
       unsubExit()
       unsubSessionInvalid()
@@ -1192,6 +1252,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Replay missed PTY data when task becomes active
   useEffect(() => {
     if (!isActive || !terminalRef.current) return
+    // Drain any throttled-but-pending chunks synchronously so
+    // lastRenderedSeqRef reflects the true rendered seq before getBufferSince
+    // captures it — otherwise the in-queue chunks come back via the missed[]
+    // array and get double-written.
+    forceFlushRef.current?.()
     let cancelled = false
     const replay = async () => {
       try {
