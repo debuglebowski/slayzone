@@ -2,7 +2,6 @@ import { resolve } from 'path'
 import { readFileSync, readdirSync, existsSync } from 'fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
-import reactSwc from '@vitejs/plugin-react-swc'
 import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { loadEnv, type Plugin } from 'vite'
@@ -36,9 +35,8 @@ function cspFloorPlugin(dev: boolean): Plugin {
   }
 }
 
-// plugin-react-swc forces SWC sourceMaps: true with no public toggle. Strip
-// post-hoc to cut V8 parse/decode overhead during dev cold-start + HMR.
-// Dev only (apply: 'serve') — prod build keeps full maps for Sentry.
+// Strip sourcemaps post-hoc to cut V8 parse/decode overhead during dev
+// cold-start + HMR. Dev only (apply: 'serve') — prod keeps full maps for Sentry.
 function stripDevSourcemapsPlugin(): Plugin {
   return {
     name: 'slayzone:strip-dev-sourcemaps',
@@ -76,13 +74,14 @@ function discoverDomainClientEntries(): string[] {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, root, '')
 
-  // Dev points React's entry files straight at their production CJS bundles
-  // so cold render + re-render cost matches the shipped app (no StrictMode
-  // double-invoke, no dev-only invariants, no warning paths). Set
-  // SLAYZONE_REACT_DEV=1 to opt back into React's development build when you
-  // need its warnings or strict-mode bug-detection. Profile mode
-  // (SLAYZONE_PROFILE=1) keeps React on its profiling build, so it also
-  // disables this swap.
+  // In dev, flip process.env.NODE_ENV to 'production' so React (and other
+  // node_modules that branch on it) use their prod bundles — no StrictMode
+  // double-invoke, no dev-only invariant checks, no warning overhead. Combined
+  // with esbuild.jsxDev=false (emits jsx not jsxDEV) so everything points at
+  // react/jsx-runtime rather than react/jsx-dev-runtime. import.meta.env.DEV
+  // and __DEV__ stay true so HMR + app dev logic are unaffected.
+  // SLAYZONE_REACT_DEV=1 opts out. SLAYZONE_PROFILE=1 also opts out — profiling
+  // requires dev React internals.
   const useReactProdInDev =
     mode !== 'production' && env.SLAYZONE_REACT_DEV !== '1' && env.SLAYZONE_PROFILE !== '1'
 
@@ -124,7 +123,13 @@ export default defineConfig(({ mode }) => {
         ),
         __POSTHOG_HOST__: JSON.stringify(env.POSTHOG_HOST ?? 'https://eu.i.posthog.com'),
         __DEV__: JSON.stringify(mode !== 'production'),
-        __SLAYZONE_PROFILE__: JSON.stringify(env.SLAYZONE_PROFILE === '1')
+        __SLAYZONE_PROFILE__: JSON.stringify(env.SLAYZONE_PROFILE === '1'),
+        // Flip process.env.NODE_ENV to 'production' in dev so React (and other
+        // node_modules that gate on it) use their prod bundles — no StrictMode
+        // double-invoke, no dev invariants, no warning paths. Your own source
+        // uses __DEV__ / import.meta.env.DEV which remain true, so HMR and
+        // dev-only app logic are unaffected. SLAYZONE_REACT_DEV=1 opts out.
+        ...(useReactProdInDev ? { 'process.env.NODE_ENV': '"production"' } : {})
       },
       resolve: {
         alias: {
@@ -142,32 +147,16 @@ export default defineConfig(({ mode }) => {
                 'scheduler/tracing': 'scheduler/tracing-profiling'
               }
             : {}),
-          // Skip React's `if (process.env.NODE_ENV === 'production')` shim
-          // files and resolve straight to the production CJS bundles. Narrow
-          // scope: only react/react-dom flip to prod paths, everything else
-          // (Convex, tRPC, etc.) still sees NODE_ENV='development'.
-          // jsx-dev-runtime is intentionally NOT aliased — SWC's Fast Refresh
-          // transform emits `jsxDEV(...)` calls which only exist in the dev
-          // factory.
-          ...(useReactProdInDev
-            ? {
-                react: 'react/cjs/react.production.js',
-                'react/jsx-runtime': 'react/cjs/react-jsx-runtime.production.js',
-                'react-dom': 'react-dom/cjs/react-dom.production.js',
-                'react-dom/client': 'react-dom/cjs/react-dom-client.production.js'
-              }
-            : {})
         }
       },
+      // esbuild.jsxDev controls whether the automatic JSX transform emits
+      // jsxDEV (→ react/jsx-dev-runtime) or jsx (→ react/jsx-runtime).
+      // Vite defaults this to !isProduction; we override to false so the
+      // transform always emits jsx — consistent with the prod React bundles
+      // loaded via the NODE_ENV define. No carve-out for jsx-dev-runtime needed.
+      ...(useReactProdInDev ? { esbuild: { jsxDev: false } } : {}),
       plugins: [
-        // Dev uses the SWC (Rust) React transform for Fast Refresh — ~20x
-        // faster per .tsx than Babel, cutting cold-start and HMR latency.
-        // Prod stays on Babel `plugin-react`: the React Compiler memoization
-        // pass is a Babel plugin with no SWC equivalent, and it only matters
-        // for prod-runtime memoization anyway.
-        mode === 'production'
-          ? react({ babel: { plugins: ['babel-plugin-react-compiler'] } })
-          : reactSwc(),
+        react({ babel: { plugins: ['babel-plugin-react-compiler'] } }),
         tailwindcss(),
         cspFloorPlugin(mode !== 'production'),
         stripDevSourcemapsPlugin(),
@@ -177,7 +166,14 @@ export default defineConfig(({ mode }) => {
       ],
       optimizeDeps: {
         exclude: slayzoneDeps,
-        entries: discoverDomainClientEntries()
+        entries: discoverDomainClientEntries(),
+        // Vite's `define` above rewrites source files but NOT pre-bundled deps
+        // in .vite/deps (those are processed by esbuild before Vite's transform
+        // pipeline runs). Mirror the define here so pre-bundled node_modules
+        // also pick their production branches.
+        ...(useReactProdInDev
+          ? { esbuildOptions: { define: { 'process.env.NODE_ENV': '"production"' } } }
+          : {})
       }
     }
   }

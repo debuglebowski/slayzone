@@ -58,7 +58,9 @@ Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 | `SLAYZONE_DEBUG_BOOT=1`         | off     | Verbose main-process boot logging.                                                                           |
 | `SLAYZONE_REGISTER_DEV_PROTOCOL=1` | off  | Register the `slayzone://` custom protocol in dev. Needed when testing OAuth deep-link callbacks.            |
 
-**React build aliasing**: dev `pnpm dev` aliases `react`, `react/jsx-runtime`, `react-dom`, `react-dom/client` straight to their `cjs/*.production.js` bundles → no StrictMode double-invoke, no dev warnings, no invariant checks. Runtime feels like prod. Flip with `SLAYZONE_REACT_DEV=1` when you need React's bug-detection. `SLAYZONE_PROFILE=1` overrides — profiling requires dev React.
+**React transform**: Babel + `babel-plugin-react-compiler` in all modes (dev + prod). Auto-memoization active everywhere; compiler rule violations surface at build time.
+
+**React prod in dev**: `pnpm dev` sets `process.env.NODE_ENV='production'` (Vite `define` + `optimizeDeps.esbuildOptions.define`) and `esbuild.jsxDev: false` → React and other node_modules use prod bundles, esbuild emits `jsx` (not `jsxDEV`) so `react/jsx-runtime` is used throughout. `import.meta.env.DEV` and `__DEV__` stay `true` — HMR and app dev logic unaffected. Flip with `SLAYZONE_REACT_DEV=1` to restore React dev warnings. `SLAYZONE_PROFILE=1` overrides — profiling requires dev React.
 
 ## Theming
 
