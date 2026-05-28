@@ -6,6 +6,7 @@ import React, {
   useRef,
   useMemo,
   useCallback,
+  useDeferredValue,
   useTransition
 } from 'react'
 import { useGuardedHotkeys } from '@slayzone/ui'
@@ -332,6 +333,7 @@ function App(): React.JSX.Element {
   const tabs = useTabStore((s) => s.tabs)
   const closedTabs = useTabStore((s) => s.closedTabs)
   const activeTabIndex = useTabStore((s) => s.activeTabIndex)
+  const deferredActiveTabIndex = useDeferredValue(activeTabIndex)
   const activeView = useTabStore((s) => s.activeView)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const sidebarView = useTabStore((s) => s.sidebarView)
@@ -2457,7 +2459,7 @@ function App(): React.JSX.Element {
                     {tabs.map((tab, i) => {
                       const isVisible = toVisibleIndex(i) >= 0
                       if (explodeMode && (tab.type !== 'task' || !isVisible)) return null
-                      const isViewActive = activeView === 'tabs' && i === activeTabIndex
+                      const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
                       const isExplodeFocused =
                         explodeMode && tab.type === 'task' && focusedExplodeTaskId === tab.taskId
                       return (
