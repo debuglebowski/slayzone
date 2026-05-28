@@ -15,24 +15,29 @@ export interface CliInstallResult {
   pathNotInPATH?: boolean
 }
 
+function platformPath() {
+  return process.platform === 'win32' ? path.win32 : path.posix
+}
+
 export function getCliBinDir(): string {
+  const pathForPlatform = platformPath()
   switch (process.platform) {
     case 'darwin':
       return '/usr/local/bin'
     case 'win32':
-      return path.join(
-        process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'),
+      return pathForPlatform.join(
+        process.env.LOCALAPPDATA ?? pathForPlatform.join(os.homedir(), 'AppData', 'Local'),
         'SlayZone',
         'bin'
       )
     default:
-      return path.join(os.homedir(), '.local', 'bin')
+      return pathForPlatform.join(os.homedir(), '.local', 'bin')
   }
 }
 
 export function getCliBinTarget(): string {
   const name = process.platform === 'win32' ? 'slay.cmd' : 'slay'
-  return path.join(getCliBinDir(), name)
+  return platformPath().join(getCliBinDir(), name)
 }
 
 export function checkCliInstalled(): { installed: boolean; path?: string } {
@@ -142,8 +147,8 @@ function installWindows(cliSrcPath: string, binDir: string, target: string): Cli
   }
   // Copy slay.js next to the .cmd shim
   // TODO: In dev mode, slay.js is at ../cli/dist/slay.js, not ../cli/bin/slay.js — shim won't work in dev on Windows
-  const srcJs = cliSrcPath.replace(/[/\\]slay$/, path.sep + 'slay.js')
-  const destJs = path.join(binDir, 'slay.js')
+  const srcJs = cliSrcPath.replace(/([/\\])slay$/, '$1slay.js')
+  const destJs = path.win32.join(binDir, 'slay.js')
   if (fs.existsSync(srcJs)) {
     fs.copyFileSync(srcJs, destJs)
   } else {

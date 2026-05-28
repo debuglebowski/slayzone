@@ -118,6 +118,9 @@ describe('migrateStateDir', () => {
   // --- Failure / rollback ---
 
   test('fails and rolls back when newDir parent is not writable', () => {
+    if (process.platform === 'win32') {
+      return // Windows chmod does not make the directory unwritable for this test.
+    }
     if (process.getuid?.() === 0) {
       return // skip when running as root
     }

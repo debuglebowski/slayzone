@@ -1,4 +1,4 @@
-import { whichBinary, resolveUserShell, getShellStartupArgs } from '@slayzone/terminal/main'
+import { whichBinary } from '@slayzone/terminal/main'
 import type {
   GhPullRequest,
   GhPrComment,
@@ -22,16 +22,12 @@ async function resolveGhPath(): Promise<string | null> {
   return ghPath
 }
 
-/** Run gh with the user's shell environment so PATH is correct. */
+/** Run gh directly so shell startup output cannot corrupt JSON stdout. */
 async function spawnGh(args: string[], opts: { cwd?: string; timeout?: number } = {}) {
-  if (!ghPath) await resolveGhPath()
-  if (!ghPath) throw new Error('gh CLI not found')
+  const resolvedGhPath = await resolveGhPath()
+  if (!resolvedGhPath) throw new Error('gh CLI not found')
 
-  const shell = resolveUserShell()
-  const shellArgs = getShellStartupArgs(shell)
-  const cmd = [ghPath, ...args].map((a) => `'${a.replace(/'/g, `'"'"'`)}'`).join(' ')
-
-  return execAsync(shell, [...shellArgs, '-c', cmd], { ...opts, source: 'gh' })
+  return execAsync(resolvedGhPath, args, { ...opts, source: 'gh' })
 }
 
 interface RawGhPr {

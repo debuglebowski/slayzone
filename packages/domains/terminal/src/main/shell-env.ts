@@ -39,10 +39,21 @@ export {
  * (chat-handlers) so subprocess Bash tools find the same binaries the user has.
  */
 let cachedEnrichedPath: string | null | undefined
+const PATH_OUTPUT_MARKER = '__SLAYZONE_PATH__'
+
 export function getEnrichedPath(): string | null {
   if (cachedEnrichedPath !== undefined) return cachedEnrichedPath
   cachedEnrichedPath = resolveEnrichedPath()
   return cachedEnrichedPath
+}
+
+function extractPathProbeOutput(output: string): string | null {
+  for (const line of output.split(/\r?\n/).reverse()) {
+    if (!line.startsWith(PATH_OUTPUT_MARKER)) continue
+    const value = line.slice(PATH_OUTPUT_MARKER.length).trim()
+    return value || null
+  }
+  return null
 }
 
 function resolveEnrichedPath(): string | null {
@@ -51,16 +62,20 @@ function resolveEnrichedPath(): string | null {
   // Fish: $PATH is a list — `echo $PATH` prints space-separated, invalid as OS PATH.
   // `string join ":" $PATH` produces colon-joined.
   const isFish = shell.endsWith('/fish')
-  const cmd = isFish ? 'string join ":" $PATH' : 'echo $PATH'
+  const cmd = isFish
+    ? `printf "\\n${PATH_OUTPUT_MARKER}%s\\n" (string join ":" $PATH)`
+    : `printf '\\n${PATH_OUTPUT_MARKER}%s\\n' "$PATH"`
 
   // Interactive login shell first — sources .zshrc/.bashrc where pnpm/nvm add PATH
   try {
     const args = getShellStartupArgs(shell)
     const result = execFileSync(shell, [...args, '-c', cmd], {
       timeout: 5000,
-      encoding: 'utf-8'
-    }).trim()
-    if (result) return result
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+    const pathValue = extractPathProbeOutput(result)
+    if (pathValue) return pathValue
   } catch {
     /* fall through */
   }
@@ -69,9 +84,11 @@ function resolveEnrichedPath(): string | null {
   try {
     const result = execFileSync(shell, ['-l', '-c', cmd], {
       timeout: 5000,
-      encoding: 'utf-8'
-    }).trim()
-    if (result) return result
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+    const pathValue = extractPathProbeOutput(result)
+    if (pathValue) return pathValue
   } catch {
     /* fall through */
   }
@@ -152,10 +169,14 @@ export async function whichBinary(name: string): Promise<string | null> {
   }
 
   try {
-    const shell = resolveUserShell()
-    const shellArgs = getShellStartupArgs(shell)
+    const env = { ...process.env }
+    const enrichedPath = getEnrichedPath()
+    if (enrichedPath) env.PATH = enrichedPath
     const checkCmd = `command -v ${quoteForShell(name)}`
-    const { stdout } = await execFileAsync(shell, [...shellArgs, '-c', checkCmd], { timeout: 3000 })
+    const { stdout } = await execFileAsync('/bin/sh', ['-c', checkCmd], {
+      timeout: 3000,
+      env
+    })
     const found = stdout.trim().split('\n')[0]
     return found || null
   } catch {

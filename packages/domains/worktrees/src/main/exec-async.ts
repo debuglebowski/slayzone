@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { getEnrichedPath } from '@slayzone/terminal/main'
 import type { DiagnosticSource } from '@slayzone/diagnostics/shared'
 
 export function trimOutput(value: unknown, maxLength = 1200): string | null {
@@ -16,6 +17,13 @@ export interface ExecResult {
   status: number | null
 }
 
+function subprocessEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  const enrichedPath = getEnrichedPath()
+  if (enrichedPath) env.PATH = enrichedPath
+  return env
+}
+
 /** Async subprocess execution — won't block the main process. */
 export function execAsync(
   command: string,
@@ -28,6 +36,7 @@ export function execAsync(
     const startedAt = Date.now()
     const child = spawn(command, args, {
       cwd: opts.cwd,
+      env: subprocessEnv(),
       stdio: ['pipe', 'pipe', 'pipe']
     })
     const stdout: string[] = []
