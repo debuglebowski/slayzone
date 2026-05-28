@@ -1336,9 +1336,26 @@ export function IntegrationsTab({
                           Beta
                         </span>
                         {providerConnected ? (
-                          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
-                            Connected
-                          </span>
+                          providerConnection?.auth_error ? (
+                            <button
+                              type="button"
+                              data-testid={`project-${category.provider}-category-auth-expired`}
+                              onClick={() =>
+                                setConnectionModalState({
+                                  provider: category.provider,
+                                  mode: 'edit'
+                                })
+                              }
+                              className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/25"
+                              title={providerConnection.auth_error}
+                            >
+                              Authentication expired — click to reconnect
+                            </button>
+                          ) : (
+                            <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
+                              Connected
+                            </span>
+                          )
                         ) : null}
                       </div>
                     </div>

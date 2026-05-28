@@ -125,6 +125,7 @@ import {
   DropdownMenuSeparator
 } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
+import { useAuthFailedConnections } from './useAuthFailedConnections'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
 import { TabBar } from '@/components/tabs/TabBar'
@@ -1781,6 +1782,30 @@ function App(): React.JSX.Element {
     setProjectSettingsOnboardingProvider(null)
   }, [])
 
+  const { failed: authFailedConnections, refetch: refetchAuthFailures } =
+    useAuthFailedConnections()
+  useEffect(() => {
+    if (!editingProject) refetchAuthFailures()
+  }, [editingProject, refetchAuthFailures])
+  const [dismissedAuthFailureIds, setDismissedAuthFailureIds] = useState<Set<string>>(new Set())
+  const visibleAuthFailures = useMemo(
+    () => authFailedConnections.filter((f) => !dismissedAuthFailureIds.has(f.connection.id)),
+    [authFailedConnections, dismissedAuthFailureIds]
+  )
+  const reconnectAuthFailure = useCallback(() => {
+    const first = visibleAuthFailures[0]
+    if (!first) return
+    const project =
+      projects.find((p) => first.projectIds.includes(p.id)) ?? projects[0]
+    if (!project) return
+    openProjectSettings(project, { initialTab: 'integrations' })
+  }, [visibleAuthFailures, projects, openProjectSettings])
+  const dismissAuthFailures = useCallback(() => {
+    setDismissedAuthFailureIds(
+      (prev) => new Set([...prev, ...visibleAuthFailures.map((f) => f.connection.id)])
+    )
+  }, [visibleAuthFailures])
+
   const handleProjectCreated = (project: Project, context: ProjectCreationContext): void => {
     setProjects((prev) => [...prev, project])
     setSelectedProjectId(project.id)
@@ -2371,8 +2396,36 @@ function App(): React.JSX.Element {
               <div id="content-wrapper" className="flex-1 min-h-0 flex">
                 <div
                   id="main-area"
-                  className="flex-1 min-w-0 min-h-0 rounded-lg bg-surface-0 flex overflow-hidden p-4"
+                  className="flex-1 min-w-0 min-h-0 rounded-lg bg-surface-0 flex flex-col overflow-hidden p-4 gap-2"
                 >
+                  {visibleAuthFailures.length > 0 ? (
+                    <div
+                      data-testid="integrations-auth-failure-banner"
+                      className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-1.5 text-xs text-destructive"
+                    >
+                      <AlertTriangle className="size-3.5 shrink-0" />
+                      <button
+                        type="button"
+                        onClick={reconnectAuthFailure}
+                        className="flex-1 text-left hover:underline"
+                        title={visibleAuthFailures
+                          .map((f) => `${f.connection.provider}: ${f.connection.auth_error ?? ''}`)
+                          .join('\n')}
+                      >
+                        {visibleAuthFailures.length === 1
+                          ? `${visibleAuthFailures[0].connection.provider.charAt(0).toUpperCase() + visibleAuthFailures[0].connection.provider.slice(1)} authentication expired — click to reconnect`
+                          : `${visibleAuthFailures.length} integrations need re-authentication — click to reconnect`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={dismissAuthFailures}
+                        className="text-destructive/70 hover:text-destructive"
+                        aria-label="Dismiss"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : null}
                   <div
                     ref={explodeGridRef}
                     className={cn(

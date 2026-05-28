@@ -11,6 +11,8 @@ export interface IntegrationConnection {
   created_at: string
   updated_at: string
   last_synced_at: string | null
+  auth_error: string | null
+  auth_error_at: string | null
 }
 
 export interface IntegrationConnectionPublic {
@@ -20,6 +22,8 @@ export interface IntegrationConnectionPublic {
   created_at: string
   updated_at: string
   last_synced_at: string | null
+  auth_error: string | null
+  auth_error_at: string | null
 }
 
 export interface IntegrationConnectionUsageProject {

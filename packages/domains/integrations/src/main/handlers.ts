@@ -152,6 +152,14 @@ export function ensureIntegrationSchema(db: Database): void {
     )
   }
 
+  if (!columnExists(db, 'integration_connections', 'auth_error')) {
+    db.exec(`ALTER TABLE integration_connections ADD COLUMN auth_error TEXT DEFAULT NULL;`)
+  }
+
+  if (!columnExists(db, 'integration_connections', 'auth_error_at')) {
+    db.exec(`ALTER TABLE integration_connections ADD COLUMN auth_error_at TEXT DEFAULT NULL;`)
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS external_links (
       id TEXT PRIMARY KEY,
@@ -210,7 +218,9 @@ function toPublicConnection(conn: IntegrationConnection): IntegrationConnectionP
     enabled: Boolean(conn.enabled),
     created_at: conn.created_at,
     updated_at: conn.updated_at,
-    last_synced_at: conn.last_synced_at
+    last_synced_at: conn.last_synced_at,
+    auth_error: conn.auth_error ?? null,
+    auth_error_at: conn.auth_error_at ?? null
   }
 }
 
@@ -1332,7 +1342,11 @@ export function registerIntegrationHandlers(
       deleteCredential(db, connection.credential_ref)
       db.prepare(`
       UPDATE integration_connections
-      SET credential_ref = ?, enabled = 1, updated_at = datetime('now')
+      SET credential_ref = ?,
+          enabled = 1,
+          auth_error = NULL,
+          auth_error_at = NULL,
+          updated_at = datetime('now')
       WHERE id = ?
     `).run(credentialRef, connection.id)
       return toPublicConnection(getConnection(db, connection.id))

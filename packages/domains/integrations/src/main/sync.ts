@@ -9,6 +9,9 @@ import type {
 import { readCredential } from './credentials'
 import { htmlToMarkdown, markdownToHtml } from './markdown'
 import { toMs, getProjectColumns, normalizeMarkdown, upsertFieldState } from './sync-helpers'
+import { isAuthError, isNetworkError } from './sync-classifiers'
+
+export { isAuthError, isNetworkError }
 import {
   getColumnById,
   getDefaultStatus,
@@ -384,6 +387,19 @@ export async function runProviderSync(
       issueMap = await adapter.getIssuesBatch(credential, refs)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      if (isAuthError(err)) {
+        const seen = new Set<string>()
+        for (const link of credLinks) {
+          if (seen.has(link.connection_id)) continue
+          seen.add(link.connection_id)
+          markConnectionAuthError(db, link.connection_id, message)
+        }
+        for (const link of credLinks) {
+          result.scanned += 1
+          result.errors.push(`${link.external_key}: ${message}`)
+        }
+        continue
+      }
       for (const link of credLinks) {
         result.scanned += 1
         markLinkError(db, link.id, message)
@@ -503,6 +519,11 @@ export async function runProviderSync(
         markLinkSynced(db, link)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
+        if (isAuthError(err)) {
+          markConnectionAuthError(db, link.connection_id, message)
+          result.errors.push(`${link.external_key}: ${message}`)
+          continue
+        }
         markLinkError(db, link.id, message)
         result.errors.push(`${link.external_key}: ${message}`)
       }
@@ -672,6 +693,14 @@ export async function pushNewTaskToProviders(
       )
       upsertNormalizedFieldState(db, linkId, task, issue)
     } catch (err) {
+      if (isAuthError(err)) {
+        const msg = err instanceof Error ? err.message : String(err)
+        markConnectionAuthError(db, mapping.connection_id, msg)
+        console.warn(
+          `[sync] push-new-task auth failed for ${mapping.provider} connection ${mapping.connection_id} — disabled`
+        )
+        continue
+      }
       console.error(`[sync] push-new-task failed for task ${taskId} (${mapping.provider}):`, err)
     }
   }
@@ -723,6 +752,14 @@ export async function pushArchiveToProviders(db: Database, taskId: string): Prom
         ctx
       )
     } catch (err) {
+      if (isAuthError(err)) {
+        const msg = err instanceof Error ? err.message : String(err)
+        markConnectionAuthError(db, link.connection_id, msg)
+        console.warn(
+          `[sync] push-archive auth failed for ${link.provider} connection ${link.connection_id} — disabled`
+        )
+        continue
+      }
       console.error(`[sync] push-archive failed for task ${taskId} (${link.provider}):`, err)
     }
   }
@@ -774,6 +811,14 @@ export async function pushUnarchiveToProviders(db: Database, taskId: string): Pr
         ctx
       )
     } catch (err) {
+      if (isAuthError(err)) {
+        const msg = err instanceof Error ? err.message : String(err)
+        markConnectionAuthError(db, link.connection_id, msg)
+        console.warn(
+          `[sync] push-unarchive auth failed for ${link.provider} connection ${link.connection_id} — disabled`
+        )
+        continue
+      }
       console.error(`[sync] push-unarchive failed for task ${taskId} (${link.provider}):`, err)
     }
   }
@@ -880,6 +925,14 @@ export async function runDiscovery(db: Database): Promise<number> {
       const credential = readCredential(db, mapping.credential_ref)
       totalDiscovered += await discoverIssues(db, adapter, mapping, credential)
     } catch (err) {
+      if (isAuthError(err)) {
+        const msg = err instanceof Error ? err.message : String(err)
+        markConnectionAuthError(db, mapping.connection_id, msg)
+        console.warn(
+          `[discovery] auth failed for ${mapping.provider} connection ${mapping.connection_id} — disabled, awaiting re-auth`
+        )
+        continue
+      }
       if (isNetworkError(err)) {
         if (!networkDown) {
           networkDown = true
@@ -899,15 +952,15 @@ let consecutiveFailures = 0
 const BASE_INTERVAL = 60 * 1000
 const MAX_INTERVAL = 30 * 60 * 1000 // 30 min cap
 
-function isNetworkError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false
-  const msg = err.message + (err.cause instanceof Error ? err.cause.message : '')
-  return (
-    msg.includes('ENOTFOUND') ||
-    msg.includes('CONNECT_TIMEOUT') ||
-    msg.includes('fetch failed') ||
-    msg.includes('ENETUNREACH')
-  )
+function markConnectionAuthError(db: Database, connectionId: string, message: string): void {
+  db.prepare(
+    `UPDATE integration_connections
+     SET enabled = 0,
+         auth_error = ?,
+         auth_error_at = datetime('now'),
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(message, connectionId)
 }
 
 export function startDiscoveryPoller(db: Database, onChanged?: () => void): NodeJS.Timeout {
