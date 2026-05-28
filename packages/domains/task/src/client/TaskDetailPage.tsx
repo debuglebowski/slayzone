@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { Activity, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   MoreHorizontal,
   Archive,
@@ -3360,20 +3360,26 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('browser')}
                   />
                 ) : (
-                  <BrowserPanel
-                    ref={browserPanelRef}
-                    className="h-full"
-                    tabs={browserTabs}
-                    onTabsChange={handleBrowserTabsChange}
-                    onRequestHide={() => handlePanelToggle('browser', false)}
-                    taskId={task.id}
-                    projectId={task.project_id}
-                    isResizing={isResizing}
-                    isActive={isActive}
-                    onElementSnippet={handleInsertElementSnippet}
-                    onScreenshot={handleScreenshot}
-                    canUseDomPicker={panelVisibility.terminal}
-                  />
+                  // Activity pauses BrowserPanel's React render layer on hidden tabs.
+                  // WebContentsView is native and INTENTIONALLY keeps painting — users
+                  // rely on seeing browser state on hidden tabs without switching.
+                  // Do NOT add a setVisible(false) bridge here.
+                  <Activity mode={isActive ? 'visible' : 'hidden'}>
+                    <BrowserPanel
+                      ref={browserPanelRef}
+                      className="h-full"
+                      tabs={browserTabs}
+                      onTabsChange={handleBrowserTabsChange}
+                      onRequestHide={() => handlePanelToggle('browser', false)}
+                      taskId={task.id}
+                      projectId={task.project_id}
+                      isResizing={isResizing}
+                      isActive={isActive}
+                      onElementSnippet={handleInsertElementSnippet}
+                      onScreenshot={handleScreenshot}
+                      canUseDomPicker={panelVisibility.terminal}
+                    />
+                  </Activity>
                 )}
               </div>
             )}
@@ -3402,12 +3408,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('editor')}
                   />
                 ) : effectiveRepoPath ? (
-                  <FileEditorView
-                    ref={fileEditorRefCallback}
-                    projectPath={effectiveRepoPath}
-                    initialEditorState={task.editor_open_files}
-                    onEditorStateChange={handleEditorStateChange}
-                  />
+                  <Activity mode={isActive ? 'visible' : 'hidden'}>
+                    <FileEditorView
+                      ref={fileEditorRefCallback}
+                      projectPath={effectiveRepoPath}
+                      initialEditorState={task.editor_open_files}
+                      onEditorStateChange={handleEditorStateChange}
+                    />
+                  </Activity>
                 ) : null}
               </div>
             )}
@@ -3436,13 +3444,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('artifacts')}
                   />
                 ) : (
-                  <ArtifactsPanel
-                    ref={artifactsPanelRef}
-                    taskId={task.id}
-                    isResizing={isResizing}
-                    initialActiveArtifactId={task.active_artifact_id}
-                    onActiveArtifactIdChange={handleActiveArtifactIdChange}
-                  />
+                  <Activity mode={isActive ? 'visible' : 'hidden'}>
+                    <ArtifactsPanel
+                      ref={artifactsPanelRef}
+                      taskId={task.id}
+                      isResizing={isResizing}
+                      initialActiveArtifactId={task.active_artifact_id}
+                      onActiveArtifactIdChange={handleActiveArtifactIdChange}
+                    />
+                  </Activity>
                 )}
               </div>
             )}
@@ -3473,20 +3483,24 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           onActivateAndClose={() => ownership.claimAndCloseOther(wp.id)}
                         />
                       ) : (
-                        <WebPanelView
-                          taskId={task.id}
-                          panelId={wp.id}
-                          url={task.web_panel_urls?.[wp.id] || wp.baseUrl}
-                          baseUrl={wp.baseUrl}
-                          name={wp.name}
-                          blockDesktopHandoff={wp.blockDesktopHandoff === true}
-                          handoffProtocol={wp.handoffProtocol}
-                          handoffHostScope={wp.handoffHostScope}
-                          onUrlChange={handleWebPanelUrlChange}
-                          onFaviconChange={handleWebPanelFaviconChange}
-                          isResizing={isResizing}
-                          isActive={isActive}
-                        />
+                        // WebPanelView uses WebContentsView like BrowserPanel — Activity
+                        // pauses React render only; native view keeps painting (feature).
+                        <Activity mode={isActive ? 'visible' : 'hidden'}>
+                          <WebPanelView
+                            taskId={task.id}
+                            panelId={wp.id}
+                            url={task.web_panel_urls?.[wp.id] || wp.baseUrl}
+                            baseUrl={wp.baseUrl}
+                            name={wp.name}
+                            blockDesktopHandoff={wp.blockDesktopHandoff === true}
+                            handoffProtocol={wp.handoffProtocol}
+                            handoffHostScope={wp.handoffHostScope}
+                            onUrlChange={handleWebPanelUrlChange}
+                            onFaviconChange={handleWebPanelFaviconChange}
+                            isResizing={isResizing}
+                            isActive={isActive}
+                          />
+                        </Activity>
                       )}
                     </div>
                   </div>
@@ -3518,29 +3532,31 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('diff')}
                   />
                 ) : (
-                  <UnifiedGitPanel
-                    ref={gitPanelRef}
-                    task={task}
-                    projectId={task.project_id}
-                    projectPath={resolvedGitViewPath}
-                    completedStatus={completedStatus}
-                    visible={panelVisibility.diff}
-                    defaultTab={gitDefaultTab}
-                    onTabChange={handleGitTabChange}
-                    pollIntervalMs={5000}
-                    onUpdateTask={updateTaskAndNotify}
-                    onTaskUpdated={handleTaskUpdate}
-                    detectedRepos={viewableRepos.map((r) => ({
-                      name: r.name,
-                      path: r.path,
-                      kind: r.kind
-                    }))}
-                    selectedRepoName={
-                      viewableRepos.find((r) => r.path === resolvedGitViewPath)?.name ?? null
-                    }
-                    isRepoStale={false}
-                    onRepoChange={handleRepoChange}
-                  />
+                  <Activity mode={isActive ? 'visible' : 'hidden'}>
+                    <UnifiedGitPanel
+                      ref={gitPanelRef}
+                      task={task}
+                      projectId={task.project_id}
+                      projectPath={resolvedGitViewPath}
+                      completedStatus={completedStatus}
+                      visible={panelVisibility.diff}
+                      defaultTab={gitDefaultTab}
+                      onTabChange={handleGitTabChange}
+                      pollIntervalMs={5000}
+                      onUpdateTask={updateTaskAndNotify}
+                      onTaskUpdated={handleTaskUpdate}
+                      detectedRepos={viewableRepos.map((r) => ({
+                        name: r.name,
+                        path: r.path,
+                        kind: r.kind
+                      }))}
+                      selectedRepoName={
+                        viewableRepos.find((r) => r.path === resolvedGitViewPath)?.name ?? null
+                      }
+                      isRepoStale={false}
+                      onRepoChange={handleRepoChange}
+                    />
+                  </Activity>
                 )}
               </div>
             )}
@@ -3570,6 +3586,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('settings')}
                   />
                 ) : (
+                  <Activity mode={isActive ? 'visible' : 'hidden'}>
                   <TaskSettingsPanel
                     taskId={task.id}
                     renderDefaultContent={() => {
@@ -4013,6 +4030,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       )
                     }}
                   />
+                  </Activity>
                 )}
               </div>
             )}
@@ -4041,13 +4059,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('processes')}
                   />
                 ) : (
-                  <ProcessesPanel
-                    taskId={task.id}
-                    projectId={project?.id ?? null}
-                    cwd={effectiveRepoPath || project?.path}
-                    terminalSessionId={getMainSessionId(task.id)}
-                    onOpenUrl={openDevServerInBrowser}
-                  />
+                  <Activity mode={isActive ? 'visible' : 'hidden'}>
+                    <ProcessesPanel
+                      taskId={task.id}
+                      projectId={project?.id ?? null}
+                      cwd={effectiveRepoPath || project?.path}
+                      terminalSessionId={getMainSessionId(task.id)}
+                      onOpenUrl={openDevServerInBrowser}
+                    />
+                  </Activity>
                 )}
               </div>
             )}

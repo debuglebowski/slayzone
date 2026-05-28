@@ -1094,6 +1094,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     return window.api.app.onCloseTask((taskId) => {
       useTabStore.getState().closeTabByTaskId(taskId)
+      void window.api.processes.killTask(taskId)
     })
   }, [])
   useEffect(() => {

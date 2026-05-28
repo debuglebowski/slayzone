@@ -400,13 +400,6 @@ export function ProcessesPanel({
   }, [])
 
   useEffect(() => {
-    const unsub = window.api.app.onCloseTask((closedTaskId) => {
-      if (taskId && closedTaskId === taskId) window.api.processes.killTask(taskId)
-    })
-    return unsub
-  }, [taskId])
-
-  useEffect(() => {
     for (const id of expandedLogs) {
       logEndRefs.current[id]?.scrollIntoView({ block: 'nearest' })
     }
