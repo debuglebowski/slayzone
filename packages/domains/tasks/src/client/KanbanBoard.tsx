@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -104,14 +104,22 @@ export function KanbanBoard({
     useSensor(KeyboardSensor)
   )
 
-  const allColumns = groupTasksBy(tasks, groupBy, sortBy, projectColumns, {
-    blockedTaskIds,
-    viewConfig
-  })
-  const visibleColumns = showEmptyColumns
-    ? allColumns
-    : allColumns.filter((c) => c.tasks.length > 0)
-  const activeTask = activeId ? tasks.find((t) => t.id === activeId) : null
+  const allColumns = useMemo(
+    () =>
+      groupTasksBy(tasks, groupBy, sortBy, projectColumns, {
+        blockedTaskIds,
+        viewConfig
+      }),
+    [tasks, groupBy, sortBy, projectColumns, blockedTaskIds, viewConfig]
+  )
+  const visibleColumns = useMemo(
+    () => (showEmptyColumns ? allColumns : allColumns.filter((c) => c.tasks.length > 0)),
+    [showEmptyColumns, allColumns]
+  )
+  const activeTask = useMemo(
+    () => (activeId ? tasks.find((t) => t.id === activeId) : null),
+    [activeId, tasks]
+  )
 
   const selection = useKanbanSelection({ columns: visibleColumns, resetKey: selectionResetKey })
 
@@ -120,19 +128,25 @@ export function KanbanBoard({
   const [dragSetSize, setDragSetSize] = useState(1)
 
   // Wrap onTaskClick: shift = toggle selection (no open); meta = bg open (existing); plain = clear + open
-  const handleCardClick = (task: Task, e: { metaKey: boolean; shiftKey?: boolean }): void => {
-    if (e.shiftKey) {
-      selection.toggle(task.id)
-      return
-    }
-    if (!e.metaKey) selection.clear()
-    onTaskClick?.(task, e)
-  }
+  const handleCardClick = useCallback(
+    (task: Task, e: { metaKey: boolean; shiftKey?: boolean }): void => {
+      if (e.shiftKey) {
+        selection.toggle(task.id)
+        return
+      }
+      if (!e.metaKey) selection.clear()
+      onTaskClick?.(task, e)
+    },
+    [selection.toggle, selection.clear, onTaskClick]
+  )
 
   // Right-click intercept: if not in selection, replace with this card; else keep selection
-  const handleCardContextMenu = (taskId: string): void => {
-    if (!selection.selectedIds.has(taskId)) selection.replace(taskId)
-  }
+  const handleCardContextMenu = useCallback(
+    (taskId: string): void => {
+      if (!selection.selectedIds.has(taskId)) selection.replace(taskId)
+    },
+    [selection.selectedIds, selection.replace]
+  )
 
   const subTaskCounts = useMemo(() => {
     const counts = new Map<string, { done: number; total: number }>()

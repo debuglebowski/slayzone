@@ -177,6 +177,7 @@ interface TaskBranchCtx {
   treeGroupBy: 'none' | 'status' | 'priority'
   treeGroupPinned: boolean
   onTaskClick?: (taskId: string) => void
+  onTaskPrefetch?: (taskId: string) => void
   onRowSelectClick: (event: ReactMouseEvent<HTMLButtonElement>, taskId: string) => void
   onCloseTab?: (taskId: string) => void
   onOpenTaskInBackground?: (taskId: string) => void
@@ -327,6 +328,8 @@ function TaskRowView({
       data-task-id={task.id}
       data-active={isActive ? 'true' : undefined}
       data-selected={isSelected ? 'true' : undefined}
+      onFocus={() => ctx.onTaskPrefetch?.(task.id)}
+      onPointerEnter={() => ctx.onTaskPrefetch?.(task.id)}
       onClick={(e) => ctx.onRowSelectClick(e, task.id)}
       onAuxClick={(e) => {
         if (e.button !== 1) return
@@ -336,6 +339,7 @@ function TaskRowView({
         else ctx.onOpenTaskInBackground?.(task.id)
       }}
       onMouseDown={(e) => {
+        if (e.button === 0) ctx.onTaskPrefetch?.(task.id)
         if (e.button === 1) e.preventDefault()
       }}
       style={{ ...style, paddingLeft: tgPaddingLeft(depth), minHeight: TG_ROW_HEIGHT }}
@@ -853,6 +857,7 @@ export function TreeView({
   onSelectProject,
   onProjectSettings,
   onTaskClick,
+  onTaskPrefetch,
   onCloseTab,
   onOpenTaskInBackground,
   onCreateTemporaryTask,
@@ -1394,11 +1399,12 @@ export function TreeView({
       }
 
       // Plain click — clear selection, set anchor, open task.
+      onTaskPrefetch?.(taskId)
       setSelectedTaskIds(new Set([taskId]))
       setSelectionAnchorId(taskId)
       onTaskClick?.(taskId)
     },
-    [selectionAnchorId, tasksById, getSiblings, onTaskClick]
+    [selectionAnchorId, tasksById, getSiblings, onTaskPrefetch, onTaskClick]
   )
 
   // Render-order list of moved task ids — the dragged set, in tree visual
@@ -1918,6 +1924,7 @@ export function TreeView({
       treeGroupBy,
       treeGroupPinned,
       onTaskClick,
+      onTaskPrefetch,
       onRowSelectClick: handleRowSelectClick,
       onCloseTab,
       onOpenTaskInBackground,

@@ -32,6 +32,7 @@ void __dirname
 const ITERATIONS = 5
 const RUN_DIR = path.join(defaultResultsDir(), `run-${Date.now()}`)
 const PROJ_ABBREV = 'PE'
+const PROJECT_NAME = 'PerfRun'
 
 let projectId: string
 let firstTaskId: string
@@ -46,7 +47,7 @@ test.describe
       await resetApp(mainWindow)
       const s = seed(mainWindow)
       const p = await s.createProject({
-        name: 'PerfRun',
+        name: PROJECT_NAME,
         color: '#8b5cf6',
         path: TEST_PROJECT_PATH
       })
@@ -159,6 +160,101 @@ test.describe
               { timeout: 5000 }
             )
             .catch(() => {})
+        }
+      }
+      const result = await profileScenario(mainWindow, definition, { runDir: RUN_DIR })
+      console.log(
+        `[perf] ${result.name} p50=${result.summary.wallP50}ms p95=${result.summary.wallP95}ms`
+      )
+      expect(result.runs.length).toBe(ITERATIONS)
+    })
+
+    test('open-closed-task-from-sidebar', async ({ mainWindow }) => {
+      const taskId = secondTaskId
+
+      const definition: ScenarioDefinition = {
+        name: 'open-closed-task-from-sidebar',
+        description: 'Click a closed task row in the sidebar tree, wait for task detail mount.',
+        iterations: ITERATIONS,
+        beforeEach: async (page) => {
+          await page.evaluate(
+            ({ anchorId, targetId, pid }) => {
+              const storeApi = (window as any).__slayzone_tabStore
+              const store = storeApi.getState()
+              storeApi.setState({
+                sidebarView: 'projects',
+                selectedProjectId: pid,
+                treeStatusFilter: ['in_progress'],
+                treePriorityFilter: [1, 2, 3, 4, 5],
+                treeShowSubtasks: true,
+                treeShowAllSubtasks: false,
+                treeShowOnlyActive: false,
+                treeShowTemporary: true,
+                treeShowAllOpen: true,
+                treeCrossOutDone: false,
+                treeShowStatus: false,
+                treeShowPriority: true,
+                treeShowWorktree: true,
+                treeGroupBy: 'status',
+                treeOrderBy: 'manual',
+                treeOrderDir: 'asc'
+              })
+              store.openTaskInBackground(anchorId)
+              store.closeTabByTaskId(targetId)
+              store.setActiveTabIndex(0)
+              storeApi.setState({ sidebarView: 'tree' })
+            },
+            { anchorId: firstTaskId, targetId: taskId, pid: projectId }
+          )
+          const expand = page.getByRole('button', { name: `Expand ${PROJECT_NAME}` }).first()
+          if (await expand.isVisible({ timeout: 500 }).catch(() => false)) {
+            await expand.click({ force: true }).catch(() => {})
+          }
+          await page.evaluate((id) => {
+            const store = (window as any).__slayzone_tabStore.getState()
+            performance.clearMarks(`sz:taskDetail:${id}:mount`)
+            store.closeTabByTaskId(id)
+            store.setActiveTabIndex(0)
+          }, taskId)
+          const row = page.locator(
+            `[data-sidebar-tree-item="task"][data-task-id="${taskId}"]`
+          )
+          await expect(row).toBeVisible({ timeout: 5000 })
+          await page.waitForTimeout(150)
+        },
+        run: async (page) => {
+          await page.evaluate(async (id) => {
+            const mark = `sz:taskDetail:${id}:mount`
+            performance.clearMarks(mark)
+            const row = document.querySelector(
+              `[data-sidebar-tree-item="task"][data-task-id="${id}"]`
+            ) as HTMLButtonElement | null
+            if (!row) throw new Error(`task row missing: ${id}`)
+            row.click()
+            await new Promise<void>((resolve, reject) => {
+              const deadline = performance.now() + 5000
+              const tick = () => {
+                if (performance.getEntriesByName(mark, 'mark').length > 0) {
+                  resolve()
+                  return
+                }
+                if (performance.now() > deadline) {
+                  reject(new Error(`task detail mount timeout: ${id}`))
+                  return
+                }
+                window.setTimeout(tick, 5)
+              }
+              tick()
+            })
+          }, taskId)
+        },
+        afterEach: async (page) => {
+          await page.evaluate((id) => {
+            const store = (window as any).__slayzone_tabStore.getState()
+            store.closeTabByTaskId(id)
+            store.setActiveTabIndex(0)
+          }, taskId)
+          await page.waitForTimeout(100)
         }
       }
       const result = await profileScenario(mainWindow, definition, { runDir: RUN_DIR })

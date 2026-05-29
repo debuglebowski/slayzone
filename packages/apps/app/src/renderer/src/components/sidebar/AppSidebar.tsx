@@ -29,6 +29,7 @@ interface AppSidebarProps {
   onUsageAnalytics: () => void
   onLeaderboard: () => void
   onTaskClick?: (taskId: string) => void
+  onTaskPrefetch?: (taskId: string) => void
   onCloseTab?: (taskId: string) => void
   onOpenTaskInBackground?: (taskId: string) => void
   onCreateTemporaryTask?: (projectId: string) => void
@@ -132,6 +133,7 @@ export function AppSidebar({
   onUsageAnalytics,
   onLeaderboard,
   onTaskClick,
+  onTaskPrefetch,
   onCloseTab,
   onOpenTaskInBackground,
   onCreateTemporaryTask,
@@ -228,6 +230,7 @@ export function AppSidebar({
               onSelectProject,
               onProjectSettings,
               onTaskClick,
+              onTaskPrefetch,
               onCloseTab,
               onOpenTaskInBackground,
               onCreateTemporaryTask,

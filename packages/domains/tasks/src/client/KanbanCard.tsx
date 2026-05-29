@@ -6,7 +6,6 @@ import { TagSelector } from '@slayzone/tags/client'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isCompletedStatus, isTerminalStatus } from '@slayzone/projects/shared'
 import { TaskProgressPopover } from '@slayzone/task/client'
-import type { TerminalState } from '@slayzone/terminal/shared'
 import {
   Card,
   CardContent,
@@ -25,7 +24,7 @@ import { useAppearance } from '@slayzone/settings/client'
 import { todayISO } from './kanban'
 import { priorityOptions } from '@slayzone/task/shared'
 import { AlarmClockOff, GitMerge } from 'lucide-react'
-import { usePty } from '@slayzone/terminal'
+import { useKnownTaskTerminalState } from '@slayzone/terminal'
 import type { CardProperties } from './FilterState'
 
 function formatTimeLeft(until: string): string {
@@ -82,15 +81,7 @@ export function KanbanCard({
   const prevStatusRef = useRef(task.status)
   const [justCompleted, setJustCompleted] = useState(false)
 
-  // Terminal state tracking - use main terminal sessionId format (taskId:taskId)
-  const { getState, subscribeState } = usePty()
-  const mainSessionId = `${task.id}:${task.id}`
-  const [terminalState, setTerminalState] = useState<TerminalState>(() => getState(mainSessionId))
-
-  useEffect(() => {
-    setTerminalState(getState(mainSessionId))
-    return subscribeState(mainSessionId, (newState) => setTerminalState(newState))
-  }, [mainSessionId, getState, subscribeState])
+  const terminalState = useKnownTaskTerminalState(task.id)
 
   useEffect(() => {
     if (

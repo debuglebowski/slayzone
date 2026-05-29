@@ -151,6 +151,10 @@ import { BoostPill } from '@/components/usage/BoostPill'
 import { useUsage } from '@/components/usage/useUsage'
 import { useOnboardingChecklist } from '@/hooks/useOnboardingChecklist'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
+import {
+  buildTaskDetailDataFromSnapshot,
+  taskDetailCache
+} from '@slayzone/task/client/taskDetailCache'
 // Extracted hooks (self-contained, clean interfaces)
 import { useHomePanel, HOME_PANEL_SIZE_KEY } from '@/hooks/useHomePanel'
 import { useTerminalStateTracking } from '@/hooks/useTerminalStateTracking'
@@ -159,11 +163,11 @@ import { useTabColors } from '@/hooks/useTabColors'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
 import { useDiagnosticsSync } from '@/hooks/useDiagnosticsSync'
 // Lazy-loaded: heavy components not needed for first paint
-const TaskDetailDataLoader = lazy(() =>
+const loadTaskDetailDataLoader = () =>
   import('@slayzone/task/client/TaskDetailDataLoader').then((m) => ({
     default: m.TaskDetailDataLoader
   }))
-)
+const TaskDetailDataLoader = lazy(loadTaskDetailDataLoader)
 const FileEditorView = lazy(() =>
   import('@slayzone/file-editor/client/FileEditorView').then((m) => ({ default: m.FileEditorView }))
 )
@@ -651,9 +655,34 @@ function App(): React.JSX.Element {
     return m
   }, [allIdleTasks])
 
+  const tasksMap = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
+  const projectsMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects])
   const selectedProject = useMemo(
-    () => projects.find((p) => p.id === selectedProjectId) ?? null,
-    [projects, selectedProjectId]
+    () => projectsMap.get(selectedProjectId) ?? null,
+    [projectsMap, selectedProjectId]
+  )
+  const prefetchTaskDetail = useCallback(
+    (taskId: string) => {
+      const task = tasksMap.get(taskId)
+      if (task) {
+        taskDetailCache.prime(
+          'taskDetail',
+          [taskId],
+          buildTaskDetailDataFromSnapshot({
+            task,
+            tasks,
+            projects,
+            tags,
+            taskTagIds: taskTags.get(taskId) ?? [],
+            projectPathMissing: task.project_id === selectedProjectId ? projectPathMissing : false
+          })
+        )
+      } else {
+        taskDetailCache.prefetch('taskDetail', taskId)
+      }
+      void loadTaskDetailDataLoader()
+    },
+    [tasksMap, tasks, projects, tags, taskTags, selectedProjectId, projectPathMissing]
   )
 
   // Project lock guard — single chokepoint for task-open paths. Resolves the task's
@@ -672,8 +701,8 @@ function App(): React.JSX.Element {
       const taskProject =
         projectOverride ??
         (() => {
-          const task = tasks.find((t) => t.id === taskId)
-          return task ? projects.find((p) => p.id === task.project_id) : undefined
+          const task = tasksMap.get(taskId)
+          return task ? projectsMap.get(task.project_id) : undefined
         })()
       if (taskProject && isProjectLocked(taskProject)) {
         toast(PROJECT_LOCKED_TOAST)
@@ -684,9 +713,10 @@ function App(): React.JSX.Element {
         return
       }
       if (taskProject) recordTaskOpen(taskProject.id)
+      prefetchTaskDetail(taskId)
       fn(taskId)
     },
-    [tasks, projects]
+    [tasksMap, projectsMap, prefetchTaskDetail]
   )
 
   const openTask = useCallback(
@@ -725,9 +755,6 @@ function App(): React.JSX.Element {
     if (!selectedProjectId || !projects.some((p) => p.id === selectedProjectId))
       setSelectedProjectId(projects[0].id)
   }, [projects, selectedProjectId, setSelectedProjectId])
-
-  // Task lookup map (used for tab props and active-tab project switching)
-  const tasksMap = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
 
   // Visible tabs (project-scoped filtering — purely visual, full tabs stay mounted)
   const { visibleTabs, visibleActiveIndex, toFullIndex, toVisibleIndex } = useVisibleTabs(
@@ -870,14 +897,18 @@ function App(): React.JSX.Element {
   }, [selectedProjectId, projects, validateProjectPath])
 
   // Computed values
-  const projectTasks = selectedProjectId
-    ? tasks.filter((t) => t.project_id === selectedProjectId)
-    : []
-  const projectTags = selectedProjectId
-    ? tags.filter((t) => t.project_id === selectedProjectId)
-    : tags
-  const displayTasks = applyFilters(projectTasks, filter, taskTags, selectedProject?.columns_config)
-  const projectsMap = new Map(projects.map((p) => [p.id, p]))
+  const projectTasks = useMemo(
+    () => (selectedProjectId ? tasks.filter((t) => t.project_id === selectedProjectId) : []),
+    [tasks, selectedProjectId]
+  )
+  const projectTags = useMemo(
+    () => (selectedProjectId ? tags.filter((t) => t.project_id === selectedProjectId) : tags),
+    [tags, selectedProjectId]
+  )
+  const displayTasks = useMemo(
+    () => applyFilters(projectTasks, filter, taskTags, selectedProject?.columns_config),
+    [projectTasks, filter, taskTags, selectedProject?.columns_config]
+  )
   const createTaskDialogDraft = useMemo(
     () => ({ projectId: selectedProjectId || projects[0]?.id, ...createTaskDraft }),
     [selectedProjectId, projects, createTaskDraft]
@@ -2201,6 +2232,7 @@ function App(): React.JSX.Element {
               useTabStore.getState().setActiveView('usage-analytics')
             }}
             onTaskClick={openTask}
+            onTaskPrefetch={prefetchTaskDetail}
             onCloseTab={closeTabByTaskId}
             onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)}
             onCreateTemporaryTask={(projectId) => {
@@ -2257,9 +2289,7 @@ function App(): React.JSX.Element {
                 }
                 isPinned={!!task.pinned}
                 onTogglePin={() => setTaskPinned(task.id, !task.pinned)}
-                canMarkUnread={
-                  terminalStates.get(task.id) === 'idle' && !task.needs_attention
-                }
+                canMarkUnread={terminalStates.get(task.id) === 'idle' && !task.needs_attention}
               >
                 {child}
               </TaskContextMenu>
@@ -2997,6 +3027,7 @@ function App(): React.JSX.Element {
                 onCreatedAndOpen={handleTaskCreatedAndOpen}
                 draft={createTaskDialogDraft}
                 tags={projectTags}
+                projects={projects}
                 onTagCreated={(tag: Tag) => setTags((prev) => [...prev, tag])}
               />
             </Suspense>

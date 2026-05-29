@@ -49,6 +49,29 @@ describe('createSuspenseCache', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
+  it('returns primed data without fetching', async () => {
+    const fetcher = vi.fn(() => Promise.resolve('from-fetch'))
+    const cache = createSuspenseCache({ item: fetcher })
+    cache.prime('item', ['a'], 'primed')
+
+    function Inner() {
+      const data = cache.useData('item', 'a')
+      return <div data-testid="result">{data}</div>
+    }
+
+    await act(async () => {
+      render(
+        <Suspense fallback={<div data-testid="fallback">loading</div>}>
+          <Inner />
+        </Suspense>
+      )
+    })
+
+    expect(screen.getByTestId('result').textContent).toBe('primed')
+    expect(screen.queryByTestId('fallback')).toBeNull()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
   it('caches separately by args', async () => {
     const fetcher = vi.fn((id: string) => Promise.resolve(id))
     const cache = createSuspenseCache({ item: fetcher })

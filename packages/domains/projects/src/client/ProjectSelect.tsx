@@ -6,18 +6,23 @@ interface ProjectSelectProps {
   value: string | undefined
   onChange: (value: string) => void
   disabled?: boolean
+  projects?: Project[]
 }
 
 export function ProjectSelect({
   value,
   onChange,
-  disabled
+  disabled,
+  projects
 }: ProjectSelectProps): React.JSX.Element {
-  const [projects, setProjects] = useState<Project[]>([])
+  const [loadedProjects, setLoadedProjects] = useState<Project[]>([])
 
   useEffect(() => {
-    window.api.db.getProjects().then(setProjects)
-  }, [])
+    if (projects) return
+    window.api.db.getProjects().then(setLoadedProjects)
+  }, [projects])
+
+  const options = projects ?? loadedProjects
 
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
@@ -25,7 +30,7 @@ export function ProjectSelect({
         <SelectValue placeholder="Select project" />
       </SelectTrigger>
       <SelectContent>
-        {[...projects]
+        {[...options]
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((project) => (
             <SelectItem key={project.id} value={project.id}>

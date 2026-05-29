@@ -22,7 +22,6 @@ import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'
-import type { TerminalState } from '@slayzone/terminal/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import {
   groupTasksBy,
@@ -45,9 +44,8 @@ import {
 } from '@slayzone/ui'
 import { IconButton } from '@slayzone/ui'
 import { ChevronDown, Plus, AlertCircle, AlarmClockOff, Check, GitMerge, Link2 } from 'lucide-react'
-import { usePty, useActiveTaskIds } from '@slayzone/terminal'
+import { useActiveTaskIds, useKnownTaskTerminalState } from '@slayzone/terminal'
 import { useDialogStore } from '@slayzone/settings/client'
-import { useEffect } from 'react'
 
 function formatSnoozeTimeLeft(until: string): string {
   const ms = new Date(until).getTime() - Date.now()
@@ -98,14 +96,7 @@ function PriorityBar({ priority }: { priority: number }): React.JSX.Element {
 // ── Terminal state dot ──
 
 function TerminalDot({ taskId }: { taskId: string }): React.JSX.Element | null {
-  const { getState, subscribeState } = usePty()
-  const sessionId = `${taskId}:${taskId}`
-  const [terminalState, setTerminalState] = useState<TerminalState>(() => getState(sessionId))
-
-  useEffect(() => {
-    setTerminalState(getState(sessionId))
-    return subscribeState(sessionId, (s) => setTerminalState(s))
-  }, [sessionId, getState, subscribeState])
+  const terminalState = useKnownTaskTerminalState(taskId)
 
   if (terminalState === 'starting') return null
   const style = getTerminalStateStyle(terminalState)

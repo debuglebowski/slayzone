@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Column } from './kanban'
 
 export interface KanbanSelectionAPI {
@@ -76,14 +76,17 @@ export function useKanbanSelection({
     setAnchorId(ids[ids.length - 1] ?? null)
   }, [])
 
-  return {
-    selectedIds,
-    anchorId,
-    isSelected,
-    toggle,
-    replace,
-    clear,
-    selectAll,
-    size: selectedIds.size
-  }
+  return useMemo(
+    () => ({
+      selectedIds,
+      anchorId,
+      isSelected,
+      toggle,
+      replace,
+      clear,
+      selectAll,
+      size: selectedIds.size
+    }),
+    [selectedIds, anchorId, isSelected, toggle, replace, clear, selectAll]
+  )
 }
