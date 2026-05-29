@@ -123,6 +123,54 @@ test.describe('Terminal state transitions', () => {
   })
 })
 
+// ── Keyboard input ──────────────────────────────────────────────────────────
+
+test.describe('Terminal keyboard input', () => {
+  let projectAbbrev: string
+  let taskId: string
+
+  test.beforeAll(async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    const p = await s.createProject({
+      name: 'Keyboard Input',
+      color: '#06b6d4',
+      path: TEST_PROJECT_PATH
+    })
+    projectAbbrev = p.name.slice(0, 2).toUpperCase()
+
+    const t = await s.createTask({
+      projectId: p.id,
+      title: 'Keyboard input task',
+      status: 'in_progress'
+    })
+    taskId = t.id
+
+    await mainWindow.evaluate(
+      (id) => window.api.db.updateTask({ id, terminalMode: 'terminal' }),
+      taskId
+    )
+    await s.refreshData()
+  })
+
+  test('lets macOS Option produce printable keyboard-layout characters', async ({ mainWindow }) => {
+    await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Keyboard input task' })
+
+    const sessionId = getMainSessionId(taskId)
+    await waitForPtySession(mainWindow, sessionId)
+
+    await expect
+      .poll(async () =>
+        mainWindow.evaluate((sid) => {
+          const links = (window as any).__slayzone_terminalLinks as
+            | Record<string, { _terminal?: { options?: { macOptionIsMeta?: boolean } } }>
+            | undefined
+          return links?.[sid]?._terminal?.options?.macOptionIsMeta ?? null
+        }, sessionId)
+      )
+      .toBe(false)
+  })
+})
+
 // ── Mode switch teardown ────────────────────────────────────────────────────
 
 test.describe('Terminal mode switch teardown', () => {
