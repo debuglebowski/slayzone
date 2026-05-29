@@ -66,6 +66,28 @@ export function applyExitEvent(
   }
 }
 
+/**
+ * Drop a session's state-subscriber set ONLY when it has no subscribers.
+ *
+ * State subscribers can OUTLIVE the PTY session they watch: a single task is
+ * killed + respawned (Retry/Reset/Stop/auto-revive all do `resetTaskState`
+ * then `kill`) while its tab stays open, reusing the same sessionId. The
+ * sidebar tracker (`useTerminalStateTracking`) keeps one long-lived cb for
+ * that task across the respawn. Unconditionally deleting the set on exit /
+ * cleanup orphaned that cb — it stopped receiving the recreated session's
+ * transitions, so the tab/tree dot froze on its last value (the "spinner
+ * stuck on running while the agent is idle" bug). Per-instance subscribers
+ * (e.g. each <Terminal>) self-unsubscribe on unmount, so the set is empty
+ * for a genuinely-gone session and still gets dropped here.
+ */
+export function dropStateSubsIfEmpty(
+  stateSubs: Map<string, Set<StateChangeCallback>>,
+  sessionId: string
+): void {
+  const subs = stateSubs.get(sessionId)
+  if (!subs || subs.size === 0) stateSubs.delete(sessionId)
+}
+
 interface PtyContextValue {
   subscribe: (sessionId: string, cb: DataCallback) => () => void
   subscribeExit: (sessionId: string, cb: ExitCallback) => () => void
@@ -212,7 +234,9 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       dataSubsRef.current.delete(sessionId)
       exitSubsRef.current.delete(sessionId)
       sessionInvalidSubsRef.current.delete(sessionId)
-      stateSubsRef.current.delete(sessionId)
+      // Preserve long-lived state subscribers across kill+respawn (same
+      // sessionId reused) so sidebar/tab dots don't freeze. See helper.
+      dropStateSubsIfEmpty(stateSubsRef.current, sessionId)
       promptSubsRef.current.delete(sessionId)
       sessionDetectedSubsRef.current.delete(sessionId)
       devServerSubsRef.current.delete(sessionId)
@@ -509,7 +533,9 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     dataSubsRef.current.delete(sessionId)
     exitSubsRef.current.delete(sessionId)
     sessionInvalidSubsRef.current.delete(sessionId)
-    stateSubsRef.current.delete(sessionId)
+    // Preserve long-lived state subscribers across kill+respawn (same
+    // sessionId reused) so sidebar/tab dots don't freeze. See helper.
+    dropStateSubsIfEmpty(stateSubsRef.current, sessionId)
     promptSubsRef.current.delete(sessionId)
     sessionDetectedSubsRef.current.delete(sessionId)
     devServerSubsRef.current.delete(sessionId)
