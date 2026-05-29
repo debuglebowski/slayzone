@@ -394,7 +394,7 @@ function TaskRowView({
               return cn(
                 'rounded-md',
                 isActive
-                  ? 'bg-white/10 text-foreground'
+                  ? 'bg-white/15 text-foreground'
                   : isOpenTab
                     ? 'text-foreground hover:bg-accent/40'
                     : 'text-muted-foreground/45 hover:bg-accent/40 hover:text-accent-foreground'
