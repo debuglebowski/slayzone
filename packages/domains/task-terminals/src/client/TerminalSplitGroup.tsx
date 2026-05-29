@@ -206,7 +206,9 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           onRetry={pane.onRetry}
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
-          {...(shouldGate ? { wasSpawned: pane.tab.wasSpawned } : {})}
+          {...(shouldGate
+            ? { wasSpawned: pane.tab.wasSpawned, hibernated: pane.tab.hibernated }
+            : {})}
         />
       )
 

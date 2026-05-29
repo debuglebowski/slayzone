@@ -179,6 +179,46 @@ export function shouldFlipToIdle(
 }
 
 /**
+ * Should the idle-close sweep hibernate (kill → fall back to the Start screen)
+ * this session right now? Pure — the caller supplies every signal. Fails safe:
+ * ALL guards must pass, so anything unknown/unresumable simply isn't a candidate.
+ *
+ * Two-axis model:
+ *   - AGENT axis: `state === 'idle'` (not working) and `!awaitingUser` (not
+ *     blocked mid-interaction) — both hook-driven, authoritative.
+ *   - USER axis: `now - lastUserInteractionAt >= idleMs` — the renderer reports
+ *     real DOM interaction; a typed draft = recent keydown = fresh clock, so no
+ *     separate draft heuristic is needed.
+ * Only the **main agent tab** of a **resume-capable** provider. Killing is safe
+ * ONLY because reopen resumes via the conversation id (`resumeCommand`); without
+ * a captured id we never hibernate.
+ */
+export function shouldHibernate(opts: {
+  enabled: boolean
+  isMainTab: boolean
+  mode: string
+  resumeEligible: boolean
+  hasConversationId: boolean
+  awaitingUser: boolean
+  state: TerminalState
+  /** Timestamp of the last genuine user interaction (renderer DOM events). */
+  lastUserInteractionAt: number
+  now: number
+  idleMs: number
+}): boolean {
+  return (
+    opts.enabled &&
+    opts.isMainTab &&
+    opts.mode !== 'terminal' &&
+    opts.resumeEligible &&
+    opts.hasConversationId &&
+    !opts.awaitingUser &&
+    opts.state === 'idle' &&
+    opts.now - opts.lastUserInteractionAt >= opts.idleMs
+  )
+}
+
+/**
  * Should pressing Enter auto-flip a session to 'running'?
  * TUI adapters (default) want this so the spinner state is reflected
  * immediately; plain shell opts out to avoid spurious "running" on commands.

@@ -2869,6 +2869,17 @@ export const migrations: Migration[] = [
       }
       db.prepare("DELETE FROM settings WHERE key LIKE 'commit_graph:task:%'").run()
     }
+  },
+  {
+    version: 141,
+    up: (db) => {
+      // Idle-close (hibernation): per-tab flag marking that the agent was
+      // auto-closed while idle. Distinct from `was_spawned` (which hibernation
+      // clears to 0): persists the "sleeping 💤 / Reopen" status across reload
+      // and restart so a stale agent stays visibly distinguishable from a
+      // never-started one. Set on hibernate, cleared on (re)spawn.
+      db.exec(`ALTER TABLE terminal_tabs ADD COLUMN hibernated INTEGER NOT NULL DEFAULT 0`)
+    }
   }
 ]
 

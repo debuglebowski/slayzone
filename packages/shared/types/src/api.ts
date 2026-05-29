@@ -750,6 +750,7 @@ export interface ElectronAPI {
     submit: (sessionId: string, text: string) => Promise<boolean>
     resize: (sessionId: string, cols: number, rows: number) => Promise<boolean>
     kill: (sessionId: string) => Promise<boolean>
+    touch: (sessionId: string) => Promise<boolean>
     exists: (sessionId: string) => Promise<boolean>
     getBuffer: (sessionId: string) => Promise<string | null>
     clearBuffer: (sessionId: string) => Promise<{ success: boolean; clearedSeq: number | null }>
@@ -758,6 +759,9 @@ export interface ElectronAPI {
     onData: (callback: (sessionId: string, data: string, seq: number) => void) => () => void
     onExit: (callback: (sessionId: string, exitCode: number) => void) => () => void
     onRespawnSuggested: (callback: (taskId: string) => void) => () => void
+    onHibernateWarn: (callback: (sessionId: string, graceSeconds: number) => void) => () => void
+    onHibernateCancelled: (callback: (sessionId: string) => void) => () => void
+    onHibernated: (callback: (sessionId: string) => void) => () => void
     onEnsureAlive: (callback: (taskId: string, reqId: number, force: boolean) => void) => () => void
     ackEnsureAlive: (reqId: number, result: 'ok' | 'already-alive' | 'error') => void
     onSessionNotFound: (callback: (sessionId: string) => void) => () => void
@@ -1166,6 +1170,7 @@ export interface ElectronAPI {
   }
   tabs: {
     list: (taskId: string) => Promise<TerminalTab[]>
+    listHibernatedSessions: () => Promise<string[]>
     create: (input: CreateTerminalTabInput) => Promise<TerminalTab>
     update: (input: UpdateTerminalTabInput) => Promise<TerminalTab | null>
     delete: (tabId: string) => Promise<boolean>

@@ -13,7 +13,10 @@ const TERMINAL_STATE_STYLES: Record<string, TerminalStateStyle> = {
   starting: { color: 'bg-gray-400', textColor: 'text-green-500', label: 'Starting' },
   running: { color: 'bg-green-400 animate-pulse', textColor: 'text-green-500', label: 'Active' },
   idle: { color: 'bg-sky-400', textColor: 'text-sky-500', label: 'Idle' },
-  error: { color: 'bg-red-400', textColor: 'text-red-500', label: 'Error' }
+  error: { color: 'bg-red-400', textColor: 'text-red-500', label: 'Error' },
+  // Idle-closed to free memory; reopen resumes. Rendered as a 💤 emoji
+  // (not a dot) by TerminalProgressDot — color/textColor are unused there.
+  hibernated: { color: 'bg-violet-400', textColor: 'text-violet-500', label: 'Sleeping' }
 }
 
 export const ATTENTION_STATE_STYLE: TerminalStateStyle = {

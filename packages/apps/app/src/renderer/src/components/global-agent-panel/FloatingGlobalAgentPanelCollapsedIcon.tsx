@@ -11,7 +11,8 @@ const DOT_COLORS: Record<TerminalState, string> = {
   running: '#fbbf24',
   idle: '#4ade80',
   error: '#ef4444',
-  dead: '#666'
+  dead: '#666',
+  hibernated: '#a78bfa'
 }
 
 export function FloatingGlobalAgentPanelCollapsedIcon({ state, onExpand }: Props) {

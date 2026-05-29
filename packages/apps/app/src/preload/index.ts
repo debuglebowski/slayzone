@@ -525,6 +525,7 @@ const api: ElectronAPI = {
     claimSession: (sessionId: string) => ipcRenderer.invoke('pty:claim-session', sessionId),
     resize: (sessionId, cols, rows) => ipcRenderer.invoke('pty:resize', sessionId, cols, rows),
     kill: (sessionId) => ipcRenderer.invoke('pty:kill', sessionId),
+    touch: (sessionId) => ipcRenderer.invoke('pty:touch', sessionId),
     exists: (sessionId) => ipcRenderer.invoke('pty:exists', sessionId),
     getBuffer: (sessionId) => ipcRenderer.invoke('pty:getBuffer', sessionId),
     clearBuffer: (sessionId) => ipcRenderer.invoke('pty:clearBuffer', sessionId),
@@ -547,6 +548,22 @@ const api: ElectronAPI = {
       const handler = (_event: unknown, taskId: string) => callback(taskId)
       ipcRenderer.on('pty:respawn-suggested', handler)
       return () => ipcRenderer.removeListener('pty:respawn-suggested', handler)
+    },
+    onHibernateWarn: (callback: (sessionId: string, graceSeconds: number) => void) => {
+      const handler = (_event: unknown, sessionId: string, graceSeconds: number) =>
+        callback(sessionId, graceSeconds)
+      ipcRenderer.on('pty:hibernate-warn', handler)
+      return () => ipcRenderer.removeListener('pty:hibernate-warn', handler)
+    },
+    onHibernateCancelled: (callback: (sessionId: string) => void) => {
+      const handler = (_event: unknown, sessionId: string) => callback(sessionId)
+      ipcRenderer.on('pty:hibernate-cancelled', handler)
+      return () => ipcRenderer.removeListener('pty:hibernate-cancelled', handler)
+    },
+    onHibernated: (callback: (sessionId: string) => void) => {
+      const handler = (_event: unknown, sessionId: string) => callback(sessionId)
+      ipcRenderer.on('pty:hibernated', handler)
+      return () => ipcRenderer.removeListener('pty:hibernated', handler)
     },
     onEnsureAlive: (callback: (taskId: string, reqId: number, force: boolean) => void) => {
       const handler = (_event: unknown, taskId: string, reqId: number, force: boolean) =>
@@ -949,6 +966,7 @@ const api: ElectronAPI = {
   },
   tabs: {
     list: (taskId) => ipcRenderer.invoke('tabs:list', taskId),
+    listHibernatedSessions: () => ipcRenderer.invoke('tabs:listHibernatedSessions'),
     create: (input) => ipcRenderer.invoke('tabs:create', input),
     update: (input) => ipcRenderer.invoke('tabs:update', input),
     delete: (tabId) => ipcRenderer.invoke('tabs:delete', tabId),

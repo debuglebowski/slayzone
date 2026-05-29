@@ -15,6 +15,13 @@ export interface TerminalTab {
    * NOT cleared on app shutdown — so next boot auto-restarts warm agents.
    */
   wasSpawned: boolean
+  /**
+   * True when the idle-close (hibernation) feature auto-closed this agent while
+   * idle. Distinct from `wasSpawned` (which hibernation clears): persists the
+   * "sleeping 💤 / Reopen" status across reload + restart so a stale agent stays
+   * visibly distinct from a never-started one. Cleared on (re)spawn.
+   */
+  hibernated: boolean
 }
 
 export interface TerminalGroup {

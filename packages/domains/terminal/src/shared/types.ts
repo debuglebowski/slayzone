@@ -1,5 +1,8 @@
 export type TerminalMode = string
-export type TerminalState = 'starting' | 'running' | 'idle' | 'error' | 'dead'
+// `hibernated` is a CLIENT-SYNTHESIZED status (PtyContext): the PTY is actually
+// dead, but the idle-close feature killed it and the UI shows it as sleeping
+// (💤) until the user reopens. Main never emits it via the state machine.
+export type TerminalState = 'starting' | 'running' | 'idle' | 'error' | 'dead' | 'hibernated'
 
 /**
  * True when state represents a session whose backing process is still around.
@@ -9,7 +12,7 @@ export type TerminalState = 'starting' | 'running' | 'idle' | 'error' | 'dead'
  * consumers must filter by state, not just existence.
  */
 export function isAliveTerminalState(state: TerminalState): boolean {
-  return state !== 'dead'
+  return state !== 'dead' && state !== 'hibernated'
 }
 
 export const BuiltinTerminalMode = {

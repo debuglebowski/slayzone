@@ -131,6 +131,12 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   const devServerSubsRef = useRef<Map<string, Set<DevServerCallback>>>(new Map())
   const titleSubsRef = useRef<Map<string, Set<TitleChangeCallback>>>(new Map())
 
+  // Sessions the idle-close feature hibernated. The PTY is actually dead, but
+  // we synthesize a 'hibernated' state (💤) and suppress the kill's 'dead'
+  // transition so the sidebar/tab dot shows "sleeping" until reopen. Cleared
+  // when the session transitions back to a live state (reopen).
+  const hibernatedRef = useRef<Set<string>>(new Set())
+
   // Track task IDs with pending prompts for global badge
   const [pendingPromptTaskIds, setPendingPromptTaskIds] = useState<Set<string>>(new Set())
   // Ref for stable getPendingPromptTaskIds callback
@@ -174,6 +180,22 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       refreshActiveTaskIds()
       performance.mark('sz:pty:end')
     })
+    // Seed hibernated (idle-closed) sessions from the persisted DB flag so the
+    // 💤 dot shows for stale agents at boot, before any live session exists.
+    // Notify state subscribers too: the sidebar/tab tracker may have already
+    // subscribed and read the default 'starting' before this async seed lands,
+    // and there's no live backend state to correct it (the session is dead).
+    window.api.tabs.listHibernatedSessions().then((sessionIds) => {
+      for (const sid of sessionIds) {
+        hibernatedRef.current.add(sid)
+        const existing = statesRef.current.get(sid)
+        const oldState = existing?.state ?? 'starting'
+        if (existing) existing.state = 'hibernated'
+        else statesRef.current.set(sid, { lastSeq: -1, sessionInvalid: false, state: 'hibernated' })
+        const subs = stateSubsRef.current.get(sid)
+        if (subs) subs.forEach((cb) => cb('hibernated', oldState))
+      }
+    })
   }, [refreshActiveTaskIds])
 
   const getOrCreateState = useCallback((sessionId: string): PtyState => {
@@ -205,6 +227,23 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     })
 
     const unsubExit = window.api.pty.onExit(async (sessionId, exitCode) => {
+      // Hibernation killed the PTY, but the UI should keep showing 💤 (not
+      // "stopped") until reopen. Preserve the synthesized 'hibernated' state +
+      // its long-lived state subscribers; only drop per-instance subs and fire
+      // explicit exit subscribers.
+      if (hibernatedRef.current.has(sessionId)) {
+        const subs = exitSubsRef.current.get(sessionId)
+        if (subs) subs.forEach((cb) => cb(exitCode))
+        disposeTerminal(sessionId)
+        dataSubsRef.current.delete(sessionId)
+        promptSubsRef.current.delete(sessionId)
+        sessionDetectedSubsRef.current.delete(sessionId)
+        devServerSubsRef.current.delete(sessionId)
+        titleSubsRef.current.delete(sessionId)
+        refreshActiveTaskIds()
+        return
+      }
+
       const state = statesRef.current.get(sessionId)
 
       if (state) {
@@ -257,6 +296,14 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     })
 
     const unsubStateChange = window.api.pty.onStateChange((sessionId, newState, oldState) => {
+      // Hibernated session: the kill emits 'dead' — swallow it so the 💤 dot
+      // persists. Any OTHER transition means the agent was reopened/respawned,
+      // so clear the marker and let it flow through normally.
+      if (hibernatedRef.current.has(sessionId)) {
+        if (newState === 'dead') return
+        hibernatedRef.current.delete(sessionId)
+      }
+
       // Bootstrap state entry if missing — chat sessions may emit before any component subscribes.
       // The entry is cheap; without it, early transitions are lost and `getState` stays 'starting'.
       const state = getOrCreateState(sessionId)
@@ -323,6 +370,19 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     })
 
+    // Idle-close: synthesize a 'hibernated' state and notify state subscribers
+    // so the sidebar/tab dot shows 💤. Fires just before the kill's 'dead'
+    // (which we then swallow above).
+    const unsubHibernated = window.api.pty.onHibernated((sessionId) => {
+      hibernatedRef.current.add(sessionId)
+      const state = getOrCreateState(sessionId)
+      const oldState = state.state
+      state.state = 'hibernated'
+      const subs = stateSubsRef.current.get(sessionId)
+      if (subs) subs.forEach((cb) => cb('hibernated', oldState))
+      refreshActiveTaskIds()
+    })
+
     return () => {
       unsubData()
       unsubExit()
@@ -332,6 +392,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       unsubSessionDetected()
       unsubDevServer()
       unsubTitleChange()
+      unsubHibernated()
     }
   }, [getOrCreateState, refreshActiveTaskIds])
 
@@ -520,6 +581,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Sequence numbers handle ordering - no need for ignore mechanism
   const resetTaskState = useCallback((sessionId: string): void => {
     statesRef.current.delete(sessionId)
+    hibernatedRef.current.delete(sessionId)
     setPendingPromptTaskIds((prev) => {
       const next = new Set(prev)
       next.delete(sessionId)
@@ -530,6 +592,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Clean up all memory for a task (call when PTY exits or task is deleted)
   const cleanupTask = useCallback((sessionId: string): void => {
     statesRef.current.delete(sessionId)
+    hibernatedRef.current.delete(sessionId)
     dataSubsRef.current.delete(sessionId)
     exitSubsRef.current.delete(sessionId)
     sessionInvalidSubsRef.current.delete(sessionId)

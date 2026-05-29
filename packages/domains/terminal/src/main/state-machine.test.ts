@@ -8,6 +8,7 @@ import {
   shouldRefreshIdleClock,
   shouldFlipToIdle,
   shouldFlipToRunningOnInput,
+  shouldHibernate,
   recordWorkingDetection,
   WORKING_DETECTION_WINDOW_MS,
   WORKING_DETECTION_THRESHOLD
@@ -449,6 +450,71 @@ test('does not mutate input history array', () => {
 })
 
 // Quiet unused-var warnings on imports referenced only via type-narrowing in tests.
+// --- shouldHibernate (idle-close gate) ---------------------------------------
+// Baseline: an eligible idle main agent past the window.
+const HIB_OK = {
+  enabled: true,
+  isMainTab: true,
+  mode: 'claude-code',
+  resumeEligible: true,
+  hasConversationId: true,
+  awaitingUser: false,
+  state: 'idle' as TerminalState,
+  lastUserInteractionAt: 0,
+  now: 60_000,
+  idleMs: 30_000
+}
+
+test('hibernate: eligible idle main agent past window → true', () => {
+  expect(shouldHibernate(HIB_OK)).toBe(true)
+})
+
+test('hibernate: feature disabled → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, enabled: false })).toBe(false)
+})
+
+test('hibernate: not the main tab → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, isMainTab: false })).toBe(false)
+})
+
+test('hibernate: plain shell mode → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, mode: 'terminal' })).toBe(false)
+})
+
+test('hibernate: resume-ineligible provider → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, resumeEligible: false })).toBe(false)
+})
+
+test('hibernate: no captured conversation id → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, hasConversationId: false })).toBe(false)
+})
+
+test('hibernate: agent awaiting user (hook) → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, awaitingUser: true })).toBe(false)
+})
+
+test('hibernate: recent user interaction (within window) → false', () => {
+  // Draft-typing and reading both surface here: a recent DOM interaction keeps
+  // lastUserInteractionAt fresh, so the window hasn't elapsed.
+  expect(shouldHibernate({ ...HIB_OK, lastUserInteractionAt: 40_000 })).toBe(false)
+})
+
+test('hibernate: state running (working) → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, state: 'running' })).toBe(false)
+})
+
+test('hibernate: state starting → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, state: 'starting' })).toBe(false)
+})
+
+test('hibernate: idle but below the window → false', () => {
+  expect(shouldHibernate({ ...HIB_OK, now: 20_000 })).toBe(false)
+})
+
+test('hibernate: exactly at the window → true', () => {
+  expect(shouldHibernate({ ...HIB_OK, now: 30_000 })).toBe(true)
+})
+
 const _activitySanity: ActivityState = 'working'
 void _activitySanity
 

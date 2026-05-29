@@ -5,5 +5,6 @@ export {
   updateTabRow,
   createPtyEnricher,
   markTabSpawned,
+  markTabHibernated,
   ensureMainTab
 } from './handlers'

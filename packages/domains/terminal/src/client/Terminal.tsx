@@ -282,6 +282,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const lastActivityTimeRef = useRef<number>(performance.now())
   const floodScoreRef = useRef<number>(0)
   const skipCounterRef = useRef<number>(0)
+  // Throttle for the idle-close "user engaged" report (pty:touch).
+  const lastTouchSentRef = useRef<number>(0)
   // Populated by the batcher useEffect with a synchronous flush. The
   // reactivation effect calls this BEFORE the replay path's getBufferSince
   // so any throttled-but-pending chunks land in lastRenderedSeqRef first,
@@ -1586,6 +1588,40 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     container.addEventListener('keydown', handleCopyPaste, true)
     return () => container.removeEventListener('keydown', handleCopyPaste, true)
+  }, [sessionId])
+
+  // Report GENUINE user interaction to main — the "user engaged" axis of the
+  // idle-close (hibernation) gate. Real DOM events only (keydown/mouse/wheel/
+  // paste/focus), never PTY bytes (which carry focus/cursor protocol noise that
+  // used to keep agents perpetually "active"). Throttled to ~once/4s so a draft
+  // being typed keeps the agent alive without flooding IPC; focus always reports.
+  // Hidden tabs (display:none) fire no events, so visibility is handled for free.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const TOUCH_THROTTLE_MS = 4000
+    const report = (force: boolean): void => {
+      const now = performance.now()
+      if (!force && now - lastTouchSentRef.current < TOUCH_THROTTLE_MS) return
+      lastTouchSentRef.current = now
+      void window.api.pty.touch(sessionId)
+    }
+    const onInteract = (): void => report(false)
+    const onFocus = (): void => report(true)
+
+    container.addEventListener('keydown', onInteract, true)
+    container.addEventListener('mousedown', onInteract, true)
+    container.addEventListener('wheel', onInteract, { capture: true, passive: true })
+    container.addEventListener('paste', onInteract, true)
+    container.addEventListener('focusin', onFocus, true)
+    return () => {
+      container.removeEventListener('keydown', onInteract, true)
+      container.removeEventListener('mousedown', onInteract, true)
+      container.removeEventListener('wheel', onInteract, true)
+      container.removeEventListener('paste', onInteract, true)
+      container.removeEventListener('focusin', onFocus, true)
+    }
   }, [sessionId])
 
   // Intercept Cmd+C / right-click Copy (xterm's native path writes raw

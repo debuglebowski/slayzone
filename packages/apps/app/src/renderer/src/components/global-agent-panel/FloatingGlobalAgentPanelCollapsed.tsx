@@ -15,7 +15,8 @@ const STATUS_MAP: Record<TerminalState, { color: string; pulse: boolean; text: s
   running: { color: '#fbbf24', pulse: true, text: 'working...' },
   idle: { color: '#4ade80', pulse: false, text: 'idle' },
   error: { color: '#ef4444', pulse: false, text: 'error' },
-  dead: { color: '#666', pulse: false, text: 'session ended' }
+  dead: { color: '#666', pulse: false, text: 'session ended' },
+  hibernated: { color: '#a78bfa', pulse: false, text: 'sleeping 💤' }
 }
 
 export function FloatingGlobalAgentPanelCollapsed({

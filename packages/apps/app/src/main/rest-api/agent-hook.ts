@@ -7,6 +7,8 @@ import {
   findSessionByTaskIdAndMode,
   transitionStateFromHook,
   markSessionActiveFromHook,
+  noteSessionConversationId,
+  setSessionAwaitingInput,
   isHookDrivenMode
 } from '@slayzone/terminal/main'
 import { updateTask, getTaskOp } from '@slayzone/task/main'
@@ -26,12 +28,23 @@ export interface TerminalStateBridge {
   /** Refresh the silence-timer clock without changing state. Called for hook
    *  events that prove activity but don't transition (PostToolUse, etc.). */
   markActive: (sessionId: string) => boolean
+  /** Mirror a captured CLI conversation id onto the live PTY session so the
+   *  idle-close (hibernation) gate sees a resumable session for hook-driven
+   *  providers (claude-code) that never run `/status`. Optional so test stubs
+   *  can omit it. */
+  noteConversationId?: (sessionId: string, conversationId: string | null) => void
+  /** Set the authoritative "blocked waiting for the user" flag so the idle-close
+   *  gate never hibernates an agent paused mid-interaction (which reports the
+   *  same 'idle' state as a completed turn). Optional for test stubs. */
+  noteAwaitingInput?: (sessionId: string, awaiting: boolean) => void
 }
 
 const defaultBridge: TerminalStateBridge = {
   findSession: findSessionByTaskIdAndMode,
   transition: transitionStateFromHook,
-  markActive: markSessionActiveFromHook
+  markActive: markSessionActiveFromHook,
+  noteConversationId: noteSessionConversationId,
+  noteAwaitingInput: setSessionAwaitingInput
 }
 
 /**
@@ -151,6 +164,44 @@ function hookToTerminalState(
   if (agentId === 'codex') return codexHookToTerminalState(hookEvent)
   if (agentId === 'antigravity') return antigravityHookToTerminalState(hookEvent)
   return claudeCodeHookToTerminalState(hookEvent, raw)
+}
+
+/**
+ * Raw hook event → "is the agent now blocked waiting for the user?" for the
+ * idle-close (hibernation) gate. Returns `true` (blocked), `false` (resumed /
+ * turn-complete → safe to hibernate), or `null` (no change).
+ *
+ * Needed because blocking-pause and turn-complete BOTH map to `'idle'` in
+ * `hookToTerminalState`, so the terminal state alone can't tell "paused mid-
+ * interaction, don't kill" from "done, fine to kill". The blocking signals:
+ *   - claude: PreToolUse for a blocking built-in (AskUserQuestion / ExitPlanMode)
+ *   - codex:  PermissionRequest
+ * Resume/complete signals (UserPromptSubmit, non-blocking PreToolUse, Stop,
+ * SessionEnd, PreInvocation) clear it. Notification is intentionally NOT treated
+ * as blocking — its dominant subtype is `idle_prompt` (agent waiting for the
+ * NEXT instruction), which is exactly the stale case we DO want to hibernate;
+ * genuine permission prompts are rare under `--allow-dangerously-skip-permissions`
+ * and are still caught by the output `detectPrompt` backstop.
+ */
+function hookToAwaitingUser(agentId: string, hookEvent: string, raw?: unknown): boolean | null {
+  if (agentId === 'codex') {
+    if (hookEvent === 'PermissionRequest') return true
+    if (hookEvent === 'UserPromptSubmit' || hookEvent === 'PreToolUse' || hookEvent === 'Stop')
+      return false
+    return null
+  }
+  if (agentId === 'antigravity') {
+    if (hookEvent === 'PreInvocation' || hookEvent === 'Stop') return false
+    return null
+  }
+  // claude-code
+  if (hookEvent === 'PreToolUse') {
+    const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
+    return typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)
+  }
+  if (hookEvent === 'UserPromptSubmit' || hookEvent === 'Stop' || hookEvent === 'SessionEnd')
+    return false
+  return null
 }
 
 /** Stringify + clamp for diagnostic storage. Keeps raw hook payloads from
@@ -287,6 +338,12 @@ export function registerAgentHookRoute(
           parsed.data.taskId,
           cliSessionId
         )
+        // Mirror onto the live PTY session for the idle-close gate.
+        const ptySessionId = bridge.findSession(
+          parsed.data.taskId,
+          parsed.data.agentId as TerminalMode
+        )
+        if (ptySessionId) bridge.noteConversationId?.(ptySessionId, cliSessionId)
       }
     }
 
@@ -326,6 +383,16 @@ export function registerAgentHookRoute(
           // the fail-safe doesn't flip running→idle mid-turn.
           bridge.markActive(sessionId)
         }
+
+        // Feed the idle-close gate the authoritative "blocked on user" signal —
+        // distinguishes a paused-mid-interaction agent (don't hibernate) from a
+        // completed turn (both report 'idle').
+        const awaiting = hookToAwaitingUser(
+          parsed.data.agentId,
+          parsed.data.hookEvent,
+          parsed.data.raw
+        )
+        if (awaiting !== null) bridge.noteAwaitingInput?.(sessionId, awaiting)
       }
     }
 

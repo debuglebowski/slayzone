@@ -338,6 +338,9 @@ export function PanelsSettingsTab({
   )
   const [terminalScrollback, setTerminalScrollback] = useState('2000')
   const [terminalAutoStart, setTerminalAutoStart] = useState(false)
+  const [terminalAutoCloseIdle, setTerminalAutoCloseIdle] = useState(false)
+  const [terminalIdleCloseValue, setTerminalIdleCloseValue] = useState('30')
+  const [terminalIdleCloseUnit, setTerminalIdleCloseUnit] = useState('minutes')
   const [terminalForceCompatibilityRenderer, setTerminalForceCompatibilityRenderer] =
     useState(false)
 
@@ -422,7 +425,10 @@ export function PanelsSettingsTab({
       window.api.settings.get('git_tab_order'),
       window.api.settings.get('git_tab_visibility'),
       window.api.settings.get('terminal_auto_start'),
-      window.api.settings.get('terminal_force_compatibility_renderer')
+      window.api.settings.get('terminal_force_compatibility_renderer'),
+      window.api.settings.get('terminal_auto_close_idle'),
+      window.api.settings.get('terminal_idle_close_value'),
+      window.api.settings.get('terminal_idle_close_unit')
     ]).then(
       ([
         pc,
@@ -448,7 +454,10 @@ export function PanelsSettingsTab({
         gto,
         gtv,
         tas,
-        tfcr
+        tfcr,
+        taci,
+        ticv,
+        ticu
       ]) => {
         if (pc)
           setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
@@ -456,6 +465,9 @@ export function PanelsSettingsTab({
         if (ts) setTerminalScrollback(ts)
         if (tas === '1') setTerminalAutoStart(true)
         if (tfcr === '1') setTerminalForceCompatibilityRenderer(true)
+        if (taci === '1') setTerminalAutoCloseIdle(true)
+        if (ticv) setTerminalIdleCloseValue(ticv)
+        if (ticu) setTerminalIdleCloseUnit(ticu)
         if (eww === 'on') setEditorWordWrap('on')
         if (erw === 'all') setEditorRenderWhitespace('all')
         if (ets === '4') setEditorTabSize('4')
@@ -878,6 +890,58 @@ export function PanelsSettingsTab({
               </span>
             </div>
           </div>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Auto-close idle agents</span>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={terminalAutoCloseIdle}
+                onCheckedChange={(c) => {
+                  setTerminalAutoCloseIdle(c)
+                  window.api.settings.set('terminal_auto_close_idle', c ? '1' : '0')
+                }}
+              />
+              <span className="text-xs text-muted-foreground">
+                Close the agent after it sits idle to free memory; reopen from the Start
+                screen (the conversation resumes). Other terminals are never closed.
+              </span>
+            </div>
+          </div>
+          {terminalAutoCloseIdle && (
+            <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+              <span className="text-sm text-muted-foreground">Idle timeout</span>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={terminalIdleCloseValue}
+                  onChange={(e) => setTerminalIdleCloseValue(e.target.value)}
+                  onBlur={() => {
+                    const n = Math.max(1, Math.floor(Number(terminalIdleCloseValue) || 30))
+                    const v = String(n)
+                    setTerminalIdleCloseValue(v)
+                    window.api.settings.set('terminal_idle_close_value', v)
+                  }}
+                  className="w-24"
+                />
+                <Select
+                  value={terminalIdleCloseUnit}
+                  onValueChange={(u) => {
+                    setTerminalIdleCloseUnit(u)
+                    window.api.settings.set('terminal_idle_close_unit', u)
+                  }}
+                >
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="seconds">Seconds</SelectItem>
+                    <SelectItem value="minutes">Minutes</SelectItem>
+                    <SelectItem value="hours">Hours</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Font family</span>
             <Input

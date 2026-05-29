@@ -43,6 +43,8 @@ export function TerminalProgressDot({
   const dotColor = stateStyle?.color ?? 'bg-muted-foreground/40'
   const stateLabel = stateStyle?.label ?? 'No session'
   const isRunning = !needsAttention && state === 'running'
+  // Hibernated (idle-closed) sessions show a 💤 emoji instead of a dot.
+  const isHibernated = !needsAttention && state === 'hibernated'
 
   // Wrapper footprint is the constant max of size/activeSize, so the row layout
   // never shifts when a terminal goes active. The indicator renders at `size`
@@ -73,7 +75,15 @@ export function TerminalProgressDot({
         />
       )}
       {showState &&
-        (isRunning ? (
+        (isHibernated ? (
+          <span
+            className="relative z-10 shrink-0 select-none leading-none"
+            style={{ fontSize: footprint - 2 }}
+            aria-label={stateLabel}
+          >
+            💤
+          </span>
+        ) : isRunning ? (
           <Loader2
             size={innerSize}
             strokeWidth={2.75}

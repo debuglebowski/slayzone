@@ -15,11 +15,17 @@ vi.mock('../broadcast-to-windows', () => ({
 const findSessionSpy = vi.fn<(taskId: string, mode: string) => string | null>()
 const transitionSpy = vi.fn<(sessionId: string, state: string, event: string) => boolean>()
 const markActiveSpy = vi.fn<(sessionId: string) => boolean>()
+const noteConversationIdSpy = vi.fn<(sessionId: string, conversationId: string | null) => void>()
+const noteAwaitingInputSpy = vi.fn<(sessionId: string, awaiting: boolean) => void>()
 vi.mock('@slayzone/terminal/main', () => ({
   findSessionByTaskIdAndMode: (taskId: string, mode: string) => findSessionSpy(taskId, mode),
   transitionStateFromHook: (sessionId: string, state: string, event: string) =>
     transitionSpy(sessionId, state, event),
   markSessionActiveFromHook: (sessionId: string) => markActiveSpy(sessionId),
+  noteSessionConversationId: (sessionId: string, conversationId: string | null) =>
+    noteConversationIdSpy(sessionId, conversationId),
+  setSessionAwaitingInput: (sessionId: string, awaiting: boolean) =>
+    noteAwaitingInputSpy(sessionId, awaiting),
   // Mirror the real registry-derived set (claude-code/codex/antigravity carry
   // hookDriven=true). The route uses this to decide whether hooks drive state;
   // the gemini "broadcast only" test below exercises the false branch.
@@ -103,6 +109,8 @@ describe('POST /api/agent-hook', () => {
     findSessionSpy.mockReset()
     transitionSpy.mockReset()
     markActiveSpy.mockReset()
+    noteConversationIdSpy.mockReset()
+    noteAwaitingInputSpy.mockReset()
     updateTaskSpy.mockReset()
     getTaskOpSpy.mockReset()
     findSessionSpy.mockReturnValue(null)
@@ -207,6 +215,80 @@ describe('POST /api/agent-hook', () => {
         taskId: 'task-3'
       })
       expect(transitionSpy).toHaveBeenCalledWith('task-3', 'idle', 'Notification')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // --- idle-close (hibernation) "awaiting user" signal -----------------------
+  test('claude-code PreToolUse(AskUserQuestion) → awaitingInput true (blocks hibernation)', async () => {
+    findSessionSpy.mockReturnValue('task-aq')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-aq',
+        raw: { tool_name: 'AskUserQuestion' }
+      })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-aq', true)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code Stop → awaitingInput false (completed turn is hibernatable)', async () => {
+    findSessionSpy.mockReturnValue('task-stop')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'Stop', taskId: 'task-stop' })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-stop', false)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PreToolUse(non-blocking) → awaitingInput false', async () => {
+    findSessionSpy.mockReturnValue('task-bash')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PreToolUse',
+        taskId: 'task-bash',
+        raw: { tool_name: 'Bash' }
+      })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-bash', false)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code Notification → does NOT set awaitingInput (idle_prompt stays hibernatable)', async () => {
+    findSessionSpy.mockReturnValue('task-notif')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'Notification',
+        taskId: 'task-notif'
+      })
+      expect(noteAwaitingInputSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('codex PermissionRequest → awaitingInput true', async () => {
+    findSessionSpy.mockReturnValue('task-perm')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'codex',
+        hookEvent: 'PermissionRequest',
+        taskId: 'task-perm'
+      })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-perm', true)
     } finally {
       await srv.close()
     }

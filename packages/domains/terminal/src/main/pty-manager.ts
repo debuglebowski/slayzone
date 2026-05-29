@@ -4,7 +4,7 @@ import { execFile } from 'child_process'
 import { BrowserWindow, nativeTheme, ipcMain } from 'electron'
 import { homedir, platform, userInfo } from 'os'
 import type { Database } from 'better-sqlite3'
-import { DEV_SERVER_URL_PATTERN, extractOscTitle } from '@slayzone/terminal/shared'
+import { DEV_SERVER_URL_PATTERN, extractOscTitle, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { RingBuffer, type BufferChunk } from './ring-buffer'
@@ -25,6 +25,7 @@ import {
   shouldRefreshIdleClock,
   shouldFlipToIdle,
   shouldFlipToRunningOnInput,
+  shouldHibernate,
   recordWorkingDetection,
   type StateTraceEvent
 } from './state-machine'
@@ -69,6 +70,50 @@ export function setSpawnedTabRecorder(fn: SpawnedSetter | null): void {
 }
 
 /**
+ * Injected by composition root to persist a tab's idle-close (hibernation)
+ * status to `terminal_tabs.hibernated`, so the "sleeping 💤 / Reopen" affordance
+ * survives reload + restart. Set true on hibernate, false on any (re)spawn.
+ */
+type HibernatedSetter = (tabId: string, hibernated: boolean) => void
+let hibernatedSetter: HibernatedSetter | null = null
+export function setHibernatedTabRecorder(fn: HibernatedSetter | null): void {
+  hibernatedSetter = fn
+}
+
+/**
+ * Idle-close (hibernation) config, injected by the composition root so
+ * pty-manager doesn't import the settings package. Read each sweep tick.
+ * Default OFF — feature is opt-in until validated.
+ */
+type IdleCloseConfig = { enabled: boolean; idleMs: number }
+let idleCloseConfigGetter: (() => IdleCloseConfig) | null = null
+export function setIdleCloseConfigGetter(fn: (() => IdleCloseConfig) | null): void {
+  idleCloseConfigGetter = fn
+}
+
+/** Grace window between the hibernate warning and the actual kill. The client
+ *  shows a cancellable countdown of the same length; any input/output/touch in
+ *  this window aborts. */
+const HIBERNATE_GRACE_MS = 10_000
+
+/** Providers whose `--resume` does NOT faithfully restore a prior conversation
+ *  must never be hibernated (reopen would start fresh = data loss). Reuses the
+ *  shared `SESSION_ID_UNAVAILABLE` set (cursor-agent, opencode — never capture a
+ *  session id) plus copilot, whose `--resume={id}` lacks a fresh/resume
+ *  distinction (pending real-world validation). */
+const HIBERNATE_EXCLUDED_MODES = new Set<string>(['copilot'])
+function isResumeEligibleMode(mode: TerminalMode): boolean {
+  return !SESSION_ID_UNAVAILABLE.includes(mode) && !HIBERNATE_EXCLUDED_MODES.has(mode)
+}
+
+/** A session is the task's main tab iff its row id equals the task id — true for
+ *  both id conventions (`${taskId}` and `${taskId}:${taskId}`); panes resolve to
+ *  their own tabId. Mirrors `resolveTabRowId`. */
+function isMainTabSession(sessionId: string): boolean {
+  return resolveTabRowId(sessionId) === taskIdFromSessionId(sessionId)
+}
+
+/**
  * App shutdown gate. When true, `finalizeSessionExit` skips clearing
  * `was_spawned` so reboots can restore the warm set. Composition root
  * MUST set this true before invoking `killAllPtys()` during app quit.
@@ -98,6 +143,25 @@ interface PtySession {
   checkingForSessionError?: boolean
   buffer: RingBuffer
   lastOutputTime: number
+  // Timestamp of the last GENUINE user interaction with this terminal, reported
+  // by the renderer (real DOM keydown/mouse/wheel/paste/focus — NOT PTY bytes,
+  // which carry focus/cursor protocol noise). This is the "user engaged" axis of
+  // the idle-close gate. Initialised at spawn so a fresh agent gets a full
+  // window; bumped via `touchPty` (the `pty:touch` IPC).
+  lastUserInteractionAt: number
+  // Captured conversation id for resume-by-id. Set at spawn (existing id),
+  // on /status detection, and via the agent hook. Gate for hibernation:
+  // never hibernate without one (reopen could not resume).
+  conversationId?: string | null
+  // Authoritative "agent is blocked waiting for the user" signal from the agent
+  // lifecycle hook (claude/codex/antigravity). Set on blocking PreToolUse /
+  // PermissionRequest, cleared on resume/done. Needed because "blocked on user"
+  // and "turn done" BOTH map to 'idle' for hook-driven agents, so state alone
+  // can't distinguish them. NOT sourced from output detectPrompt — that fuzzy
+  // signal (e.g. any line ending in '?') gave sticky false positives.
+  awaitingUser?: boolean
+  // Armed cancellable timer between hibernate-warn and the kill.
+  hibernateTimer?: NodeJS.Timeout
   createdAt: number
   state: TerminalState
   // CLI state tracking
@@ -340,6 +404,9 @@ const stateMachine = new StateMachine((sessionId, newState, oldState) => {
   if (!session) return
   // Sync session.state for debounced transitions (timer fires after transitionState returns)
   session.state = newState
+  // Agent resumed work / left idle → abort any pending hibernate countdown.
+  // (The idle clock itself is the user-interaction axis, owned by the client.)
+  if (newState !== 'idle') cancelHibernateCountdown(session)
   emitStateChange(session, sessionId, newState, oldState)
 }, traceStateMachine)
 
@@ -531,7 +598,123 @@ function checkInactiveSessions(): void {
       }
       transitionState(sessionId, 'idle')
     }
+
+    // Idle-close: arm a cancellable countdown on the main agent tab once it has
+    // been idle past the window. The kill itself (→ Start screen) happens after
+    // the grace, unless input/output/touch cancels it first.
+    if (!session.hibernateTimer && isHibernateEligible(session)) {
+      if (!session.win.isDestroyed()) {
+        try {
+          session.win.webContents.send('pty:hibernate-warn', sessionId, HIBERNATE_GRACE_MS / 1000)
+        } catch {
+          // Window destroyed, ignore
+        }
+      }
+      session.hibernateTimer = setTimeout(() => hibernateSession(sessionId), HIBERNATE_GRACE_MS)
+    }
   }
+}
+
+/** Evaluate the full hibernation gate against this session's live signals.
+ *  Delegates to the pure `shouldHibernate`; fails safe (default config OFF). */
+function isHibernateEligible(session: PtySession): boolean {
+  const cfg = idleCloseConfigGetter?.() ?? { enabled: false, idleMs: 30 * 60_000 }
+  return shouldHibernate({
+    enabled: cfg.enabled,
+    isMainTab: isMainTabSession(session.sessionId),
+    mode: session.mode,
+    resumeEligible: isResumeEligibleMode(session.mode),
+    hasConversationId: !!session.conversationId,
+    awaitingUser: !!session.awaitingUser,
+    state: session.state,
+    lastUserInteractionAt: session.lastUserInteractionAt,
+    now: Date.now(),
+    idleMs: Math.max(5_000, cfg.idleMs)
+  })
+}
+
+/** Abort a pending hibernate countdown (activity arrived or user cancelled).
+ *  Notifies the renderer so it hides the countdown overlay. */
+function cancelHibernateCountdown(session: PtySession): void {
+  if (!session.hibernateTimer) return
+  clearTimeout(session.hibernateTimer)
+  session.hibernateTimer = undefined
+  if (!session.win.isDestroyed()) {
+    try {
+      session.win.webContents.send('pty:hibernate-cancelled', session.sessionId)
+    } catch {
+      // Window destroyed, ignore
+    }
+  }
+}
+
+/** Fire the hibernation: re-assert eligibility (state may have changed during
+ *  the grace), tell the renderer to swap to the Start screen, then kill via the
+ *  normal `killPty` path (clears `was_spawned`, emits `pty:exit`, frees buffer).
+ *  Reopen resumes the conversation via the stored id. */
+function hibernateSession(sessionId: string): void {
+  const session = sessions.get(sessionId)
+  if (!session) return
+  session.hibernateTimer = undefined
+  if (!isHibernateEligible(session)) return
+  recordDiagnosticEvent({
+    level: 'info',
+    source: 'pty',
+    event: 'pty.hibernate',
+    sessionId,
+    taskId: session.taskId,
+    message: 'idle agent hibernated (killed → Start screen; resumes on reopen)',
+    payload: {
+      mode: session.mode,
+      idleMs: Date.now() - session.lastUserInteractionAt
+    }
+  })
+  if (!session.win.isDestroyed()) {
+    try {
+      session.win.webContents.send('pty:hibernated', sessionId)
+    } catch {
+      // Window destroyed, ignore
+    }
+  }
+  // Persist the status so 💤 / Reopen survive reload + restart.
+  try {
+    hibernatedSetter?.(resolveTabRowId(sessionId), true)
+  } catch {
+    // Best-effort
+  }
+  killPty(sessionId)
+}
+
+/** Mark genuine user interaction with this terminal (the "user engaged" axis of
+ *  the idle-close gate). Called by the renderer on real DOM interaction
+ *  (keydown/mouse/wheel/paste/focus, throttled) and by the countdown's explicit
+ *  "Keep open". Resets the idle window + aborts any pending countdown. */
+export function touchPty(sessionId: string): boolean {
+  const session = sessions.get(sessionId)
+  if (!session) return false
+  session.lastUserInteractionAt = Date.now()
+  cancelHibernateCountdown(session)
+  return true
+}
+
+/** Record a conversation id captured out-of-band (e.g. the agent SessionStart
+ *  hook) so the hibernation gate sees a resumable session for hook-driven
+ *  providers like claude-code that never run `/status`. */
+export function noteSessionConversationId(sessionId: string, conversationId: string | null): void {
+  const session = sessions.get(sessionId)
+  if (session && conversationId) session.conversationId = conversationId
+}
+
+/** Authoritative "agent is blocked waiting for the user" signal from the agent
+ *  lifecycle hook. Set true on blocking PreToolUse / PermissionRequest, false on
+ *  resume/turn-complete. Blocks hibernation (a paused-mid-interaction agent must
+ *  not be killed even though it reports 'idle' like a completed turn). Also
+ *  aborts a pending countdown when it flips true. */
+export function setSessionAwaitingInput(sessionId: string, awaiting: boolean): void {
+  const session = sessions.get(sessionId)
+  if (!session) return
+  session.awaitingUser = awaiting
+  if (awaiting) cancelHibernateCountdown(session)
 }
 
 // Start the inactivity checker interval
@@ -943,6 +1126,8 @@ export async function createPty(
       checkingForSessionError: resuming,
       buffer: new RingBuffer(MAX_BUFFER_SIZE),
       lastOutputTime: Date.now(),
+      lastUserInteractionAt: Date.now(),
+      conversationId: effectiveConversationId ?? null,
       createdAt: Date.now(),
       state: 'starting',
       // CLI state tracking
@@ -959,6 +1144,12 @@ export async function createPty(
     })
     // Record this tab as warm — survives across app shutdown so next boot
     // auto-restarts. Cleared in finalizeSessionExit on natural/user exit.
+    // Also clear any hibernated flag — a fresh spawn means it's no longer asleep.
+    try {
+      hibernatedSetter?.(resolveTabRowId(sessionId), false)
+    } catch {
+      // Best-effort
+    }
     try {
       spawnedSetter?.(resolveTabRowId(sessionId), true)
     } catch (err) {
@@ -1250,6 +1441,12 @@ export async function createPty(
           // late response bytes appear as garbage text in the user's prompt.
           const data = interceptSyncQueries(session, data0)
 
+          // NOTE: output does NOT touch the idle-close clock. Hook-driven TUI
+          // agents emit cosmetic redraws while idle; counting those as activity
+          // would make agents un-hibernatable. The "user engaged" clock is the
+          // renderer's real DOM interaction (via `pty:touch`); the "agent
+          // blocked/working" axis is the hook-driven state + `awaitingUser`.
+
           // Append to buffer for history restoration (filter problematic sequences)
           const cleanData = filterBufferData(data)
           const seq = session.buffer.append(cleanData)
@@ -1280,6 +1477,8 @@ export async function createPty(
 
           if (detectedActivity) {
             session.activity = detectedActivity
+            // A working agent is, by definition, not blocked awaiting the user.
+            if (detectedActivity === 'working') session.awaitingUser = false
             // Clear error state on valid activity (recovery from error)
             if (session.error && detectedActivity !== 'unknown') {
               session.error = null
@@ -1341,7 +1540,9 @@ export async function createPty(
             }
           }
 
-          // Check for prompts
+          // Check for prompts (drives the needs-attention UI). NOT used as a
+          // hibernation blocker — the fuzzy match (any line ending in '?') gave
+          // sticky false positives. Hibernation uses the hook signal instead.
           const prompt = session.adapter.detectPrompt(data)
           if (prompt && !win.isDestroyed()) {
             try {
@@ -1409,6 +1610,9 @@ export async function createPty(
             }
 
             if (detectedConversationId) {
+              // Remember it on the session so the hibernation gate knows this
+              // agent can be resumed by id.
+              session.conversationId = detectedConversationId
               recordDiagnosticEvent({
                 level: 'info',
                 source: 'pty',
@@ -1693,6 +1897,11 @@ export function writePty(sessionId: string, data: string): boolean {
   const session = sessions.get(sessionId)
   if (!session) return false
 
+  // NOTE: writePty does NOT touch the idle-close clock. PTY input is a noisy
+  // mix of real typing and terminal protocol the renderer writes back (focus/
+  // cursor reports). The "user engaged" signal comes from the renderer's real
+  // DOM events via `pty:touch`; the "agent blocked" signal comes from hooks.
+
   // Observation only: ESC bytes in stdin are the user's interrupt key for
   // claude-code (and codex). Log as a precise anchor so we can correlate
   // user keystrokes against subsequent hook arrivals (or their absence).
@@ -1957,6 +2166,10 @@ function stopSessionTimers(session: PtySession): void {
   if (session.sessionIdAutoDetectTimer) {
     clearTimeout(session.sessionIdAutoDetectTimer)
     session.sessionIdAutoDetectTimer = undefined
+  }
+  if (session.hibernateTimer) {
+    clearTimeout(session.hibernateTimer)
+    session.hibernateTimer = undefined
   }
   stopTitlePolling(session)
 }

@@ -251,6 +251,8 @@ import {
   notifyGlobalStateListeners,
   setPtyEnricher,
   setPtySpawnedTabRecorder,
+  setPtyHibernatedTabRecorder,
+  setIdleCloseConfigGetter,
   setChatSpawnedTabRecorder,
   beginTerminalShutdown
 } from '@slayzone/terminal/main'
@@ -263,7 +265,8 @@ import { attachTaskWindows, setupTaskWindows } from './task-windows'
 import {
   registerTerminalTabsHandlers,
   createPtyEnricher,
-  markTabSpawned
+  markTabSpawned,
+  markTabHibernated
 } from '@slayzone/task-terminals/main'
 import { registerWorktreeHandlers, closeGitWatcher } from '@slayzone/worktrees/main'
 import {
@@ -1135,7 +1138,14 @@ app
     runMigrations(db)
     // Pre-warm keys used by synchronous IPC handlers (event.returnValue).
     // Must run after migrations have seeded defaults.
-    await settings.warmCache(['labs_tests_panel', 'labs_jira_integration', 'labs_loop_mode'])
+    await settings.warmCache([
+      'labs_tests_panel',
+      'labs_jira_integration',
+      'labs_loop_mode',
+      'terminal_auto_close_idle',
+      'terminal_idle_close_value',
+      'terminal_idle_close_unit'
+    ])
     logBoot('migrations applied')
     normalizeProjectStatusData(db)
 
@@ -1534,6 +1544,7 @@ app
           'pty:write',
           'pty:resize',
           'pty:kill',
+          'pty:touch',
           'pty:exists',
           'pty:getBuffer',
           'pty:clearBuffer',
@@ -1560,6 +1571,20 @@ app
     }
     setPtySpawnedTabRecorder(recordSpawned)
     setChatSpawnedTabRecorder(recordSpawned)
+    setPtyHibernatedTabRecorder((tabId, hibernated) => markTabHibernated(db, tabId, hibernated))
+    // Idle-close (hibernation) config — read live each sweep tick. Raw `=== '1'`
+    // (NOT isLabEnabled, which defaults ON in dev) keeps it strictly opt-in.
+    // SettingsService.set updates the warmed cache, so UI toggles take effect
+    // without a restart.
+    setIdleCloseConfigGetter(() => {
+      const value = Number(settings.getCached('terminal_idle_close_value')) || 30
+      const unit = settings.getCached('terminal_idle_close_unit') || 'minutes'
+      const unitMs = unit === 'seconds' ? 1_000 : unit === 'hours' ? 3_600_000 : 60_000
+      return {
+        enabled: settings.getCached('terminal_auto_close_idle') === '1',
+        idleMs: value * unitMs
+      }
+    })
     logBoot('terminal-tabs handlers registered')
     registerChatHandlers(ipcMain, db, { onChatEvent: initChatTurnSubscriber(db) })
     // One-shot: backfill `chatMode` for tasks that pre-date the chat-mode UI so

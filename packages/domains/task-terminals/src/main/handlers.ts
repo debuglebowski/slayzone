@@ -13,6 +13,7 @@ interface TabRow {
   position: number
   created_at: string
   was_spawned: number
+  hibernated: number
 }
 
 function rowToTab(row: TabRow): TerminalTab {
@@ -25,7 +26,8 @@ function rowToTab(row: TabRow): TerminalTab {
     isMain: row.is_main === 1,
     position: row.position,
     createdAt: row.created_at,
-    wasSpawned: row.was_spawned === 1
+    wasSpawned: row.was_spawned === 1,
+    hibernated: row.hibernated === 1
   }
 }
 
@@ -42,6 +44,25 @@ function rowToTab(row: TabRow): TerminalTab {
  */
 export function markTabSpawned(db: Database, tabId: string, wasSpawned: boolean): void {
   db.prepare('UPDATE terminal_tabs SET was_spawned = ? WHERE id = ?').run(wasSpawned ? 1 : 0, tabId)
+}
+
+/**
+ * Persist a tab's idle-close (hibernation) status so the "sleeping 💤 / Reopen"
+ * affordance survives reload + restart. Set true when the idle agent is killed,
+ * false on any (re)spawn. Same tabId resolution as `markTabSpawned`.
+ */
+export function markTabHibernated(db: Database, tabId: string, hibernated: boolean): void {
+  db.prepare('UPDATE terminal_tabs SET hibernated = ? WHERE id = ?').run(hibernated ? 1 : 0, tabId)
+}
+
+/** Main-tab session ids (`${taskId}:${taskId}`) for tabs currently flagged
+ *  hibernated. Seeds the renderer's PtyContext at boot so the 💤 dot shows for
+ *  stale agents before any live session exists. */
+export function listHibernatedSessionIds(db: Database): string[] {
+  const rows = db
+    .prepare('SELECT task_id FROM terminal_tabs WHERE hibernated = 1 AND is_main = 1')
+    .all() as Array<{ task_id: string }>
+  return rows.map((r) => `${r.task_id}:${r.task_id}`)
 }
 
 /**
@@ -84,7 +105,8 @@ export function ensureMainTab(db: Database, taskId: string, mode: string): Termi
     isMain: true,
     position: 0,
     createdAt: now,
-    wasSpawned: false
+    wasSpawned: false,
+    hibernated: false
   }
 }
 
@@ -117,7 +139,8 @@ export function createTabRow(db: Database, input: CreateTerminalTabInput): Termi
     isMain: false,
     position,
     createdAt: now,
-    wasSpawned: false
+    wasSpawned: false,
+    hibernated: false
   }
 }
 
@@ -212,7 +235,8 @@ export function splitTabRow(db: Database, tabId: string): TerminalTab | null {
     isMain: false,
     position,
     createdAt: now,
-    wasSpawned: false
+    wasSpawned: false,
+    hibernated: false
   }
 }
 
@@ -224,6 +248,11 @@ export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: Database): vo
       .all(taskId) as TabRow[]
 
     return rows.map(rowToTab)
+  })
+
+  // Main-tab session ids flagged hibernated — seeds PtyContext's 💤 dots at boot.
+  ipcMain.handle('tabs:listHibernatedSessions', (): string[] => {
+    return listHibernatedSessionIds(db)
   })
 
   // Create a new tab (new group)

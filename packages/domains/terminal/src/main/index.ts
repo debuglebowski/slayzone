@@ -31,6 +31,11 @@ export {
   type PtyShutdownOptions,
   type PtyShutdownResult,
   setSpawnedTabRecorder as setPtySpawnedTabRecorder,
+  setHibernatedTabRecorder as setPtyHibernatedTabRecorder,
+  setIdleCloseConfigGetter,
+  touchPty,
+  noteSessionConversationId,
+  setSessionAwaitingInput,
   findSessionByTaskIdAndMode,
   transitionStateFromHook,
   markSessionActiveFromHook
