@@ -180,3 +180,49 @@ export function reportDowngradeSnapshot(snapshot: DowngradeSnapshot): void {
     // Diagnostics failures must never block the downgrade itself.
   }
 }
+
+/**
+ * Counterpart to {@link DowngradeSnapshot}: the denominator payload. Emitted
+ * once per session when the WebGL renderer activates cleanly. `count(ok)` is
+ * the baseline the downgrade events are measured against (downgrade rate ≈
+ * `count(downgrade) / count(ok)`, since a session that downgrades almost always
+ * emitted `ok` first — it loads clean, then scrambles later).
+ *
+ * Keep field names stable for analysis tooling — same contract as DowngradeSnapshot.
+ */
+export interface RendererOkEvent {
+  sessionId: string
+  mode?: string
+  tsMs: number
+  /** Vendor / renderer strings from `WEBGL_debug_renderer_info`, when available. */
+  gpu: { vendor?: string; renderer?: string } | null
+}
+
+/**
+ * Ship a {@link RendererOkEvent} through the renderer-side diagnostics IPC.
+ * Lands in `diagnostics_events` with `event = 'terminal.webgl_renderer_ok'`.
+ * `level: 'info'` (not warn) — a healthy session is not a problem.
+ */
+export function reportRendererOk(
+  terminal: Pick<XTerm, 'element'>,
+  sessionId: string,
+  mode: string | undefined
+): void {
+  try {
+    const event: RendererOkEvent = {
+      sessionId,
+      mode,
+      tsMs: Date.now(),
+      gpu: readGpuInfo(findWebglCanvas(terminal))
+    }
+    window.api.diagnostics.recordClientEvent({
+      event: 'terminal.webgl_renderer_ok',
+      level: 'info',
+      sessionId,
+      message: 'WebGL renderer active',
+      payload: event as unknown as Record<string, unknown>
+    })
+  } catch {
+    // Diagnostics failures must never block rendering.
+  }
+}

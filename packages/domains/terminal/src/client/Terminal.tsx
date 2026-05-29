@@ -8,7 +8,7 @@ import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHand
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { matchesShortcut, useShortcutStore, PulseGrid, toast } from '@slayzone/ui'
+import { matchesShortcut, useShortcutStore, PulseGrid } from '@slayzone/ui'
 import { WebLinkProvider, FileLinkProvider } from './web-link-provider'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
@@ -17,7 +17,11 @@ import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import { loadWebglRenderer, correctAtlas, type DowngradeReason } from './webgl-loader'
 import { monitorFrameTime, createScrambleProbe, type ScrambleProbe } from './scramble-detector'
 import { decideThrottle, DEFAULT_THROTTLE_OPTIONS } from './paint-throttle'
-import { captureDowngradeSnapshot, reportDowngradeSnapshot } from './scramble-telemetry'
+import {
+  captureDowngradeSnapshot,
+  reportDowngradeSnapshot,
+  reportRendererOk
+} from './scramble-telemetry'
 import { diag } from './terminal-webgl-diag'
 import '@xterm/xterm/css/xterm.css'
 
@@ -48,18 +52,23 @@ let webglDisabled = false
 
 // Sessions where the WebGL renderer was swapped out for the DOM renderer by
 // a detection signal (context-loss / frame-time / canary / manual). Scoped to
-// the current renderer process — a reload re-attempts WebGL. The user can
-// re-enable WebGL for the live session via the toast's "Retry WebGL" action.
+// the current renderer process — a reload re-attempts WebGL.
 //
 // Distinct from {@link webglDisabled}: that one is a *process-wide* latch for
 // construction failures (driver blocklist), this is a *per-session* latch for
 // post-construction misbehavior. Different scopes, different reasons.
 const downgradedSessions = new Set<string>()
 
+// Sessions that have already emitted a `terminal.webgl_renderer_ok` telemetry
+// event. Deduped so the downgrade-rate denominator counts sessions, not every
+// WebGL (re)load — a forceCompat toggle or cache-reattach can re-run the load
+// path within one session.
+const rendererOkReportedSessions = new Set<string>()
+
 // Test-only registry: maps sessionId → the live `handleDowngrade` closure for
 // that terminal. Exposed via `window.__slayzone_scrambleDetector` so the e2e
-// suite can simulate a detector fire (toast + retry path) without touching
-// real GPU state. Populated when initTerminal constructs handleDowngrade,
+// suite can simulate a detector fire (downgrade + telemetry path) without
+// touching real GPU state. Populated when initTerminal constructs handleDowngrade,
 // cleared in the unmount cleanup. Production code never reads this — the
 // detectors call handleDowngrade directly via the `onDowngrade` option.
 const fakeDowngradeRegistry = new Map<string, (reason: DowngradeReason) => void>()
@@ -80,20 +89,6 @@ if (typeof window !== 'undefined') {
       return true
     },
     sessions: (): string[] => Array.from(fakeDowngradeRegistry.keys())
-  }
-}
-
-/** Short human-readable cause shown in the downgrade toast description. */
-function describeDowngradeReason(reason: DowngradeReason): string {
-  switch (reason) {
-    case 'context-loss':
-      return 'GPU context lost'
-    case 'frame-time':
-      return 'slow rendering at startup'
-    case 'canary':
-      return 'glyph corruption detected'
-    case 'manual':
-      return 'manual override'
   }
 }
 
@@ -483,9 +478,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         initializedRef.current = true
 
         // Renderer-health helpers — shared by both the cached-reattach path and
-        // the fresh-allocation path. Defined here so the toast's Retry action
-        // (which fires long after init returned) keeps a live closure on the
-        // current session's refs.
+        // the fresh-allocation path. Defined here so the forceCompat toggle and
+        // cache-reattach (which fire long after init returned) keep a live
+        // closure on the current session's refs.
 
         const handleDowngrade = (reason: DowngradeReason): void => {
           // Snapshot first — addon + WebGL canvas must still be live so the
@@ -534,17 +529,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           }
 
           downgradedSessions.add(sessionId)
-          toast('Terminal switched to compatibility renderer', {
-            description: `Cause: ${describeDowngradeReason(reason)}`,
-            action: {
-              label: 'Retry WebGL',
-              onClick: () => {
-                downgradedSessions.delete(sessionId)
-                triggerWebglLoad()
-              }
-            },
-            duration: 8000
-          })
         }
 
         // Make this session's handleDowngrade reachable from the e2e suite.
@@ -553,8 +537,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
         const installRendererMonitors = (addon: WebglAddon, terminalInst: XTerm): void => {
           // Tear down any previous monitors before installing fresh — covers
-          // the Retry-WebGL path and cache-reattach where an addon-instance is
-          // re-adopted from a now-defunct previous component.
+          // the forceCompat re-enable path and cache-reattach where an
+          // addon-instance is re-adopted from a now-defunct previous component.
           frameTimeStopRef.current?.()
           scrambleProbeRef.current?.dispose()
 
@@ -610,7 +594,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
               sessionId
             })
             const addon = webglAddonRef.current
-            if (addon) installRendererMonitors(addon, terminalInst)
+            if (addon) {
+              installRendererMonitors(addon, terminalInst)
+              // Emit the downgrade-rate denominator once per session: WebGL
+              // came up clean. Skipped if this session already downgraded.
+              if (
+                !rendererOkReportedSessions.has(sessionId) &&
+                !downgradedSessions.has(sessionId)
+              ) {
+                rendererOkReportedSessions.add(sessionId)
+                reportRendererOk(terminalInst, sessionId, mode)
+              }
+            }
           })
         }
 
@@ -904,8 +899,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // before data reaches the renderer. CSS override kept as safety net.
         // Deferred to the next animation frame inside `triggerWebglLoad` (defined
         // above) so layout (post open()+fit()) has committed before the addon
-        // rasterizes its glyph atlas. The detector toast's "Retry WebGL" action
-        // re-enters the same path. See webgl-loader.ts + scramble-detector.ts.
+        // rasterizes its glyph atlas. The forceCompat re-enable toggle re-enters
+        // the same path. See webgl-loader.ts + scramble-detector.ts.
         triggerWebglLoad()
 
         // Let Ctrl+Tab and Ctrl+Shift+Tab bubble up for tab switching
@@ -1522,10 +1517,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // `triggerWebglLoad`; this effect handles the case where the user flips it
   // while a terminal is already running.
   //
-  // ON  → dispose the live WebGL addon + monitors, latch the session so a
-  //       subsequent retry-WebGL action would be a no-op until the setting
-  //       flips back off. No toast — the toggle they just clicked is the
-  //       feedback.
+  // ON  → dispose the live WebGL addon + monitors, latch the session so any
+  //       subsequent WebGL re-load stays a no-op until the setting flips back
+  //       off.
   // OFF → clear the session latch so the *next* terminal mount can re-enable
   //       WebGL. The current already-DOM terminal stays DOM until next mount;
   //       reopening the tab brings WebGL back. Conservative choice: avoids
