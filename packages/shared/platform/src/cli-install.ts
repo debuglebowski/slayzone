@@ -20,19 +20,21 @@ export function getCliBinDir(): string {
     case 'darwin':
       return '/usr/local/bin'
     case 'win32':
-      return path.join(
+      return path.win32.join(
         process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'),
         'SlayZone',
         'bin'
       )
     default:
-      return path.join(os.homedir(), '.local', 'bin')
+      return path.posix.join(os.homedir(), '.local', 'bin')
   }
 }
 
 export function getCliBinTarget(): string {
   const name = process.platform === 'win32' ? 'slay.cmd' : 'slay'
-  return path.join(getCliBinDir(), name)
+  return process.platform === 'win32'
+    ? path.win32.join(getCliBinDir(), name)
+    : path.posix.join(getCliBinDir(), name)
 }
 
 export function checkCliInstalled(): { installed: boolean; path?: string } {
