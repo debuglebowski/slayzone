@@ -29,7 +29,6 @@ function parseTemplate(row: Record<string, unknown> | undefined): TaskTemplate |
     web_panel_urls: safeJsonParse(row.web_panel_urls) as TaskTemplate['web_panel_urls'],
     dangerously_skip_permissions:
       row.dangerously_skip_permissions == null ? null : Boolean(row.dangerously_skip_permissions),
-    ccs_profile: (row.ccs_profile as string) ?? null,
     default_status: (row.default_status as string) ?? null,
     default_priority: row.default_priority == null ? null : Number(row.default_priority),
     is_default: Boolean(row.is_default),
@@ -93,9 +92,9 @@ export function registerTaskTemplateHandlers(ipcMain: IpcMain, db: Database): vo
       INSERT INTO task_templates (
         id, project_id, name, description,
         terminal_mode, provider_config, panel_visibility, browser_tabs, web_panel_urls,
-        dangerously_skip_permissions, ccs_profile, default_status, default_priority,
+        dangerously_skip_permissions, default_status, default_priority,
         is_default, sort_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.projectId,
@@ -107,7 +106,6 @@ export function registerTaskTemplateHandlers(ipcMain: IpcMain, db: Database): vo
       data.browserTabs ? JSON.stringify(data.browserTabs) : null,
       data.webPanelUrls ? JSON.stringify(data.webPanelUrls) : null,
       data.dangerouslySkipPermissions == null ? null : data.dangerouslySkipPermissions ? 1 : 0,
-      data.ccsProfile ?? null,
       data.defaultStatus ?? null,
       data.defaultPriority ?? null,
       data.isDefault ? 1 : 0,
@@ -147,7 +145,6 @@ export function registerTaskTemplateHandlers(ipcMain: IpcMain, db: Database): vo
         'dangerously_skip_permissions',
         (v) => (v == null ? null : v ? 1 : 0)
       ],
-      ['ccsProfile', 'ccs_profile', (v) => v ?? null],
       ['defaultStatus', 'default_status', (v) => v ?? null],
       ['defaultPriority', 'default_priority', (v) => v ?? null],
       ['isDefault', 'is_default', (v) => (v ? 1 : 0)]

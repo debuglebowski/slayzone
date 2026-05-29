@@ -57,7 +57,6 @@ export const MODE_ICONS: Partial<Record<TerminalMode, IconComponent>> = {
   gemini: GeminiColor as IconComponent,
   opencode: OpenCodeMono as IconComponent,
   copilot: CopilotColor as IconComponent,
-  ccs: ClaudeColor as IconComponent,
   terminal: TerminalIcon
 }
 

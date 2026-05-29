@@ -628,8 +628,6 @@ export interface Task {
   // Merge mode
   merge_state: MergeState | null
   merge_context: MergeContext | null
-  // CCS (Claude Code Switch) profile name
-  ccs_profile: string | null
   // Loop mode configuration (JSON)
   loop_config: LoopConfig | null
   // Snooze — task hidden from board until this datetime (ISO 8601)

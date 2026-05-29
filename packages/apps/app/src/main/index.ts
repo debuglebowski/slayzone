@@ -1531,7 +1531,6 @@ app
           'terminalModes:resetToDefaultState',
           'pty:create',
           'pty:testExecutionContext',
-          'pty:ccsListProfiles',
           'pty:write',
           'pty:resize',
           'pty:kill',

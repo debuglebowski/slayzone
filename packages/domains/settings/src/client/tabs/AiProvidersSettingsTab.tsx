@@ -191,8 +191,7 @@ function UsageConfigSection({
                     <strong>JSON File</strong> — reads a token from a JSON file on disk (e.g.
                     ~/.my-cli/auth.json).
                     <br />
-                    <strong>Keychain</strong> — reads a token from the macOS Keychain (e.g. CCS
-                    profiles).
+                    <strong>Keychain</strong> — reads a token from the macOS Keychain.
                   </>
                 }
               />
@@ -288,7 +287,7 @@ function UsageConfigSection({
                 <div className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-4">
                   <FieldLabel
                     label="Service Name"
-                    tip="The macOS Keychain service name. For CCS profiles, use Claude Code-credentials-<suffix> where <suffix> is the SHA-256 hash prefix of the instance path."
+                    tip="The macOS Keychain service name, e.g. Claude Code-credentials-<suffix> where <suffix> is the SHA-256 hash prefix of the instance path."
                   />
                   <DebouncedInput
                     className="font-mono text-xs"

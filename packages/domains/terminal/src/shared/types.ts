@@ -402,7 +402,7 @@ export const SESSION_ID_COMMANDS: Partial<Record<TerminalMode, string>> = {
 }
 
 /** Providers where session ID detection is not possible — no --session-id flag and no detection command. */
-export const SESSION_ID_UNAVAILABLE: readonly TerminalMode[] = ['ccs', 'cursor-agent', 'opencode']
+export const SESSION_ID_UNAVAILABLE: readonly TerminalMode[] = ['cursor-agent', 'opencode']
 
 export type SkillSource = 'user' | 'project' | 'agents'
 

@@ -91,7 +91,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@slayzone/ui'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import {
   ContextMenu,
@@ -638,7 +637,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [isMainTabActive, setIsMainTabActive] = useState(true)
   const [flagsInputValue, setFlagsInputValue] = useState('')
   const [flagsPopoverOpen, setFlagsPopoverOpen] = useState(false)
-  const [ccsProfiles, setCcsProfiles] = useState<string[]>([])
 
   // Panel visibility state. Initial value sourced from initialData (secondary lifts via parent).
   const defaultPanelVisibility: PanelVisibility = isSecondaryWindow
@@ -971,16 +969,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       devServerAutoOpenRef.current = autoOpen === '1'
     })
   }, [settingsRevision])
-
-  // Load CCS profiles when mode is 'ccs'
-  useEffect(() => {
-    if (task?.terminal_mode === 'ccs') {
-      window.api.pty
-        .ccsListProfiles()
-        .then(({ profiles }) => setCcsProfiles(profiles))
-        .catch(() => {})
-    }
-  }, [task?.terminal_mode])
 
   useEffect(() => {
     if (!task) return
@@ -3228,57 +3216,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                     <DialogContent className="max-w-md">
                                       <DialogHeader>
                                         <DialogTitle>
-                                          {task.terminal_mode === 'ccs'
-                                            ? 'CCS profile'
-                                            : `CLI flags for ${task.terminal_mode}`}
+                                          {`CLI flags for ${task.terminal_mode}`}
                                         </DialogTitle>
                                       </DialogHeader>
-                                      {task.terminal_mode === 'ccs' ? (
-                                        <div className="space-y-2">
-                                          <Select
-                                            value={
-                                              getProviderFlags(task.provider_config, 'ccs') ||
-                                              '__none__'
-                                            }
-                                            onValueChange={async (val) => {
-                                              const profile = val === '__none__' ? '' : val
-                                              const updated = await window.api.db.updateTask({
-                                                id: task.id,
-                                                providerConfig: setProviderFlags(
-                                                  task.provider_config,
-                                                  'ccs',
-                                                  profile
-                                                )
-                                              })
-                                              if (updated) onTaskUpdated(updated)
-                                            }}
-                                          >
-                                            <SelectTrigger className="w-full">
-                                              <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              <SelectItem value="__none__">Default</SelectItem>
-                                              {ccsProfiles.map((p) => (
-                                                <SelectItem key={p} value={p}>
-                                                  {p}
-                                                </SelectItem>
-                                              ))}
-                                              {(() => {
-                                                const currentProfile = getProviderFlags(
-                                                  task.provider_config,
-                                                  'ccs'
-                                                )
-                                                return currentProfile &&
-                                                  !ccsProfiles.includes(currentProfile) ? (
-                                                  <SelectItem value={currentProfile}>
-                                                    {currentProfile}
-                                                  </SelectItem>
-                                                ) : null
-                                              })()}
-                                            </SelectContent>
-                                          </Select>
-                                        </div>
-                                      ) : (
+                                      {(
                                         <div className="space-y-3">
                                           <div className="text-xs text-muted-foreground">
                                             Passed to the provider on startup (e.g. --no-cache).

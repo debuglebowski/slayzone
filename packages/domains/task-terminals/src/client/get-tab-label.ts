@@ -18,8 +18,6 @@ export function getModeLabel(mode: TerminalMode): string {
       return 'OpenCode'
     case 'copilot':
       return 'Copilot'
-    case 'ccs':
-      return 'CCS'
     default:
       return 'Terminal'
   }

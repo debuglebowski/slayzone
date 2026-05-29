@@ -163,25 +163,3 @@ export async function whichBinary(name: string): Promise<string | null> {
   }
 }
 
-/**
- * List CCS auth profiles by running `ccs auth list --json`.
- * Returns profile names or empty array if ccs not found / command fails.
- */
-export async function listCcsProfiles(): Promise<string[]> {
-  const ccsPath = await whichBinary('ccs')
-  if (!ccsPath) return []
-
-  try {
-    const shell = resolveUserShell()
-    const shellArgs = getShellStartupArgs(shell)
-    const cmd = `${quoteForShell(ccsPath)} auth list --json`
-    const { stdout } = await execFileAsync(shell, [...shellArgs, '-c', cmd], { timeout: 5000 })
-    const parsed = JSON.parse(stdout.trim())
-    if (Array.isArray(parsed?.profiles)) {
-      return parsed.profiles.map((p: { name: string }) => p.name).filter(Boolean)
-    }
-    return []
-  } catch {
-    return []
-  }
-}

@@ -268,7 +268,6 @@ beforeEach(() => {
     },
     taskTags: { getTagsForTask: vi.fn().mockResolvedValue([]) },
     taskTemplates: { getByProject: vi.fn().mockResolvedValue([]) },
-    ccs: { getProfiles: vi.fn().mockResolvedValue([]) },
     pty: { getBuffer: vi.fn().mockResolvedValue(null) }
   }
 })

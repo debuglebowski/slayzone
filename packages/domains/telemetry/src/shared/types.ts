@@ -62,7 +62,6 @@ export type TelemetryEventName =
   | 'terminal_buffer_cleared'
   | 'terminal_restarted'
   | 'custom_mode_created'
-  | 'ccs_profile_selected'
   // Git & worktrees
   | 'git_operation'
   | 'branch_created'
@@ -198,7 +197,6 @@ export interface TelemetryEventProps {
   terminal_buffer_cleared: Record<string, never>
   terminal_restarted: { provider: string }
   custom_mode_created: Record<string, never>
-  ccs_profile_selected: Record<string, never>
   // Git & worktrees
   git_operation: { op: string }
   branch_created: Record<string, never>

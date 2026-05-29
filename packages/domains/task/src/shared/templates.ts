@@ -13,7 +13,6 @@ export interface TaskTemplate {
   browser_tabs: BrowserTabsState | null
   web_panel_urls: WebPanelUrls | null
   dangerously_skip_permissions: boolean | null
-  ccs_profile: string | null
   default_status: string | null
   default_priority: number | null
   is_default: boolean
@@ -32,7 +31,6 @@ export interface CreateTaskTemplateInput {
   browserTabs?: BrowserTabsState | null
   webPanelUrls?: WebPanelUrls | null
   dangerouslySkipPermissions?: boolean | null
-  ccsProfile?: string | null
   defaultStatus?: string | null
   defaultPriority?: number | null
   isDefault?: boolean
@@ -48,7 +46,6 @@ export interface UpdateTaskTemplateInput {
   browserTabs?: BrowserTabsState | null
   webPanelUrls?: WebPanelUrls | null
   dangerouslySkipPermissions?: boolean | null
-  ccsProfile?: string | null
   defaultStatus?: string | null
   defaultPriority?: number | null
   isDefault?: boolean

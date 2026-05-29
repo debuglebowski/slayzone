@@ -46,13 +46,6 @@ export async function createImportedTaskOp(
     providerConfig[row.id] = { flags: row.default_flags ?? '' }
   }
 
-  const ccsDefaultProfile =
-    (
-      db.prepare('SELECT value FROM settings WHERE key = ?').get('ccs_default_profile') as
-        | { value: string }
-        | undefined
-    )?.value ?? null
-
   const initialTask = insertTaskRow(db, {
     id,
     projectId: data.projectId,
@@ -67,7 +60,6 @@ export async function createImportedTaskOp(
     terminalMode,
     providerConfig,
     isTemporary: false,
-    ccsProfile: ccsDefaultProfile,
     repoName: null,
     dangerouslySkipPermissions: false,
     panelVisibility: null,

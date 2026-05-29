@@ -18,7 +18,6 @@ interface TemplateRow extends Record<string, unknown> {
   browser_tabs: string | null
   web_panel_urls: string | null
   dangerously_skip_permissions: number
-  ccs_profile: string | null
 }
 
 function resolveTemplate(db: ReturnType<typeof openDb>, idPrefix: string) {
@@ -136,7 +135,6 @@ export function templatesCommand(): Command {
       if (t.terminal_mode) console.log(`Mode:        ${t.terminal_mode}`)
       if (t.default_status) console.log(`Status:      ${t.default_status}`)
       if (t.default_priority != null) console.log(`Priority:    ${t.default_priority}`)
-      if (t.ccs_profile) console.log(`CCS Profile: ${t.ccs_profile}`)
       console.log(`Created:     ${t.created_at}`)
     })
 

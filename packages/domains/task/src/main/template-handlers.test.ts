@@ -56,7 +56,6 @@ await describe('db:taskTemplates:create', () => {
     expect(t.browser_tabs).toBeNull()
     expect(t.web_panel_urls).toBeNull()
     expect(t.dangerously_skip_permissions).toBeNull()
-    expect(t.ccs_profile).toBeNull()
     expect(t.default_status).toBeNull()
     expect(t.default_priority).toBeNull()
   })
@@ -81,7 +80,6 @@ await describe('db:taskTemplates:create', () => {
       },
       webPanelUrls: { grafana: 'http://grafana.local' },
       dangerouslySkipPermissions: true,
-      ccsProfile: 'fast',
       defaultStatus: 'todo',
       defaultPriority: 1
     })
@@ -94,7 +92,6 @@ await describe('db:taskTemplates:create', () => {
     expect(t.browser_tabs?.activeTabId).toBe('t1')
     expect(t.web_panel_urls?.grafana).toBe('http://grafana.local')
     expect(t.dangerously_skip_permissions).toBe(true)
-    expect(t.ccs_profile).toBe('fast')
     expect(t.default_status).toBe('todo')
     expect(t.default_priority).toBe(1)
   })
@@ -268,7 +265,6 @@ await describe('template application on task creation', () => {
       },
       webPanelUrls: { docs: 'http://docs.local' },
       dangerouslySkipPermissions: true,
-      ccsProfile: 'turbo',
       defaultStatus: 'todo',
       defaultPriority: 1
     })
@@ -281,7 +277,6 @@ await describe('template application on task creation', () => {
     expect(task.browser_tabs?.tabs).toHaveLength(1)
     expect(task.web_panel_urls?.docs).toBe('http://docs.local')
     expect(task.dangerously_skip_permissions).toBe(true)
-    expect(task.ccs_profile).toBe('turbo')
     expect(task.status).toBe('todo')
     expect(task.priority).toBe(1)
   })

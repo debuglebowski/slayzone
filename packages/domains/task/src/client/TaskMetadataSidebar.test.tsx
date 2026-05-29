@@ -132,7 +132,6 @@ function makeTask(overrides: Record<string, unknown> = {}) {
     editor_open_files: null,
     merge_state: null,
     merge_context: null,
-    ccs_profile: null,
     loop_config: null,
     snoozed_until: null,
     is_temporary: false,

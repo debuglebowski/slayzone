@@ -335,7 +335,7 @@ console.log('\nIntegration: TUI redraw stream → idle flip\n')
  *   3. After idle window passes, the inactivity checker MUST flip to 'idle'.
  *
  * If `shouldRefreshIdleClock` were to update the clock on every chunk
- * (the old buggy behavior on Claude/CCS/Qwen), the checker would never
+ * (the old buggy behavior on Claude/Qwen), the checker would never
  * flip and this test would loop forever — guarded by the assert.
  */
 test('TUI default: redraw stream does NOT keep idle clock pinned open', () => {

@@ -32,7 +32,7 @@ import type {
 } from '@slayzone/terminal/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import { parseShellArgs } from './adapters/flag-parser'
-import { listCcsProfiles, setShellOverride } from './shell-env'
+import { setShellOverride } from './shell-env'
 import { syncTerminalModes } from './startup-sync'
 
 interface PtyCreateOpts {
@@ -293,15 +293,6 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('pty:testExecutionContext', async (_, context: ExecutionContext) => {
     return testExecutionContext(context)
-  })
-
-  ipcMain.handle('pty:ccsListProfiles', async () => {
-    try {
-      const profiles = await listCcsProfiles()
-      return { profiles }
-    } catch (e: unknown) {
-      return { profiles: [], error: e instanceof Error ? e.message : String(e) }
-    }
   })
 
   ipcMain.handle('pty:write', (_, sessionId: string, data: string) => {

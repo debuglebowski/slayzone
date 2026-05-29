@@ -13,7 +13,6 @@ export type {
 } from './types'
 
 import type { TerminalAdapter } from './types'
-import { CcsAdapter } from './ccs-adapter'
 import { ClaudeAdapter } from './claude-adapter'
 import { CodexAdapter } from './codex-adapter'
 import { CursorAdapter } from './cursor-adapter'
@@ -25,7 +24,6 @@ import { CopilotAdapter } from './copilot-adapter'
 import { ShellAdapter } from './shell-adapter'
 
 const BUILTIN_ADAPTERS: Record<string, new () => TerminalAdapter> = {
-  ccs: CcsAdapter,
   'claude-code': ClaudeAdapter,
   codex: CodexAdapter,
   'cursor-agent': CursorAdapter,

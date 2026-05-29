@@ -34,11 +34,11 @@ export interface SpawnShellConfig {
 export interface SpawnBinaryInfo {
   /** Binary name (e.g. 'claude', 'codex') */
   name: string
-  /** Structural args (resume, session-id) — used for direct CLI, skipped for CCS */
+  /** Structural args (resume, session-id) — used for direct CLI */
   args: string[]
-  /** Provider-specific flags (--sandbox, --yolo, etc.) — used for direct CLI, skipped for CCS */
+  /** Provider-specific flags (--sandbox, --yolo, etc.) — used for direct CLI */
   providerArgs: string[]
-  /** Initial prompt text — passed through to both direct CLI and CCS */
+  /** Initial prompt text — passed to the direct CLI */
   initialPrompt?: string
 }
 

@@ -61,15 +61,6 @@ export async function createTaskOp(
     }
   }
 
-  const ccsDefaultProfile =
-    template?.ccs_profile ??
-    (
-      db.prepare('SELECT value FROM settings WHERE key = ?').get('ccs_default_profile') as
-        | { value: string }
-        | undefined
-    )?.value ??
-    null
-
   const priority = data.priority ?? template?.default_priority ?? 3
   const dangerouslySkipPerms = template?.dangerously_skip_permissions ? true : false
   const panelVisibility = template?.panel_visibility
@@ -92,7 +83,6 @@ export async function createTaskOp(
     terminalMode,
     providerConfig,
     isTemporary: Boolean(data.isTemporary),
-    ccsProfile: ccsDefaultProfile,
     repoName: data.repoName ?? null,
     dangerouslySkipPermissions: dangerouslySkipPerms,
     panelVisibility,

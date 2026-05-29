@@ -18,7 +18,6 @@ export interface TaskRowData {
   terminalMode: string
   providerConfig: ProviderConfig
   isTemporary: boolean
-  ccsProfile: string | null
   repoName: string | null
   dangerouslySkipPermissions: boolean
   panelVisibility: string | null
@@ -33,10 +32,10 @@ const INSERT_SQL = `
     id, project_id, parent_id, title, description, description_format, assignee,
     status, priority, due_date, terminal_mode, provider_config,
     claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
-    is_temporary, ccs_profile, repo_name,
+    is_temporary, repo_name,
     dangerously_skip_permissions, panel_visibility, browser_tabs, web_panel_urls,
     updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
     COALESCE(?, datetime('now')))
 `
 
@@ -68,7 +67,6 @@ export function insertTaskRow(db: Database, row: TaskRowData): Task | null {
       row.providerConfig['gemini']?.flags ?? '',
       row.providerConfig['opencode']?.flags ?? '',
       row.isTemporary ? 1 : 0,
-      row.ccsProfile,
       row.repoName,
       row.dangerouslySkipPermissions ? 1 : 0,
       row.panelVisibility,

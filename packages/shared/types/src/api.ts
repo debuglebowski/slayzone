@@ -746,7 +746,6 @@ export interface ElectronAPI {
     testExecutionContext: (
       context: ExecutionContext
     ) => Promise<{ success: boolean; error?: string }>
-    ccsListProfiles: () => Promise<{ profiles: string[]; error?: string }>
     write: (sessionId: string, data: string) => Promise<boolean>
     submit: (sessionId: string, text: string) => Promise<boolean>
     resize: (sessionId: string, cols: number, rows: number) => Promise<boolean>
