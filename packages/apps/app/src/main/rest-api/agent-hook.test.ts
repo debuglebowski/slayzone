@@ -208,7 +208,7 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('claude-code SessionStart → broadcast + markActive (no state transition; PTY drives its own starting→running)', async () => {
+  test('claude-code SessionStart → broadcast + markActive, no state transition (PTY drives its own starting→running)', async () => {
     findSessionSpy.mockReturnValue('task-4')
     const srv = await startServer()
     try {
@@ -569,8 +569,9 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('claude-code SessionStart with sessionId → no persist (not in capture allowlist)', async () => {
-    const srv = await startServer()
+  test('claude-code SessionStart with sessionId → persists conversationId to provider_config', async () => {
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
     try {
       await postJson(srv.port, {
         agentId: 'claude-code',
@@ -578,8 +579,67 @@ describe('POST /api/agent-hook', () => {
         taskId: 'cc-task',
         sessionId: '66666666-6666-4666-8666-666666666666'
       })
+      expect(getTaskOpSpy).toHaveBeenCalledWith(expect.anything(), 'cc-task')
+      expect(updateTaskSpy).toHaveBeenCalledTimes(1)
+      const data = updateTaskSpy.mock.calls[0][1]
+      expect(data).toEqual({
+        id: 'cc-task',
+        providerConfig: { 'claude-code': { conversationId: '66666666-6666-4666-8666-666666666666' } }
+      })
+      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart with only raw.session_id → still persists (envelope fallback)', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task',
+        raw: { session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
+      })
+      expect(updateTaskSpy).toHaveBeenCalledTimes(1)
+      const data = updateTaskSpy.mock.calls[0][1] as {
+        providerConfig: { 'claude-code': { conversationId: string } }
+      }
+      expect(data.providerConfig['claude-code'].conversationId).toBe(
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      )
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart without any session id → no persist', async () => {
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, { agentId: 'claude-code', hookEvent: 'SessionStart', taskId: 'cc-task' })
       expect(getTaskOpSpy).not.toHaveBeenCalled()
       expect(updateTaskSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code SessionStart where stored id already matches → no write (short-circuit)', async () => {
+    getTaskOpSpy.mockResolvedValue({
+      provider_config: { 'claude-code': { conversationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' } }
+    })
+    const notifyRendererSpy = vi.fn()
+    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc-task',
+        sessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+      })
+      expect(getTaskOpSpy).toHaveBeenCalledTimes(1)
+      expect(updateTaskSpy).not.toHaveBeenCalled()
+      expect(notifyRendererSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }

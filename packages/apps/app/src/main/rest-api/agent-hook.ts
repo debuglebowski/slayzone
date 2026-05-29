@@ -140,14 +140,14 @@ function antigravityHookToTerminalState(hookEvent: string): TerminalState | null
  * hook event that delivers it. Persisted to
  * `provider_config[agentId].conversationId` for deterministic resume-by-id.
  *
+ * - `claude-code`: `SessionStart` fires on startup and on `/clear` (new session id
+ *   each time); raw payload carries `session_id`.
  * - `codex`: `SessionStart` fires once per session, carries `session_id`.
  * - `antigravity`: every `agy` hook payload carries `conversationId`; we capture
  *   on `PreInvocation` (turn start). Repeats short-circuit in `persistConversationId`.
- *
- * Claude Code is absent — it mints its own id at creation (`claude --session-id
- * {id}`), so there is nothing to capture from a hook.
  */
 const CONVERSATION_ID_CAPTURE_EVENT: Record<string, string> = {
+  'claude-code': 'SessionStart',
   codex: 'SessionStart',
   antigravity: 'PreInvocation'
 }
