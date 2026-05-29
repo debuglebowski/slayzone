@@ -2880,6 +2880,23 @@ export const migrations: Migration[] = [
       // never-started one. Set on hibernate, cleared on (re)spawn.
       db.exec(`ALTER TABLE terminal_tabs ADD COLUMN hibernated INTEGER NOT NULL DEFAULT 0`)
     }
+  },
+  {
+    version: 142,
+    up: (db) => {
+      // CCS provider removed. Convert orphaned ccs tasks to claude-code (CCS ran
+      // Claude underneath, so claude-code is the faithful successor), drop the
+      // now-unused ccs_profile columns, strip dead provider_config.ccs keys, and
+      // clean the CCS settings rows.
+      db.exec(`UPDATE tasks SET terminal_mode = 'claude-code' WHERE terminal_mode = 'ccs'`)
+      db.exec(`ALTER TABLE tasks DROP COLUMN ccs_profile`)
+      db.exec(`ALTER TABLE task_templates DROP COLUMN ccs_profile`)
+      db.exec(
+        `UPDATE tasks SET provider_config = json_remove(provider_config, '$.ccs')
+         WHERE provider_config IS NOT NULL AND json_extract(provider_config, '$.ccs') IS NOT NULL`
+      )
+      db.prepare(`DELETE FROM settings WHERE key IN ('ccs_enabled', 'ccs_default_profile')`).run()
+    }
   }
 ]
 
