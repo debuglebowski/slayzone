@@ -38,6 +38,10 @@ function taskIdFromSessionId(sessionId: string): string {
   return idx >= 0 ? sessionId.substring(0, idx) : sessionId
 }
 
+function isAliveState(state: TerminalState): boolean {
+  return ALIVE_STATES.has(state)
+}
+
 export function applyExitEvent(
   sessionId: string,
   exitCode: number,
@@ -123,7 +127,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     setActiveTaskIds((prev) => {
       const next = new Set<string>()
       for (const [sid, s] of statesRef.current) {
-        if (ALIVE_STATES.has(s.state)) next.add(taskIdFromSessionId(sid))
+        if (isAliveState(s.state)) next.add(taskIdFromSessionId(sid))
       }
       // Avoid new reference if nothing changed
       if (next.size === prev.size && [...next].every((id) => prev.has(id))) return prev
@@ -139,7 +143,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     performance.mark('sz:pty:start')
     window.api.session.list().then((sessions) => {
       for (const s of sessions) {
-        if (ALIVE_STATES.has(s.state)) {
+        if (isAliveState(s.state)) {
           const sid = s.sessionId
           const existing = statesRef.current.get(sid)
           if (existing) {
@@ -245,15 +249,12 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
 
       // Update active task tracking
-      const wasAlive = ALIVE_STATES.has(oldState as TerminalState)
-      const isAlive = ALIVE_STATES.has(newState as TerminalState)
+      const wasAlive = isAliveState(oldState as TerminalState)
+      const isAlive = isAliveState(newState as TerminalState)
       if (wasAlive !== isAlive) refreshActiveTaskIds()
 
-      // Clear pending prompt when state leaves the alive set (e.g. dead/error)
-      if (
-        ALIVE_STATES.has(oldState as TerminalState) &&
-        !ALIVE_STATES.has(newState as TerminalState)
-      ) {
+      // Clear pending prompt when state leaves the alive set.
+      if (isAliveState(oldState as TerminalState) && !isAliveState(newState as TerminalState)) {
         state.pendingPrompt = undefined
         setPendingPromptTaskIds((prev) => {
           const next = new Set(prev)
@@ -385,7 +386,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
                 currentSubs.forEach((sub) => sub(backendState, oldState))
               }
               // Update active task tracking
-              if (ALIVE_STATES.has(backendState)) refreshActiveTaskIds()
+              if (isAliveState(backendState)) refreshActiveTaskIds()
             }
           }
         })
@@ -623,4 +624,26 @@ export function usePendingPrompts(): string[] {
  */
 export function useActiveTaskIds(): Set<string> {
   return useContext(ActiveTaskIdsContext)
+}
+
+export function useKnownTaskTerminalState(taskId: string): TerminalState | undefined {
+  const activeTaskIds = useActiveTaskIds()
+  const shouldSubscribe = activeTaskIds.has(taskId)
+  const sessionId = `${taskId}:${taskId}`
+  const { getState, subscribeState } = usePty()
+  const [terminalState, setTerminalState] = useState<TerminalState | undefined>(() =>
+    shouldSubscribe ? getState(sessionId) : undefined
+  )
+
+  useEffect(() => {
+    if (!shouldSubscribe) {
+      setTerminalState(undefined)
+      return
+    }
+
+    setTerminalState(getState(sessionId))
+    return subscribeState(sessionId, (newState) => setTerminalState(newState))
+  }, [shouldSubscribe, sessionId, getState, subscribeState])
+
+  return terminalState
 }

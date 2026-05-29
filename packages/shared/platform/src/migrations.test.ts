@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { describe, test, expect } from 'vitest'
+import { describe, test, expect, vi } from 'vitest'
 import { migrateStateDir, copyVerifyDelete } from './migrations'
 
 function tmpDir(): string {
@@ -117,27 +117,24 @@ describe('migrateStateDir', () => {
 
   // --- Failure / rollback ---
 
-  test('fails and rolls back when newDir parent is not writable', () => {
-    if (process.getuid?.() === 0) {
-      return // skip when running as root
-    }
+  test('fails and preserves oldDir when rename fails', () => {
     const root = tmpDir()
     const oldDir = path.join(root, 'old')
-    const lockedParent = path.join(root, 'locked')
-    const newDir = path.join(lockedParent, 'new')
+    const newDir = path.join(root, 'new')
     fs.mkdirSync(oldDir)
     fs.writeFileSync(path.join(oldDir, 'slayzone.sqlite'), 'important')
-    // Create parent then remove write permission
-    fs.mkdirSync(lockedParent)
-    fs.chmodSync(lockedParent, 0o555)
+    const renameSync = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      const err = new Error('EACCES') as NodeJS.ErrnoException
+      err.code = 'EACCES'
+      throw err
+    })
     try {
       const result = migrateStateDir(oldDir, newDir)
       expect(result.migrated).toBe(false)
       expect(result.failed).toBe(true)
-      // Old dir preserved
       expect(fs.readFileSync(path.join(oldDir, 'slayzone.sqlite'), 'utf8')).toBe('important')
     } finally {
-      fs.chmodSync(lockedParent, 0o755)
+      renameSync.mockRestore()
       cleanup(root)
     }
   })

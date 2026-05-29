@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import {
   MoreHorizontal,
   Archive,
@@ -435,6 +435,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Prefer live global state; fall back to suspense-cached data for subtask race window
   const task = taskProp ?? initialData?.task ?? null
   const project = projectProp ?? initialData?.project ?? null
+  useLayoutEffect(() => {
+    if (task?.id) performance.mark(`sz:taskDetail:${task.id}:mount`)
+  }, [task?.id])
 
   // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
   const shortcutActive = hasShortcutFocus ?? isActive
@@ -2181,7 +2184,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const isTaskCompleted = isCompletedStatus(task.status, project?.columns_config)
 
   return (
-    <div id="task-detail" className={cn('h-full flex flex-col', compact ? 'p-0' : 'gap-4')}>
+    <div
+      id="task-detail"
+      data-task-id={task.id}
+      className={cn('h-full flex flex-col', compact ? 'p-0' : 'gap-4')}
+    >
       {compact && (
         <div className="shrink-0 flex items-center gap-1.5 px-2 h-10 bg-surface-1 border-b border-border min-w-0">
           {!task.is_temporary &&

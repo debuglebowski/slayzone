@@ -32,6 +32,7 @@ interface CreateTaskDialogProps {
   onCreatedAndOpen?: (task: Task) => void
   draft?: CreateTaskDraft
   tags: Tag[]
+  projects?: Project[]
   onTagCreated?: (tag: Tag) => void
 }
 
@@ -42,10 +43,10 @@ export function CreateTaskDialog({
   onCreatedAndOpen,
   draft,
   tags,
+  projects = [],
   onTagCreated
 }: CreateTaskDialogProps): React.JSX.Element {
   const [createTagOpen, setCreateTagOpen] = useState(false)
-  const [projects, setProjects] = useState<Project[]>([])
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('__none__')
   const form = useForm<CreateTaskFormData>({
@@ -61,11 +62,6 @@ export function CreateTaskDialog({
     }
     prevOpenRef.current = open
   }, [open, draft, form])
-
-  useEffect(() => {
-    if (!open) return
-    window.api.db.getProjects().then((list) => setProjects(list))
-  }, [open])
 
   const selectedProjectId = form.watch('projectId')
   const selectedProject = projects.find((project) => project.id === selectedProjectId)
@@ -110,11 +106,11 @@ export function CreateTaskDialog({
     opts?: { statusOverride?: Task['status']; andOpen?: boolean }
   ): Promise<void> => {
     const isAutoCreateEnabledForProject = async (projectId: string): Promise<boolean> => {
-      const [globalSetting, projects] = await Promise.all([
+      const [globalSetting, availableProjects] = await Promise.all([
         window.api.settings.get('auto_create_worktree_on_task_create'),
-        window.api.db.getProjects()
+        projects.length > 0 ? Promise.resolve(projects) : window.api.db.getProjects()
       ])
-      const project = projects.find((p) => p.id === projectId)
+      const project = availableProjects.find((p) => p.id === projectId)
       const override = project?.auto_create_worktree_on_task_create
       if (override === 1) return true
       if (override === 0) return false
@@ -435,7 +431,11 @@ export function CreateTaskDialog({
                 <FormItem>
                   <FormLabel>Project</FormLabel>
                   <FormControl>
-                    <ProjectSelect value={field.value} onChange={field.onChange} />
+                    <ProjectSelect
+                      value={field.value}
+                      onChange={field.onChange}
+                      projects={projects}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

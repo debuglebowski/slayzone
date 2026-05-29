@@ -11,6 +11,8 @@ export interface SidebarViewContext {
   onSelectProject: (id: string) => void
   onProjectSettings: (project: Project) => void
   onTaskClick?: (taskId: string) => void
+  /** Warm task detail data/module before the user commits to opening the task. */
+  onTaskPrefetch?: (taskId: string) => void
   /** Close a task tab by id (handles temporary task DB cleanup). */
   onCloseTab?: (taskId: string) => void
   /** Open a task as a background tab without changing focus. */

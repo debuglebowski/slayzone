@@ -212,18 +212,20 @@ interface TabState {
 }
 
 function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup): number {
-  const task = lookup.tasks.find((t) => t.id === taskId)
+  const tasksById = new Map(lookup.tasks.map((t) => [t.id, t]))
+  const projectsById = new Map(lookup.projects.map((p) => [p.id, p]))
+  const task = tasksById.get(taskId)
   if (!task?.project_id) return tabs.length
-  const project = lookup.projects.find((p) => p.id === task.project_id)
+  const project = projectsById.get(task.project_id)
   const effectivePath = task.worktree_path || project?.path
   if (!effectivePath) return tabs.length
   let lastSibling = -1
   for (let i = tabs.length - 1; i >= 0; i--) {
     const tab = tabs[i]
     if (tab.type !== 'task') continue
-    const t = lookup.tasks.find((x) => x.id === tab.taskId)
+    const t = tasksById.get(tab.taskId)
     if (!t?.project_id) continue
-    const p = lookup.projects.find((pr) => pr.id === t.project_id)
+    const p = projectsById.get(t.project_id)
     const otherPath = t.worktree_path || p?.path
     if (otherPath === effectivePath) {
       lastSibling = i
