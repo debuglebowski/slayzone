@@ -60,11 +60,9 @@ Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 
 **React transform**: Babel + `babel-plugin-react-compiler` in all modes (dev + prod). Auto-memoization active everywhere; compiler rule violations surface at build time.
 
-**React transform**: Babel + `babel-plugin-react-compiler` in all modes (dev + prod). Auto-memoization active everywhere; compiler rule violations surface at build time.
+**React prod in dev**: `pnpm dev` runs React's production build via a single lever — `optimizeDeps.esbuildOptions.define` sets `NODE_ENV=production` so the pre-bundled `react`/`react-dom` chunks resolve to `cjs/*.production`. Source + every pre-bundled dep share that one optimized React instance. Paired with `esbuild.jsxDev:false` (emit `jsx`, not `jsxDEV`, since the prod define stubs `jsx-dev-runtime`). **Do NOT** alias `react/*` to on-disk cjs files (serves source a 2nd React copy → dual dispatcher → `useMemo` null in ConvexAuthProvider) and **do NOT** add a top-level `define: process.env.NODE_ENV` (stubs the react-refresh runtime). `import.meta.env.DEV`/`__DEV__` stay `true`. `SLAYZONE_REACT_DEV=1` opts out; `SLAYZONE_PROFILE=1` overrides.
 
-**React prod in dev**: `pnpm dev` aliases `react`, `react/jsx-runtime`, `react/jsx-dev-runtime`, `react-dom`, `react-dom/client` directly to their `cjs/*.production.js` bundles via regex array aliases (exact match — no prefix mangling). Also sets `esbuild.jsxDev: false` and `esbuildOptions.define NODE_ENV=production` for pre-bundled deps. `import.meta.env.DEV` and `__DEV__` stay `true`. Flip with `SLAYZONE_REACT_DEV=1` to restore React dev warnings. `SLAYZONE_PROFILE=1` overrides.
-
-**HMR disabled in dev**: `server.hmr: false` — prod React strips `scheduleRefresh` from its DevTools internals, making react-refresh a silent no-op. File changes still trigger automatic full page reload via Vite.
+**HMR in dev**: channel kept enabled. Under prod React, react-refresh is an inert no-op (prod react-dom omits `scheduleRefresh` → no targeted hot-reload, never throws), but the channel is required for Vite's full-reload on dep re-optimize — without it, a runtime re-optimize leaves mixed dep-hash modules → multiple React copies. File changes trigger full page reload.
 
 ## Theming
 
