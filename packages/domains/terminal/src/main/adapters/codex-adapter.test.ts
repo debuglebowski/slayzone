@@ -26,6 +26,16 @@ function expect(actual: unknown) {
   }
 }
 
+console.log('\nCodexAdapter config\n')
+
+test('hookDriven is true — Enter does NOT optimistically flip to running', () => {
+  // Codex is fully hook-driven (UserPromptSubmit/PreToolUse/Stop). The
+  // optimistic Enter → 'running' flip is suppressed so a local slash command
+  // (/status) — which fires no hook — can't pin the spinner on 'running'
+  // (Infinity = no silence-timer to undo a wrong flip).
+  expect(adapter.hookDriven).toBe(true)
+})
+
 console.log('\nCodexAdapter.detectActivity (hook-driven; only approval modal → idle)\n')
 
 test('"esc to interrupt" → null (working is hook-driven via UserPromptSubmit/PreToolUse)', () => {

@@ -313,6 +313,18 @@ test('already running → no flip', () => {
   expect(shouldFlipToRunningOnInput({}, 'running', 5)).toBe(false)
 })
 
+test('hook-driven adapter → never flip on input (hooks are sole running signal)', () => {
+  expect(shouldFlipToRunningOnInput({ hookDriven: true }, 'idle', 5)).toBe(false)
+})
+
+test('hook-driven + output-driven both suppress flip', () => {
+  expect(shouldFlipToRunningOnInput({ hookDriven: true, transitionOnInput: false }, 'idle', 5)).toBe(false)
+})
+
+test('hookDriven undefined keeps TUI flip behavior (regression guard)', () => {
+  expect(shouldFlipToRunningOnInput({ hookDriven: undefined }, 'idle', 5)).toBe(true)
+})
+
 console.log('\nIntegration: TUI redraw stream → idle flip\n')
 
 /**

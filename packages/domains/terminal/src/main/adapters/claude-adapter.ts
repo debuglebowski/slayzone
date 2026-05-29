@@ -30,6 +30,10 @@ export class ClaudeAdapter implements TerminalAdapter {
   // running→idle mid-turn → spurious needs_attention. Infinity makes the
   // inactivity checker skip this adapter (shouldFlipToIdle is always false).
   readonly idleTimeoutMs = Infinity
+  // Fully hook-driven (see HOOK_DRIVEN_MODES): skips the optimistic
+  // Enter→'running' flip. A local slash command (/status) fires no hook and
+  // Infinity leaves no silence-timer to undo a wrong flip → stuck-running.
+  readonly hookDriven = true
 
   /** Claude Code enables Kitty keyboard protocol; internal newlines must be
    *  encoded as Shift+Enter so they're treated as newline-in-input (not submit). */

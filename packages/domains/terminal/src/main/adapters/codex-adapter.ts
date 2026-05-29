@@ -31,11 +31,11 @@ export class CodexAdapter implements TerminalAdapter {
   // covers the lagging-hook case. A time-based fallback only misfired: a
   // quiet "thinking" gap tripped a false running→idle mid-turn → spurious
   // needs_attention. Infinity makes the inactivity checker skip this adapter.
-  //
-  // `transitionOnInput` is left at the TUI default (like ClaudeAdapter):
-  // Enter flips to 'running' for instant feedback before the
-  // UserPromptSubmit hook lands.
   readonly idleTimeoutMs = Infinity
+  // Fully hook-driven (see HOOK_DRIVEN_MODES): skips the optimistic
+  // Enter→'running' flip. A local slash command (/status) fires no hook and
+  // Infinity leaves no silence-timer to undo a wrong flip → stuck-running.
+  readonly hookDriven = true
   readonly sessionIdCommand = '/status'
 
   encodeSubmit = defaultEncodeSubmit

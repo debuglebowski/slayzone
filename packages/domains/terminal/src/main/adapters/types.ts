@@ -99,6 +99,17 @@ export interface TerminalAdapter {
    */
   readonly transitionOnInput?: boolean
 
+  /**
+   * True when this adapter's running/idle state is fully owned by lifecycle
+   * hooks (claude-code, codex, antigravity — see `HOOK_DRIVEN_MODES`, derived
+   * from this flag). Such adapters skip the optimistic Enter→'running' flip:
+   * a local slash command (e.g. `/status`) submits input but starts no turn,
+   * so no hook fires; with `idleTimeoutMs = Infinity` there is no silence-timer
+   * to undo a wrong flip → the spinner would stick on 'running' forever. The
+   * hook (UserPromptSubmit / PreToolUse) is the sole 'running' signal instead.
+   */
+  readonly hookDriven?: boolean
+
   /** Command to run in terminal to discover session ID. Undefined = supports --session-id at creation. */
   readonly sessionIdCommand?: string
 

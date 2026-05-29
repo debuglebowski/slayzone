@@ -19,7 +19,11 @@ vi.mock('@slayzone/terminal/main', () => ({
   findSessionByTaskIdAndMode: (taskId: string, mode: string) => findSessionSpy(taskId, mode),
   transitionStateFromHook: (sessionId: string, state: string, event: string) =>
     transitionSpy(sessionId, state, event),
-  markSessionActiveFromHook: (sessionId: string) => markActiveSpy(sessionId)
+  markSessionActiveFromHook: (sessionId: string) => markActiveSpy(sessionId),
+  // Mirror the real registry-derived set (claude-code/codex/antigravity carry
+  // hookDriven=true). The route uses this to decide whether hooks drive state;
+  // the gemini "broadcast only" test below exercises the false branch.
+  isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode)
 }))
 
 // Diagnostics call from the handler must not blow up under vitest's lack of

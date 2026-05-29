@@ -19,10 +19,11 @@ export class AntigravityAdapter implements TerminalAdapter {
   // No silence-timer fallback: hooks (installed by antigravity-hook-installer)
   // drive running→idle. Infinity makes the inactivity checker skip this adapter.
   readonly idleTimeoutMs = Infinity
-  // `transitionOnInput` left at the TUI default (like Claude/Codex): Enter
-  // flips to 'running' for instant feedback before the PreInvocation hook
-  // lands. An explicit `false` would also pin the idle clock open on every
-  // TUI redraw — antigravity redraws constantly.
+  // Fully hook-driven (see HOOK_DRIVEN_MODES): skips the optimistic
+  // Enter→'running' flip. Input that starts no turn (e.g. a local slash
+  // command) fires no hook, and Infinity leaves no silence-timer to undo a
+  // wrong flip → stuck-running. Hooks are the sole 'running' signal.
+  readonly hookDriven = true
   // Heavy CLI bundle; allow generous startup window for first output.
   readonly startupTimeoutMs = 20_000
 

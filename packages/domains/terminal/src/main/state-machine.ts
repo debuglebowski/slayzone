@@ -182,12 +182,16 @@ export function shouldFlipToIdle(
  * Should pressing Enter auto-flip a session to 'running'?
  * TUI adapters (default) want this so the spinner state is reflected
  * immediately; plain shell opts out to avoid spurious "running" on commands.
+ * Hook-driven adapters opt out too: their 'running' comes from the hook, and
+ * with no silence-timer (idleTimeoutMs=Infinity) there is nothing to undo a
+ * flip that a local slash command (/status) never confirms → stuck-running.
  */
 export function shouldFlipToRunningOnInput(
-  adapter: { transitionOnInput?: boolean },
+  adapter: { transitionOnInput?: boolean; hookDriven?: boolean },
   state: TerminalState,
   inputBufferTrimmedLength: number
 ): boolean {
+  if (adapter.hookDriven) return false
   return adapter.transitionOnInput !== false && inputBufferTrimmedLength > 0 && state !== 'running'
 }
 

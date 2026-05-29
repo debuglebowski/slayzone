@@ -6,7 +6,8 @@ import { mapEventType } from '@slayzone/terminal/shared'
 import {
   findSessionByTaskIdAndMode,
   transitionStateFromHook,
-  markSessionActiveFromHook
+  markSessionActiveFromHook,
+  isHookDrivenMode
 } from '@slayzone/terminal/main'
 import { updateTask, getTaskOp } from '@slayzone/task/main'
 import { getProviderConversationId } from '@slayzone/task/shared'
@@ -104,17 +105,6 @@ function codexHookToTerminalState(hookEvent: string): TerminalState | null {
       return null
   }
 }
-
-/**
- * Agents whose PTY state machine is driven by hook signals instead of adapter
- * output detection. Claude Code, Codex and Antigravity all have reliable native
- * lifecycle hooks; gemini/opencode still rely on adapter detection.
- */
-const HOOK_DRIVEN_AGENTS: ReadonlySet<string> = new Set([
-  'claude-code',
-  'codex',
-  'antigravity'
-])
 
 /**
  * Antigravity (`agy`) raw hook event → TerminalState. `agy` has no per-turn
@@ -303,7 +293,7 @@ export function registerAgentHookRoute(
     // Drive the PTY state machine from the hook signal — the source of truth
     // for hook-driven agents (replaces adapter output detection / bullet-glyph
     // regex). gemini/opencode still rely on adapter detection.
-    if (HOOK_DRIVEN_AGENTS.has(parsed.data.agentId) && parsed.data.taskId) {
+    if (isHookDrivenMode(parsed.data.agentId) && parsed.data.taskId) {
       const mode = parsed.data.agentId as TerminalMode
       const sessionId = bridge.findSession(parsed.data.taskId, mode)
       if (sessionId) {

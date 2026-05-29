@@ -37,6 +37,7 @@ export {
 } from './pty-manager'
 export { resolveUserShell, getShellStartupArgs, whichBinary, getEnrichedPath } from './shell-env'
 export { syncTerminalModes } from './startup-sync'
+export { isHookDrivenMode, HOOK_DRIVEN_MODES } from './adapters'
 export {
   registerChatHandlers,
   shutdownChatTransports,

@@ -26,6 +26,15 @@ function expect(actual: unknown) {
   }
 }
 
+console.log('\nAntigravityAdapter config\n')
+
+test('hookDriven is true — Enter does NOT optimistically flip to running', () => {
+  // Antigravity is fully hook-driven (PreInvocation/Stop). The optimistic
+  // Enter → 'running' flip is suppressed so input that starts no turn can't
+  // pin the spinner on 'running' (Infinity = no silence-timer to undo it).
+  expect(adapter.hookDriven).toBe(true)
+})
+
 console.log('\nAntigravityAdapter.detectConversationId\n')
 
 test('extracts UUID from box-drawing session output', () => {

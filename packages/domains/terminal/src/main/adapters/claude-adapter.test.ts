@@ -33,10 +33,14 @@ function expect(actual: unknown) {
 
 console.log('\nClaudeAdapter config\n')
 
-test('transitionOnInput is not explicitly false (TUI default → Enter flips to running)', () => {
-  // Claude is hook-driven with no silence-timer fallback. The TUI default
-  // keeps the Enter → 'running' flip for instant feedback before the
-  // UserPromptSubmit hook lands; an explicit `false` would drop that.
+test('hookDriven is true — Enter does NOT optimistically flip to running', () => {
+  // Claude is fully hook-driven (UserPromptSubmit/Stop). The optimistic
+  // Enter → 'running' flip is suppressed: a local slash command (/status)
+  // fires no hook and Infinity leaves no silence-timer to undo a wrong flip →
+  // the spinner would stick on 'running' forever. Hooks are the sole 'running'
+  // signal. transitionOnInput stays at the TUI default (idle-clock semantics
+  // unchanged); hookDriven is what suppresses the flip.
+  expect(adapter.hookDriven).toBe(true)
   expect(adapter.transitionOnInput !== false).toBe(true)
 })
 

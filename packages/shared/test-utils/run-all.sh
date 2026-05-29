@@ -47,6 +47,12 @@ run_test packages/domains/automations/src/main/engine.test.ts
 run_test packages/domains/terminal/src/main/filter-buffer-data.test.ts
 run_test packages/domains/terminal/src/client/webgl-loader.test.ts
 
+# Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
+run_test packages/domains/terminal/src/main/state-machine.test.ts
+run_test packages/domains/terminal/src/main/adapters/claude-adapter.test.ts
+run_test packages/domains/terminal/src/main/adapters/antigravity-adapter.test.ts
+run_test packages/domains/terminal/src/main/adapters/hook-driven-modes.test.ts
+
 # Terminal — Codex Chat (codex-chat mode) driver + transport + adapter
 run_test packages/domains/terminal/src/main/agents/codex/codex-app-server-client.test.ts
 run_test packages/domains/terminal/src/main/agents/codex/codex-chat-session.test.ts
