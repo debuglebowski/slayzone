@@ -1,8 +1,11 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, lazy, Suspense } from 'react'
 import { Pin } from 'lucide-react'
 import type { Task, PanelVisibility } from '@slayzone/task/shared'
-import { TaskDetailPage } from '@slayzone/task/client/TaskDetailPage'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
+
+const TaskDetailPage = lazy(() =>
+  import('@slayzone/task/client/TaskDetailPage').then((m) => ({ default: m.TaskDetailPage }))
+)
 import { fetchTaskDetail, type TaskDetailData } from '@slayzone/task/client/taskDetailCache'
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from '@slayzone/ui'
 import { BoostPill } from '@/components/usage/BoostPill'
@@ -134,32 +137,34 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
         >
           <div className="flex-1 min-w-0 min-h-0 rounded-lg overflow-hidden relative">
             <div className="h-full">
-              <TaskDetailPage
-                key={taskId}
-                taskId={taskId}
-                task={data.task}
-                project={project}
-                isActive={true}
-                hasShortcutFocus={true}
-                onBack={handleClose}
-                onTaskUpdated={handleTaskUpdated}
-                onArchiveTask={async (id) => {
-                  await window.api.db.archiveTask(id)
-                  handleClose()
-                }}
-                onDeleteTask={async (id) => {
-                  await window.api.db.deleteTask(id)
-                  handleClose()
-                }}
-                onNavigateToTask={(id) => {
-                  window.api.taskWindow.open(id)
-                }}
-                onCloseTab={handleClose}
-                initialData={initialDataForPage}
-                isSidePanelResizing={false}
-                isSecondaryWindow
-                onPanelVisibilityChange={setPanelVis}
-              />
+              <Suspense fallback={<TaskShell />}>
+                <TaskDetailPage
+                  key={taskId}
+                  taskId={taskId}
+                  task={data.task}
+                  project={project}
+                  isActive={true}
+                  hasShortcutFocus={true}
+                  onBack={handleClose}
+                  onTaskUpdated={handleTaskUpdated}
+                  onArchiveTask={async (id) => {
+                    await window.api.db.archiveTask(id)
+                    handleClose()
+                  }}
+                  onDeleteTask={async (id) => {
+                    await window.api.db.deleteTask(id)
+                    handleClose()
+                  }}
+                  onNavigateToTask={(id) => {
+                    window.api.taskWindow.open(id)
+                  }}
+                  onCloseTab={handleClose}
+                  initialData={initialDataForPage}
+                  isSidePanelResizing={false}
+                  isSecondaryWindow
+                  onPanelVisibilityChange={setPanelVis}
+                />
+              </Suspense>
             </div>
           </div>
         </div>

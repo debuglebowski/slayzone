@@ -45,9 +45,6 @@ interface GlobalAgentSidePanelProps {
   onReattach?: () => void
 }
 
-export const GLOBAL_AGENT_PANEL_MIN_WIDTH = 320
-export const GLOBAL_AGENT_PANEL_MAX_WIDTH = 720
-
 export function GlobalAgentSidePanel({
   width,
   sessionId,

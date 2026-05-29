@@ -1,7 +1,9 @@
+import { lazy, Suspense } from 'react'
 import { LayoutGrid, ListTree } from 'lucide-react'
 import type { SidebarView } from './types'
 import { ProjectsRailView } from './ProjectsRailView'
-import { TreeView } from './TreeView'
+
+const TreeView = lazy(() => import('./TreeView').then((m) => ({ default: m.TreeView })))
 
 export const viewRegistry: SidebarView[] = [
   {
@@ -22,7 +24,11 @@ export const viewRegistry: SidebarView[] = [
     defaultWidth: 384,
     minWidth: 220,
     maxWidth: 720,
-    render: (ctx) => <TreeView {...ctx} />
+    render: (ctx) => (
+      <Suspense fallback={<div className="flex-1 animate-pulse bg-sidebar" />}>
+        <TreeView {...ctx} />
+      </Suspense>
+    )
   }
 ]
 

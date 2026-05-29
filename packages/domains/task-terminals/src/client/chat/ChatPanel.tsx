@@ -58,7 +58,7 @@ import {
   isAwaitingUserQuestion,
   type TimelineItem
 } from '@slayzone/terminal/client'
-import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor'
+import { useImagePasteDrop, useArtifactUpload, type ArtifactRef } from '@slayzone/editor/hooks'
 import { AutocompleteMenu } from './autocomplete/AutocompleteMenu'
 import { useAutocomplete } from './autocomplete/useAutocomplete'
 import { createSkillsSource } from './autocomplete/sources/skills'

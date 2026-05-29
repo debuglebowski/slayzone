@@ -9,6 +9,8 @@ export interface GlobalAgentPanelState {
 }
 
 export const DEFAULT_GLOBAL_AGENT_PANEL_WIDTH = 400
+export const GLOBAL_AGENT_PANEL_MIN_WIDTH = 320
+export const GLOBAL_AGENT_PANEL_MAX_WIDTH = 720
 
 const DEFAULT_STATE: GlobalAgentPanelState = {
   isOpen: false,

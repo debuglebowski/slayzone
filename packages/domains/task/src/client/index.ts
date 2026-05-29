@@ -14,7 +14,5 @@ export {
   type SnoozePreset
 } from './SnoozePicker'
 export { TaskProgressPopover } from './TaskProgressPopover'
-export { ArtifactsPanel, type ArtifactsPanelHandle } from './ArtifactsPanel'
-export { useArtifacts, type UseArtifactsReturn } from './useArtifacts'
 export { usePanelOwnership } from './usePanelOwnership'
 export { PanelOwnerStub } from './PanelOwnerStub'

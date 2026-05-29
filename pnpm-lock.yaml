@@ -163,6 +163,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../../domains/task-artifacts
+      '@slayzone/task-browser':
+        specifier: workspace:*
+        version: link:../../domains/task-browser
       '@slayzone/task-terminals':
         specifier: workspace:*
         version: link:../../domains/task-terminals
@@ -984,9 +987,39 @@ importers:
 
   packages/domains/task-artifacts:
     dependencies:
+      '@codemirror/view':
+        specifier: ^6.36.5
+        version: 6.39.12
+      '@slayzone/editor':
+        specifier: workspace:*
+        version: link:../../shared/editor
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../file-editor
+      '@slayzone/markdown':
+        specifier: workspace:*
+        version: link:../../shared/markdown
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../settings
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
+      '@slayzone/telemetry':
+        specifier: workspace:*
+        version: link:../telemetry
+      '@slayzone/ui':
+        specifier: workspace:*
+        version: link:../../shared/ui
       diff:
         specifier: ^7.0.0
         version: 7.0.0
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
       zod:
         specifier: ^4
         version: 4.3.5
@@ -1776,9 +1809,6 @@ importers:
       diff:
         specifier: ^8.0.3
         version: 8.0.3
-      framer-motion:
-        specifier: ^12.26.2
-        version: 12.29.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)

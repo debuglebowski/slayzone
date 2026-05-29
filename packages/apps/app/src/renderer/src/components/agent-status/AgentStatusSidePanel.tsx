@@ -14,9 +14,6 @@ interface AgentStatusSidePanelProps {
   currentProjectName?: string
 }
 
-export const AGENT_STATUS_PANEL_MIN_WIDTH = 240
-export const AGENT_STATUS_PANEL_MAX_WIDTH = 480
-
 export function AgentStatusSidePanel({
   width,
   idleTasks,

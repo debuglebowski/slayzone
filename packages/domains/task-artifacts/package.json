@@ -8,14 +8,25 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./main": "./src/main/index.ts"
+    "./main": "./src/main/index.ts",
+    "./client": "./src/client/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@codemirror/view": "^6.36.5",
+    "@slayzone/editor": "workspace:*",
+    "@slayzone/file-editor": "workspace:*",
+    "@slayzone/markdown": "workspace:*",
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/settings": "workspace:*",
+    "@slayzone/task": "workspace:*",
+    "@slayzone/telemetry": "workspace:*",
+    "@slayzone/ui": "workspace:*",
     "diff": "^7.0.0",
+    "lucide-react": "^0.562.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {

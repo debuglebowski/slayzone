@@ -7,6 +7,8 @@ export interface AgentStatusState {
 }
 
 export const DEFAULT_AGENT_STATUS_PANEL_WIDTH = 320
+export const AGENT_STATUS_PANEL_MIN_WIDTH = 240
+export const AGENT_STATUS_PANEL_MAX_WIDTH = 480
 
 const DEFAULT_STATE: AgentStatusState = {
   isLocked: false,

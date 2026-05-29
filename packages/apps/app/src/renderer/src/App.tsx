@@ -50,9 +50,6 @@ import {
 import type { Tag } from '@slayzone/tags/shared'
 // Domains
 import {
-  KanbanBoard,
-  KanbanListView,
-  FilterBar,
   useTasksData,
   useUndoableTaskActions,
   useFilterState,
@@ -62,11 +59,11 @@ import {
   useSnoozeWakeUp,
   TaskContextMenu,
   BulkTaskContextMenu
-} from '@slayzone/tasks'
+} from '@slayzone/tasks/hooks'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
 import { usePanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
-import { useProjectRepos } from '@slayzone/worktrees'
+import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/projects'
 import {
   ProjectLockPopover,
@@ -86,7 +83,6 @@ import {
 } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
 import { usePty, useActiveTaskIds, usePtyStatus } from '@slayzone/terminal/client'
-import { TerminalStatusDialog } from '@slayzone/terminal'
 // Shared
 import {
   Button,
@@ -132,7 +128,6 @@ import { useStaleSkillCount } from '@slayzone/ai-config/client'
 import { TabBar } from '@/components/tabs/TabBar'
 import {
   GlobalAgentPanelButton,
-  GlobalAgentSidePanel,
   GLOBAL_AGENT_PANEL_MIN_WIDTH,
   GLOBAL_AGENT_PANEL_MAX_WIDTH,
   useGlobalAgentPanelState,
@@ -140,7 +135,6 @@ import {
 } from '@/components/global-agent-panel'
 import {
   AgentStatusButton,
-  AgentStatusSidePanel,
   AGENT_STATUS_PANEL_MIN_WIDTH,
   AGENT_STATUS_PANEL_MAX_WIDTH,
   useIdleTasks,
@@ -233,6 +227,28 @@ const CliInstallDialog = lazy(() =>
 )
 const ChangelogDialog = lazy(() =>
   import('@/components/changelog/ChangelogDialog').then((m) => ({ default: m.ChangelogDialog }))
+)
+const KanbanBoard = lazy(() =>
+  import('@slayzone/tasks').then((m) => ({ default: m.KanbanBoard }))
+)
+const KanbanListView = lazy(() =>
+  import('@slayzone/tasks').then((m) => ({ default: m.KanbanListView }))
+)
+const FilterBar = lazy(() =>
+  import('@slayzone/tasks').then((m) => ({ default: m.FilterBar }))
+)
+const GlobalAgentSidePanel = lazy(() =>
+  import('@/components/global-agent-panel/GlobalAgentSidePanel').then((m) => ({
+    default: m.GlobalAgentSidePanel
+  }))
+)
+const AgentStatusSidePanel = lazy(() =>
+  import('@/components/agent-status/AgentStatusSidePanel').then((m) => ({
+    default: m.AgentStatusSidePanel
+  }))
+)
+const TerminalStatusDialog = lazy(() =>
+  import('@slayzone/terminal').then((m) => ({ default: m.TerminalStatusDialog }))
 )
 
 type ProjectSettingsTab =
@@ -2556,12 +2572,14 @@ function App(): React.JSX.Element {
                                               />
                                             )}
                                             <div className="h-4 w-px bg-border" />
-                                            <FilterBar
-                                              filter={filter}
-                                              onChange={setFilter}
-                                              tags={projectTags}
-                                              columns={selectedProject?.columns_config}
-                                            />
+                                            <Suspense fallback={null}>
+                                              <FilterBar
+                                                filter={filter}
+                                                onChange={setFilter}
+                                                tags={projectTags}
+                                                columns={selectedProject?.columns_config}
+                                              />
+                                            </Suspense>
                                           </div>
                                         )}
                                       {projects.length > 0 &&
@@ -2737,53 +2755,57 @@ function App(): React.JSX.Element {
                                                 style={{ width: w }}
                                               >
                                                 {id === 'kanban' && filter.viewMode !== 'list' && (
-                                                  <KanbanBoard
-                                                    tasks={displayTasks}
-                                                    columns={selectedProject?.columns_config}
-                                                    viewConfig={getViewConfig(filter)}
-                                                    isActive={tabs[activeTabIndex]?.type === 'home'}
-                                                    onTaskMove={handleTaskMove}
-                                                    onTaskBulkMove={handleTaskBulkMove}
-                                                    onTaskReorder={reorderTasks}
-                                                    onTaskClick={handleTaskClick}
-                                                    cardProperties={filter.cardProperties}
-                                                    taskTags={taskTags}
-                                                    tags={projectTags}
-                                                    onTaskTagsChange={handleTaskTagsChange}
-                                                    blockedTaskIds={blockedTaskIds}
-                                                    allProjects={projects}
-                                                    onUpdateTask={contextMenuUpdate}
-                                                    onBulkUpdateTasks={bulkContextMenuUpdate}
-                                                    onClearBlockers={clearBlockers}
-                                                    onArchiveTask={archiveTask}
-                                                    onDeleteTask={deleteTask}
-                                                    onBulkDeleteTasks={bulkDelete}
-                                                    onArchiveAllTasks={archiveTasks}
-                                                    activeAgentTaskIds={activeAgentTaskIds}
-                                                    onShutdownAgent={shutdownAgentForTask}
-                                                    selectionResetKey={selectedProjectId}
-                                                  />
+                                                  <Suspense fallback={null}>
+                                                    <KanbanBoard
+                                                      tasks={displayTasks}
+                                                      columns={selectedProject?.columns_config}
+                                                      viewConfig={getViewConfig(filter)}
+                                                      isActive={tabs[activeTabIndex]?.type === 'home'}
+                                                      onTaskMove={handleTaskMove}
+                                                      onTaskBulkMove={handleTaskBulkMove}
+                                                      onTaskReorder={reorderTasks}
+                                                      onTaskClick={handleTaskClick}
+                                                      cardProperties={filter.cardProperties}
+                                                      taskTags={taskTags}
+                                                      tags={projectTags}
+                                                      onTaskTagsChange={handleTaskTagsChange}
+                                                      blockedTaskIds={blockedTaskIds}
+                                                      allProjects={projects}
+                                                      onUpdateTask={contextMenuUpdate}
+                                                      onBulkUpdateTasks={bulkContextMenuUpdate}
+                                                      onClearBlockers={clearBlockers}
+                                                      onArchiveTask={archiveTask}
+                                                      onDeleteTask={deleteTask}
+                                                      onBulkDeleteTasks={bulkDelete}
+                                                      onArchiveAllTasks={archiveTasks}
+                                                      activeAgentTaskIds={activeAgentTaskIds}
+                                                      onShutdownAgent={shutdownAgentForTask}
+                                                      selectionResetKey={selectedProjectId}
+                                                    />
+                                                  </Suspense>
                                                 )}
                                                 {id === 'kanban' && filter.viewMode === 'list' && (
-                                                  <KanbanListView
-                                                    tasks={displayTasks}
-                                                    columns={selectedProject?.columns_config}
-                                                    viewConfig={getViewConfig(filter)}
-                                                    onTaskMove={handleTaskMove}
-                                                    onTaskReorder={reorderTasks}
-                                                    onTaskClick={handleTaskClick}
-                                                    cardProperties={filter.cardProperties}
-                                                    blockedTaskIds={blockedTaskIds}
-                                                    allProjects={projects}
-                                                    onUpdateTask={contextMenuUpdate}
-                                                    onArchiveTask={archiveTask}
-                                                    onDeleteTask={deleteTask}
-                                                    tags={projectTags}
-                                                    taskTags={taskTags}
-                                                    onTaskTagsChange={handleTaskTagsChange}
-                                                    activeAgentTaskIds={activeAgentTaskIds}
-                                                    onShutdownAgent={shutdownAgentForTask}
-                                                  />
+                                                  <Suspense fallback={null}>
+                                                    <KanbanListView
+                                                      tasks={displayTasks}
+                                                      columns={selectedProject?.columns_config}
+                                                      viewConfig={getViewConfig(filter)}
+                                                      onTaskMove={handleTaskMove}
+                                                      onTaskReorder={reorderTasks}
+                                                      onTaskClick={handleTaskClick}
+                                                      cardProperties={filter.cardProperties}
+                                                      blockedTaskIds={blockedTaskIds}
+                                                      allProjects={projects}
+                                                      onUpdateTask={contextMenuUpdate}
+                                                      onArchiveTask={archiveTask}
+                                                      onDeleteTask={deleteTask}
+                                                      tags={projectTags}
+                                                      taskTags={taskTags}
+                                                      onTaskTagsChange={handleTaskTagsChange}
+                                                      activeAgentTaskIds={activeAgentTaskIds}
+                                                      onShutdownAgent={shutdownAgentForTask}
+                                                    />
+                                                  </Suspense>
                                                 )}
                                                 {id === 'git' && (
                                                   <Suspense
@@ -2980,25 +3002,27 @@ function App(): React.JSX.Element {
                         globalAgentPanelState.isOpen ? undefined : { position: 'absolute' as const }
                       }
                     >
-                      <GlobalAgentSidePanel
-                        width={globalAgentPanelState.panelWidth}
-                        sessionId={agentSessionId}
-                        cwd={projects.find((p) => p.id === selectedProjectId)?.path ?? ''}
-                        mode={agentMode as import('@slayzone/terminal/shared').TerminalMode}
-                        isActive={globalAgentPanelState.isOpen}
-                        isResizing={isSidePanelResizing}
-                        onNewSession={handleAgentNewSession}
-                        onModeChange={handleAgentModeChange}
-                        floatingEnabled={globalAgentPanelState.floatingEnabled}
-                        onToggleFloating={() =>
-                          setGlobalAgentPanelState({
-                            floatingEnabled: !globalAgentPanelState.floatingEnabled
-                          })
-                        }
-                        floatingState={floatingGlobalAgentPanelState.kind}
-                        onDetach={() => window.api.floatingGlobalAgentPanel.detach()}
-                        onReattach={() => window.api.floatingGlobalAgentPanel.reattach()}
-                      />
+                      <Suspense fallback={null}>
+                        <GlobalAgentSidePanel
+                          width={globalAgentPanelState.panelWidth}
+                          sessionId={agentSessionId}
+                          cwd={projects.find((p) => p.id === selectedProjectId)?.path ?? ''}
+                          mode={agentMode as import('@slayzone/terminal/shared').TerminalMode}
+                          isActive={globalAgentPanelState.isOpen}
+                          isResizing={isSidePanelResizing}
+                          onNewSession={handleAgentNewSession}
+                          onModeChange={handleAgentModeChange}
+                          floatingEnabled={globalAgentPanelState.floatingEnabled}
+                          onToggleFloating={() =>
+                            setGlobalAgentPanelState({
+                              floatingEnabled: !globalAgentPanelState.floatingEnabled
+                            })
+                          }
+                          floatingState={floatingGlobalAgentPanelState.kind}
+                          onDetach={() => window.api.floatingGlobalAgentPanel.detach()}
+                          onReattach={() => window.api.floatingGlobalAgentPanel.reattach()}
+                        />
+                      </Suspense>
                     </div>
                   )}
                   {agentStatusState.isLocked && (
@@ -3025,21 +3049,23 @@ function App(): React.JSX.Element {
                     />
                   )}
                   {agentStatusState.isLocked && (
-                    <AgentStatusSidePanel
-                      width={agentStatusState.panelWidth}
-                      idleTasks={idleTasks}
-                      filterCurrentProject={agentStatusState.filterCurrentProject}
-                      onFilterToggle={() =>
-                        setAgentStatusState({
-                          filterCurrentProject: !agentStatusState.filterCurrentProject
-                        })
-                      }
-                      onNavigate={openTask}
-                      onDismiss={handleDismissIdle}
-                      columnsByProjectId={columnsByProjectId}
-                      selectedProjectId={selectedProjectId}
-                      currentProjectName={projects.find((p) => p.id === selectedProjectId)?.name}
-                    />
+                    <Suspense fallback={null}>
+                      <AgentStatusSidePanel
+                        width={agentStatusState.panelWidth}
+                        idleTasks={idleTasks}
+                        filterCurrentProject={agentStatusState.filterCurrentProject}
+                        onFilterToggle={() =>
+                          setAgentStatusState({
+                            filterCurrentProject: !agentStatusState.filterCurrentProject
+                          })
+                        }
+                        onNavigate={openTask}
+                        onDismiss={handleDismissIdle}
+                        columnsByProjectId={columnsByProjectId}
+                        selectedProjectId={selectedProjectId}
+                        currentProjectName={projects.find((p) => p.id === selectedProjectId)?.name}
+                      />
+                    </Suspense>
                   )}
                   </div>
                 </div>
@@ -3253,7 +3279,9 @@ function App(): React.JSX.Element {
             onRestart={() => window.api.app.restartForUpdate()}
             onDismiss={() => setUpdateToastDismissed(true)}
           />
-          <TerminalStatusDialog tasks={tasks} onTaskClick={openTask} />
+          <Suspense fallback={null}>
+            <TerminalStatusDialog tasks={tasks} onTaskClick={openTask} />
+          </Suspense>
           <Toaster position="bottom-right" theme="dark" closeButton />
         </div>
       </SidebarProvider>

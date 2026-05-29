@@ -1,9 +1,23 @@
-import { useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
+import { useState, useCallback, useRef, forwardRef, useImperativeHandle, lazy, Suspense } from 'react'
 import { Terminal, type TerminalHandle } from '@slayzone/terminal/client/LazyTerminal'
 import type { TerminalTab } from '../shared/types'
 import { isChatSupported } from '../shared/chat-modes'
 import { TerminalContextMenu } from './TerminalContextMenu'
-import { ChatPanel, type ChatPanelHandle } from './chat/ChatPanel'
+import type { ChatPanelHandle } from './chat/ChatPanel'
+import { Skeleton } from '@slayzone/ui'
+
+const ChatPanel = lazy(() => import('./chat/ChatPanel').then((m) => ({ default: m.ChatPanel })))
+
+function ChatPanelSkeleton() {
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-1" />
+      <div className="border-t border-border p-2">
+        <Skeleton className="h-9 w-full rounded-md" />
+      </div>
+    </div>
+  )
+}
 import { TerminalStarter } from './TerminalStarter'
 
 interface PaneProps {
@@ -143,20 +157,22 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
     const renderPane = (pane: PaneProps) => {
       if (isChatPane(pane)) {
         return (
-          <ChatPanel
-            ref={chatRefs.current[pane.tab.id]}
-            key={pane.tab.id}
-            tabId={pane.tab.id}
-            taskId={pane.taskId}
-            mode={pane.tab.mode}
-            cwd={pane.cwd}
-            isActive={isActive}
-            providerFlagsOverride={pane.providerFlags ?? null}
-            permissionNotice={pane.permissionNotice ?? null}
-            onOpenUrl={onOpenUrl}
-            onOpenFile={onOpenFile}
-            wasSpawned={pane.tab.wasSpawned}
-          />
+          <Suspense fallback={<ChatPanelSkeleton />}>
+            <ChatPanel
+              ref={chatRefs.current[pane.tab.id]}
+              key={pane.tab.id}
+              tabId={pane.tab.id}
+              taskId={pane.taskId}
+              mode={pane.tab.mode}
+              cwd={pane.cwd}
+              isActive={isActive}
+              providerFlagsOverride={pane.providerFlags ?? null}
+              permissionNotice={pane.permissionNotice ?? null}
+              onOpenUrl={onOpenUrl}
+              onOpenFile={onOpenFile}
+              wasSpawned={pane.tab.wasSpawned}
+            />
+          </Suspense>
         )
       }
 

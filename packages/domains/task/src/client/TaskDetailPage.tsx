@@ -1,4 +1,4 @@
-import React, { Activity, useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { Activity, useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
 import {
   MoreHorizontal,
   Archive,
@@ -37,10 +37,9 @@ import {
   PanelsTopLeft
 } from 'lucide-react'
 import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
-import { DescriptionDialog } from './DescriptionDialog'
-import { ArtifactsPanel, type ArtifactsPanelHandle } from './ArtifactsPanel'
-import { useArtifacts } from './useArtifacts'
-import { useArtifactUpload } from '@slayzone/editor'
+import type { ArtifactsPanelHandle } from '@slayzone/task-artifacts/client'
+import { useArtifacts } from '@slayzone/task-artifacts/client'
+import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -121,7 +120,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
-import { RichTextEditor } from '@slayzone/editor'
 import {
   normalizeDescription,
   stripMarkdown,
@@ -159,12 +157,8 @@ import {
   type TerminalContainerHandle,
   MODE_ICONS
 } from '@slayzone/task-terminals'
-import {
-  UnifiedGitPanel,
-  type UnifiedGitPanelHandle,
-  type GitTabId,
-  useProjectRepos
-} from '@slayzone/worktrees'
+import { useProjectRepos } from '@slayzone/worktrees/hooks'
+import type { UnifiedGitPanelHandle, GitTabId } from '@slayzone/worktrees'
 import {
   buildStatusOptions,
   cn,
@@ -178,8 +172,8 @@ import {
   getThemeEditorColors,
   type EditorThemeColors
 } from '@slayzone/ui'
-import { BrowserPanel, type BrowserPanelHandle } from '@slayzone/task-browser'
-import { FileEditorView, type FileEditorViewHandle } from '@slayzone/file-editor/client'
+import type { BrowserPanelHandle } from '@slayzone/task-browser'
+import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 import { track } from '@slayzone/telemetry/client'
 import { usePanelSizes, resolveWidths, minWidthFor } from './usePanelSizes'
@@ -193,6 +187,26 @@ import { WebPanelView } from './WebPanelView'
 import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
+import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
+
+const ArtifactsPanel = lazy(() =>
+  import('@slayzone/task-artifacts/client').then((m) => ({ default: m.ArtifactsPanel }))
+)
+const DescriptionDialog = lazy(() =>
+  import('./DescriptionDialog').then((m) => ({ default: m.DescriptionDialog }))
+)
+const RichTextEditor = lazy(() =>
+  import('@slayzone/editor').then((m) => ({ default: m.RichTextEditor }))
+)
+const UnifiedGitPanel = lazy(() =>
+  import('@slayzone/worktrees').then((m) => ({ default: m.UnifiedGitPanel }))
+)
+const BrowserPanel = lazy(() =>
+  import('@slayzone/task-browser').then((m) => ({ default: m.BrowserPanel }))
+)
+const FileEditorView = lazy(() =>
+  import('@slayzone/file-editor/client').then((m) => ({ default: m.FileEditorView }))
+)
 
 function TaskOverviewRow({
   sub,
@@ -3360,26 +3374,28 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('browser')}
                   />
                 ) : (
-                  // Activity pauses BrowserPanel's React render layer on hidden tabs.
-                  // WebContentsView is native and INTENTIONALLY keeps painting — users
-                  // rely on seeing browser state on hidden tabs without switching.
-                  // Do NOT add a setVisible(false) bridge here.
-                  <Activity mode={isActive ? 'visible' : 'hidden'}>
-                    <BrowserPanel
-                      ref={browserPanelRef}
-                      className="h-full"
-                      tabs={browserTabs}
-                      onTabsChange={handleBrowserTabsChange}
-                      onRequestHide={() => handlePanelToggle('browser', false)}
-                      taskId={task.id}
-                      projectId={task.project_id}
-                      isResizing={isResizing}
-                      isActive={isActive}
-                      onElementSnippet={handleInsertElementSnippet}
-                      onScreenshot={handleScreenshot}
-                      canUseDomPicker={panelVisibility.terminal}
-                    />
-                  </Activity>
+                  <Suspense fallback={<PanelLoadingSkeleton />}>
+                    {/* Activity pauses BrowserPanel's React render layer on hidden tabs.
+                        WebContentsView is native and INTENTIONALLY keeps painting — users
+                        rely on seeing browser state on hidden tabs without switching.
+                        Do NOT add a setVisible(false) bridge here. */}
+                    <Activity mode={isActive ? 'visible' : 'hidden'}>
+                      <BrowserPanel
+                        ref={browserPanelRef}
+                        className="h-full"
+                        tabs={browserTabs}
+                        onTabsChange={handleBrowserTabsChange}
+                        onRequestHide={() => handlePanelToggle('browser', false)}
+                        taskId={task.id}
+                        projectId={task.project_id}
+                        isResizing={isResizing}
+                        isActive={isActive}
+                        onElementSnippet={handleInsertElementSnippet}
+                        onScreenshot={handleScreenshot}
+                        canUseDomPicker={panelVisibility.terminal}
+                      />
+                    </Activity>
+                  </Suspense>
                 )}
               </div>
             )}
@@ -3408,14 +3424,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('editor')}
                   />
                 ) : effectiveRepoPath ? (
-                  <Activity mode={isActive ? 'visible' : 'hidden'}>
-                    <FileEditorView
-                      ref={fileEditorRefCallback}
-                      projectPath={effectiveRepoPath}
-                      initialEditorState={task.editor_open_files}
-                      onEditorStateChange={handleEditorStateChange}
-                    />
-                  </Activity>
+                  <Suspense fallback={<PanelLoadingSkeleton />}>
+                    <Activity mode={isActive ? 'visible' : 'hidden'}>
+                      <FileEditorView
+                        ref={fileEditorRefCallback}
+                        projectPath={effectiveRepoPath}
+                        initialEditorState={task.editor_open_files}
+                        onEditorStateChange={handleEditorStateChange}
+                      />
+                    </Activity>
+                  </Suspense>
                 ) : null}
               </div>
             )}
@@ -3444,15 +3462,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('artifacts')}
                   />
                 ) : (
-                  <Activity mode={isActive ? 'visible' : 'hidden'}>
-                    <ArtifactsPanel
-                      ref={artifactsPanelRef}
-                      taskId={task.id}
-                      isResizing={isResizing}
-                      initialActiveArtifactId={task.active_artifact_id}
-                      onActiveArtifactIdChange={handleActiveArtifactIdChange}
-                    />
-                  </Activity>
+                  <Suspense fallback={<PanelLoadingSkeleton />}>
+                    <Activity mode={isActive ? 'visible' : 'hidden'}>
+                      <ArtifactsPanel
+                        ref={artifactsPanelRef}
+                        taskId={task.id}
+                        isResizing={isResizing}
+                        initialActiveArtifactId={task.active_artifact_id}
+                        onActiveArtifactIdChange={handleActiveArtifactIdChange}
+                      />
+                    </Activity>
+                  </Suspense>
                 )}
               </div>
             )}
@@ -3532,31 +3552,33 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     onActivateAndClose={() => ownership.claimAndCloseOther('diff')}
                   />
                 ) : (
-                  <Activity mode={isActive ? 'visible' : 'hidden'}>
-                    <UnifiedGitPanel
-                      ref={gitPanelRef}
-                      task={task}
-                      projectId={task.project_id}
-                      projectPath={resolvedGitViewPath}
-                      completedStatus={completedStatus}
-                      visible={panelVisibility.diff}
-                      defaultTab={gitDefaultTab}
-                      onTabChange={handleGitTabChange}
-                      pollIntervalMs={5000}
-                      onUpdateTask={updateTaskAndNotify}
-                      onTaskUpdated={handleTaskUpdate}
-                      detectedRepos={viewableRepos.map((r) => ({
-                        name: r.name,
-                        path: r.path,
-                        kind: r.kind
-                      }))}
-                      selectedRepoName={
-                        viewableRepos.find((r) => r.path === resolvedGitViewPath)?.name ?? null
-                      }
-                      isRepoStale={false}
-                      onRepoChange={handleRepoChange}
-                    />
-                  </Activity>
+                  <Suspense fallback={<PanelLoadingSkeleton />}>
+                    <Activity mode={isActive ? 'visible' : 'hidden'}>
+                      <UnifiedGitPanel
+                        ref={gitPanelRef}
+                        task={task}
+                        projectId={task.project_id}
+                        projectPath={resolvedGitViewPath}
+                        completedStatus={completedStatus}
+                        visible={panelVisibility.diff}
+                        defaultTab={gitDefaultTab}
+                        onTabChange={handleGitTabChange}
+                        pollIntervalMs={5000}
+                        onUpdateTask={updateTaskAndNotify}
+                        onTaskUpdated={handleTaskUpdate}
+                        detectedRepos={viewableRepos.map((r) => ({
+                          name: r.name,
+                          path: r.path,
+                          kind: r.kind
+                        }))}
+                        selectedRepoName={
+                          viewableRepos.find((r) => r.path === resolvedGitViewPath)?.name ?? null
+                        }
+                        isRepoStale={false}
+                        onRepoChange={handleRepoChange}
+                      />
+                    </Activity>
+                  </Suspense>
                 )}
               </div>
             )}
@@ -3711,35 +3733,37 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                               </div>
                               {descriptionOpen && (
                                 <div className="flex flex-col min-h-0 flex-1">
-                                  <RichTextEditor
-                                    value={descriptionValue}
-                                    onChange={(md) => {
-                                      descriptionDirty.current = true
-                                      setDescriptionValue(md)
-                                    }}
-                                    onBlur={handleDescriptionSave}
-                                    placeholder="Add description..."
-                                    testId="task-description-editor"
-                                    variant="inline"
-                                    fontFamily={notesFontFamily}
-                                    checkedHighlight={notesCheckedHighlight}
-                                    showToolbar={notesShowToolbar}
-                                    spellcheck={notesSpellcheck}
-                                    themeColors={notesThemeColors}
-                                    artifacts={artifacts.map((a) => ({
-                                      id: a.id,
-                                      title: a.title,
-                                      type: RENDER_MODE_INFO[
-                                        getEffectiveRenderMode(a.title, a.render_mode)
-                                      ].label
-                                    }))}
-                                    onArtifactClick={(artifactId) => {
-                                      if (!panelVisibility.artifacts)
-                                        handlePanelToggle('artifacts', true)
-                                      artifactsPanelRef.current?.selectArtifact(artifactId)
-                                    }}
-                                    onUploadImages={handleUploadImages}
-                                  />
+                                  <Suspense fallback={<div className="h-20" />}>
+                                    <RichTextEditor
+                                      value={descriptionValue}
+                                      onChange={(md) => {
+                                        descriptionDirty.current = true
+                                        setDescriptionValue(md)
+                                      }}
+                                      onBlur={handleDescriptionSave}
+                                      placeholder="Add description..."
+                                      testId="task-description-editor"
+                                      variant="inline"
+                                      fontFamily={notesFontFamily}
+                                      checkedHighlight={notesCheckedHighlight}
+                                      showToolbar={notesShowToolbar}
+                                      spellcheck={notesSpellcheck}
+                                      themeColors={notesThemeColors}
+                                      artifacts={artifacts.map((a) => ({
+                                        id: a.id,
+                                        title: a.title,
+                                        type: RENDER_MODE_INFO[
+                                          getEffectiveRenderMode(a.title, a.render_mode)
+                                        ].label
+                                      }))}
+                                      onArtifactClick={(artifactId) => {
+                                        if (!panelVisibility.artifacts)
+                                          handlePanelToggle('artifacts', true)
+                                        artifactsPanelRef.current?.selectArtifact(artifactId)
+                                      }}
+                                      onUploadImages={handleUploadImages}
+                                    />
+                                  </Suspense>
                                 </div>
                               )}
                             </Collapsible>
@@ -4177,30 +4201,32 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         </DialogContent>
       </Dialog>
 
-      <DescriptionDialog
-        open={descriptionFullscreen}
-        onOpenChange={setDescriptionFullscreen}
-        value={descriptionValue}
-        onChange={setDescriptionValue}
-        onSave={handleDescriptionSave}
-        fontFamily={notesFontFamily}
-        readability={notesReadability}
-        width={notesWidth}
-        checkedHighlight={notesCheckedHighlight}
-        showToolbar={notesShowToolbar}
-        spellcheck={notesSpellcheck}
-        themeColors={notesThemeColors}
-        artifacts={artifacts.map((a) => ({
-          id: a.id,
-          title: a.title,
-          type: RENDER_MODE_INFO[getEffectiveRenderMode(a.title, a.render_mode)].label
-        }))}
-        onArtifactClick={(artifactId) => {
-          if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
-          artifactsPanelRef.current?.selectArtifact(artifactId)
-        }}
-        onUploadImages={handleUploadImages}
-      />
+      <Suspense fallback={null}>
+        <DescriptionDialog
+          open={descriptionFullscreen}
+          onOpenChange={setDescriptionFullscreen}
+          value={descriptionValue}
+          onChange={setDescriptionValue}
+          onSave={handleDescriptionSave}
+          fontFamily={notesFontFamily}
+          readability={notesReadability}
+          width={notesWidth}
+          checkedHighlight={notesCheckedHighlight}
+          showToolbar={notesShowToolbar}
+          spellcheck={notesSpellcheck}
+          themeColors={notesThemeColors}
+          artifacts={artifacts.map((a) => ({
+            id: a.id,
+            title: a.title,
+            type: RENDER_MODE_INFO[getEffectiveRenderMode(a.title, a.render_mode)].label
+          }))}
+          onArtifactClick={(artifactId) => {
+            if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
+            artifactsPanelRef.current?.selectArtifact(artifactId)
+          }}
+          onUploadImages={handleUploadImages}
+        />
+      </Suspense>
     </div>
   )
 })
