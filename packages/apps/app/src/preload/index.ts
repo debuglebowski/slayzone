@@ -538,9 +538,15 @@ const api: ElectronAPI = {
       ipcRenderer.on('pty:data', handler)
       return () => ipcRenderer.removeListener('pty:data', handler)
     },
-    onExit: (callback: (sessionId: string, exitCode: number) => void) => {
-      const handler = (_event: unknown, sessionId: string, exitCode: number) =>
-        callback(sessionId, exitCode)
+    onExit: (
+      callback: (sessionId: string, exitCode: number, reason?: string | null) => void
+    ) => {
+      const handler = (
+        _event: unknown,
+        sessionId: string,
+        exitCode: number,
+        reason?: string | null
+      ) => callback(sessionId, exitCode, reason ?? null)
       ipcRenderer.on('pty:exit', handler)
       return () => ipcRenderer.removeListener('pty:exit', handler)
     },
@@ -573,11 +579,6 @@ const api: ElectronAPI = {
     },
     ackEnsureAlive: (reqId: number, result: 'ok' | 'already-alive' | 'error') => {
       ipcRenderer.send('pty:ensure-alive:ack', reqId, result)
-    },
-    onSessionNotFound: (callback: (sessionId: string) => void) => {
-      const handler = (_event: unknown, sessionId: string) => callback(sessionId)
-      ipcRenderer.on('pty:session-not-found', handler)
-      return () => ipcRenderer.removeListener('pty:session-not-found', handler)
     },
     onStateChange: (
       callback: (sessionId: string, newState: TerminalState, oldState: TerminalState) => void

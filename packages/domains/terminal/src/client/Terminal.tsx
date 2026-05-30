@@ -105,7 +105,7 @@ import { useTheme, useAppearance } from '@slayzone/settings/client'
 import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
 import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
-import { stripUnderlineCodes, KITTY_SHIFT_ENTER } from '@slayzone/terminal/shared'
+import { stripUnderlineCodes, KITTY_SHIFT_ENTER, DETECTION_ENGINES } from '@slayzone/terminal/shared'
 import { track } from '@slayzone/telemetry/client'
 
 // Wait for container to have non-zero dimensions before opening terminal
@@ -170,7 +170,10 @@ export interface TerminalProps {
   isActive?: boolean
   onAttached?: (api: { sessionId: string; focus: () => void }) => void
   onConversationCreated?: (conversationId: string) => void
-  onSessionInvalid?: () => void
+  /** Start a brand-new session: clear the stored conversation id + remount.
+   *  Wired to the dead overlay's "Start fresh" action for a stale (auto-cleaned)
+   *  session — see issue #90. */
+  onStartFresh?: () => void
   onReady?: (api: {
     sendInput: (text: string) => Promise<void>
     write: (data: string) => Promise<boolean>
@@ -214,7 +217,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     isActive = true,
     onAttached,
     onConversationCreated,
-    onSessionInvalid,
+    onStartFresh,
     onReady,
     onFirstInput,
     onRetry,
@@ -249,6 +252,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [initError, setInitError] = useState<string | null>(null)
   const [deadExitCode, setDeadExitCode] = useState<number | null>(null)
   const [deadCrashOutput, setDeadCrashOutput] = useState<string | null>(null)
+  // Structured error code from the CLI at exit (e.g. SESSION_NOT_FOUND), carried
+  // on `pty:exit`. Drives the error-specific dead overlay (see issue #90).
+  const [deadReason, setDeadReason] = useState<string | null>(null)
   const [doctorResults, setDoctorResults] = useState<
     import('@slayzone/terminal/shared').ValidationResult[] | null
   >(null)
@@ -260,8 +266,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // mid-initialization — causing a data loss window where PTY output is silently dropped.
   const onConversationCreatedRef = useRef(onConversationCreated)
   onConversationCreatedRef.current = onConversationCreated
-  const onSessionInvalidRef = useRef(onSessionInvalid)
-  onSessionInvalidRef.current = onSessionInvalid
+  const onStartFreshRef = useRef(onStartFresh)
+  onStartFreshRef.current = onStartFresh
   const onReadyRef = useRef(onReady)
   onReadyRef.current = onReady
   const isActiveRef = useRef(isActive)
@@ -308,7 +314,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const {
     subscribe,
     subscribeExit,
-    subscribeSessionInvalid,
     subscribeState,
     getState,
     getCrashOutput,
@@ -1214,20 +1219,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
     })
 
-    const unsubExit = subscribeExit(sessionId, (exitCode) => {
+    const unsubExit = subscribeExit(sessionId, (exitCode, reason) => {
       terminalRef.current?.writeln(`\r\n\x1b[90mProcess exited with code ${exitCode}\x1b[0m`)
       // Capture crash output before cleanupTask deletes context state
       const raw = getCrashOutput(sessionId)
       // Clean up cached terminal and context state on exit
       disposeTerminal(sessionId)
       cleanupTask(sessionId)
-      // Show dead overlay for AI modes
+      // Show dead overlay for AI modes. `reason` (e.g. SESSION_NOT_FOUND) drives
+      // an error-specific message instead of the generic exit-code line.
       setDeadExitCode(exitCode)
+      setDeadReason(reason ?? null)
       if (raw) setDeadCrashOutput(raw)
-    })
-
-    const unsubSessionInvalid = subscribeSessionInvalid(sessionId, () => {
-      onSessionInvalidRef.current?.()
     })
 
     return () => {
@@ -1242,9 +1245,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       forceFlushRef.current = null
       unsubData()
       unsubExit()
-      unsubSessionInvalid()
     }
-  }, [sessionId, subscribe, subscribeExit, subscribeSessionInvalid, getCrashOutput, cleanupTask])
+  }, [sessionId, subscribe, subscribeExit, getCrashOutput, cleanupTask])
 
   // Replay missed PTY data when task becomes active
   useEffect(() => {
@@ -1809,9 +1811,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const handleRetry = useCallback(() => {
     setDeadExitCode(null)
     setDeadCrashOutput(null)
+    setDeadReason(null)
     setDoctorResults(null)
     onRetry?.()
   }, [onRetry])
+
+  // "Start fresh" on a stale (auto-cleaned) session: clear the dead overlay and
+  // ask the parent to start a brand-new session (clears the stored conversation
+  // id + remounts). See issue #90.
+  const handleStartFresh = useCallback(() => {
+    setDeadExitCode(null)
+    setDeadCrashOutput(null)
+    setDeadReason(null)
+    setDoctorResults(null)
+    onStartFreshRef.current?.()
+  }, [])
 
   const handleDoctor = useCallback(async () => {
     setDoctorLoading(true)
@@ -1828,6 +1842,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const showDeadOverlay =
     ptyState === 'dead' && !isInitializing && deadExitCode !== null && mode !== 'terminal'
+
+  // Stale-session case (issue #90): the CLI's stored conversation id was
+  // auto-cleaned by the provider, so `--resume` failed. Show a friendly,
+  // provider-named message + a single "Start fresh" action instead of the
+  // generic exit-code overlay.
+  const isStaleSession = deadReason === 'SESSION_NOT_FOUND'
+  const providerLabel = DETECTION_ENGINES.find((e) => e.type === mode)?.label ?? 'The agent'
 
   return (
     <div className="relative h-full w-full">
@@ -1862,7 +1883,24 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             </div>
           </div>
         )}
-        {showDeadOverlay && (
+        {showDeadOverlay && isStaleSession && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-background dark:bg-surface-0 z-10 p-6 gap-3 overflow-y-auto text-center">
+            <p className="text-sm font-medium text-foreground">
+              {providerLabel} session expired
+            </p>
+            <p className="text-sm text-muted-foreground max-w-md">
+              This conversation was cleaned up — agent sessions expire over time. Your task and
+              files are untouched. Start a fresh session to continue.
+            </p>
+            <button
+              onClick={handleStartFresh}
+              className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Start fresh
+            </button>
+          </div>
+        )}
+        {showDeadOverlay && !isStaleSession && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-background dark:bg-surface-0 z-10 p-6 gap-4 overflow-y-auto">
             {deadCrashOutput && (
               <pre className="text-xs text-muted-foreground dark:text-muted-foreground max-h-32 overflow-y-auto w-full max-w-lg bg-surface-2 dark:bg-surface-0 rounded p-3 font-mono whitespace-pre-wrap break-all">

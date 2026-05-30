@@ -85,6 +85,30 @@ test('detectActivity matches the user-interrupt marker → idle', () => {
   expect(adapter.detectActivity('Interrupted', 'unknown')).toBe(null)
 })
 
+console.log('\nClaudeAdapter.detectError\n')
+
+test('detectError flags the unrecoverable resume failure (SESSION_NOT_FOUND)', () => {
+  // `claude --resume <id>` against a session claude no longer has prints this.
+  // It produces no distinct exit signal, so output detection is the only hook.
+  const result = adapter.detectError('No conversation found with session ID: abc-123')
+  expect(result?.code).toBe('SESSION_NOT_FOUND')
+  expect(result?.recoverable).toBe(false)
+})
+
+test('detectError ignores replayed tool-error history on resume', () => {
+  // `claude --resume` replays the prior transcript to the TTY. A historical
+  // tool_result (is_error:true) renders as a line starting "Error: ...". That
+  // is in-band agent content, NOT a CLI crash — the old generic `^Error:`
+  // matcher flipped the freshly-resumed agent to 'error' on every reopen
+  // (confirmed: tool failure "Error: Exit code 1\nTask not found: …"). Real
+  // claude crashes are caught by non-zero exit code (shell_fallback), not here.
+  expect(adapter.detectError('Error: Exit code 1\nTask not found: 6f2f6f88')).toBe(null)
+  // ANSI-wrapped replay still ignored.
+  expect(adapter.detectError('\x1b[31mError: something the tool printed\x1b[0m')).toBe(null)
+  // Mid-line "Error:" (e.g. inside normal prose / logs) never matched anyway.
+  expect(adapter.detectError('the command returned Error: boom')).toBe(null)
+})
+
 console.log('\nClaudeAdapter.detectPrompt\n')
 
 test('detects Y/n as permission prompt', () => {

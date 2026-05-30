@@ -757,14 +757,15 @@ export interface ElectronAPI {
     getBufferSince: (sessionId: string, afterSeq: number) => Promise<BufferSinceResult | null>
     list: () => Promise<PtyInfo[]>
     onData: (callback: (sessionId: string, data: string, seq: number) => void) => () => void
-    onExit: (callback: (sessionId: string, exitCode: number) => void) => () => void
+    onExit: (
+      callback: (sessionId: string, exitCode: number, reason?: string | null) => void
+    ) => () => void
     onRespawnSuggested: (callback: (taskId: string) => void) => () => void
     onHibernateWarn: (callback: (sessionId: string, graceSeconds: number) => void) => () => void
     onHibernateCancelled: (callback: (sessionId: string) => void) => () => void
     onHibernated: (callback: (sessionId: string) => void) => () => void
     onEnsureAlive: (callback: (taskId: string, reqId: number, force: boolean) => void) => () => void
     ackEnsureAlive: (reqId: number, result: 'ok' | 'already-alive' | 'error') => void
-    onSessionNotFound: (callback: (sessionId: string) => void) => () => void
     onStateChange: (
       callback: (sessionId: string, newState: TerminalState, oldState: TerminalState) => void
     ) => () => void

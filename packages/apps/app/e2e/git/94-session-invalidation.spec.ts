@@ -3,8 +3,13 @@ import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, getMainSessionId } from '../fixtures/terminal'
 
 /**
- * Tests session invalidation (pty:session-not-found), reset terminal, and restart terminal.
- * Mocks pty:create, pty:kill, pty:exists to verify lifecycle without real CLIs.
+ * Tests stale-session handling (issue #90: provider auto-cleaned the session),
+ * reset terminal, and restart terminal. Mocks pty:create, pty:kill, pty:exists
+ * to verify lifecycle without real CLIs.
+ *
+ * Stale detection now rides the `pty:exit` reason (code SESSION_NOT_FOUND); there
+ * is no `pty:session-not-found` IPC and no auto-clear — the dead overlay shows a
+ * friendly message and recovery is the user-initiated "Start fresh" button.
  */
 // QUARANTINED 2026-05-16: same root cause as 93 — pty:create mock no longer
 // captures opts on task open. Needs rewriting against new pty lifecycle.
@@ -94,8 +99,8 @@ test.describe
         g.__ptyExistsOverride = false
       })
 
-    /** Emit pty:session-not-found from main process */
-    const emitSessionNotFound = (
+    /** Emit pty:exit carrying the stale-session reason (issue #90 path) */
+    const emitStaleExit = (
       electronApp: import('electron').ElectronApplication,
       sessionId: string
     ) =>
@@ -103,7 +108,7 @@ test.describe
         const win = BrowserWindow.getAllWindows().find(
           (w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:')
         )
-        win?.webContents.send('pty:session-not-found', sid)
+        win?.webContents.send('pty:exit', sid, 0, 'SESSION_NOT_FOUND')
       }, sessionId)
 
     /** Open the terminal header dropdown menu */
@@ -138,100 +143,67 @@ test.describe
       })
     })
 
-    // --- pty:session-not-found ---
+    // --- stale session (issue #90): friendly overlay + manual "Start fresh" ---
 
-    test('session-not-found clears conversationId in DB', async ({ electronApp, mainWindow }) => {
-      const s = seed(mainWindow)
-      const t = await s.createTask({ projectId, title: 'SI clear id', status: 'in_progress' })
-      await mainWindow.evaluate(
-        ({ id }) =>
-          window.api.db.updateTask({
-            id,
-            providerConfig: { 'claude-code': { conversationId: 'stale-id-to-clear' } }
-          }),
-        { id: t.id }
-      )
-      await s.refreshData()
-
-      await resetCapture(electronApp)
-      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI clear id' })
-      await expect.poll(() => getCreateCount(electronApp), { timeout: 10_000 }).toBeGreaterThan(0)
-
-      const sessionId = getMainSessionId(t.id)
-      await emitSessionNotFound(electronApp, sessionId)
-
-      // conversationId should be cleared
-      await expect
-        .poll(
-          async () => {
-            const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
-            return task?.provider_config?.['claude-code']?.conversationId ?? null
-          },
-          { timeout: 10_000 }
-        )
-        .toBeNull()
-    })
-
-    test('session-not-found kills the PTY', async ({ electronApp, mainWindow }) => {
-      const s = seed(mainWindow)
-      const t = await s.createTask({ projectId, title: 'SI kill pty', status: 'in_progress' })
-      await mainWindow.evaluate(
-        ({ id }) =>
-          window.api.db.updateTask({
-            id,
-            providerConfig: { 'claude-code': { conversationId: 'stale-kill-test' } }
-          }),
-        { id: t.id }
-      )
-      await s.refreshData()
-
-      await resetCapture(electronApp)
-      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI kill pty' })
-      await expect.poll(() => getCreateCount(electronApp), { timeout: 10_000 }).toBeGreaterThan(0)
-
-      const sessionId = getMainSessionId(t.id)
-      await emitSessionNotFound(electronApp, sessionId)
-
-      // pty:kill should have been called with the session ID
-      await expect
-        .poll(
-          async () => {
-            const kills = await getKillCalls(electronApp)
-            return kills.includes(sessionId)
-          },
-          { timeout: 10_000 }
-        )
-        .toBe(true)
-    })
-
-    test('session invalidation only clears current mode ID (others survive)', async ({
+    test('stale-session exit shows the "Start fresh" overlay', async ({
       electronApp,
       mainWindow
     }) => {
       const s = seed(mainWindow)
-      const t = await s.createTask({ projectId, title: 'SI cross mode', status: 'in_progress' })
-      // Set conversation IDs for both claude-code and codex
+      const t = await s.createTask({ projectId, title: 'SI overlay', status: 'in_progress' })
       await mainWindow.evaluate(
         ({ id }) =>
           window.api.db.updateTask({
             id,
-            providerConfig: {
-              'claude-code': { conversationId: 'claude-to-clear' },
-              codex: { conversationId: 'codex-should-survive' }
-            }
+            providerConfig: { 'claude-code': { conversationId: 'stale-overlay' } }
           }),
         { id: t.id }
       )
       await s.refreshData()
 
       await resetCapture(electronApp)
-      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI cross mode' })
+      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI overlay' })
       await expect.poll(() => getCreateCount(electronApp), { timeout: 10_000 }).toBeGreaterThan(0)
 
       const sessionId = getMainSessionId(t.id)
-      await emitSessionNotFound(electronApp, sessionId)
+      await emitStaleExit(electronApp, sessionId)
 
-      // Wait for claude-code's ID to be cleared
+      await expect(mainWindow.getByText(/session expired/i)).toBeVisible()
+      await expect(mainWindow.getByRole('button', { name: 'Start fresh' })).toBeVisible()
+    })
+
+    test('"Start fresh" clears conversationId and remounts; id survives until then', async ({
+      electronApp,
+      mainWindow
+    }) => {
+      const s = seed(mainWindow)
+      const t = await s.createTask({ projectId, title: 'SI fresh', status: 'in_progress' })
+      await mainWindow.evaluate(
+        ({ id }) =>
+          window.api.db.updateTask({
+            id,
+            providerConfig: { 'claude-code': { conversationId: 'clear-on-fresh' } }
+          }),
+        { id: t.id }
+      )
+      await s.refreshData()
+
+      await resetCapture(electronApp)
+      await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SI fresh' })
+      await expect.poll(() => getCreateCount(electronApp), { timeout: 10_000 }).toBeGreaterThan(0)
+      const countBefore = await getCreateCount(electronApp)
+
+      const sessionId = getMainSessionId(t.id)
+      await emitStaleExit(electronApp, sessionId)
+      await expect(mainWindow.getByRole('button', { name: 'Start fresh' })).toBeVisible()
+
+      // Manual-only (issue #90 decision Q1): the id survives until the user acts.
+      const mid = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
+      expect(mid?.provider_config?.['claude-code']?.conversationId).toBe('clear-on-fresh')
+
+      await mainWindow.getByRole('button', { name: 'Start fresh' }).click()
+
+      // Now the id is cleared and the terminal remounts fresh.
       await expect
         .poll(
           async () => {
@@ -241,10 +213,9 @@ test.describe
           { timeout: 10_000 }
         )
         .toBeNull()
-
-      // codex's ID should survive
-      const task = await mainWindow.evaluate((id) => window.api.db.getTask(id), t.id)
-      expect(task?.provider_config?.codex?.conversationId).toBe('codex-should-survive')
+      await expect
+        .poll(() => getCreateCount(electronApp), { timeout: 10_000 })
+        .toBeGreaterThan(countBefore)
     })
 
     // --- Reset terminal (menu) ---

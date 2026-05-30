@@ -36,11 +36,7 @@ import {
   getShellStartupArgs,
   wrapShellWithUlimit
 } from './shell-env'
-import {
-  shouldShellFallback,
-  shouldNotifySessionNotFound,
-  buildRecoveryMessage
-} from './pty-exit-strategy'
+import { shouldShellFallback, buildRecoveryMessage } from './pty-exit-strategy'
 import { computeSyncQueryResponse, type TerminalTheme } from './sync-query-response'
 import { filterBufferData } from './filter-buffer-data'
 import { buildMcpEnv } from './mcp-env'
@@ -141,6 +137,12 @@ interface PtySession {
   mode: TerminalMode
   adapter: TerminalAdapter
   checkingForSessionError?: boolean
+  // Set once a stale `--resume` is detected (provider auto-cleaned the session,
+  // issue #90). Suppresses forwarding the CLI's death-throes output (the raw
+  // "No conversation found …" line) to the renderer so the friendly "session
+  // expired" overlay isn't preceded by a scary red error. Diagnostics buffer
+  // still records everything.
+  suppressOutput?: boolean
   buffer: RingBuffer
   lastOutputTime: number
   // Timestamp of the last GENUINE user interaction with this terminal, reported
@@ -1274,7 +1276,9 @@ export async function createPty(
           /* Window destroyed */
         }
         try {
-          exitWin.webContents.send('pty:exit', sessionId, exitCode)
+          // Carry the structured error code (e.g. SESSION_NOT_FOUND) so the
+          // renderer's dead overlay can render an error-specific message.
+          exitWin.webContents.send('pty:exit', sessionId, exitCode, exitSession?.error?.code ?? null)
         } catch {
           // Window destroyed, ignore
         }
@@ -1531,12 +1535,14 @@ export async function createPty(
                 rawLength: data.length
               }
             })
-            if (!win.isDestroyed() && detectedError.code === 'SESSION_NOT_FOUND') {
-              try {
-                win.webContents.send('pty:session-not-found', sessionId)
-              } catch {
-                // Window destroyed, ignore
-              }
+            // The error code is carried to the renderer on `pty:exit` (see
+            // finalizeSessionExit) so the dead overlay can show a friendly,
+            // error-specific message. No separate IPC — on a stale resume the
+            // CLI exits and the overlay rides that exit. From here on, suppress
+            // forwarding this session's output so the raw "No conversation
+            // found …" line never paints before that overlay.
+            if (resuming && detectedError.code === 'SESSION_NOT_FOUND') {
+              session.suppressOutput = true
             }
           }
 
@@ -1560,7 +1566,7 @@ export async function createPty(
             if (oscTitle) emitTitle(session, oscTitle)
           }
 
-          if (!win.isDestroyed()) {
+          if (!win.isDestroyed() && !session.suppressOutput) {
             try {
               // cleanData already filtered above (buffer append)
               win.webContents.send('pty:data', sessionId, cleanData, currentSeq)
@@ -1710,38 +1716,32 @@ export async function createPty(
             }
           }
 
-          // #6: Notify renderer on stale resume (any provider, not just text-match)
+          // Stale-resume detection. A failed `--resume` (the provider
+          // auto-cleaned the session — issue #90) exits NON-ZERO, which would
+          // otherwise trip the interactive-shell fallback below and bury the
+          // "No conversation found" error in a raw recovery shell. Detect it here
+          // (ring-buffer scan via the adapter — authoritative + exit-code
+          // agnostic) so `shouldShellFallback` suppresses the fallback and the
+          // friendly "session expired" dead overlay surfaces instead. The code
+          // rides `pty:exit` (see finalizeSessionExit) to drive that overlay.
+          // Gated on `resuming`: only a resume attempt can hit a stale session.
+          if (resuming && !session.error) {
+            const scanned = session.adapter.detectError(session.buffer.toString())
+            if (scanned) session.error = scanned
+          }
+          const isStaleResume = resuming && session.error?.code === 'SESSION_NOT_FOUND'
+
           const exitCtx = {
             exitCode,
             terminalMode,
             hasPostSpawnCommand: !!spawnConfig.postSpawnCommand,
             resuming,
-            usedShellFallback
-          }
-          if (shouldNotifySessionNotFound(exitCtx) && !win.isDestroyed()) {
-            recordDiagnosticEvent({
-              level: 'warn',
-              source: 'pty',
-              event: 'pty.resume_fast_exit',
-              sessionId,
-              taskId: taskIdFromSessionId(sessionId),
-              payload: {
-                exitCode,
-                mode: terminalMode,
-                reason:
-                  firstOutputTs === null
-                    ? 'resume_nonzero_exit_no_output'
-                    : 'resume_nonzero_exit_with_output'
-              }
-            })
-            try {
-              win.webContents.send('pty:session-not-found', sessionId)
-            } catch {
-              // Window destroyed, ignore
-            }
+            usedShellFallback,
+            isStale: isStaleResume
           }
 
-          // #5: Shell fallback — spawn interactive shell when AI provider exits non-zero
+          // #5: Shell fallback — spawn interactive shell when AI provider exits
+          // non-zero. Suppressed for a stale session (handled by the overlay).
           if (shouldShellFallback(exitCtx)) {
             const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
             const previousArgs = [...usedArgs]

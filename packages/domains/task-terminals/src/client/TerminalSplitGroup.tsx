@@ -33,7 +33,7 @@ interface PaneProps {
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   permissionNotice?: string | null
   onConversationCreated?: (conversationId: string) => void
-  onSessionInvalid?: () => void
+  onStartFresh?: () => void
   onReady?: (api: {
     sendInput: (text: string) => Promise<void>
     write: (data: string) => Promise<boolean>
@@ -200,7 +200,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           isActive={isActive}
           onAttached={onAttached}
           onConversationCreated={pane.onConversationCreated}
-          onSessionInvalid={pane.onSessionInvalid}
+          onStartFresh={pane.onStartFresh}
           onReady={pane.onReady}
           onFirstInput={pane.onFirstInput}
           onRetry={pane.onRetry}

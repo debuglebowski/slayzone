@@ -16,15 +16,13 @@ interface PtyState {
   lastSeq: number // Last sequence number received for ordering
   exitCode?: number
   crashOutput?: string
-  sessionInvalid: boolean
   state: TerminalState
   pendingPrompt?: PromptInfo
   quickRunPrompt?: string
 }
 
 type DataCallback = (data: string, seq: number) => void
-type ExitCallback = (exitCode: number) => void
-type SessionInvalidCallback = () => void
+type ExitCallback = (exitCode: number, reason?: string | null) => void
 type StateChangeCallback = (newState: TerminalState, oldState: TerminalState) => void
 type PromptCallback = (prompt: PromptInfo) => void
 type SessionDetectedCallback = (sessionId: string) => void
@@ -43,7 +41,8 @@ export function applyExitEvent(
   exitCode: number,
   state: PtyState | undefined,
   stateSubs: Map<string, Set<StateChangeCallback>>,
-  exitSubs: Map<string, Set<ExitCallback>>
+  exitSubs: Map<string, Set<ExitCallback>>,
+  reason?: string | null
 ): void {
   if (state) {
     // Ensure state transitions to dead — the main process may not always
@@ -62,7 +61,7 @@ export function applyExitEvent(
   // already cleaned up before the exit event reached the renderer.
   const subs = exitSubs.get(sessionId)
   if (subs) {
-    subs.forEach((cb) => cb(exitCode))
+    subs.forEach((cb) => cb(exitCode, reason ?? null))
   }
 }
 
@@ -91,7 +90,6 @@ export function dropStateSubsIfEmpty(
 interface PtyContextValue {
   subscribe: (sessionId: string, cb: DataCallback) => () => void
   subscribeExit: (sessionId: string, cb: ExitCallback) => () => void
-  subscribeSessionInvalid: (sessionId: string, cb: SessionInvalidCallback) => () => void
   subscribeState: (sessionId: string, cb: StateChangeCallback) => () => void
   subscribePrompt: (sessionId: string, cb: PromptCallback) => () => void
   subscribeSessionDetected: (sessionId: string, cb: SessionDetectedCallback) => () => void
@@ -100,7 +98,6 @@ interface PtyContextValue {
   getLastSeq: (sessionId: string) => number
   getExitCode: (sessionId: string) => number | undefined
   getCrashOutput: (sessionId: string) => string | undefined
-  isSessionInvalid: (sessionId: string) => boolean
   getState: (sessionId: string) => TerminalState
   getPendingPrompt: (sessionId: string) => PromptInfo | undefined
   clearPendingPrompt: (sessionId: string) => void
@@ -124,7 +121,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Per-sessionId subscriber sets
   const dataSubsRef = useRef<Map<string, Set<DataCallback>>>(new Map())
   const exitSubsRef = useRef<Map<string, Set<ExitCallback>>>(new Map())
-  const sessionInvalidSubsRef = useRef<Map<string, Set<SessionInvalidCallback>>>(new Map())
   const stateSubsRef = useRef<Map<string, Set<StateChangeCallback>>>(new Map())
   const promptSubsRef = useRef<Map<string, Set<PromptCallback>>>(new Map())
   const sessionDetectedSubsRef = useRef<Map<string, Set<SessionDetectedCallback>>>(new Map())
@@ -173,7 +169,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
           if (existing) {
             existing.state = s.state
           } else {
-            statesRef.current.set(sid, { lastSeq: -1, sessionInvalid: false, state: s.state })
+            statesRef.current.set(sid, { lastSeq: -1, state: s.state })
           }
         }
       }
@@ -191,7 +187,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
         const existing = statesRef.current.get(sid)
         const oldState = existing?.state ?? 'starting'
         if (existing) existing.state = 'hibernated'
-        else statesRef.current.set(sid, { lastSeq: -1, sessionInvalid: false, state: 'hibernated' })
+        else statesRef.current.set(sid, { lastSeq: -1, state: 'hibernated' })
         const subs = stateSubsRef.current.get(sid)
         if (subs) subs.forEach((cb) => cb('hibernated', oldState))
       }
@@ -201,7 +197,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   const getOrCreateState = useCallback((sessionId: string): PtyState => {
     let state = statesRef.current.get(sessionId)
     if (!state) {
-      state = { lastSeq: -1, sessionInvalid: false, state: 'starting' }
+      state = { lastSeq: -1, state: 'starting' }
       statesRef.current.set(sessionId, state)
     }
     return state
@@ -226,14 +222,14 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     })
 
-    const unsubExit = window.api.pty.onExit(async (sessionId, exitCode) => {
+    const unsubExit = window.api.pty.onExit(async (sessionId, exitCode, reason) => {
       // Hibernation killed the PTY, but the UI should keep showing 💤 (not
       // "stopped") until reopen. Preserve the synthesized 'hibernated' state +
       // its long-lived state subscribers; only drop per-instance subs and fire
       // explicit exit subscribers.
       if (hibernatedRef.current.has(sessionId)) {
         const subs = exitSubsRef.current.get(sessionId)
-        if (subs) subs.forEach((cb) => cb(exitCode))
+        if (subs) subs.forEach((cb) => cb(exitCode, reason ?? null))
         disposeTerminal(sessionId)
         dataSubsRef.current.delete(sessionId)
         promptSubsRef.current.delete(sessionId)
@@ -263,7 +259,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      applyExitEvent(sessionId, exitCode, state, stateSubsRef.current, exitSubsRef.current)
+      applyExitEvent(sessionId, exitCode, state, stateSubsRef.current, exitSubsRef.current, reason)
 
       // Free xterm.js instance + PtyContext state. Handles the case where Terminal
       // component is unmounted (tab closed before PTY exits). If Terminal was still
@@ -272,7 +268,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       statesRef.current.delete(sessionId)
       dataSubsRef.current.delete(sessionId)
       exitSubsRef.current.delete(sessionId)
-      sessionInvalidSubsRef.current.delete(sessionId)
       // Preserve long-lived state subscribers across kill+respawn (same
       // sessionId reused) so sidebar/tab dots don't freeze. See helper.
       dropStateSubsIfEmpty(stateSubsRef.current, sessionId)
@@ -281,18 +276,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       devServerSubsRef.current.delete(sessionId)
       titleSubsRef.current.delete(sessionId)
       refreshActiveTaskIds()
-    })
-
-    const unsubSessionNotFound = window.api.pty.onSessionNotFound((sessionId) => {
-      const state = statesRef.current.get(sessionId)
-      if (!state) return // Ignore for unknown tasks
-
-      state.sessionInvalid = true
-
-      const subs = sessionInvalidSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb())
-      }
     })
 
     const unsubStateChange = window.api.pty.onStateChange((sessionId, newState, oldState) => {
@@ -386,7 +369,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     return () => {
       unsubData()
       unsubExit()
-      unsubSessionNotFound()
       unsubStateChange()
       unsubPrompt()
       unsubSessionDetected()
@@ -425,21 +407,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       subs!.delete(cb)
     }
   }, [])
-
-  const subscribeSessionInvalid = useCallback(
-    (sessionId: string, cb: SessionInvalidCallback): (() => void) => {
-      let subs = sessionInvalidSubsRef.current.get(sessionId)
-      if (!subs) {
-        subs = new Set()
-        sessionInvalidSubsRef.current.set(sessionId, subs)
-      }
-      subs.add(cb)
-      return () => {
-        subs!.delete(cb)
-      }
-    },
-    []
-  )
 
   const subscribeState = useCallback(
     (sessionId: string, cb: StateChangeCallback): (() => void) => {
@@ -549,10 +516,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     return statesRef.current.get(sessionId)?.crashOutput
   }, [])
 
-  const isSessionInvalid = useCallback((sessionId: string): boolean => {
-    return statesRef.current.get(sessionId)?.sessionInvalid ?? false
-  }, [])
-
   const getState = useCallback((sessionId: string): TerminalState => {
     return statesRef.current.get(sessionId)?.state ?? 'starting'
   }, [])
@@ -595,7 +558,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     hibernatedRef.current.delete(sessionId)
     dataSubsRef.current.delete(sessionId)
     exitSubsRef.current.delete(sessionId)
-    sessionInvalidSubsRef.current.delete(sessionId)
     // Preserve long-lived state subscribers across kill+respawn (same
     // sessionId reused) so sidebar/tab dots don't freeze. See helper.
     dropStateSubsIfEmpty(stateSubsRef.current, sessionId)
@@ -634,7 +596,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     () => ({
       subscribe,
       subscribeExit,
-      subscribeSessionInvalid,
       subscribeState,
       subscribePrompt,
       subscribeSessionDetected,
@@ -643,7 +604,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       getLastSeq,
       getExitCode,
       getCrashOutput,
-      isSessionInvalid,
       getState,
       getPendingPrompt,
       clearPendingPrompt,
@@ -657,7 +617,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     [
       subscribe,
       subscribeExit,
-      subscribeSessionInvalid,
       subscribeState,
       subscribePrompt,
       subscribeSessionDetected,
@@ -666,7 +625,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       getLastSeq,
       getExitCode,
       getCrashOutput,
-      isSessionInvalid,
       getState,
       getPendingPrompt,
       clearPendingPrompt,

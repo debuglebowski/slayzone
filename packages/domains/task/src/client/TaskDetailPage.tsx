@@ -1178,22 +1178,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   }, [task, detectedSessionId, sessionIdCommand, onTaskUpdated, getConversationIdForMode])
 
-  // Handle invalid session (e.g., "No conversation found" error)
-  const handleSessionInvalid = useCallback(async () => {
-    if (!task) return
-    const mainSessionId = getMainSessionId(task.id)
-
-    // Clear the stale session ID from the database
-    const updated = await window.api.db.updateTask({
-      id: task.id,
-      providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, null)
-    })
-    onTaskUpdated(updated)
-
-    // Kill the current PTY so we can restart fresh
-    await window.api.pty.kill(mainSessionId)
-  }, [task, onTaskUpdated, getMainSessionId])
-
   // Restart terminal (kill PTY, remount, keep session for --resume)
   const handleRestartTerminal = useCallback(async () => {
     if (!task) return
@@ -2990,7 +2974,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           executionContext={project?.execution_context}
                           focusRequestId={terminalFocusRequestId}
                           onConversationCreated={handleSessionCreated}
-                          onSessionInvalid={handleSessionInvalid}
+                          onStartFresh={handleResetTerminal}
                           onReady={handleTerminalReady}
                           onRetry={handleRestartTerminal}
                           onFocusRequestHandled={handleTerminalFocusRequestHandled}

@@ -2,11 +2,7 @@
  * Tests for PTY exit strategy decision logic.
  * Run with: npx tsx packages/domains/terminal/src/main/pty-exit-strategy.test.ts
  */
-import {
-  shouldShellFallback,
-  shouldNotifySessionNotFound,
-  buildRecoveryMessage
-} from './pty-exit-strategy.js'
+import { shouldShellFallback, buildRecoveryMessage } from './pty-exit-strategy.js'
 
 let passed = 0
 let failed = 0
@@ -42,7 +38,8 @@ const base = {
   terminalMode: 'codex',
   hasPostSpawnCommand: true,
   resuming: false,
-  usedShellFallback: false
+  usedShellFallback: false,
+  isStale: false
 }
 
 // --- shouldShellFallback ---
@@ -80,21 +77,15 @@ describe('shouldShellFallback', () => {
     // Simulates: CLI crashes → shell fallback → fallback shell also exits non-zero
     expect(shouldShellFallback({ ...base, exitCode: 1, usedShellFallback: true })).toBe(false)
   })
-})
 
-// --- shouldNotifySessionNotFound ---
-
-describe('shouldNotifySessionNotFound', () => {
-  test('true when resuming and exit non-zero', () => {
-    expect(shouldNotifySessionNotFound({ ...base, resuming: true })).toBe(true)
+  test('false when stale resume — surface dead overlay, not a recovery shell (#90)', () => {
+    // The real bug: stale `--resume` exits code 1 → without this guard the
+    // shell fallback fired and buried "No conversation found" in a raw shell.
+    expect(shouldShellFallback({ ...base, exitCode: 1, resuming: true, isStale: true })).toBe(false)
   })
 
-  test('false when not resuming', () => {
-    expect(shouldNotifySessionNotFound({ ...base, resuming: false })).toBe(false)
-  })
-
-  test('false when resuming but exit code 0', () => {
-    expect(shouldNotifySessionNotFound({ ...base, resuming: true, exitCode: 0 })).toBe(false)
+  test('true for a genuine non-zero crash on resume (not stale)', () => {
+    expect(shouldShellFallback({ ...base, exitCode: 1, resuming: true, isStale: false })).toBe(true)
   })
 })
 

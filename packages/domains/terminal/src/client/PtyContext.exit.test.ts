@@ -61,6 +61,43 @@ test('transitions state to dead and notifies state + exit subscribers', () => {
   expect(exits[0]).toBe(7)
 })
 
+test('forwards the exit reason (e.g. SESSION_NOT_FOUND) to exit subscribers', () => {
+  const stateSubs = new Map<
+    string,
+    Set<(newState: TerminalState, oldState: TerminalState) => void>
+  >()
+  const exitSubs = new Map<string, Set<(exitCode: number, reason?: string | null) => void>>()
+  const seen: Array<{ code: number; reason: string | null | undefined }> = []
+  exitSubs.set('sr', new Set([(code, reason) => seen.push({ code, reason })]))
+
+  applyExitEvent('sr', 0, undefined, stateSubs, exitSubs, 'SESSION_NOT_FOUND')
+
+  expect(seen.length).toBe(1)
+  expect(seen[0].code).toBe(0)
+  expect(seen[0].reason).toBe('SESSION_NOT_FOUND')
+})
+
+test('exit reason defaults to null when not provided', () => {
+  const stateSubs = new Map<
+    string,
+    Set<(newState: TerminalState, oldState: TerminalState) => void>
+  >()
+  const exitSubs = new Map<string, Set<(exitCode: number, reason?: string | null) => void>>()
+  let captured: string | null | undefined = 'unset'
+  exitSubs.set(
+    'sd',
+    new Set([
+      (_code, reason) => {
+        captured = reason
+      }
+    ])
+  )
+
+  applyExitEvent('sd', 0, undefined, stateSubs, exitSubs)
+
+  expect(captured).toBe(null)
+})
+
 test('notifies exit subscribers even if local state is missing', () => {
   const stateSubs = new Map<
     string,

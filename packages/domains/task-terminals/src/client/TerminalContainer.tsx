@@ -40,7 +40,7 @@ interface TerminalContainerProps {
   hasShortcutFocus?: boolean
   focusRequestId?: number
   onConversationCreated?: (conversationId: string) => void
-  onSessionInvalid?: () => void
+  onStartFresh?: () => void
   onReady?: (api: {
     sendInput: (text: string) => Promise<void>
     write: (data: string) => Promise<boolean>
@@ -76,7 +76,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       hasShortcutFocus,
       focusRequestId = 0,
       onConversationCreated,
-      onSessionInvalid,
+      onStartFresh,
       onReady,
       onFirstInput,
       onRetry,
@@ -378,7 +378,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           providerFlags: tab.isMain ? providerFlags : undefined,
           executionContext,
           onConversationCreated: tab.isMain ? handleConversationCreated : undefined,
-          onSessionInvalid: tab.isMain ? onSessionInvalid : undefined,
+          onStartFresh: tab.isMain ? onStartFresh : undefined,
           onReady: tab.isMain ? handleTerminalReady : undefined,
           onFirstInput: tab.isMain ? onFirstInput : undefined,
           onRetry: tab.isMain ? onRetry : undefined,
@@ -413,7 +413,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       providerFlags,
       executionContext,
       handleConversationCreated,
-      onSessionInvalid,
+      onStartFresh,
       handleTerminalReady,
       onFirstInput,
       onRetry,
