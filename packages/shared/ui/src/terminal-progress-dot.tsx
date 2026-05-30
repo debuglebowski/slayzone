@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Pause } from 'lucide-react'
 import { cn } from './utils'
 import { getTerminalStateStyle, ATTENTION_STATE_STYLE } from './terminal-state'
 import { ProgressRing } from './progress-ring'
@@ -43,7 +43,7 @@ export function TerminalProgressDot({
   const dotColor = stateStyle?.color ?? 'bg-muted-foreground/40'
   const stateLabel = stateStyle?.label ?? 'No session'
   const isRunning = !needsAttention && state === 'running'
-  // Hibernated (idle-closed) sessions show a 💤 emoji instead of a dot.
+  // Hibernated (idle-closed) sessions show a pause icon instead of a dot.
   const isHibernated = !needsAttention && state === 'hibernated'
 
   // Wrapper footprint is the constant max of size/activeSize, so the row layout
@@ -76,13 +76,15 @@ export function TerminalProgressDot({
       )}
       {showState &&
         (isHibernated ? (
-          <span
-            className="relative z-10 shrink-0 select-none leading-none"
-            style={{ fontSize: footprint - 2 }}
+          <Pause
+            size={footprint}
+            strokeWidth={1.5}
+            className={cn(
+              'relative z-10 shrink-0 fill-current',
+              stateStyle?.textColor ?? 'text-violet-500'
+            )}
             aria-label={stateLabel}
-          >
-            💤
-          </span>
+          />
         ) : isRunning ? (
           <Loader2
             size={innerSize}
