@@ -6,6 +6,7 @@ export {
 export { PtyProvider, usePty, usePendingPrompts } from './PtyContext'
 export {
   useSessionState,
+  useSessionStateRaw,
   useTaskTerminalState,
   useActiveTaskIds,
   useTerminalStateStore

@@ -155,6 +155,13 @@ export function useSessionState(sessionId: string): TerminalState {
   return useTerminalStateStore((s) => s.byId[sessionId] ?? 'starting')
 }
 
+/** Per-session state but `undefined` when the session is unknown (no entry) —
+ *  for `alwaysShow` dots that render a muted "No session" indicator for tasks
+ *  without a live terminal, vs a styled dot once a session exists. */
+export function useSessionStateRaw(sessionId: string): TerminalState | undefined {
+  return useTerminalStateStore((s) => s.byId[sessionId])
+}
+
 /** Task-level state — the task's MAIN session is `${taskId}:${taskId}`. */
 export function useTaskTerminalState(taskId: string): TerminalState {
   return useTerminalStateStore((s) => s.byId[`${taskId}:${taskId}`] ?? 'starting')

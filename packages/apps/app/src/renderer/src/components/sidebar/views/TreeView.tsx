@@ -40,6 +40,7 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { useSessionStateRaw } from '@slayzone/terminal'
 import {
   cn,
   TerminalProgressDot,
@@ -155,7 +156,6 @@ interface TaskBranchCtx {
   activeTaskId: string | null
   openTabTaskIds: Set<string>
   doneTaskIds?: Set<string>
-  terminalStates?: Map<string, import('@slayzone/terminal/shared').TerminalState>
   taskProgress?: Map<string, number>
   columnsByProjectId?: Map<string, import('@slayzone/projects/shared').ColumnConfig[] | null>
   pinnedSet: Set<string>
@@ -312,7 +312,7 @@ function TaskRowView({
   const isActive = ctx.activeTaskId === task.id
   const isOpenTab = ctx.openTabTaskIds.has(task.id)
   const isSelected = ctx.selectedTaskIds.has(task.id)
-  const termState = ctx.terminalStates?.get(task.id)
+  const termState = useSessionStateRaw(`${task.id}:${task.id}`)
   const progress = ctx.taskProgress?.get(task.id)
   const isDone = ctx.doneTaskIds?.has(task.id) ?? false
   const cols = ctx.columnsByProjectId?.get(task.project_id) ?? null
@@ -858,7 +858,6 @@ export function TreeView({
   onCreateTemporaryTask,
   taskContextMenuRender,
   taskBulkContextMenuRender,
-  terminalStates,
   taskProgress,
   doneTaskIds,
   columnsByProjectId,
@@ -1903,7 +1902,6 @@ export function TreeView({
       activeTaskId,
       openTabTaskIds,
       doneTaskIds,
-      terminalStates,
       taskProgress,
       columnsByProjectId,
       pinnedSet,
