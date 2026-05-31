@@ -34,6 +34,7 @@ export {
   setHibernatedTabRecorder as setPtyHibernatedTabRecorder,
   setIdleCloseConfigGetter,
   touchPty,
+  interruptPty,
   noteSessionConversationId,
   setSessionAwaitingInput,
   findSessionByTaskIdAndMode,

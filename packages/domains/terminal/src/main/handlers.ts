@@ -10,6 +10,7 @@ import {
   resizePty,
   killPty,
   touchPty,
+  interruptPty,
   hasPty,
   getBuffer,
   clearBuffer,
@@ -314,6 +315,10 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('pty:touch', (_, sessionId: string) => {
     return touchPty(sessionId)
+  })
+
+  ipcMain.handle('pty:interrupt', (_, sessionId: string) => {
+    return interruptPty(sessionId)
   })
 
   ipcMain.handle('pty:exists', (_, sessionId: string) => {

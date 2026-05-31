@@ -699,6 +699,29 @@ export function touchPty(sessionId: string): boolean {
   return true
 }
 
+/**
+ * User pressed an interrupt key (Esc / Ctrl+C) in the terminal — optimistically
+ * flip a *running* session to idle.
+ *
+ * Mirrors Superset's `useTerminalInterruptClear`: Ctrl+C kills the foreground
+ * agent process while the shell stays alive, and Claude Code's `Stop` hook does
+ * NOT fire on user interrupt — so a hook-driven agent (idleTimeoutMs=Infinity,
+ * no silence fallback) would otherwise stay stuck on 'running'. We flip the
+ * authoritative backend state here so the dot clears and reconcile agrees; if
+ * the agent is in fact still working, its next lifecycle hook
+ * (UserPromptSubmit/PreToolUse) re-asserts 'running'. No-op unless running, so
+ * an Esc that didn't actually interrupt anything costs nothing.
+ */
+export function interruptPty(sessionId: string): boolean {
+  const session = sessions.get(sessionId)
+  if (!session) return false
+  if (session.state !== 'running') return false
+  session.activity = 'unknown'
+  session.pendingTransitionTrigger = { source: 'user-interrupt', preview: 'Esc/Ctrl+C' }
+  transitionState(sessionId, 'idle')
+  return true
+}
+
 /** Record a conversation id captured out-of-band (e.g. the agent SessionStart
  *  hook) so the hibernation gate sees a resumable session for hook-driven
  *  providers like claude-code that never run `/status`. */

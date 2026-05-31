@@ -526,6 +526,7 @@ const api: ElectronAPI = {
     resize: (sessionId, cols, rows) => ipcRenderer.invoke('pty:resize', sessionId, cols, rows),
     kill: (sessionId) => ipcRenderer.invoke('pty:kill', sessionId),
     touch: (sessionId) => ipcRenderer.invoke('pty:touch', sessionId),
+    interrupt: (sessionId) => ipcRenderer.invoke('pty:interrupt', sessionId),
     exists: (sessionId) => ipcRenderer.invoke('pty:exists', sessionId),
     getBuffer: (sessionId) => ipcRenderer.invoke('pty:getBuffer', sessionId),
     clearBuffer: (sessionId) => ipcRenderer.invoke('pty:clearBuffer', sessionId),

@@ -17,18 +17,20 @@ import { KITTY_SHIFT_ENTER, ENTER } from '@slayzone/terminal/shared'
  * bullet-glyph regex (SPINNER_LINE_RE / COMPLETION_LINE_RE) was retired —
  * `detectActivity` is now intentionally a no-op for this adapter.
  *
- * No silence-timer fallback: hooks + the interrupt marker (see detectActivity)
- * are the sole running→idle signals. idleTimeoutMs = Infinity disables the
+ * No silence-timer fallback: hooks drive running→idle, and the one hook-less
+ * case (no Stop hook fires on user interrupt) is handled at the input layer
+ * (Terminal `onKey` → `pty.interrupt`). idleTimeoutMs = Infinity disables the
  * inactivity checker for this adapter.
  */
 export class ClaudeAdapter implements TerminalAdapter {
   readonly mode = 'claude-code' as const
   // No silence-timer fallback. Hooks (Stop/Notification/SessionEnd) drive
-  // running→idle; the interrupt marker in detectActivity covers the one
-  // hook-less case (ESC mid-thinking). A time-based fallback only ever
-  // misfired here — a long Bash run or "thinking" gap tripped a false
-  // running→idle mid-turn → spurious needs_attention. Infinity makes the
-  // inactivity checker skip this adapter (shouldFlipToIdle is always false).
+  // running→idle; the one hook-less case (user interrupt via Esc/Ctrl+C, which
+  // fires no Stop hook) is handled at the input layer (Terminal `onKey` →
+  // `pty.interrupt`). A time-based fallback only ever misfired here — a long
+  // Bash run or "thinking" gap tripped a false running→idle mid-turn →
+  // spurious needs_attention. Infinity makes the inactivity checker skip this
+  // adapter (shouldFlipToIdle is always false).
   readonly idleTimeoutMs = Infinity
   // Fully hook-driven (see HOOK_DRIVEN_MODES): skips the optimistic
   // Enter→'running' flip. A local slash command (/status) fires no hook and
@@ -42,29 +44,18 @@ export class ClaudeAdapter implements TerminalAdapter {
   }
 
   /**
-   * Activity detection is hook-driven for the working→idle path — see
-   * `rest-api/agent-hook.ts` and `notify.sh`. The ONE exception is the
-   * user-interrupt path: claude does NOT fire the `Stop` hook when the user
-   * presses ESC during the pure thinking phase (no tool call in flight),
-   * confirmed via diagnostic trace. Without an output signal the spinner
-   * would stick on 'running' indefinitely — there is no silence-timer fallback.
+   * No output-based activity detection — Claude is fully hook-driven for the
+   * working→idle path (see `rest-api/agent-hook.ts` + `notify.sh`). The one
+   * hook-less case, user interrupt (Esc/Ctrl+C fires no `Stop` hook), is handled
+   * where the keypress happens: Terminal's `onKey` → `pty.interrupt` → backend
+   * flips running→idle (mirrors Superset's `useTerminalInterruptClear`).
    *
-   * Claude's TUI prints `⎿  Interrupted · What should Claude do instead?`
-   * (with the box-drawing ⎿ glyph, U+23BF) immediately after the user
-   * interrupts. We match that marker — anchored on the glyph + literal
-   * "Interrupted" — and return `'idle'` so the state machine flips
-   * `running → idle` via the existing `activityToTerminalState` path.
-   *
-   * Architectural debt: deliberately reintroduces narrow output parsing
-   * after we retired the bullet-glyph spinner regex. Justified because
-   * (a) hooks fail upstream, (b) there is no silence-timer fallback, (c) signal
-   * is evidence-based (claude actually printed it), (d) scope is one regex,
-   * one direction. Remove if Anthropic fixes Stop-on-ESC. Tracking:
-   * https://github.com/anthropics/claude-code/issues (TODO: file).
+   * A `⎿ Interrupted` output regex previously lived here as a fallback, but it
+   * was unreliable: claude draws that line with cursor positioning, so it
+   * arrived split across PTY chunks and usually never matched. The input-layer
+   * handler is the reliable signal, so this is now a no-op.
    */
-  detectActivity(data: string, _current: ActivityState): ActivityState | null {
-    const stripped = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
-    if (/⎿\s+Interrupted/.test(stripped)) return 'idle'
+  detectActivity(_data: string, _current: ActivityState): ActivityState | null {
     return null
   }
 

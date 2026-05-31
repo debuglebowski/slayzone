@@ -751,6 +751,7 @@ export interface ElectronAPI {
     resize: (sessionId: string, cols: number, rows: number) => Promise<boolean>
     kill: (sessionId: string) => Promise<boolean>
     touch: (sessionId: string) => Promise<boolean>
+    interrupt: (sessionId: string) => Promise<boolean>
     exists: (sessionId: string) => Promise<boolean>
     getBuffer: (sessionId: string) => Promise<string | null>
     clearBuffer: (sessionId: string) => Promise<{ success: boolean; clearedSeq: number | null }>

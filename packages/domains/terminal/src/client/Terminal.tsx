@@ -997,6 +997,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           if (filtered) window.api.pty.write(sessionId, filtered)
         })
 
+        // Optimistically clear the 'running' dot when the user interrupts the
+        // agent. Mirrors Superset's `useTerminalInterruptClear`: Ctrl+C / Esc
+        // interrupt the foreground agent, but Claude Code fires no Stop hook on
+        // user interrupt, so the backend (hook-driven, idleTimeoutMs=Infinity)
+        // would otherwise stay stuck on 'running'. The backend flip is
+        // authoritative; the next lifecycle hook re-asserts 'running' if work
+        // actually continues. Use onKey (semantic key) not onData, so kitty /
+        // CSI-u input encoding doesn't hide the Esc keypress.
+        terminal.onKey(({ domEvent }) => {
+          const isInterrupt =
+            domEvent.key === 'Escape' || (domEvent.key === 'c' && domEvent.ctrlKey)
+          if (isInterrupt) void window.api.pty.interrupt(sessionId)
+        })
+
         // Handle resize
         terminal.onResize(({ cols, rows }) => {
           if (resizeDebounceRef.current) clearTimeout(resizeDebounceRef.current)

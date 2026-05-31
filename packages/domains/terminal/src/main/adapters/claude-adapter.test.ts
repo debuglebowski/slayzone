@@ -45,11 +45,12 @@ test('hookDriven is true — Enter does NOT optimistically flip to running', () 
 })
 
 test('idleTimeoutMs is Infinity — no silence-timer fallback (hook-driven)', () => {
-  // Hook events (Stop, Notification, SessionEnd) drive running→idle;
-  // detectActivity catches the user-interrupt marker. There is no time-based
-  // fallback — it only ever misfired (a long Bash run tripped a false
-  // running→idle mid-turn). Infinity makes the inactivity checker skip this
-  // adapter (shouldFlipToIdle: `now - t >= Infinity` is always false).
+  // Hook events (Stop, Notification, SessionEnd) drive running→idle; the
+  // user-interrupt case (no hook fires) is handled at the input layer (Esc/
+  // Ctrl+C → pty.interrupt). There is no time-based fallback — it only ever
+  // misfired (a long Bash run tripped a false running→idle mid-turn). Infinity
+  // makes the inactivity checker skip this adapter (shouldFlipToIdle:
+  // `now - t >= Infinity` is always false).
   expect(adapter.idleTimeoutMs).toBe(Infinity)
 })
 
@@ -67,22 +68,18 @@ test('detectActivity ignores spinner/completion text — hooks are the source of
   expect(adapter.detectActivity('Some random text', 'unknown')).toBe(null)
 })
 
-test('detectActivity matches the user-interrupt marker → idle', () => {
-  // Claude does NOT fire the Stop hook when the user presses ESC during the
-  // pure thinking phase. The TUI prints `⎿  Interrupted · What should Claude
-  // do instead?` after the interrupt — that line is the evidence-based signal
-  // that claude actually stopped. Match anchors on the ⎿ box-drawing glyph
-  // (U+23BF) + literal "Interrupted" so generic uses of the word elsewhere
-  // (e.g. user prompt content, log files) don't false-trigger.
+test('detectActivity is a no-op — user-interrupt handled at the input layer', () => {
+  // Claude fires no Stop hook on user interrupt (Esc/Ctrl+C). That case is now
+  // handled where the keypress happens — Terminal's `onKey` → `pty.interrupt`
+  // → backend flips running→idle (mirrors Superset's useTerminalInterruptClear).
+  // The old `⎿ Interrupted` output regex was unreliable: claude draws that line
+  // with cursor positioning, so it arrived split across PTY chunks and usually
+  // never matched. It is now redundant — detectActivity returns null for it too,
+  // leaving this adapter fully hook-driven (+ input-layer interrupt).
   expect(adapter.detectActivity('⎿  Interrupted · What should Claude do instead?', 'unknown'))
-    .toBe('idle')
-  // ANSI-wrapped marker still matches (claude colors the glyph red).
+    .toBe(null)
   expect(adapter.detectActivity('\x1b[38;2;153;153;153m  ⎿  Interrupted · What\x1b[39m', 'unknown'))
-    .toBe('idle')
-  // Word "Interrupted" alone (no ⎿ glyph) does NOT match — avoids false
-  // positives from user prompt content or unrelated log output.
-  expect(adapter.detectActivity('the build was Interrupted by ctrl-c', 'unknown')).toBe(null)
-  expect(adapter.detectActivity('Interrupted', 'unknown')).toBe(null)
+    .toBe(null)
 })
 
 console.log('\nClaudeAdapter.detectError\n')
