@@ -60,7 +60,8 @@ export class ClaudeAdapter implements TerminalAdapter {
   }
 
   detectError(data: string): ErrorInfo | null {
-    // Session not found error
+    // `claude --resume <id>` against a session claude no longer has prints this
+    // and produces no distinct exit signal, so output detection is the only hook.
     if (/No conversation found with session ID:/.test(data)) {
       return {
         code: 'SESSION_NOT_FOUND',
@@ -69,18 +70,11 @@ export class ClaudeAdapter implements TerminalAdapter {
       }
     }
 
-    // Generic CLI error - only match actual error lines, not code/docs
-    // Must start with "Error:" at line start (after ANSI codes)
-    const stripped = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
-    const errorMatch = stripped.match(/^Error:\s*(.+)/im)
-    if (errorMatch) {
-      return {
-        code: 'CLI_ERROR',
-        message: errorMatch[1].trim(),
-        recoverable: true
-      }
-    }
-
+    // No generic `^Error:` matcher: `claude --resume` replays the prior
+    // transcript, and a historical tool_result (is_error) renders as an
+    // "Error: ..." line — in-band agent content, not a CLI crash. The old
+    // matcher flipped freshly-resumed agents to 'error' on every reopen. Real
+    // claude crashes surface via non-zero exit code (shell_fallback), not here.
     return null
   }
 
