@@ -51,6 +51,11 @@ export {
   type UseStablePollOptions,
   type UseStablePollResult
 } from './use-stable-poll'
+export {
+  useDocumentVisibility,
+  useVisibleInterval,
+  type UseVisibleIntervalOptions
+} from './use-document-visibility'
 
 // Components
 export * from './alert-dialog'

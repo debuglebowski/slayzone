@@ -50,5 +50,35 @@ export default defineConfig(
       'react-hooks/preserve-manual-memoization': 'warn',
       'react-hooks/static-components': 'warn'
     }
+  },
+  // Ban raw setInterval in renderer/client code — these timers fire while the
+  // window is hidden and burn background CPU. Use useVisibleInterval from
+  // @slayzone/ui (auto-pauses while hidden). Escape-hatch with
+  // `// eslint-disable-next-line no-restricted-syntax` for the rare callers
+  // whose own visibility/foreground logic supersedes the generic hook
+  // (e.g. telemetry, WebGL atlas, git-diff-store).
+  {
+    files: [
+      'packages/apps/app/src/renderer/**/*.{ts,tsx}',
+      'packages/domains/*/src/client/**/*.{ts,tsx}',
+      'packages/shared/ui/src/**/*.{ts,tsx}'
+    ],
+    ignores: [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      // The hook itself wraps setInterval.
+      'packages/shared/ui/src/use-document-visibility.ts'
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector:
+            "CallExpression[callee.name='setInterval'], CallExpression[callee.object.name='window'][callee.property.name='setInterval']",
+          message:
+            'Use useVisibleInterval from @slayzone/ui to avoid burning background CPU while the window is hidden. If the timer must fire while hidden, add `// eslint-disable-next-line no-restricted-syntax` with a comment explaining why.'
+        }
+      ]
+    }
   }
 )

@@ -139,6 +139,9 @@ export function startHeartbeat(): void {
   window.addEventListener('focus', onForegroundChange)
   window.addEventListener('blur', onForegroundChange)
 
+  // eslint-disable-next-line no-restricted-syntax -- foreground state IS the
+  // data being tracked; gating by visibility would break active-window
+  // accounting (the heartbeat itself closes the window when un-foregrounded).
   heartbeatTimer = setInterval(() => {
     const now = Date.now()
     if (!isForeground || now - lastActive >= HEARTBEAT_INTERVAL) {

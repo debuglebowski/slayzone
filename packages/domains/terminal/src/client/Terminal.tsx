@@ -1505,6 +1505,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       scrambleProbeRef.current?.probe()
     }
 
+    // eslint-disable-next-line no-restricted-syntax -- callback has its own
+    // `visibilityState !== 'visible'` early-return; the timer also acts as a
+    // heartbeat that must coexist with focus + visibilitychange listeners.
     const interval = window.setInterval(tryCorrect, 30_000)
     document.addEventListener('visibilitychange', tryCorrect)
     window.addEventListener('focus', tryCorrect)
