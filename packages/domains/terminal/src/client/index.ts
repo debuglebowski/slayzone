@@ -3,7 +3,13 @@ export {
   TerminalStatusButton,
   TerminalStatusDialog
 } from './TerminalStatusPopover'
-export { PtyProvider, usePty, usePendingPrompts, useActiveTaskIds } from './PtyContext'
+export { PtyProvider, usePty, usePendingPrompts } from './PtyContext'
+export {
+  useSessionState,
+  useTaskTerminalState,
+  useActiveTaskIds,
+  useTerminalStateStore
+} from './useTerminalStateStore'
 export {
   PtyStateDot,
   PtyProgressDot,

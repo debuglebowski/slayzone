@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Frame, X } from 'lucide-react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
-import { usePty } from '@slayzone/terminal/client'
-import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
+import { useSessionState } from '@slayzone/terminal/client'
+import type { TerminalMode } from '@slayzone/terminal/shared'
 import { FloatingGlobalAgentPanelCollapsed } from './FloatingGlobalAgentPanelCollapsed'
 import { FloatingGlobalAgentPanelCollapsedIcon } from './FloatingGlobalAgentPanelCollapsedIcon'
 
@@ -16,11 +16,11 @@ export function FloatingGlobalAgentPanel() {
   const [session, setSession] = useState<FloatingSession | null>(null)
   const [collapsed, setCollapsed] = useState(true)
   const [style, setStyle] = useState<'widget' | 'icon'>('widget')
-  const [terminalState, setTerminalState] = useState<TerminalState>('starting')
   const [showTerminal, setShowTerminal] = useState(false)
   const [detachMode, setDetachMode] = useState<'auto' | 'manual' | null>(null)
   const [hasCustomSize, setHasCustomSize] = useState(false)
-  const { subscribeState, getState } = usePty()
+  // Terminal state from the reactive store (hydrates this renderer on wire).
+  const terminalState = useSessionState(session?.sessionId ?? '')
 
   useEffect(() => {
     window.api.floatingGlobalAgentPanel.getSession().then((data) => {
@@ -63,21 +63,6 @@ export function FloatingGlobalAgentPanel() {
       setHasCustomSize(s.hasCustomSize)
     })
   }, [])
-
-  useEffect(() => {
-    if (!session) return
-    const contextState = getState(session.sessionId)
-    if (contextState !== 'starting') {
-      setTerminalState(contextState)
-    } else {
-      window.api.pty.getState(session.sessionId).then((backendState) => {
-        if (backendState) setTerminalState(backendState)
-      })
-    }
-    return subscribeState(session.sessionId, (newState) => {
-      setTerminalState(newState)
-    })
-  }, [session, getState, subscribeState])
 
   const handleToggle = useCallback(() => {
     window.api.floatingGlobalAgentPanel.toggleCollapse()

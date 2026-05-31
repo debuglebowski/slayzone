@@ -1,16 +1,11 @@
-import { useEffect, useState } from 'react'
 import { TerminalProgressDot, type TerminalProgressDotProps } from '@slayzone/ui'
 import type { TerminalState } from '../shared/types'
-import { usePty } from './PtyContext'
+import { useSessionState } from './useTerminalStateStore'
 
+/** Per-session terminal state. Backed by the reactive store (single source of
+ *  truth); name/signature kept so existing callers are unchanged. */
 export function useTerminalState(sessionId: string): TerminalState {
-  const { getState, subscribeState } = usePty()
-  const [state, setState] = useState<TerminalState>(() => getState(sessionId))
-  useEffect(() => {
-    setState(getState(sessionId))
-    return subscribeState(sessionId, (next) => setState(next))
-  }, [sessionId, getState, subscribeState])
-  return state
+  return useSessionState(sessionId)
 }
 
 export function PtyStateDot({ sessionId }: { sessionId: string }): React.JSX.Element | null {

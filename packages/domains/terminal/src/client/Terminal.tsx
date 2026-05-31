@@ -101,6 +101,7 @@ import {
   unregisterActiveAddon
 } from './terminal-cache'
 import { usePty } from './PtyContext'
+import { useSessionState } from './useTerminalStateStore'
 import { useTheme, useAppearance } from '@slayzone/settings/client'
 import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
@@ -314,8 +315,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const {
     subscribe,
     subscribeExit,
-    subscribeState,
-    getState,
     getCrashOutput,
     resetTaskState,
     cleanupTask
@@ -361,7 +360,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const wasActiveRef = useRef(isActive)
 
-  const [ptyState, setPtyState] = useState<TerminalState>(() => getState(sessionId))
+  // Reactive store value; local ptyState mirrors it but also carries transient
+  // watchdog overrides ('dead'/'error') reasserted by the next store change.
+  const storeState = useSessionState(sessionId)
+  const [ptyState, setPtyState] = useState<TerminalState>(() => storeState)
 
   const clearBufferWithoutRestart = useCallback(async (): Promise<void> => {
     const result = await window.api.pty.clearBuffer(sessionId)
@@ -1297,15 +1299,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
   }, [isActive, sessionId])
 
-  // Subscribe to PTY state changes for loading indicator
+  // Sync the loading-indicator state from the reactive store. Local overrides
+  // (watchdog 'dead'/'error') are transient — the next store change reasserts,
+  // same as the old subscribeState path. Don't regress a settled state back to
+  // 'starting' on a late store seed.
   useEffect(() => {
-    setPtyState((prev) => {
-      // Don't regress from a terminal state (dead/error) back to starting
-      if (prev !== 'starting') return prev
-      return getState(sessionId)
-    })
-    return subscribeState(sessionId, (newState) => setPtyState(newState))
-  }, [sessionId, getState, subscribeState])
+    setPtyState((prev) => (storeState === 'starting' && prev !== 'starting' ? prev : storeState))
+  }, [storeState])
 
   // Re-rasterize the WebGL atlas on isActive false→true. A task switch is a
   // CSS visibility:hidden flip — no fit() fires on its own — so the atlas
