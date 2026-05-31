@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Lock } from 'lucide-react'
-import { Button } from '@slayzone/ui'
+import { Button, useVisibleInterval } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
 import { isScheduleLocked, overrideScheduleLock, overrideDurationLock } from './useProjectLockGuard'
 
@@ -35,27 +35,23 @@ export function ProjectLockScreen({
   )
 
   // Duration countdown (1s interval)
-  useEffect(() => {
-    if (!hasDuration) return
-    const id = setInterval(() => {
-      const r = new Date(lockedUntil).getTime() - Date.now()
+  useVisibleInterval(
+    () => {
+      const r = new Date(lockedUntil ?? 0).getTime() - Date.now()
       setRemaining(r)
-      if (r <= 0) clearInterval(id)
-    }, 1000)
-    return () => clearInterval(id)
-  }, [lockedUntil, hasDuration])
+    },
+    1000,
+    { enabled: Boolean(hasDuration) && remaining > 0 }
+  )
 
   // Schedule recheck (60s interval)
-  useEffect(() => {
-    if (hasDuration || !schedule) return
-    const id = setInterval(() => {
-      if (!isScheduleLocked(project)) {
-        // Schedule window ended — notify parent to re-render
-        onUnlocked(project)
-      }
-    }, 60_000)
-    return () => clearInterval(id)
-  }, [hasDuration, schedule, project, onUnlocked])
+  useVisibleInterval(
+    () => {
+      if (!isScheduleLocked(project)) onUnlocked(project)
+    },
+    60_000,
+    { enabled: !hasDuration && Boolean(schedule), runOnVisible: true }
+  )
 
   const handleUnlockEarly = useCallback(() => {
     if (hasDuration) overrideDurationLock(project.id)

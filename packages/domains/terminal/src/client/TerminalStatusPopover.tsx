@@ -4,6 +4,7 @@ import {
   IconButton,
   getTerminalStateStyle,
   useStablePoll,
+  useVisibleInterval,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -101,11 +102,7 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
 
   useStablePoll(refreshPtys, { enabled: open, baseDelayMs: 5000 })
 
-  useEffect(() => {
-    if (!open) return
-    const tickInterval = setInterval(() => tick((t) => t + 1), 1000)
-    return () => clearInterval(tickInterval)
-  }, [open])
+  useVisibleInterval(() => tick((t) => t + 1), 1000, { enabled: open })
 
   useEffect(() => {
     const unsub = window.api.pty.onStateChange(() => refreshPtys())

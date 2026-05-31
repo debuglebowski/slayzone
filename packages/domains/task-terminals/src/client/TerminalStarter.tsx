@@ -7,7 +7,7 @@ import {
 } from '@slayzone/terminal/client/LazyTerminal'
 import { markSkipCache } from '@slayzone/terminal/client'
 import { useTheme } from '@slayzone/settings/client'
-import { getThemeTerminalColors } from '@slayzone/ui'
+import { getThemeTerminalColors, useVisibleInterval } from '@slayzone/ui'
 import { MODE_ICONS } from './TerminalTabBar'
 import { getModeLabel } from './get-tab-label'
 
@@ -44,7 +44,6 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     const [reason, setReason] = useState<'initial' | 'hibernated'>('initial')
     // Seconds left in the idle-close countdown (null = not counting down).
     const [countdown, setCountdown] = useState<number | null>(null)
-    const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
     const innerRef = useRef<TerminalHandle | null>(null)
     const { terminalThemeId, contentVariant } = useTheme()
     const themeColors = getThemeTerminalColors(terminalThemeId, contentVariant)
@@ -85,35 +84,16 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     // countdown; `cancelled` aborts it; `hibernated` means main killed the PTY
     // → swap to the Start screen (reopen resumes via conversation id).
     useEffect(() => {
-      const stopTimer = (): void => {
-        if (countdownTimerRef.current) {
-          clearInterval(countdownTimerRef.current)
-          countdownTimerRef.current = null
-        }
-      }
       const offWarn = window.api.pty.onHibernateWarn((sid, graceSeconds) => {
         if (sid !== sessionId) return
-        stopTimer()
         setCountdown(graceSeconds)
-        countdownTimerRef.current = setInterval(() => {
-          setCountdown((c) => {
-            if (c === null) return null
-            if (c <= 1) {
-              stopTimer()
-              return 0
-            }
-            return c - 1
-          })
-        }, 1000)
       })
       const offCancelled = window.api.pty.onHibernateCancelled((sid) => {
         if (sid !== sessionId) return
-        stopTimer()
         setCountdown(null)
       })
       const offHibernated = window.api.pty.onHibernated((sid) => {
         if (sid !== sessionId) return
-        stopTimer()
         setCountdown(null)
         // Dispose (don't cache) the dead xterm so reopen builds a fresh one
         // showing the resumed session.
@@ -126,9 +106,19 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         offWarn()
         offCancelled()
         offHibernated()
-        stopTimer()
       }
     }, [sessionId])
+
+    useVisibleInterval(
+      () =>
+        setCountdown((c) => {
+          if (c === null) return null
+          if (c <= 1) return 0
+          return c - 1
+        }),
+      1000,
+      { enabled: countdown !== null && countdown > 0 }
+    )
 
     useImperativeHandle(
       ref,
@@ -150,10 +140,6 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
 
     if (started) {
       const handleCancelCountdown = (): void => {
-        if (countdownTimerRef.current) {
-          clearInterval(countdownTimerRef.current)
-          countdownTimerRef.current = null
-        }
         setCountdown(null)
         void window.api.pty.touch(sessionId)
       }

@@ -1,6 +1,7 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
 import { formatDistanceToNowStrict, parseISO } from 'date-fns'
+import { useVisibleInterval } from '@slayzone/ui'
 import {
   Archive,
   Calendar,
@@ -136,13 +137,9 @@ export function TaskHistoryPanel({ taskId }: TaskHistoryPanelProps): React.JSX.E
   )
   const [, setTimestampTick] = useState(0)
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setTimestampTick((current) => current + 1)
-    }, 60_000)
-
-    return () => window.clearInterval(interval)
-  }, [])
+  useVisibleInterval(() => setTimestampTick((current) => current + 1), 60_000, {
+    runOnVisible: true
+  })
 
   useEffect(() => {
     let active = true

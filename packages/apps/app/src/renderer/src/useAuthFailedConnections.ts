@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useVisibleInterval } from '@slayzone/ui'
 import type { IntegrationConnectionPublic } from '@slayzone/integrations/shared'
 
 export interface AuthFailedConnection {
@@ -41,14 +42,14 @@ export function useAuthFailedConnections(): {
     void refetch()
     const onFocus = (): void => void refetch()
     window.addEventListener('focus', onFocus)
-    const interval = setInterval(() => void refetch(), POLL_MS)
     const unsub = window.api?.app?.onTasksChanged?.(() => void refetch())
     return () => {
       window.removeEventListener('focus', onFocus)
-      clearInterval(interval)
       unsub?.()
     }
   }, [refetch])
+
+  useVisibleInterval(() => void refetch(), POLL_MS)
 
   return { failed, refetch: () => void refetch() }
 }

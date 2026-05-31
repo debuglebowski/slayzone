@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useVisibleInterval } from '@slayzone/ui'
 import type { ProviderUsage } from '@slayzone/terminal/shared'
 
 const POLL_INTERVAL = 5 * 60_000
@@ -19,10 +20,10 @@ export function useUsage() {
   }, [])
 
   useEffect(() => {
-    refresh()
-    const id = setInterval(refresh, POLL_INTERVAL)
-    return () => clearInterval(id)
+    void refresh()
   }, [refresh])
+
+  useVisibleInterval(() => void refresh(), POLL_INTERVAL, { runOnVisible: true })
 
   return { data, loading, refresh }
 }

@@ -11,7 +11,8 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
+  useVisibleInterval
 } from '@slayzone/ui'
 import type { DiagnosticsConfig } from '@slayzone/types'
 import { SettingsTabIntro } from './SettingsTabIntro'
@@ -39,20 +40,15 @@ export function DiagnosticsSettingsTab() {
   }, [])
 
   // Poll the dark-launch side-car status while this tab is mounted.
-  useEffect(() => {
-    let active = true
-    const refresh = (): void => {
-      window.api.app.getSidecarStatus().then((s) => {
-        if (active) setSidecarStatus(s)
+  useVisibleInterval(
+    () => {
+      void window.api.app.getSidecarStatus().then((s) => {
+        if (mountedRef.current) setSidecarStatus(s)
       })
-    }
-    refresh()
-    const timer = setInterval(refresh, 3000)
-    return () => {
-      active = false
-      clearInterval(timer)
-    }
-  }, [])
+    },
+    3000,
+    { runOnVisible: true }
+  )
 
   const updateDiagnosticsConfig = async (partial: Partial<DiagnosticsConfig>) => {
     const next = await window.api.diagnostics.setConfig(partial)

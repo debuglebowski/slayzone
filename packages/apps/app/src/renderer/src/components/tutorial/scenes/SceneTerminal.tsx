@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useVisibleInterval } from '@slayzone/ui'
 import { Sparkles, ChevronDown, Plus, Calendar, Archive, Trash2 } from 'lucide-react'
 import { SceneShell, TaskHeader, panelButtons } from './SceneShell'
 
@@ -46,30 +47,34 @@ export function SceneTerminal(): React.JSX.Element {
     return () => clearTimeout(t1)
   }, [])
 
+  const typedCharsRef = useRef(0)
   useEffect(() => {
-    if (phase !== 'typing') return
-    let i = 0
-    const id = setInterval(() => {
-      i++
-      setTypedChars(i)
-      if (i >= USER_PROMPT.length) {
-        clearInterval(id)
+    if (phase === 'typing') typedCharsRef.current = 0
+  }, [phase])
+  useVisibleInterval(
+    () => {
+      typedCharsRef.current += 1
+      setTypedChars(typedCharsRef.current)
+      if (typedCharsRef.current >= USER_PROMPT.length) {
         setTimeout(() => setPhase('response'), PHASE_PAUSE)
       }
-    }, TYPING_SPEED)
-    return () => clearInterval(id)
-  }, [phase])
+    },
+    TYPING_SPEED,
+    { enabled: phase === 'typing' && typedChars < USER_PROMPT.length }
+  )
 
+  const visibleLinesRef = useRef(0)
   useEffect(() => {
-    if (phase !== 'response') return
-    let i = 0
-    const id = setInterval(() => {
-      i++
-      setVisibleLines(i)
-      if (i >= RESPONSE_LINES.length) clearInterval(id)
-    }, LINE_INTERVAL)
-    return () => clearInterval(id)
+    if (phase === 'response') visibleLinesRef.current = 0
   }, [phase])
+  useVisibleInterval(
+    () => {
+      visibleLinesRef.current += 1
+      setVisibleLines(visibleLinesRef.current)
+    },
+    LINE_INTERVAL,
+    { enabled: phase === 'response' && visibleLines < RESPONSE_LINES.length }
+  )
 
   const showCursor = phase === 'banner' || phase === 'typing'
 

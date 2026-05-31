@@ -71,7 +71,7 @@ export default defineConfig(
     ],
     rules: {
       'no-restricted-syntax': [
-        'warn',
+        'error',
         {
           selector:
             "CallExpression[callee.name='setInterval'], CallExpression[callee.object.name='window'][callee.property.name='setInterval']",

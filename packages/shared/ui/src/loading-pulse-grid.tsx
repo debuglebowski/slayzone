@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useVisibleInterval } from './use-document-visibility'
 
 const LOADING_TEXTS = [
   'Reticulating splines...',
@@ -23,16 +24,13 @@ export function PulseGrid() {
   const [textIndex, setTextIndex] = useState(() => Math.floor(Math.random() * LOADING_TEXTS.length))
   const [fade, setFade] = useState(true)
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setFade(false)
-      setTimeout(() => {
-        setTextIndex((i) => (i + 1) % LOADING_TEXTS.length)
-        setFade(true)
-      }, 300)
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [])
+  useVisibleInterval(() => {
+    setFade(false)
+    setTimeout(() => {
+      setTextIndex((i) => (i + 1) % LOADING_TEXTS.length)
+      setFade(true)
+    }, 300)
+  }, 3000)
 
   return (
     <div className="flex items-center justify-center h-full">

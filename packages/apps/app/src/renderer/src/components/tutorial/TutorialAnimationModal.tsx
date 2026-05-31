@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Dialog, DialogContent, Button, cn } from '@slayzone/ui'
+import { Dialog, DialogContent, Button, cn, useVisibleInterval } from '@slayzone/ui'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { SceneProjects } from './scenes/SceneProjects'
 import { SceneOpenTask } from './scenes/SceneOpenTask'
@@ -174,12 +174,8 @@ export function TutorialAnimationModal({ open, onClose }: Props): React.JSX.Elem
   }, [open])
 
   // Replay scene animations on the same interval as the timer bar
-  useEffect(() => {
-    if (!open) return
-    const dur = TABS[tabIndex].steps[stepIndex].duration ?? 6000
-    const id = setInterval(() => setCycle((c) => c + 1), dur)
-    return () => clearInterval(id)
-  }, [open, tabIndex, stepIndex])
+  const cycleDur = TABS[tabIndex].steps[stepIndex].duration ?? 6000
+  useVisibleInterval(() => setCycle((c) => c + 1), cycleDur, { enabled: open })
 
   const currentTab = TABS[tabIndex]
   const currentStep = currentTab.steps[stepIndex]

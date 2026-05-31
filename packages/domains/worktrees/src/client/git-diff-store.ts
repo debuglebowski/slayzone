@@ -250,8 +250,9 @@ function ensureTimer(entry: StoreEntry): void {
     entry.timer = null
   }
   entry.timerIntervalMs = target
-  // eslint-disable-next-line no-restricted-syntax -- bespoke pause/resume via
-  // visibilitychange handler above (lines 96–134) supersedes useVisibleInterval.
+  // Bespoke pause/resume via the visibilitychange handler above (lines 96–134)
+  // supersedes the generic useVisibleInterval gate.
+  // eslint-disable-next-line no-restricted-syntax
   entry.timer = setInterval(() => {
     void runFetch(entry)
   }, target)

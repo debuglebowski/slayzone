@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useVisibleInterval } from '@slayzone/ui'
 
 const LOADING_TEXTS = [
   'Warming up the browser...',
@@ -24,20 +25,13 @@ export function BrowserLoadingAnimation() {
   const [textIndex, setTextIndex] = useState(() => Math.floor(Math.random() * LOADING_TEXTS.length))
   const [fade, setFade] = useState(true)
 
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>
-    const interval = setInterval(() => {
-      setFade(false)
-      timeoutId = setTimeout(() => {
-        setTextIndex((i) => (i + 1) % LOADING_TEXTS.length)
-        setFade(true)
-      }, 300)
-    }, 3000)
-    return () => {
-      clearInterval(interval)
-      clearTimeout(timeoutId)
-    }
-  }, [])
+  useVisibleInterval(() => {
+    setFade(false)
+    setTimeout(() => {
+      setTextIndex((i) => (i + 1) % LOADING_TEXTS.length)
+      setFade(true)
+    }, 300)
+  }, 3000)
 
   return (
     <div className="flex items-center justify-center h-full">

@@ -1,29 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
-import { PulseGrid } from '@slayzone/ui'
+import { PulseGrid, useVisibleInterval } from '@slayzone/ui'
 
 // 1. Typing Cursor — blinking block cursor with text typed out
 function TypingCursor() {
   const text = 'Initializing terminal...'
   const [displayed, setDisplayed] = useState('')
   const [showCursor, setShowCursor] = useState(true)
+  const [typing, setTyping] = useState(true)
   const indexRef = useRef(0)
 
-  useEffect(() => {
-    const typeInterval = setInterval(() => {
+  useVisibleInterval(
+    () => {
       if (indexRef.current < text.length) {
         setDisplayed(text.slice(0, indexRef.current + 1))
         indexRef.current++
       } else {
-        clearInterval(typeInterval)
+        setTyping(false)
       }
-    }, 60)
-    return () => clearInterval(typeInterval)
-  }, [])
+    },
+    60,
+    { enabled: typing }
+  )
 
-  useEffect(() => {
-    const cursorInterval = setInterval(() => setShowCursor((v) => !v), 530)
-    return () => clearInterval(cursorInterval)
-  }, [])
+  useVisibleInterval(() => setShowCursor((v) => !v), 530)
 
   return (
     <div className="flex items-center justify-center h-full">
@@ -119,15 +118,8 @@ function AsciiArt() {
   const [frame, setFrame] = useState(0)
   const [dots, setDots] = useState('')
 
-  useEffect(() => {
-    const interval = setInterval(() => setFrame((f) => (f + 1) % frames.length), 150)
-    return () => clearInterval(interval)
-  }, [])
-
-  useEffect(() => {
-    const interval = setInterval(() => setDots((d) => (d.length >= 3 ? '' : d + '.')), 400)
-    return () => clearInterval(interval)
-  }, [])
+  useVisibleInterval(() => setFrame((f) => (f + 1) % frames.length), 150)
+  useVisibleInterval(() => setDots((d) => (d.length >= 3 ? '' : d + '.')), 400)
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-3">
@@ -144,6 +136,8 @@ function AsciiArt() {
 // 5. Scanline — horizontal line sweeping down like a boot sequence
 function Scanline() {
   const [lines, setLines] = useState<string[]>([])
+  const [booting, setBooting] = useState(true)
+  const indexRef = useRef(0)
   const bootMessages = [
     '[  OK  ] Loading kernel modules...',
     '[  OK  ] Mounting filesystems...',
@@ -153,19 +147,19 @@ function Scanline() {
     '[  ..  ] Waiting for terminal output...'
   ]
 
-  useEffect(() => {
-    let i = 0
-    const interval = setInterval(() => {
-      if (i < bootMessages.length) {
-        const msg = bootMessages[i]
-        i++
+  useVisibleInterval(
+    () => {
+      if (indexRef.current < bootMessages.length) {
+        const msg = bootMessages[indexRef.current]
+        indexRef.current++
         setLines((prev) => [...prev, msg])
       } else {
-        clearInterval(interval)
+        setBooting(false)
       }
-    }, 350)
-    return () => clearInterval(interval)
-  }, [])
+    },
+    350,
+    { enabled: booting }
+  )
 
   return (
     <div className="flex flex-col justify-end h-full p-4 overflow-hidden">
