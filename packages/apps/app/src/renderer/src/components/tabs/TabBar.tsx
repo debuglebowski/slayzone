@@ -10,6 +10,7 @@ import {
   useShortcutDisplay,
   withShortcut
 } from '@slayzone/ui'
+import { useTaskTerminalState } from '@slayzone/terminal'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import {
   DndContext,
@@ -39,7 +40,6 @@ interface TabBarProps {
   tabs: Tab[]
   activeIndex: number
   activeView?: string
-  terminalStates?: Map<string, TerminalState>
   projectColors?: Map<string, string>
   worktreeColors?: Map<string, string>
   taskProgress?: Map<string, number>
@@ -59,7 +59,7 @@ interface TabContentProps {
   isActive: boolean
   isDragging?: boolean
   onClose?: () => void
-  terminalState?: TerminalState
+  taskId: string
   needsAttention?: boolean
   isSubTask?: boolean
   isTemporary?: boolean
@@ -79,7 +79,7 @@ function TabContent({
   isActive,
   isDragging,
   onClose,
-  terminalState,
+  taskId,
   needsAttention,
   isSubTask,
   isTemporary,
@@ -93,6 +93,7 @@ function TabContent({
   onEditCancel,
   inputRef
 }: TabContentProps): React.JSX.Element {
+  const terminalState = useTaskTerminalState(taskId)
   return (
     <div
       className={cn(
@@ -176,7 +177,6 @@ interface SortableTabProps {
   isActive: boolean
   onTabClick: (index: number) => void
   onTabClose: (index: number) => void
-  terminalState?: TerminalState
   needsAttention?: boolean
   projectColor?: string
   worktreeColor?: string
@@ -198,7 +198,6 @@ function SortableTab({
   isActive,
   onTabClick,
   onTabClose,
-  terminalState,
   needsAttention,
   projectColor,
   worktreeColor,
@@ -270,7 +269,7 @@ function SortableTab({
         title={tab.title}
         isActive={isActive}
         onClose={() => onTabClose(index)}
-        terminalState={terminalState}
+        taskId={tab.taskId}
         needsAttention={needsAttention}
         isSubTask={tab.isSubTask}
         isTemporary={tab.isTemporary}
@@ -292,7 +291,6 @@ export function TabBar({
   tabs,
   activeIndex,
   activeView,
-  terminalStates,
   projectColors,
   worktreeColors,
   taskProgress,
@@ -448,7 +446,6 @@ export function TabBar({
                     isActive={index === activeIndex && activeView === 'tabs'}
                     onTabClick={onTabClick}
                     onTabClose={onTabClose}
-                    terminalState={terminalStates?.get(tab.taskId)}
                     needsAttention={attentionTaskIds?.has(tab.taskId)}
                     projectColor={projectColors?.get(tab.taskId)}
                     worktreeColor={worktreeColors?.get(tab.taskId)}
@@ -475,7 +472,7 @@ export function TabBar({
                     activeIndex
                   }
                   isDragging
-                  terminalState={terminalStates?.get(activeTab.taskId)}
+                  taskId={activeTab.taskId}
                   needsAttention={attentionTaskIds?.has(activeTab.taskId)}
                   isTemporary={activeTab.isTemporary}
                   projectColor={projectColors?.get(activeTab.taskId)}

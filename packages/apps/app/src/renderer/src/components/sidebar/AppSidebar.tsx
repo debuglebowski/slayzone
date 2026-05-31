@@ -12,7 +12,6 @@ import { useTabStore } from '@slayzone/settings'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
-import type { TerminalState } from '@slayzone/terminal/shared'
 import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
 import { SidebarFooterIcons } from './SidebarFooterIcons'
 import { SidebarViewSwitcher } from './SidebarViewSwitcher'
@@ -56,7 +55,6 @@ interface AppSidebarProps {
   onPinnedReorder?: (taskIds: string[]) => void
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode
   taskBulkContextMenuRender?: (taskIds: string[], child: ReactNode) => ReactNode
-  terminalStates?: Map<string, TerminalState>
   taskProgress?: Map<string, number>
   doneTaskIds?: Set<string>
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
@@ -150,7 +148,6 @@ export function AppSidebar({
   onPinnedReorder,
   taskContextMenuRender,
   taskBulkContextMenuRender,
-  terminalStates,
   taskProgress,
   doneTaskIds,
   columnsByProjectId,
@@ -244,7 +241,6 @@ export function AppSidebar({
               idleByProject,
               taskContextMenuRender,
               taskBulkContextMenuRender,
-              terminalStates,
               taskProgress,
               doneTaskIds,
               columnsByProjectId

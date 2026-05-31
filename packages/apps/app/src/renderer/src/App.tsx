@@ -82,7 +82,7 @@ import {
   type SearchFileContext
 } from '@slayzone/settings'
 import { track, trackShortcut } from '@slayzone/telemetry/client'
-import { usePty, useActiveTaskIds, usePtyStatus } from '@slayzone/terminal/client'
+import { usePtyStatus, useTerminalStateStore } from '@slayzone/terminal/client'
 // Shared
 import {
   Button,
@@ -149,7 +149,6 @@ import { useOnboardingChecklist } from '@/hooks/useOnboardingChecklist'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 // Extracted hooks (self-contained, clean interfaces)
 import { useHomePanel, HOME_PANEL_SIZE_KEY } from '@/hooks/useHomePanel'
-import { useTerminalStateTracking } from '@/hooks/useTerminalStateTracking'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
 import { useTabColors } from '@/hooks/useTabColors'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
@@ -467,8 +466,6 @@ function App(): React.JSX.Element {
   const [projectNameValue, setProjectNameValue] = useState('')
   const projectNameInputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Terminal state tracking (extracted — pure input/output)
-  const ptyContext = usePty()
   const openTaskIds = useMemo(
     () =>
       tabs
@@ -477,17 +474,6 @@ function App(): React.JSX.Element {
     [tabs]
   )
   const activeAgentTaskIds = useActiveSessionTaskIds()
-  // PTYs outlive tabs (tab close ≠ PTY kill). Track tabs ∪ live PTY tasks so
-  // tree-view rows for closed tabs still reflect the running PTY's state.
-  // Source from PtyContext's in-memory alive set rather than the IPC-polling
-  // useActiveSessionTaskIds — same trigger surface, no roundtrip per event.
-  const aliveTaskIds = useActiveTaskIds()
-  const trackedTaskIds = useMemo(() => {
-    const s = new Set(openTaskIds)
-    for (const id of aliveTaskIds) s.add(id)
-    return [...s]
-  }, [openTaskIds, aliveTaskIds])
-  const terminalStates = useTerminalStateTracking(trackedTaskIds, ptyContext)
 
   // Tab lifecycle (extracted — manages sync, cleanup, cache eviction, page tracking)
   useTabLifecycle({ tasks, projects, tabs, activeTabIndex, setTerminalFocusRequests })
@@ -2271,7 +2257,6 @@ function App(): React.JSX.Element {
             onSetTasksPinned={setTasksPinned}
             onSetCollapsed={setTaskCollapsed}
             onPinnedReorder={reorderPinnedTasks}
-            terminalStates={terminalStates}
             taskProgress={taskProgress}
             doneTaskIds={doneTaskIds}
             columnsByProjectId={columnsByProjectId}
@@ -2306,7 +2291,8 @@ function App(): React.JSX.Element {
                 isPinned={!!task.pinned}
                 onTogglePin={() => setTaskPinned(task.id, !task.pinned)}
                 canMarkUnread={
-                  terminalStates.get(task.id) === 'idle' && !task.needs_attention
+                  useTerminalStateStore.getState().byId[`${task.id}:${task.id}`] === 'idle' &&
+                  !task.needs_attention
                 }
               >
                 {child}
@@ -2352,7 +2338,6 @@ function App(): React.JSX.Element {
                     tabs={visibleTabs}
                     activeIndex={visibleActiveIndex}
                     activeView={activeView}
-                    terminalStates={terminalStates}
                     projectColors={taskProjectColors}
                     worktreeColors={taskWorktreeColors}
                     taskProgress={taskProgress}

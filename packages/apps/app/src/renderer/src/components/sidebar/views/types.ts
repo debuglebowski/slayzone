@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
-import type { TerminalState } from '@slayzone/terminal/shared'
 
 export interface SidebarViewContext {
   projects: Project[]
@@ -23,8 +22,6 @@ export interface SidebarViewContext {
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode
   /** Render a bulk context-menu wrapper when multiple tasks are selected. */
   taskBulkContextMenuRender?: (taskIds: string[], child: ReactNode) => ReactNode
-  /** Per-task terminal state (mostly populated for open-tab tasks). */
-  terminalStates?: Map<string, TerminalState>
   /** Per-task progress 0..100. */
   taskProgress?: Map<string, number>
   /** Task ids in a "done" status. */
