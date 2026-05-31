@@ -2,7 +2,7 @@
  * Regression tests for PtyContext exit handling.
  * Run with: npx tsx packages/domains/terminal/src/client/PtyContext.exit.test.ts
  */
-import { applyExitEvent, dropStateSubsIfEmpty } from './PtyContext'
+import { applyExitEvent, dropStateSubsIfEmpty, reconcileSessionStates, type PtyState } from './PtyContext'
 import type { TerminalState } from '@slayzone/terminal/shared'
 
 let passed = 0
@@ -378,6 +378,141 @@ test('FIX T5: with dropStateSubsIfEmpty, sidebar cb survives respawn and tracks 
 
   expect(statesRef.get(sid)!.state).toBe('idle')
   expect(sidebarValue).toBe('idle') // FIXED: tracks new session, not frozen on 'running'
+})
+
+// ---------------------------------------------------------------------------
+// SELF-HEAL: reconcileSessionStates re-pulls the authoritative session list and
+// corrects any local drift, so a dropped pty:state-change / pty:exit converges
+// instead of sticking forever (the root of the "frozen dot" bug class). Pure —
+// operates on the same statesRef + stateSubsRef the live handlers use.
+// ---------------------------------------------------------------------------
+
+type StateSubs = Map<string, Set<(n: TerminalState, o: TerminalState) => void>>
+
+function makeRecorder(): {
+  subs: StateSubs
+  record: (sid: string) => Array<{ newState: TerminalState; oldState: TerminalState }>
+} {
+  const subs: StateSubs = new Map()
+  const logs = new Map<string, Array<{ newState: TerminalState; oldState: TerminalState }>>()
+  return {
+    subs,
+    record(sid) {
+      const log: Array<{ newState: TerminalState; oldState: TerminalState }> = []
+      logs.set(sid, log)
+      subs.set(sid, new Set([(newState, oldState) => log.push({ newState, oldState })]))
+      return log
+    }
+  }
+}
+
+test('RECONCILE: adopts a dropped state-change (local running, backend idle)', () => {
+  // The exact frozen-dot trigger: claude idleTimeoutMs=Infinity drops the
+  // running->idle transition; reconcile pulls session.list() and converges.
+  const states = new Map<string, PtyState>([['a:a', { lastSeq: -1, state: 'running' }]])
+  const { subs, record } = makeRecorder()
+  const log = record('a:a')
+
+  const aliveChanged = reconcileSessionStates(states, subs, new Set(), [
+    { sessionId: 'a:a', state: 'idle' }
+  ])
+
+  expect(states.get('a:a')!.state).toBe('idle')
+  expect(log.length).toBe(1)
+  expect(log[0].newState).toBe('idle')
+  expect(log[0].oldState).toBe('running')
+  // running and idle are both ALIVE -> task still active -> no aliveness change
+  expect(aliveChanged).toBe(false)
+})
+
+test('RECONCILE: marks a dropped exit dead (alive locally, absent from list)', () => {
+  const states = new Map<string, PtyState>([['b:b', { lastSeq: -1, state: 'running' }]])
+  const { subs, record } = makeRecorder()
+  const log = record('b:b')
+
+  const aliveChanged = reconcileSessionStates(states, subs, new Set(), [])
+
+  expect(states.get('b:b')!.state).toBe('dead')
+  expect(log.length).toBe(1)
+  expect(log[0].newState).toBe('dead')
+  expect(log[0].oldState).toBe('running')
+  expect(aliveChanged).toBe(true)
+})
+
+test('RECONCILE: never revives a locally-dead session (avoids exit-race flicker)', () => {
+  const states = new Map<string, PtyState>([['c:c', { lastSeq: -1, state: 'dead' }]])
+  const { subs, record } = makeRecorder()
+  const log = record('c:c')
+
+  const aliveChanged = reconcileSessionStates(states, subs, new Set(), [
+    { sessionId: 'c:c', state: 'idle' }
+  ])
+
+  expect(states.get('c:c')!.state).toBe('dead')
+  expect(log.length).toBe(0)
+  expect(aliveChanged).toBe(false)
+})
+
+test('RECONCILE: skips hibernated sessions (absent stays 💤, not clobbered to dead)', () => {
+  const states = new Map<string, PtyState>([['d:d', { lastSeq: -1, state: 'hibernated' }]])
+  const { subs, record } = makeRecorder()
+  const log = record('d:d')
+  const hibernated = new Set(['d:d'])
+
+  // Absent from the list (a hibernated PTY is dead on the backend) — must NOT
+  // become 'dead'; the 💤 dot persists until reopen.
+  const aliveChanged = reconcileSessionStates(states, subs, hibernated, [])
+
+  expect(states.get('d:d')!.state).toBe('hibernated')
+  expect(log.length).toBe(0)
+  expect(aliveChanged).toBe(false)
+})
+
+test('RECONCILE: skips hibernated sessions (a stale list idle does NOT revive it)', () => {
+  const states = new Map<string, PtyState>([['e:e', { lastSeq: -1, state: 'hibernated' }]])
+  const { subs, record } = makeRecorder()
+  const log = record('e:e')
+  const hibernated = new Set(['e:e'])
+
+  const aliveChanged = reconcileSessionStates(states, subs, hibernated, [
+    { sessionId: 'e:e', state: 'idle' }
+  ])
+
+  expect(states.get('e:e')!.state).toBe('hibernated')
+  expect(log.length).toBe(0)
+  expect(aliveChanged).toBe(false)
+})
+
+test('RECONCILE: fills a missing entry from the list and notifies waiting subscribers', () => {
+  // A sidebar cb subscribed before any IPC arrived (entry not yet created).
+  const states = new Map<string, PtyState>()
+  const { subs, record } = makeRecorder()
+  const log = record('f:f')
+
+  const aliveChanged = reconcileSessionStates(states, subs, new Set(), [
+    { sessionId: 'f:f', state: 'running' }
+  ])
+
+  expect(states.get('f:f')!.state).toBe('running')
+  expect(log.length).toBe(1)
+  expect(log[0].newState).toBe('running')
+  expect(log[0].oldState).toBe('starting')
+  expect(aliveChanged).toBe(true)
+})
+
+test('RECONCILE: respawn-orphan dropped-idle converges (the original bug, via reconcile)', () => {
+  // Models the frozen sidebar cb after a kill+respawn: stateSubs still holds the
+  // long-lived cb (dropStateSubsIfEmpty preserved it), statesRef recovered to a
+  // live session, but the cb missed the final 'idle'. reconcile re-delivers it.
+  const sid = 'task:task'
+  const states = new Map<string, PtyState>([[sid, { lastSeq: -1, state: 'running' }]])
+  const { subs, record } = makeRecorder()
+  const log = record(sid)
+
+  reconcileSessionStates(states, subs, new Set(), [{ sessionId: sid, state: 'idle' }])
+
+  expect(states.get(sid)!.state).toBe('idle')
+  expect(log[log.length - 1].newState).toBe('idle') // dot un-freezes
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

@@ -8,11 +8,12 @@ import {
   useMemo,
   type ReactNode
 } from 'react'
+import { useVisibleInterval } from '@slayzone/ui'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
 import { disposeTerminal } from './terminal-cache'
 
 // Per-task state - no buffer (backend is source of truth)
-interface PtyState {
+export interface PtyState {
   lastSeq: number // Last sequence number received for ordering
   exitCode?: number
   crashOutput?: string
@@ -87,6 +88,72 @@ export function dropStateSubsIfEmpty(
   if (!subs || subs.size === 0) stateSubs.delete(sessionId)
 }
 
+/**
+ * Self-heal: reconcile local terminal state against the authoritative backend
+ * session list, notifying state subscribers for anything that drifted.
+ *
+ * The manual pub/sub has no reconciliation — a single dropped `pty:state-change`
+ * (claude's `idleTimeoutMs=Infinity` means an idle agent emits no further IPC to
+ * self-correct) leaves the dot frozen forever. This is the missing convergence
+ * step: re-pull `session.list()` on focus / after an exit / on a low-freq timer
+ * and fix any divergence so the dot can never stick on a stale value. Pure (no
+ * `window.api`) so it is unit-testable; mutates `states` in place and fires the
+ * same `stateSubs` callbacks the live IPC handlers use.
+ *
+ * Returns whether any session's alive-ness (running|idle) changed, so the caller
+ * can refresh derived active-task tracking only when needed.
+ */
+export function reconcileSessionStates(
+  states: Map<string, PtyState>,
+  stateSubs: Map<string, Set<StateChangeCallback>>,
+  hibernated: Set<string>,
+  sessions: Array<{ sessionId: string; state: TerminalState }>
+): boolean {
+  let aliveChanged = false
+  const present = new Map<string, TerminalState>()
+  for (const s of sessions) present.set(s.sessionId, s.state)
+
+  const notify = (sid: string, next: TerminalState, old: TerminalState): void => {
+    stateSubs.get(sid)?.forEach((cb) => cb(next, old))
+  }
+
+  // Pass 1 — adopt backend drift (e.g. a dropped running->idle) and fill entries
+  // a subscriber is waiting on. Never revive a locally-'dead' session: a real
+  // respawn reuses the sessionId and re-creates it via its own IPC, and this
+  // avoids flicker if session.list() raced slightly ahead of a just-applied exit.
+  for (const [sid, listState] of present) {
+    if (hibernated.has(sid)) continue
+    const local = states.get(sid)
+    if (!local) {
+      states.set(sid, { lastSeq: -1, state: listState })
+      notify(sid, listState, 'starting')
+      if (ALIVE_STATES.has(listState)) aliveChanged = true
+      continue
+    }
+    if (local.state !== listState && local.state !== 'dead') {
+      const old = local.state
+      local.state = listState
+      notify(sid, listState, old)
+      if (ALIVE_STATES.has(old) !== ALIVE_STATES.has(listState)) aliveChanged = true
+    }
+  }
+
+  // Pass 2 — a locally-alive session absent from the list has exited (the list
+  // excludes dead/ended/not-spawned sessions), so a dropped pty:exit converges
+  // to 'dead'. Hibernated sessions are intentionally dead-on-backend; skip them.
+  for (const [sid, local] of states) {
+    if (hibernated.has(sid)) continue
+    if (ALIVE_STATES.has(local.state) && !present.has(sid)) {
+      const old = local.state
+      local.state = 'dead'
+      notify(sid, 'dead', old)
+      aliveChanged = true
+    }
+  }
+
+  return aliveChanged
+}
+
 interface PtyContextValue {
   subscribe: (sessionId: string, cb: DataCallback) => () => void
   subscribeExit: (sessionId: string, cb: ExitCallback) => () => void
@@ -154,6 +221,34 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       return next
     })
   }, [])
+
+  // Self-heal: re-pull the authoritative session list and reconcile any local
+  // drift. The single missing convergence step that keeps a dropped
+  // pty:state-change / pty:exit from freezing the dot forever. Guarded so
+  // overlapping triggers (focus + timer + post-exit) don't pile up.
+  const reconcilingRef = useRef(false)
+  const reconcile = useCallback(async (): Promise<void> => {
+    if (reconcilingRef.current) return
+    reconcilingRef.current = true
+    try {
+      const sessions = await window.api.session.list()
+      const aliveChanged = reconcileSessionStates(
+        statesRef.current,
+        stateSubsRef.current,
+        hibernatedRef.current,
+        sessions
+      )
+      if (aliveChanged) refreshActiveTaskIds()
+    } catch {
+      // Best-effort; the next trigger retries.
+    } finally {
+      reconcilingRef.current = false
+    }
+  }, [refreshActiveTaskIds])
+  // Stable handle so effect/handler closures call the latest reconcile without
+  // re-subscribing the global IPC listeners.
+  const reconcileRef = useRef(reconcile)
+  reconcileRef.current = reconcile
 
   // Seed from existing sessions on mount. Use the unified session registry so
   // both PTY and chat-transport sessions hydrate after a renderer reload — the
@@ -276,6 +371,9 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       devServerSubsRef.current.delete(sessionId)
       titleSubsRef.current.delete(sessionId)
       refreshActiveTaskIds()
+      // A session just ended — cross-check the fleet for any dropped exit /
+      // transition so a stale dot elsewhere converges now rather than next focus.
+      void reconcileRef.current()
     })
 
     const unsubStateChange = window.api.pty.onStateChange((sessionId, newState, oldState) => {
@@ -377,6 +475,20 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       unsubHibernated()
     }
   }, [getOrCreateState, refreshActiveTaskIds])
+
+  // Self-heal triggers. Window focus = the user looking at (possibly stale) dots
+  // (handles 99% of resync needs); the visible-gated timer backstops a tab that
+  // never regains focus. Cheap (session registry is an in-memory merge) and
+  // guarded against overlap inside reconcile. 30s is plenty — the focus event
+  // covers the case that matters.
+  useEffect(() => {
+    const onFocus = (): void => void reconcileRef.current()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+  useVisibleInterval(() => void reconcileRef.current(), 30_000, { runOnVisible: true })
 
   const subscribe = useCallback(
     (sessionId: string, cb: DataCallback): (() => void) => {
