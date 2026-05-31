@@ -39,14 +39,15 @@ export function DiagnosticsSettingsTab() {
     }
   }, [])
 
-  // Poll the dark-launch side-car status while this tab is mounted.
+  // Poll the dark-launch side-car status while this tab is mounted. 5s feels
+  // live; 3s was unnecessarily aggressive for a manual settings screen.
   useVisibleInterval(
     () => {
       void window.api.app.getSidecarStatus().then((s) => {
         if (mountedRef.current) setSidecarStatus(s)
       })
     },
-    3000,
+    5000,
     { runOnVisible: true }
   )
 

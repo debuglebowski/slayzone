@@ -7,7 +7,9 @@ export interface AuthFailedConnection {
   projectIds: string[]
 }
 
-const POLL_MS = 60_000
+// 2 min — `focus` + `tasks:changed` IPC catch any user-visible change near
+// instantly, so the periodic poll is just a backstop.
+const POLL_MS = 120_000
 
 export function useAuthFailedConnections(): {
   failed: AuthFailedConnection[]

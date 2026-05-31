@@ -4,7 +4,7 @@ import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
 import { useVisibleInterval } from '@slayzone/ui'
 import { api } from 'convex/_generated/api'
 
-const TWELVE_HOURS = 12 * 60 * 60 * 1000
+const ONE_DAY = 24 * 60 * 60 * 1000
 
 interface LeaderboardAuthState {
   configured: boolean
@@ -144,7 +144,7 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
     [actions, completeOAuthCode, isAuthenticated, isLoading, lastError]
   )
 
-  // Background leaderboard stats sync every 12 hours
+  // Background leaderboard stats sync once a day
   const syncDailyStats = useMutation(api.leaderboard.syncDailyStats)
   const sync = useCallback((): void => {
     window.api.leaderboard
@@ -160,7 +160,7 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
     sync()
   }, [isAuthenticated, sync])
 
-  useVisibleInterval(sync, TWELVE_HOURS, { enabled: isAuthenticated })
+  useVisibleInterval(sync, ONE_DAY, { enabled: isAuthenticated })
 
   return <LeaderboardAuthContext.Provider value={value}>{children}</LeaderboardAuthContext.Provider>
 }
