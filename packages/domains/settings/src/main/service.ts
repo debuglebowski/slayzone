@@ -3,10 +3,26 @@ import type { Database } from 'better-sqlite3'
 export type ThemePreference = 'light' | 'dark' | 'system'
 
 export class SettingsService {
+  // One shared instance per DB handle. The warmed cache is per-instance and
+  // write-through only fires for keys warmed on THAT instance, so a second
+  // instance would fork a private cache that silently diverges from sync
+  // getCached() readers (e.g. the idle-close sweep). Private constructor +
+  // forDatabase() make that fork impossible to write by accident.
+  private static readonly instances = new WeakMap<Database, SettingsService>()
+
   private readonly cache = new Map<string, string | undefined>()
   private readonly cached = new Set<string>()
 
-  constructor(private readonly db: Database) {}
+  private constructor(private readonly db: Database) {}
+
+  static forDatabase(db: Database): SettingsService {
+    let inst = SettingsService.instances.get(db)
+    if (!inst) {
+      inst = new SettingsService(db)
+      SettingsService.instances.set(db, inst)
+    }
+    return inst
+  }
 
   async get(key: string): Promise<string | undefined> {
     const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as

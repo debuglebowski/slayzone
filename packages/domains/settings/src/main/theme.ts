@@ -4,7 +4,7 @@ import type { Database } from 'better-sqlite3'
 import { SettingsService, type ThemePreference } from './service'
 
 export function registerThemeHandlers(ipcMain: IpcMain, db: Database): void {
-  const settings = new SettingsService(db)
+  const settings = SettingsService.forDatabase(db)
 
   ipcMain.handle('theme:get-effective', () => {
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'

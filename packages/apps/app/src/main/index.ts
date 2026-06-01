@@ -1131,7 +1131,7 @@ app
     // Initialize databases
     logBoot('database init start')
     const db = getDatabase()
-    const settings = new SettingsService(db)
+    const settings = SettingsService.forDatabase(db)
     logBoot('db opened')
     await createPreMigrationBackup(db, LATEST_MIGRATION_VERSION)
     logBoot('pre-migration backup done')
@@ -1476,7 +1476,7 @@ app
     registerTaskTemplateHandlers(ipcMain, db)
     registerTagHandlers(ipcMain, db)
     registerHistoryHandlers(ipcMain, db)
-    registerSettingsHandlers(ipcMain, db)
+    registerSettingsHandlers(ipcMain, settings)
     registerFeedbackHandlers(ipcMain, db)
     logBoot('core domain handlers registered')
 
