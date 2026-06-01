@@ -4,6 +4,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { AgentEvent } from '@slayzone/terminal/shared'
 import { snapshotWorktree, deleteTurnRef, diffIsEmptyCached, diffIsEmpty } from './git-snapshot'
 import { insertTurn, deleteTurn, getLatestTurnForWorktree, findTurnsToPrune } from './db'
+import { agentTurnsEvents } from './events'
 
 /**
  * Check whether a prompt text is "clean" enough to store as a preview.
@@ -54,6 +55,10 @@ async function resolveTabContext(
 }
 
 function broadcastChange(worktreePath: string): void {
+  // tRPC `agentTurns.onChanged` subscription source (fires in every context,
+  // incl. tests). The webContents.send path below stays until the renderer
+  // drops IPC (slice 5).
+  agentTurnsEvents.emit('agent-turns:changed', worktreePath)
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { BrowserWindow } = require('electron') as typeof import('electron')

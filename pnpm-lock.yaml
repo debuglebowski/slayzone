@@ -1666,6 +1666,9 @@ importers:
 
   packages/shared/transport:
     dependencies:
+      '@slayzone/agent-turns':
+        specifier: workspace:*
+        version: link:../../domains/agent-turns
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform

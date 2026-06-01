@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./ipc": "./src/ipc-dedup.ts",
-    "./slz-file-url": "./src/slz-file-url.ts"
+    "./slz-file-url": "./src/slz-file-url.ts",
+    "./events": "./src/typed-emitter.ts"
   },
   "scripts": {
     "test": "vitest run",
