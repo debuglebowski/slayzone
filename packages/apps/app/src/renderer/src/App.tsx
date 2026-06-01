@@ -1930,7 +1930,7 @@ function App(): React.JSX.Element {
   // Projects rail: align horizontally with project cards + vertically with the
   //   TabBar (default x=10 sits near the rail's icon center at ~36px).
   useEffect(() => {
-    const pos = sidebarView === 'tree' ? { x: 24, y: 14 } : { x: 16, y: 20 }
+    const pos = sidebarView === 'tree' ? { x: 24, y: 14 } : { x: 9, y: 15 }
     window.api.window.setTrafficLightPosition(pos)
   }, [sidebarView])
   const activePtyCount = usePtyStatus().size
