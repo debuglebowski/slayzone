@@ -618,6 +618,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [artifactsOpen, setArtifactsOpen] = useState(true)
   const [detailsOpen, setDetailsOpen] = useState(true)
 
+  // Settings cards-grid: open cards water-fill the available height (see
+  // useSharedCardHeights). In full-height, Details joins the grid as a 4th card.
+  const settingsCardsGridRef = useRef<HTMLDivElement>(null)
+  useSharedCardHeights(settingsCardsGridRef, [
+    descriptionExpanded,
+    descriptionOpen,
+    subTasksOpen,
+    artifactsOpen,
+    detailsOpen
+  ])
+
   // Doctor dialog state
   const [doctorDialogOpen, setDoctorDialogOpen] = useState(false)
   const [doctorResults, setDoctorResults] = useState<ValidationResult[] | null>(null)
@@ -3537,58 +3548,170 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   <TaskSettingsPanel
                     taskId={task.id}
                     renderDefaultContent={() => {
-                      // Two layouts, picked by the Description "Full height" (↕) toggle:
+                      // The grid holds Description / Sub-tasks / Artifacts (and, in
+                      // full-height, Details). Open cards SHARE the available height via
+                      // useSharedCardHeights: each hugs its content, tall cards cap at a
+                      // shared water-level and scroll internally, short neighbours' unused
+                      // space flows to the tall ones, and nothing is squeezed below 9rem
+                      // by sharing alone (the grid scrolls instead). `grid-template-rows`
+                      // is set imperatively by the hook — keep none here.
                       //
-                      // Full height (descriptionExpanded): Description fills all spare
-                      //   space (minmax(9rem,1fr)); Sub-tasks/Artifacts are auxiliary —
-                      //   header-only when closed, capped at 18rem (internal scroll)
-                      //   when open.
-                      //
-                      // Default height: open cards share remaining space evenly.
-                      //   Share = (container − closed×header − total-gap) / openCount,
-                      //   floored at 9rem so a short panel can't starve the grid down
-                      //   to header-only — it scrolls instead. Units in rem to track
-                      //   Tailwind scale: gap-4 = 1rem, min-h-8 (card header) = 2rem.
-                      const openCount = [descriptionOpen, subTasksOpen, artifactsOpen].filter(
-                        Boolean
-                      ).length
-                      const closedCount = 3 - openCount
-                      const share =
-                        openCount > 0
-                          ? `max(9rem, calc((100% - ${closedCount * 2}rem - 2rem) / ${openCount}))`
-                          : '100%'
-                      const rowFor = (open: boolean): string =>
-                        open ? `fit-content(${share})` : 'auto'
-                      const cappedRowFor = (open: boolean): string =>
-                        open ? 'fit-content(18rem)' : 'auto'
-                      const cardRows = descriptionExpanded
-                        ? [
-                            descriptionOpen ? 'minmax(9rem, 1fr)' : 'auto',
-                            cappedRowFor(subTasksOpen),
-                            cappedRowFor(artifactsOpen)
-                          ].join(' ')
-                        : [
-                            rowFor(descriptionOpen),
-                            rowFor(subTasksOpen),
-                            rowFor(artifactsOpen)
-                          ].join(' ')
+                      // Details (task metadata + working dir + danger zone) renders in two
+                      // places depending on mode: pinned at the bottom of the panel in
+                      // normal mode (always shown, unshrinkable), or as a 4th card INSIDE
+                      // the grid in full-height mode (collapsible, shares space via the
+                      // water-fill). Body is shared via this const.
+                      const detailsBody = (
+                        <>
+                          <TaskMetadataSidebar
+                            task={task}
+                            tags={tags}
+                            taskTagIds={taskTagIds}
+                            onUpdate={handleTaskUpdate}
+                            onTagsChange={handleTagsChange}
+                            onTagCreated={(tag) => setTags((prev) => [...prev, tag])}
+                          />
+
+                          <div className="flex flex-col gap-3 mt-5">
+                            {/* Working directory */}
+                            <div className="flex flex-col gap-2">
+                              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                                Working directory
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Info className="size-3 text-muted-foreground/60 cursor-help" />
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-72 text-xs">
+                                    <p>Override the project directory for this task.</p>
+                                    <p className="mt-1.5">Priority (highest first):</p>
+                                    <ol className="mt-0.5 list-decimal list-inside">
+                                      <li>Worktree</li>
+                                      <li>Custom directory</li>
+                                      <li>Project path</li>
+                                    </ol>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <div
+                                  className="flex-1 min-w-0 text-xs text-muted-foreground truncate px-2 py-1.5 rounded border border-border bg-muted/30"
+                                  title={effectiveRepoPath ?? 'No directory set'}
+                                >
+                                  {effectiveRepoPath ?? 'No directory set'}
+                                  {task.worktree_path && (
+                                    <span className="ml-1 text-[10px] opacity-60">(worktree)</span>
+                                  )}
+                                  {!task.worktree_path && task.base_dir && (
+                                    <span className="ml-1 text-[10px] opacity-60">(custom)</span>
+                                  )}
+                                </div>
+                                <button
+                                  className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
+                                  title="Change working directory"
+                                  onClick={async () => {
+                                    const result = await window.api.dialog.showOpenDialog({
+                                      title: 'Select Working Directory',
+                                      defaultPath: task.base_dir ?? effectiveRepoPath ?? undefined,
+                                      properties: ['openDirectory']
+                                    })
+                                    if (result.canceled || !result.filePaths[0]) return
+                                    await updateTaskAndNotify({
+                                      id: task.id,
+                                      baseDir: result.filePaths[0]
+                                    })
+                                  }}
+                                >
+                                  <FileCode className="size-3.5 text-muted-foreground" />
+                                </button>
+                                {task.base_dir && (
+                                  <button
+                                    className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
+                                    title="Clear custom directory"
+                                    onClick={() => {
+                                      void updateTaskAndNotify({ id: task.id, baseDir: null })
+                                    }}
+                                  >
+                                    <X className="size-3.5 text-muted-foreground" />
+                                  </button>
+                                )}
+                              </div>
+                              {task.worktree_path && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs w-full justify-start"
+                                  onClick={() => {
+                                    void updateTaskAndNotify({
+                                      id: task.id,
+                                      worktreePath: null,
+                                      worktreeParentBranch: null
+                                    })
+                                  }}
+                                >
+                                  <GitBranch className="mr-1.5 size-3" />
+                                  Detach worktree
+                                </Button>
+                              )}
+                              {task.worktree_path && task.base_dir && (
+                                <span className="text-[10px] text-amber-400/80">
+                                  Worktree active — custom dir overridden
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Danger zone */}
+                            <div className="flex flex-col gap-2">
+                              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                                Danger zone
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1 text-xs"
+                                  onClick={
+                                    isArchived ? handleUnarchive : () => setArchiveDialogOpen(true)
+                                  }
+                                >
+                                  <Archive className="mr-1.5 size-3" />
+                                  {isArchived ? 'Unarchive' : 'Archive'}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1 text-xs text-destructive hover:text-destructive"
+                                  onClick={() => setDeleteDialogOpen(true)}
+                                >
+                                  <Trash2 className="mr-1.5 size-3" />
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )
                       return (
                         <>
-                          {/* External sync links */}
+                          {/* External sync links — pinned above the shared grid */}
                           <ExternalSyncCard taskId={task.id} onUpdate={handleTaskUpdate} />
 
-                          {/* Cards grid: open cards share remaining space, closed cards
-                              collapse to header. flex-[1_0_auto] = grow into spare space
-                              but never shrink below content, so floored rows push the
-                              panel into its overflow-y-auto scroll instead of clipping. */}
+                          {/* Cards grid: flex-1 min-h-0 → height is the spare space
+                              between ExternalSync and the pinned Details (definite, so
+                              the water-level caps resolve). useSharedCardHeights also sets
+                              a min-height = floored content, so a short window scrolls the
+                              PANEL (keeping cards usable) instead of crushing them; the
+                              grid itself never overflows. content-start → short cards leave
+                              the leftover as empty space above the pinned meta. */}
                           <div
+                            ref={settingsCardsGridRef}
                             data-testid="settings-cards-grid"
-                            className="flex-[1_0_auto] grid gap-4 content-start"
-                            style={{ gridTemplateRows: cardRows }}
+                            className="flex-1 min-h-0 overflow-hidden grid gap-4 content-start"
                           >
                             {/* Description */}
                             <Collapsible
                               data-testid="settings-description-card"
+                              data-card
+                              data-card-open={descriptionOpen}
                               open={descriptionOpen}
                               onOpenChange={setDescriptionOpen}
                               className="flex flex-col rounded-md border border-border overflow-hidden min-h-0"
@@ -3696,6 +3819,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                             {/* Sub-tasks */}
                             <Collapsible
                               data-testid="settings-subtasks-card"
+                              data-card
+                              data-card-open={subTasksOpen}
                               open={subTasksOpen}
                               onOpenChange={setSubTasksOpen}
                               className="group/sub rounded-md border border-border overflow-hidden flex flex-col min-h-0"
@@ -3724,7 +3849,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                     items={subTasks.map((s) => s.id)}
                                     strategy={verticalListSortingStrategy}
                                   >
-                                    <div className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+                                    <div
+                                      data-card-scroll
+                                      className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain"
+                                    >
                                       {subTasks.map((sub) => (
                                         <SortableSubTask
                                           key={sub.id}
@@ -3776,6 +3904,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                             {/* Artifacts */}
                             <Collapsible
                               data-testid="settings-artifacts-card"
+                              data-card
+                              data-card-open={artifactsOpen}
                               open={artifactsOpen}
                               onOpenChange={setArtifactsOpen}
                               className="group/artifacts rounded-md border border-border overflow-hidden flex flex-col min-h-0"
@@ -3790,7 +3920,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                 )}
                               </CollapsibleTrigger>
                               <CollapsibleContent className="p-2 flex flex-col flex-1 min-h-0">
-                                <div className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+                                <div
+                                  data-card-scroll
+                                  className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overscroll-contain"
+                                >
                                   {artifacts.map((artifact) => (
                                     <button
                                       key={artifact.id}
@@ -3824,157 +3957,44 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                 </div>
                               </CollapsibleContent>
                             </Collapsible>
+                            {/* Details — in full-height mode this becomes a 4th card that
+                                shares the grid via the water-fill (collapsed by default
+                                when entering full-height). */}
+                            {descriptionExpanded && (
+                              <Collapsible
+                                data-testid="settings-details-card"
+                                data-card
+                                data-card-open={detailsOpen}
+                                open={detailsOpen}
+                                onOpenChange={setDetailsOpen}
+                                className="group/details rounded-md border border-border overflow-hidden flex flex-col min-h-0"
+                              >
+                                <CollapsibleTrigger className="shrink-0 flex w-full items-center gap-1.5 bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group-data-[state=open]/details:border-b border-border [&[data-state=open]>svg:first-child]:rotate-90">
+                                  <ChevronRight className="size-3 transition-transform" />
+                                  Details
+                                </CollapsibleTrigger>
+                                <CollapsibleContent className="flex flex-col flex-1 min-h-0">
+                                  <div
+                                    data-card-scroll
+                                    className="flex-1 min-h-0 overflow-y-auto p-2.5"
+                                  >
+                                    {detailsBody}
+                                  </div>
+                                </CollapsibleContent>
+                              </Collapsible>
+                            )}
                           </div>
 
-                          {/* Details */}
-                          <Collapsible
-                            open={descriptionExpanded && descriptionOpen ? detailsOpen : true}
-                            onOpenChange={setDetailsOpen}
-                            className="shrink-0 mt-auto"
-                          >
-                            {descriptionExpanded && descriptionOpen && (
-                              <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 min-h-8 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors [&[data-state=open]>svg:first-child]:rotate-90">
-                                <ChevronRight className="size-3 transition-transform" />
-                                Details
-                              </CollapsibleTrigger>
-                            )}
-                            <CollapsibleContent
-                              className={descriptionExpanded && descriptionOpen ? 'pt-4' : ''}
+                          {/* Details — normal mode: pinned at the bottom of the panel,
+                              always visible, never shrinks. */}
+                          {!descriptionExpanded && (
+                            <div
+                              data-testid="settings-details-pinned"
+                              className="shrink-0 mt-auto"
                             >
-                              <TaskMetadataSidebar
-                                task={task}
-                                tags={tags}
-                                taskTagIds={taskTagIds}
-                                onUpdate={handleTaskUpdate}
-                                onTagsChange={handleTagsChange}
-                                onTagCreated={(tag) => setTags((prev) => [...prev, tag])}
-                              />
-
-                              <div className="flex flex-col gap-3 mt-5">
-                                {/* Working directory */}
-                                <div className="flex flex-col gap-2">
-                                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                                    Working directory
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Info className="size-3 text-muted-foreground/60 cursor-help" />
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-72 text-xs">
-                                        <p>Override the project directory for this task.</p>
-                                        <p className="mt-1.5">Priority (highest first):</p>
-                                        <ol className="mt-0.5 list-decimal list-inside">
-                                          <li>Worktree</li>
-                                          <li>Custom directory</li>
-                                          <li>Project path</li>
-                                        </ol>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </span>
-                                  <div className="flex items-center gap-1">
-                                    <div
-                                      className="flex-1 min-w-0 text-xs text-muted-foreground truncate px-2 py-1.5 rounded border border-border bg-muted/30"
-                                      title={effectiveRepoPath ?? 'No directory set'}
-                                    >
-                                      {effectiveRepoPath ?? 'No directory set'}
-                                      {task.worktree_path && (
-                                        <span className="ml-1 text-[10px] opacity-60">
-                                          (worktree)
-                                        </span>
-                                      )}
-                                      {!task.worktree_path && task.base_dir && (
-                                        <span className="ml-1 text-[10px] opacity-60">
-                                          (custom)
-                                        </span>
-                                      )}
-                                    </div>
-                                    <button
-                                      className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
-                                      title="Change working directory"
-                                      onClick={async () => {
-                                        const result = await window.api.dialog.showOpenDialog({
-                                          title: 'Select Working Directory',
-                                          defaultPath:
-                                            task.base_dir ?? effectiveRepoPath ?? undefined,
-                                          properties: ['openDirectory']
-                                        })
-                                        if (result.canceled || !result.filePaths[0]) return
-                                        await updateTaskAndNotify({
-                                          id: task.id,
-                                          baseDir: result.filePaths[0]
-                                        })
-                                      }}
-                                    >
-                                      <FileCode className="size-3.5 text-muted-foreground" />
-                                    </button>
-                                    {task.base_dir && (
-                                      <button
-                                        className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
-                                        title="Clear custom directory"
-                                        onClick={() => {
-                                          void updateTaskAndNotify({ id: task.id, baseDir: null })
-                                        }}
-                                      >
-                                        <X className="size-3.5 text-muted-foreground" />
-                                      </button>
-                                    )}
-                                  </div>
-                                  {task.worktree_path && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="text-xs w-full justify-start"
-                                      onClick={() => {
-                                        void updateTaskAndNotify({
-                                          id: task.id,
-                                          worktreePath: null,
-                                          worktreeParentBranch: null
-                                        })
-                                      }}
-                                    >
-                                      <GitBranch className="mr-1.5 size-3" />
-                                      Detach worktree
-                                    </Button>
-                                  )}
-                                  {task.worktree_path && task.base_dir && (
-                                    <span className="text-[10px] text-amber-400/80">
-                                      Worktree active — custom dir overridden
-                                    </span>
-                                  )}
-                                </div>
-
-                                {/* Danger zone */}
-                                <div className="flex flex-col gap-2">
-                                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                                    Danger zone
-                                  </span>
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="flex-1 text-xs"
-                                      onClick={
-                                        isArchived
-                                          ? handleUnarchive
-                                          : () => setArchiveDialogOpen(true)
-                                      }
-                                    >
-                                      <Archive className="mr-1.5 size-3" />
-                                      {isArchived ? 'Unarchive' : 'Archive'}
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="flex-1 text-xs text-destructive hover:text-destructive"
-                                      onClick={() => setDeleteDialogOpen(true)}
-                                    >
-                                      <Trash2 className="mr-1.5 size-3" />
-                                      Delete
-                                    </Button>
-                                  </div>
-                                </div>
-                              </div>
-                            </CollapsibleContent>
-                          </Collapsible>
+                              {detailsBody}
+                            </div>
+                          )}
                         </>
                       )
                     }}

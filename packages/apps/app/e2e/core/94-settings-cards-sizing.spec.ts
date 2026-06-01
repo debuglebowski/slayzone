@@ -24,6 +24,13 @@ const artifactsCard = (page: Page): Locator =>
 
 const cardsGrid = (page: Page): Locator => settingsPanel(page).getByTestId('settings-cards-grid')
 
+// Details: pinned at the panel bottom in normal mode; an in-grid card in full-height.
+const detailsPinned = (page: Page): Locator =>
+  settingsPanel(page).getByTestId('settings-details-pinned')
+
+const detailsCard = (page: Page): Locator =>
+  settingsPanel(page).getByTestId('settings-details-card')
+
 async function cardHeight(locator: Locator): Promise<number> {
   const box = await locator.boundingBox()
   return box?.height ?? 0
@@ -77,6 +84,33 @@ async function clearSubtasks(page: Page, parentId: string) {
   })
 }
 
+// A description tall enough to overflow any panel — the reported bug.
+const LONG_DESCRIPTION = Array.from(
+  { length: 120 },
+  (_, i) => `Paragraph ${i + 1}: ${'lorem ipsum dolor sit amet consectetur adipiscing. '.repeat(3)}`
+).join('\n\n')
+
+async function seedDescription(page: Page, id: string, text: string) {
+  await page.evaluate(
+    async ({ id, text }) => {
+      await window.api.db.updateTask({ id, description: text })
+      await (
+        window as unknown as { __slayzone_refreshData?: () => Promise<void> }
+      ).__slayzone_refreshData?.()
+      await new Promise((r) => setTimeout(r, 200))
+    },
+    { id, text }
+  )
+}
+
+// The description editor's internal scroll layer.
+const descriptionScroll = (page: Page): Locator =>
+  descriptionCard(page).locator('.mk-doc-scroll')
+
+async function isScrollable(locator: Locator): Promise<boolean> {
+  return locator.evaluate((el) => el.scrollHeight > el.clientHeight + 4)
+}
+
 async function resizeWindow(electronApp: ElectronApplication, width: number, height: number) {
   await electronApp.evaluate(
     ({ BrowserWindow }, size) => {
@@ -124,8 +158,9 @@ test.describe('Settings panel card sizing', () => {
   })
 
   test.beforeEach(async ({ mainWindow }) => {
-    // Reset state: clear subtasks, ensure cards start in known state
+    // Reset state: clear subtasks + description, ensure cards start known
     await clearSubtasks(mainWindow, taskId)
+    await seedDescription(mainWindow, taskId, '')
   })
 
   test('all cards closed: each card is roughly header-height', async ({ mainWindow }) => {
@@ -231,6 +266,45 @@ test.describe('Settings panel card sizing', () => {
     expect(await cardHeight(subtasksCard(mainWindow))).toBeLessThan(60)
   })
 
+  test('long description, normal mode: caps within the grid + scrolls internally (bug)', async ({
+    mainWindow
+  }) => {
+    // The reported bug: a very long description grew past its allotted space and
+    // blew the grid out of the panel, and its editor never scrolled.
+    await seedDescription(mainWindow, taskId, LONG_DESCRIPTION)
+    await setCardOpen(descriptionCard(mainWindow), true)
+    await setCardOpen(subtasksCard(mainWindow), true)
+    await setCardOpen(artifactsCard(mainWindow), true)
+
+    const panelH = await cardHeight(settingsPanel(mainWindow))
+    const gridH = await cardHeight(cardsGrid(mainWindow))
+    const descH = await cardHeight(descriptionCard(mainWindow))
+
+    // Grid stays inside the panel; description stays inside the grid.
+    expect(gridH).toBeLessThanOrEqual(panelH + 1)
+    expect(descH).toBeLessThanOrEqual(gridH + 1)
+    // The editor takes over the overflow by scrolling internally.
+    expect(await isScrollable(descriptionScroll(mainWindow))).toBe(true)
+  })
+
+  test('long description, normal mode: takes the space empty peers leave unused', async ({
+    mainWindow
+  }) => {
+    await seedDescription(mainWindow, taskId, LONG_DESCRIPTION)
+    await setCardOpen(descriptionCard(mainWindow), true)
+    await setCardOpen(subtasksCard(mainWindow), true)
+    await setCardOpen(artifactsCard(mainWindow), true)
+
+    const gridH = await cardHeight(cardsGrid(mainWindow))
+    const descH = await cardHeight(descriptionCard(mainWindow))
+
+    // Empty peers hug their content (small)...
+    expect(await cardHeight(subtasksCard(mainWindow))).toBeLessThan(120)
+    expect(await cardHeight(artifactsCard(mainWindow))).toBeLessThan(120)
+    // ...so the long description gets far more than an even 1/3 share.
+    expect(descH).toBeGreaterThan(gridH * 0.5)
+  })
+
   test('toggle subtasks closed with 25 subtasks: collapses back to header', async ({
     mainWindow
   }) => {
@@ -299,9 +373,47 @@ test.describe('Settings panel card sizing', () => {
     await settingsPanel(mainWindow).getByRole('button', { name: 'Default height' }).click()
   })
 
-  test('full-height mode: Description fills space, opened peers stay capped', async ({
+  test('full-height mode: a LONG description fills the panel + scrolls', async ({ mainWindow }) => {
+    await seedDescription(mainWindow, taskId, LONG_DESCRIPTION)
+    await setCardOpen(descriptionCard(mainWindow), true)
+    await setCardOpen(subtasksCard(mainWindow), false)
+    await setCardOpen(artifactsCard(mainWindow), false)
+
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Full height' }).click()
+
+    const gridH = await cardHeight(cardsGrid(mainWindow))
+    const descH = await cardHeight(descriptionCard(mainWindow))
+    // Sole open card with tall content → fills almost the whole grid...
+    expect(descH).toBeGreaterThan(gridH * 0.7)
+    expect(descH).toBeLessThanOrEqual(gridH + 1)
+    // ...and scrolls internally rather than overflowing.
+    expect(await isScrollable(descriptionScroll(mainWindow))).toBe(true)
+
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Default height' }).click()
+  })
+
+  test('full-height mode: an EMPTY description hugs (does not force-fill)', async ({
     mainWindow
   }) => {
+    // New behaviour: full-height no longer force-fills. With no content the
+    // description hugs, leaving the rest of the panel empty.
+    await setCardOpen(descriptionCard(mainWindow), true)
+    await setCardOpen(subtasksCard(mainWindow), false)
+    await setCardOpen(artifactsCard(mainWindow), false)
+
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Full height' }).click()
+
+    const gridH = await cardHeight(cardsGrid(mainWindow))
+    const descH = await cardHeight(descriptionCard(mainWindow))
+    expect(descH).toBeLessThan(gridH - 100)
+
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Default height' }).click()
+  })
+
+  test('full-height mode: opening a peer shares the space (both capped, none runs away)', async ({
+    mainWindow
+  }) => {
+    await seedDescription(mainWindow, taskId, LONG_DESCRIPTION)
     await createSubtasks(mainWindow, taskId, projectId, 25)
     await setCardOpen(descriptionCard(mainWindow), true)
     await setCardOpen(subtasksCard(mainWindow), false)
@@ -309,18 +421,125 @@ test.describe('Settings panel card sizing', () => {
 
     await settingsPanel(mainWindow).getByRole('button', { name: 'Full height' }).click()
 
-    // Description fills available space — far taller than the collapsed peers
-    expect(await cardHeight(descriptionCard(mainWindow))).toBeGreaterThan(300)
-
-    // Open sub-tasks (25 items): must cap (fit-content(18rem)), not run away
+    // Open the 25-item sub-tasks card alongside the long description.
     await setCardOpen(subtasksCard(mainWindow), true)
+    const gridH = await cardHeight(cardsGrid(mainWindow))
     const subH = await cardHeight(subtasksCard(mainWindow))
-    expect(subH).toBeGreaterThan(60)
-    expect(subH).toBeLessThanOrEqual(18 * 16 + 2)
+    const descH = await cardHeight(descriptionCard(mainWindow))
 
-    // Description still dominates
-    expect(await cardHeight(descriptionCard(mainWindow))).toBeGreaterThan(subH)
+    // Both are substantial and both stay inside the grid (neither runs away).
+    expect(subH).toBeGreaterThan(120)
+    expect(descH).toBeGreaterThan(120)
+    expect(subH).toBeLessThanOrEqual(gridH + 1)
+    expect(descH).toBeLessThanOrEqual(gridH + 1)
 
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Default height' }).click()
+  })
+
+  test('9rem floor: under sharing pressure cards are not crushed, panel scrolls', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    // Two tall cards in a short window: the fair share drops below the 9rem
+    // floor, so each card must hold at ~144px (not be squeezed smaller) and the
+    // panel degrades by scrolling.
+    await seedDescription(mainWindow, taskId, LONG_DESCRIPTION)
+    await createSubtasks(mainWindow, taskId, projectId, 25)
+    await setCardOpen(descriptionCard(mainWindow), true)
+    await setCardOpen(subtasksCard(mainWindow), true)
+    await setCardOpen(artifactsCard(mainWindow), false)
+
+    await resizeWindow(electronApp, 1100, 500)
+    await mainWindow.waitForTimeout(350)
+
+    // Neither tall card is squeezed below the 9rem (144px) floor.
+    expect(await cardHeight(descriptionCard(mainWindow))).toBeGreaterThanOrEqual(140)
+    expect(await cardHeight(subtasksCard(mainWindow))).toBeGreaterThanOrEqual(140)
+
+    // Panel degrades by scrolling rather than clipping.
+    const scrollable = await settingsPanel(mainWindow).evaluate(
+      (el) => el.scrollHeight > el.clientHeight
+    )
+    expect(scrollable).toBe(true)
+
+    await resizeWindow(electronApp, 1920, 1200)
+  })
+
+  test('normal mode: Details is pinned at the panel bottom, no header, not a grid card', async ({
+    mainWindow
+  }) => {
+    // Default = normal mode. Details lives at the bottom, always shown, and is
+    // NOT rendered as the in-grid collapsible card.
+    await expect(detailsPinned(mainWindow)).toBeVisible()
+    await expect(detailsCard(mainWindow)).toHaveCount(0)
+
+    const panelBox = await settingsPanel(mainWindow).boundingBox()
+    const pinnedBox = await detailsPinned(mainWindow).boundingBox()
+    if (!panelBox || !pinnedBox) throw new Error('missing box')
+    // Pinned to the bottom: its bottom edge sits at the panel's bottom (modulo
+    // the panel's p-3 padding).
+    const gapToBottom = panelBox.y + panelBox.height - (pinnedBox.y + pinnedBox.height)
+    expect(gapToBottom).toBeGreaterThanOrEqual(0)
+    expect(gapToBottom).toBeLessThan(24)
+  })
+
+  test('full-height mode: Details becomes a collapsible grid card (collapsed on enter)', async ({
+    mainWindow
+  }) => {
+    await setCardOpen(descriptionCard(mainWindow), true)
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Full height' }).click()
+
+    // Pinned meta is replaced by the in-grid card, collapsed on entering.
+    await expect(detailsPinned(mainWindow)).toHaveCount(0)
+    await expect(detailsCard(mainWindow)).toBeVisible()
+    await expect(detailsCard(mainWindow)).toHaveAttribute('data-state', 'closed')
+
+    // User can expand it — it then shares grid space.
+    await setCardOpen(detailsCard(mainWindow), true)
+    expect(await cardHeight(detailsCard(mainWindow))).toBeGreaterThan(60)
+
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Default height' }).click()
+    // Back to pinned in normal mode.
+    await expect(detailsPinned(mainWindow)).toBeVisible()
+  })
+
+  test('exiting full-height re-opens the peers it collapsed', async ({ mainWindow }) => {
+    await setCardOpen(descriptionCard(mainWindow), true)
+    await setCardOpen(subtasksCard(mainWindow), true)
+    await setCardOpen(artifactsCard(mainWindow), true)
+
+    // Enter → force-closes peers.
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Full height' }).click()
+    await expect(subtasksCard(mainWindow)).toHaveAttribute('data-state', 'closed')
+    await expect(artifactsCard(mainWindow)).toHaveAttribute('data-state', 'closed')
+
+    // Exit → restores them.
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Default height' }).click()
+    await expect(subtasksCard(mainWindow)).toHaveAttribute('data-state', 'open')
+    await expect(artifactsCard(mainWindow)).toHaveAttribute('data-state', 'open')
+  })
+
+  test('full-height: a long description re-flows when the window resizes (live recompute)', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    await resizeWindow(electronApp, 1920, 1200)
+    await seedDescription(mainWindow, taskId, LONG_DESCRIPTION)
+    await setCardOpen(descriptionCard(mainWindow), true)
+    await setCardOpen(subtasksCard(mainWindow), false)
+    await setCardOpen(artifactsCard(mainWindow), false)
+    await settingsPanel(mainWindow).getByRole('button', { name: 'Full height' }).click()
+    await mainWindow.waitForTimeout(250)
+    const tallH = await cardHeight(descriptionCard(mainWindow))
+
+    // Shrink the window — the sole open, tall card must track the new available
+    // height (proves the ResizeObserver recompute path runs).
+    await resizeWindow(electronApp, 1400, 700)
+    await mainWindow.waitForTimeout(400)
+    const shortH = await cardHeight(descriptionCard(mainWindow))
+    expect(shortH).toBeLessThan(tallH - 50)
+
+    await resizeWindow(electronApp, 1920, 1200)
     await settingsPanel(mainWindow).getByRole('button', { name: 'Default height' }).click()
   })
 
