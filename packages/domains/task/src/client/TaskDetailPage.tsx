@@ -187,6 +187,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { ProcessesPanel } from './ProcessesPanel'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
 import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
+import { useSharedCardHeights } from './useSharedCardHeights'
 
 const ArtifactsPanel = lazy(() =>
   import('@slayzone/task-artifacts/client').then((m) => ({ default: m.ArtifactsPanel }))
@@ -3300,26 +3301,25 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   />
                 ) : (
                   <Suspense fallback={<PanelLoadingSkeleton />}>
-                    {/* Activity pauses BrowserPanel's React render layer on hidden tabs.
-                        WebContentsView is native and INTENTIONALLY keeps painting — users
-                        rely on seeing browser state on hidden tabs without switching.
-                        Do NOT add a setVisible(false) bridge here. */}
-                    <Activity mode={isActive ? 'visible' : 'hidden'}>
-                      <BrowserPanel
-                        ref={browserPanelRef}
-                        className="h-full"
-                        tabs={browserTabs}
-                        onTabsChange={handleBrowserTabsChange}
-                        onRequestHide={() => handlePanelToggle('browser', false)}
-                        taskId={task.id}
-                        projectId={task.project_id}
-                        isResizing={isResizing}
-                        isActive={isActive}
-                        onElementSnippet={handleInsertElementSnippet}
-                        onScreenshot={handleScreenshot}
-                        canUseDomPicker={panelVisibility.terminal}
-                      />
-                    </Activity>
+                    {/* NOT wrapped in Activity: useBrowserViewLifecycle's cleanup
+                        would destroy the WebContentsView on hide and recreate it
+                        on show, resetting video playback. BrowserPanel keeps the
+                        active WCV painting at off-screen bounds when the parent
+                        task tab is hidden (see useBrowserViewBounds offScreen). */}
+                    <BrowserPanel
+                      ref={browserPanelRef}
+                      className="h-full"
+                      tabs={browserTabs}
+                      onTabsChange={handleBrowserTabsChange}
+                      onRequestHide={() => handlePanelToggle('browser', false)}
+                      taskId={task.id}
+                      projectId={task.project_id}
+                      isResizing={isResizing}
+                      isActive={isActive}
+                      onElementSnippet={handleInsertElementSnippet}
+                      onScreenshot={handleScreenshot}
+                      canUseDomPicker={panelVisibility.terminal}
+                    />
                   </Suspense>
                 )}
               </div>
@@ -3428,24 +3428,24 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           onActivateAndClose={() => ownership.claimAndCloseOther(wp.id)}
                         />
                       ) : (
-                        // WebPanelView uses WebContentsView like BrowserPanel — Activity
-                        // pauses React render only; native view keeps painting (feature).
-                        <Activity mode={isActive ? 'visible' : 'hidden'}>
-                          <WebPanelView
-                            taskId={task.id}
-                            panelId={wp.id}
-                            url={task.web_panel_urls?.[wp.id] || wp.baseUrl}
-                            baseUrl={wp.baseUrl}
-                            name={wp.name}
-                            blockDesktopHandoff={wp.blockDesktopHandoff === true}
-                            handoffProtocol={wp.handoffProtocol}
-                            handoffHostScope={wp.handoffHostScope}
-                            onUrlChange={handleWebPanelUrlChange}
-                            onFaviconChange={handleWebPanelFaviconChange}
-                            isResizing={isResizing}
-                            isActive={isActive}
-                          />
-                        </Activity>
+                        // NOT wrapped in Activity: same reason as BrowserPanel —
+                        // useBrowserViewLifecycle would destroy the WCV on hide.
+                        // Off-screen park (offScreen prop on useBrowserView) keeps
+                        // it painting while parent task tab is hidden.
+                        <WebPanelView
+                          taskId={task.id}
+                          panelId={wp.id}
+                          url={task.web_panel_urls?.[wp.id] || wp.baseUrl}
+                          baseUrl={wp.baseUrl}
+                          name={wp.name}
+                          blockDesktopHandoff={wp.blockDesktopHandoff === true}
+                          handoffProtocol={wp.handoffProtocol}
+                          handoffHostScope={wp.handoffHostScope}
+                          onUrlChange={handleWebPanelUrlChange}
+                          onFaviconChange={handleWebPanelFaviconChange}
+                          isResizing={isResizing}
+                          isActive={isActive}
+                        />
                       )}
                     </div>
                   </div>

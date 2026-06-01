@@ -956,9 +956,12 @@ export class BrowserViewManager {
   }
 
   private normalizeViewBounds(bounds: ViewBounds): Electron.Rectangle {
+    // x/y allowed negative so the renderer can park views off-screen (e.g. when
+    // a hidden task tab's browser panel keeps playing video). Width/height must
+    // stay ≥1 — zero size is rejected by Electron's WCV.
     return {
-      x: Math.max(0, Math.floor(bounds.x)),
-      y: Math.max(0, Math.floor(bounds.y)),
+      x: Math.floor(bounds.x),
+      y: Math.floor(bounds.y),
       width: Math.max(1, Math.floor(bounds.width)),
       height: Math.max(1, Math.floor(bounds.height))
     }

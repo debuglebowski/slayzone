@@ -1049,16 +1049,18 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     setInputUrl(activeTab?.url || '')
   }, [activeTab?.id, activeTab?.url])
 
-  // Belt-and-suspenders: explicitly sync all view visibility on tab/task switch
+  // Belt-and-suspenders: explicitly sync all view visibility on tab switch.
+  // Note: isActive (parent task tab visibility) is intentionally NOT a gate
+  // here — when the parent tab is hidden, the active browser sub-tab keeps
+  // painting and useBrowserViewBounds parks it off-screen via offScreen.
   useEffect(() => {
     for (const [tabId, ref] of tabRefsRef.current) {
       const handle = ref.current
       if (!handle?.viewId) continue
-      const shouldBeVisible =
-        tabId === tabs.activeTabId && isActive !== false && !extensionsManagerOpen
+      const shouldBeVisible = tabId === tabs.activeTabId && !extensionsManagerOpen
       void window.api.browser.setVisible(handle.viewId, shouldBeVisible)
     }
-  }, [tabs.activeTabId, isActive, extensionsManagerOpen])
+  }, [tabs.activeTabId, extensionsManagerOpen])
 
   // No longer needed — each tab has its own WebContentsView via BrowserTabPlaceholder
 
@@ -2066,8 +2068,9 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
               taskId={taskId || ''}
               url={tab.url || 'about:blank'}
               partition="persist:browser-tabs"
-              visible={tab.id === tabs.activeTabId && isActive !== false && !extensionsManagerOpen}
+              visible={tab.id === tabs.activeTabId && !extensionsManagerOpen}
               hidden={!!loadError || extensionsManagerOpen || !activeViewState.hasLoadedRealPage}
+              offScreen={isActive === false}
               isResizing={isResizing}
               locked={!!tab.locked}
               className="absolute inset-0"

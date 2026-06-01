@@ -94,7 +94,8 @@ export function WebPanelView({
     desktopHandoffPolicy,
     onPopupRoute,
     isResizing,
-    visible: isActive !== false
+    visible: true,
+    offScreen: isActive === false
   })
   actionsRef.current = actions
 

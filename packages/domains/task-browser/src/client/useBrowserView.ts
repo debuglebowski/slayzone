@@ -18,6 +18,8 @@ interface UseBrowserViewOpts {
   visible?: boolean
   hidden?: boolean
   isResizing?: boolean
+  /** Keep the view painting but parked off-screen (e.g. parent task tab hidden). */
+  offScreen?: boolean
   kind?: 'browser-tab' | 'web-panel'
   desktopHandoffPolicy?: DesktopHandoffPolicy | null
   onPopupRoute?: (url: string) => void
@@ -45,6 +47,7 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
     visible = true,
     hidden,
     isResizing,
+    offScreen,
     kind,
     desktopHandoffPolicy,
     onPopupRoute
@@ -61,7 +64,8 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
   const { placeholderRef, hiddenByOverlay } = useBrowserViewBounds(viewId, {
     visible,
     hidden,
-    isResizing
+    isResizing,
+    offScreen
   })
   const state = useBrowserViewEvents(viewId)
 

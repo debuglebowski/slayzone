@@ -27,6 +27,8 @@ interface BrowserTabPlaceholderProps {
   visible: boolean
   hidden?: boolean
   isResizing?: boolean
+  /** When true, keep view painting but park bounds off-screen. */
+  offScreen?: boolean
   /** Agent lock: when true, OS-origin input is silenced for this WCV. */
   locked?: boolean
   className?: string
@@ -46,6 +48,7 @@ export const BrowserTabPlaceholder = forwardRef<
     visible,
     hidden,
     isResizing,
+    offScreen,
     locked,
     className,
     onStateChange,
@@ -60,7 +63,8 @@ export const BrowserTabPlaceholder = forwardRef<
     partition,
     visible,
     hidden,
-    isResizing
+    isResizing,
+    offScreen
   })
 
   useImperativeHandle(ref, () => ({ viewId, state, actions, hiddenByOverlay }), [

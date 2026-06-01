@@ -4,14 +4,24 @@ interface UseBrowserViewBoundsOpts {
   visible: boolean
   hidden?: boolean
   isResizing?: boolean
+  /** When true, keep the view painting (so video keeps playing) but park its
+   *  bounds off-screen so it doesn't overlap whatever the user is now looking
+   *  at. Used when the parent task tab is hidden. */
+  offScreen?: boolean
 }
+
+const OFF_SCREEN_X = -20000
+const OFF_SCREEN_Y = -20000
+const FALLBACK_PARK_WIDTH = 800
+const FALLBACK_PARK_HEIGHT = 600
 
 export function useBrowserViewBounds(
   viewId: string | null,
   opts: UseBrowserViewBoundsOpts
 ): { placeholderRef: (el: HTMLDivElement | null) => void; hiddenByOverlay: boolean } {
-  const { visible, hidden, isResizing } = opts
-  const effectivelyVisible = visible && !hidden && !isResizing
+  const { visible, hidden, isResizing, offScreen } = opts
+  const shouldPaint = visible && !hidden && !isResizing
+  const effectivelyVisible = shouldPaint && !offScreen
   const [appZoomFactor, setAppZoomFactor] = useState(1)
 
   const elementRef = useRef<HTMLDivElement | null>(null)
@@ -46,11 +56,31 @@ export function useBrowserViewBounds(
     }
   }, [])
 
-  // Sync visibility changes
+  // Sync visibility changes — drives WCV painting independent of bounds. When
+  // shouldPaint is true but offScreen is true, the view keeps painting (video
+  // plays) while parked off-screen by the bounds effect below.
   useEffect(() => {
     if (!viewId) return
-    void window.api.browser.setVisible(viewId, effectivelyVisible)
-  }, [viewId, effectivelyVisible])
+    void window.api.browser.setVisible(viewId, shouldPaint)
+  }, [viewId, shouldPaint])
+
+  // Park bounds off-screen when shouldPaint && offScreen. One-shot per transition:
+  // the rAF loop is gated on effectivelyVisible (= !offScreen), so it won't fight
+  // this placement. Reuse the last on-screen w/h so the page's layout (and thus
+  // any video player sizing) doesn't reflow on park — only x/y move.
+  useEffect(() => {
+    if (!viewId || !shouldPaint || !offScreen) return
+    const last = lastBoundsRef.current
+    const width = last?.width && last.width > 0 ? last.width : FALLBACK_PARK_WIDTH
+    const height = last?.height && last.height > 0 ? last.height : FALLBACK_PARK_HEIGHT
+    void window.api.browser.setBounds(viewId, {
+      x: OFF_SCREEN_X,
+      y: OFF_SCREEN_Y,
+      width,
+      height
+    })
+    lastBoundsRef.current = null
+  }, [viewId, shouldPaint, offScreen])
 
   // Track whether we've hidden this view due to a dialog overlay
   const [hiddenByOverlay, setHiddenByOverlay] = useState(false)
