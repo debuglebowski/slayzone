@@ -8,6 +8,7 @@
 @source "../../../../../../../packages/shared/editor/src";
 @source "../../../../../../../packages/domains/terminal/src";
 @source "../../../../../../../packages/domains/task/src";
+@source "../../../../../../../packages/domains/task-artifacts/src";
 @source "../../../../../../../packages/domains/tasks/src";
 @source "../../../../../../../packages/domains/projects/src";
 @source "../../../../../../../packages/domains/tags/src";
