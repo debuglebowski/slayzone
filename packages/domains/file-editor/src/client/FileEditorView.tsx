@@ -130,6 +130,7 @@ function formatSize(bytes: number): string {
 
 export interface MarkdownFilePaneHandle {
   scrollToHeadingIndex: (index: number) => void
+  focus: () => void
 }
 
 interface MarkdownFilePaneProps {
@@ -169,6 +170,10 @@ function MarkdownFilePane({
         const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6')
         const target = headings[index] as HTMLElement | undefined
         target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      },
+      focus: () => {
+        const root = editorRef.current ? getEditorViewDOM(editorRef.current) : null
+        root?.focus()
       }
     }
     return () => {
@@ -263,6 +268,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       treeRefreshKey,
       fileVersions,
       goToPosition,
+      focusToken,
       clearGoToPosition
     } = useFileEditor(projectPath, initialEditorState)
 
@@ -300,6 +306,20 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
     const [tocWidth, setTocWidth] = useState(initialEditorState?.tocWidth ?? 220)
     const cmViewRef = useRef<CMEditorView | null>(null)
     const richPaneRef = useRef<MarkdownFilePaneHandle | null>(null)
+
+    // Focus the editor whenever a file is opened/activated via openFile. The
+    // newly-active pane mounts (child effect sets cmViewRef / richPaneRef) before
+    // this parent effect runs; rAF covers async-mount slack. CM (code + split-md)
+    // first, else rich-markdown (milkdown); image/too-large have nothing to focus.
+    // Skips token 0 so first render / restore never grabs focus.
+    useEffect(() => {
+      if (focusToken === 0) return
+      const id = requestAnimationFrame(() => {
+        if (cmViewRef.current) cmViewRef.current.focus()
+        else richPaneRef.current?.focus()
+      })
+      return () => cancelAnimationFrame(id)
+    }, [focusToken])
     const viewMode: MarkdownViewMode =
       (activeFilePath ? fileViewModes[activeFilePath] : undefined) ?? editorMarkdownViewMode
     const setViewModeForFile = useCallback(

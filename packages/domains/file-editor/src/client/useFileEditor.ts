@@ -29,6 +29,10 @@ export function useFileEditor(
 ) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
+  // One-shot signal bumped whenever openFile activates a file. Lets the view
+  // focus the editor on open (incl. plain Cmd+K opens with no position). Not
+  // bumped by restore/file-watcher paths, so reopening a task never steals focus.
+  const [focusToken, setFocusToken] = useState(0)
   const [treeRefreshKey, setTreeRefreshKey] = useState(0)
   const pendingOpen = useRef<string | null>(null)
   const treeRefreshTimer = useRef<NodeJS.Timeout | null>(null)
@@ -246,13 +250,17 @@ export function useFileEditor(
   const openFile = useCallback(
     async (filePath: string, options?: OpenFileOptions) => {
       const from = options?.from ?? 'sidebar'
+      const activateFile = (path: string) => {
+        setActiveFilePath(path)
+        setFocusToken((t) => t + 1)
+      }
       if (options?.position) {
         setGoToPosition({ filePath, line: options.position.line, col: options.position.col ?? 0 })
       }
       // Already open — just focus
       const existing = openFiles.find((f) => f.path === filePath)
       if (existing) {
-        setActiveFilePath(filePath)
+        activateFile(filePath)
         return
       }
 
@@ -266,7 +274,7 @@ export function useFileEditor(
             if (prev.some((f) => f.path === filePath)) return prev
             return [...prev, { path: filePath, content: null, originalContent: null, binary: true }]
           })
-          setActiveFilePath(filePath)
+          activateFile(filePath)
           track('editor_file_opened', { from })
           return
         }
@@ -286,7 +294,7 @@ export function useFileEditor(
               }
             ]
           })
-          setActiveFilePath(filePath)
+          activateFile(filePath)
           track('editor_file_opened', { from })
           return
         }
@@ -297,7 +305,7 @@ export function useFileEditor(
             { path: filePath, content: result.content, originalContent: result.content }
           ]
         })
-        setActiveFilePath(filePath)
+        activateFile(filePath)
         track('editor_file_opened', { from })
       } finally {
         pendingOpen.current = null
@@ -518,6 +526,7 @@ export function useFileEditor(
     treeRefreshKey,
     fileVersions,
     goToPosition,
+    focusToken,
     clearGoToPosition: useCallback(() => setGoToPosition(null), [])
   }
 }
