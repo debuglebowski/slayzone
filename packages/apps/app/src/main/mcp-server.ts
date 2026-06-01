@@ -4,7 +4,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import express from 'express'
 import type { Server } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { notifyRenderer } from './notify-renderer'
 import { registerRestApi } from './rest-api'
 import { registerMcpTools } from './mcp-tools'
@@ -14,7 +14,7 @@ let idleTimer: NodeJS.Timeout | null = null
 const SESSION_IDLE_TIMEOUT = 30 * 60 * 1000 // 30 min
 const IDLE_CHECK_INTERVAL = 5 * 60 * 1000 // 5 min
 
-function createMcpServer(db: Database): McpServer {
+function createMcpServer(db: SlayzoneDb): McpServer {
   const server = new McpServer({
     name: 'slayzone',
     version: '1.0.0'
@@ -35,11 +35,11 @@ export function stopMcpServer(): void {
   }
 }
 
-function getPreferredPort(db: Database): number {
+async function getPreferredPort(db: SlayzoneDb): Promise<number> {
   try {
-    const row = db
+    const row = (await db
       .prepare("SELECT value FROM settings WHERE key = 'mcp_preferred_port' LIMIT 1")
-      .get() as { value: string } | undefined
+      .get()) as { value: string } | undefined
     const port = parseInt(row?.value ?? '', 10)
     return port >= 1024 && port <= 65535 ? port : 0
   } catch {
@@ -47,11 +47,11 @@ function getPreferredPort(db: Database): number {
   }
 }
 
-export function startMcpServer(
-  db: Database,
+export async function startMcpServer(
+  db: SlayzoneDb,
   opts?: { automationEngine?: { executeManual(id: string): Promise<unknown> } }
-): void {
-  const port = getPreferredPort(db)
+): Promise<void> {
+  const port = await getPreferredPort(db)
   const app = express()
   app.use(express.json())
 
@@ -163,14 +163,14 @@ export function startMcpServer(
 
   stopMcpServer()
 
-  function onListening(): void {
+  async function onListening(): Promise<void> {
     const addr = httpServer!.address()
     const actualPort = typeof addr === 'object' && addr ? addr.port : port
     ;(globalThis as Record<string, unknown>).__mcpPort = actualPort
     try {
-      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)").run(
-        String(actualPort)
-      )
+      await db
+        .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('mcp_server_port', ?)")
+        .run(String(actualPort))
     } catch {
       /* non-fatal — CLI falls back to default port */
     }

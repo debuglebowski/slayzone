@@ -1,10 +1,10 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 
-export function getAllBlockedTaskIdsOp(db: Database): string[] {
-  const rows = db
-    .prepare(`SELECT DISTINCT blocks_task_id AS id FROM task_dependencies
+export async function getAllBlockedTaskIdsOp(db: SlayzoneDb): Promise<string[]> {
+  const rows = await db.all<{ id: string }>(
+    `SELECT DISTINCT blocks_task_id AS id FROM task_dependencies
       UNION
-      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL`)
-    .all() as { id: string }[]
+      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL`
+  )
   return rows.map((r) => r.id)
 }

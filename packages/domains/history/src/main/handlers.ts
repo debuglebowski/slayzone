@@ -1,9 +1,9 @@
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { listActivityEventsForTask, listAutomationActionRuns } from './recorder'
 import type { ListTaskHistoryOptions } from '../shared/types'
 
-export function registerHistoryHandlers(ipcMain: IpcMain, db: Database): void {
+export function registerHistoryHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   ipcMain.handle(
     'history:listForTask',
     (_event, taskId: string, options?: ListTaskHistoryOptions) => {

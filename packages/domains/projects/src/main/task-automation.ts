@@ -1,18 +1,18 @@
-import type Database from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { isTerminalStatus, parseColumnsConfig } from '@slayzone/workflow'
 
 /**
  * Handle terminal state changes by auto-moving tasks to configured statuses.
  * Called from the global PTY state change listener.
  */
-export function handleTerminalStateChange(
-  db: Database.Database,
+export async function handleTerminalStateChange(
+  db: SlayzoneDb,
   sessionId: string,
   newState: string,
   oldState: string,
   notifyTasksChanged: () => void,
   onReachedTerminal?: (taskId: string) => void
-): void {
+): Promise<void> {
   let targetField: 'on_terminal_active' | 'on_terminal_idle' | null = null
   if (newState === 'running') targetField = 'on_terminal_active'
   else if (oldState === 'running' && newState === 'idle') targetField = 'on_terminal_idle'
@@ -20,16 +20,18 @@ export function handleTerminalStateChange(
 
   try {
     const taskId = sessionId.split(':')[0]
-    const task = db.prepare('SELECT id, status, project_id FROM tasks WHERE id = ?').get(taskId) as
-      | { id: string; status: string; project_id: string }
-      | undefined
+    const task = await db.get<{ id: string; status: string; project_id: string }>(
+      'SELECT id, status, project_id FROM tasks WHERE id = ?',
+      [taskId]
+    )
     if (!task) return
 
-    const project = db
-      .prepare('SELECT task_automation_config, columns_config FROM projects WHERE id = ?')
-      .get(task.project_id) as
-      | { task_automation_config: string | null; columns_config: string | null }
-      | undefined
+    const project = await db.get<{
+      task_automation_config: string | null
+      columns_config: string | null
+    }>('SELECT task_automation_config, columns_config FROM projects WHERE id = ?', [
+      task.project_id
+    ])
     if (!project?.task_automation_config) return
 
     // Never un-complete or un-cancel a task via terminal activity — explicit terminal status wins.
@@ -43,10 +45,10 @@ export function handleTerminalStateChange(
     const newStatus = config[targetField]
     if (!newStatus || newStatus === task.status) return
 
-    db.prepare("UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?").run(
+    await db.run("UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?", [
       newStatus,
       task.id
-    )
+    ])
     if (isTerminalStatus(newStatus, columns)) onReachedTerminal?.(task.id)
     notifyTasksChanged()
   } catch {

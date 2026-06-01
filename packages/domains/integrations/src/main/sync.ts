@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   ExternalLink,
   IntegrationProjectMapping,
@@ -52,25 +52,25 @@ interface LinkRow extends ExternalLink {
  * 1. Check integration_state_mappings for explicit mapping by state_type
  * 2. Fall back to adapter's category mapping → getStatusByCategories()
  */
-export function resolveLocalStatus(
-  db: Database,
+export async function resolveLocalStatus(
+  db: SlayzoneDb,
   adapter: ProviderAdapter,
   mapping: ProjectMapping | undefined,
   projectId: string,
   remoteStatusType: string,
   remoteStatusName: string
-): string {
-  const columns = getProjectColumns(db, projectId)
+): Promise<string> {
+  const columns = await getProjectColumns(db, projectId)
 
   if (mapping) {
-    const mapped = db
+    const mapped = (await db
       .prepare(`
       SELECT local_status FROM integration_state_mappings
       WHERE provider = ? AND project_mapping_id = ? AND state_type = ?
       ORDER BY rowid ASC
       LIMIT 1
     `)
-      .get(mapping.provider, mapping.id, remoteStatusType) as { local_status: string } | undefined
+      .get(mapping.provider, mapping.id, remoteStatusType)) as { local_status: string } | undefined
 
     if (mapped && isKnownStatus(mapped.local_status, columns)) {
       return mapped.local_status
@@ -106,25 +106,25 @@ export function resolveStatusByCategory(
  * Find the remote state_id to use when pushing a local status.
  * Works for any provider that has integration_state_mappings.
  */
-export function getDesiredRemoteStatusId(
-  db: Database,
+export async function getDesiredRemoteStatusId(
+  db: SlayzoneDb,
   mapping: IntegrationProjectMapping | undefined,
   projectId: string,
   taskStatus: string
-): string | undefined {
+): Promise<string | undefined> {
   if (!mapping) return undefined
 
   // Direct mapping: local_status → state_id
-  const direct = db
+  const direct = (await db
     .prepare(`
     SELECT state_id FROM integration_state_mappings
     WHERE provider = ? AND project_mapping_id = ? AND local_status = ?
   `)
-    .get(mapping.provider, mapping.id, taskStatus) as { state_id: string } | undefined
+    .get(mapping.provider, mapping.id, taskStatus)) as { state_id: string } | undefined
   if (direct?.state_id) return direct.state_id
 
   // Category-based fallback: find state mappings with matching category
-  const projectColumns = getProjectColumns(db, projectId)
+  const projectColumns = await getProjectColumns(db, projectId)
   const statusColumn = getColumnById(taskStatus, projectColumns)
   if (!statusColumn) return undefined
 
@@ -138,14 +138,14 @@ export function getDesiredRemoteStatusId(
   }
 
   for (const stateType of CATEGORY_FALLBACKS[statusColumn.category]) {
-    const byType = db
+    const byType = (await db
       .prepare(`
       SELECT state_id FROM integration_state_mappings
       WHERE provider = ? AND project_mapping_id = ? AND state_type = ?
       ORDER BY rowid ASC
       LIMIT 1
     `)
-      .get(mapping.provider, mapping.id, stateType) as { state_id: string } | undefined
+      .get(mapping.provider, mapping.id, stateType)) as { state_id: string } | undefined
     if (byType?.state_id) return byType.state_id
   }
 
@@ -157,58 +157,58 @@ export const getDesiredLinearStateId = getDesiredRemoteStatusId
 
 // --- Core helpers ---
 
-function loadTask(db: Database, taskId: string): Task | null {
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task | undefined
+async function loadTask(db: SlayzoneDb, taskId: string): Promise<Task | null> {
+  const row = (await db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId)) as Task | undefined
   return row ?? null
 }
 
-function loadProjectMappingByTask(
-  db: Database,
+async function loadProjectMappingByTask(
+  db: SlayzoneDb,
   taskId: string,
   provider: IntegrationProvider
-): ProjectMapping | undefined {
-  return db
+): Promise<ProjectMapping | undefined> {
+  return (await db
     .prepare(`
     SELECT pm.*
     FROM integration_project_mappings pm
     JOIN tasks t ON t.project_id = pm.project_id
     WHERE t.id = ? AND pm.provider = ?
   `)
-    .get(taskId, provider) as ProjectMapping | undefined
+    .get(taskId, provider)) as ProjectMapping | undefined
 }
 
-function markLinkSynced(db: Database, link: LinkRow): void {
-  db.prepare(`
+async function markLinkSynced(db: SlayzoneDb, link: LinkRow): Promise<void> {
+  await db.prepare(`
     UPDATE external_links
     SET sync_state = 'active', last_error = NULL, last_sync_at = datetime('now'), updated_at = datetime('now')
     WHERE id = ?
   `).run(link.id)
-  db.prepare(`
+  await db.prepare(`
     UPDATE integration_connections
     SET last_synced_at = datetime('now'), updated_at = datetime('now')
     WHERE id = ?
   `).run(link.connection_id)
 }
 
-function markLinkError(db: Database, linkId: string, message: string): void {
-  db.prepare(`
+async function markLinkError(db: SlayzoneDb, linkId: string, message: string): Promise<void> {
+  await db.prepare(`
     UPDATE external_links
     SET sync_state = 'error', last_error = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(message, linkId)
 }
 
-function createExternalLink(
-  db: Database,
+async function createExternalLink(
+  db: SlayzoneDb,
   provider: IntegrationProvider,
   connectionId: string,
   externalId: string,
   externalKey: string,
   externalUrl: string,
   taskId: string
-): string {
+): Promise<string> {
   const id = crypto.randomUUID()
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO external_links (
       id, provider, connection_id, external_type, external_id, external_key,
       external_url, task_id, sync_state, last_sync_at, last_error, created_at, updated_at
@@ -219,15 +219,15 @@ function createExternalLink(
 
 // --- Unified remote update / field state ---
 
-function applyRemoteUpdate(
-  db: Database,
+async function applyRemoteUpdate(
+  db: SlayzoneDb,
   taskId: string,
   issue: NormalizedIssue,
   localStatus: string,
   priority?: number
-): void {
+): Promise<void> {
   if (priority !== undefined) {
-    db.prepare(`
+    await db.prepare(`
       UPDATE tasks
       SET title = ?, description = ?, status = ?, priority = ?, assignee = ?, updated_at = ?
       WHERE id = ?
@@ -241,7 +241,7 @@ function applyRemoteUpdate(
       taskId
     )
   } else {
-    db.prepare(`
+    await db.prepare(`
       UPDATE tasks
       SET title = ?, description = ?, status = ?, assignee = ?, updated_at = ?
       WHERE id = ?
@@ -256,14 +256,22 @@ function applyRemoteUpdate(
   }
 }
 
-function upsertNormalizedFieldState(
-  db: Database,
+async function upsertNormalizedFieldState(
+  db: SlayzoneDb,
   linkId: string,
   task: Task,
   issue: NormalizedIssue
-): void {
-  upsertFieldState(db, linkId, 'title', task.title, issue.title, task.updated_at, issue.updatedAt)
-  upsertFieldState(
+): Promise<void> {
+  await upsertFieldState(
+    db,
+    linkId,
+    'title',
+    task.title,
+    issue.title,
+    task.updated_at,
+    issue.updatedAt
+  )
+  await upsertFieldState(
     db,
     linkId,
     'description',
@@ -272,7 +280,7 @@ function upsertNormalizedFieldState(
     task.updated_at,
     issue.updatedAt
   )
-  upsertFieldState(
+  await upsertFieldState(
     db,
     linkId,
     'status',
@@ -282,7 +290,7 @@ function upsertNormalizedFieldState(
     issue.updatedAt
   )
   if (issue.extras.priority !== undefined) {
-    upsertFieldState(
+    await upsertFieldState(
       db,
       linkId,
       'priority',
@@ -321,7 +329,7 @@ function localPriorityToExtras(priority: number): number {
 // --- Unified sync ---
 
 export async function runProviderSync(
-  db: Database,
+  db: SlayzoneDb,
   provider: IntegrationProvider,
   input: SyncNowInput
 ): Promise<SyncNowResult> {
@@ -351,7 +359,7 @@ export async function runProviderSync(
     values.push(input.projectId)
   }
 
-  const links = db
+  const links = (await db
     .prepare(`
     SELECT l.*, c.credential_ref
     FROM external_links l
@@ -360,7 +368,7 @@ export async function runProviderSync(
     JOIN integration_project_mappings pm ON pm.project_id = t.project_id AND pm.provider = l.provider
     WHERE ${where.join(' AND ')} AND pm.status_setup_complete = 1
   `)
-    .all(...values) as LinkRow[]
+    .all(...values)) as LinkRow[]
 
   if (links.length === 0) return result
 
@@ -369,7 +377,7 @@ export async function runProviderSync(
   for (const link of links) {
     let group = byCredential.get(link.credential_ref)
     if (!group) {
-      group = { credential: readCredential(db, link.credential_ref), links: [] }
+      group = { credential: await readCredential(db, link.credential_ref), links: [] }
       byCredential.set(link.credential_ref, group)
     }
     group.links.push(link)
@@ -392,7 +400,7 @@ export async function runProviderSync(
         for (const link of credLinks) {
           if (seen.has(link.connection_id)) continue
           seen.add(link.connection_id)
-          markConnectionAuthError(db, link.connection_id, message)
+          await markConnectionAuthError(db, link.connection_id, message)
         }
         for (const link of credLinks) {
           result.scanned += 1
@@ -402,7 +410,7 @@ export async function runProviderSync(
       }
       for (const link of credLinks) {
         result.scanned += 1
-        markLinkError(db, link.id, message)
+        await markLinkError(db, link.id, message)
         result.errors.push(`${link.external_key}: ${message}`)
       }
       continue
@@ -416,9 +424,9 @@ export async function runProviderSync(
 
         // Batch fetch may miss issues — retry with single fetch
         if (!remoteIssue) {
-          const task = loadTask(db, link.task_id)
+          const task = await loadTask(db, link.task_id)
           if (task?.archived_at) {
-            markLinkSynced(db, link)
+            await markLinkSynced(db, link)
             continue
           }
           try {
@@ -431,26 +439,26 @@ export async function runProviderSync(
 
         if (!remoteIssue) {
           // Issue gone — archive local task
-          db.prepare(
+          await db.prepare(
             "UPDATE tasks SET archived_at = datetime('now') WHERE id = ? AND archived_at IS NULL"
           ).run(link.task_id)
-          markLinkSynced(db, link)
+          await markLinkSynced(db, link)
           result.pulled += 1
           continue
         }
 
-        const task = loadTask(db, link.task_id)
+        const task = await loadTask(db, link.task_id)
         if (!task) continue
 
         const localUpdatedMs = toMs(task.updated_at)
         const remoteUpdatedMs = toMs(remoteIssue.updatedAt)
 
-        const mapping = loadProjectMappingByTask(db, task.id, provider)
+        const mapping = await loadProjectMappingByTask(db, task.id, provider)
         const syncMode = mapping?.sync_mode ?? 'one_way'
 
         if (remoteUpdatedMs > localUpdatedMs) {
           // Pull remote changes
-          const localStatus = resolveLocalStatus(
+          const localStatus = await resolveLocalStatus(
             db,
             adapter,
             mapping,
@@ -459,22 +467,22 @@ export async function runProviderSync(
             remoteIssue.status.name
           )
           const priority = resolvePriorityFromExtras(remoteIssue.extras, task.priority)
-          applyRemoteUpdate(
+          await applyRemoteUpdate(
             db,
             task.id,
             remoteIssue,
             localStatus,
             remoteIssue.extras.priority !== undefined ? priority : undefined
           )
-          const updatedTask = loadTask(db, task.id)!
-          const columns = getProjectColumns(db, task.project_id)
+          const updatedTask = (await loadTask(db, task.id))!
+          const columns = await getProjectColumns(db, task.project_id)
           if (isTerminalStatus(localStatus, columns)) onTaskReachedTerminal(task.id)
-          upsertNormalizedFieldState(db, link.id, updatedTask, remoteIssue)
+          await upsertNormalizedFieldState(db, link.id, updatedTask, remoteIssue)
           result.pulled += 1
           result.conflictsResolved += 1
         } else if (localUpdatedMs > remoteUpdatedMs && syncMode === 'two_way') {
           // Push local changes
-          const statusId = getDesiredRemoteStatusId(db, mapping, task.project_id, task.status)
+          const statusId = await getDesiredRemoteStatusId(db, mapping, task.project_id, task.status)
           const ctx = adapter.parseExternalKey(link.external_key) ?? undefined
 
           const extras: Record<string, unknown> = {}
@@ -483,7 +491,7 @@ export async function runProviderSync(
           }
           // GitHub needs explicit state for updateIssue
           if (provider === 'github') {
-            const columns = getProjectColumns(db, task.project_id)
+            const columns = await getProjectColumns(db, task.project_id)
             const col = getColumnById(task.status, columns)
             extras.state =
               col?.category === 'completed' || col?.category === 'canceled' ? 'closed' : 'open'
@@ -505,26 +513,26 @@ export async function runProviderSync(
 
           if (updatedIssue) {
             result.pushed += 1
-            upsertNormalizedFieldState(db, link.id, task, updatedIssue)
+            await upsertNormalizedFieldState(db, link.id, task, updatedIssue)
           }
         }
 
         // Archive sync
         if (remoteIssue.isArchived && !task.archived_at) {
-          db.prepare("UPDATE tasks SET archived_at = datetime('now') WHERE id = ?").run(task.id)
+          await db.prepare("UPDATE tasks SET archived_at = datetime('now') WHERE id = ?").run(task.id)
         } else if (!remoteIssue.isArchived && task.archived_at) {
-          db.prepare('UPDATE tasks SET archived_at = NULL WHERE id = ?').run(task.id)
+          await db.prepare('UPDATE tasks SET archived_at = NULL WHERE id = ?').run(task.id)
         }
 
-        markLinkSynced(db, link)
+        await markLinkSynced(db, link)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         if (isAuthError(err)) {
-          markConnectionAuthError(db, link.connection_id, message)
+          await markConnectionAuthError(db, link.connection_id, message)
           result.errors.push(`${link.external_key}: ${message}`)
           continue
         }
-        markLinkError(db, link.id, message)
+        await markLinkError(db, link.id, message)
         result.errors.push(`${link.external_key}: ${message}`)
       }
     }
@@ -534,12 +542,12 @@ export async function runProviderSync(
 }
 
 /** @deprecated Use runProviderSync(db, 'linear', input) */
-export async function runSyncNow(db: Database, input: SyncNowInput): Promise<SyncNowResult> {
+export async function runSyncNow(db: SlayzoneDb, input: SyncNowInput): Promise<SyncNowResult> {
   return runProviderSync(db, 'linear', input)
 }
 
 /** @deprecated Use runProviderSync(db, 'github', input) */
-export async function runGithubSyncNow(db: Database, input: SyncNowInput): Promise<SyncNowResult> {
+export async function runGithubSyncNow(db: SlayzoneDb, input: SyncNowInput): Promise<SyncNowResult> {
   return runProviderSync(db, 'github', input)
 }
 
@@ -552,7 +560,7 @@ export function resetSyncFlags(): void {
   discoveryRunning = false
 }
 
-export function startSyncPoller(db: Database, onChanged?: () => void): NodeJS.Timeout {
+export function startSyncPoller(db: SlayzoneDb, onChanged?: () => void): NodeJS.Timeout {
   return setInterval(() => {
     if (syncRunning) return
     syncRunning = true
@@ -576,13 +584,13 @@ export function startSyncPoller(db: Database, onChanged?: () => void): NodeJS.Ti
  * Silently skips if no external links exist.
  */
 export async function pushTaskAfterEdit(
-  db: Database,
+  db: SlayzoneDb,
   taskId: string,
   opts?: { pushGithubTask?: (taskId: string) => Promise<void> }
 ): Promise<void> {
-  const links = db
+  const links = (await db
     .prepare('SELECT provider FROM external_links WHERE task_id = ?')
-    .all(taskId) as Array<{ provider: string }>
+    .all(taskId)) as Array<{ provider: string }>
   if (links.length === 0) return
 
   const providers = new Set(links.map((l) => l.provider))
@@ -603,12 +611,12 @@ export async function pushTaskAfterEdit(
 // --- Unified task creation from normalized issue ---
 
 async function createLocalTaskFromNormalizedIssue(
-  db: Database,
+  db: SlayzoneDb,
   adapter: ProviderAdapter,
   projectId: string,
   issue: NormalizedIssue
 ): Promise<string> {
-  const columns = getProjectColumns(db, projectId)
+  const columns = await getProjectColumns(db, projectId)
   const category = adapter.remoteStatusToCategory({
     id: issue.status.id,
     name: issue.status.name,
@@ -633,32 +641,32 @@ async function createLocalTaskFromNormalizedIssue(
 // --- Unified push functions ---
 
 export async function pushNewTaskToProviders(
-  db: Database,
+  db: SlayzoneDb,
   taskId: string,
   projectId: string
 ): Promise<void> {
-  const mappings = db
+  const mappings = (await db
     .prepare(`
     SELECT pm.*, c.credential_ref
     FROM integration_project_mappings pm
     JOIN integration_connections c ON c.id = pm.connection_id AND c.enabled = 1
     WHERE pm.project_id = ? AND pm.sync_mode = 'two_way' AND pm.status_setup_complete = 1
   `)
-    .all(projectId) as Array<IntegrationProjectMapping & { credential_ref: string }>
+    .all(projectId)) as Array<IntegrationProjectMapping & { credential_ref: string }>
 
-  const task = loadTask(db, taskId)
+  const task = await loadTask(db, taskId)
   if (!task) return
 
   for (const mapping of mappings) {
-    const existing = db
+    const existing = await db
       .prepare('SELECT id FROM external_links WHERE task_id = ? AND provider = ?')
       .get(taskId, mapping.provider)
     if (existing) continue
 
     try {
       const adapter = getAdapter(mapping.provider as IntegrationProvider)
-      const credential = readCredential(db, mapping.credential_ref)
-      const statusId = getDesiredRemoteStatusId(db, mapping, projectId, task.status)
+      const credential = await readCredential(db, mapping.credential_ref)
+      const statusId = await getDesiredRemoteStatusId(db, mapping, projectId, task.status)
 
       const extras: Record<string, unknown> = {}
       if (mapping.provider === 'linear') {
@@ -682,7 +690,7 @@ export async function pushNewTaskToProviders(
       })
 
       const externalKey = adapter.buildExternalKey(issue)
-      const linkId = createExternalLink(
+      const linkId = await createExternalLink(
         db,
         mapping.provider as IntegrationProvider,
         mapping.connection_id,
@@ -691,11 +699,11 @@ export async function pushNewTaskToProviders(
         issue.url,
         taskId
       )
-      upsertNormalizedFieldState(db, linkId, task, issue)
+      await upsertNormalizedFieldState(db, linkId, task, issue)
     } catch (err) {
       if (isAuthError(err)) {
         const msg = err instanceof Error ? err.message : String(err)
-        markConnectionAuthError(db, mapping.connection_id, msg)
+        await markConnectionAuthError(db, mapping.connection_id, msg)
         console.warn(
           `[sync] push-new-task auth failed for ${mapping.provider} connection ${mapping.connection_id} — disabled`
         )
@@ -706,32 +714,32 @@ export async function pushNewTaskToProviders(
   }
 }
 
-export async function pushArchiveToProviders(db: Database, taskId: string): Promise<void> {
-  const links = db
+export async function pushArchiveToProviders(db: SlayzoneDb, taskId: string): Promise<void> {
+  const links = (await db
     .prepare(`
     SELECT l.*, c.credential_ref
     FROM external_links l
     JOIN integration_connections c ON c.id = l.connection_id AND c.enabled = 1
     WHERE l.task_id = ?
   `)
-    .all(taskId) as LinkRow[]
+    .all(taskId)) as LinkRow[]
 
-  const task = loadTask(db, taskId)
+  const task = await loadTask(db, taskId)
   if (!task) return
 
   for (const link of links) {
     try {
       const provider = link.provider as IntegrationProvider
-      const mapping = loadProjectMappingByTask(db, taskId, provider)
+      const mapping = await loadProjectMappingByTask(db, taskId, provider)
       if (mapping?.sync_mode !== 'two_way') continue
 
       const adapter = getAdapter(provider)
-      const credential = readCredential(db, link.credential_ref)
+      const credential = await readCredential(db, link.credential_ref)
       const ctx = adapter.parseExternalKey(link.external_key) ?? undefined
 
-      const columns = getProjectColumns(db, task.project_id)
+      const columns = await getProjectColumns(db, task.project_id)
       const doneStatus = getDoneStatus(columns)
-      const statusId = getDesiredRemoteStatusId(db, mapping, task.project_id, doneStatus)
+      const statusId = await getDesiredRemoteStatusId(db, mapping, task.project_id, doneStatus)
 
       const extras: Record<string, unknown> = {}
       if (provider === 'github') {
@@ -754,7 +762,7 @@ export async function pushArchiveToProviders(db: Database, taskId: string): Prom
     } catch (err) {
       if (isAuthError(err)) {
         const msg = err instanceof Error ? err.message : String(err)
-        markConnectionAuthError(db, link.connection_id, msg)
+        await markConnectionAuthError(db, link.connection_id, msg)
         console.warn(
           `[sync] push-archive auth failed for ${link.provider} connection ${link.connection_id} — disabled`
         )
@@ -765,32 +773,32 @@ export async function pushArchiveToProviders(db: Database, taskId: string): Prom
   }
 }
 
-export async function pushUnarchiveToProviders(db: Database, taskId: string): Promise<void> {
-  const links = db
+export async function pushUnarchiveToProviders(db: SlayzoneDb, taskId: string): Promise<void> {
+  const links = (await db
     .prepare(`
     SELECT l.*, c.credential_ref
     FROM external_links l
     JOIN integration_connections c ON c.id = l.connection_id AND c.enabled = 1
     WHERE l.task_id = ?
   `)
-    .all(taskId) as LinkRow[]
+    .all(taskId)) as LinkRow[]
 
-  const task = loadTask(db, taskId)
+  const task = await loadTask(db, taskId)
   if (!task) return
 
   for (const link of links) {
     try {
       const provider = link.provider as IntegrationProvider
-      const mapping = loadProjectMappingByTask(db, taskId, provider)
+      const mapping = await loadProjectMappingByTask(db, taskId, provider)
       if (mapping?.sync_mode !== 'two_way') continue
 
       const adapter = getAdapter(provider)
-      const credential = readCredential(db, link.credential_ref)
+      const credential = await readCredential(db, link.credential_ref)
       const ctx = adapter.parseExternalKey(link.external_key) ?? undefined
 
-      const columns = getProjectColumns(db, task.project_id)
+      const columns = await getProjectColumns(db, task.project_id)
       const defaultStatus = getDefaultStatus(columns)
-      const statusId = getDesiredRemoteStatusId(db, mapping, task.project_id, defaultStatus)
+      const statusId = await getDesiredRemoteStatusId(db, mapping, task.project_id, defaultStatus)
 
       const extras: Record<string, unknown> = {}
       if (provider === 'github') {
@@ -813,7 +821,7 @@ export async function pushUnarchiveToProviders(db: Database, taskId: string): Pr
     } catch (err) {
       if (isAuthError(err)) {
         const msg = err instanceof Error ? err.message : String(err)
-        markConnectionAuthError(db, link.connection_id, msg)
+        await markConnectionAuthError(db, link.connection_id, msg)
         console.warn(
           `[sync] push-unarchive auth failed for ${link.provider} connection ${link.connection_id} — disabled`
         )
@@ -827,7 +835,7 @@ export async function pushUnarchiveToProviders(db: Database, taskId: string): Pr
 // --- Unified discovery ---
 
 async function discoverIssues(
-  db: Database,
+  db: SlayzoneDb,
   adapter: ProviderAdapter,
   mapping: IntegrationProjectMapping & { credential_ref: string },
   credential: string
@@ -861,7 +869,7 @@ async function discoverIssues(
     })
 
     for (const issue of issues) {
-      const linked = db
+      const linked = await db
         .prepare('SELECT id FROM external_links WHERE provider = ? AND external_id = ?')
         .get(mapping.provider, issue.id)
       if (linked) continue
@@ -874,7 +882,7 @@ async function discoverIssues(
           issue
         )
         const externalKey = adapter.buildExternalKey(issue)
-        const linkId = createExternalLink(
+        const linkId = await createExternalLink(
           db,
           mapping.provider as IntegrationProvider,
           mapping.connection_id,
@@ -883,8 +891,8 @@ async function discoverIssues(
           issue.url,
           taskId
         )
-        const task = loadTask(db, taskId)!
-        upsertNormalizedFieldState(db, linkId, task, issue)
+        const task = (await loadTask(db, taskId))!
+        await upsertNormalizedFieldState(db, linkId, task, issue)
         discovered++
       } catch (err) {
         if (err instanceof Error && err.message.includes('UNIQUE')) continue
@@ -895,7 +903,7 @@ async function discoverIssues(
     cursor = nextCursor
   } while (cursor)
 
-  db.prepare(
+  await db.prepare(
     "UPDATE integration_project_mappings SET last_discovery_at = datetime('now'), updated_at = datetime('now') WHERE id = ?"
   ).run(mapping.id)
 
@@ -907,27 +915,27 @@ async function discoverIssues(
   return discovered
 }
 
-export async function runDiscovery(db: Database): Promise<number> {
-  const mappings = db
+export async function runDiscovery(db: SlayzoneDb): Promise<number> {
+  const mappings = (await db
     .prepare(`
     SELECT pm.*, c.credential_ref
     FROM integration_project_mappings pm
     JOIN integration_connections c ON c.id = pm.connection_id AND c.enabled = 1
     WHERE pm.status_setup_complete = 1
   `)
-    .all() as Array<IntegrationProjectMapping & { credential_ref: string }>
+    .all()) as Array<IntegrationProjectMapping & { credential_ref: string }>
 
   let totalDiscovered = 0
   let networkDown = false
   for (const mapping of mappings) {
     try {
       const adapter = getAdapter(mapping.provider as IntegrationProvider)
-      const credential = readCredential(db, mapping.credential_ref)
+      const credential = await readCredential(db, mapping.credential_ref)
       totalDiscovered += await discoverIssues(db, adapter, mapping, credential)
     } catch (err) {
       if (isAuthError(err)) {
         const msg = err instanceof Error ? err.message : String(err)
-        markConnectionAuthError(db, mapping.connection_id, msg)
+        await markConnectionAuthError(db, mapping.connection_id, msg)
         console.warn(
           `[discovery] auth failed for ${mapping.provider} connection ${mapping.connection_id} — disabled, awaiting re-auth`
         )
@@ -952,8 +960,12 @@ let consecutiveFailures = 0
 const BASE_INTERVAL = 60 * 1000
 const MAX_INTERVAL = 30 * 60 * 1000 // 30 min cap
 
-function markConnectionAuthError(db: Database, connectionId: string, message: string): void {
-  db.prepare(
+async function markConnectionAuthError(
+  db: SlayzoneDb,
+  connectionId: string,
+  message: string
+): Promise<void> {
+  await db.prepare(
     `UPDATE integration_connections
      SET enabled = 0,
          auth_error = ?,
@@ -963,7 +975,7 @@ function markConnectionAuthError(db: Database, connectionId: string, message: st
   ).run(message, connectionId)
 }
 
-export function startDiscoveryPoller(db: Database, onChanged?: () => void): NodeJS.Timeout {
+export function startDiscoveryPoller(db: SlayzoneDb, onChanged?: () => void): NodeJS.Timeout {
   void runDiscovery(db)
     .then((discovered) => {
       consecutiveFailures = 0

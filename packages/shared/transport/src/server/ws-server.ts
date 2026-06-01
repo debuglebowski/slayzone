@@ -1,7 +1,7 @@
 import { createServer, type Server as HttpServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { applyWSSHandler } from '@trpc/server/adapters/ws'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { getServerHost, getTrpcPort } from '@slayzone/platform'
 import { appRouter } from './router'
 import type { TrpcContext } from './context'
@@ -10,13 +10,13 @@ let httpServer: HttpServer | null = null
 let wss: WebSocketServer | null = null
 let wssHandler: ReturnType<typeof applyWSSHandler> | null = null
 
-function getPreferredPort(db: Database): number {
+async function getPreferredPort(db: SlayzoneDb): Promise<number> {
   const envPort = getTrpcPort()
   if (envPort !== undefined) return envPort
   try {
-    const row = db
-      .prepare("SELECT value FROM settings WHERE key = 'trpc_preferred_port' LIMIT 1")
-      .get() as { value: string } | undefined
+    const row = await db.get<{ value: string }>(
+      "SELECT value FROM settings WHERE key = 'trpc_preferred_port' LIMIT 1"
+    )
     const port = parseInt(row?.value ?? '', 10)
     return port >= 1024 && port <= 65535 ? port : 0
   } catch {
@@ -25,16 +25,16 @@ function getPreferredPort(db: Database): number {
 }
 
 export type StartTrpcServerOpts = {
-  db: Database
+  db: SlayzoneDb
   dataRoot: string
 }
 
-export function startTrpcServer(opts: StartTrpcServerOpts): void {
+export async function startTrpcServer(opts: StartTrpcServerOpts): Promise<void> {
   stopTrpcServer()
 
   const { db, dataRoot } = opts
   const host = getServerHost()
-  const preferred = getPreferredPort(db)
+  const preferred = await getPreferredPort(db)
 
   const baseContext: TrpcContext = { db, dataRoot }
 
@@ -55,13 +55,11 @@ export function startTrpcServer(opts: StartTrpcServerOpts): void {
       const addr = httpServer!.address()
       const actualPort = typeof addr === 'object' && addr ? addr.port : port
       ;(globalThis as Record<string, unknown>).__trpcPort = actualPort
-      try {
-        db.prepare(
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ('trpc_server_port', ?)"
-        ).run(String(actualPort))
-      } catch {
+      db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('trpc_server_port', ?)", [
+        String(actualPort)
+      ]).catch(() => {
         /* non-fatal */
-      }
+      })
       console.log(`[tRPC] WS server listening on ws://${host}:${actualPort}/trpc`)
     })
 

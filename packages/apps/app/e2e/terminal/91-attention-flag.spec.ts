@@ -10,13 +10,14 @@ import type { ElectronApplication } from 'playwright'
 type State = 'starting' | 'running' | 'idle' | 'error' | 'dead'
 
 async function readFlag(electronApp: ElectronApplication, taskId: string): Promise<number> {
-  return electronApp.evaluate(({}, id: string): number => {
+  return electronApp.evaluate(async ({}, id: string): Promise<number> => {
     const db = (globalThis as Record<string, unknown>).__db as {
-      prepare: (sql: string) => {
-        get: (...args: unknown[]) => { needs_attention: number } | undefined
-      }
+      get: (
+        sql: string,
+        params?: unknown[]
+      ) => Promise<{ needs_attention: number } | undefined>
     }
-    const row = db.prepare('SELECT needs_attention FROM tasks WHERE id = ?').get(id)
+    const row = await db.get('SELECT needs_attention FROM tasks WHERE id = ?', [id])
     return row?.needs_attention ?? 0
   }, taskId)
 }
@@ -27,11 +28,11 @@ async function setFlag(
   value: 0 | 1
 ): Promise<void> {
   await electronApp.evaluate(
-    ({}, args: { id: string; value: number }) => {
+    async ({}, args: { id: string; value: number }) => {
       const db = (globalThis as Record<string, unknown>).__db as {
-        prepare: (sql: string) => { run: (...args: unknown[]) => unknown }
+        run: (sql: string, params?: unknown[]) => Promise<unknown>
       }
-      db.prepare('UPDATE tasks SET needs_attention = ? WHERE id = ?').run(args.value, args.id)
+      await db.run('UPDATE tasks SET needs_attention = ? WHERE id = ?', [args.value, args.id])
     },
     { id: taskId, value }
   )
@@ -49,8 +50,11 @@ async function fireStateChange(
         sid: string,
         next: string,
         prev: string
-      ) => void
-      fn(args.sid, args.next, args.prev)
+      ) => void | Promise<void>
+      // notifyGlobalStateListeners is async (state-change listeners do DB writes
+      // through the SQLite worker) — return its promise so evaluate awaits the
+      // flag write before the test reads it back.
+      return fn(args.sid, args.next, args.prev)
     },
     { sid: sessionId, next, prev }
   )

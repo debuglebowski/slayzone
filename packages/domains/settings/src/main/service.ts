@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 
@@ -8,14 +8,14 @@ export class SettingsService {
   // instance would fork a private cache that silently diverges from sync
   // getCached() readers (e.g. the idle-close sweep). Private constructor +
   // forDatabase() make that fork impossible to write by accident.
-  private static readonly instances = new WeakMap<Database, SettingsService>()
+  private static readonly instances = new WeakMap<SlayzoneDb, SettingsService>()
 
   private readonly cache = new Map<string, string | undefined>()
   private readonly cached = new Set<string>()
 
-  private constructor(private readonly db: Database) {}
+  private constructor(private readonly db: SlayzoneDb) {}
 
-  static forDatabase(db: Database): SettingsService {
+  static forDatabase(db: SlayzoneDb): SettingsService {
     let inst = SettingsService.instances.get(db)
     if (!inst) {
       inst = new SettingsService(db)
@@ -25,19 +25,21 @@ export class SettingsService {
   }
 
   async get(key: string): Promise<string | undefined> {
-    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+    const row = (await this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key)) as
       | { value: string }
       | undefined
     return row?.value
   }
 
   async set(key: string, value: string): Promise<void> {
-    this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
+    await this.db
+      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+      .run(key, value)
     if (this.cached.has(key)) this.cache.set(key, value)
   }
 
   async getAll(): Promise<Record<string, string>> {
-    const rows = this.db.prepare('SELECT key, value FROM settings').all() as {
+    const rows = (await this.db.prepare('SELECT key, value FROM settings').all()) as {
       key: string
       value: string
     }[]

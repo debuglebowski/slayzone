@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@slayzone/ui": "workspace:*",
-    "picomatch": "^4.0.0"
+    "picomatch": "^4.0.0",
+    "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",

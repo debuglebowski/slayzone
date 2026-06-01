@@ -4,7 +4,7 @@
  */
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { storeCredential } from './credentials'
 
 // ── .env loading ────────────────────────────────────────────────────────
@@ -41,8 +41,8 @@ function uid(prefix: string): string {
 }
 
 // ── DB seeding ──────────────────────────────────────────────────────────
-export function seedFullMapping(
-  db: Database,
+export async function seedFullMapping(
+  db: SlayzoneDb,
   provider: 'linear' | 'github',
   credential: string,
   opts: {
@@ -53,42 +53,51 @@ export function seedFullMapping(
     repoName?: string
     workflowStates?: Array<{ id: string; type: string }>
   }
-): { projectId: string; connectionId: string; mappingId: string } {
+): Promise<{ projectId: string; connectionId: string; mappingId: string }> {
   const projectId = uid(`proj-integ-${provider}`)
   const connectionId = uid(`conn-integ-${provider}`)
   const credRef = uid(`cred-integ-${provider}`)
   const mappingId = uid(`map-integ-${provider}`)
 
-  db.prepare(`INSERT INTO projects (id, name, color, path, created_at, updated_at)
-    VALUES (?, ?, '#888888', '/tmp/integ-test', datetime('now'), datetime('now'))`).run(
-    projectId,
-    `Integration Test ${provider}`
+  await db.run(
+    `INSERT INTO projects (id, name, color, path, created_at, updated_at)
+    VALUES (?, ?, '#888888', '/tmp/integ-test', datetime('now'), datetime('now'))`,
+    [projectId, `Integration Test ${provider}`]
   )
 
-  storeCredential(db, credRef, credential)
+  await storeCredential(db, credRef, credential)
 
-  db.prepare(`INSERT INTO integration_connections (id, provider, credential_ref, enabled)
-    VALUES (?, ?, ?, 1)`).run(connectionId, provider, credRef)
+  await db.run(
+    `INSERT INTO integration_connections (id, provider, credential_ref, enabled)
+    VALUES (?, ?, ?, 1)`,
+    [connectionId, provider, credRef]
+  )
 
-  db.prepare(`INSERT INTO integration_project_connections (id, project_id, provider, connection_id)
-    VALUES (?, ?, ?, ?)`).run(crypto.randomUUID(), projectId, provider, connectionId)
+  await db.run(
+    `INSERT INTO integration_project_connections (id, project_id, provider, connection_id)
+    VALUES (?, ?, ?, ?)`,
+    [crypto.randomUUID(), projectId, provider, connectionId]
+  )
 
   const repoOwner = opts.repoOwner ?? ''
   const repoName = opts.repoName ?? ''
 
-  db.prepare(`INSERT INTO integration_project_mappings
+  await db.run(
+    `INSERT INTO integration_project_mappings
     (id, project_id, provider, connection_id, external_team_id, external_team_key,
      sync_mode, status_setup_complete, external_repo_owner, external_repo_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
-    mappingId,
-    projectId,
-    provider,
-    connectionId,
-    opts.teamId,
-    opts.teamKey,
-    opts.syncMode ?? 'two_way',
-    repoOwner,
-    repoName
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    [
+      mappingId,
+      projectId,
+      provider,
+      connectionId,
+      opts.teamId,
+      opts.teamKey,
+      opts.syncMode ?? 'two_way',
+      repoOwner,
+      repoName
+    ]
   )
 
   if (provider === 'linear' && opts.workflowStates) {
@@ -102,26 +111,28 @@ export function seedFullMapping(
     }
     for (const state of opts.workflowStates) {
       const localStatus = statusMap[state.type] ?? 'todo'
-      db.prepare(`INSERT OR IGNORE INTO integration_state_mappings
+      await db.run(
+        `INSERT OR IGNORE INTO integration_state_mappings
         (id, provider, project_mapping_id, local_status, state_id, state_type)
-        VALUES (?, ?, ?, ?, ?, ?)`).run(
-        crypto.randomUUID(),
-        'linear',
-        mappingId,
-        localStatus,
-        state.id,
-        state.type
+        VALUES (?, ?, ?, ?, ?, ?)`,
+        [crypto.randomUUID(), 'linear', mappingId, localStatus, state.id, state.type]
       )
     }
   }
 
   if (provider === 'github') {
-    db.prepare(`INSERT OR IGNORE INTO integration_state_mappings
+    await db.run(
+      `INSERT OR IGNORE INTO integration_state_mappings
       (id, provider, project_mapping_id, local_status, state_id, state_type)
-      VALUES (?, 'github', ?, 'todo', 'open', 'open')`).run(crypto.randomUUID(), mappingId)
-    db.prepare(`INSERT OR IGNORE INTO integration_state_mappings
+      VALUES (?, 'github', ?, 'todo', 'open', 'open')`,
+      [crypto.randomUUID(), mappingId]
+    )
+    await db.run(
+      `INSERT OR IGNORE INTO integration_state_mappings
       (id, provider, project_mapping_id, local_status, state_id, state_type)
-      VALUES (?, 'github', ?, 'done', 'closed', 'closed')`).run(crypto.randomUUID(), mappingId)
+      VALUES (?, 'github', ?, 'done', 'closed', 'closed')`,
+      [crypto.randomUUID(), mappingId]
+    )
   }
 
   return { projectId, connectionId, mappingId }
@@ -229,18 +240,19 @@ export async function cleanupGithubIssues(
  * Run discovery for a SINGLE mapping only, not all mappings in the DB.
  * Prevents cross-contamination between test sections.
  */
-export async function runScopedDiscovery(db: Database, mappingId: string): Promise<void> {
+export async function runScopedDiscovery(db: SlayzoneDb, mappingId: string): Promise<void> {
   // Temporarily hide all other mappings by disabling their connections
-  const otherMappings = db
-    .prepare(`
+  const otherMappings = (await db.all(
+    `
     SELECT DISTINCT pm.connection_id FROM integration_project_mappings pm
     WHERE pm.id != ? AND pm.status_setup_complete = 1
-  `)
-    .all(mappingId) as Array<{ connection_id: string }>
+  `,
+    [mappingId]
+  )) as Array<{ connection_id: string }>
 
   const disabledIds: string[] = []
   for (const m of otherMappings) {
-    db.prepare('UPDATE integration_connections SET enabled = 0 WHERE id = ?').run(m.connection_id)
+    await db.run('UPDATE integration_connections SET enabled = 0 WHERE id = ?', [m.connection_id])
     disabledIds.push(m.connection_id)
   }
 
@@ -251,7 +263,7 @@ export async function runScopedDiscovery(db: Database, mappingId: string): Promi
   } finally {
     // Re-enable
     for (const id of disabledIds) {
-      db.prepare('UPDATE integration_connections SET enabled = 1 WHERE id = ?').run(id)
+      await db.run('UPDATE integration_connections SET enabled = 1 WHERE id = ?', [id])
     }
   }
 }

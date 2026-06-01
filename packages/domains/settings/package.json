@@ -30,7 +30,8 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "lucide-react": "^0.562.0",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.0",
+    "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",

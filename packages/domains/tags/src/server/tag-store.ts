@@ -1,58 +1,32 @@
 import { randomUUID } from 'node:crypto'
-import type { Database } from 'better-sqlite3'
-import { recordActivityEvents } from '@slayzone/history/main'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { CreateTagInput, Tag, UpdateTagInput } from '../shared'
 
-function buildTaskTagsChangedEvents(
-  task: { id: string; project_id: string },
-  previousTagIds: string[],
-  nextTagIds: string[]
-) {
-  const previousSet = new Set(previousTagIds)
-  const nextSet = new Set(nextTagIds)
-  const addedTagIds = nextTagIds.filter((tagId) => !previousSet.has(tagId))
-  const removedTagIds = previousTagIds.filter((tagId) => !nextSet.has(tagId))
-
-  if (addedTagIds.length === 0 && removedTagIds.length === 0) return []
-
-  return [
-    {
-      entityType: 'task' as const,
-      entityId: task.id,
-      projectId: task.project_id,
-      taskId: task.id,
-      kind: 'task.tags_changed' as const,
-      actorType: 'user' as const,
-      source: 'task' as const,
-      summary: 'Tags updated',
-      payload: { addedTagIds, removedTagIds }
-    }
-  ]
+export async function listAllTags(db: SlayzoneDb): Promise<Tag[]> {
+  return (await db.prepare('SELECT * FROM tags ORDER BY sort_order, name').all()) as Tag[]
 }
 
-export function listAllTags(db: Database): Tag[] {
-  return db.prepare('SELECT * FROM tags ORDER BY sort_order, name').all() as Tag[]
-}
-
-export function createTag(db: Database, data: CreateTagInput): Tag {
+export async function createTag(db: SlayzoneDb, data: CreateTagInput): Promise<Tag> {
   const id = randomUUID()
-  const maxOrder = db
+  const maxOrder = (await db
     .prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM tags WHERE project_id = ?')
-    .get(data.projectId) as { m: number }
-  db.prepare(
-    'INSERT INTO tags (id, project_id, name, color, text_color, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(
-    id,
-    data.projectId,
-    data.name,
-    data.color ?? '#6366f1',
-    data.textColor ?? '#ffffff',
-    maxOrder.m + 1
-  )
-  return db.prepare('SELECT * FROM tags WHERE id = ?').get(id) as Tag
+    .get(data.projectId)) as { m: number }
+  await db
+    .prepare(
+      'INSERT INTO tags (id, project_id, name, color, text_color, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+    )
+    .run(
+      id,
+      data.projectId,
+      data.name,
+      data.color ?? '#6366f1',
+      data.textColor ?? '#ffffff',
+      maxOrder.m + 1
+    )
+  return (await db.prepare('SELECT * FROM tags WHERE id = ?').get(id)) as Tag
 }
 
-export function updateTag(db: Database, data: UpdateTagInput): Tag {
+export async function updateTag(db: SlayzoneDb, data: UpdateTagInput): Promise<Tag> {
   const fields: string[] = []
   const values: unknown[] = []
 
@@ -75,38 +49,41 @@ export function updateTag(db: Database, data: UpdateTagInput): Tag {
 
   if (fields.length > 0) {
     values.push(data.id)
-    db.prepare(`UPDATE tags SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+    await db.prepare(`UPDATE tags SET ${fields.join(', ')} WHERE id = ?`).run(...values)
   }
-  return db.prepare('SELECT * FROM tags WHERE id = ?').get(data.id) as Tag
+  return (await db.prepare('SELECT * FROM tags WHERE id = ?').get(data.id)) as Tag
 }
 
-export function deleteTag(db: Database, id: string): boolean {
-  const result = db.prepare('DELETE FROM tags WHERE id = ?').run(id)
+export async function deleteTag(db: SlayzoneDb, id: string): Promise<boolean> {
+  const result = await db.prepare('DELETE FROM tags WHERE id = ?').run(id)
   return result.changes > 0
 }
 
-export function reorderTags(db: Database, tagIds: string[]): void {
-  const stmt = db.prepare('UPDATE tags SET sort_order = ? WHERE id = ?')
-  db.transaction(() => {
-    for (let i = 0; i < tagIds.length; i++) stmt.run(i, tagIds[i])
-  })()
+export async function reorderTags(db: SlayzoneDb, tagIds: string[]): Promise<void> {
+  await db.batchTxn(
+    tagIds.map((tagId, i) => ({
+      type: 'run' as const,
+      sql: 'UPDATE tags SET sort_order = ? WHERE id = ?',
+      params: [i, tagId]
+    }))
+  )
 }
 
-export function getTagsForTask(db: Database, taskId: string): Tag[] {
-  return db
+export async function getTagsForTask(db: SlayzoneDb, taskId: string): Promise<Tag[]> {
+  return (await db
     .prepare(
       `SELECT tags.* FROM tags
        JOIN task_tags ON tags.id = task_tags.tag_id
        WHERE task_tags.task_id = ?
        ORDER BY tags.sort_order, tags.name`
     )
-    .all(taskId) as Tag[]
+    .all(taskId)) as Tag[]
 }
 
-export function getAllTaskTagIds(db: Database): Record<string, string[]> {
-  const rows = db
+export async function getAllTaskTagIds(db: SlayzoneDb): Promise<Record<string, string[]>> {
+  const rows = (await db
     .prepare('SELECT task_id, tag_id FROM task_tags')
-    .all() as { task_id: string; tag_id: string }[]
+    .all()) as { task_id: string; tag_id: string }[]
   const map: Record<string, string[]> = {}
   for (const row of rows) {
     if (!map[row.task_id]) map[row.task_id] = []
@@ -115,22 +92,10 @@ export function getAllTaskTagIds(db: Database): Record<string, string[]> {
   return map
 }
 
-export function setTagsForTask(db: Database, taskId: string, tagIds: string[]): void {
-  const deleteStmt = db.prepare('DELETE FROM task_tags WHERE task_id = ?')
-  const insertStmt = db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)')
-  db.transaction(() => {
-    const previousRows = db
-      .prepare('SELECT tag_id FROM task_tags WHERE task_id = ? ORDER BY tag_id ASC')
-      .all(taskId) as Array<{ tag_id: string }>
-    const previousTagIds = previousRows.map((row) => row.tag_id)
-    deleteStmt.run(taskId)
-    for (const tagId of tagIds) insertStmt.run(taskId, tagId)
-
-    const taskRow = db
-      .prepare('SELECT id, project_id FROM tasks WHERE id = ?')
-      .get(taskId) as { id: string; project_id: string } | undefined
-    if (taskRow) {
-      recordActivityEvents(db, buildTaskTagsChangedEvents(taskRow, previousTagIds, tagIds))
-    }
-  })()
+export async function setTagsForTask(
+  db: SlayzoneDb,
+  taskId: string,
+  tagIds: string[]
+): Promise<void> {
+  await db.namedTxn('tags:setForTask', { taskId, tagIds })
 }

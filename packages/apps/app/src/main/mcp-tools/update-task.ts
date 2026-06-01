@@ -30,9 +30,9 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
     },
     async ({ task_id, due_date, parent_id, close, ...fields }) => {
       if (fields.status !== undefined) {
-        const taskRow = deps.db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(task_id) as
-          | { project_id: string }
-          | undefined
+        const taskRow = (await deps.db
+          .prepare('SELECT project_id FROM tasks WHERE id = ?')
+          .get(task_id)) as { project_id: string } | undefined
         if (!taskRow) {
           return {
             content: [{ type: 'text' as const, text: `Task ${task_id} not found` }],
@@ -40,7 +40,7 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
           }
         }
 
-        const projectColumns = getProjectColumns(deps.db, taskRow.project_id)
+        const projectColumns = await getProjectColumns(deps.db, taskRow.project_id)
         if (!isKnownStatus(fields.status, projectColumns)) {
           const allowed = getAllowedStatusesText(projectColumns)
           return {

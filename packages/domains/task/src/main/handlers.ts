@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron'
 import { app, dialog, BrowserWindow, shell } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   CreateTaskInput,
   UpdateTaskInput,
@@ -19,7 +19,6 @@ import {
   canExportAsPng,
   canExportAsHtml
 } from '@slayzone/task/shared'
-import { uniqueName } from '@slayzone/file-editor/shared'
 import path from 'path'
 import {
   existsSync,
@@ -30,10 +29,8 @@ import {
   rmSync,
   copyFileSync,
   statSync,
-  readdirSync,
   createWriteStream
 } from 'fs'
-import { randomUUID } from 'crypto'
 import archiver from 'archiver'
 import {
   buildPdfHtml,
@@ -43,21 +40,7 @@ import {
   renderToPng
 } from './artifact-export'
 import { startArtifactWatcher } from './artifact-watcher'
-import {
-  BlobStore,
-  betterSqliteTxn,
-  createVersion,
-  saveCurrent,
-  setCurrentVersion,
-  listVersions,
-  resolveVersionRef,
-  readVersionContent,
-  renameVersion,
-  pruneVersions,
-  diffVersions,
-  isVersionError
-} from '@slayzone/task-artifacts/main'
-import type { AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
+import type { VersionRef } from '@slayzone/task-artifacts/shared'
 import {
   addBlockerOp,
   archiveManyTasksOp,
@@ -91,71 +74,77 @@ export type { TaskRuntimeAdapters, DiagnosticEventPayload, DiagnosticLevel } fro
 
 export function registerTaskHandlers(
   ipcMain: IpcMain,
-  db: Database,
+  db: SlayzoneDb,
   onMutation?: () => void
 ): void {
-  // Purge stale soft-deleted tasks from previous sessions
-  const stale = db
-    .prepare(
-      `SELECT id FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', '-5 minutes')`
-    )
-    .all() as { id: string }[]
+  // Startup purges run async (fire-and-forget) since the DB is now an async
+  // worker proxy. Registration of IPC handlers below stays synchronous.
   void (async () => {
+    // Purge stale soft-deleted tasks from previous sessions
+    const stale = (await db
+      .prepare(
+        `SELECT id FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', '-5 minutes')`
+      )
+      .all()) as { id: string }[]
     const staleIds = stale.map((r) => r.id)
     for (const { id } of stale) {
       await cleanupTaskFull(db, id, staleIds)
     }
-  })()
-  if (stale.length > 0) {
-    const placeholders = stale.map(() => '?').join(',')
-    db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...stale.map((r) => r.id))
-    console.log(`Purged ${stale.length} soft-deleted task(s)`)
-  }
-
-  // Purge orphaned temporary tasks (untouched for >24h AND not present in the
-  // persisted tab list). PTY activity does not bump tasks.updated_at, so the
-  // time gate alone purges actively-used scratch terminals after a quit/restart
-  // (notably auto-update). Cross-checking viewState protects open temp tasks
-  // even when their updated_at is stale; the 24h gate still catches true
-  // orphans (crash leaks, tabs closed without renderer cleanup).
-  const openTaskIds = new Set<string>()
-  try {
-    const row = db.prepare(`SELECT value FROM settings WHERE key = 'viewState'`).get() as
-      | { value: string }
-      | undefined
-    if (row?.value) {
-      const parsed = JSON.parse(row.value) as { tabs?: Array<{ type?: string; taskId?: string }> }
-      for (const tab of parsed.tabs ?? []) {
-        if (tab?.type === 'task' && typeof tab.taskId === 'string') openTaskIds.add(tab.taskId)
-      }
+    if (stale.length > 0) {
+      const placeholders = stale.map(() => '?').join(',')
+      await db
+        .prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`)
+        .run(...stale.map((r) => r.id))
+      console.log(`Purged ${stale.length} soft-deleted task(s)`)
     }
-  } catch (err) {
-    console.warn(
-      '[task] Failed to read viewState for temp-task cleanup; falling back to time-only purge:',
-      err
-    )
-  }
-  const staleTemp = (
-    db
-      .prepare(
-        `SELECT id FROM tasks
+
+    // Purge orphaned temporary tasks (untouched for >24h AND not present in the
+    // persisted tab list). PTY activity does not bump tasks.updated_at, so the
+    // time gate alone purges actively-used scratch terminals after a quit/restart
+    // (notably auto-update). Cross-checking viewState protects open temp tasks
+    // even when their updated_at is stale; the 24h gate still catches true
+    // orphans (crash leaks, tabs closed without renderer cleanup).
+    const openTaskIds = new Set<string>()
+    try {
+      const row = (await db.prepare(`SELECT value FROM settings WHERE key = 'viewState'`).get()) as
+        | { value: string }
+        | undefined
+      if (row?.value) {
+        const parsed = JSON.parse(row.value) as {
+          tabs?: Array<{ type?: string; taskId?: string }>
+        }
+        for (const tab of parsed.tabs ?? []) {
+          if (tab?.type === 'task' && typeof tab.taskId === 'string') openTaskIds.add(tab.taskId)
+        }
+      }
+    } catch (err) {
+      console.warn(
+        '[task] Failed to read viewState for temp-task cleanup; falling back to time-only purge:',
+        err
+      )
+    }
+    const staleTemp = (
+      (await db
+        .prepare(
+          `SELECT id FROM tasks
      WHERE is_temporary = 1
        AND deleted_at IS NULL
        AND updated_at < datetime('now', '-24 hours')`
-      )
-      .all() as { id: string }[]
-  ).filter(({ id }) => !openTaskIds.has(id))
-  void (async () => {
+        )
+        .all()) as { id: string }[]
+    ).filter(({ id }) => !openTaskIds.has(id))
     const staleTempIds = staleTemp.map((r) => r.id)
     for (const { id } of staleTemp) {
       await cleanupTaskFull(db, id, staleTempIds)
     }
+    if (staleTemp.length > 0) {
+      const placeholders = staleTemp.map(() => '?').join(',')
+      await db
+        .prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`)
+        .run(...staleTemp.map((r) => r.id))
+      console.log(`Purged ${staleTemp.length} stale temporary task(s)`)
+    }
   })()
-  if (staleTemp.length > 0) {
-    const placeholders = staleTemp.map(() => '?').join(',')
-    db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...staleTemp.map((r) => r.id))
-    console.log(`Purged ${staleTemp.length} stale temporary task(s)`)
-  }
 
   const deps = { ipcMain, onMutation }
 
@@ -210,9 +199,6 @@ export function registerTaskHandlers(
 
   const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
   const artifactsDir = path.join(dataDir, 'artifacts')
-  const blobStore = new BlobStore(dataDir)
-  const versionTxn = betterSqliteTxn(db)
-  const uiAuthor: AuthorContext = { type: 'user', id: null }
   startArtifactWatcher(artifactsDir)
 
   function getArtifactFilePath(taskId: string, artifactId: string, title: string): string {
@@ -259,156 +245,79 @@ export function registerTaskHandlers(
     }
   }
 
-  ipcMain.handle('db:artifacts:getByTask', (_, taskId: string) => {
-    const rows = db
+  ipcMain.handle('db:artifacts:getByTask', async (_, taskId: string) => {
+    const rows = (await db
       .prepare(
         'SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY "order" ASC, created_at ASC'
       )
-      .all(taskId) as Record<string, unknown>[]
+      .all(taskId)) as Record<string, unknown>[]
     return rows.map(parseArtifact).filter(Boolean)
   })
 
-  ipcMain.handle('db:artifacts:get', (_, id: string) => {
-    const row = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+  ipcMain.handle('db:artifacts:get', async (_, id: string) => {
+    const row = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     return parseArtifact(row)
   })
 
-  ipcMain.handle('db:artifacts:create', (_, data: CreateArtifactInput) => {
-    const id = randomUUID()
-    const folderId = data.folderId ?? null
-    const maxOrder =
-      (
-        db
-          .prepare(
-            folderId
-              ? 'SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ? AND folder_id = ?'
-              : 'SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ? AND folder_id IS NULL'
-          )
-          .get(...(folderId ? [data.taskId, folderId] : [data.taskId])) as { m: number | null }
-      ).m ?? -1
-
-    db.prepare(`
-      INSERT INTO task_artifacts (id, task_id, folder_id, title, render_mode, language, "order")
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      data.taskId,
-      folderId,
-      data.title,
-      data.renderMode ?? null,
-      data.language ?? null,
-      maxOrder + 1
-    )
-
-    // Write content to disk
-    const filePath = getArtifactFilePath(data.taskId, id, data.title)
-    mkdirSync(path.dirname(filePath), { recursive: true })
-    const initialBytes = Buffer.from(data.content ?? '', 'utf-8')
-    writeFileSync(filePath, initialBytes)
-
-    // Seed v1 for the new artifact.
-    createVersion(db, versionTxn, blobStore, {
-      artifactId: id,
-      bytes: initialBytes,
-      author: uiAuthor
+  ipcMain.handle('db:artifacts:create', async (_, data: CreateArtifactInput) => {
+    const row = await db.namedTxn<Record<string, unknown> | undefined>('task-artifacts:create', {
+      dataDir,
+      taskId: data.taskId,
+      folderId: data.folderId ?? null,
+      title: data.title,
+      renderMode: data.renderMode ?? null,
+      language: data.language ?? null,
+      content: data.content ?? ''
     })
-
     onMutation?.()
-    const row = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
-      | Record<string, unknown>
-      | undefined
     return parseArtifact(row)
   })
 
   ipcMain.handle(
     'db:artifacts:update',
-    (_, data: UpdateArtifactInput & { mutateVersion?: boolean }) => {
-      const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(data.id) as
-        | Record<string, unknown>
-        | undefined
-      if (!existing) return null
-
-      const sets: string[] = []
-      const values: unknown[] = []
-      if (data.title !== undefined) {
-        sets.push('title = ?')
-        values.push(data.title)
+    async (_, data: UpdateArtifactInput & { mutateVersion?: boolean }) => {
+      // Mirror the original `data.x !== undefined` checks: only forward keys the
+      // caller actually provided so the worker rebuilds the same SET clause.
+      const setKeys: string[] = []
+      for (const key of [
+        'title',
+        'folderId',
+        'renderMode',
+        'viewMode',
+        'readabilityOverride',
+        'widthOverride',
+        'language',
+        'content'
+      ] as const) {
+        if (data[key] !== undefined) setKeys.push(key)
       }
-      if (data.folderId !== undefined) {
-        sets.push('folder_id = ?')
-        values.push(data.folderId)
-      }
-      if (data.renderMode !== undefined) {
-        sets.push('render_mode = ?')
-        values.push(data.renderMode)
-      }
-      if (data.viewMode !== undefined) {
-        sets.push('view_mode = ?')
-        values.push(data.viewMode)
-      }
-      if (data.readabilityOverride !== undefined) {
-        sets.push('readability_override = ?')
-        values.push(data.readabilityOverride)
-      }
-      if (data.widthOverride !== undefined) {
-        sets.push('width_override = ?')
-        values.push(data.widthOverride)
-      }
-      if (data.language !== undefined) {
-        sets.push('language = ?')
-        values.push(data.language)
-      }
-      if (sets.length > 0) {
-        sets.push("updated_at = datetime('now')")
-        values.push(data.id)
-        db.prepare(`UPDATE task_artifacts SET ${sets.join(', ')} WHERE id = ?`).run(...values)
-      }
-
-      // If title changed and extension changed, rename file on disk
-      const taskId = existing.task_id as string
-      const oldTitle = existing.title as string
-      const newTitle = data.title ?? oldTitle
-      if (data.title !== undefined) {
-        const oldExt = getExtensionFromTitle(oldTitle) || '.txt'
-        const newExt = getExtensionFromTitle(newTitle) || '.txt'
-        if (oldExt !== newExt) {
-          const oldPath = path.join(artifactsDir, taskId, `${data.id}${oldExt}`)
-          const newPath = path.join(artifactsDir, taskId, `${data.id}${newExt}`)
-          if (existsSync(oldPath)) {
-            const content = readFileSync(oldPath, 'utf-8')
-            writeFileSync(newPath, content, 'utf-8')
-            unlinkSync(oldPath)
-          }
+      const row = await db.namedTxn<Record<string, unknown> | null | undefined>(
+        'task-artifacts:update',
+        {
+          dataDir,
+          id: data.id,
+          mutateVersion: data.mutateVersion,
+          title: data.title,
+          folderId: data.folderId,
+          renderMode: data.renderMode,
+          viewMode: data.viewMode,
+          readabilityOverride: data.readabilityOverride,
+          widthOverride: data.widthOverride,
+          language: data.language,
+          content: data.content,
+          setKeys
         }
-      }
-
-      // UI autosave: `saveCurrent` mutates current in place when mutable
-      // (tip + unnamed) or auto-branches when locked. Explicit "Create
-      // version" still uses `createVersion` to always create a row.
-      if (data.content !== undefined) {
-        const filePath = getArtifactFilePath(taskId, data.id, newTitle)
-        mkdirSync(path.dirname(filePath), { recursive: true })
-        const bytes = Buffer.from(data.content, 'utf-8')
-        writeFileSync(filePath, bytes)
-        if (data.mutateVersion) {
-          saveCurrent(db, versionTxn, blobStore, { artifactId: data.id, bytes, author: uiAuthor })
-        } else {
-          createVersion(db, versionTxn, blobStore, { artifactId: data.id, bytes, author: uiAuthor })
-        }
-      }
-
+      )
+      if (row === null) return null
       onMutation?.()
-      const row = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(data.id) as
-        | Record<string, unknown>
-        | undefined
-      return parseArtifact(row)
+      return parseArtifact(row ?? undefined)
     }
   )
 
-  ipcMain.handle('db:artifacts:delete', (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+  ipcMain.handle('db:artifacts:delete', async (_, id: string) => {
+    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return false
@@ -416,26 +325,27 @@ export function registerTaskHandlers(
     const filePath = getArtifactFilePath(existing.task_id as string, id, existing.title as string)
     if (existsSync(filePath)) unlinkSync(filePath)
 
-    db.prepare('DELETE FROM task_artifacts WHERE id = ?').run(id)
+    await db.prepare('DELETE FROM task_artifacts WHERE id = ?').run(id)
     onMutation?.()
     return true
   })
 
   ipcMain.handle(
     'db:artifacts:reorder',
-    (_, data: string[] | { folderId: string | null; artifactIds: string[] }) => {
+    async (_, data: string[] | { folderId: string | null; artifactIds: string[] }) => {
       const artifactIds = Array.isArray(data) ? data : data.artifactIds
-      const stmt = db.prepare('UPDATE task_artifacts SET "order" = ? WHERE id = ?')
-      db.transaction(() => {
-        artifactIds.forEach((id, index) => {
-          stmt.run(index, id)
-        })
-      })()
+      await db.batchTxn(
+        artifactIds.map((id, index) => ({
+          type: 'run',
+          sql: 'UPDATE task_artifacts SET "order" = ? WHERE id = ?',
+          params: [index, id]
+        }))
+      )
     }
   )
 
-  ipcMain.handle('db:artifacts:readContent', (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+  ipcMain.handle('db:artifacts:readContent', async (_, id: string) => {
+    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return null
@@ -450,16 +360,16 @@ export function registerTaskHandlers(
     return ''
   })
 
-  ipcMain.handle('db:artifacts:getFilePath', (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+  ipcMain.handle('db:artifacts:getFilePath', async (_, id: string) => {
+    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return null
     return getArtifactFilePath(existing.task_id as string, id, existing.title as string)
   })
 
-  ipcMain.handle('db:artifacts:getMtime', (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+  ipcMain.handle('db:artifacts:getMtime', async (_, id: string) => {
+    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return null
@@ -473,263 +383,70 @@ export function registerTaskHandlers(
 
   ipcMain.handle(
     'db:artifacts:upload',
-    (_, data: { taskId: string; sourcePath: string; title?: string }) => {
-      const id = randomUUID()
-      const title = data.title ?? path.basename(data.sourcePath)
-      const maxOrder =
-        (
-          db
-            .prepare('SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ?')
-            .get(data.taskId) as { m: number | null }
-        ).m ?? -1
-
-      db.prepare(`
-      INSERT INTO task_artifacts (id, task_id, title, "order")
-      VALUES (?, ?, ?, ?)
-    `).run(id, data.taskId, title, maxOrder + 1)
-
-      const filePath = getArtifactFilePath(data.taskId, id, title)
-      mkdirSync(path.dirname(filePath), { recursive: true })
-      copyFileSync(data.sourcePath, filePath)
-
-      // Seed v1 from uploaded bytes.
-      createVersion(db, versionTxn, blobStore, {
-        artifactId: id,
-        bytes: readFileSync(filePath),
-        author: uiAuthor
+    async (_, data: { taskId: string; sourcePath: string; title?: string }) => {
+      const row = await db.namedTxn<Record<string, unknown> | undefined>('task-artifacts:upload', {
+        dataDir,
+        taskId: data.taskId,
+        sourcePath: data.sourcePath,
+        title: data.title ?? path.basename(data.sourcePath)
       })
-
       onMutation?.()
-      const row = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
-        | Record<string, unknown>
-        | undefined
       return parseArtifact(row)
     }
   )
 
   ipcMain.handle(
     'db:artifacts:pasteFiles',
-    (_, data: { sourcePaths: string[]; destTaskId: string; destFolderId: string | null }) => {
-      const { sourcePaths, destTaskId, destFolderId } = data
-      if (!sourcePaths.length) return []
-
-      const artifactsRootPrefix = artifactsDir + path.sep
-      const created: TaskArtifact[] = []
-
-      db.transaction(() => {
-        for (const srcPath of sourcePaths) {
-          if (!existsSync(srcPath)) continue
-          const stat = statSync(srcPath)
-          if (!stat.isFile()) continue
-
-          const newId = randomUUID()
-          let title = path.basename(srcPath)
-          let renderMode: string | null = null
-          let language: string | null = null
-
-          if (srcPath.startsWith(artifactsRootPrefix)) {
-            const idMatch = path.basename(srcPath).match(/^([0-9a-f-]{36})\./)
-            if (idMatch) {
-              const sourceRow = db
-                .prepare('SELECT * FROM task_artifacts WHERE id = ?')
-                .get(idMatch[1]) as Record<string, unknown> | undefined
-              if (sourceRow) {
-                title = sourceRow.title as string
-                renderMode = (sourceRow.render_mode as string | null) ?? null
-                language = (sourceRow.language as string | null) ?? null
-              }
-            }
-          }
-
-          const siblingTitles = new Set<string>(
-            (
-              db
-                .prepare(
-                  destFolderId
-                    ? 'SELECT title FROM task_artifacts WHERE task_id = ? AND folder_id = ?'
-                    : 'SELECT title FROM task_artifacts WHERE task_id = ? AND folder_id IS NULL'
-                )
-                .all(...(destFolderId ? [destTaskId, destFolderId] : [destTaskId])) as {
-                title: string
-              }[]
-            ).map((r) => r.title)
-          )
-          title = uniqueName(title, siblingTitles)
-
-          const maxOrder =
-            (
-              db
-                .prepare(
-                  destFolderId
-                    ? 'SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ? AND folder_id = ?'
-                    : 'SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ? AND folder_id IS NULL'
-                )
-                .get(...(destFolderId ? [destTaskId, destFolderId] : [destTaskId])) as {
-                m: number | null
-              }
-            ).m ?? -1
-
-          db.prepare(`
-          INSERT INTO task_artifacts (id, task_id, folder_id, title, render_mode, language, "order")
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(newId, destTaskId, destFolderId, title, renderMode, language, maxOrder + 1)
-
-          const destFilePath = getArtifactFilePath(destTaskId, newId, title)
-          mkdirSync(path.dirname(destFilePath), { recursive: true })
-          copyFileSync(srcPath, destFilePath)
-
-          createVersion(db, versionTxn, blobStore, {
-            artifactId: newId,
-            bytes: readFileSync(destFilePath),
-            author: uiAuthor
-          })
-
-          const row = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(newId) as
-            | Record<string, unknown>
-            | undefined
-          const parsed = parseArtifact(row)
-          if (parsed) created.push(parsed)
-        }
-      })()
-
+    async (_, data: { sourcePaths: string[]; destTaskId: string; destFolderId: string | null }) => {
+      const rows = await db.namedTxn<Record<string, unknown>[]>('task-artifacts:pasteFiles', {
+        dataDir,
+        sourcePaths: data.sourcePaths,
+        destTaskId: data.destTaskId,
+        destFolderId: data.destFolderId
+      })
       onMutation?.()
-      return created
+      return rows.map(parseArtifact).filter(Boolean) as TaskArtifact[]
     }
   )
 
   ipcMain.handle(
     'db:artifacts:uploadBlob',
-    (
+    async (
       _,
       data: { taskId: string; title: string; bytes: Uint8Array; folderId?: string | null }
-    ): TaskArtifact | null => {
-      const id = randomUUID()
-      const folderId = data.folderId ?? null
-
-      const siblingTitles = new Set<string>(
-        (
-          db
-            .prepare(
-              folderId
-                ? 'SELECT title FROM task_artifacts WHERE task_id = ? AND folder_id = ?'
-                : 'SELECT title FROM task_artifacts WHERE task_id = ? AND folder_id IS NULL'
-            )
-            .all(...(folderId ? [data.taskId, folderId] : [data.taskId])) as { title: string }[]
-        ).map((r) => r.title)
+    ): Promise<TaskArtifact | null> => {
+      const row = await db.namedTxn<Record<string, unknown> | undefined>(
+        'task-artifacts:uploadBlob',
+        {
+          dataDir,
+          taskId: data.taskId,
+          title: data.title,
+          bytes: data.bytes,
+          folderId: data.folderId ?? null
+        }
       )
-      const title = uniqueName(data.title, siblingTitles)
-
-      const maxOrder =
-        (
-          db
-            .prepare(
-              folderId
-                ? 'SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ? AND folder_id = ?'
-                : 'SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ? AND folder_id IS NULL'
-            )
-            .get(...(folderId ? [data.taskId, folderId] : [data.taskId])) as { m: number | null }
-        ).m ?? -1
-
-      db.prepare(`
-      INSERT INTO task_artifacts (id, task_id, folder_id, title, "order")
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, data.taskId, folderId, title, maxOrder + 1)
-
-      const filePath = getArtifactFilePath(data.taskId, id, title)
-      mkdirSync(path.dirname(filePath), { recursive: true })
-      const buf = Buffer.from(data.bytes)
-      writeFileSync(filePath, buf)
-
-      createVersion(db, versionTxn, blobStore, {
-        artifactId: id,
-        bytes: buf,
-        author: uiAuthor
-      })
-
       onMutation?.()
-      const row = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
-        | Record<string, unknown>
-        | undefined
       return parseArtifact(row)
     }
   )
 
   ipcMain.handle(
     'db:artifacts:uploadDir',
-    (_, data: { taskId: string; dirPath: string; parentFolderId: string | null }) => {
-      const createdFolders: ReturnType<typeof parseFolder>[] = []
-      const createdArtifacts: ReturnType<typeof parseArtifact>[] = []
-
-      function walkDir(dirPath: string, parentFolderId: string | null) {
-        const entries = readdirSync(dirPath, { withFileTypes: true })
-        for (const entry of entries) {
-          const fullPath = path.join(dirPath, entry.name)
-          if (entry.isDirectory()) {
-            const folderId = randomUUID()
-            const maxOrder =
-              (
-                db
-                  .prepare(
-                    parentFolderId
-                      ? 'SELECT MAX("order") as m FROM artifact_folders WHERE task_id = ? AND parent_id = ?'
-                      : 'SELECT MAX("order") as m FROM artifact_folders WHERE task_id = ? AND parent_id IS NULL'
-                  )
-                  .get(...(parentFolderId ? [data.taskId, parentFolderId] : [data.taskId])) as {
-                  m: number | null
-                }
-              ).m ?? -1
-
-            db.prepare(`
-            INSERT INTO artifact_folders (id, task_id, parent_id, name, "order")
-            VALUES (?, ?, ?, ?, ?)
-          `).run(folderId, data.taskId, parentFolderId, entry.name, maxOrder + 1)
-
-            const row = db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(folderId) as
-              | Record<string, unknown>
-              | undefined
-            createdFolders.push(parseFolder(row))
-            walkDir(fullPath, folderId)
-          } else if (entry.isFile()) {
-            const artifactId = randomUUID()
-            const title = entry.name
-            const maxOrder =
-              (
-                db
-                  .prepare(
-                    parentFolderId
-                      ? 'SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ? AND folder_id = ?'
-                      : 'SELECT MAX("order") as m FROM task_artifacts WHERE task_id = ? AND folder_id IS NULL'
-                  )
-                  .get(...(parentFolderId ? [data.taskId, parentFolderId] : [data.taskId])) as {
-                  m: number | null
-                }
-              ).m ?? -1
-
-            db.prepare(`
-            INSERT INTO task_artifacts (id, task_id, folder_id, title, "order")
-            VALUES (?, ?, ?, ?, ?)
-          `).run(artifactId, data.taskId, parentFolderId, title, maxOrder + 1)
-
-            const filePath = getArtifactFilePath(data.taskId, artifactId, title)
-            mkdirSync(path.dirname(filePath), { recursive: true })
-            copyFileSync(fullPath, filePath)
-
-            const row = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(artifactId) as
-              | Record<string, unknown>
-              | undefined
-            createdArtifacts.push(parseArtifact(row))
-          }
-        }
-      }
-
-      db.transaction(() => {
-        walkDir(data.dirPath, data.parentFolderId)
-      })()
+    async (_, data: { taskId: string; dirPath: string; parentFolderId: string | null }) => {
+      const result = await db.namedTxn<{
+        folders: (Record<string, unknown> | undefined)[]
+        artifacts: (Record<string, unknown> | undefined)[]
+      }>('task-artifacts:uploadDir', {
+        dataDir,
+        taskId: data.taskId,
+        dirPath: data.dirPath,
+        parentFolderId: data.parentFolderId
+      })
 
       onMutation?.()
       return {
-        folders: createdFolders.filter(Boolean),
-        artifacts: createdArtifacts.filter(Boolean)
+        folders: result.folders.map(parseFolder).filter(Boolean),
+        artifacts: result.artifacts.map(parseArtifact).filter(Boolean)
       }
     }
   )
@@ -741,33 +458,31 @@ export function registerTaskHandlers(
   })
 
   // --- Artifact Versions ---
-
-  function wrapVersionError<T>(fn: () => T): T {
-    try {
-      return fn()
-    } catch (err: unknown) {
-      if (isVersionError(err)) {
-        // Return a serializable error to the renderer.
-        throw new Error(`[${err.code}] ${err.message}`)
-      }
-      throw err
-    }
-  }
+  //
+  // The `@slayzone/task-artifacts` version helpers operate on a synchronous
+  // better-sqlite3 db + `TxnRunner`, so they run inside the DB worker via
+  // `namedTxn` (see ./artifacts-txns). Each named txn re-formats `VersionError`
+  // into a serializable `[CODE] message` string before it crosses the worker
+  // boundary, preserving the renderer-facing error contract.
 
   ipcMain.handle(
     'db:artifacts:versions:list',
     (_, data: { artifactId: string; limit?: number; offset?: number }) => {
-      return listVersions(db, data.artifactId, { limit: data.limit, offset: data.offset })
+      return db.namedTxn('task-artifacts:versions:list', {
+        artifactId: data.artifactId,
+        limit: data.limit,
+        offset: data.offset
+      })
     }
   )
 
   ipcMain.handle(
     'db:artifacts:versions:read',
     (_, data: { artifactId: string; versionRef: VersionRef }) => {
-      return wrapVersionError(() => {
-        const v = resolveVersionRef(db, data.artifactId, data.versionRef)
-        const buf = readVersionContent(blobStore, v)
-        return buf.toString('utf-8')
+      return db.namedTxn('task-artifacts:versions:read', {
+        dataDir,
+        artifactId: data.artifactId,
+        versionRef: data.versionRef
       })
     }
   )
@@ -775,24 +490,10 @@ export function registerTaskHandlers(
   ipcMain.handle(
     'db:artifacts:versions:create',
     (_, data: { artifactId: string; name?: string | null }) => {
-      return wrapVersionError(() => {
-        const existing = db
-          .prepare('SELECT * FROM task_artifacts WHERE id = ?')
-          .get(data.artifactId) as Record<string, unknown> | undefined
-        if (!existing) throw new Error('Artifact not found')
-        const filePath = getArtifactFilePath(
-          existing.task_id as string,
-          data.artifactId,
-          existing.title as string
-        )
-        const bytes = existsSync(filePath) ? readFileSync(filePath) : Buffer.alloc(0)
-        return createVersion(db, versionTxn, blobStore, {
-          artifactId: data.artifactId,
-          bytes,
-          name: data.name ?? null,
-          honorUnchanged: true,
-          author: uiAuthor
-        })
+      return db.namedTxn('task-artifacts:versions:create', {
+        dataDir,
+        artifactId: data.artifactId,
+        name: data.name ?? null
       })
     }
   )
@@ -800,18 +501,23 @@ export function registerTaskHandlers(
   ipcMain.handle(
     'db:artifacts:versions:rename',
     (_, data: { artifactId: string; versionRef: VersionRef; newName: string | null }) => {
-      return wrapVersionError(() =>
-        renameVersion(db, versionTxn, data.artifactId, data.versionRef, data.newName)
-      )
+      return db.namedTxn('task-artifacts:versions:rename', {
+        artifactId: data.artifactId,
+        versionRef: data.versionRef,
+        newName: data.newName
+      })
     }
   )
 
   ipcMain.handle(
     'db:artifacts:versions:diff',
     (_, data: { artifactId: string; a: VersionRef; b?: VersionRef }) => {
-      return wrapVersionError(() =>
-        diffVersions(db, blobStore, { artifactId: data.artifactId, a: data.a, b: data.b })
-      )
+      return db.namedTxn('task-artifacts:versions:diff', {
+        dataDir,
+        artifactId: data.artifactId,
+        a: data.a,
+        b: data.b
+      })
     }
   )
 
@@ -827,47 +533,36 @@ export function registerTaskHandlers(
         dryRun?: boolean
       }
     ) => {
-      return wrapVersionError(() =>
-        pruneVersions(db, versionTxn, blobStore, data.artifactId, {
-          keepLast: data.keepLast,
-          keepNamed: data.keepNamed,
-          keepCurrent: data.keepCurrent,
-          dryRun: data.dryRun
-        })
-      )
+      return db.namedTxn('task-artifacts:versions:prune', {
+        dataDir,
+        artifactId: data.artifactId,
+        keepLast: data.keepLast,
+        keepNamed: data.keepNamed,
+        keepCurrent: data.keepCurrent,
+        dryRun: data.dryRun
+      })
     }
   )
 
   ipcMain.handle(
     'db:artifacts:versions:setCurrent',
-    (_, data: { artifactId: string; versionRef: VersionRef }) => {
-      return wrapVersionError(() => {
-        const existing = db
-          .prepare('SELECT * FROM task_artifacts WHERE id = ?')
-          .get(data.artifactId) as Record<string, unknown> | undefined
-        if (!existing) throw new Error('Artifact not found')
-        const v = setCurrentVersion(db, versionTxn, data.artifactId, data.versionRef)
-        // Flush the switched version's bytes to disk so the editor reloads
-        // the correct content. Without this, the on-disk file still reflects
-        // the prior current and saves would diff against stale bytes.
-        const bytes = readVersionContent(blobStore, v)
-        const filePath = getArtifactFilePath(
-          existing.task_id as string,
-          data.artifactId,
-          existing.title as string
-        )
-        mkdirSync(path.dirname(filePath), { recursive: true })
-        writeFileSync(filePath, bytes)
-        onMutation?.()
-        return v
+    async (_, data: { artifactId: string; versionRef: VersionRef }) => {
+      // The worker switches the current pointer AND flushes the version's bytes
+      // back to the artifact's on-disk file; it returns the version row.
+      const result = await db.namedTxn<{ version: unknown }>('task-artifacts:versions:setCurrent', {
+        dataDir,
+        artifactId: data.artifactId,
+        versionRef: data.versionRef
       })
+      onMutation?.()
+      return result.version
     }
   )
 
   // --- Artifact Download ---
 
   ipcMain.handle('db:artifacts:downloadFile', async (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return false
@@ -886,9 +581,9 @@ export function registerTaskHandlers(
   })
 
   ipcMain.handle('db:artifacts:downloadFolder', async (_, folderId: string) => {
-    const folder = db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(folderId) as
-      | Record<string, unknown>
-      | undefined
+    const folder = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(
+      folderId
+    )) as Record<string, unknown> | undefined
     if (!folder) return false
 
     const win = BrowserWindow.getFocusedWindow()
@@ -907,9 +602,9 @@ export function registerTaskHandlers(
     const taskId = folder.task_id as string
 
     // Build folder path map: folderId -> name segments
-    const allFolders = db
+    const allFolders = (await db
       .prepare('SELECT * FROM artifact_folders WHERE task_id = ?')
-      .all(taskId) as Record<string, unknown>[]
+      .all(taskId)) as Record<string, unknown>[]
     const byId = new Map(allFolders.map((f) => [f.id as string, f]))
     function folderPath(id: string): string {
       const f = byId.get(id)
@@ -945,13 +640,13 @@ export function registerTaskHandlers(
     }
 
     // Copy artifacts in target folders
-    const artifacts = db
+    const artifacts = (await db
       .prepare(
         'SELECT * FROM task_artifacts WHERE task_id = ? AND folder_id IN (' +
           [...targetIds].map(() => '?').join(',') +
           ')'
       )
-      .all(taskId, ...targetIds) as Record<string, unknown>[]
+      .all(taskId, ...targetIds)) as Record<string, unknown>[]
     for (const artifact of artifacts) {
       const srcPath = getArtifactFilePath(taskId, artifact.id as string, artifact.title as string)
       if (!existsSync(srcPath)) continue
@@ -968,7 +663,7 @@ export function registerTaskHandlers(
   // --- Download as PDF ---
 
   ipcMain.handle('db:artifacts:downloadAsPdf', async (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return false
@@ -1011,7 +706,7 @@ export function registerTaskHandlers(
   // --- Download as PNG ---
 
   ipcMain.handle('db:artifacts:downloadAsPng', async (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return false
@@ -1052,7 +747,7 @@ export function registerTaskHandlers(
   // --- Download as HTML ---
 
   ipcMain.handle('db:artifacts:downloadAsHtml', async (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id) as
+    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return false
@@ -1094,14 +789,14 @@ export function registerTaskHandlers(
   // --- Download All as ZIP ---
 
   ipcMain.handle('db:artifacts:downloadAllAsZip', async (_, taskId: string) => {
-    const allArtifacts = db
+    const allArtifacts = (await db
       .prepare('SELECT * FROM task_artifacts WHERE task_id = ?')
-      .all(taskId) as Record<string, unknown>[]
+      .all(taskId)) as Record<string, unknown>[]
     if (allArtifacts.length === 0) return false
 
-    const allFolders = db
+    const allFolders = (await db
       .prepare('SELECT * FROM artifact_folders WHERE task_id = ?')
-      .all(taskId) as Record<string, unknown>[]
+      .all(taskId)) as Record<string, unknown>[]
     const byId = new Map(allFolders.map((f) => [f.id as string, f]))
     function folderPath(id: string): string {
       const f = byId.get(id)
@@ -1151,78 +846,40 @@ export function registerTaskHandlers(
 
   // --- Artifact Folders ---
 
-  ipcMain.handle('db:artifactFolders:getByTask', (_, taskId: string) => {
-    const rows = db
+  ipcMain.handle('db:artifactFolders:getByTask', async (_, taskId: string) => {
+    const rows = (await db
       .prepare(
         'SELECT * FROM artifact_folders WHERE task_id = ? ORDER BY "order" ASC, created_at ASC'
       )
-      .all(taskId) as Record<string, unknown>[]
+      .all(taskId)) as Record<string, unknown>[]
     return rows.map(parseFolder).filter(Boolean)
   })
 
   ipcMain.handle(
     'db:artifactFolders:getOrCreateByName',
-    (_, data: { taskId: string; name: string }) => {
-      const existing = db
-        .prepare(
-          'SELECT * FROM artifact_folders WHERE task_id = ? AND parent_id IS NULL AND name = ?'
-        )
-        .get(data.taskId, data.name) as Record<string, unknown> | undefined
-      if (existing) return parseFolder(existing)
-
-      const id = randomUUID()
-      const maxOrder =
-        (
-          db
-            .prepare(
-              'SELECT MAX("order") as m FROM artifact_folders WHERE task_id = ? AND parent_id IS NULL'
-            )
-            .get(data.taskId) as { m: number | null }
-        ).m ?? -1
-
-      db.prepare(`
-      INSERT INTO artifact_folders (id, task_id, parent_id, name, "order")
-      VALUES (?, ?, NULL, ?, ?)
-    `).run(id, data.taskId, data.name, maxOrder + 1)
-
+    async (_, data: { taskId: string; name: string }) => {
+      const row = await db.namedTxn<Record<string, unknown> | undefined>(
+        'task-artifacts:folders:getOrCreateByName',
+        { taskId: data.taskId, name: data.name }
+      )
       onMutation?.()
-      const row = db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(id) as
-        | Record<string, unknown>
-        | undefined
       return parseFolder(row)
     }
   )
 
-  ipcMain.handle('db:artifactFolders:create', (_, data: CreateArtifactFolderInput) => {
-    const id = randomUUID()
-    const parentId = data.parentId ?? null
-    const maxOrder =
-      (
-        db
-          .prepare(
-            parentId
-              ? 'SELECT MAX("order") as m FROM artifact_folders WHERE task_id = ? AND parent_id = ?'
-              : 'SELECT MAX("order") as m FROM artifact_folders WHERE task_id = ? AND parent_id IS NULL'
-          )
-          .get(...(parentId ? [data.taskId, parentId] : [data.taskId])) as { m: number | null }
-      ).m ?? -1
-
-    db.prepare(`
-      INSERT INTO artifact_folders (id, task_id, parent_id, name, "order")
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, data.taskId, parentId, data.name, maxOrder + 1)
-
+  ipcMain.handle('db:artifactFolders:create', async (_, data: CreateArtifactFolderInput) => {
+    const row = await db.namedTxn<Record<string, unknown> | undefined>(
+      'task-artifacts:folders:create',
+      { taskId: data.taskId, parentId: data.parentId ?? null, name: data.name }
+    )
     onMutation?.()
-    const row = db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(id) as
-      | Record<string, unknown>
-      | undefined
     return parseFolder(row)
   })
 
-  ipcMain.handle('db:artifactFolders:update', (_, data: UpdateArtifactFolderInput) => {
-    const existing = db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(data.id) as
-      | Record<string, unknown>
-      | undefined
+  ipcMain.handle('db:artifactFolders:update', async (_, data: UpdateArtifactFolderInput) => {
+    const existing = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(
+      data.id
+    )) as Record<string, unknown> | undefined
     if (!existing) return null
 
     const sets: string[] = []
@@ -1237,35 +894,36 @@ export function registerTaskHandlers(
     }
     if (sets.length > 0) {
       values.push(data.id)
-      db.prepare(`UPDATE artifact_folders SET ${sets.join(', ')} WHERE id = ?`).run(...values)
+      await db.prepare(`UPDATE artifact_folders SET ${sets.join(', ')} WHERE id = ?`).run(...values)
     }
 
     onMutation?.()
-    const row = db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(data.id) as
+    const row = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(data.id)) as
       | Record<string, unknown>
       | undefined
     return parseFolder(row)
   })
 
-  ipcMain.handle('db:artifactFolders:delete', (_, id: string) => {
-    const existing = db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(id) as
+  ipcMain.handle('db:artifactFolders:delete', async (_, id: string) => {
+    const existing = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     if (!existing) return false
-    db.prepare('DELETE FROM artifact_folders WHERE id = ?').run(id)
+    await db.prepare('DELETE FROM artifact_folders WHERE id = ?').run(id)
     onMutation?.()
     return true
   })
 
   ipcMain.handle(
     'db:artifactFolders:reorder',
-    (_, data: { parentId: string | null; folderIds: string[] }) => {
-      const stmt = db.prepare('UPDATE artifact_folders SET "order" = ? WHERE id = ?')
-      db.transaction(() => {
-        data.folderIds.forEach((id, index) => {
-          stmt.run(index, id)
-        })
-      })()
+    async (_, data: { parentId: string | null; folderIds: string[] }) => {
+      await db.batchTxn(
+        data.folderIds.map((id, index) => ({
+          type: 'run',
+          sql: 'UPDATE artifact_folders SET "order" = ? WHERE id = ?',
+          params: [index, id]
+        }))
+      )
     }
   )
 }

@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import {
   getColumnById,
   getDefaultStatus,
@@ -19,10 +19,13 @@ export function toMs(value: string | null | undefined): number {
   return Number.isNaN(ts) ? 0 : ts
 }
 
-export function getProjectColumns(db: Database, projectId: string): ColumnConfig[] | null {
-  const row = db.prepare('SELECT columns_config FROM projects WHERE id = ?').get(projectId) as
-    | { columns_config: string | null }
-    | undefined
+export async function getProjectColumns(
+  db: SlayzoneDb,
+  projectId: string
+): Promise<ColumnConfig[] | null> {
+  const row = (await db
+    .prepare('SELECT columns_config FROM projects WHERE id = ?')
+    .get(projectId)) as { columns_config: string | null } | undefined
   return parseColumnsConfig(row?.columns_config)
 }
 
@@ -62,16 +65,16 @@ export function parseGitHubExternalKey(
   return { owner: match[1], repo: match[2], number }
 }
 
-export function upsertFieldState(
-  db: Database,
+export async function upsertFieldState(
+  db: SlayzoneDb,
   externalLinkId: string,
   field: string,
   localValue: unknown,
   externalValue: unknown,
   localUpdatedAt: string,
   externalUpdatedAt: string
-): void {
-  db.prepare(`
+): Promise<void> {
+  await db.prepare(`
     INSERT INTO external_field_state (
       id, external_link_id, field_name, last_local_value_json, last_external_value_json,
       last_local_updated_at, last_external_updated_at, updated_at
@@ -139,16 +142,16 @@ export function localPriorityToLinear(priority: number): number {
   return 3
 }
 
-export function buildDefaultProviderConfig(db: Database): {
+export async function buildDefaultProviderConfig(db: SlayzoneDb): Promise<{
   json: string
   claudeFlags: string
   codexFlags: string
-} {
+}> {
   let rows: Array<{ id: string; default_flags: string | null }> = []
   try {
-    rows = db
+    rows = (await db
       .prepare('SELECT id, default_flags FROM terminal_modes WHERE enabled = 1')
-      .all() as Array<{ id: string; default_flags: string | null }>
+      .all()) as Array<{ id: string; default_flags: string | null }>
   } catch {
     rows = []
   }

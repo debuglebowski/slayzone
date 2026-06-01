@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import { updateTask } from './ops/shared.js'
 
@@ -16,24 +16,24 @@ import { updateTask } from './ops/shared.js'
  *
  * Returns true if the flag value changed, false otherwise.
  */
-export function handleAttentionTransition(
-  db: Database,
+export async function handleAttentionTransition(
+  db: SlayzoneDb,
   sessionId: string,
   newState: TerminalState,
   oldState: TerminalState,
   hasUserInput: boolean
-): boolean {
+): Promise<boolean> {
   const taskId = sessionId.split(':')[0]
   if (!taskId) return false
 
-  const row = db.prepare('SELECT needs_attention FROM tasks WHERE id = ?').get(taskId) as
+  const row = (await db.prepare('SELECT needs_attention FROM tasks WHERE id = ?').get(taskId)) as
     | { needs_attention: number }
     | undefined
   if (!row) return false
 
   if (newState === 'running') {
     if (!row.needs_attention) return false
-    updateTask(db, { id: taskId, needsAttention: false })
+    await updateTask(db, { id: taskId, needsAttention: false })
     return true
   }
 
@@ -42,6 +42,6 @@ export function handleAttentionTransition(
   if (!hasUserInput) return false
   if (row.needs_attention) return false
 
-  updateTask(db, { id: taskId, needsAttention: true })
+  await updateTask(db, { id: taskId, needsAttention: true })
   return true
 }

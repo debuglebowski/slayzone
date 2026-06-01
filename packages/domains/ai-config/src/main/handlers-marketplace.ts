@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto'
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   AddRegistryInput,
   InstallSkillInput,
@@ -9,13 +8,8 @@ import type {
   SkillRegistryEntry,
   SkillUpdateInfo
 } from '../shared/types'
-import { BUILTIN_SKILLS } from '../shared/skill-marketplace-registry'
 import { fetchGitHubRegistry, parseGitHubUrl } from './github-registry-fetcher'
 import { normalizeSkillForPersistence } from './skill-normalize'
-
-function contentHash(content: string): string {
-  return createHash('sha256').update(content).digest('hex')
-}
 
 function rowToRegistry(row: Record<string, unknown>): SkillRegistry {
   return {
@@ -67,12 +61,16 @@ function rowToEntry(row: Record<string, unknown>): SkillRegistryEntry {
   }
 }
 
-export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): void {
-  // Ensure built-in entries are seeded
-  seedBuiltinEntries(db)
+export function registerMarketplaceHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+  // Ensure built-in entries are seeded. Fire-and-forget (was synchronous at
+  // registration before the async DB lift) — handlers are async and the seed
+  // settles well before any user interaction.
+  void db
+    .namedTxn('ai-config:marketplace:seed-builtin-entries', {})
+    .catch((err) => console.error('[marketplace] Failed to seed builtin entries:', err))
 
-  ipcMain.handle('ai-config:marketplace:list-registries', () => {
-    const rows = db
+  ipcMain.handle('ai-config:marketplace:list-registries', async () => {
+    const rows = (await db
       .prepare(`
       SELECT r.*, COUNT(e.id) as entry_count
       FROM skill_registries r
@@ -80,7 +78,7 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       GROUP BY r.id
       ORDER BY r.source_type ASC, r.name ASC
     `)
-      .all() as Record<string, unknown>[]
+      .all()) as Record<string, unknown>[]
     return rows.map(rowToRegistry)
   })
 
@@ -88,7 +86,7 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     const parsed = parseGitHubUrl(input.githubUrl)
     if (!parsed) throw new Error('Invalid GitHub URL. Use "owner/repo" or a full GitHub URL.')
 
-    const existing = db
+    const existing = await db
       .prepare('SELECT id FROM skill_registries WHERE github_owner = ? AND github_repo = ?')
       .get(parsed.owner, parsed.repo)
     if (existing) throw new Error(`Registry for ${parsed.owner}/${parsed.repo} already exists`)
@@ -97,10 +95,12 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     const branch = input.branch ?? 'main'
     const path = input.path ?? 'skills'
 
-    db.prepare(`
+    await db
+      .prepare(`
       INSERT INTO skill_registries (id, name, description, source_type, github_owner, github_repo, github_branch, github_path)
       VALUES (?, ?, ?, 'github', ?, ?, ?, ?)
-    `).run(id, `${parsed.owner}/${parsed.repo}`, '', parsed.owner, parsed.repo, branch, path)
+    `)
+      .run(id, `${parsed.owner}/${parsed.repo}`, '', parsed.owner, parsed.repo, branch, path)
 
     // Immediately fetch entries
     try {
@@ -109,7 +109,7 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       // Don't fail — registry is created, fetch can be retried
     }
 
-    const row = db
+    const row = (await db
       .prepare(`
       SELECT r.*, COUNT(e.id) as entry_count
       FROM skill_registries r
@@ -117,36 +117,38 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       WHERE r.id = ?
       GROUP BY r.id
     `)
-      .get(id) as Record<string, unknown>
+      .get(id)) as Record<string, unknown>
     return rowToRegistry(row)
   })
 
-  ipcMain.handle('ai-config:marketplace:remove-registry', (_event, registryId: string) => {
-    const registry = db
+  ipcMain.handle('ai-config:marketplace:remove-registry', async (_event, registryId: string) => {
+    const registry = (await db
       .prepare('SELECT source_type FROM skill_registries WHERE id = ?')
-      .get(registryId) as { source_type: string } | undefined
+      .get(registryId)) as { source_type: string } | undefined
     if (!registry) return false
     if (registry.source_type === 'builtin') throw new Error('Cannot remove built-in registries')
-    db.prepare('DELETE FROM skill_registries WHERE id = ?').run(registryId)
+    await db.prepare('DELETE FROM skill_registries WHERE id = ?').run(registryId)
     return true
   })
 
   ipcMain.handle(
     'ai-config:marketplace:toggle-registry',
-    (_event, registryId: string, enabled: boolean) => {
-      db.prepare(
-        `UPDATE skill_registries SET enabled = ?, updated_at = datetime('now') WHERE id = ?`
-      ).run(enabled ? 1 : 0, registryId)
+    async (_event, registryId: string, enabled: boolean) => {
+      await db
+        .prepare(
+          `UPDATE skill_registries SET enabled = ?, updated_at = datetime('now') WHERE id = ?`
+        )
+        .run(enabled ? 1 : 0, registryId)
     }
   )
 
   ipcMain.handle('ai-config:marketplace:ensure-fresh', async () => {
     const STALE_MS = 24 * 60 * 60 * 1000
-    const registries = db
+    const registries = (await db
       .prepare(
         "SELECT id, last_synced_at FROM skill_registries WHERE enabled = 1 AND source_type = 'github'"
       )
-      .all() as { id: string; last_synced_at: string | null }[]
+      .all()) as { id: string; last_synced_at: string | null }[]
 
     for (const reg of registries) {
       const lastSynced = reg.last_synced_at ? new Date(reg.last_synced_at + 'Z').getTime() : 0
@@ -170,7 +172,9 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
   })
 
   ipcMain.handle('ai-config:marketplace:refresh-all', async () => {
-    const registries = db.prepare('SELECT id FROM skill_registries WHERE enabled = 1').all() as {
+    const registries = (await db
+      .prepare('SELECT id FROM skill_registries WHERE enabled = 1')
+      .all()) as {
       id: string
     }[]
 
@@ -183,7 +187,7 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     }
   })
 
-  ipcMain.handle('ai-config:marketplace:list-entries', (_event, input?: ListEntriesInput) => {
+  ipcMain.handle('ai-config:marketplace:list-entries', async (_event, input?: ListEntriesInput) => {
     const where: string[] = ['1=1']
     const values: unknown[] = []
     const projectId = input?.projectId ?? null
@@ -205,7 +209,7 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     }
 
     // Subqueries for per-scope install detection (avoids duplicate rows)
-    const rows = db
+    const rows = (await db
       .prepare(`
       SELECT e.*,
         r.name as registry_name,
@@ -218,15 +222,15 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       WHERE ${where.join(' AND ')}
       ORDER BY e.name ASC
     `)
-      .all(projectId, projectId, ...values) as Record<string, unknown>[]
+      .all(projectId, projectId, ...values)) as Record<string, unknown>[]
 
     return rows.map(rowToEntry)
   })
 
-  ipcMain.handle('ai-config:marketplace:install-skill', (_event, input: InstallSkillInput) => {
-    const entry = db
+  ipcMain.handle('ai-config:marketplace:install-skill', async (_event, input: InstallSkillInput) => {
+    const entry = (await db
       .prepare('SELECT * FROM skill_registry_entries WHERE id = ?')
-      .get(input.entryId) as Record<string, unknown> | undefined
+      .get(input.entryId)) as Record<string, unknown> | undefined
     if (!entry) throw new Error('Registry entry not found')
 
     const scope = input.scope
@@ -235,17 +239,18 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     // Idempotent per scope: return existing if already installed in this scope
     const existing =
       scope === 'project'
-        ? (db
+        ? ((await db
             .prepare(`
           SELECT id FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = ? AND scope = 'project' AND project_id = ?
         `)
-            .get(input.entryId, projectId) as { id: string } | undefined)
-        : (db
+            .get(input.entryId, projectId)) as { id: string } | undefined)
+        : ((await db
             .prepare(`
           SELECT id FROM ai_config_items WHERE json_extract(metadata_json, '$.marketplace.entryId') = ? AND scope = 'library'
         `)
-            .get(input.entryId) as { id: string } | undefined)
-    if (existing) return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(existing.id)
+            .get(input.entryId)) as { id: string } | undefined)
+    if (existing)
+      return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(existing.id)
 
     const slug = entry.slug as string
     const content = entry.content as string
@@ -254,18 +259,18 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     // Slug conflict check: return existing item if same (scope, slug) already exists
     const slugConflict =
       scope === 'project'
-        ? (db
+        ? ((await db
             .prepare(
               `SELECT id FROM ai_config_items WHERE scope = 'project' AND project_id = ? AND type = 'skill' AND slug = ?`
             )
-            .get(projectId, slug) as { id: string } | undefined)
-        : (db
+            .get(projectId, slug)) as { id: string } | undefined)
+        : ((await db
             .prepare(
               `SELECT id FROM ai_config_items WHERE scope = 'library' AND type = 'skill' AND slug = ?`
             )
-            .get(slug) as { id: string } | undefined)
+            .get(slug)) as { id: string } | undefined)
     if (slugConflict)
-      return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(slugConflict.id)
+      return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(slugConflict.id)
 
     const id = crypto.randomUUID()
 
@@ -275,9 +280,9 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     const baseMetadata = normalized ? JSON.parse(normalized.metadataJson) : {}
 
     // Add marketplace provenance
-    const registry = db.prepare('SELECT name FROM skill_registries WHERE id = ?').get(registryId) as
-      | { name: string }
-      | undefined
+    const registry = (await db
+      .prepare('SELECT name FROM skill_registries WHERE id = ?')
+      .get(registryId)) as { name: string } | undefined
     baseMetadata.marketplace = {
       registryId,
       registryName: registry?.name ?? null,
@@ -289,26 +294,28 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     const metadataJson = JSON.stringify(baseMetadata)
     const now = new Date().toISOString()
 
-    db.prepare(`
+    await db
+      .prepare(`
       INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
       VALUES (?, 'skill', ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      scope,
-      projectId,
-      entry.name as string,
-      slug,
-      persistedContent,
-      metadataJson,
-      now,
-      now
-    )
+    `)
+      .run(
+        id,
+        scope,
+        projectId,
+        entry.name as string,
+        slug,
+        persistedContent,
+        metadataJson,
+        now,
+        now
+      )
 
-    return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(id)
+    return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(id)
   })
 
-  ipcMain.handle('ai-config:marketplace:check-updates', () => {
-    const rows = db
+  ipcMain.handle('ai-config:marketplace:check-updates', async () => {
+    const rows = (await db
       .prepare(`
       SELECT i.id as item_id, e.id as entry_id, i.slug,
         json_extract(i.metadata_json, '$.marketplace.installedVersion') as current_version,
@@ -318,7 +325,7 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       WHERE json_extract(i.metadata_json, '$.marketplace.entryId') IS NOT NULL
         AND e.content_hash != json_extract(i.metadata_json, '$.marketplace.installedVersion')
     `)
-      .all() as Array<{
+      .all()) as Array<{
       item_id: string
       entry_id: string
       slug: string
@@ -337,10 +344,10 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     )
   })
 
-  ipcMain.handle('ai-config:marketplace:unlink-skill', (_event, itemId: string) => {
-    const item = db.prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?').get(itemId) as
-      | { metadata_json: string }
-      | undefined
+  ipcMain.handle('ai-config:marketplace:unlink-skill', async (_event, itemId: string) => {
+    const item = (await db
+      .prepare('SELECT metadata_json FROM ai_config_items WHERE id = ?')
+      .get(itemId)) as { metadata_json: string } | undefined
     if (!item) throw new Error('Skill not found')
 
     let metadata: Record<string, unknown>
@@ -351,22 +358,24 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
     }
     delete metadata.marketplace
 
-    db.prepare(
-      `UPDATE ai_config_items SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?`
-    ).run(JSON.stringify(metadata), itemId)
+    await db
+      .prepare(
+        `UPDATE ai_config_items SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?`
+      )
+      .run(JSON.stringify(metadata), itemId)
 
-    return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)
+    return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)
   })
 
   ipcMain.handle(
     'ai-config:marketplace:update-skill',
-    (_event, itemId: string, entryId: string) => {
-      const entry = db.prepare('SELECT * FROM skill_registry_entries WHERE id = ?').get(entryId) as
-        | Record<string, unknown>
-        | undefined
+    async (_event, itemId: string, entryId: string) => {
+      const entry = (await db
+        .prepare('SELECT * FROM skill_registry_entries WHERE id = ?')
+        .get(entryId)) as Record<string, unknown> | undefined
       if (!entry) throw new Error('Registry entry not found')
 
-      const item = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId) as
+      const item = (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)) as
         | Record<string, unknown>
         | undefined
       if (!item) throw new Error('Installed skill not found')
@@ -389,28 +398,30 @@ export function registerMarketplaceHandlers(ipcMain: IpcMain, db: Database): voi
       }
 
       const now = new Date().toISOString()
-      db.prepare(`
+      await db
+        .prepare(`
       UPDATE ai_config_items SET content = ?, metadata_json = ?, updated_at = ? WHERE id = ?
-    `).run(persistedContent, JSON.stringify(baseMetadata), now, itemId)
+    `)
+        .run(persistedContent, JSON.stringify(baseMetadata), now, itemId)
 
-      return db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)
+      return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)
     }
   )
 }
 
-async function refreshRegistry(db: Database, registryId: string): Promise<SkillRegistryEntry[]> {
-  const registry = db.prepare('SELECT * FROM skill_registries WHERE id = ?').get(registryId) as
-    | Record<string, unknown>
-    | undefined
+async function refreshRegistry(db: SlayzoneDb, registryId: string): Promise<SkillRegistryEntry[]> {
+  const registry = (await db
+    .prepare('SELECT * FROM skill_registries WHERE id = ?')
+    .get(registryId)) as Record<string, unknown> | undefined
   if (!registry) throw new Error('Registry not found')
 
   const sourceType = registry.source_type as string
 
   if (sourceType === 'builtin') {
-    seedBuiltinEntries(db)
-    const rows = db
+    await db.namedTxn('ai-config:marketplace:seed-builtin-entries', {})
+    const rows = (await db
       .prepare('SELECT * FROM skill_registry_entries WHERE registry_id = ?')
-      .all(registryId) as Record<string, unknown>[]
+      .all(registryId)) as Record<string, unknown>[]
     return rows.map(rowToEntry)
   }
 
@@ -425,169 +436,25 @@ async function refreshRegistry(db: Database, registryId: string): Promise<SkillR
 
     if (!result) {
       // 304 not modified
-      return db
+      return (await db
         .prepare('SELECT * FROM skill_registry_entries WHERE registry_id = ?')
-        .all(registryId) as SkillRegistryEntry[]
+        .all(registryId)) as SkillRegistryEntry[]
     }
 
-    // Upsert entries in a transaction
-    db.transaction(() => {
-      const upsert = db.prepare(`
-        INSERT INTO skill_registry_entries (id, registry_id, slug, name, description, content, version, category, author, content_hash, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT (registry_id, slug) DO UPDATE SET
-          name = excluded.name,
-          description = excluded.description,
-          content = excluded.content,
-          version = excluded.version,
-          category = excluded.category,
-          author = excluded.author,
-          content_hash = excluded.content_hash,
-          fetched_at = excluded.fetched_at
-      `)
+    // Upsert entries in a transaction. Conditional read-modify-write (reads
+    // current slugs to prune missing ones), so it runs as a named txn inside
+    // the DB worker — see marketplace-txns.ts.
+    await db.namedTxn('ai-config:marketplace:refresh-registry-entries', {
+      registryId,
+      entries: result.entries,
+      etag: result.etag
+    })
 
-      // Remove entries that no longer exist in the repo
-      const existingSlugs = new Set(result.entries.map((e) => e.slug))
-      const currentEntries = db
-        .prepare('SELECT slug FROM skill_registry_entries WHERE registry_id = ?')
-        .all(registryId) as { slug: string }[]
-      for (const existing of currentEntries) {
-        if (!existingSlugs.has(existing.slug)) {
-          db.prepare('DELETE FROM skill_registry_entries WHERE registry_id = ? AND slug = ?').run(
-            registryId,
-            existing.slug
-          )
-        }
-      }
-
-      for (const entry of result.entries) {
-        upsert.run(
-          crypto.randomUUID(),
-          registryId,
-          entry.slug,
-          entry.name,
-          entry.description,
-          entry.content,
-          entry.version,
-          entry.category ?? 'general',
-          entry.author,
-          entry.content_hash
-        )
-      }
-
-      db.prepare(`
-        UPDATE skill_registries SET last_synced_at = datetime('now'), etag = ?, updated_at = datetime('now') WHERE id = ?
-      `).run(result.etag, registryId)
-    })()
-
-    const rows = db
+    const rows = (await db
       .prepare('SELECT * FROM skill_registry_entries WHERE registry_id = ?')
-      .all(registryId) as Record<string, unknown>[]
+      .all(registryId)) as Record<string, unknown>[]
     return rows.map(rowToEntry)
   }
 
   throw new Error(`Unknown registry source type: ${sourceType}`)
-}
-
-function seedBuiltinEntries(db: Database): void {
-  const registryId = 'builtin-slayzone'
-  const exists = db.prepare('SELECT id FROM skill_registries WHERE id = ?').get(registryId)
-  if (!exists) return
-
-  const upsert = db.prepare(`
-    INSERT INTO skill_registry_entries (id, registry_id, slug, name, description, content, version, category, author, content_hash, fetched_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'builtin', ?, ?, ?, datetime('now'))
-    ON CONFLICT (registry_id, slug) DO UPDATE SET
-      name = excluded.name,
-      description = excluded.description,
-      content = excluded.content,
-      category = excluded.category,
-      author = excluded.author,
-      content_hash = excluded.content_hash,
-      fetched_at = excluded.fetched_at
-  `)
-
-  const validSlugs = BUILTIN_SKILLS.map((s) => s.slug)
-
-  db.transaction(() => {
-    for (const skill of BUILTIN_SKILLS) {
-      const hash = contentHash(skill.content)
-      upsert.run(
-        `builtin-${skill.slug}`,
-        registryId,
-        skill.slug,
-        skill.name,
-        skill.description,
-        skill.content,
-        skill.category,
-        skill.author,
-        hash
-      )
-    }
-
-    // Remove stale entries no longer in BUILTIN_SKILLS
-    const placeholders = validSlugs.map(() => '?').join(', ')
-    db.prepare(
-      `DELETE FROM skill_registry_entries WHERE registry_id = ? AND slug NOT IN (${placeholders})`
-    ).run(registryId, ...validSlugs)
-
-    // Scrub orphan marketplace metadata: items still tagged with this registry
-    // but whose entryId no longer exists (e.g. skill removed from BUILTIN_SKILLS
-    // but item row kept). Otherwise UI keeps showing the "built-in" badge.
-    const orphans = db
-      .prepare(`
-      SELECT i.id, i.metadata_json
-      FROM ai_config_items i
-      WHERE json_extract(i.metadata_json, '$.marketplace.registryId') = ?
-        AND NOT EXISTS (
-          SELECT 1 FROM skill_registry_entries e
-          WHERE e.id = json_extract(i.metadata_json, '$.marketplace.entryId')
-        )
-    `)
-      .all(registryId) as Array<{ id: string; metadata_json: string }>
-
-    for (const orphan of orphans) {
-      let meta: Record<string, unknown>
-      try {
-        meta = JSON.parse(orphan.metadata_json) as Record<string, unknown>
-      } catch {
-        meta = {}
-      }
-      delete meta.marketplace
-      db.prepare(
-        `UPDATE ai_config_items SET metadata_json = ?, updated_at = datetime('now') WHERE id = ?`
-      ).run(JSON.stringify(meta), orphan.id)
-    }
-
-    // Auto-update installed builtin skills whose content is stale
-    const staleItems = db
-      .prepare(`
-      SELECT i.id as item_id, e.id as entry_id, i.metadata_json, e.slug, e.content, e.content_hash
-      FROM ai_config_items i
-      JOIN skill_registry_entries e ON e.id = json_extract(i.metadata_json, '$.marketplace.entryId')
-      WHERE e.registry_id = ?
-        AND e.content_hash != json_extract(i.metadata_json, '$.marketplace.installedVersion')
-    `)
-      .all(registryId) as Array<{
-      item_id: string
-      entry_id: string
-      metadata_json: string
-      slug: string
-      content: string
-      content_hash: string
-    }>
-
-    for (const item of staleItems) {
-      const normalized = normalizeSkillForPersistence(item.slug, item.content, item.metadata_json)
-      const meta = JSON.parse(normalized.metadataJson)
-      meta.marketplace = {
-        ...meta.marketplace,
-        installedVersion: item.content_hash,
-        installedAt: new Date().toISOString()
-      }
-      db.prepare(
-        `UPDATE ai_config_items SET content = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ?`
-      ).run(normalized.content, JSON.stringify(meta), item.item_id)
-    }
-  })()
 }

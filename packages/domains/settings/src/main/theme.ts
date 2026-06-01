@@ -1,9 +1,9 @@
 import { nativeTheme, BrowserWindow } from 'electron'
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { SettingsService, type ThemePreference } from './service'
 
-export function registerThemeHandlers(ipcMain: IpcMain, db: Database): void {
+export function registerThemeHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   const settings = SettingsService.forDatabase(db)
 
   ipcMain.handle('theme:get-effective', () => {

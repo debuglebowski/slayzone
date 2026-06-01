@@ -53,9 +53,9 @@ export async function startMainPty(
 ): Promise<StartMainPtyResult> {
   if (hasPty(mainSessionIdFor(taskId))) return 'already-alive'
 
-  const task = deps.db.prepare('SELECT id, terminal_mode FROM tasks WHERE id = ?').get(taskId) as
-    | TaskRow
-    | undefined
+  const task = (await deps.db
+    .prepare('SELECT id, terminal_mode FROM tasks WHERE id = ?')
+    .get(taskId)) as TaskRow | undefined
   if (!task) return 'no-task'
 
   const cached = failureCache.get(taskId)

@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { CreateTagInput, UpdateTagInput } from '@slayzone/tags/shared'
 import {
   listAllTags,
@@ -12,7 +12,7 @@ import {
   setTagsForTask
 } from '@slayzone/tags/server'
 
-export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
+export function registerTagHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   // Tags CRUD
   ipcMain.handle('db:tags:getAll', () => listAllTags(db))
 
@@ -22,8 +22,8 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('db:tags:delete', (_, id: string) => deleteTag(db, id))
 
-  ipcMain.handle('db:tags:reorder', (_, tagIds: string[]) => {
-    reorderTags(db, tagIds)
+  ipcMain.handle('db:tags:reorder', async (_, tagIds: string[]) => {
+    await reorderTags(db, tagIds)
   })
 
   // Task-Tag associations
@@ -31,8 +31,8 @@ export function registerTagHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle('db:taskTags:getAll', () => getAllTaskTagIds(db))
 
-  ipcMain.handle('db:taskTags:setForTask', (_, taskId: string, tagIds: string[]) => {
-    setTagsForTask(db, taskId, tagIds)
+  ipcMain.handle('db:taskTags:setForTask', async (_, taskId: string, tagIds: string[]) => {
+    await setTagsForTask(db, taskId, tagIds)
     ipcMain.emit('db:taskTags:setForTask:done', null, taskId, tagIds)
   })
 }

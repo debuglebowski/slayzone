@@ -1,5 +1,5 @@
 import electron from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 
 type SafeStorageApi = {
   isEncryptionAvailable: () => boolean
@@ -18,13 +18,13 @@ function toSettingKey(ref: string): string {
   return `integration:credential:${ref}`
 }
 
-export function storeCredential(db: Database, ref: string, secret: string): void {
+export async function storeCredential(db: SlayzoneDb, ref: string, secret: string): Promise<void> {
   if (!safeStorage) {
     if (!allowPlaintextFallback()) {
       throw new Error('OS secure credential storage is unavailable on this machine')
     }
     // Node-only test runtime fallback (no Electron safeStorage export).
-    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
+    await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
       toSettingKey(ref),
       `${PLAINTEXT_PREFIX}${secret}`
     )
@@ -35,14 +35,14 @@ export function storeCredential(db: Database, ref: string, secret: string): void
     throw new Error('OS secure credential storage is unavailable on this machine')
   }
   const encrypted = safeStorage.encryptString(secret)
-  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
+  await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
     toSettingKey(ref),
     encrypted.toString('base64')
   )
 }
 
-export function readCredential(db: Database, ref: string): string {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(toSettingKey(ref)) as
+export async function readCredential(db: SlayzoneDb, ref: string): Promise<string> {
+  const row = (await db.prepare('SELECT value FROM settings WHERE key = ?').get(toSettingKey(ref))) as
     | { value: string }
     | undefined
   if (!row?.value) {
@@ -64,6 +64,6 @@ export function readCredential(db: Database, ref: string): string {
   return safeStorage.decryptString(encrypted)
 }
 
-export function deleteCredential(db: Database, ref: string): void {
-  db.prepare('DELETE FROM settings WHERE key = ?').run(toSettingKey(ref))
+export async function deleteCredential(db: SlayzoneDb, ref: string): Promise<void> {
+  await db.prepare('DELETE FROM settings WHERE key = ?').run(toSettingKey(ref))
 }

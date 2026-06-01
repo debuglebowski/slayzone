@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { getSlayzoneHomeDir } from '@slayzone/platform'
 import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../shared'
 
@@ -13,17 +13,18 @@ import { HOOK_SUPPORTED_AGENT_IDS, type AgentId, type TerminalMode } from '../sh
  *   SLAYZONE_AGENT_ID        - the mode itself (passed back in hook payload)
  *   SLAYZONE_HOME_DIR        - resolved ~/.slayzone (script lookup base)
  */
-export function buildMcpEnv(
-  db: Database | null | undefined,
+export async function buildMcpEnv(
+  db: SlayzoneDb | null | undefined,
   taskId: string | undefined,
   mode?: TerminalMode
-): Record<string, string> {
+): Promise<Record<string, string>> {
   const env: Record<string, string> = {}
   if (taskId) {
     env.SLAYZONE_TASK_ID = taskId
-    const row = db?.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId) as
-      | { project_id?: string }
-      | undefined
+    const row = await db?.get<{ project_id?: string }>(
+      'SELECT project_id FROM tasks WHERE id = ?',
+      [taskId]
+    )
     if (row?.project_id) env.SLAYZONE_PROJECT_ID = row.project_id
   }
   const mcpPort = (globalThis as Record<string, unknown>).__mcpPort as number | undefined

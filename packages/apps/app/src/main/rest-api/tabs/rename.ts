@@ -4,7 +4,7 @@ import { broadcastToWindows } from '../../broadcast-to-windows'
 import type { RestApiDeps } from '../types'
 
 export function registerTabsRenameRoute(app: Express, deps: RestApiDeps): void {
-  app.post('/api/tabs/rename', (req, res) => {
+  app.post('/api/tabs/rename', async (req, res) => {
     const body = req.body as { id?: unknown; label?: unknown }
     const id = body?.id
     if (typeof id !== 'string' || !id) {
@@ -18,7 +18,7 @@ export function registerTabsRenameRoute(app: Express, deps: RestApiDeps): void {
     // Empty string clears.
     const label = body.label === '' ? null : (body.label as string | null)
 
-    const tab = updateTabRow(deps.db, { id, label })
+    const tab = await updateTabRow(deps.db, { id, label })
     if (!tab) {
       res.status(404).json({ error: `Tab not found: ${id}` })
       return

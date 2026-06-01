@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   CreateAutomationInput,
   UpdateAutomationInput,
@@ -18,47 +18,38 @@ function safeParse(s: string): unknown {
 
 export function registerAutomationHandlers(
   ipcMain: IpcMain,
-  db: Database,
+  db: SlayzoneDb,
   engine: AutomationEngine
 ): void {
-  ipcMain.handle('db:automations:getByProject', (_, projectId: string) => {
-    const rows = db
-      .prepare('SELECT * FROM automations WHERE project_id = ? ORDER BY sort_order, created_at')
-      .all(projectId) as AutomationRow[]
+  ipcMain.handle('db:automations:getByProject', async (_, projectId: string) => {
+    const rows = await db.all<AutomationRow>(
+      'SELECT * FROM automations WHERE project_id = ? ORDER BY sort_order, created_at',
+      [projectId]
+    )
     return rows.map(parseAutomationRow)
   })
 
-  ipcMain.handle('db:automations:get', (_, id: string) => {
-    const row = db.prepare('SELECT * FROM automations WHERE id = ?').get(id) as
-      | AutomationRow
-      | undefined
+  ipcMain.handle('db:automations:get', async (_, id: string) => {
+    const row = await db.get<AutomationRow>('SELECT * FROM automations WHERE id = ?', [id])
     return row ? parseAutomationRow(row) : null
   })
 
-  ipcMain.handle('db:automations:create', (_, data: CreateAutomationInput) => {
+  ipcMain.handle('db:automations:create', async (_, data: CreateAutomationInput) => {
     const id = crypto.randomUUID()
-    const maxOrder = db
-      .prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM automations WHERE project_id = ?')
-      .get(data.project_id) as { m: number }
-    db.prepare(
-      `INSERT INTO automations (id, project_id, name, description, trigger_config, conditions, actions, sort_order, catchup_on_start)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+    const row = await db.namedTxn<AutomationRow>('automations:create', {
       id,
-      data.project_id,
-      data.name,
-      data.description ?? null,
-      JSON.stringify(data.trigger_config),
-      JSON.stringify(data.conditions ?? []),
-      JSON.stringify(data.actions),
-      maxOrder.m + 1,
-      data.catchup_on_start === false ? 0 : 1
-    )
-    const row = db.prepare('SELECT * FROM automations WHERE id = ?').get(id) as AutomationRow
+      projectId: data.project_id,
+      name: data.name,
+      description: data.description ?? null,
+      triggerConfig: JSON.stringify(data.trigger_config),
+      conditions: JSON.stringify(data.conditions ?? []),
+      actions: JSON.stringify(data.actions),
+      catchupOnStart: data.catchup_on_start === false ? 0 : 1
+    })
     return parseAutomationRow(row)
   })
 
-  ipcMain.handle('db:automations:update', (_, data: UpdateAutomationInput) => {
+  ipcMain.handle('db:automations:update', async (_, data: UpdateAutomationInput) => {
     const fields: string[] = []
     const values: unknown[] = []
 
@@ -98,44 +89,46 @@ export function registerAutomationHandlers(
     if (fields.length > 0) {
       fields.push("updated_at = datetime('now')")
       values.push(data.id)
-      db.prepare(`UPDATE automations SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+      await db.run(`UPDATE automations SET ${fields.join(', ')} WHERE id = ?`, values)
     }
 
-    const row = db.prepare('SELECT * FROM automations WHERE id = ?').get(data.id) as AutomationRow
+    const row = (await db.get<AutomationRow>('SELECT * FROM automations WHERE id = ?', [
+      data.id
+    ])) as AutomationRow
     return parseAutomationRow(row)
   })
 
-  ipcMain.handle('db:automations:delete', (_, id: string) => {
-    const result = db.prepare('DELETE FROM automations WHERE id = ?').run(id)
+  ipcMain.handle('db:automations:delete', async (_, id: string) => {
+    const result = await db.run('DELETE FROM automations WHERE id = ?', [id])
     return result.changes > 0
   })
 
-  ipcMain.handle('db:automations:toggle', (_, id: string, enabled: boolean) => {
-    db.prepare("UPDATE automations SET enabled = ?, updated_at = datetime('now') WHERE id = ?").run(
+  ipcMain.handle('db:automations:toggle', async (_, id: string, enabled: boolean) => {
+    await db.run("UPDATE automations SET enabled = ?, updated_at = datetime('now') WHERE id = ?", [
       enabled ? 1 : 0,
       id
-    )
-    const row = db.prepare('SELECT * FROM automations WHERE id = ?').get(id) as AutomationRow
+    ])
+    const row = (await db.get<AutomationRow>('SELECT * FROM automations WHERE id = ?', [
+      id
+    ])) as AutomationRow
     return parseAutomationRow(row)
   })
 
-  ipcMain.handle('db:automations:reorder', (_, ids: string[]) => {
-    const stmt = db.prepare('UPDATE automations SET sort_order = ? WHERE id = ?')
-    db.transaction(() => {
-      for (let i = 0; i < ids.length; i++) {
-        stmt.run(i, ids[i])
-      }
-    })()
+  ipcMain.handle('db:automations:reorder', async (_, ids: string[]) => {
+    await db.batchTxn(
+      ids.map((id, i) => ({
+        type: 'run' as const,
+        sql: 'UPDATE automations SET sort_order = ? WHERE id = ?',
+        params: [i, id]
+      }))
+    )
   })
 
-  ipcMain.handle('db:automations:getRuns', (_, automationId: string, limit?: number) => {
-    const rows = db
-      .prepare(
-        'SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT ?'
-      )
-      .all(automationId, limit ?? 50) as Array<
-      { trigger_event: string | null } & Record<string, unknown>
-    >
+  ipcMain.handle('db:automations:getRuns', async (_, automationId: string, limit?: number) => {
+    const rows = await db.all<{ trigger_event: string | null } & Record<string, unknown>>(
+      'SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT ?',
+      [automationId, limit ?? 50]
+    )
     return rows.map((row) => ({
       ...row,
       trigger_event: row.trigger_event ? safeParse(row.trigger_event) : null
@@ -146,7 +139,7 @@ export function registerAutomationHandlers(
     return engine.executeManual(id)
   })
 
-  ipcMain.handle('db:automations:clearRuns', (_, automationId: string) => {
-    db.prepare('DELETE FROM automation_runs WHERE automation_id = ?').run(automationId)
+  ipcMain.handle('db:automations:clearRuns', async (_, automationId: string) => {
+    await db.run('DELETE FROM automation_runs WHERE automation_id = ?', [automationId])
   })
 }

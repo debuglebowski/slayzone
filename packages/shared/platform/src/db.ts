@@ -1,5 +1,3 @@
-import type { Database } from 'better-sqlite3'
-
 /** SQLite PRAGMAs required for all connections to the SlayZone database. */
 export const DB_PRAGMAS = [
   'journal_mode = WAL',
@@ -9,13 +7,53 @@ export const DB_PRAGMAS = [
   'busy_timeout = 5000'
 ] as const
 
+/** A single statement in a `batchTxn` op list. */
+export type BatchOp = {
+  type: 'get' | 'all' | 'run'
+  sql: string
+  params: unknown[]
+}
+
+/** Mirrors better-sqlite3's `RunResult`. `lastInsertRowid` may be a bigint. */
+export type RunResult = {
+  changes: number
+  lastInsertRowid: number | bigint
+}
+
 /**
- * The SlayZone DB handle type. Aliased here so the engine choice lives in one
- * place — a future swap (e.g. node:sqlite) redefines this single line rather
- * than every consumer. No structural interface: designed from evidence once
- * real procedures exist (slice 4+).
+ * A prepared-statement handle. Mirrors the subset of better-sqlite3's
+ * `Statement` the codebase uses (`get`/`all`/`run`), but every call is async
+ * because execution happens in the SQLite worker thread. Params are spread to
+ * match better-sqlite3 (`stmt.get(a, b)` or `stmt.get({ named }))`.
  */
-export type SlayzoneDb = Database
+export interface PreparedBridge {
+  get<T = unknown>(...params: unknown[]): Promise<T | undefined>
+  all<T = unknown>(...params: unknown[]): Promise<T[]>
+  run(...params: unknown[]): Promise<RunResult>
+}
+
+/**
+ * The SlayZone DB handle. The connection lives in a worker thread; this is the
+ * async proxy every main-process module receives. Engine choice lives here in
+ * one place — a future swap redefines this rather than every consumer.
+ *
+ * Deliberately has NO synchronous `transaction()`: transactions must go through
+ * `batchTxn` (a static op list) or `namedTxn` (pre-registered conditional
+ * read-modify-write logic) so they run atomically inside the worker and never
+ * split across the thread boundary.
+ */
+export interface SlayzoneDb {
+  get<T = unknown>(sql: string, params?: unknown[]): Promise<T | undefined>
+  all<T = unknown>(sql: string, params?: unknown[]): Promise<T[]>
+  run(sql: string, params?: unknown[]): Promise<RunResult>
+  exec(sql: string): Promise<void>
+  batchTxn(ops: BatchOp[]): Promise<unknown[]>
+  namedTxn<T = unknown>(name: string, params: unknown): Promise<T>
+  /** Online backup of the live connection to `destPath` (manual/restore backups). */
+  backup(destPath: string): Promise<void>
+  prepare(sql: string): PreparedBridge
+  close(): Promise<void>
+}
 
 /**
  * The DB filename for a given build. `packaged` Electron uses the production

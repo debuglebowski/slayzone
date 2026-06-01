@@ -10,6 +10,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./main": "./src/main/index.ts",
+    "./db": "./src/main/worker-db.ts",
     "./client": "./src/client/index.ts",
     "./client/Terminal": "./src/client/Terminal.tsx",
     "./client/LazyTerminal": "./src/client/LazyTerminal.tsx",

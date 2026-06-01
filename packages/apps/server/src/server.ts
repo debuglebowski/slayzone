@@ -76,7 +76,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       await new Promise<void>((r) => httpServer.close(() => r()))
       if (ownsDb) {
         try {
-          db.close()
+          await db.close()
         } catch {
           /* ignore */
         }

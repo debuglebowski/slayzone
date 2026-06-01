@@ -1,7 +1,7 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 
 export interface RestApiDeps {
-  db: Database
+  db: SlayzoneDb
   notifyRenderer: () => void
   automationEngine?: { executeManual(id: string): Promise<unknown> }
 }

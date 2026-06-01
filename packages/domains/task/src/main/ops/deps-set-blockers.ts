@@ -1,15 +1,21 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
+import type { BatchOp } from '@slayzone/platform'
 
-export function setBlockersOp(db: Database, taskId: string, blockerTaskIds: string[]): void {
-  const deleteStmt = db.prepare('DELETE FROM task_dependencies WHERE blocks_task_id = ?')
-  const insertStmt = db.prepare(
-    'INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)'
-  )
-
-  db.transaction(() => {
-    deleteStmt.run(taskId)
-    for (const blockerTaskId of blockerTaskIds) {
-      insertStmt.run(blockerTaskId, taskId)
-    }
-  })()
+export async function setBlockersOp(
+  db: SlayzoneDb,
+  taskId: string,
+  blockerTaskIds: string[]
+): Promise<void> {
+  // Pure delete-then-insert with all params known up-front — atomic batch op list.
+  const ops: BatchOp[] = [
+    { type: 'run', sql: 'DELETE FROM task_dependencies WHERE blocks_task_id = ?', params: [taskId] },
+    ...blockerTaskIds.map(
+      (blockerTaskId): BatchOp => ({
+        type: 'run',
+        sql: 'INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)',
+        params: [blockerTaskId, taskId]
+      })
+    )
+  ]
+  await db.batchTxn(ops)
 }

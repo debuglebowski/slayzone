@@ -14,14 +14,14 @@ interface BrowserTabsState {
 }
 
 export function registerBrowserTabsRoute(app: Express, deps: RestApiDeps): void {
-  app.get('/api/browser/tabs', (req, res) => {
+  app.get('/api/browser/tabs', async (req, res) => {
     const taskId = req.query.taskId as string | undefined
     if (!taskId) {
       res.status(400).json({ error: 'taskId required' })
       return
     }
 
-    const row = deps.db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(taskId) as
+    const row = (await deps.db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(taskId)) as
       | { browser_tabs: string | null }
       | undefined
 

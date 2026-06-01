@@ -1,5 +1,4 @@
-import type { Database } from 'better-sqlite3'
-import { recordActivityEvents } from '@slayzone/history/main'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { taskEvents } from '../events.js'
 import { buildTaskDeletedEvents } from '../history.js'
 import { cleanupTaskImmediate, parseTask, type OpDeps } from './shared.js'
@@ -9,11 +8,11 @@ export interface DeleteManyTasksResult {
   blockedIds: string[]
 }
 
-export function deleteManyTasksOp(
-  db: Database,
+export async function deleteManyTasksOp(
+  db: SlayzoneDb,
   ids: string[],
   deps: OpDeps
-): DeleteManyTasksResult {
+): Promise<DeleteManyTasksResult> {
   const { ipcMain, onMutation } = deps
   if (ids.length === 0) return { deletedIds: [], blockedIds: [] }
 
@@ -21,16 +20,17 @@ export function deleteManyTasksOp(
   const deletable: { id: string; previous: ReturnType<typeof parseTask> }[] = []
 
   for (const id of ids) {
-    const previousRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as
-      | Record<string, unknown>
-      | undefined
+    const previousRow = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
+      id
+    ])
     const previousTask = parseTask(previousRow)
     const linkCount = (
-      db.prepare('SELECT COUNT(*) as count FROM external_links WHERE task_id = ?').get(id) as {
-        count: number
-      }
-    ).count
-    if (linkCount > 0) {
+      await db.get<{ count: number }>(
+        'SELECT COUNT(*) as count FROM external_links WHERE task_id = ?',
+        [id]
+      )
+    )?.count
+    if ((linkCount ?? 0) > 0) {
       blockedIds.push(id)
       continue
     }
@@ -41,20 +41,19 @@ export function deleteManyTasksOp(
     cleanupTaskImmediate(id)
   }
 
-  const deletedIds: string[] = []
-  db.transaction(() => {
-    for (const { id, previous } of deletable) {
-      const updateResult = db
-        .prepare(`
+  // Soft-delete every deletable task + record deletion events in one transaction.
+  // The named txn records events only for rows whose UPDATE actually changed a row
+  // and returns the ids that were deleted.
+  const { deletedIds } = await db.namedTxn<{ deletedIds: string[] }>('task:soft-delete-many', {
+    ops: deletable.map(({ id, previous }) => ({
+      id,
+      sql: `
         UPDATE tasks SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
-      `)
-        .run(id)
-      if (updateResult.changes > 0) {
-        if (previous) recordActivityEvents(db, buildTaskDeletedEvents(previous))
-        deletedIds.push(id)
-      }
-    }
-  })()
+      `,
+      params: [id],
+      events: previous ? buildTaskDeletedEvents(previous) : []
+    }))
+  })
 
   for (const { id, previous } of deletable) {
     if (!deletedIds.includes(id)) continue

@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./main": "./src/main/index.ts",
+    "./db": "./src/main/worker-db.ts",
     "./server": "./src/server/index.ts",
     "./client": "./src/client/index.ts"
   },
@@ -19,7 +20,8 @@
     "@slayzone/history": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^0.562.0",
+    "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",

@@ -12,8 +12,8 @@ import { mergeSessions } from './session-merge'
  * Pure merge logic lives in `./session-merge` so tests don't need to load
  * the electron-bound pty-manager.
  */
-export function listSessions(): SessionInfo[] {
-  return mergeSessions({ ptys: listPtys(), chats: listChatSessions() })
+export async function listSessions(): Promise<SessionInfo[]> {
+  return mergeSessions({ ptys: await listPtys(), chats: listChatSessions() })
 }
 
 export function getSessionState(sessionId: string): TerminalState | null {

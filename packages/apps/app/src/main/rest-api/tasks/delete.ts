@@ -6,10 +6,10 @@ import { deleteTaskOp } from '@slayzone/task/main'
 import type { RestApiDeps } from '../types'
 
 export function registerDeleteTaskRoute(app: Express, deps: RestApiDeps): void {
-  app.delete('/api/tasks/:id', (req, res) => {
+  app.delete('/api/tasks/:id', async (req, res) => {
     try {
       const input = deleteTaskInputSchema.parse({ id: req.params.id })
-      const result = deleteTaskOp(deps.db, input.id, {
+      const result = await deleteTaskOp(deps.db, input.id, {
         ipcMain,
         onMutation: deps.notifyRenderer
       })

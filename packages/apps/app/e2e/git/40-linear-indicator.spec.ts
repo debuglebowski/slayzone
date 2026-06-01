@@ -19,18 +19,21 @@ test.describe('Linear link indicator', () => {
 
     // Insert mock external_link directly via main process DB (disable FK for fake connection_id)
     await electronApp.evaluate(
-      ({}, { taskId: tid }: { taskId: string }) => {
+      async ({}, { taskId: tid }: { taskId: string }) => {
         const db = (globalThis as Record<string, any>).__db
         if (!db) throw new Error('__db not exposed')
         const id = crypto.randomUUID()
-        db.pragma('foreign_keys = OFF')
-        db.prepare(`
+        await db.exec('PRAGMA foreign_keys = OFF')
+        await db.run(
+          `
         INSERT INTO external_links (
           id, provider, connection_id, external_type, external_id, external_key,
           external_url, task_id, sync_state, created_at, updated_at
         ) VALUES (?, 'linear', 'fake-conn', 'issue', ?, 'LI-1', ?, ?, 'active', datetime('now'), datetime('now'))
-      `).run(id, 'fake-ext-' + id, 'https://linear.app/test/issue/LI-1/linked-task', tid)
-        db.pragma('foreign_keys = ON')
+      `,
+          [id, 'fake-ext-' + id, 'https://linear.app/test/issue/LI-1/linked-task', tid]
+        )
+        await db.exec('PRAGMA foreign_keys = ON')
       },
       { taskId }
     )

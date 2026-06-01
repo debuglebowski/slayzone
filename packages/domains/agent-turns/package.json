@@ -15,7 +15,8 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@slayzone/terminal": "workspace:*"
+    "@slayzone/terminal": "workspace:*",
+    "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",

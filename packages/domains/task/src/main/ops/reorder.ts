@@ -1,12 +1,13 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
+import type { BatchOp } from '@slayzone/platform'
 
-export function reorderTasksOp(db: Database, taskIds: string[]): void {
-  const stmt = db.prepare('UPDATE tasks SET "order" = ? WHERE id = ?')
-  db.transaction(() => {
-    taskIds.forEach((id, index) => {
-      stmt.run(index, id)
-    })
-  })()
+export async function reorderTasksOp(db: SlayzoneDb, taskIds: string[]): Promise<void> {
+  const ops: BatchOp[] = taskIds.map((id, index) => ({
+    type: 'run',
+    sql: 'UPDATE tasks SET "order" = ? WHERE id = ?',
+    params: [index, id]
+  }))
+  await db.batchTxn(ops)
 }
 
 /**
@@ -15,11 +16,11 @@ export function reorderTasksOp(db: Database, taskIds: string[]): void {
  * appended to the existing list). Does not touch tasks absent from the list —
  * unpinning is a separate write (mirrors `reorderTasksOp`).
  */
-export function reorderPinnedTasksOp(db: Database, taskIds: string[]): void {
-  const stmt = db.prepare('UPDATE tasks SET pinned = 1, pin_order = ? WHERE id = ?')
-  db.transaction(() => {
-    taskIds.forEach((id, index) => {
-      stmt.run(index, id)
-    })
-  })()
+export async function reorderPinnedTasksOp(db: SlayzoneDb, taskIds: string[]): Promise<void> {
+  const ops: BatchOp[] = taskIds.map((id, index) => ({
+    type: 'run',
+    sql: 'UPDATE tasks SET pinned = 1, pin_order = ? WHERE id = ?',
+    params: [index, id]
+  }))
+  await db.batchTxn(ops)
 }

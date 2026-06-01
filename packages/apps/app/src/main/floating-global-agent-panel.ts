@@ -80,8 +80,10 @@ function executeAction(action: Action): void {
       if (!floatingGlobalAgentPanelWindow || floatingGlobalAgentPanelWindow.isDestroyed()) {
         floatingGlobalAgentPanelWindow = createFloatingGlobalAgentPanelWindow()
       }
-      readConfig()
-      readExpandedSize()
+      // Fire-and-forget async DB reads (worker-thread proxy); they populate
+      // module-level config/size used by subsequent applyBounds dispatches.
+      void readConfig()
+      void readExpandedSize()
       return
 
     case 'destroy-floating-window':
@@ -96,12 +98,20 @@ function executeAction(action: Action): void {
       if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
         const ok = redirectSessionWindow(action.sessionId, floatingGlobalAgentPanelWindow)
         if (ok) {
-          currentFloatingSession = readSessionMeta(action.sessionId)
-          if (!floatingGlobalAgentPanelWindow.isDestroyed()) {
-            floatingGlobalAgentPanelWindow.webContents.send(
-              'floating-global-agent-panel:session-changed'
-            )
-          }
+          const sid = action.sessionId
+          // DB read is async (worker-thread proxy); resolve session meta then
+          // notify the floating window. Fire-and-forget — the FSM doesn't await.
+          void readSessionMeta(sid).then((meta) => {
+            currentFloatingSession = meta
+            if (
+              floatingGlobalAgentPanelWindow &&
+              !floatingGlobalAgentPanelWindow.isDestroyed()
+            ) {
+              floatingGlobalAgentPanelWindow.webContents.send(
+                'floating-global-agent-panel:session-changed'
+              )
+            }
+          })
         }
       }
       return
@@ -202,7 +212,8 @@ function executeAction(action: Action): void {
         clearTimeout(saveExpandedSizeTimer)
         saveExpandedSizeTimer = null
       }
-      getDatabase()
+      // Fire-and-forget async DB write (worker-thread proxy).
+      void getDatabase()
         .prepare("DELETE FROM settings WHERE key = 'floatingGlobalAgentPanelExpandedSize'")
         .run()
       broadcastState()
@@ -225,11 +236,13 @@ function broadcastState(): void {
   }
 }
 
-function readSessionMeta(sessionId: string): { sessionId: string; cwd: string; mode: string } {
+async function readSessionMeta(
+  sessionId: string
+): Promise<{ sessionId: string; cwd: string; mode: string }> {
   const db = getDatabase()
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'globalAgentPanelState'").get() as
-    | { value: string }
-    | undefined
+  const row = (await db
+    .prepare("SELECT value FROM settings WHERE key = 'globalAgentPanelState'")
+    .get()) as { value: string } | undefined
   let cwd = ''
   let mode = 'claude-code'
   try {
@@ -321,11 +334,11 @@ function applyBounds(animate: boolean): void {
   floatingGlobalAgentPanelWindow.setBounds(bounds, animate)
 }
 
-function readExpandedSize(): void {
+async function readExpandedSize(): Promise<void> {
   const db = getDatabase()
-  const row = db
+  const row = (await db
     .prepare("SELECT value FROM settings WHERE key = 'floatingGlobalAgentPanelExpandedSize'")
-    .get() as { value: string } | undefined
+    .get()) as { value: string } | undefined
   try {
     if (row?.value) {
       const parsed = JSON.parse(row.value)
@@ -352,17 +365,20 @@ function persistExpandedSize(width: number, height: number): void {
   saveExpandedSizeTimer = setTimeout(() => {
     saveExpandedSizeTimer = null
     const db = getDatabase()
-    db.prepare(
-      "INSERT INTO settings (key, value) VALUES ('floatingGlobalAgentPanelExpandedSize', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    ).run(JSON.stringify({ width, height }))
+    // Fire-and-forget async DB write (worker-thread proxy).
+    void db
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('floatingGlobalAgentPanelExpandedSize', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      )
+      .run(JSON.stringify({ width, height }))
   }, 200)
 }
 
-function readConfig(): void {
+async function readConfig(): Promise<void> {
   const db = getDatabase()
-  const row = db
+  const row = (await db
     .prepare("SELECT value FROM settings WHERE key = 'floatingGlobalAgentPanelConfig'")
-    .get() as { value: string } | undefined
+    .get()) as { value: string } | undefined
   try {
     currentConfig = row?.value ? { ...DEFAULT_CONFIG, ...JSON.parse(row.value) } : DEFAULT_CONFIG
   } catch {

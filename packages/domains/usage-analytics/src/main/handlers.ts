@@ -1,9 +1,9 @@
 import type { IpcMain } from 'electron'
-import type Database from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { DateRange } from '../shared/types'
 import { refreshUsageData, queryAnalytics, queryTaskCost } from './cache'
 
-export function registerUsageAnalyticsHandlers(ipcMain: IpcMain, db: Database.Database): void {
+export function registerUsageAnalyticsHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   ipcMain.handle('usage-analytics:query', async (_, range: DateRange) => {
     return queryAnalytics(db, range)
   })

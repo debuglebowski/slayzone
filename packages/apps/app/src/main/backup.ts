@@ -1,6 +1,6 @@
 import { app, shell } from 'electron'
 import type { IpcMain } from 'electron'
-import type Database from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import fs from 'fs'
 import path from 'path'
 import { getDatabasePath, closeDatabase } from './db'
@@ -48,13 +48,13 @@ function parseBackupFilename(
 }
 
 // Backup names stored as JSON map { [filename]: name } in settings table
-let _db: Database.Database | null = null
+let _db: SlayzoneDb | null = null
 
-function getBackupNames(): Record<string, string> {
+async function getBackupNames(): Promise<Record<string, string>> {
   if (!_db) return {}
-  const row = _db.prepare('SELECT value FROM settings WHERE key = ?').get('backup_names') as
-    | { value: string }
-    | undefined
+  const row = (await _db
+    .prepare('SELECT value FROM settings WHERE key = ?')
+    .get('backup_names')) as { value: string } | undefined
   if (!row) return {}
   try {
     return JSON.parse(row.value)
@@ -63,28 +63,28 @@ function getBackupNames(): Record<string, string> {
   }
 }
 
-function setBackupName(filename: string, name: string): void {
+async function setBackupName(filename: string, name: string): Promise<void> {
   if (!_db) return
-  const names = getBackupNames()
+  const names = await getBackupNames()
   names[filename] = name
-  _db
+  await _db
     .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
     .run('backup_names', JSON.stringify(names))
 }
 
-function removeBackupName(filename: string): void {
+async function removeBackupName(filename: string): Promise<void> {
   if (!_db) return
-  const names = getBackupNames()
+  const names = await getBackupNames()
   delete names[filename]
-  _db
+  await _db
     .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
     .run('backup_names', JSON.stringify(names))
 }
 
-function listBackups(): BackupInfo[] {
+async function listBackups(): Promise<BackupInfo[]> {
   const dir = getBackupsDir()
   const files = fs.readdirSync(dir)
-  const names = getBackupNames()
+  const names = await getBackupNames()
   const backups: BackupInfo[] = []
   for (const filename of files) {
     const parsed = parseBackupFilename(filename)
@@ -103,7 +103,7 @@ function listBackups(): BackupInfo[] {
 }
 
 async function createBackup(
-  db: Database.Database,
+  db: SlayzoneDb,
   type: 'auto' | 'manual',
   name?: string
 ): Promise<BackupInfo> {
@@ -114,10 +114,10 @@ async function createBackup(
   const stat = fs.statSync(destPath)
 
   // Assign name: use provided name, or auto-generate "Backup N"
-  const settings = getBackupSettings(db)
+  const settings = await getBackupSettings(db)
   const backupName = name || `Backup ${settings.nextBackupNumber}`
-  setBackupName(filename, backupName)
-  setBackupSettings(db, { nextBackupNumber: settings.nextBackupNumber + 1 })
+  await setBackupName(filename, backupName)
+  await setBackupSettings(db, { nextBackupNumber: settings.nextBackupNumber + 1 })
 
   return {
     filename,
@@ -128,7 +128,7 @@ async function createBackup(
   }
 }
 
-function deleteBackup(filename: string): void {
+async function deleteBackup(filename: string): Promise<void> {
   const dir = getBackupsDir()
   const filePath = path.join(dir, filename)
   // Validate path is within backups dir
@@ -138,10 +138,10 @@ function deleteBackup(filename: string): void {
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath)
   }
-  removeBackupName(filename)
+  await removeBackupName(filename)
 }
 
-function restoreBackup(filename: string): void {
+async function restoreBackup(filename: string): Promise<void> {
   const dir = getBackupsDir()
   const backupPath = path.join(dir, filename)
   if (!path.resolve(backupPath).startsWith(path.resolve(dir))) {
@@ -153,7 +153,7 @@ function restoreBackup(filename: string): void {
 
   const dbPath = getDatabasePath()
   stopAutoBackup()
-  closeDatabase()
+  await closeDatabase()
 
   // Copy backup over main DB
   fs.copyFileSync(backupPath, dbPath)
@@ -171,10 +171,10 @@ function restoreBackup(filename: string): void {
   app.exit()
 }
 
-function getBackupSettings(db: Database.Database): BackupSettings {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('backup_settings') as
-    | { value: string }
-    | undefined
+async function getBackupSettings(db: SlayzoneDb): Promise<BackupSettings> {
+  const row = (await db
+    .prepare('SELECT value FROM settings WHERE key = ?')
+    .get('backup_settings')) as { value: string } | undefined
   if (!row) return { ...DEFAULT_BACKUP_SETTINGS }
   try {
     return { ...DEFAULT_BACKUP_SETTINGS, ...JSON.parse(row.value) }
@@ -183,41 +183,40 @@ function getBackupSettings(db: Database.Database): BackupSettings {
   }
 }
 
-function setBackupSettings(
-  db: Database.Database,
+async function setBackupSettings(
+  db: SlayzoneDb,
   partial: Partial<BackupSettings>
-): BackupSettings {
-  const current = getBackupSettings(db)
+): Promise<BackupSettings> {
+  const current = await getBackupSettings(db)
   const merged = { ...current, ...partial }
-  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
-    'backup_settings',
-    JSON.stringify(merged)
-  )
+  await db
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run('backup_settings', JSON.stringify(merged))
   return merged
 }
 
-function cleanupOldBackups(type: BackupInfo['type'], max: number): void {
+async function cleanupOldBackups(type: BackupInfo['type'], max: number): Promise<void> {
   if (max <= 0) return // 0 = unlimited
-  const backups = listBackups().filter((b) => b.type === type)
+  const backups = (await listBackups()).filter((b) => b.type === type)
   if (backups.length <= max) return
   // backups already sorted newest-first
   const toDelete = backups.slice(max)
   for (const backup of toDelete) {
-    deleteBackup(backup.filename)
+    await deleteBackup(backup.filename)
   }
 }
 
 let autoBackupTimer: ReturnType<typeof setInterval> | null = null
 
-export function startAutoBackup(db: Database.Database): void {
+export async function startAutoBackup(db: SlayzoneDb): Promise<void> {
   stopAutoBackup()
-  const settings = getBackupSettings(db)
+  const settings = await getBackupSettings(db)
   if (!settings.autoEnabled) return
   const intervalMs = settings.intervalMinutes * 60 * 1000
   autoBackupTimer = setInterval(async () => {
     try {
       await createBackup(db, 'auto')
-      cleanupOldBackups('auto', settings.maxAutoBackups)
+      await cleanupOldBackups('auto', settings.maxAutoBackups)
     } catch (err) {
       console.error('Auto-backup failed:', err)
     }
@@ -231,27 +230,7 @@ export function stopAutoBackup(): void {
   }
 }
 
-export async function createPreMigrationBackup(
-  db: Database.Database,
-  targetVersion: number
-): Promise<void> {
-  const currentVersion = db.pragma('user_version', { simple: true }) as number
-  if (currentVersion === 0 || currentVersion >= targetVersion) return
-
-  const dir = getBackupsDir()
-  const filename = buildBackupFilename('migration')
-  try {
-    await db.backup(path.join(dir, filename))
-    console.error(
-      `[slayzone] Pre-migration backup: v${currentVersion}→v${targetVersion} → ${filename}`
-    )
-    cleanupOldBackups('migration', 3)
-  } catch (err) {
-    console.error(`[slayzone] Pre-migration backup failed (continuing): ${err}`)
-  }
-}
-
-export function registerBackupHandlers(ipcMain: IpcMain, db: Database.Database): void {
+export function registerBackupHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   _db = db
 
   ipcMain.handle('backup:list', () => {
@@ -263,24 +242,24 @@ export function registerBackupHandlers(ipcMain: IpcMain, db: Database.Database):
   })
 
   ipcMain.handle('backup:rename', (_, filename: string, name: string) => {
-    setBackupName(filename, name)
+    return setBackupName(filename, name)
   })
 
   ipcMain.handle('backup:delete', (_, filename: string) => {
-    deleteBackup(filename)
+    return deleteBackup(filename)
   })
 
   ipcMain.handle('backup:restore', (_, filename: string) => {
-    restoreBackup(filename)
+    return restoreBackup(filename)
   })
 
   ipcMain.handle('backup:getSettings', () => {
     return getBackupSettings(db)
   })
 
-  ipcMain.handle('backup:setSettings', (_, partial: Partial<BackupSettings>) => {
-    const updated = setBackupSettings(db, partial)
-    startAutoBackup(db)
+  ipcMain.handle('backup:setSettings', async (_, partial: Partial<BackupSettings>) => {
+    const updated = await setBackupSettings(db, partial)
+    await startAutoBackup(db)
     return updated
   })
 

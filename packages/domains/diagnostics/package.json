@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./main": "./src/main/index.ts",
+    "./self-heal": "./src/main/self-heal.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
@@ -21,5 +22,8 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.19.1",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@slayzone/platform": "workspace:*"
   }
 }

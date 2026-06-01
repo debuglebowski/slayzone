@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./main": "./src/main/index.ts",
+    "./db": "./src/main/worker-db.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
@@ -21,7 +22,8 @@
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "date-fns": "^4.1.0",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^0.562.0",
+    "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",

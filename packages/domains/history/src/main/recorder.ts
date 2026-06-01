@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   ActivityEvent,
   ActivityEventKind,
@@ -198,39 +199,41 @@ function mapActivityEvent(row: ActivityEventRow): ActivityEvent {
   }
 }
 
-export function listActivityEventsForTask(
-  db: Database,
+export async function listActivityEventsForTask(
+  db: SlayzoneDb,
   taskId: string,
   options: ListTaskHistoryOptions = {}
-): ListTaskHistoryResult {
+): Promise<ListTaskHistoryResult> {
   const limit = clampTaskHistoryLimit(options.limit)
 
   const rows = options.before
-    ? (db
-        .prepare(`
+    ? ((await db.all(
+        `
         SELECT *
         FROM activity_events
         WHERE task_id = ?
           AND (created_at < ? OR (created_at = ? AND id < ?))
         ORDER BY created_at DESC, id DESC
         LIMIT ?
-      `)
-        .all(
+      `,
+        [
           taskId,
           options.before.createdAt,
           options.before.createdAt,
           options.before.id,
           limit + 1
-        ) as ActivityEventRow[])
-    : (db
-        .prepare(`
+        ]
+      )) as ActivityEventRow[])
+    : ((await db.all(
+        `
         SELECT *
         FROM activity_events
         WHERE task_id = ?
         ORDER BY created_at DESC, id DESC
         LIMIT ?
-      `)
-        .all(taskId, limit + 1) as ActivityEventRow[])
+      `,
+        [taskId, limit + 1]
+      )) as ActivityEventRow[])
 
   const hasMore = rows.length > limit
   const pageRows = hasMore ? rows.slice(0, limit) : rows
@@ -243,15 +246,19 @@ export function listActivityEventsForTask(
   }
 }
 
-export function listAutomationActionRuns(db: Database, runId: string): AutomationActionRun[] {
-  const rows = db
-    .prepare(`
+export async function listAutomationActionRuns(
+  db: SlayzoneDb,
+  runId: string
+): Promise<AutomationActionRun[]> {
+  const rows = (await db.all(
+    `
     SELECT *
     FROM automation_action_runs
     WHERE run_id = ?
     ORDER BY action_index ASC, started_at ASC
-  `)
-    .all(runId) as AutomationActionRunRow[]
+  `,
+    [runId]
+  )) as AutomationActionRunRow[]
 
   return rows.map((row) => ({
     id: row.id,

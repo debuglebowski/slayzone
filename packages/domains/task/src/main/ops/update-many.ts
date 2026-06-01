@@ -1,6 +1,6 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import { recordActivityEvents } from '@slayzone/history/main'
+import type { RecordActivityEventInput } from '@slayzone/history/main'
 import { buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { colorOne, parseTask, updateTask, type OpDeps } from './shared.js'
@@ -11,7 +11,7 @@ export interface UpdateManyTasksInput {
 }
 
 export async function updateManyTasksOp(
-  db: Database,
+  db: SlayzoneDb,
   data: UpdateManyTasksInput,
   deps: OpDeps
 ): Promise<Task[]> {
@@ -19,23 +19,27 @@ export async function updateManyTasksOp(
   const { ids, updates } = data
   if (ids.length === 0) return []
 
-  const results: Array<{ id: string; previous: Task | null; next: Task | null }> = db.transaction(
-    () => {
-      const out: Array<{ id: string; previous: Task | null; next: Task | null }> = []
-      for (const id of ids) {
-        const previousRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as
-          | Record<string, unknown>
-          | undefined
-        const previousTask = parseTask(previousRow)
-        const nextTask = updateTask(db, { ...updates, id } as UpdateTaskInput)
-        if (previousTask && nextTask) {
-          recordActivityEvents(db, buildTaskUpdatedEvents(previousTask, nextTask))
-        }
-        out.push({ id, previous: previousTask, next: nextTask })
-      }
-      return out
+  // `updateTask` is a conditional read-modify-write with runtime side effects, so
+  // each update runs as its own awaited call rather than inside a worker named-txn.
+  // The diff-derived activity events are accumulated and recorded together via the
+  // `task:record-events` named transaction.
+  const results: Array<{ id: string; previous: Task | null; next: Task | null }> = []
+  const events: RecordActivityEventInput[] = []
+  for (const id of ids) {
+    const previousRow = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
+      id
+    ])
+    const previousTask = parseTask(previousRow)
+    const nextTask = await updateTask(db, { ...updates, id } as UpdateTaskInput)
+    if (previousTask && nextTask) {
+      events.push(...buildTaskUpdatedEvents(previousTask, nextTask))
     }
-  )()
+    results.push({ id, previous: previousTask, next: nextTask })
+  }
+
+  if (events.length > 0) {
+    await db.namedTxn('task:record-events', { events })
+  }
 
   for (const r of results) {
     if (!r.next) continue

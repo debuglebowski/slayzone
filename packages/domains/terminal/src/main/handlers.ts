@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron'
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import {
@@ -35,7 +35,6 @@ import type {
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import { parseShellArgs } from './adapters/flag-parser'
 import { setShellOverride } from './shell-env'
-import { syncTerminalModes } from './startup-sync'
 
 interface PtyCreateOpts {
   sessionId: string
@@ -76,16 +75,16 @@ function mapModeRow(row: any): TerminalModeInfo {
   }
 }
 
-export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
+export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   // Set database reference for notifications
   setDatabase(db)
 
-  // Synchronize built-in modes from code to database
-  syncTerminalModes(db)
+  // Built-in terminal modes are synchronized inside the DB worker on startup
+  // (see db-worker.ts) — no main-thread sync needed here.
 
   // Terminal Modes CRUD
   ipcMain.handle('terminalModes:list', async () => {
-    const rows = db.prepare('SELECT * FROM terminal_modes ORDER BY "order" ASC').all()
+    const rows = await db.prepare('SELECT * FROM terminal_modes ORDER BY "order" ASC').all()
     return rows.map(mapModeRow)
   })
 
@@ -105,39 +104,43 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
   })
 
   ipcMain.handle('terminalModes:get', async (_, id: string) => {
-    const row = db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
+    const row = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
     return row ? mapModeRow(row) : null
   })
 
   ipcMain.handle('terminalModes:create', async (_, input: CreateTerminalModeInput) => {
     const id = input.id
-    db.prepare(`
+    await db
+      .prepare(
+        `
       INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order", pattern_working, pattern_error, usage_config)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-    `).run(
-      id,
-      input.label,
-      input.type,
-      input.initialCommand ?? null,
-      input.resumeCommand ?? null,
-      input.headlessCommand ?? null,
-      input.defaultFlags ?? null,
-      input.enabled !== false ? 1 : 0,
-      input.order ?? 0,
-      input.patternWorking ?? null,
-      input.patternError ?? null,
-      input.usageConfig ? JSON.stringify(input.usageConfig) : null
-    )
-    const row = db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
+    `
+      )
+      .run(
+        id,
+        input.label,
+        input.type,
+        input.initialCommand ?? null,
+        input.resumeCommand ?? null,
+        input.headlessCommand ?? null,
+        input.defaultFlags ?? null,
+        input.enabled !== false ? 1 : 0,
+        input.order ?? 0,
+        input.patternWorking ?? null,
+        input.patternError ?? null,
+        input.usageConfig ? JSON.stringify(input.usageConfig) : null
+      )
+    const row = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
     return mapModeRow(row)
   })
 
   ipcMain.handle(
     'terminalModes:update',
     async (_, id: string, updates: UpdateTerminalModeInput) => {
-      const builtinRow = db.prepare('SELECT is_builtin FROM terminal_modes WHERE id = ?').get(id) as
-        | { is_builtin: number }
-        | undefined
+      const builtinRow = (await db
+        .prepare('SELECT is_builtin FROM terminal_modes WHERE id = ?')
+        .get(id)) as { is_builtin: number } | undefined
       const isBuiltin = Boolean(builtinRow?.is_builtin)
 
       const sets: string[] = []
@@ -191,56 +194,59 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
       if (sets.length > 0) {
         sets.push("updated_at = datetime('now')")
         params.push(id)
-        db.prepare(`UPDATE terminal_modes SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+        await db.prepare(`UPDATE terminal_modes SET ${sets.join(', ')} WHERE id = ?`).run(...params)
       }
 
-      const updatedRow = db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
+      const updatedRow = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
       return updatedRow ? mapModeRow(updatedRow) : null
     }
   )
 
   ipcMain.handle('terminalModes:delete', async (_, id: string) => {
-    const deleteRow = db.prepare('SELECT is_builtin FROM terminal_modes WHERE id = ?').get(id) as
-      | { is_builtin: number }
-      | undefined
+    const deleteRow = (await db
+      .prepare('SELECT is_builtin FROM terminal_modes WHERE id = ?')
+      .get(id)) as { is_builtin: number } | undefined
     if (deleteRow?.is_builtin) {
       return false // Built-in modes cannot be deleted
     }
-    db.prepare('DELETE FROM terminal_modes WHERE id = ?').run(id)
+    await db.prepare('DELETE FROM terminal_modes WHERE id = ?').run(id)
     return true
   })
 
   ipcMain.handle('terminalModes:restoreDefaults', async () => {
-    db.transaction(() => {
-      const insertStmt = db.prepare(`
+    const insertSql = `
         INSERT OR IGNORE INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-      `)
-      for (const mode of DEFAULT_TERMINAL_MODES) {
-        insertStmt.run(
-          mode.id,
-          mode.label,
-          mode.type,
-          mode.initialCommand ?? null,
-          mode.resumeCommand ?? null,
-          mode.headlessCommand ?? null,
-          mode.defaultFlags ?? null,
-          mode.enabled ? 1 : 0,
-          mode.order
-        )
-      }
-    })()
+      `
+    const ops = DEFAULT_TERMINAL_MODES.map((mode) => ({
+      type: 'run' as const,
+      sql: insertSql,
+      params: [
+        mode.id,
+        mode.label,
+        mode.type,
+        mode.initialCommand ?? null,
+        mode.resumeCommand ?? null,
+        mode.headlessCommand ?? null,
+        mode.defaultFlags ?? null,
+        mode.enabled ? 1 : 0,
+        mode.order
+      ]
+    }))
+    await db.batchTxn(ops)
   })
 
   ipcMain.handle('terminalModes:resetToDefaultState', async () => {
-    db.transaction(() => {
-      db.prepare('DELETE FROM terminal_modes').run()
-      const insertStmt = db.prepare(`
+    const insertSql = `
         INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-      `)
-      for (const mode of DEFAULT_TERMINAL_MODES) {
-        insertStmt.run(
+      `
+    const ops = [
+      { type: 'run' as const, sql: 'DELETE FROM terminal_modes', params: [] as unknown[] },
+      ...DEFAULT_TERMINAL_MODES.map((mode) => ({
+        type: 'run' as const,
+        sql: insertSql,
+        params: [
           mode.id,
           mode.label,
           mode.type,
@@ -250,9 +256,10 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
           mode.defaultFlags ?? null,
           mode.enabled ? 1 : 0,
           mode.order
-        )
-      }
-    })()
+        ] as unknown[]
+      }))
+    ]
+    await db.batchTxn(ops)
   })
 
   ipcMain.handle('pty:create', async (event, opts: PtyCreateOpts) => {
@@ -269,7 +276,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
     // Look up mode info to get type, templates, and default flags
     const modeId = opts.mode || 'claude-code'
 
-    const modeRow = db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(modeId)
+    const modeRow = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(modeId)
     const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
 
     return createPty({
@@ -368,7 +375,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: Database): void {
   )
 
   ipcMain.handle('pty:validate', async (_, mode: TerminalMode) => {
-    const modeRow = db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(mode)
+    const modeRow = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(mode)
     const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
     const adapter = getAdapter({
       mode,

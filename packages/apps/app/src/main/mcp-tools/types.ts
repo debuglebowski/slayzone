@@ -1,6 +1,6 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 
 export interface McpToolsDeps {
-  db: Database
+  db: SlayzoneDb
   notifyRenderer: () => void
 }

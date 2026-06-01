@@ -1,6 +1,6 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 import { BrowserWindow } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import {
   withResultDedup as withResultDedupBase,
@@ -153,17 +153,17 @@ function evictStaleRepoCache(): void {
   }
 }
 
-export function resolveCopyBehavior(
-  db: Database,
+export async function resolveCopyBehavior(
+  db: SlayzoneDb,
   projectId?: string
-): { behavior: WorktreeCopyBehavior; customPaths: string[] } {
+): Promise<{ behavior: WorktreeCopyBehavior; customPaths: string[] }> {
   // Check project-level override first (null = inherit from global)
   // Wrapped in try-catch: columns added in migration v70 may not exist on stale DBs
   if (projectId) {
     try {
-      const row = db
+      const row = (await db
         .prepare('SELECT worktree_copy_behavior, worktree_copy_paths FROM projects WHERE id = ?')
-        .get(projectId) as
+        .get(projectId)) as
         | { worktree_copy_behavior: string | null; worktree_copy_paths: string | null }
         | undefined
       if (row?.worktree_copy_behavior) {
@@ -183,15 +183,15 @@ export function resolveCopyBehavior(
   }
 
   // Fall back to global setting
-  const settingRow = db
+  const settingRow = (await db
     .prepare("SELECT value FROM settings WHERE key = 'worktree_copy_behavior'")
-    .get() as { value: string } | undefined
+    .get()) as { value: string } | undefined
   const behavior = (settingRow?.value as WorktreeCopyBehavior) || 'ask'
   let customPaths: string[] = []
   if (behavior === 'custom') {
-    const pathsRow = db
+    const pathsRow = (await db
       .prepare("SELECT value FROM settings WHERE key = 'worktree_copy_paths'")
-      .get() as { value: string } | undefined
+      .get()) as { value: string } | undefined
     customPaths = pathsRow?.value
       ? pathsRow.value
           .split(',')
@@ -203,24 +203,24 @@ export function resolveCopyBehavior(
   return { behavior, customPaths }
 }
 
-export function resolveSubmoduleInitBehavior(
-  db: Database,
+export async function resolveSubmoduleInitBehavior(
+  db: SlayzoneDb,
   projectId?: string
-): WorktreeSubmoduleInit {
+): Promise<WorktreeSubmoduleInit> {
   if (projectId) {
     try {
-      const row = db
+      const row = (await db
         .prepare('SELECT worktree_submodule_init FROM projects WHERE id = ?')
-        .get(projectId) as { worktree_submodule_init: string | null } | undefined
+        .get(projectId)) as { worktree_submodule_init: string | null } | undefined
       if (row?.worktree_submodule_init) return row.worktree_submodule_init as WorktreeSubmoduleInit
     } catch {
       /* column may not exist on stale DB — fall through */
     }
   }
 
-  const settingRow = db
+  const settingRow = (await db
     .prepare("SELECT value FROM settings WHERE key = 'worktree_submodule_init'")
-    .get() as { value: string } | undefined
+    .get()) as { value: string } | undefined
   return (settingRow?.value as WorktreeSubmoduleInit) || 'auto'
 }
 
@@ -263,7 +263,7 @@ function attachWatcherBridge(): void {
   })
 }
 
-export function registerWorktreeHandlers(ipcMain: IpcMain, db: Database): void {
+export function registerWorktreeHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   attachWatcherBridge()
 
   // Push-update fs watcher for git state (replaces renderer polling).
@@ -366,13 +366,13 @@ export function registerWorktreeHandlers(ipcMain: IpcMain, db: Database): void {
 
     emit('copying')
     // Copy ignored files based on settings ('ask' is handled client-side)
-    const { behavior, customPaths } = resolveCopyBehavior(db, projectId)
+    const { behavior, customPaths } = await resolveCopyBehavior(db, projectId)
     if (behavior === 'all' || behavior === 'custom') {
       await copyIgnoredFiles(repoPath, targetPath, behavior, customPaths)
     }
 
     emit('submodules')
-    const submoduleBehavior = resolveSubmoduleInitBehavior(db, projectId)
+    const submoduleBehavior = await resolveSubmoduleInitBehavior(db, projectId)
     let submoduleResult: WorktreeSubmoduleResult
     if (submoduleBehavior === 'skip') {
       submoduleResult = { ran: false, reason: 'skipped' }

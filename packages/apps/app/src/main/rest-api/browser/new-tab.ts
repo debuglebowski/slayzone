@@ -46,7 +46,7 @@ export function registerBrowserNewTabRoute(app: Express, deps: RestApiDeps): voi
       return
     }
 
-    const exists = deps.db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId)
+    const exists = await deps.db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId)
     if (!exists) {
       res.status(404).json({ error: `Task ${taskId} not found` })
       return
@@ -68,7 +68,7 @@ export function registerBrowserNewTabRoute(app: Express, deps: RestApiDeps): voi
       return
     }
 
-    const row = deps.db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(taskId) as
+    const row = (await deps.db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(taskId)) as
       | { browser_tabs: string | null }
       | undefined
     let idx = -1

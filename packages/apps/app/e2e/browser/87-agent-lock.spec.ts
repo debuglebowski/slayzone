@@ -117,14 +117,15 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
 
     // Probe DB: agentTouched should flip, then auto-lock should write locked.
     const dbTab = () =>
-      electronApp.evaluate((_, tid) => {
+      electronApp.evaluate(async (_, tid) => {
         type DB = {
-          prepare: (sql: string) => {
-            get: (id: string) => { browser_tabs: string | null } | undefined
-          }
+          get: (
+            sql: string,
+            params?: unknown[]
+          ) => Promise<{ browser_tabs: string | null } | undefined>
         }
         const db = (globalThis as Record<string, unknown>).__db as DB
-        const row = db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(tid)
+        const row = await db.get('SELECT browser_tabs FROM tasks WHERE id = ?', [tid])
         const state = row?.browser_tabs ? JSON.parse(row.browser_tabs) : null
         return state?.tabs?.[0] ?? null
       }, taskId)
@@ -222,15 +223,16 @@ test.describe('Agent lock (per-tab, sticky agentTouched + ephemeral lock)', () =
 
     // Use the test-only __db global instead of dynamically importing
     // better-sqlite3 (dynamic imports aren't allowed inside evaluate).
-    const stored = await electronApp.evaluate((_, tid) => {
+    const stored = await electronApp.evaluate(async (_, tid) => {
       type DB = {
-        prepare: (sql: string) => {
-          get: (id: string) => { browser_tabs: string | null } | undefined
-        }
+        get: (
+          sql: string,
+          params?: unknown[]
+        ) => Promise<{ browser_tabs: string | null } | undefined>
       }
       const db = (globalThis as Record<string, unknown>).__db as DB | undefined
       if (!db) throw new Error('__db not exposed by main')
-      const row = db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(tid)
+      const row = await db.get('SELECT browser_tabs FROM tasks WHERE id = ?', [tid])
       return row?.browser_tabs ?? null
     }, taskId)
 

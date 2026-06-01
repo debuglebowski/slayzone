@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { CreateTaskInput, ProviderConfig, Task } from '@slayzone/task/shared'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
 import { taskEvents } from '../events.js'
@@ -14,16 +14,16 @@ import {
 import { insertTaskRow } from './insert.js'
 
 export async function createTaskOp(
-  db: Database,
+  db: SlayzoneDb,
   data: CreateTaskInput,
   deps: OpDeps
 ): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
   const id = crypto.randomUUID()
-  const projectColumns = getProjectColumns(db, data.projectId)
+  const projectColumns = await getProjectColumns(db, data.projectId)
 
   // Resolve template (explicit > project default > none)
-  const template = getTemplateForTask(db, data.projectId, data.templateId)
+  const template = await getTemplateForTask(db, data.projectId, data.templateId)
 
   const initialStatus =
     data.status && isKnownStatus(data.status, projectColumns)
@@ -35,9 +35,9 @@ export async function createTaskOp(
     data.terminalMode ??
     template?.terminal_mode ??
     (
-      db.prepare("SELECT value FROM settings WHERE key = 'default_terminal_mode'").get() as
-        | { value: string }
-        | undefined
+      await db.get<{ value: string }>(
+        "SELECT value FROM settings WHERE key = 'default_terminal_mode'"
+      )
     )?.value ??
     'claude-code'
 
@@ -50,7 +50,7 @@ export async function createTaskOp(
     gemini: data.geminiFlags,
     opencode: data.opencodeFlags
   }
-  const allModes = getEnabledModeDefaults(db)
+  const allModes = await getEnabledModeDefaults(db)
   for (const row of allModes) {
     providerConfig[row.id] = {
       flags:
@@ -69,7 +69,7 @@ export async function createTaskOp(
   const browserTabs = template?.browser_tabs ? JSON.stringify(template.browser_tabs) : null
   const webPanelUrls = template?.web_panel_urls ? JSON.stringify(template.web_panel_urls) : null
 
-  const initialTask = insertTaskRow(db, {
+  const initialTask = await insertTaskRow(db, {
     id,
     projectId: data.projectId,
     parentId: data.parentId ?? null,
@@ -93,11 +93,15 @@ export async function createTaskOp(
   if (!initialTask) return null
 
   if (data.parentId) {
-    const parent = db
-      .prepare(
-        'SELECT repo_name, worktree_path, worktree_parent_branch, base_dir FROM tasks WHERE id = ?'
-      )
-      .get(data.parentId) as
+    const parent = (await db.get<{
+      repo_name: string | null
+      worktree_path: string | null
+      worktree_parent_branch: string | null
+      base_dir: string | null
+    }>(
+      'SELECT repo_name, worktree_path, worktree_parent_branch, base_dir FROM tasks WHERE id = ?',
+      [data.parentId]
+    )) as
       | {
           repo_name: string | null
           worktree_path: string | null
@@ -107,24 +111,25 @@ export async function createTaskOp(
       | undefined
 
     if (parent) {
-      db.prepare(`
+      await db.run(
+        `
         UPDATE tasks
         SET repo_name = ?, worktree_path = ?, worktree_parent_branch = ?, base_dir = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(
-        parent.repo_name,
-        parent.worktree_path,
-        parent.worktree_parent_branch,
-        parent.base_dir,
-        id
+      `,
+        [
+          parent.repo_name,
+          parent.worktree_path,
+          parent.worktree_parent_branch,
+          parent.base_dir,
+          id
+        ]
       )
     }
   } else {
     await maybeAutoCreateWorktree(db, id, data.projectId, data.title, data.repoName)
   }
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as
-    | Record<string, unknown>
-    | undefined
+  const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
   const task = parseTask(row)
   if (task) {
     ipcMain.emit('db:tasks:create:done', null, id, data.projectId)

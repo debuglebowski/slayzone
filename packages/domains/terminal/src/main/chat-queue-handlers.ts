@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import {
   sendUserMessage,
   ensureSpawned,
@@ -8,14 +8,7 @@ import {
   isSessionAwaitingUserInput,
   registerChatQueueDrainer
 } from './chat-transport-manager'
-import {
-  listChatQueue,
-  pushChatQueue,
-  removeChatQueueItem,
-  clearChatQueue,
-  popChatQueueHead,
-  requeueAtHead
-} from './chat-queue-store'
+import { listChatQueue, removeChatQueueItem, clearChatQueue } from './chat-queue-store'
 import type { QueuedChatMessage } from '../shared/types'
 
 /**
@@ -51,7 +44,7 @@ function broadcast(channel: 'chat:queue-changed' | 'chat:queue-drained', ...args
  * Pop is atomic via a transaction; if `sendUserMessage` fails we
  * re-insert at head so the next drain retries.
  */
-export function drainChatQueue(db: Database, tabId: string): void {
+export async function drainChatQueue(db: SlayzoneDb, tabId: string): Promise<void> {
   const state = getSessionTerminalState(tabId)
   // Pre-spawn lazy trigger: a queued message arrived before the user ever
   // sent one (so the subprocess was never started). Fire ensureSpawned —
@@ -60,7 +53,7 @@ export function drainChatQueue(db: Database, tabId: string): void {
   // queue. Only trigger when there's actually something queued to avoid
   // spinning up a process for nothing.
   if (state === 'not-spawned') {
-    if (listChatQueue(db, tabId).length === 0) return
+    if ((await listChatQueue(db, tabId)).length === 0) return
     void ensureSpawned(tabId).catch((err) => {
       console.error('[chat-queue] ensureSpawned failed for pre-spawn drain:', err)
     })
@@ -71,7 +64,7 @@ export function drainChatQueue(db: Database, tabId: string): void {
   const info = getSessionInfo(tabId)
   if (!info || info.ended) return
 
-  const head = popChatQueueHead(db, tabId)
+  const head = await db.namedTxn<QueuedChatMessage | null>('chat-queue:pop', { tabId })
   if (!head) return
 
   const sent = sendUserMessage(tabId, head.send)
@@ -79,7 +72,7 @@ export function drainChatQueue(db: Database, tabId: string): void {
     // Session died between gate-check and stdin write. Put it back so the
     // next idle transition (e.g. fresh respawn) can retry.
     try {
-      requeueAtHead(db, head)
+      await db.namedTxn('chat-queue:requeue', { msg: head })
     } catch (err) {
       console.error('[chat-queue] requeue failed:', err)
     }
@@ -92,39 +85,47 @@ export function drainChatQueue(db: Database, tabId: string): void {
   broadcast('chat:queue-drained', tabId, head.original)
 }
 
-export function registerChatQueueHandlers(ipcMain: IpcMain, db: Database): void {
+export function registerChatQueueHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   // Wire drain into the transport so state transitions can pull from queue.
-  registerChatQueueDrainer((tabId) => drainChatQueue(db, tabId))
+  // drainChatQueue is async now; the drainer slot is fire-and-forget (invoked
+  // via setImmediate in the transport), so float the promise explicitly.
+  registerChatQueueDrainer((tabId) => {
+    void drainChatQueue(db, tabId)
+  })
 
-  ipcMain.handle('chat:queue:list', (_, tabId: string): QueuedChatMessage[] => {
+  ipcMain.handle('chat:queue:list', (_, tabId: string): Promise<QueuedChatMessage[]> => {
     return listChatQueue(db, tabId)
   })
 
   ipcMain.handle(
     'chat:queue:push',
-    (_, tabId: string, send: string, original: string): QueuedChatMessage => {
-      const msg = pushChatQueue(db, tabId, send, original)
+    async (_, tabId: string, send: string, original: string): Promise<QueuedChatMessage> => {
+      const msg = await db.namedTxn<QueuedChatMessage>('chat-queue:push', {
+        tabId,
+        send,
+        original
+      })
       broadcast('chat:queue-changed', tabId)
       // Belt-and-suspenders drain: if the session is already idle when push
       // lands (renderer's inFlight mirror lags the transport), no fresh
       // state transition is coming — kick the drainer so the queue doesn't
       // sit. drainChatQueue itself gates on idle so this is safe.
-      drainChatQueue(db, tabId)
+      await drainChatQueue(db, tabId)
       return msg
     }
   )
 
-  ipcMain.handle('chat:queue:remove', (_, id: string): boolean => {
-    const row = db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id) as
+  ipcMain.handle('chat:queue:remove', async (_, id: string): Promise<boolean> => {
+    const row = (await db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id)) as
       | { tab_id: string }
       | undefined
-    const removed = removeChatQueueItem(db, id)
+    const removed = await removeChatQueueItem(db, id)
     if (removed && row) broadcast('chat:queue-changed', row.tab_id)
     return removed
   })
 
-  ipcMain.handle('chat:queue:clear', (_, tabId: string): number => {
-    const cleared = clearChatQueue(db, tabId)
+  ipcMain.handle('chat:queue:clear', async (_, tabId: string): Promise<number> => {
+    const cleared = await clearChatQueue(db, tabId)
     if (cleared > 0) broadcast('chat:queue-changed', tabId)
     return cleared
   })

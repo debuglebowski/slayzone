@@ -100,7 +100,12 @@ export default defineConfig(({ mode }) => {
       build: {
         rollupOptions: {
           input: {
-            index: resolve('src/main/index.ts')
+            index: resolve('src/main/index.ts'),
+            // SQLite worker threads — bundled as separate entries so they can be
+            // spawned via `new Worker(join(__dirname, 'db-worker.js'))`. They
+            // import only worker-safe modules (no node-pty/electron).
+            'db-worker': resolve('src/main/db/db-worker.ts'),
+            'diag-worker': resolve('src/main/db/diag-worker.ts')
           },
           external: ['better-sqlite3', 'node-pty', 'posix']
         }

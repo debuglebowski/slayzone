@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./main": "./src/main/index.ts",
+    "./db": "./src/main/worker-db.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {
@@ -18,7 +19,8 @@
     "@slayzone/task": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
-    "@slayzone/workflow": "workspace:*"
+    "@slayzone/workflow": "workspace:*",
+    "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0"

@@ -12,7 +12,7 @@ export function registerDeleteTaskTool(server: McpServer, deps: McpToolsDeps): v
     async ({ id }) => {
       let result
       try {
-        result = deleteTaskOp(deps.db, id, {
+        result = await deleteTaskOp(deps.db, id, {
           ipcMain,
           onMutation: deps.notifyRenderer
         })

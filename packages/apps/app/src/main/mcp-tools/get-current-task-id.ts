@@ -27,9 +27,9 @@ export function registerGetCurrentTaskIdTool(server: McpServer, deps: McpToolsDe
         }
       }
 
-      const exists = deps.db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(resolvedTaskId) as
-        | { 1: number }
-        | undefined
+      const exists = (await deps.db
+        .prepare('SELECT 1 FROM tasks WHERE id = ?')
+        .get(resolvedTaskId)) as { 1: number } | undefined
       if (!exists) {
         return {
           content: [

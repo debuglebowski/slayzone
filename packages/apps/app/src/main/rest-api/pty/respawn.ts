@@ -12,7 +12,7 @@ export function registerPtyRespawnRoute(app: Express, deps: RestApiDeps): void {
       res.status(400).json({ error: 'taskId required' })
       return
     }
-    const row = deps.db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId)
+    const row = await deps.db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId)
     if (!row) {
       res.status(404).json({ error: `Task not found: ${taskId}` })
       return

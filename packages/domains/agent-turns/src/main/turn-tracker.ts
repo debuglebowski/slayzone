@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { realpathSync } from 'node:fs'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { AgentEvent } from '@slayzone/terminal/shared'
 import { snapshotWorktree, deleteTurnRef, diffIsEmptyCached, diffIsEmpty } from './git-snapshot'
 import { insertTurn, deleteTurn, getLatestTurnForWorktree, findTurnsToPrune } from './db'
@@ -30,21 +30,23 @@ function canonical(p: string): string {
  * Lookup task_id + git repo path for a chat tab. Falls back to project.path
  * when task.worktree_path is empty. Returns null if no usable repo path.
  */
-function resolveTabContext(
-  db: Database,
+async function resolveTabContext(
+  db: SlayzoneDb,
   tabId: string
-): { taskId: string; worktreePath: string } | null {
-  const tab = db.prepare(`SELECT task_id FROM terminal_tabs WHERE id = ?`).get(tabId) as
+): Promise<{ taskId: string; worktreePath: string } | null> {
+  const tab = (await db.prepare(`SELECT task_id FROM terminal_tabs WHERE id = ?`).get(tabId)) as
     | { task_id: string }
     | undefined
   if (!tab) return null
-  const row = db
+  const row = (await db
     .prepare(
       `SELECT t.worktree_path, p.path AS project_path
        FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
        WHERE t.id = ?`
     )
-    .get(tab.task_id) as { worktree_path: string | null; project_path: string | null } | undefined
+    .get(tab.task_id)) as
+    | { worktree_path: string | null; project_path: string | null }
+    | undefined
   if (!row) return null
   const repoPath = row.worktree_path || row.project_path
   if (!repoPath) return null
@@ -73,18 +75,18 @@ function broadcastChange(worktreePath: string): void {
  * for attribution but groups by worktree_path.
  */
 export async function recordTurnBoundary(
-  db: Database,
+  db: SlayzoneDb,
   tabId: string,
   promptText: string
 ): Promise<void> {
-  const ctx = resolveTabContext(db, tabId)
+  const ctx = await resolveTabContext(db, tabId)
   if (!ctx) return
   const id = randomUUID()
   const snap = await snapshotWorktree(ctx.worktreePath, id)
   if (!snap) return
   const { snapshotSha: sha, headSha } = snap
 
-  const prev = getLatestTurnForWorktree(db, ctx.worktreePath)
+  const prev = await getLatestTurnForWorktree(db, ctx.worktreePath)
   // Dedupe semantically — commit SHA always differs (commit message includes
   // turn id). Compare actual diff content.
   if (prev && diffIsEmptyCached(ctx.worktreePath, prev.snapshot_sha, sha)) {
@@ -101,7 +103,7 @@ export async function recordTurnBoundary(
   }
 
   try {
-    insertTurn(db, {
+    await insertTurn(db, {
       id,
       worktree_path: ctx.worktreePath,
       task_id: ctx.taskId,
@@ -120,9 +122,9 @@ export async function recordTurnBoundary(
   }
 
   // Prune oldest beyond cap (per worktree).
-  const stale = findTurnsToPrune(db, ctx.worktreePath)
+  const stale = await findTurnsToPrune(db, ctx.worktreePath)
   for (const sid of stale) {
-    deleteTurn(db, sid)
+    await deleteTurn(db, sid)
     await deleteTurnRef(ctx.worktreePath, sid)
   }
 
@@ -133,7 +135,9 @@ export async function recordTurnBoundary(
  * Chat-mode entrypoint: pair `user-message` → `result`. Use the captured
  * user prompt as `prompt_preview`.
  */
-export function initChatTurnSubscriber(db: Database): (tabId: string, event: AgentEvent) => void {
+export function initChatTurnSubscriber(
+  db: SlayzoneDb
+): (tabId: string, event: AgentEvent) => void {
   const lastUserPromptByTab = new Map<string, string>()
   return (tabId, event) => {
     if (event.kind === 'user-message') {
@@ -160,13 +164,13 @@ export function initChatTurnSubscriber(db: Database): (tabId: string, event: Age
  * structured-event source exists (see `detectUserPrompt` hook below).
  */
 export function initPtyTurnSubscriber(
-  db: Database
-): (sessionId: string, taskId: string, line: string) => void {
-  return (sessionId, taskId, line) => {
+  db: SlayzoneDb
+): (sessionId: string, taskId: string, line: string) => Promise<void> {
+  return async (sessionId, taskId, line) => {
     if (!line.trim()) return
     const parts = sessionId.split(':')
     const tabId = parts.length > 1 ? parts.slice(1).join(':') : taskId
-    const tabMode = db.prepare(`SELECT mode FROM terminal_tabs WHERE id = ?`).get(tabId) as
+    const tabMode = (await db.prepare(`SELECT mode FROM terminal_tabs WHERE id = ?`).get(tabId)) as
       | { mode: string }
       | undefined
     if (!tabMode || tabMode.mode === 'terminal') return

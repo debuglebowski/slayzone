@@ -1,26 +1,33 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task/shared'
-import { recordActivityEvents } from '@slayzone/history/main'
 import { buildTaskUnarchivedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { parseTask, type OpDeps } from './shared.js'
 
-export function unarchiveTaskOp(db: Database, id: string, deps: OpDeps): Task | null {
+export async function unarchiveTaskOp(
+  db: SlayzoneDb,
+  id: string,
+  deps: OpDeps
+): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
-  const task = db.transaction(() => {
-    db.prepare(`
+  // Read project_id up-front so the unarchive event can be built before the write —
+  // lets the UPDATE + event recording commit atomically via the `task:update` named
+  // transaction (the unarchived event only needs id + project_id).
+  const before = await db.get<{ project_id: string }>('SELECT project_id FROM tasks WHERE id = ?', [
+    id
+  ])
+  await db.namedTxn('task:update', {
+    sql: `
       UPDATE tasks SET archived_at = NULL, updated_at = datetime('now')
       WHERE id = ?
-    `).run(id)
-    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as
-      | Record<string, unknown>
-      | undefined
-    const nextTask = parseTask(row)
-    if (nextTask) {
-      recordActivityEvents(db, buildTaskUnarchivedEvents(nextTask))
-    }
-    return nextTask
-  })()
+    `,
+    params: [id],
+    events: before
+      ? buildTaskUnarchivedEvents({ id, project_id: before.project_id } as Task)
+      : []
+  })
+  const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
+  const task = parseTask(row)
   if (task) {
     taskEvents.emit('task:unarchived', { taskId: id, projectId: task.project_id })
   }

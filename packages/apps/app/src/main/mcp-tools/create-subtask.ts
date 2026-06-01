@@ -49,9 +49,9 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
         }
       }
 
-      const parent = deps.db
+      const parent = (await deps.db
         .prepare('SELECT id, project_id, terminal_mode FROM tasks WHERE id = ?')
-        .get(resolvedParentId) as
+        .get(resolvedParentId)) as
         | { id: string; project_id: string; terminal_mode: string | null }
         | undefined
 
@@ -71,13 +71,13 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       const terminalMode =
         parent.terminal_mode ??
         (
-          deps.db.prepare("SELECT value FROM settings WHERE key = 'default_terminal_mode'").get() as
-            | { value: string }
-            | undefined
+          (await deps.db
+            .prepare("SELECT value FROM settings WHERE key = 'default_terminal_mode'")
+            .get()) as { value: string } | undefined
         )?.value ??
         'claude-code'
-      const providerConfig = buildDefaultProviderConfig(deps.db)
-      const projectColumns = getProjectColumns(deps.db, parent.project_id)
+      const providerConfig = await buildDefaultProviderConfig(deps.db)
+      const projectColumns = await getProjectColumns(deps.db, parent.project_id)
       if (status && !isKnownStatus(status, projectColumns)) {
         const allowed = getAllowedStatusesText(projectColumns)
         return {
@@ -92,7 +92,7 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
       }
       const initialStatus = status ?? getDefaultStatus(projectColumns)
 
-      deps.db
+      await deps.db
         .prepare(`
         INSERT INTO tasks (
           id, project_id, parent_id, title, description, assignee,
@@ -121,7 +121,7 @@ export function registerCreateSubtaskTool(server: McpServer, deps: McpToolsDeps)
           0
         )
 
-      const created = updateTask(deps.db, { id })
+      const created = await updateTask(deps.db, { id })
       if (!created) {
         return {
           content: [

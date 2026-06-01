@@ -190,22 +190,9 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
 
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
-import {
-  getDatabase,
-  closeDatabase,
-  getDatabasePath,
-  getDiagnosticsDatabase,
-  closeDiagnosticsDatabase
-} from './db'
-import { runMigrations, LATEST_MIGRATION_VERSION } from './db/migrations'
-import { normalizeProjectStatusData } from './db/status-normalization'
+import { initDatabases, closeDatabase, getDatabasePath, closeDiagnosticsDatabase } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
-import {
-  registerBackupHandlers,
-  startAutoBackup,
-  stopAutoBackup,
-  createPreMigrationBackup
-} from './backup'
+import { registerBackupHandlers, startAutoBackup, stopAutoBackup } from './backup'
 // Domain handlers
 import { registerProjectHandlers, handleTerminalStateChange } from '@slayzone/projects/main'
 import {
@@ -216,8 +203,6 @@ import {
   closeArtifactWatcher,
   handleAttentionTransition
 } from '@slayzone/task/main'
-import { BlobStore, betterSqliteTxn, seedInitialVersions } from '@slayzone/task-artifacts/main'
-import { getExtensionFromTitle } from '@slayzone/task/shared'
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerFeedbackHandlers } from '@slayzone/feedback/main'
 import {
@@ -234,7 +219,6 @@ import {
   onTaskReachedTerminal,
   startIdleChecker,
   stopIdleChecker,
-  syncTerminalModes,
   getPtyPids,
   onSessionChange,
   onGlobalStateChange,
@@ -296,7 +280,6 @@ import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { registerAiConfigHandlers } from '@slayzone/ai-config/main'
 import {
   registerIntegrationHandlers,
-  ensureIntegrationSchema,
   startSyncPoller,
   pushTaskAfterEdit,
   pushNewTaskToProviders,
@@ -1128,16 +1111,17 @@ app
     handleOAuthDeepLinkFromArgv(process.argv)
     logBoot('oauth deep-link handlers initialized')
 
-    // Initialize databases
+    // Initialize databases. The worker thread owns the only better-sqlite3
+    // connection and runs the entire bring-up sequence — legacy file migration,
+    // pragmas, pre-migration backup, schema migrations, status normalization and
+    // terminal-mode sync — before initDatabases() resolves. No query can race
+    // ahead of migrations, so nothing here needs to re-run those steps.
     logBoot('database init start')
-    const db = getDatabase()
+    const { db, diagDb } = await initDatabases()
     const settings = SettingsService.forDatabase(db)
     logBoot('db opened')
-    await createPreMigrationBackup(db, LATEST_MIGRATION_VERSION)
-    logBoot('pre-migration backup done')
-    runMigrations(db)
     // Pre-warm keys used by synchronous IPC handlers (event.returnValue).
-    // Must run after migrations have seeded defaults.
+    // Migrations (run in the worker) have already seeded defaults by now.
     await settings.warmCache([
       'labs_tests_panel',
       'labs_jira_integration',
@@ -1147,7 +1131,6 @@ app
       'terminal_idle_close_unit'
     ])
     logBoot('migrations applied')
-    normalizeProjectStatusData(db)
 
     // v127 disk-dir migration: assets/ → artifacts/. Idempotent.
     // Earlier v127 builds shipped a no-op rename (both vars = 'artifacts') that
@@ -1168,18 +1151,17 @@ app
     }
     logBoot('v127 disk migration done')
 
-    // Seed initial artifact versions (v1) for any artifacts without history. Idempotent.
+    // Seed initial artifact versions (v1) for any artifacts without history.
+    // Idempotent. Runs inside the DB worker (read needsSeed → per-artifact
+    // read-file → write blob+version txn) so the file IO + writes stay atomic
+    // and the sync better-sqlite3 logic never touches the async proxy.
     {
       const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
       const artifactsDir = join(dataDir, 'artifacts')
-      const blobStore = new BlobStore(dataDir)
-      const txnRunner = betterSqliteTxn(db)
-      const seedReport = seedInitialVersions(db, txnRunner, blobStore, {
-        resolveFilePath: (row) => {
-          const ext = getExtensionFromTitle(row.title) || '.txt'
-          return join(artifactsDir, row.task_id, `${row.id}${ext}`)
-        }
-      })
+      const seedReport = await db.namedTxn<{ seeded: number; skippedMissing: number }>(
+        'artifacts:seed-initial-versions',
+        { dataDir, artifactsDir }
+      )
       if (seedReport.seeded > 0 || seedReport.skippedMissing > 0) {
         console.log(
           `[artifact-versions] seeded=${seedReport.seeded} skippedMissing=${seedReport.skippedMissing}`
@@ -1187,7 +1169,6 @@ app
       }
     }
     logBoot('artifact versions seeded')
-    const diagDb = getDiagnosticsDatabase()
     logBoot('diagnostics db opened')
     const isLabEnabled = (key: string): boolean => {
       const raw = settings.getCached(key)
@@ -1444,15 +1425,15 @@ app
 
     // Persist the host-kill timestamp into provider_config so the revive flow can
     // choose between resume (hot) and fresh conversation (cold) — see COLD_RESPAWN_MS.
-    setOnHostKillHandler((taskId, mode) => {
+    setOnHostKillHandler(async (taskId, mode) => {
       try {
-        const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
-          | { provider_config: string | null }
-          | undefined
+        const row = (await db
+          .prepare('SELECT provider_config FROM tasks WHERE id = ?')
+          .get(taskId)) as { provider_config: string | null } | undefined
         if (!row) return
         const cfg: ProviderConfig = row.provider_config ? JSON.parse(row.provider_config) : {}
         const next = setProviderLastKilledAt(cfg, mode, Date.now())
-        db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(
+        await db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(
           JSON.stringify(next),
           taskId
         )
@@ -1490,8 +1471,8 @@ app
     logBoot('floating global agent panel + task windows set up')
 
     // Task automation: auto-move tasks on terminal state change
-    onGlobalStateChange((sessionId, newState, oldState) => {
-      handleTerminalStateChange(
+    onGlobalStateChange(async (sessionId, newState, oldState) => {
+      await handleTerminalStateChange(
         db,
         sessionId,
         newState,
@@ -1506,7 +1487,7 @@ app
       // the task. Renderer clears the flag when the user focuses the task tab.
       try {
         if (
-          handleAttentionTransition(
+          await handleAttentionTransition(
             db,
             sessionId,
             newState,
@@ -1591,7 +1572,7 @@ app
     // upgraded users keep their current `--allow-dangerously-skip-permissions`
     // behavior instead of suddenly hitting denials.
     try {
-      const stats = backfillChatModes(db)
+      const stats = await backfillChatModes(db)
       if (stats.updated > 0) {
         console.log(
           `[chat-handlers] backfillChatModes: ${stats.updated}/${stats.scanned} tasks tagged 'bypass'`
@@ -1608,7 +1589,7 @@ app
     onPtyInputSubmit(initPtyTurnSubscriber(db))
     registerAiConfigHandlers(ipcMain, db)
     logBoot('ai-config handlers registered')
-    const integrationHandles = registerIntegrationHandlers(ipcMain, db, {
+    const integrationHandles = await registerIntegrationHandlers(ipcMain, db, {
       enableTestChannels: isPlaywright
     })
     logBoot('integration handlers registered')
@@ -1780,9 +1761,9 @@ app
     if (!isPlaywright) {
       // Push new tasks to providers (two_way sync)
       ipcMain.on('db:tasks:create:done', (_event, taskId: string, projectId: string) => {
-        void pushNewTaskToProviders(db, taskId, projectId).then(() => {
+        void pushNewTaskToProviders(db, taskId, projectId).then(async () => {
           // Only notify if a link was actually created
-          const hasLink = db
+          const hasLink = await db
             .prepare('SELECT 1 FROM external_links WHERE task_id = ? LIMIT 1')
             .get(taskId)
           if (hasLink) notifyTasksChanged()
@@ -3017,18 +2998,12 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         oauthCallbackQueue.length = 0
         oauthCallbackWaiters.clear()
 
-        // 7. Drop all tables + re-migrate
-        const tables = db
-          .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-          .all() as { name: string }[]
-        db.exec('PRAGMA foreign_keys = OFF')
-        for (const { name } of tables) db.exec(`DROP TABLE IF EXISTS "${name}"`)
-        db.exec('PRAGMA foreign_keys = ON')
-        db.pragma('user_version = 0')
-        runMigrations(db)
-        ensureIntegrationSchema(db)
-        normalizeProjectStatusData(db)
-        syncTerminalModes(db)
+        // 7. Drop all tables + re-migrate. This whole schema rebuild (enumerate
+        // tables → drop with FK checks off → user_version=0 → runMigrations →
+        // ensureIntegrationSchema → normalizeProjectStatusData → syncTerminalModes)
+        // mirrors the DB worker's own startup sequence and uses the synchronous
+        // better-sqlite3 connection + pragmas, so it must run inside the worker.
+        await db.namedTxn('db:reset-for-test', {})
 
         // 7b. Seed post-onboarding baseline so tests skip the onboarding wizard
         await settings.seedOnboardingCompleted()

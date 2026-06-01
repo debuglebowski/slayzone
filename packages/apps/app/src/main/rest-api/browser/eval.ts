@@ -14,7 +14,7 @@ export function registerBrowserEvalRoute(app: Express, deps: RestApiDeps): void 
     if (!bwc) return
     try {
       const result = await execJs(bwc.wc, code)
-      markTabAgentTouched(deps.db, deps.notifyRenderer, taskId, bwc.tabId)
+      await markTabAgentTouched(deps.db, deps.notifyRenderer, taskId, bwc.tabId)
       res.json({ ok: true, result })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })

@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./main": "./src/main/index.ts",
+    "./db": "./src/main/worker-db.ts",
     "./client": "./src/client/index.ts",
     "./client/TaskDetailPage": "./src/client/TaskDetailPage.tsx",
     "./client/TaskDetailDataLoader": "./src/client/TaskDetailDataLoader.tsx",

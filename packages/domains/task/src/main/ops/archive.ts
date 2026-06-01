@@ -1,40 +1,45 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task/shared'
-import { recordActivityEvents } from '@slayzone/history/main'
 import { taskEvents } from '../events.js'
 import { buildTaskArchivedEvents } from '../history.js'
 import { cleanupTaskFull, parseTask, parseTasks, type OpDeps } from './shared.js'
 
-export async function archiveTaskOp(db: Database, id: string, deps: OpDeps): Promise<Task | null> {
+export async function archiveTaskOp(
+  db: SlayzoneDb,
+  id: string,
+  deps: OpDeps
+): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
-  const projectRow = db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(id) as
-    | { project_id: string }
-    | undefined
-  const toArchiveRows = db
-    .prepare('SELECT * FROM tasks WHERE id = ? OR parent_id = ?')
-    .all(id, id) as Record<string, unknown>[]
+  const projectRow = await db.get<{ project_id: string }>(
+    'SELECT project_id FROM tasks WHERE id = ?',
+    [id]
+  )
+  const toArchiveRows = await db.all<Record<string, unknown>>(
+    'SELECT * FROM tasks WHERE id = ? OR parent_id = ?',
+    [id, id]
+  )
   const toArchiveTasks = parseTasks(toArchiveRows)
   const childIds = (
-    db.prepare('SELECT id FROM tasks WHERE parent_id = ? AND archived_at IS NULL').all(id) as {
-      id: string
-    }[]
+    await db.all<{ id: string }>(
+      'SELECT id FROM tasks WHERE parent_id = ? AND archived_at IS NULL',
+      [id]
+    )
   ).map((r) => r.id)
   const batch = [id, ...childIds]
   await cleanupTaskFull(db, id, batch)
   for (const childId of childIds) {
     await cleanupTaskFull(db, childId, batch)
   }
-  const archivedTask = db.transaction(() => {
-    db.prepare(`
+  await db.namedTxn('task:archive', {
+    sql: `
       UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, base_dir = NULL, updated_at = datetime('now')
       WHERE id = ? OR parent_id = ?
-    `).run(id, id)
-    recordActivityEvents(db, buildTaskArchivedEvents(toArchiveTasks))
-    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as
-      | Record<string, unknown>
-      | undefined
-    return parseTask(row)
-  })()
+    `,
+    params: [id, id],
+    events: buildTaskArchivedEvents(toArchiveTasks)
+  })
+  const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
+  const archivedTask = parseTask(row)
   ipcMain.emit('db:tasks:archive:done', null, id)
   if (projectRow) {
     taskEvents.emit('task:archived', { taskId: id, projectId: projectRow.project_id })

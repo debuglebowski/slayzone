@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { QueuedChatMessage } from '../shared/types'
 
 interface Row {
@@ -22,10 +23,10 @@ function rowToMessage(row: Row): QueuedChatMessage {
   }
 }
 
-export function listChatQueue(db: Database, tabId: string): QueuedChatMessage[] {
-  const rows = db
+export async function listChatQueue(db: SlayzoneDb, tabId: string): Promise<QueuedChatMessage[]> {
+  const rows = (await db
     .prepare('SELECT * FROM chat_queue WHERE tab_id = ? ORDER BY position ASC')
-    .all(tabId) as Row[]
+    .all(tabId)) as Row[]
   return rows.map(rowToMessage)
 }
 
@@ -51,13 +52,13 @@ export function pushChatQueue(
   return rowToMessage(row)
 }
 
-export function removeChatQueueItem(db: Database, id: string): boolean {
-  const info = db.prepare('DELETE FROM chat_queue WHERE id = ?').run(id)
+export async function removeChatQueueItem(db: SlayzoneDb, id: string): Promise<boolean> {
+  const info = await db.prepare('DELETE FROM chat_queue WHERE id = ?').run(id)
   return info.changes > 0
 }
 
-export function clearChatQueue(db: Database, tabId: string): number {
-  const info = db.prepare('DELETE FROM chat_queue WHERE tab_id = ?').run(tabId)
+export async function clearChatQueue(db: SlayzoneDb, tabId: string): Promise<number> {
+  const info = await db.prepare('DELETE FROM chat_queue WHERE tab_id = ?').run(tabId)
   return info.changes
 }
 

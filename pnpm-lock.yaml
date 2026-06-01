@@ -416,6 +416,9 @@ importers:
 
   packages/domains/agent-turns:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
@@ -496,6 +499,9 @@ importers:
       '@slayzone/history':
         specifier: workspace:*
         version: link:../history
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
@@ -539,6 +545,9 @@ importers:
 
   packages/domains/diagnostics:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       electron:
         specifier: ^41.0.0
         version: 41.0.3
@@ -555,6 +564,9 @@ importers:
 
   packages/domains/feedback:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       electron:
         specifier: ^41.0.0
         version: 41.0.3
@@ -680,6 +692,9 @@ importers:
 
   packages/domains/history:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       electron:
         specifier: ^41.0.0
         version: 41.0.3
@@ -693,6 +708,9 @@ importers:
 
   packages/domains/integrations:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
@@ -798,6 +816,9 @@ importers:
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../integrations
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../projects
@@ -847,6 +868,9 @@ importers:
       '@slayzone/history':
         specifier: workspace:*
         version: link:../history
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
@@ -1091,6 +1115,9 @@ importers:
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
@@ -1275,6 +1302,9 @@ importers:
 
   packages/domains/test-panel:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
@@ -1303,6 +1333,9 @@ importers:
 
   packages/domains/usage-analytics:
     dependencies:
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
       '@slayzone/types':
         specifier: workspace:*
         version: link:../../shared/types

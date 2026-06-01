@@ -14,9 +14,9 @@ export function registerArtifactsExportPdfRoute(app: Express, deps: RestApiDeps)
       return
     }
 
-    const existing = deps.db
+    const existing = (await deps.db
       .prepare('SELECT * FROM task_artifacts WHERE id = ?')
-      .get(req.params.id) as Record<string, unknown> | undefined
+      .get(req.params.id)) as Record<string, unknown> | undefined
     if (!existing) {
       res.status(404).json({ error: 'Artifact not found' })
       return

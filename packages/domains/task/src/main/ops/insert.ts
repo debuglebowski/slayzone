@@ -1,5 +1,4 @@
-import type { Database } from 'better-sqlite3'
-import { recordActivityEvents } from '@slayzone/history/main'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task } from '@slayzone/task/shared'
 import { buildTaskCreatedEvents } from '../history.js'
 import { parseTask } from './shared.js'
@@ -41,47 +40,51 @@ const INSERT_SQL = `
 
 /**
  * Canonical task INSERT seam. All task-creation paths (in-app, importers, MCP)
- * route through here. Atomically inserts row + records `task.created` activity event.
+ * route through here. Atomically inserts row + records `task.created` activity event
+ * via the `task:insert-row` named transaction (runs inside the DB worker).
  *
  * Caller responsible for: post-insert hooks (worktree provisioning, events, IPC).
  */
-export function insertTaskRow(db: Database, row: TaskRowData): Task | null {
-  const stmt = db.prepare(INSERT_SQL)
-  return db.transaction(() => {
-    stmt.run(
-      row.id,
-      row.projectId,
-      row.parentId,
-      row.title,
-      row.description,
-      row.descriptionFormat,
-      row.assignee,
-      row.status,
-      row.priority,
-      row.dueDate,
-      row.terminalMode,
-      JSON.stringify(row.providerConfig),
-      row.providerConfig['claude-code']?.flags ?? '',
-      row.providerConfig['codex']?.flags ?? '',
-      row.providerConfig['cursor-agent']?.flags ?? '',
-      row.providerConfig['gemini']?.flags ?? '',
-      row.providerConfig['opencode']?.flags ?? '',
-      row.isTemporary ? 1 : 0,
-      row.repoName,
-      row.dangerouslySkipPermissions ? 1 : 0,
-      row.panelVisibility,
-      row.browserTabs,
-      row.webPanelUrls,
-      row.updatedAt ?? null
-    )
+export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<Task | null> {
+  const insertParams: unknown[] = [
+    row.id,
+    row.projectId,
+    row.parentId,
+    row.title,
+    row.description,
+    row.descriptionFormat,
+    row.assignee,
+    row.status,
+    row.priority,
+    row.dueDate,
+    row.terminalMode,
+    JSON.stringify(row.providerConfig),
+    row.providerConfig['claude-code']?.flags ?? '',
+    row.providerConfig['codex']?.flags ?? '',
+    row.providerConfig['cursor-agent']?.flags ?? '',
+    row.providerConfig['gemini']?.flags ?? '',
+    row.providerConfig['opencode']?.flags ?? '',
+    row.isTemporary ? 1 : 0,
+    row.repoName,
+    row.dangerouslySkipPermissions ? 1 : 0,
+    row.panelVisibility,
+    row.browserTabs,
+    row.webPanelUrls,
+    row.updatedAt ?? null
+  ]
 
-    const fetched = db.prepare('SELECT * FROM tasks WHERE id = ?').get(row.id) as
-      | Record<string, unknown>
-      | undefined
-    const task = parseTask(fetched)
-    if (!task) return null
+  // Activity events are derived from the task being created; all fields the
+  // builder reads (id/project_id/title/status/priority) are known up-front.
+  const events = buildTaskCreatedEvents({
+    id: row.id,
+    project_id: row.projectId,
+    title: row.title,
+    status: row.status,
+    priority: row.priority
+  } as Task)
 
-    recordActivityEvents(db, buildTaskCreatedEvents(task))
-    return task
-  })()
+  await db.namedTxn('task:insert-row', { insertSql: INSERT_SQL, insertParams, events })
+
+  const fetched = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [row.id])
+  return parseTask(fetched)
 }

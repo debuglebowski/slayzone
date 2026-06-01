@@ -1,5 +1,6 @@
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import { randomUUID } from 'crypto'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   TaskTemplate,
   CreateTaskTemplateInput,
@@ -38,96 +39,74 @@ function parseTemplate(row: Record<string, unknown> | undefined): TaskTemplate |
   }
 }
 
-export function getTemplateForTask(
-  db: Database,
+export async function getTemplateForTask(
+  db: SlayzoneDb,
   projectId: string,
   templateId?: string
-): TaskTemplate | null {
+): Promise<TaskTemplate | null> {
   if (templateId) {
-    const row = db.prepare('SELECT * FROM task_templates WHERE id = ?').get(templateId) as
+    const row = (await db.prepare('SELECT * FROM task_templates WHERE id = ?').get(templateId)) as
       | Record<string, unknown>
       | undefined
     return parseTemplate(row)
   }
   // Fall back to project default
-  const row = db
+  const row = (await db
     .prepare('SELECT * FROM task_templates WHERE project_id = ? AND is_default = 1')
-    .get(projectId) as Record<string, unknown> | undefined
+    .get(projectId)) as Record<string, unknown> | undefined
   return parseTemplate(row)
 }
 
-export function registerTaskTemplateHandlers(ipcMain: IpcMain, db: Database): void {
-  ipcMain.handle('db:taskTemplates:getByProject', (_, projectId: string) => {
-    const rows = db
+export function registerTaskTemplateHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+  ipcMain.handle('db:taskTemplates:getByProject', async (_, projectId: string) => {
+    const rows = (await db
       .prepare(
         'SELECT * FROM task_templates WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC'
       )
-      .all(projectId) as Record<string, unknown>[]
+      .all(projectId)) as Record<string, unknown>[]
     return rows.map((r) => parseTemplate(r)!).filter(Boolean)
   })
 
-  ipcMain.handle('db:taskTemplates:get', (_, id: string) => {
-    const row = db.prepare('SELECT * FROM task_templates WHERE id = ?').get(id) as
+  ipcMain.handle('db:taskTemplates:get', async (_, id: string) => {
+    const row = (await db.prepare('SELECT * FROM task_templates WHERE id = ?').get(id)) as
       | Record<string, unknown>
       | undefined
     return parseTemplate(row)
   })
 
-  ipcMain.handle('db:taskTemplates:create', (_, data: CreateTaskTemplateInput) => {
-    const id = crypto.randomUUID()
-    // If marking as default, clear existing default for this project
-    if (data.isDefault) {
-      db.prepare(
-        'UPDATE task_templates SET is_default = 0 WHERE project_id = ? AND is_default = 1'
-      ).run(data.projectId)
-    }
-    const maxOrder =
-      (
-        db
-          .prepare('SELECT MAX(sort_order) as m FROM task_templates WHERE project_id = ?')
-          .get(data.projectId) as { m: number | null }
-      )?.m ?? -1
-
-    db.prepare(`
-      INSERT INTO task_templates (
-        id, project_id, name, description,
-        terminal_mode, provider_config, panel_visibility, browser_tabs, web_panel_urls,
-        dangerously_skip_permissions, default_status, default_priority,
-        is_default, sort_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      data.projectId,
-      data.name,
-      data.description ?? null,
-      data.terminalMode ?? null,
-      data.providerConfig ? JSON.stringify(data.providerConfig) : null,
-      data.panelVisibility ? JSON.stringify(data.panelVisibility) : null,
-      data.browserTabs ? JSON.stringify(data.browserTabs) : null,
-      data.webPanelUrls ? JSON.stringify(data.webPanelUrls) : null,
-      data.dangerouslySkipPermissions == null ? null : data.dangerouslySkipPermissions ? 1 : 0,
-      data.defaultStatus ?? null,
-      data.defaultPriority ?? null,
-      data.isDefault ? 1 : 0,
-      maxOrder + 1
-    )
-    const row = db.prepare('SELECT * FROM task_templates WHERE id = ?').get(id) as
-      | Record<string, unknown>
-      | undefined
+  ipcMain.handle('db:taskTemplates:create', async (_, data: CreateTaskTemplateInput) => {
+    const row = await db.namedTxn<Record<string, unknown> | undefined>('task-templates:create', {
+      id: randomUUID(),
+      projectId: data.projectId,
+      name: data.name,
+      description: data.description ?? null,
+      terminalMode: data.terminalMode ?? null,
+      providerConfig: data.providerConfig ? JSON.stringify(data.providerConfig) : null,
+      panelVisibility: data.panelVisibility ? JSON.stringify(data.panelVisibility) : null,
+      browserTabs: data.browserTabs ? JSON.stringify(data.browserTabs) : null,
+      webPanelUrls: data.webPanelUrls ? JSON.stringify(data.webPanelUrls) : null,
+      dangerouslySkipPermissions:
+        data.dangerouslySkipPermissions == null ? null : data.dangerouslySkipPermissions ? 1 : 0,
+      defaultStatus: data.defaultStatus ?? null,
+      defaultPriority: data.defaultPriority ?? null,
+      isDefault: data.isDefault ? 1 : 0
+    })
     return parseTemplate(row)
   })
 
-  ipcMain.handle('db:taskTemplates:update', (_, data: UpdateTaskTemplateInput) => {
-    const existing = db.prepare('SELECT * FROM task_templates WHERE id = ?').get(data.id) as
-      | Record<string, unknown>
-      | undefined
+  ipcMain.handle('db:taskTemplates:update', async (_, data: UpdateTaskTemplateInput) => {
+    const existing = (await db.prepare('SELECT * FROM task_templates WHERE id = ?').get(
+      data.id
+    )) as Record<string, unknown> | undefined
     if (!existing) return null
 
     // If marking as default, clear existing default for this project
     if (data.isDefault) {
-      db.prepare(
-        'UPDATE task_templates SET is_default = 0 WHERE project_id = (SELECT project_id FROM task_templates WHERE id = ?) AND is_default = 1'
-      ).run(data.id)
+      await db
+        .prepare(
+          'UPDATE task_templates SET is_default = 0 WHERE project_id = (SELECT project_id FROM task_templates WHERE id = ?) AND is_default = 1'
+        )
+        .run(data.id)
     }
 
     const sets: string[] = []
@@ -161,30 +140,29 @@ export function registerTaskTemplateHandlers(ipcMain: IpcMain, db: Database): vo
 
     sets.push("updated_at = datetime('now')")
     values.push(data.id)
-    db.prepare(`UPDATE task_templates SET ${sets.join(', ')} WHERE id = ?`).run(...values)
+    await db.prepare(`UPDATE task_templates SET ${sets.join(', ')} WHERE id = ?`).run(...values)
 
-    const row = db.prepare('SELECT * FROM task_templates WHERE id = ?').get(data.id) as
+    const row = (await db.prepare('SELECT * FROM task_templates WHERE id = ?').get(data.id)) as
       | Record<string, unknown>
       | undefined
     return parseTemplate(row)
   })
 
-  ipcMain.handle('db:taskTemplates:delete', (_, id: string) => {
-    const result = db.prepare('DELETE FROM task_templates WHERE id = ?').run(id)
+  ipcMain.handle('db:taskTemplates:delete', async (_, id: string) => {
+    const result = await db.prepare('DELETE FROM task_templates WHERE id = ?').run(id)
     return result.changes > 0
   })
 
   ipcMain.handle(
     'db:taskTemplates:setDefault',
-    (_, projectId: string, templateId: string | null) => {
-      db.prepare(
-        'UPDATE task_templates SET is_default = 0 WHERE project_id = ? AND is_default = 1'
-      ).run(projectId)
+    async (_, projectId: string, templateId: string | null) => {
+      await db
+        .prepare('UPDATE task_templates SET is_default = 0 WHERE project_id = ? AND is_default = 1')
+        .run(projectId)
       if (templateId) {
-        db.prepare('UPDATE task_templates SET is_default = 1 WHERE id = ? AND project_id = ?').run(
-          templateId,
-          projectId
-        )
+        await db
+          .prepare('UPDATE task_templates SET is_default = 1 WHERE id = ? AND project_id = ?')
+          .run(templateId, projectId)
       }
     }
   )

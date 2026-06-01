@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { app } from 'electron'
 import { buildShellInvocation, quoteForShell } from '@slayzone/platform'
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   AiConfigItem,
   AiConfigProjectSelection,
@@ -196,15 +196,18 @@ interface ProjectSkillSelectionRow {
   item_metadata: string
 }
 
-function queryProjectSkillSelections(db: Database, projectId: string): ProjectSkillSelectionRow[] {
-  return db
+async function queryProjectSkillSelections(
+  db: SlayzoneDb,
+  projectId: string
+): Promise<ProjectSkillSelectionRow[]> {
+  return (await db
     .prepare(`
     SELECT ps.provider, ps.target_path, ps.content_hash, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
     FROM ai_config_project_selections ps
     JOIN ai_config_items i ON i.id = ps.item_id
     WHERE ps.project_id = ? AND i.type = 'skill'
   `)
-    .all(projectId) as ProjectSkillSelectionRow[]
+    .all(projectId)) as ProjectSkillSelectionRow[]
 }
 
 function getCanonicalSelectionTargetPath(
@@ -334,8 +337,8 @@ function toProjectRelativePath(projectRoot: string, filePath: string): string {
   return path.relative(projectRoot, filePath).split(path.sep).join('/')
 }
 
-export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
-  ipcMain.handle('ai-config:list-items', (_event, input: ListAiConfigItemsInput) => {
+export function registerAiConfigHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+  ipcMain.handle('ai-config:list-items', async (_event, input: ListAiConfigItemsInput) => {
     const where: string[] = ['scope = ?']
     const values: unknown[] = [input.scope]
 
@@ -349,25 +352,25 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       values.push(input.type)
     }
 
-    const rows = db
+    const rows = (await db
       .prepare(`
       SELECT * FROM ai_config_items
       WHERE ${where.join(' AND ')}
       ORDER BY updated_at DESC, created_at DESC
     `)
-      .all(...values) as AiConfigItem[]
+      .all(...values)) as AiConfigItem[]
 
     return rows.map(withDerivedSkillValidation)
   })
 
-  ipcMain.handle('ai-config:get-item', (_event, id: string) => {
-    const row = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(id) as
+  ipcMain.handle('ai-config:get-item', async (_event, id: string) => {
+    const row = (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(id)) as
       | AiConfigItem
       | undefined
     return row ? withDerivedSkillValidation(row) : null
   })
 
-  ipcMain.handle('ai-config:create-item', (_event, input: CreateAiConfigItemInput) => {
+  ipcMain.handle('ai-config:create-item', async (_event, input: CreateAiConfigItemInput) => {
     const id = crypto.randomUUID()
     if (input.scope === 'project' && !input.projectId) {
       throw new Error('Project ID is required for project-scoped items')
@@ -380,20 +383,22 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     const persistedContent = normalizedSkill ? normalizedSkill.content : rawContent
     const persistedMetadataJson = normalizedSkill ? normalizedSkill.metadataJson : '{}'
     try {
-      db.prepare(`
+      await db
+        .prepare(`
         INSERT INTO ai_config_items (
           id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-      `).run(
-        id,
-        input.type,
-        input.scope,
-        projectId,
-        slug,
-        slug,
-        persistedContent,
-        persistedMetadataJson
-      )
+      `)
+        .run(
+          id,
+          input.type,
+          input.scope,
+          projectId,
+          slug,
+          slug,
+          persistedContent,
+          persistedMetadataJson
+        )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new Error(`An item with slug "${slug}" already exists in this scope`)
@@ -401,16 +406,18 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       throw error
     }
 
-    const row = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(id) as AiConfigItem
+    const row = (await db
+      .prepare('SELECT * FROM ai_config_items WHERE id = ?')
+      .get(id)) as AiConfigItem
     return row
   })
 
-  ipcMain.handle('ai-config:update-item', (_event, input: UpdateAiConfigItemInput) => {
-    const existing = db
+  ipcMain.handle('ai-config:update-item', async (_event, input: UpdateAiConfigItemInput) => {
+    const existing = (await db
       .prepare(
         'SELECT id, type, scope, project_id, slug, content, metadata_json FROM ai_config_items WHERE id = ?'
       )
-      .get(input.id) as
+      .get(input.id)) as
       | Pick<
           AiConfigItem,
           'id' | 'type' | 'scope' | 'project_id' | 'slug' | 'content' | 'metadata_json'
@@ -480,7 +487,9 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       fields.push("updated_at = datetime('now')")
       values.push(input.id)
       try {
-        db.prepare(`UPDATE ai_config_items SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+        await db
+          .prepare(`UPDATE ai_config_items SET ${fields.join(', ')} WHERE id = ?`)
+          .run(...values)
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           throw new Error('An item with that slug already exists in this scope')
@@ -489,38 +498,38 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       }
     }
 
-    const row = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(input.id) as
+    const row = (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(input.id)) as
       | AiConfigItem
       | undefined
     return row ?? null
   })
 
-  ipcMain.handle('ai-config:delete-item', (_event, id: string) => {
-    db.prepare('DELETE FROM ai_config_project_selections WHERE item_id = ?').run(id)
-    const result = db.prepare('DELETE FROM ai_config_items WHERE id = ?').run(id)
+  ipcMain.handle('ai-config:delete-item', async (_event, id: string) => {
+    await db.prepare('DELETE FROM ai_config_project_selections WHERE item_id = ?').run(id)
+    const result = await db.prepare('DELETE FROM ai_config_items WHERE id = ?').run(id)
     return result.changes > 0
   })
 
-  ipcMain.handle('ai-config:list-project-selections', (_event, projectId: string) => {
-    const rows = db
+  ipcMain.handle('ai-config:list-project-selections', async (_event, projectId: string) => {
+    const rows = (await db
       .prepare(`
       SELECT * FROM ai_config_project_selections
       WHERE project_id = ?
       ORDER BY selected_at DESC
     `)
-      .all(projectId) as AiConfigProjectSelection[]
+      .all(projectId)) as AiConfigProjectSelection[]
     return rows.filter((row) => isConfigurableCliProvider(row.provider))
   })
 
   ipcMain.handle(
     'ai-config:set-project-selection',
-    (_event, input: SetAiConfigProjectSelectionInput) => {
+    async (_event, input: SetAiConfigProjectSelectionInput) => {
       const provider = input.provider ?? 'claude'
       if (!isConfigurableCliProvider(provider))
         throw new Error(`Provider ${provider} is not configurable`)
-      const item = db
+      const item = (await db
         .prepare('SELECT type, slug FROM ai_config_items WHERE id = ?')
-        .get(input.itemId) as { type: string; slug: string } | undefined
+        .get(input.itemId)) as { type: string; slug: string } | undefined
       if (!item) throw new Error('Item not found')
       const targetPath = getCanonicalSelectionTargetPath(
         provider,
@@ -529,22 +538,24 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         input.targetPath
       )
       const id = crypto.randomUUID()
-      db.prepare(`
+      await db
+        .prepare(`
       INSERT INTO ai_config_project_selections (
         id, project_id, item_id, provider, target_path, selected_at
       ) VALUES (?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(project_id, item_id, provider) DO UPDATE SET
         target_path = excluded.target_path,
         selected_at = datetime('now')
-    `).run(id, input.projectId, input.itemId, provider, targetPath)
+    `)
+        .run(id, input.projectId, input.itemId, provider, targetPath)
     }
   )
 
   ipcMain.handle(
     'ai-config:remove-project-selection',
-    (_event, projectId: string, itemId: string, provider?: string) => {
+    async (_event, projectId: string, itemId: string, provider?: string) => {
       if (provider) {
-        const result = db
+        const result = await db
           .prepare(`
         DELETE FROM ai_config_project_selections
         WHERE project_id = ? AND item_id = ? AND provider = ?
@@ -552,7 +563,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
           .run(projectId, itemId, provider)
         return result.changes > 0
       }
-      const result = db
+      const result = await db
         .prepare(`
       DELETE FROM ai_config_project_selections
       WHERE project_id = ? AND item_id = ?
@@ -759,7 +770,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
   )
 
-  ipcMain.handle('ai-config:get-context-tree', (_event, projectPath: string, projectId: string) => {
+  ipcMain.handle('ai-config:get-context-tree', async (_event, projectPath: string, projectId: string) => {
     const entries: ContextTreeEntry[] = []
     const resolvedProject = path.resolve(projectPath)
     const seenPaths = new Set<string>()
@@ -838,14 +849,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
 
     // 3. Check project selections for linked library items
-    const selections = db
+    const selections = (await db
       .prepare(`
       SELECT ps.*, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
       FROM ai_config_project_selections ps
       JOIN ai_config_items i ON i.id = ps.item_id
       WHERE ps.project_id = ?
     `)
-      .all(projectId) as Array<
+      .all(projectId)) as Array<
       AiConfigProjectSelection & {
         item_content: string
         item_type: string
@@ -900,10 +911,10 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     return entries
   })
 
-  ipcMain.handle('ai-config:load-library-item', (_event, input: LoadLibraryItemInput) => {
-    const item = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(input.itemId) as
-      | AiConfigItem
-      | undefined
+  ipcMain.handle('ai-config:load-library-item', async (_event, input: LoadLibraryItemInput) => {
+    const item = (await db
+      .prepare('SELECT * FROM ai_config_items WHERE id = ?')
+      .get(input.itemId)) as AiConfigItem | undefined
     if (!item) throw new Error('Item not found')
     if (item.type === 'skill') {
       ensureSkillValidationForSync(item.slug, item.content, item.metadata_json)
@@ -930,19 +941,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
       fs.writeFileSync(filePath, syncedContent, 'utf-8')
 
-      db.prepare(`
+      await db
+        .prepare(`
         INSERT INTO ai_config_project_selections (id, project_id, item_id, provider, target_path, content_hash, selected_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(project_id, item_id, provider) DO UPDATE SET
           target_path = excluded.target_path, content_hash = excluded.content_hash, selected_at = datetime('now')
-      `).run(
-        crypto.randomUUID(),
-        input.projectId,
-        input.itemId,
-        manualProvider,
-        input.manualPath,
-        hash
-      )
+      `)
+        .run(crypto.randomUUID(), input.projectId, input.itemId, manualProvider, input.manualPath, hash)
 
       entries.push({
         path: filePath,
@@ -978,12 +984,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
       fs.writeFileSync(filePath, syncedContent, 'utf-8')
 
-      db.prepare(`
+      await db
+        .prepare(`
         INSERT INTO ai_config_project_selections (id, project_id, item_id, provider, target_path, content_hash, selected_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(project_id, item_id, provider) DO UPDATE SET
           target_path = excluded.target_path, content_hash = excluded.content_hash, selected_at = datetime('now')
-      `).run(crypto.randomUUID(), input.projectId, input.itemId, provider, relativePath, hash)
+      `)
+        .run(crypto.randomUUID(), input.projectId, input.itemId, provider, relativePath, hash)
 
       entries.push({
         path: filePath,
@@ -1002,9 +1010,15 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:sync-linked-file',
-    (_event, projectId: string, projectPath: string, itemId: string, provider?: CliProvider) => {
+    async (
+      _event,
+      projectId: string,
+      projectPath: string,
+      itemId: string,
+      provider?: CliProvider
+    ) => {
       const rows = provider
-        ? db
+        ? await db
             .prepare(`
         SELECT ps.*, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
         FROM ai_config_project_selections ps
@@ -1012,7 +1026,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         WHERE ps.project_id = ? AND ps.item_id = ? AND ps.provider = ?
       `)
             .all(projectId, itemId, provider)
-        : db
+        : await db
             .prepare(`
         SELECT ps.*, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
         FROM ai_config_project_selections ps
@@ -1033,13 +1047,13 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       const resolvedProject = path.resolve(projectPath)
 
       if (selections.length === 0) {
-        const localItem = db
+        const localItem = (await db
           .prepare(`
         SELECT id, project_id, scope, type, slug, content, metadata_json
         FROM ai_config_items
         WHERE id = ?
       `)
-          .get(itemId) as
+          .get(itemId)) as
           | {
               id: string
               project_id: string | null
@@ -1061,7 +1075,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
         const providersToSync = provider
           ? filterConfigurableCliProviders([provider])
-          : getEnabledProviders(projectId)
+          : await getEnabledProviders(projectId)
 
         const insertSelection = db.prepare(`
         INSERT INTO ai_config_project_selections (id, project_id, item_id, provider, target_path, content_hash, selected_at)
@@ -1089,7 +1103,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
           const dir = path.dirname(filePath)
           if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
           fs.writeFileSync(filePath, syncedContent, 'utf-8')
-          insertSelection.run(
+          await insertSelection.run(
             crypto.randomUUID(),
             projectId,
             localItem.id,
@@ -1160,7 +1174,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         const dir = path.dirname(filePath)
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
         fs.writeFileSync(filePath, syncedContent, 'utf-8')
-        updateSelection.run(effectiveTargetPath, contentHash(syncedContent), sel.id)
+        await updateSelection.run(effectiveTargetPath, contentHash(syncedContent), sel.id)
         removeLegacySkillFileIfPresent(
           providerId,
           sel.item_type,
@@ -1201,8 +1215,8 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
   )
 
-  ipcMain.handle('ai-config:unlink-file', (_event, projectId: string, itemId: string) => {
-    const result = db
+  ipcMain.handle('ai-config:unlink-file', async (_event, projectId: string, itemId: string) => {
+    const result = await db
       .prepare(`
       DELETE FROM ai_config_project_selections WHERE project_id = ? AND item_id = ?
     `)
@@ -1212,7 +1226,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:rename-context-file',
-    (_event, oldPath: string, newPath: string, projectPath: string) => {
+    async (_event, oldPath: string, newPath: string, projectPath: string) => {
       if (!isPathAllowed(oldPath, projectPath)) throw new Error('Path not allowed')
       if (!isPathAllowed(newPath, projectPath)) throw new Error('Path not allowed')
       if (!fs.existsSync(oldPath)) throw new Error('File not found')
@@ -1223,15 +1237,17 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       const resolvedProject = path.resolve(projectPath)
       const oldRel = path.relative(resolvedProject, oldPath)
       const newRel = path.relative(resolvedProject, newPath)
-      db.prepare(`
+      await db
+        .prepare(`
       UPDATE ai_config_project_selections SET target_path = ? WHERE target_path = ?
-    `).run(newRel, oldRel)
+    `)
+        .run(newRel, oldRel)
     }
   )
 
   ipcMain.handle(
     'ai-config:delete-context-file',
-    (_event, filePath: string, projectPath: string, projectId: string) => {
+    async (_event, filePath: string, projectPath: string, projectId: string) => {
       if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
       // Remove empty parent dir (e.g. skills/slug/ after deleting SKILL.md)
@@ -1245,63 +1261,65 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       // Remove any project selections pointing to this file
       const resolvedProject = path.resolve(projectPath)
       const rel = path.relative(resolvedProject, filePath)
-      db.prepare(`
+      await db
+        .prepare(`
       DELETE FROM ai_config_project_selections WHERE project_id = ? AND target_path = ?
-    `).run(projectId, rel)
+    `)
+        .run(projectId, rel)
     }
   )
 
   // --- Root instructions + skills status ---
 
-  function getDefaultProviderKind(): CliProvider {
+  async function getDefaultProviderKind(): Promise<CliProvider> {
     const mode = (
-      db.prepare("SELECT value FROM settings WHERE key = 'default_terminal_mode'").get() as
+      (await db.prepare("SELECT value FROM settings WHERE key = 'default_terminal_mode'").get()) as
         | { value: string }
         | undefined
     )?.value
     return defaultProviderFromMode(mode)
   }
 
-  function getEnabledProviders(projectId: string): CliProvider[] {
+  async function getEnabledProviders(projectId: string): Promise<CliProvider[]> {
     let providers: CliProvider[]
-    const row = db
+    const row = (await db
       .prepare('SELECT value FROM settings WHERE key = ?')
-      .get(`ai_providers:${projectId}`) as { value: string } | undefined
+      .get(`ai_providers:${projectId}`)) as { value: string } | undefined
     if (row) {
       const parsed = parseConfiguredProviders(row.value)
       providers = parsed ?? []
     } else {
-      const active = db
+      const active = (await db
         .prepare('SELECT kind FROM ai_config_sources WHERE enabled = 1 AND status = ?')
-        .all('active') as Array<{ kind: string }>
+        .all('active')) as Array<{ kind: string }>
       providers = filterConfigurableCliProviders(active.map((p) => p.kind))
     }
     // Always include the default terminal mode's provider
-    const defaultKind = getDefaultProviderKind()
+    const defaultKind = await getDefaultProviderKind()
     if (!providers.includes(defaultKind)) {
       providers.push(defaultKind)
     }
     return providers
   }
 
-  function recomputeInstructionsResult(
+  async function recomputeInstructionsResult(
     projectId: string,
     projectPath: string
-  ): RootInstructionsResult {
+  ): Promise<RootInstructionsResult> {
     // Check for linked library variant
-    const variantRow = db
+    const variantRow = (await db
       .prepare('SELECT value FROM settings WHERE key = ?')
-      .get(`ai_instruction_variant:${projectId}`) as { value: string } | undefined
+      .get(`ai_instruction_variant:${projectId}`)) as { value: string } | undefined
     let variant: AiConfigItem | undefined
     if (variantRow) {
-      variant = db
+      variant = (await db
         .prepare(
           "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
         )
-        .get(variantRow.value) as AiConfigItem | undefined
+        .get(variantRow.value)) as AiConfigItem | undefined
     }
 
-    const providers = getEnabledProviders(projectId)
+    const providers = await getEnabledProviders(projectId)
     const resolvedProject = path.resolve(projectPath)
     const providerHealth: Partial<
       Record<
@@ -1354,100 +1372,110 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
   )
 
-  ipcMain.handle('ai-config:get-library-instructions', (_event, variantId?: string) => {
+  ipcMain.handle('ai-config:get-library-instructions', async (_event, variantId?: string) => {
     if (variantId) {
-      const item = db
+      const item = (await db
         .prepare(
           "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
         )
-        .get(variantId) as AiConfigItem | undefined
+        .get(variantId)) as AiConfigItem | undefined
       return item?.content ?? ''
     }
     // Legacy: return first (default) variant
-    const item = db
+    const item = (await db
       .prepare(
         "SELECT * FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'library' ORDER BY created_at ASC LIMIT 1"
       )
-      .get() as AiConfigItem | undefined
+      .get()) as AiConfigItem | undefined
     return item?.content ?? ''
   })
 
   ipcMain.handle(
     'ai-config:save-library-instructions',
-    (_event, content: string, variantId?: string) => {
+    async (_event, content: string, variantId?: string) => {
       if (variantId) {
-        db.prepare(
-          "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
-        ).run(content, variantId)
+        await db
+          .prepare(
+            "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
+          )
+          .run(content, variantId)
         return
       }
       // Legacy: upsert the default variant
-      const existing = db
+      const existing = (await db
         .prepare(
           "SELECT id FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'library' ORDER BY created_at ASC LIMIT 1"
         )
-        .get() as { id: string } | undefined
+        .get()) as { id: string } | undefined
 
       if (existing) {
-        db.prepare(
-          "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ?"
-        ).run(content, existing.id)
+        await db
+          .prepare(
+            "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ?"
+          )
+          .run(content, existing.id)
       } else {
-        db.prepare(`
+        await db
+          .prepare(`
         INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
         VALUES (?, 'root_instructions', 'library', NULL, 'root_instructions', 'root_instructions', ?, '{}', datetime('now'), datetime('now'))
-      `).run(crypto.randomUUID(), content)
+      `)
+          .run(crypto.randomUUID(), content)
       }
     }
   )
 
   // Instruction variants
-  ipcMain.handle('ai-config:list-instruction-variants', (): AiConfigItem[] => {
-    return db
+  ipcMain.handle('ai-config:list-instruction-variants', async (): Promise<AiConfigItem[]> => {
+    return (await db
       .prepare(
         "SELECT * FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'library' ORDER BY updated_at DESC"
       )
-      .all() as AiConfigItem[]
+      .all()) as AiConfigItem[]
   })
 
   ipcMain.handle(
     'ai-config:get-project-instruction-variant',
-    (_event, projectId: string): AiConfigItem | null => {
-      const row = db
+    async (_event, projectId: string): Promise<AiConfigItem | null> => {
+      const row = (await db
         .prepare('SELECT value FROM settings WHERE key = ?')
-        .get(`ai_instruction_variant:${projectId}`) as { value: string } | undefined
+        .get(`ai_instruction_variant:${projectId}`)) as { value: string } | undefined
       if (!row) return null
-      const item = db
+      const item = (await db
         .prepare(
           "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
         )
-        .get(row.value) as AiConfigItem | undefined
+        .get(row.value)) as AiConfigItem | undefined
       return item ?? null
     }
   )
 
   ipcMain.handle(
     'ai-config:set-project-instruction-variant',
-    (_event, projectId: string, variantItemId: string | null, projectPath?: string) => {
+    async (_event, projectId: string, variantItemId: string | null, projectPath?: string) => {
       if (variantItemId === null) {
-        db.prepare('DELETE FROM settings WHERE key = ?').run(`ai_instruction_variant:${projectId}`)
+        await db
+          .prepare('DELETE FROM settings WHERE key = ?')
+          .run(`ai_instruction_variant:${projectId}`)
         return
       }
 
-      db.prepare(
-        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-      ).run(`ai_instruction_variant:${projectId}`, variantItemId)
+      await db
+        .prepare(
+          'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+        )
+        .run(`ai_instruction_variant:${projectId}`, variantItemId)
 
       // Auto-sync: write variant content to all provider instruction files
       if (projectPath) {
-        const variant = db
+        const variant = (await db
           .prepare(
             "SELECT * FROM ai_config_items WHERE id = ? AND type = 'root_instructions' AND scope = 'library'"
           )
-          .get(variantItemId) as AiConfigItem | undefined
+          .get(variantItemId)) as AiConfigItem | undefined
         if (variant) {
           const hash = contentHash(variant.content)
-          const providers = getEnabledProviders(projectId)
+          const providers = await getEnabledProviders(projectId)
           const resolvedProject = path.resolve(projectPath)
           for (const provider of providers) {
             const rootPath = PROVIDER_PATHS[provider]?.rootInstructions
@@ -1457,12 +1485,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
             const dir = path.dirname(filePath)
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
             fs.writeFileSync(filePath, variant.content, 'utf-8')
-            db.prepare(`
+            await db
+              .prepare(`
             INSERT INTO ai_config_project_selections (id, project_id, item_id, provider, target_path, content_hash, selected_at)
             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(project_id, item_id, provider) DO UPDATE SET
               target_path = excluded.target_path, content_hash = excluded.content_hash, selected_at = datetime('now')
-          `).run(crypto.randomUUID(), projectId, variant.id, provider, rootPath, hash)
+          `)
+              .run(crypto.randomUUID(), projectId, variant.id, provider, rootPath, hash)
           }
         }
       }
@@ -1471,55 +1501,68 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:save-instructions-content',
-    (_event, projectId: string, projectPath: string, content: string): RootInstructionsResult => {
-      const existing = db
+    async (
+      _event,
+      projectId: string,
+      projectPath: string,
+      content: string
+    ): Promise<RootInstructionsResult> => {
+      const existing = (await db
         .prepare(
           "SELECT id FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'project' AND project_id = ?"
         )
-        .get(projectId) as { id: string } | undefined
+        .get(projectId)) as { id: string } | undefined
 
       if (existing) {
-        db.prepare(
-          "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ?"
-        ).run(content, existing.id)
+        await db
+          .prepare(
+            "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ?"
+          )
+          .run(content, existing.id)
       } else {
         const id = crypto.randomUUID()
-        db.prepare(`
+        await db
+          .prepare(`
         INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
         VALUES (?, 'root_instructions', 'project', ?, 'root_instructions', 'root_instructions', ?, '{}', datetime('now'), datetime('now'))
-      `).run(id, projectId, content)
+      `)
+          .run(id, projectId, content)
       }
 
-      return recomputeInstructionsResult(projectId, projectPath)
+      return await recomputeInstructionsResult(projectId, projectPath)
     }
   )
 
   ipcMain.handle(
     'ai-config:save-root-instructions',
-    (_event, projectId: string, projectPath: string, content: string) => {
+    async (_event, projectId: string, projectPath: string, content: string) => {
       // Upsert the root_instructions item
-      const existing = db
+      const existing = (await db
         .prepare(
           "SELECT id FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'project' AND project_id = ?"
         )
-        .get(projectId) as { id: string } | undefined
+        .get(projectId)) as { id: string } | undefined
 
       let itemId: string
       if (existing) {
-        db.prepare(
-          "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ?"
-        ).run(content, existing.id)
+        await db
+          .prepare(
+            "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ?"
+          )
+          .run(content, existing.id)
         itemId = existing.id
       } else {
         itemId = crypto.randomUUID()
-        db.prepare(`
+        await db
+          .prepare(`
         INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
         VALUES (?, 'root_instructions', 'project', ?, 'root_instructions', 'root_instructions', ?, '{}', datetime('now'), datetime('now'))
-      `).run(itemId, projectId, content)
+      `)
+          .run(itemId, projectId, content)
       }
 
       const hash = contentHash(content)
-      const providers = getEnabledProviders(projectId)
+      const providers = await getEnabledProviders(projectId)
       const resolvedProject = path.resolve(projectPath)
       const providerHealth: Partial<
         Record<CliProvider, { health: SyncHealth; reason: SyncReason | null }>
@@ -1535,12 +1578,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
         fs.writeFileSync(filePath, content, 'utf-8')
 
-        db.prepare(`
+        await db
+          .prepare(`
         INSERT INTO ai_config_project_selections (id, project_id, item_id, provider, target_path, content_hash, selected_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(project_id, item_id, provider) DO UPDATE SET
           target_path = excluded.target_path, content_hash = excluded.content_hash, selected_at = datetime('now')
-      `).run(crypto.randomUUID(), projectId, itemId, provider, rootPath, hash)
+      `)
+          .run(crypto.randomUUID(), projectId, itemId, provider, rootPath, hash)
 
         providerHealth[provider] = { health: 'synced', reason: null }
       }
@@ -1564,24 +1609,24 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:push-provider-instructions',
-    (
+    async (
       _event,
       projectId: string,
       projectPath: string,
       provider: CliProvider,
       content: string
-    ): RootInstructionsResult => {
+    ): Promise<RootInstructionsResult> => {
       const rootPath = PROVIDER_PATHS[provider]?.rootInstructions
       if (!rootPath) throw new Error(`No root instructions path for ${provider}`)
       const resolvedProject = path.resolve(projectPath)
       const filePath = path.join(resolvedProject, rootPath)
       if (!isPathAllowed(filePath, projectPath)) throw new Error('Path not allowed')
 
-      const item = db
+      const item = (await db
         .prepare(
           "SELECT * FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'project' AND project_id = ?"
         )
-        .get(projectId) as AiConfigItem | undefined
+        .get(projectId)) as AiConfigItem | undefined
       if (!item) throw new Error('No instructions to push')
 
       const dir = path.dirname(filePath)
@@ -1589,25 +1634,27 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       fs.writeFileSync(filePath, content, 'utf-8')
 
       const hash = contentHash(content)
-      db.prepare(`
+      await db
+        .prepare(`
       INSERT INTO ai_config_project_selections (id, project_id, item_id, provider, target_path, content_hash, selected_at)
       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(project_id, item_id, provider) DO UPDATE SET
         target_path = excluded.target_path, content_hash = excluded.content_hash, selected_at = datetime('now')
-    `).run(crypto.randomUUID(), projectId, item.id, provider, rootPath, hash)
+    `)
+        .run(crypto.randomUUID(), projectId, item.id, provider, rootPath, hash)
 
-      return recomputeInstructionsResult(projectId, projectPath)
+      return await recomputeInstructionsResult(projectId, projectPath)
     }
   )
 
   ipcMain.handle(
     'ai-config:pull-provider-instructions',
-    (
+    async (
       _event,
       projectId: string,
       projectPath: string,
       provider: CliProvider
-    ): RootInstructionsResult => {
+    ): Promise<RootInstructionsResult> => {
       const rootPath = PROVIDER_PATHS[provider]?.rootInstructions
       if (!rootPath) throw new Error(`No root instructions path for ${provider}`)
       const filePath = path.join(path.resolve(projectPath), rootPath)
@@ -1616,36 +1663,40 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
       const diskContent = fs.readFileSync(filePath, 'utf-8')
 
-      const existing = db
+      const existing = (await db
         .prepare(
           "SELECT id FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'project' AND project_id = ?"
         )
-        .get(projectId) as { id: string } | undefined
+        .get(projectId)) as { id: string } | undefined
 
       if (existing) {
-        db.prepare(
-          "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ?"
-        ).run(diskContent, existing.id)
+        await db
+          .prepare(
+            "UPDATE ai_config_items SET content = ?, updated_at = datetime('now') WHERE id = ?"
+          )
+          .run(diskContent, existing.id)
       } else {
         const id = crypto.randomUUID()
-        db.prepare(`
+        await db
+          .prepare(`
         INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
         VALUES (?, 'root_instructions', 'project', ?, 'root_instructions', 'root_instructions', ?, '{}', datetime('now'), datetime('now'))
-      `).run(id, projectId, diskContent)
+      `)
+          .run(id, projectId, diskContent)
       }
 
-      return recomputeInstructionsResult(projectId, projectPath)
+      return await recomputeInstructionsResult(projectId, projectPath)
     }
   )
 
   ipcMain.handle(
     'ai-config:get-project-skills-status',
-    (_event, projectId: string, projectPath: string) => {
-      const providers = getEnabledProviders(projectId)
+    async (_event, projectId: string, projectPath: string) => {
+      const providers = await getEnabledProviders(projectId)
       const resolvedProject = path.resolve(projectPath)
 
       const selections = (
-        db
+        (await db
           .prepare(`
       SELECT ps.*, i.content as item_content, i.type as item_type, i.slug as item_slug,
              i.name as item_name, i.scope as item_scope, i.project_id as item_project_id,
@@ -1655,7 +1706,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       JOIN ai_config_items i ON i.id = ps.item_id
       WHERE ps.project_id = ? AND i.type = 'skill'
     `)
-          .all(projectId) as Array<
+          .all(projectId)) as Array<
           AiConfigProjectSelection & {
             item_content: string
             item_type: string
@@ -1751,26 +1802,26 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
   )
 
-  function recomputeSingleSkillStatus(
+  async function recomputeSingleSkillStatus(
     projectId: string,
     projectPath: string,
     itemId: string
-  ): ProjectSkillStatus {
-    const providers = getEnabledProviders(projectId)
+  ): Promise<ProjectSkillStatus> {
+    const providers = await getEnabledProviders(projectId)
     const resolvedProject = path.resolve(projectPath)
 
-    const rawItem = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId) as
+    const rawItem = (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)) as
       | AiConfigItem
       | undefined
     const item = rawItem ? withDerivedSkillValidation(rawItem) : undefined
     if (!item) throw new Error('Item not found')
 
     const selections = (
-      db
+      (await db
         .prepare(`
       SELECT * FROM ai_config_project_selections WHERE project_id = ? AND item_id = ?
     `)
-        .all(projectId, itemId) as AiConfigProjectSelection[]
+        .all(projectId, itemId)) as AiConfigProjectSelection[]
     ).filter((s) => isConfigurableCliProvider(s.provider))
 
     const providerMap: ProjectSkillStatus['providers'] = {}
@@ -1828,8 +1879,13 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:read-provider-skill',
-    (_event, projectPath: string, provider: CliProvider, itemId: string): ProviderFileContent => {
-      const item = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId) as
+    async (
+      _event,
+      projectPath: string,
+      provider: CliProvider,
+      itemId: string
+    ): Promise<ProviderFileContent> => {
+      const item = (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)) as
         | AiConfigItem
         | undefined
       if (!item) return { provider, content: '', exists: false }
@@ -1846,8 +1902,13 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:get-expected-skill-content',
-    (_event, _projectPath: string, provider: CliProvider, itemId: string): string => {
-      const item = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId) as
+    async (
+      _event,
+      _projectPath: string,
+      provider: CliProvider,
+      itemId: string
+    ): Promise<string> => {
+      const item = (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)) as
         | AiConfigItem
         | undefined
       if (!item) throw new Error('Item not found')
@@ -1868,14 +1929,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:pull-provider-skill',
-    (
+    async (
       _event,
       projectId: string,
       projectPath: string,
       provider: CliProvider,
       itemId: string
-    ): ProjectSkillStatus => {
-      const item = db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId) as
+    ): Promise<ProjectSkillStatus> => {
+      const item = (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)) as
         | AiConfigItem
         | undefined
       if (!item) throw new Error('Item not found')
@@ -1895,18 +1956,20 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         item.slug
       )
 
-      db.prepare(
-        "UPDATE ai_config_items SET content = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ?"
-      ).run(normalized.content, normalized.metadataJson, itemId)
+      await db
+        .prepare(
+          "UPDATE ai_config_items SET content = ?, metadata_json = ?, updated_at = datetime('now') WHERE id = ?"
+        )
+        .run(normalized.content, normalized.metadataJson, itemId)
 
       // Update baseline only for the pulled provider.
       // Other providers keep their baseline hashes so a subsequent sync-all can overwrite them
       // without false external-edit conflicts.
-      const pulledSelection = db
+      const pulledSelection = (await db
         .prepare(
           'SELECT id, target_path FROM ai_config_project_selections WHERE project_id = ? AND item_id = ? AND provider = ?'
         )
-        .get(projectId, itemId, provider) as { id: string; target_path: string } | undefined
+        .get(projectId, itemId, provider)) as { id: string; target_path: string } | undefined
       if (pulledSelection) {
         const effectiveTargetPath = getCanonicalSelectionTargetPath(
           provider,
@@ -1914,24 +1977,26 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
           item.slug,
           pulledSelection.target_path
         )
-        db.prepare(`
+        await db
+          .prepare(`
         UPDATE ai_config_project_selections
         SET target_path = ?, content_hash = ?, selected_at = datetime('now')
         WHERE id = ?
-      `).run(effectiveTargetPath, contentHash(diskContent), pulledSelection.id)
+      `)
+          .run(effectiveTargetPath, contentHash(diskContent), pulledSelection.id)
       }
 
-      return recomputeSingleSkillStatus(projectId, projectPath, itemId)
+      return await recomputeSingleSkillStatus(projectId, projectPath, itemId)
     }
   )
 
   // --- Provider management ---
 
-  ipcMain.handle('ai-config:list-providers', () => {
-    const providers = db
+  ipcMain.handle('ai-config:list-providers', async () => {
+    const providers = (await db
       .prepare('SELECT * FROM ai_config_sources ORDER BY name')
-      .all() as CliProviderInfo[]
-    const defaultKind = getDefaultProviderKind()
+      .all()) as CliProviderInfo[]
+    const defaultKind = await getDefaultProviderKind()
     return providers
       .filter((provider) => isConfigurableCliProvider(provider.kind))
       .map((provider) => ({
@@ -1941,16 +2006,16 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       }))
   })
 
-  ipcMain.handle('ai-config:toggle-provider', (_event, id: string, enabled: boolean) => {
-    const row = db.prepare('SELECT kind FROM ai_config_sources WHERE id = ?').get(id) as
+  ipcMain.handle('ai-config:toggle-provider', async (_event, id: string, enabled: boolean) => {
+    const row = (await db.prepare('SELECT kind FROM ai_config_sources WHERE id = ?').get(id)) as
       | { kind: string }
       | undefined
     if (!row || !isConfigurableCliProvider(row.kind)) return
     // Prevent disabling the default terminal mode's provider
-    if (!enabled && row.kind === getDefaultProviderKind()) return
-    db.prepare(
-      "UPDATE ai_config_sources SET enabled = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(enabled ? 1 : 0, id)
+    if (!enabled && row.kind === (await getDefaultProviderKind())) return
+    await db
+      .prepare("UPDATE ai_config_sources SET enabled = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(enabled ? 1 : 0, id)
   })
 
   // ---------------------------------------------------------------------------
@@ -1958,9 +2023,9 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
   // ---------------------------------------------------------------------------
   ipcMain.handle(
     'ai-config:reconcile-project-skills',
-    (_event, projectId: string, projectPath: string) => {
+    async (_event, projectId: string, projectPath: string) => {
       const resolvedProject = path.resolve(projectPath)
-      const enabledProviders = new Set(getEnabledProviders(projectId))
+      const enabledProviders = new Set(await getEnabledProviders(projectId))
       let created = 0
 
       // 1. Scan skill directories for enabled providers only
@@ -1998,14 +2063,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       if (discovered.length === 0) return 0
 
       // 2. Query existing items (project-scoped + library) to avoid duplicates
-      const existingItems = db
+      const existingItems = (await db
         .prepare(`
       SELECT id, slug, scope, project_id FROM ai_config_items
       WHERE type = 'skill' AND (
         (scope = 'project' AND project_id = ?) OR scope = 'library'
       )
     `)
-        .all(projectId) as Array<{
+        .all(projectId)) as Array<{
         id: string
         slug: string
         scope: string
@@ -2014,11 +2079,11 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       const slugToItem = new Map(existingItems.map((i) => [i.slug, i]))
 
       // 3. Query existing selections for this project
-      const existingSelections = db
+      const existingSelections = (await db
         .prepare(`
       SELECT item_id, provider FROM ai_config_project_selections WHERE project_id = ?
     `)
-        .all(projectId) as Array<{ item_id: string; provider: string }>
+        .all(projectId)) as Array<{ item_id: string; provider: string }>
       const selectionKeys = new Set(existingSelections.map((s) => `${s.item_id}:${s.provider}`))
 
       // 4. For each unique slug, ensure DB item + selection exists
@@ -2033,10 +2098,12 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
           const content = normalized ? normalized.content : rawContent
           const metadataJson = normalized ? normalized.metadataJson : '{}'
 
-          db.prepare(`
+          await db
+            .prepare(`
           INSERT INTO ai_config_items (id, type, scope, project_id, name, slug, content, metadata_json, created_at, updated_at)
           VALUES (?, 'skill', 'project', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-        `).run(id, projectId, entry.slug, entry.slug, content, metadataJson)
+        `)
+            .run(id, projectId, entry.slug, entry.slug, content, metadataJson)
 
           item = { id, slug: entry.slug, scope: 'project', project_id: projectId }
           slugToItem.set(entry.slug, item)
@@ -2050,11 +2117,13 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
             getSkillPath(entry.provider, entry.slug) ?? `${entry.relDir}/${entry.slug}/SKILL.md`
           const selId = crypto.randomUUID()
           try {
-            db.prepare(`
+            await db
+              .prepare(`
             INSERT INTO ai_config_project_selections (id, project_id, item_id, provider, target_path, selected_at)
             VALUES (?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(project_id, item_id, provider) DO NOTHING
-          `).run(selId, projectId, item.id, entry.provider, targetPath)
+          `)
+              .run(selId, projectId, item.id, entry.provider, targetPath)
           } catch {
             /* ignore constraint errors */
           }
@@ -2066,44 +2135,46 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
   )
 
-  ipcMain.handle('ai-config:get-project-providers', (_event, projectId: string) => {
-    const row = db
+  ipcMain.handle('ai-config:get-project-providers', async (_event, projectId: string) => {
+    const row = (await db
       .prepare('SELECT value FROM settings WHERE key = ?')
-      .get(`ai_providers:${projectId}`) as { value: string } | undefined
+      .get(`ai_providers:${projectId}`)) as { value: string } | undefined
     if (row) {
       const parsed = parseConfiguredProviders(row.value)
       if (parsed) return parsed
     }
     // Fallback: all globally enabled active providers
-    const providers = db
+    const providers = (await db
       .prepare('SELECT kind FROM ai_config_sources WHERE enabled = 1 AND status = ?')
-      .all('active') as Array<{ kind: string }>
+      .all('active')) as Array<{ kind: string }>
     return filterConfigurableCliProviders(providers.map((p) => p.kind))
   })
 
   ipcMain.handle(
     'ai-config:set-project-providers',
-    (_event, projectId: string, providers: CliProvider[]) => {
-      db.prepare(
-        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-      ).run(`ai_providers:${projectId}`, JSON.stringify(filterConfigurableCliProviders(providers)))
+    async (_event, projectId: string, providers: CliProvider[]) => {
+      await db
+        .prepare(
+          'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+        )
+        .run(`ai_providers:${projectId}`, JSON.stringify(filterConfigurableCliProviders(providers)))
     }
   )
 
   ipcMain.handle(
     'ai-config:needs-sync',
-    (_event, projectId: string, projectPath: string): boolean => {
-      const providers = getEnabledProviders(projectId)
+    async (_event, projectId: string, projectPath: string): Promise<boolean> => {
+      const providers = await getEnabledProviders(projectId)
       if (providers.length === 0) return false
       const enabledSet = new Set(providers)
       const resolvedProject = path.resolve(projectPath)
 
       // Check root instructions
-      const rootItem = db
+      const rootItem = (await db
         .prepare(
           "SELECT content FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'project' AND project_id = ?"
         )
-        .get(projectId) as { content: string } | undefined
+        .get(projectId)) as { content: string } | undefined
       if (rootItem) {
         const hash = contentHash(rootItem.content)
         for (const provider of providers) {
@@ -2116,7 +2187,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       }
 
       // Check skills
-      const selections = queryProjectSkillSelections(db, projectId)
+      const selections = await queryProjectSkillSelections(db, projectId)
 
       for (const sel of selections) {
         if (!isConfigurableCliProvider(sel.provider)) continue
@@ -2149,13 +2220,16 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     }
   )
 
-  const computeStaleSkillCount = (projectId: string, projectPath: string): number => {
-    const providers = getEnabledProviders(projectId)
+  const computeStaleSkillCount = async (
+    projectId: string,
+    projectPath: string
+  ): Promise<number> => {
+    const providers = await getEnabledProviders(projectId)
     if (providers.length === 0) return 0
     const enabledSet = new Set(providers)
     const resolvedProject = path.resolve(projectPath)
 
-    const selections = queryProjectSkillSelections(db, projectId)
+    const selections = await queryProjectSkillSelections(db, projectId)
 
     let stale = 0
     for (const sel of selections) {
@@ -2187,31 +2261,34 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:get-project-stale-skill-count',
-    (_event, projectId: string, projectPath: string): number =>
+    (_event, projectId: string, projectPath: string): Promise<number> =>
       computeStaleSkillCount(projectId, projectPath)
   )
 
   ipcMain.handle(
     'ai-config:get-projects-stale-skill-counts',
-    (_event, pairs: Array<{ projectId: string; projectPath: string }>): Record<string, number> => {
+    async (
+      _event,
+      pairs: Array<{ projectId: string; projectPath: string }>
+    ): Promise<Record<string, number>> => {
       const out: Record<string, number> = {}
       for (const { projectId, projectPath } of pairs) {
-        out[projectId] = computeStaleSkillCount(projectId, projectPath)
+        out[projectId] = await computeStaleSkillCount(projectId, projectPath)
       }
       return out
     }
   )
 
-  ipcMain.handle('ai-config:sync-all', (_event, input: SyncAllInput) => {
+  ipcMain.handle('ai-config:sync-all', async (_event, input: SyncAllInput) => {
     const resolvedProject = path.resolve(input.projectPath)
     const singleItemId = input.itemId ?? null
 
     // Get enabled providers for this project
     let providers = input.providers
     if (!providers) {
-      const row = db
+      const row = (await db
         .prepare('SELECT value FROM settings WHERE key = ?')
-        .get(`ai_providers:${input.projectId}`) as { value: string } | undefined
+        .get(`ai_providers:${input.projectId}`)) as { value: string } | undefined
       if (row) {
         const parsed = parseConfiguredProviders(row.value)
         if (parsed) {
@@ -2219,9 +2296,9 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
         }
       }
       if (!providers) {
-        const active = db
+        const active = (await db
           .prepare('SELECT kind FROM ai_config_sources WHERE enabled = 1 AND status = ?')
-          .all('active') as Array<{ kind: string }>
+          .all('active')) as Array<{ kind: string }>
         providers = filterConfigurableCliProviders(active.map((p) => p.kind))
       }
     }
@@ -2231,14 +2308,14 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
     // Get all selections for this project with item content
     const selections = (
-      db
+      (await db
         .prepare(`
       SELECT ps.*, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
       FROM ai_config_project_selections ps
       JOIN ai_config_items i ON i.id = ps.item_id
       WHERE ps.project_id = ?
     `)
-        .all(input.projectId) as Array<
+        .all(input.projectId)) as Array<
         AiConfigProjectSelection & {
           item_content: string
           item_type: string
@@ -2314,7 +2391,7 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
       const dir = path.dirname(filePath)
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
       fs.writeFileSync(filePath, syncedContent, 'utf-8')
-      updateSelection.run(effectiveTargetPath, hash, sel.id)
+      await updateSelection.run(effectiveTargetPath, hash, sel.id)
       removeLegacySkillFileIfPresent(
         provider,
         sel.item_type,
@@ -2342,13 +2419,13 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
     // Sync project-local items to all enabled provider paths that support the item type.
     const localItems = (
-      db
+      (await db
         .prepare(`
       SELECT id, slug, content, type, metadata_json
       FROM ai_config_items
       WHERE scope = 'project' AND project_id = ? AND type = 'skill'
     `)
-        .all(input.projectId) as Array<{
+        .all(input.projectId)) as Array<{
         id: string
         slug: string
         content: string
@@ -2394,11 +2471,11 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
     if (input.pruneUnmanaged && !singleItemId) {
       // Prune unmanaged root instruction files:
       // keep only enabled-provider root files when a project root_instructions item exists.
-      const rootItem = db
+      const rootItem = (await db
         .prepare(
           "SELECT id FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'project' AND project_id = ?"
         )
-        .get(input.projectId) as { id: string } | undefined
+        .get(input.projectId)) as { id: string } | undefined
       const managedInstructionPaths = new Set<string>()
       if (rootItem) {
         for (const provider of providers) {
@@ -2495,18 +2572,18 @@ export function registerAiConfigHandlers(ipcMain: IpcMain, db: Database): void {
 
   ipcMain.handle(
     'ai-config:check-sync-status',
-    (_event, projectId: string, projectPath: string) => {
+    async (_event, projectId: string, projectPath: string) => {
       const resolvedProject = path.resolve(projectPath)
       const conflicts: SyncConflict[] = []
 
-      const selections = db
+      const selections = (await db
         .prepare(`
       SELECT ps.*, i.content as item_content, i.type as item_type, i.slug as item_slug, i.metadata_json as item_metadata
       FROM ai_config_project_selections ps
       JOIN ai_config_items i ON i.id = ps.item_id
       WHERE ps.project_id = ?
     `)
-        .all(projectId) as Array<
+        .all(projectId)) as Array<
         AiConfigProjectSelection & {
           item_content: string
           item_type: string

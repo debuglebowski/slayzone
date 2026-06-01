@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 
 interface StoredTab {
@@ -22,18 +22,18 @@ interface StoredState {
  * once the renderer mirrors the flag locally, any subsequent writeback
  * preserves it.
  */
-export function markTabAgentTouched(
-  db: Database,
+export async function markTabAgentTouched(
+  db: SlayzoneDb,
   notifyRenderer: () => void,
   taskId: string,
   tabId: string | null
-): void {
+): Promise<void> {
   if (!tabId) return
   // Always announce: even if the DB row already has the flag, the renderer
   // may still be holding stale local state that drops it on next writeback.
   broadcastToWindows('browser:agent-touched', { taskId, tabId })
 
-  const row = db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(taskId) as
+  const row = (await db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(taskId)) as
     | { browser_tabs: string | null }
     | undefined
   if (!row?.browser_tabs) return
@@ -52,6 +52,6 @@ export function markTabAgentTouched(
   if (tab.agentTouched === true) return
 
   tab.agentTouched = true
-  db.prepare('UPDATE tasks SET browser_tabs = ? WHERE id = ?').run(JSON.stringify(state), taskId)
+  await db.prepare('UPDATE tasks SET browser_tabs = ? WHERE id = ?').run(JSON.stringify(state), taskId)
   notifyRenderer()
 }

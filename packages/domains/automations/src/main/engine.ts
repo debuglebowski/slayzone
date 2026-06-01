@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   ActionConfig,
   Automation,
@@ -7,12 +7,7 @@ import type {
   AutomationRow,
   AutomationRun
 } from '@slayzone/automations/shared'
-import {
-  finishAutomationActionRun,
-  recordActivityEvent,
-  startAutomationActionRun,
-  trimOutputTail
-} from '@slayzone/history/main'
+import { trimOutputTail, type RecordActivityEventInput } from '@slayzone/history/main'
 import { parseAutomationRow } from '@slayzone/automations/shared'
 import {
   buildAiHeadlessCommand,
@@ -63,7 +58,7 @@ export class AutomationEngine {
   private cronInterval: ReturnType<typeof setInterval> | null = null
 
   constructor(
-    private db: Database,
+    private db: SlayzoneDb,
     private notifyRenderer: () => void
   ) {}
 
@@ -71,54 +66,62 @@ export class AutomationEngine {
     // --- Task status change ---
     taskEvents.on('task:updated', ({ taskId, projectId, oldStatus }) => {
       if (oldStatus === undefined) return
-      const row = this.db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as
-        | { status: string }
-        | undefined
-      if (!row) return
-      if (oldStatus === row.status) return
+      void (async () => {
+        const row = await this.db.get<{ status: string }>(
+          'SELECT status FROM tasks WHERE id = ?',
+          [taskId]
+        )
+        if (!row) return
+        if (oldStatus === row.status) return
 
-      this.handleEvent({
-        type: 'task_status_change',
-        taskId,
-        projectId,
-        oldStatus,
-        newStatus: row.status,
-        depth: this.currentDepth
-      })
+        await this.handleEvent({
+          type: 'task_status_change',
+          taskId,
+          projectId,
+          oldStatus,
+          newStatus: row.status,
+          depth: this.currentDepth
+        })
+      })()
     })
 
     // --- Task created ---
     taskEvents.on('task:created', ({ taskId, projectId }) => {
-      this.handleEvent({ type: 'task_created', taskId, projectId, depth: 0 })
+      void this.handleEvent({ type: 'task_created', taskId, projectId, depth: 0 })
     })
 
     // --- Task archived ---
     taskEvents.on('task:archived', ({ taskId, projectId }) => {
-      const exists = this.db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId)
-      if (!exists) return
-      this.handleEvent({ type: 'task_archived', taskId, projectId, depth: 0 })
+      void (async () => {
+        const exists = await this.db.get('SELECT 1 FROM tasks WHERE id = ?', [taskId])
+        if (!exists) return
+        await this.handleEvent({ type: 'task_archived', taskId, projectId, depth: 0 })
+      })()
     })
 
     // --- Task tag changed ---
     ipcMain.on('db:taskTags:setForTask:done', (_event, taskId: string, tagIds: string[]) => {
-      const task = this.db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId) as
-        | { project_id: string }
-        | undefined
-      if (task)
-        this.handleEvent({
-          type: 'task_tag_changed',
-          taskId,
-          projectId: task.project_id,
-          tagIds,
-          depth: 0
-        })
+      void (async () => {
+        const task = await this.db.get<{ project_id: string }>(
+          'SELECT project_id FROM tasks WHERE id = ?',
+          [taskId]
+        )
+        if (task)
+          await this.handleEvent({
+            type: 'task_tag_changed',
+            taskId,
+            projectId: task.project_id,
+            tagIds,
+            depth: 0
+          })
+      })()
     })
 
     // --- Cron ---
-    this.cronInterval = setInterval(() => this.tickCron(), 60_000)
+    this.cronInterval = setInterval(() => void this.tickCron(), 60_000)
 
     // Catch up on missed cron fires after offline period (app closed, sleep, etc.)
-    this.runCatchup()
+    void this.runCatchup()
   }
 
   /**
@@ -128,12 +131,10 @@ export class AutomationEngine {
    *
    * Public so external triggers (e.g. powerMonitor.resume) can re-run it.
    */
-  runCatchup(): void {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM automations WHERE enabled = 1 AND catchup_on_start = 1 AND last_run_at IS NOT NULL AND json_extract(trigger_config, '$.type') = 'cron'"
-      )
-      .all() as AutomationRow[]
+  async runCatchup(): Promise<void> {
+    const rows = (await this.db.all<AutomationRow>(
+      "SELECT * FROM automations WHERE enabled = 1 AND catchup_on_start = 1 AND last_run_at IS NOT NULL AND json_extract(trigger_config, '$.type') = 'cron'"
+    )) as AutomationRow[]
 
     const now = new Date()
     const nowFloor = new Date(now)
@@ -180,13 +181,11 @@ export class AutomationEngine {
     }
   }
 
-  private tickCron(): void {
+  private async tickCron(): Promise<void> {
     const now = new Date()
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM automations WHERE enabled = 1 AND json_extract(trigger_config, '$.type') = 'cron'"
-      )
-      .all() as AutomationRow[]
+    const rows = (await this.db.all<AutomationRow>(
+      "SELECT * FROM automations WHERE enabled = 1 AND json_extract(trigger_config, '$.type') = 'cron'"
+    )) as AutomationRow[]
 
     for (const row of rows) {
       const automation = parseAutomationRow(row)
@@ -206,20 +205,21 @@ export class AutomationEngine {
     }
   }
 
-  private handleEvent(event: AutomationEvent): void {
+  private async handleEvent(event: AutomationEvent): Promise<void> {
     const depth = event.depth ?? 0
     if (depth >= MAX_DEPTH) return
     if (!event.projectId) return
 
-    const rows = this.db
-      .prepare('SELECT * FROM automations WHERE project_id = ? AND enabled = 1')
-      .all(event.projectId) as AutomationRow[]
+    const rows = await this.db.all<AutomationRow>(
+      'SELECT * FROM automations WHERE project_id = ? AND enabled = 1',
+      [event.projectId]
+    )
 
     const automations = rows.map(parseAutomationRow)
 
     for (const automation of automations) {
       if (this.matchesTrigger(automation, event)) {
-        if (this.evaluateConditions(automation, event)) {
+        if (await this.evaluateConditions(automation, event)) {
           void this.executeAutomation(automation, event, depth)
         }
       }
@@ -251,7 +251,10 @@ export class AutomationEngine {
     }
   }
 
-  private evaluateConditions(automation: Automation, event: AutomationEvent): boolean {
+  private async evaluateConditions(
+    automation: Automation,
+    event: AutomationEvent
+  ): Promise<boolean> {
     for (const condition of automation.conditions) {
       if (condition.type === 'task_property' && event.taskId) {
         const { field, operator, value } = condition.params as {
@@ -262,9 +265,10 @@ export class AutomationEngine {
 
         // tags_contains_some: check against task_tags join table
         if (field === 'tags') {
-          const tagRows = this.db
-            .prepare('SELECT tag_id FROM task_tags WHERE task_id = ?')
-            .all(event.taskId) as { tag_id: string }[]
+          const tagRows = await this.db.all<{ tag_id: string }>(
+            'SELECT tag_id FROM task_tags WHERE task_id = ?',
+            [event.taskId]
+          )
           const taskTagIds = tagRows.map((r) => r.tag_id)
           if (operator === 'in' && Array.isArray(value)) {
             if (!value.some((v) => taskTagIds.includes(v as string))) return false
@@ -273,9 +277,10 @@ export class AutomationEngine {
         }
 
         // Regular task fields
-        const task = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(event.taskId) as
-          | Record<string, unknown>
-          | undefined
+        const task = await this.db.get<Record<string, unknown>>(
+          'SELECT * FROM tasks WHERE id = ?',
+          [event.taskId]
+        )
         if (!task) return false
 
         const actual = task[field]
@@ -315,14 +320,13 @@ export class AutomationEngine {
     const runId = crypto.randomUUID()
     const startTime = Date.now()
 
-    this.db
-      .prepare(
-        `INSERT INTO automation_runs (id, automation_id, trigger_event, status, started_at)
-       VALUES (?, ?, ?, 'running', datetime('now'))`
-      )
-      .run(runId, automation.id, JSON.stringify(event))
+    await this.db.run(
+      `INSERT INTO automation_runs (id, automation_id, trigger_event, status, started_at)
+       VALUES (?, ?, ?, 'running', datetime('now'))`,
+      [runId, automation.id, JSON.stringify(event)]
+    )
 
-    const ctx = this.buildTemplateContext(event)
+    const ctx = await this.buildTemplateContext(event)
     const prevDepth = this.currentDepth
     let runStatus: 'success' | 'error' = 'success'
     let runError: string | null = null
@@ -331,31 +335,39 @@ export class AutomationEngine {
       this.currentDepth = depth + 1
       for (let i = 0; i < automation.actions.length; i++) {
         const action = automation.actions[i]
-        const resolved = this.resolveAction(action, ctx)
-        const actionRunId = startAutomationActionRun(this.db, {
-          runId,
-          automationId: automation.id,
-          taskId: event.taskId ?? null,
-          projectId: event.projectId ?? null,
-          actionIndex: i,
-          actionType: action.type,
-          command: resolved.command
+        const resolved = await this.resolveAction(action, ctx)
+        const actionRunId = await this.db.namedTxn<string>('automations:start-action-run', {
+          input: {
+            runId,
+            automationId: automation.id,
+            taskId: event.taskId ?? null,
+            projectId: event.projectId ?? null,
+            actionIndex: i,
+            actionType: action.type,
+            command: resolved.command
+          }
         })
         const actionStart = Date.now()
 
         try {
           const result = await this.runResolvedAction(resolved)
-          finishAutomationActionRun(this.db, actionRunId, {
-            status: 'success',
-            outputTail: result.outputTail,
-            durationMs: Date.now() - actionStart
+          await this.db.namedTxn('automations:finish-action-run', {
+            id: actionRunId,
+            input: {
+              status: 'success',
+              outputTail: result.outputTail,
+              durationMs: Date.now() - actionStart
+            }
           })
         } catch (err) {
-          finishAutomationActionRun(this.db, actionRunId, {
-            status: 'error',
-            outputTail: err instanceof AutomationCommandError ? err.outputTail : null,
-            error: err instanceof Error ? err.message : String(err),
-            durationMs: Date.now() - actionStart
+          await this.db.namedTxn('automations:finish-action-run', {
+            id: actionRunId,
+            input: {
+              status: 'error',
+              outputTail: err instanceof AutomationCommandError ? err.outputTail : null,
+              error: err instanceof Error ? err.message : String(err),
+              durationMs: Date.now() - actionStart
+            }
           })
           throw err
         }
@@ -368,56 +380,43 @@ export class AutomationEngine {
     }
 
     const durationMs = Date.now() - startTime
-    this.db.transaction(() => {
-      if (runStatus === 'success') {
-        this.db
-          .prepare(
-            `UPDATE automation_runs SET status = 'success', error = NULL, duration_ms = ?, completed_at = datetime('now') WHERE id = ?`
-          )
-          .run(durationMs, runId)
-      } else {
-        this.db
-          .prepare(
-            `UPDATE automation_runs SET status = 'error', error = ?, duration_ms = ?, completed_at = datetime('now') WHERE id = ?`
-          )
-          .run(runError, durationMs, runId)
-      }
+    await this.db.namedTxn('automations:complete-run', {
+      runId,
+      automationId: automation.id,
+      durationMs,
+      runStatus,
+      runError,
+      timelineEvent: this.buildAutomationTimelineEvent(
+        automation,
+        event,
+        runId,
+        runStatus,
+        runError
+      )
+    })
 
-      this.db
-        .prepare(
-          `UPDATE automations SET run_count = run_count + 1, last_run_at = datetime('now') WHERE id = ?`
-        )
-        .run(automation.id)
-
-      this.recordAutomationTimelineEvent(automation, event, runId, runStatus, runError)
-    })()
-
-    this.pruneOldRuns(automation.id)
+    await this.pruneOldRuns(automation.id)
     this.notifyRenderer()
   }
 
-  private resolveAction(
+  private async resolveAction(
     action: ActionConfig,
     ctx: TemplateContext
-  ): { command: string; cwd?: string; timeoutMs: number } {
+  ): Promise<{ command: string; cwd?: string; timeoutMs: number }> {
     const params = action.params
     const cwd = params.cwd ? resolveTemplate(params.cwd as string, ctx) : ctx.project?.path
 
     if (action.type === 'ai') {
       const providerId = typeof params.provider === 'string' ? params.provider.trim() : ''
       if (!providerId) throw new Error('AI action missing provider')
-      const row = this.db
-        .prepare(
-          'SELECT id, type, default_flags, headless_command FROM terminal_modes WHERE id = ?'
-        )
-        .get(providerId) as
-        | {
-            id: string
-            type: string
-            default_flags: string | null
-            headless_command: string | null
-          }
-        | undefined
+      const row = await this.db.get<{
+        id: string
+        type: string
+        default_flags: string | null
+        headless_command: string | null
+      }>('SELECT id, type, default_flags, headless_command FROM terminal_modes WHERE id = ?', [
+        providerId
+      ])
       if (!row) throw new Error(`AI action references unknown provider "${providerId}"`)
 
       const resolvedPrompt = resolveTemplate(params.prompt, ctx)
@@ -487,16 +486,20 @@ export class AutomationEngine {
     })
   }
 
-  private recordAutomationTimelineEvent(
+  // Build the timeline activity event for a completed run. Returns `null` when
+  // there's no task to attribute it to. The caller hands this to the
+  // `automations:complete-run` named transaction, which records it atomically
+  // with the run-completion writes via the synchronous recorder in the worker.
+  private buildAutomationTimelineEvent(
     automation: Automation,
     event: AutomationEvent,
     runId: string,
     status: 'success' | 'error',
     error: string | null
-  ): void {
-    if (!event.taskId) return
+  ): RecordActivityEventInput | null {
+    if (!event.taskId) return null
 
-    recordActivityEvent(this.db, {
+    return {
       entityType: 'automation_run',
       entityId: runId,
       projectId: event.projectId ?? automation.project_id,
@@ -511,10 +514,10 @@ export class AutomationEngine {
         status,
         error
       }
-    })
+    }
   }
 
-  private buildTemplateContext(event: AutomationEvent): TemplateContext {
+  private async buildTemplateContext(event: AutomationEvent): Promise<TemplateContext> {
     const ctx: TemplateContext = {
       trigger: {
         old_status: event.oldStatus,
@@ -523,29 +526,27 @@ export class AutomationEngine {
     }
 
     if (event.taskId) {
-      const task = this.db
-        .prepare(
-          'SELECT id, title AS name, status, priority, worktree_path, worktree_parent_branch AS branch, terminal_mode, project_id FROM tasks WHERE id = ?'
-        )
-        .get(event.taskId) as
-        | {
-            id: string
-            name: string
-            status: string
-            priority: number
-            worktree_path: string | null
-            branch: string | null
-            terminal_mode: string | null
-            project_id: string
-          }
-        | undefined
+      const task = await this.db.get<{
+        id: string
+        name: string
+        status: string
+        priority: number
+        worktree_path: string | null
+        branch: string | null
+        terminal_mode: string | null
+        project_id: string
+      }>(
+        'SELECT id, title AS name, status, priority, worktree_path, worktree_parent_branch AS branch, terminal_mode, project_id FROM tasks WHERE id = ?',
+        [event.taskId]
+      )
       if (task) {
         // Read flags from provider_config JSON
         let terminalModeFlags: string | null = null
         if (task.terminal_mode) {
-          const raw = this.db
-            .prepare('SELECT provider_config FROM tasks WHERE id = ?')
-            .get(event.taskId) as { provider_config: string | null } | undefined
+          const raw = await this.db.get<{ provider_config: string | null }>(
+            'SELECT provider_config FROM tasks WHERE id = ?',
+            [event.taskId]
+          )
           if (raw?.provider_config) {
             try {
               const config = JSON.parse(raw.provider_config)
@@ -569,15 +570,11 @@ export class AutomationEngine {
     }
 
     if (event.projectId) {
-      const project = this.db
-        .prepare('SELECT id, name, path FROM projects WHERE id = ?')
-        .get(event.projectId) as
-        | {
-            id: string
-            name: string
-            path: string
-          }
-        | undefined
+      const project = await this.db.get<{
+        id: string
+        name: string
+        path: string
+      }>('SELECT id, name, path FROM projects WHERE id = ?', [event.projectId])
       if (project) {
         ctx.project = { id: project.id, name: project.name, path: project.path }
       }
@@ -586,20 +583,19 @@ export class AutomationEngine {
     return ctx
   }
 
-  private pruneOldRuns(automationId: string): void {
-    this.db
-      .prepare(
-        `DELETE FROM automation_runs WHERE automation_id = ? AND id NOT IN (
+  private async pruneOldRuns(automationId: string): Promise<void> {
+    await this.db.run(
+      `DELETE FROM automation_runs WHERE automation_id = ? AND id NOT IN (
         SELECT id FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT ?
-      )`
-      )
-      .run(automationId, automationId, MAX_RUNS_PER_AUTOMATION)
+      )`,
+      [automationId, automationId, MAX_RUNS_PER_AUTOMATION]
+    )
   }
 
   async executeManual(automationId: string): Promise<AutomationRun> {
-    const row = this.db.prepare('SELECT * FROM automations WHERE id = ?').get(automationId) as
-      | AutomationRow
-      | undefined
+    const row = await this.db.get<AutomationRow>('SELECT * FROM automations WHERE id = ?', [
+      automationId
+    ])
     if (!row) throw new Error('Automation not found')
     const automation = parseAutomationRow(row)
 
@@ -611,10 +607,9 @@ export class AutomationEngine {
     }
 
     await this.executeAutomation(automation, event, 0)
-    return this.db
-      .prepare(
-        'SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT 1'
-      )
-      .get(automation.id) as AutomationRun
+    return (await this.db.get<AutomationRun>(
+      'SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT 1',
+      [automation.id]
+    )) as AutomationRun
   }
 }

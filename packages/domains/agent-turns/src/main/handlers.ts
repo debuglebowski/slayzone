@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { realpathSync } from 'node:fs'
 import { listTurnsForWorktree } from './db'
 import {
@@ -98,11 +98,11 @@ function filterAndRethread(repoPath: string, rows: AgentTurnRange[]): AgentTurnR
   return out
 }
 
-export function registerAgentTurnsHandlers(ipcMain: IpcMain, db: Database): void {
-  ipcMain.handle('agent-turns:list', (_, worktreePath: string) => {
+export function registerAgentTurnsHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+  ipcMain.handle('agent-turns:list', async (_, worktreePath: string) => {
     if (!worktreePath) return []
     const path = canonical(worktreePath)
-    const raw = listTurnsForWorktree(db, path)
+    const raw = await listTurnsForWorktree(db, path)
     return filterAndRethread(path, raw)
   })
 }

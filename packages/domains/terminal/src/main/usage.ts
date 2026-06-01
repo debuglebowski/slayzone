@@ -4,7 +4,7 @@ import { execFile, spawn } from 'child_process'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
-import type Database from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import type { ProviderUsage, UsageWindow, UsageProviderConfig } from '@slayzone/terminal/shared'
 
@@ -537,7 +537,7 @@ function fetchProvider(
 
 // ── Handler ──────────────────────────────────────────────────────────
 
-export function registerUsageHandlers(ipcMain: IpcMain, db: Database.Database): void {
+export function registerUsageHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   ipcMain.handle('usage:fetch', async (_e, force?: boolean): Promise<ProviderUsage[]> => {
     const now = Date.now()
 
@@ -555,18 +555,16 @@ export function registerUsageHandlers(ipcMain: IpcMain, db: Database.Database): 
     if (inflight) return inflight
 
     // Gather custom providers from DB
-    const customRows = db
-      .prepare(
-        `SELECT id, label, usage_config FROM terminal_modes WHERE usage_config IS NOT NULL AND enabled = 1`
-      )
-      .all() as { id: string; label: string; usage_config: string }[]
+    const customRows = (await db.all(
+      `SELECT id, label, usage_config FROM terminal_modes WHERE usage_config IS NOT NULL AND enabled = 1`
+    )) as { id: string; label: string; usage_config: string }[]
 
     // Check enabled status for built-in providers
     const builtinEnabled = new Map(
       (
-        db
-          .prepare(`SELECT id, enabled FROM terminal_modes WHERE id IN ('claude-code', 'codex')`)
-          .all() as { id: string; enabled: number }[]
+        (await db.all(
+          `SELECT id, enabled FROM terminal_modes WHERE id IN ('claude-code', 'codex')`
+        )) as { id: string; enabled: number }[]
       ).map((r) => [r.id, r.enabled === 1])
     )
 

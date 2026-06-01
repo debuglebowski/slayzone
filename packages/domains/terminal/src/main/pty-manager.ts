@@ -3,7 +3,7 @@ import { accessSync, constants as fsConstants, existsSync, writeSync } from 'fs'
 import { execFile } from 'child_process'
 import { BrowserWindow, nativeTheme, ipcMain } from 'electron'
 import { homedir, platform, userInfo } from 'os'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import { DEV_SERVER_URL_PATTERN, extractOscTitle, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
@@ -45,9 +45,9 @@ import { markSessionUserInput, clearSessionUserInputMark } from './user-input-tr
 export { filterBufferData }
 
 // Database reference (held for future use; legacy from notification feature)
-let db: Database | null = null
+let db: SlayzoneDb | null = null
 
-export function setDatabase(database: Database): void {
+export function setDatabase(database: SlayzoneDb): void {
   db = database
 }
 
@@ -283,14 +283,16 @@ export function subscribeToStateChange(
   }
 }
 
-const globalStateChangeListeners = new Set<
-  (sessionId: string, newState: TerminalState, oldState: TerminalState) => void
->()
+type GlobalStateChangeListener = (
+  sessionId: string,
+  newState: TerminalState,
+  oldState: TerminalState
+) => void | Promise<void>
+
+const globalStateChangeListeners = new Set<GlobalStateChangeListener>()
 
 /** Subscribe to state changes for ALL sessions. Returns unsubscribe function. */
-export function onGlobalStateChange(
-  cb: (sessionId: string, newState: TerminalState, oldState: TerminalState) => void
-): () => void {
+export function onGlobalStateChange(cb: GlobalStateChangeListener): () => void {
   globalStateChangeListeners.add(cb)
   return () => {
     globalStateChangeListeners.delete(cb)
@@ -301,24 +303,29 @@ export function onGlobalStateChange(
  * Fire global state-change listeners for a session not owned by pty-manager
  * (e.g. chat-transport sessions). Lets task-automation and other main-side
  * subscribers react to chat activity through the same channel as PTY.
+ *
+ * Awaits async listeners (DB writes now run through the SQLite worker) so
+ * callers can observe their effects on resolve — the test hook relies on this.
  */
-export function notifyGlobalStateListeners(
+export async function notifyGlobalStateListeners(
   sessionId: string,
   newState: TerminalState,
   oldState: TerminalState
-): void {
-  for (const cb of globalStateChangeListeners) {
-    try {
-      cb(sessionId, newState, oldState)
-    } catch (err) {
-      recordPtyCallbackError(
-        sessionId,
-        taskIdFromSessionId(sessionId),
-        'global-state-listener',
-        err
-      )
-    }
-  }
+): Promise<void> {
+  await Promise.all(
+    [...globalStateChangeListeners].map(async (cb) => {
+      try {
+        await cb(sessionId, newState, oldState)
+      } catch (err) {
+        recordPtyCallbackError(
+          sessionId,
+          taskIdFromSessionId(sessionId),
+          'global-state-listener',
+          err
+        )
+      }
+    })
+  )
 }
 
 /**
@@ -558,10 +565,19 @@ function emitStateChange(
     }
   }
 
-  // Notify global subscribers
+  // Notify global subscribers. Listeners may be async (DB writes via the SQLite
+  // worker); fire-and-forget here but route both sync throws and async
+  // rejections to the error recorder so neither escapes as an unhandled crash.
   for (const cb of globalStateChangeListeners) {
     try {
-      cb(sessionId, newState, oldState)
+      void Promise.resolve(cb(sessionId, newState, oldState)).catch((err) => {
+        recordPtyCallbackError(
+          sessionId,
+          taskIdFromSessionId(sessionId),
+          'global-state-listener',
+          err
+        )
+      })
     } catch (err) {
       recordPtyCallbackError(
         sessionId,
@@ -1017,7 +1033,7 @@ export async function createPty(
       }
     })
 
-    const mcpEnv = buildMcpEnv(db, taskId, terminalMode)
+    const mcpEnv = await buildMcpEnv(db, taskId, terminalMode)
 
     const baseEnv = {
       ...process.env,
@@ -2133,14 +2149,14 @@ export function getBufferSince(sessionId: string, afterSeq: number): BufferSince
 /** Injected by composition root (apps/app) to surface tab id + label per
  *  session without pty-manager touching the `terminal_tabs` table (owned by
  *  the task-terminals package). */
-type PtyEnricher = (raw: PtyInfo[]) => PtyInfo[]
+type PtyEnricher = (raw: PtyInfo[]) => PtyInfo[] | Promise<PtyInfo[]>
 let ptyEnricher: PtyEnricher | null = null
 
 export function setPtyEnricher(fn: PtyEnricher | null): void {
   ptyEnricher = fn
 }
 
-export function listPtys(): PtyInfo[] {
+export async function listPtys(): Promise<PtyInfo[]> {
   const raw: PtyInfo[] = []
   for (const [sessionId, session] of sessions) {
     raw.push({
@@ -2154,7 +2170,7 @@ export function listPtys(): PtyInfo[] {
       state: session.state
     })
   }
-  return ptyEnricher ? ptyEnricher(raw) : raw
+  return ptyEnricher ? await ptyEnricher(raw) : raw
 }
 
 /** Returns a map of sessionId → PID for all alive sessions. Used for stats polling. */

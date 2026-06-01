@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { OpDeps } from './shared.js'
 
 interface StoredTab {
@@ -16,16 +16,17 @@ interface StoredState {
  * incoming `locked` to prevent stale renderer writebacks from clobbering it —
  * this op is the only place renderers/server are allowed to mutate the flag.
  */
-export function setBrowserTabLockedOp(
-  db: Database,
+export async function setBrowserTabLockedOp(
+  db: SlayzoneDb,
   taskId: string,
   tabId: string,
   locked: boolean,
   deps: OpDeps
-): boolean {
-  const row = db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(taskId) as
-    | { browser_tabs: string | null }
-    | undefined
+): Promise<boolean> {
+  const row = await db.get<{ browser_tabs: string | null }>(
+    'SELECT browser_tabs FROM tasks WHERE id = ?',
+    [taskId]
+  )
   if (!row?.browser_tabs) return false
 
   let state: StoredState
@@ -42,7 +43,7 @@ export function setBrowserTabLockedOp(
   if (!!tab.locked === locked) return true
 
   tab.locked = locked
-  db.prepare('UPDATE tasks SET browser_tabs = ? WHERE id = ?').run(JSON.stringify(state), taskId)
+  await db.run('UPDATE tasks SET browser_tabs = ? WHERE id = ?', [JSON.stringify(state), taskId])
   deps.onMutation?.()
   return true
 }

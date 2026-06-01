@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { UsageRecord, AnalyticsSummary, DateRange } from '../shared/types'
 import { parseClaudeFiles } from './parsers/claude'
 import { parseCodexFiles } from './parsers/codex'
@@ -11,43 +11,56 @@ interface ParseState {
   last_modified_ms: number
 }
 
-function getLastOffset(
-  db: Database.Database,
-  filePath: string
-): { offset: number; modifiedMs: number } | undefined {
-  const row = db
-    .prepare('SELECT last_offset, last_modified_ms FROM usage_parse_state WHERE file_path = ?')
-    .get(filePath) as ParseState | undefined
-  if (!row) return undefined
-  return { offset: row.last_offset, modifiedMs: row.last_modified_ms }
+/**
+ * Load all incremental-parse offsets up front into a Map. The file parsers take
+ * a SYNCHRONOUS `getOffset(filePath)` callback (they call it inline while
+ * walking files), so we can't hand them an async DB lookup. One query + a Map
+ * is both contract-correct and cheaper than a per-file round-trip to the worker.
+ */
+async function loadOffsets(
+  db: SlayzoneDb
+): Promise<Map<string, { offset: number; modifiedMs: number }>> {
+  const rows = (await db.all(
+    'SELECT file_path, last_offset, last_modified_ms FROM usage_parse_state'
+  )) as ParseState[]
+  return new Map(
+    rows.map((r) => [r.file_path, { offset: r.last_offset, modifiedMs: r.last_modified_ms }])
+  )
 }
 
-function saveParseState(
-  db: Database.Database,
+async function saveParseState(
+  db: SlayzoneDb,
   filePath: string,
   mtimeMs: number,
   endOffset: number
-): void {
-  db.prepare(
-    'INSERT OR REPLACE INTO usage_parse_state (file_path, last_modified_ms, last_offset) VALUES (?, ?, ?)'
-  ).run(filePath, mtimeMs, endOffset)
+): Promise<void> {
+  await db
+    .prepare(
+      'INSERT OR REPLACE INTO usage_parse_state (file_path, last_modified_ms, last_offset) VALUES (?, ?, ?)'
+    )
+    .run(filePath, mtimeMs, endOffset)
 }
 
-function upsertRecords(db: Database.Database, records: UsageRecord[], sourceFile: string): number {
+async function upsertRecords(
+  db: SlayzoneDb,
+  records: UsageRecord[],
+  sourceFile: string
+): Promise<number> {
   if (records.length === 0) return 0
 
-  const insert = db.prepare(`
+  const sql = `
     INSERT OR IGNORE INTO usage_records (
       id, provider, model, session_id, timestamp,
       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
       cost_usd, cwd, task_id, source_file, source_offset
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 0)
-  `)
+  `
 
-  let inserted = 0
-  const tx = db.transaction(() => {
-    for (const r of records) {
-      const result = insert.run(
+  const results = await db.batchTxn(
+    records.map((r) => ({
+      type: 'run' as const,
+      sql,
+      params: [
         r.id,
         r.provider,
         r.model,
@@ -61,16 +74,21 @@ function upsertRecords(db: Database.Database, records: UsageRecord[], sourceFile
         r.cwd,
         r.taskId,
         sourceFile
-      )
-      inserted += result.changes
-    }
-  })
-  tx()
+      ]
+    }))
+  )
+
+  let inserted = 0
+  for (const result of results) {
+    inserted += (result as { changes: number }).changes
+  }
   return inserted
 }
 
-export async function refreshUsageData(db: Database.Database): Promise<void> {
-  const getOffset = (filePath: string) => getLastOffset(db, filePath)
+export async function refreshUsageData(db: SlayzoneDb): Promise<void> {
+  const offsets = await loadOffsets(db)
+  const getOffset = (filePath: string): { offset: number; modifiedMs: number } | undefined =>
+    offsets.get(filePath)
 
   const allResults = await Promise.all([
     parseClaudeFiles(getOffset),
@@ -82,24 +100,24 @@ export async function refreshUsageData(db: Database.Database): Promise<void> {
   let totalInserted = 0
   for (const results of allResults) {
     for (const result of results) {
-      const inserted = upsertRecords(db, result.records, result.sourceFile)
-      saveParseState(db, result.sourceFile, result.fileMtimeMs, result.endOffset)
+      const inserted = await upsertRecords(db, result.records, result.sourceFile)
+      await saveParseState(db, result.sourceFile, result.fileMtimeMs, result.endOffset)
       totalInserted += inserted
     }
   }
 
   // Only correlate if new records were inserted
   if (totalInserted > 0) {
-    correlateNewRecords(db)
+    await correlateNewRecords(db)
   }
 }
 
-function correlateNewRecords(db: Database.Database): void {
-  const tasks = db
+async function correlateNewRecords(db: SlayzoneDb): Promise<void> {
+  const tasks = (await db
     .prepare(
       "SELECT id, provider_config, worktree_path FROM tasks WHERE provider_config IS NOT NULL AND provider_config != '{}'"
     )
-    .all() as Array<{ id: string; provider_config: string; worktree_path: string | null }>
+    .all()) as Array<{ id: string; provider_config: string; worktree_path: string | null }>
 
   const updateBySession = db.prepare(
     'UPDATE usage_records SET task_id = ? WHERE session_id = ? AND task_id IS NULL'
@@ -114,20 +132,20 @@ function correlateNewRecords(db: Database.Database): void {
     }
     for (const mode of Object.values(config)) {
       if (mode.conversationId) {
-        updateBySession.run(task.id, mode.conversationId)
+        await updateBySession.run(task.id, mode.conversationId)
       }
     }
   }
 
-  const tasksWithPaths = db
+  const tasksWithPaths = (await db
     .prepare('SELECT id, worktree_path FROM tasks WHERE worktree_path IS NOT NULL')
-    .all() as Array<{ id: string; worktree_path: string }>
+    .all()) as Array<{ id: string; worktree_path: string }>
 
   const updateByCwd = db.prepare(
     'UPDATE usage_records SET task_id = ? WHERE cwd = ? AND task_id IS NULL'
   )
   for (const task of tasksWithPaths) {
-    updateByCwd.run(task.id, task.worktree_path)
+    await updateByCwd.run(task.id, task.worktree_path)
   }
 }
 
@@ -145,10 +163,10 @@ function dateRangeToSql(range: DateRange): string {
 }
 
 /** Total tokens per day across all providers (no date filtering). */
-export function queryDailyTotals(
-  db: Database.Database
-): Array<{ date: string; totalTokens: number }> {
-  return db
+export async function queryDailyTotals(
+  db: SlayzoneDb
+): Promise<Array<{ date: string; totalTokens: number }>> {
+  return (await db
     .prepare(
       `SELECT date(timestamp, 'localtime') as date,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
@@ -156,13 +174,13 @@ export function queryDailyTotals(
       GROUP BY date(timestamp, 'localtime')
       ORDER BY date ASC`
     )
-    .all() as Array<{ date: string; totalTokens: number }>
+    .all()) as Array<{ date: string; totalTokens: number }>
 }
 
-export function queryAnalytics(db: Database.Database, range: DateRange): AnalyticsSummary {
+export async function queryAnalytics(db: SlayzoneDb, range: DateRange): Promise<AnalyticsSummary> {
   const since = dateRangeToSql(range)
 
-  const totals = db
+  const totals = (await db
     .prepare(
       `SELECT
         COALESCE(SUM(input_tokens), 0) as totalInputTokens,
@@ -173,7 +191,7 @@ export function queryAnalytics(db: Database.Database, range: DateRange): Analyti
       FROM usage_records
       WHERE timestamp >= ${since}`
     )
-    .get() as {
+    .get()) as {
     totalInputTokens: number
     totalOutputTokens: number
     totalCacheReadTokens: number
@@ -187,7 +205,7 @@ export function queryAnalytics(db: Database.Database, range: DateRange): Analyti
       ? (totals.totalCacheReadTokens / (totalInput + totals.totalCacheReadTokens)) * 100
       : 0
 
-  const byProvider = db
+  const byProvider = (await db
     .prepare(
       `SELECT provider,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens,
@@ -199,7 +217,7 @@ export function queryAnalytics(db: Database.Database, range: DateRange): Analyti
       FROM usage_records WHERE timestamp >= ${since}
       GROUP BY provider ORDER BY totalTokens DESC`
     )
-    .all() as Array<{
+    .all()) as Array<{
     provider: string
     totalTokens: number
     inputTokens: number
@@ -209,25 +227,25 @@ export function queryAnalytics(db: Database.Database, range: DateRange): Analyti
     sessions: number
   }>
 
-  const byModel = db
+  const byModel = (await db
     .prepare(
       `SELECT provider, model,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
       FROM usage_records WHERE timestamp >= ${since}
       GROUP BY provider, model ORDER BY totalTokens DESC`
     )
-    .all() as Array<{ provider: string; model: string; totalTokens: number }>
+    .all()) as Array<{ provider: string; model: string; totalTokens: number }>
 
-  const byDay = db
+  const byDay = (await db
     .prepare(
       `SELECT date(timestamp, 'localtime') as date, provider,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens
       FROM usage_records WHERE timestamp >= ${since}
       GROUP BY date(timestamp, 'localtime'), provider ORDER BY date ASC`
     )
-    .all() as Array<{ date: string; provider: string; totalTokens: number }>
+    .all()) as Array<{ date: string; provider: string; totalTokens: number }>
 
-  const byTask = db
+  const byTask = (await db
     .prepare(
       `SELECT ur.provider, ur.task_id as taskId, COALESCE(t.title, 'Unknown') as taskTitle,
         SUM(ur.input_tokens + ur.output_tokens + ur.cache_read_tokens + ur.cache_write_tokens) as totalTokens
@@ -237,7 +255,7 @@ export function queryAnalytics(db: Database.Database, range: DateRange): Analyti
       GROUP BY ur.provider, ur.task_id ORDER BY totalTokens DESC
       LIMIT 20`
     )
-    .all() as Array<{ provider: string; taskId: string; taskTitle: string; totalTokens: number }>
+    .all()) as Array<{ provider: string; taskId: string; taskTitle: string; totalTokens: number }>
 
   return {
     ...totals,
@@ -249,14 +267,14 @@ export function queryAnalytics(db: Database.Database, range: DateRange): Analyti
   }
 }
 
-export function queryTaskCost(
-  db: Database.Database,
+export async function queryTaskCost(
+  db: SlayzoneDb,
   taskId: string
-): {
+): Promise<{
   totalTokens: number
   byProvider: Array<{ provider: string; model: string; totalTokens: number; sessions: number }>
-} {
-  const byProvider = db
+}> {
+  const byProvider = (await db
     .prepare(
       `SELECT provider, model,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) as totalTokens,
@@ -264,7 +282,7 @@ export function queryTaskCost(
       FROM usage_records WHERE task_id = ?
       GROUP BY provider, model`
     )
-    .all(taskId) as Array<{
+    .all(taskId)) as Array<{
     provider: string
     model: string
     totalTokens: number

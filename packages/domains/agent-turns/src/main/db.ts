@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { AgentTurn, AgentTurnRange } from '../shared/types'
 
 const MAX_TURNS_PER_WORKTREE = 50
@@ -15,8 +15,8 @@ export interface InsertTurn {
   created_at: number
 }
 
-export function insertTurn(db: Database, t: InsertTurn): void {
-  db.prepare(
+export async function insertTurn(db: SlayzoneDb, t: InsertTurn): Promise<void> {
+  await db.prepare(
     `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
@@ -32,26 +32,30 @@ export function insertTurn(db: Database, t: InsertTurn): void {
   // Bump task-level interaction marker so tree-view "Last interaction" sort
   // reflects this turn. Skips when the turn isn't task-scoped.
   if (t.task_id) {
-    db.prepare(
+    await db.prepare(
       `UPDATE tasks SET last_interaction_at = ? WHERE id = ? AND (last_interaction_at IS NULL OR last_interaction_at < ?)`
     ).run(t.created_at, t.task_id, t.created_at)
   }
 }
 
-export function deleteTurn(db: Database, id: string): void {
-  db.prepare(`DELETE FROM agent_turns WHERE id = ?`).run(id)
+export async function deleteTurn(db: SlayzoneDb, id: string): Promise<void> {
+  await db.prepare(`DELETE FROM agent_turns WHERE id = ?`).run(id)
 }
 
-export function getTurn(db: Database, id: string): AgentTurn | null {
+export async function getTurn(db: SlayzoneDb, id: string): Promise<AgentTurn | null> {
   return (
-    (db.prepare(`SELECT * FROM agent_turns WHERE id = ?`).get(id) as AgentTurn | undefined) ?? null
+    (await db.prepare(`SELECT * FROM agent_turns WHERE id = ?`).get(id) as AgentTurn | undefined) ??
+    null
   )
 }
 
 /** Latest turn for a worktree — used for snapshot deduplication. */
-export function getLatestTurnForWorktree(db: Database, worktreePath: string): AgentTurn | null {
+export async function getLatestTurnForWorktree(
+  db: SlayzoneDb,
+  worktreePath: string
+): Promise<AgentTurn | null> {
   return (
-    (db
+    (await db
       .prepare(`SELECT * FROM agent_turns WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1`)
       .get(worktreePath) as AgentTurn | undefined) ?? null
   )
@@ -62,8 +66,11 @@ export function getLatestTurnForWorktree(db: Database, worktreePath: string): Ag
  * snapshot so callers can diff `prev_snapshot_sha..snapshot_sha` for that
  * turn's changes. `prev_snapshot_sha` is null for the first row.
  */
-export function listTurnsForWorktree(db: Database, worktreePath: string): AgentTurnRange[] {
-  const rows = db
+export async function listTurnsForWorktree(
+  db: SlayzoneDb,
+  worktreePath: string
+): Promise<AgentTurnRange[]> {
+  const rows = (await db
     .prepare(
       `SELECT a.*, t.title AS task_title
      FROM agent_turns a
@@ -71,7 +78,7 @@ export function listTurnsForWorktree(db: Database, worktreePath: string): AgentT
      WHERE a.worktree_path = ?
      ORDER BY a.created_at ASC`
     )
-    .all(worktreePath) as (AgentTurn & { task_title: string | null })[]
+    .all(worktreePath)) as (AgentTurn & { task_title: string | null })[]
   return rows.map((row, idx) => ({
     ...row,
     prev_snapshot_sha: idx === 0 ? null : rows[idx - 1].snapshot_sha
@@ -79,10 +86,10 @@ export function listTurnsForWorktree(db: Database, worktreePath: string): AgentT
 }
 
 /** Return IDs of the oldest excess rows beyond MAX_TURNS_PER_WORKTREE. */
-export function findTurnsToPrune(db: Database, worktreePath: string): string[] {
-  const rows = db
+export async function findTurnsToPrune(db: SlayzoneDb, worktreePath: string): Promise<string[]> {
+  const rows = (await db
     .prepare(`SELECT id FROM agent_turns WHERE worktree_path = ? ORDER BY created_at ASC`)
-    .all(worktreePath) as { id: string }[]
+    .all(worktreePath)) as { id: string }[]
   if (rows.length <= MAX_TURNS_PER_WORKTREE) return []
   return rows.slice(0, rows.length - MAX_TURNS_PER_WORKTREE).map((r) => r.id)
 }

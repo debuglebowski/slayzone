@@ -1,8 +1,12 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 
-export function removeBlockerOp(db: Database, taskId: string, blockerTaskId: string): void {
-  db.prepare('DELETE FROM task_dependencies WHERE task_id = ? AND blocks_task_id = ?').run(
+export async function removeBlockerOp(
+  db: SlayzoneDb,
+  taskId: string,
+  blockerTaskId: string
+): Promise<void> {
+  await db.run('DELETE FROM task_dependencies WHERE task_id = ? AND blocks_task_id = ?', [
     blockerTaskId,
     taskId
-  )
+  ])
 }

@@ -1,32 +1,34 @@
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import { recordActivityEvents } from '@slayzone/history/main'
 import { buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { colorOne, parseTask, updateTask, type OpDeps } from './shared.js'
 
 export async function updateTaskOp(
-  db: Database,
+  db: SlayzoneDb,
   data: UpdateTaskInput,
   deps: OpDeps
 ): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
-  const result = db.transaction(() => {
-    const previousRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as
-      | Record<string, unknown>
-      | undefined
-    const previousTask = parseTask(previousRow)
-    const nextTask = updateTask(db, data)
+  // `updateTask` is a conditional read-modify-write that runs side effects via
+  // runtime adapters, so it can't live inside a worker named-txn. Read the prior
+  // row, apply the update, then record the diff-derived activity events atomically
+  // through the `task:record-events` named transaction (keeps `recordActivityEvents`
+  // running synchronously inside the worker).
+  const previousRow = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
+    data.id
+  ])
+  const previousTask = parseTask(previousRow)
+  const nextTask = await updateTask(db, data)
 
-    if (previousTask && nextTask) {
-      recordActivityEvents(db, buildTaskUpdatedEvents(previousTask, nextTask))
+  if (previousTask && nextTask) {
+    const events = buildTaskUpdatedEvents(previousTask, nextTask)
+    if (events.length > 0) {
+      await db.namedTxn('task:record-events', { events })
     }
+  }
 
-    return {
-      previousTask,
-      nextTask
-    }
-  })()
+  const result = { previousTask, nextTask }
 
   if (result.nextTask) {
     ipcMain.emit('db:tasks:update:done', null, data.id, { oldStatus: result.previousTask?.status })

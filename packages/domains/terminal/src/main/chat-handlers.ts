@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import {
   hydrateSession,
   ensureSpawned,
@@ -142,8 +142,12 @@ interface ProviderConfigEntry {
   chatFastMode?: boolean
 }
 
-function readProviderConfig(db: Database, taskId: string, mode: string): ProviderConfigEntry {
-  const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
+async function readProviderConfig(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string
+): Promise<ProviderConfigEntry> {
+  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
     | { provider_config: string | null }
     | undefined
   if (!row?.provider_config) return {}
@@ -155,8 +159,13 @@ function readProviderConfig(db: Database, taskId: string, mode: string): Provide
   }
 }
 
-function writeChatConversationId(db: Database, taskId: string, mode: string, id: string): void {
-  const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
+async function writeChatConversationId(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  id: string
+): Promise<void> {
+  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
     | { provider_config: string | null }
     | undefined
   let cfg: Record<string, ProviderConfigEntry> = {}
@@ -169,11 +178,18 @@ function writeChatConversationId(db: Database, taskId: string, mode: string, id:
   }
   const existing = cfg[mode] ?? {}
   cfg[mode] = { ...existing, chatConversationId: id }
-  db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
+  await db
+    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+    .run(JSON.stringify(cfg), taskId)
 }
 
-function writeChatModel(db: Database, taskId: string, mode: string, chatModel: string): void {
-  const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
+async function writeChatModel(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  chatModel: string
+): Promise<void> {
+  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
     | { provider_config: string | null }
     | undefined
   let cfg: Record<string, ProviderConfigEntry> = {}
@@ -187,16 +203,18 @@ function writeChatModel(db: Database, taskId: string, mode: string, chatModel: s
   const existing = cfg[mode] ?? {}
   if (existing.chatModel === chatModel) return
   cfg[mode] = { ...existing, chatModel }
-  db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
+  await db
+    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+    .run(JSON.stringify(cfg), taskId)
 }
 
-function writeChatEffort(
-  db: Database,
+async function writeChatEffort(
+  db: SlayzoneDb,
   taskId: string,
   mode: string,
   chatEffort: ChatEffort | null
-): void {
-  const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
+): Promise<void> {
+  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
     | { provider_config: string | null }
     | undefined
   let cfg: Record<string, ProviderConfigEntry> = {}
@@ -210,16 +228,18 @@ function writeChatEffort(
   const existing = cfg[mode] ?? {}
   if ((existing.chatEffort ?? null) === chatEffort) return
   cfg[mode] = { ...existing, chatEffort }
-  db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
+  await db
+    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+    .run(JSON.stringify(cfg), taskId)
 }
 
-function writeChatCollaboration(
-  db: Database,
+async function writeChatCollaboration(
+  db: SlayzoneDb,
   taskId: string,
   mode: string,
   chatCollaboration: ChatCollaborationMode | null
-): void {
-  const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
+): Promise<void> {
+  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
     | { provider_config: string | null }
     | undefined
   let cfg: Record<string, ProviderConfigEntry> = {}
@@ -233,16 +253,18 @@ function writeChatCollaboration(
   const existing = cfg[mode] ?? {}
   if ((existing.chatCollaboration ?? null) === chatCollaboration) return
   cfg[mode] = { ...existing, chatCollaboration }
-  db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
+  await db
+    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+    .run(JSON.stringify(cfg), taskId)
 }
 
-function writeChatFastMode(
-  db: Database,
+async function writeChatFastMode(
+  db: SlayzoneDb,
   taskId: string,
   mode: string,
   chatFastMode: boolean
-): void {
-  const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
+): Promise<void> {
+  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
     | { provider_config: string | null }
     | undefined
   let cfg: Record<string, ProviderConfigEntry> = {}
@@ -256,11 +278,18 @@ function writeChatFastMode(
   const existing = cfg[mode] ?? {}
   if ((existing.chatFastMode ?? false) === chatFastMode) return
   cfg[mode] = { ...existing, chatFastMode }
-  db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
+  await db
+    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+    .run(JSON.stringify(cfg), taskId)
 }
 
-function writeChatMode(db: Database, taskId: string, mode: string, chatMode: string): void {
-  const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
+async function writeChatMode(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  chatMode: string
+): Promise<void> {
+  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
     | { provider_config: string | null }
     | undefined
   let cfg: Record<string, ProviderConfigEntry> = {}
@@ -277,7 +306,9 @@ function writeChatMode(db: Database, taskId: string, mode: string, chatMode: str
   // the common case where mode hasn't moved.
   if (existing.chatMode === chatMode) return
   cfg[mode] = { ...existing, chatMode }
-  db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
+  await db
+    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+    .run(JSON.stringify(cfg), taskId)
 }
 
 /**
@@ -296,8 +327,10 @@ function writeChatMode(db: Database, taskId: string, mode: string, chatMode: str
  * on every app start. Only chat-capable modes (per `supportsChatMode`) are
  * touched, leaving non-chat modes alone.
  */
-export function backfillChatModes(db: Database): { scanned: number; updated: number } {
-  const rows = db.prepare('SELECT id, terminal_mode, provider_config FROM tasks').all() as {
+export async function backfillChatModes(
+  db: SlayzoneDb
+): Promise<{ scanned: number; updated: number }> {
+  const rows = (await db.prepare('SELECT id, terminal_mode, provider_config FROM tasks').all()) as {
     id: string
     terminal_mode: string | null
     provider_config: string | null
@@ -337,18 +370,21 @@ export function backfillChatModes(db: Database): { scanned: number; updated: num
       dirty = true
     }
     if (dirty) {
-      db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(
-        JSON.stringify(cfg),
-        row.id
-      )
+      await db
+        .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+        .run(JSON.stringify(cfg), row.id)
       updated++
     }
   }
   return { scanned, updated }
 }
 
-function clearChatConversationId(db: Database, taskId: string, mode: string): void {
-  const row = db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId) as
+async function clearChatConversationId(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string
+): Promise<void> {
+  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
     | { provider_config: string | null }
     | undefined
   if (!row?.provider_config) return
@@ -361,13 +397,15 @@ function clearChatConversationId(db: Database, taskId: string, mode: string): vo
   const existing = cfg[mode]
   if (!existing?.chatConversationId) return
   cfg[mode] = { ...existing, chatConversationId: null }
-  db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(JSON.stringify(cfg), taskId)
+  await db
+    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
+    .run(JSON.stringify(cfg), taskId)
 }
 
-function readTaskModeDefaultFlags(db: Database, mode: string): string | null {
-  const row = db.prepare('SELECT default_flags FROM terminal_modes WHERE id = ?').get(mode) as
-    | { default_flags: string | null }
-    | undefined
+async function readTaskModeDefaultFlags(db: SlayzoneDb, mode: string): Promise<string | null> {
+  const row = (await db
+    .prepare('SELECT default_flags FROM terminal_modes WHERE id = ?')
+    .get(mode)) as { default_flags: string | null } | undefined
   return row?.default_flags ?? null
 }
 
@@ -420,7 +458,7 @@ export function inspectPermissionFlags(flags: string[]): {
  * (transactional) without a race where the builder re-reads stale DB.
  */
 async function buildHydrateOpts(
-  db: Database,
+  db: SlayzoneDb,
   opts: ChatCreateOpts,
   {
     fresh,
@@ -438,7 +476,7 @@ async function buildHydrateOpts(
     chatFastModeOverride?: boolean
   }
 ): Promise<Parameters<typeof hydrateSession>[0]> {
-  const providerCfg = readProviderConfig(db, opts.taskId, opts.mode)
+  const providerCfg = await readProviderConfig(db, opts.taskId, opts.mode)
   // Flag-resolution priority for chat:
   //   1. per-call override (`providerFlagsOverride`)
   //   2. per-task explicit flags (`providerCfg.flags`)
@@ -501,12 +539,12 @@ async function buildHydrateOpts(
     providerFlags = [...providerFlags, ...chatEffortToFlags(resolvedChatEffort)]
   }
 
-  const initialBuffer = fresh ? [] : loadChatEvents(db, opts.tabId)
-  const initialNextSeq = fresh ? 0 : getNextSeqForTab(db, opts.tabId)
+  const initialBuffer = fresh ? [] : await loadChatEvents(db, opts.tabId)
+  const initialNextSeq = fresh ? 0 : await getNextSeqForTab(db, opts.tabId)
 
   const enrichedPath = getEnrichedPath()
   const subprocessEnv: Record<string, string> = {
-    ...buildMcpEnv(db, opts.taskId, opts.mode),
+    ...(await buildMcpEnv(db, opts.taskId, opts.mode)),
     ...(enrichedPath ? { PATH: enrichedPath } : {})
   }
 
@@ -526,17 +564,20 @@ async function buildHydrateOpts(
     chatCollaboration: resolvedChatCollaboration,
     chatFastMode: resolvedChatFastMode,
     onPersistSessionId: (id) => {
-      writeChatConversationId(db, opts.taskId, opts.mode, id)
+      // Fire-and-forget DB write — the transport invokes this without awaiting
+      // (same as before the async-DB lift; the write was already a void side
+      // effect). Errors surface via the persist path's own logging.
+      void writeChatConversationId(db, opts.taskId, opts.mode, id)
     },
     onInvalidResume: () => {
-      clearChatConversationId(db, opts.taskId, opts.mode)
+      void clearChatConversationId(db, opts.taskId, opts.mode)
     }
   }
 }
 
 export function registerChatHandlers(
   ipcMain: IpcMain,
-  db: Database,
+  db: SlayzoneDb,
   opts: ChatHandlerOpts = {}
 ): void {
   // Wire SQLite persistence into the transport. Default deps had a no-op
@@ -551,58 +592,64 @@ export function registerChatHandlers(
       if (newState === 'not-spawned' || oldState === 'not-spawned') return
       notifyGlobalStateListeners(sessionId, newState, oldState)
     },
+    // Async because the DB lift makes persistChatEvent / the last_interaction_at
+    // UPDATE / writeChatMode Promises. The transport invokes this without
+    // awaiting (fire-and-forget, wrapped in its own try/catch), matching the
+    // prior void semantics — the returned Promise simply floats.
     persistEvent: (tabId, seq, event) => {
-      try {
-        persistChatEvent(db, tabId, seq, event)
-      } catch (err) {
-        console.error('[chat-handlers] persistChatEvent failed:', err)
-      }
-      // Tree-view "Last interaction" sort marker — only fire on user-message
-      // (clear "I interacted" signal). Agent-side bumps come via agent_turns.
-      if (event.kind === 'user-message') {
-        const info = getSessionInfo(tabId)
-        if (info) {
-          try {
-            const now = Date.now()
-            const res = db
-              .prepare(
-                `UPDATE tasks SET last_interaction_at = ? WHERE id = ? AND (last_interaction_at IS NULL OR last_interaction_at < ?)`
-              )
-              .run(now, info.taskId, now)
-            // Notify renderer so the tree-view sort reorders without waiting
-            // for an unrelated tasks reload. Skip when UPDATE was a no-op.
-            if (res.changes > 0) {
-              try {
-                // eslint-disable-next-line @typescript-eslint/no-require-imports
-                const { BrowserWindow } = require('electron') as typeof import('electron')
-                for (const w of BrowserWindow.getAllWindows()) {
-                  if (!w.isDestroyed()) w.webContents.send('tasks:changed')
-                }
-              } catch {
-                // non-electron (tests) — no-op
-              }
-            }
-          } catch (err) {
-            console.error('[chat-handlers] bump last_interaction_at failed:', err)
-          }
+      void (async () => {
+        try {
+          await persistChatEvent(db, tabId, seq, event)
+        } catch (err) {
+          console.error('[chat-handlers] persistChatEvent failed:', err)
         }
-      }
-      // Subprocess is the source of truth for permission mode. Cache it back
-      // into provider_config whenever turn-init carries a recognized mode so
-      // cold-start spawn flags match the last observed live value.
-      if (event.kind === 'turn-init') {
-        const mapped = rawPermissionModeToChatMode(event.permissionMode)
-        if (mapped) {
+        // Tree-view "Last interaction" sort marker — only fire on user-message
+        // (clear "I interacted" signal). Agent-side bumps come via agent_turns.
+        if (event.kind === 'user-message') {
           const info = getSessionInfo(tabId)
           if (info) {
             try {
-              writeChatMode(db, info.taskId, info.mode, mapped)
+              const now = Date.now()
+              const res = await db
+                .prepare(
+                  `UPDATE tasks SET last_interaction_at = ? WHERE id = ? AND (last_interaction_at IS NULL OR last_interaction_at < ?)`
+                )
+                .run(now, info.taskId, now)
+              // Notify renderer so the tree-view sort reorders without waiting
+              // for an unrelated tasks reload. Skip when UPDATE was a no-op.
+              if (res.changes > 0) {
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-require-imports
+                  const { BrowserWindow } = require('electron') as typeof import('electron')
+                  for (const w of BrowserWindow.getAllWindows()) {
+                    if (!w.isDestroyed()) w.webContents.send('tasks:changed')
+                  }
+                } catch {
+                  // non-electron (tests) — no-op
+                }
+              }
             } catch (err) {
-              console.error('[chat-handlers] writeChatMode (live sync) failed:', err)
+              console.error('[chat-handlers] bump last_interaction_at failed:', err)
             }
           }
         }
-      }
+        // Subprocess is the source of truth for permission mode. Cache it back
+        // into provider_config whenever turn-init carries a recognized mode so
+        // cold-start spawn flags match the last observed live value.
+        if (event.kind === 'turn-init') {
+          const mapped = rawPermissionModeToChatMode(event.permissionMode)
+          if (mapped) {
+            const info = getSessionInfo(tabId)
+            if (info) {
+              try {
+                await writeChatMode(db, info.taskId, info.mode, mapped)
+              } catch (err) {
+                console.error('[chat-handlers] writeChatMode (live sync) failed:', err)
+              }
+            }
+          }
+        }
+      })()
       if (opts.onChatEvent) {
         try {
           opts.onChatEvent(tabId, event)
@@ -751,7 +798,7 @@ export function registerChatHandlers(
       // Stop button discards queued follow-ups alongside the in-flight turn —
       // matches pre-backend behavior where handleStop did `setQueuedMessages([])`.
       try {
-        clearChatQueue(db, opts.tabId)
+        await clearChatQueue(db, opts.tabId)
       } catch (err) {
         console.error('[chat-handlers] clearChatQueue failed:', err)
       }
@@ -770,18 +817,18 @@ export function registerChatHandlers(
     killChat(tabId)
   })
 
-  ipcMain.handle('chat:remove', (_, tabId: string): void => {
+  ipcMain.handle('chat:remove', async (_, tabId: string): Promise<void> => {
     removeSession(tabId)
     // Tab is gone — drop persisted history + queue. (FK ON DELETE CASCADE
     // also clears them when the terminal_tabs row itself is deleted, but
     // chat:remove can be invoked before the tab row is gone, so be explicit.)
     try {
-      clearChatEventsForTab(db, tabId)
+      await clearChatEventsForTab(db, tabId)
     } catch (err) {
       console.error('[chat-handlers] clearChatEventsForTab failed:', err)
     }
     try {
-      clearChatQueue(db, tabId)
+      await clearChatQueue(db, tabId)
     } catch (err) {
       console.error('[chat-handlers] clearChatQueue failed:', err)
     }
@@ -804,17 +851,17 @@ export function registerChatHandlers(
   ipcMain.handle('chat:reset', async (_, opts: ChatCreateOpts): Promise<ChatSessionInfo> => {
     removeSession(opts.tabId)
     try {
-      clearChatEventsForTab(db, opts.tabId)
+      await clearChatEventsForTab(db, opts.tabId)
     } catch (err) {
       console.error('[chat-handlers] clearChatEventsForTab failed:', err)
     }
     try {
-      clearChatQueue(db, opts.tabId)
+      await clearChatQueue(db, opts.tabId)
     } catch (err) {
       console.error('[chat-handlers] clearChatQueue failed:', err)
     }
     try {
-      clearChatConversationId(db, opts.taskId, opts.mode)
+      await clearChatConversationId(db, opts.taskId, opts.mode)
     } catch (err) {
       console.error('[chat-handlers] clearChatConversationId failed:', err)
     }
@@ -829,7 +876,11 @@ export function registerChatHandlers(
 
   ipcMain.handle(
     'chat:inspectPermissions',
-    (_, taskId: string, mode: string): ReturnType<typeof inspectPermissionFlags> => {
+    async (
+      _,
+      taskId: string,
+      mode: string
+    ): Promise<ReturnType<typeof inspectPermissionFlags>> => {
       // codex-chat governs permissions through the JSON-RPC approval protocol,
       // not CLI flags — the flag-based safety check doesn't apply.
       if (mode === 'codex-chat') {
@@ -840,14 +891,14 @@ export function registerChatHandlers(
           permissionModeValue: null
         }
       }
-      const providerCfg = readProviderConfig(db, taskId, mode)
-      const flagsString = providerCfg.flags ?? readTaskModeDefaultFlags(db, mode) ?? ''
+      const providerCfg = await readProviderConfig(db, taskId, mode)
+      const flagsString = providerCfg.flags ?? (await readTaskModeDefaultFlags(db, mode)) ?? ''
       return inspectPermissionFlags(parseShellArgs(flagsString))
     }
   )
 
   ipcMain.handle('chat:getMode', async (_, taskId: string, mode: string): Promise<string> => {
-    const cfg = readProviderConfig(db, taskId, mode)
+    const cfg = await readProviderConfig(db, taskId, mode)
     const stored = cfg.chatMode ?? defaultChatModeForMode(mode)
     // Hide stale `auto` from UI when capability is gone — pill would otherwise
     // show violet, and the next mode change would attempt a forbidden flag.
@@ -876,7 +927,7 @@ export function registerChatHandlers(
       // picks it up via buildSpawnArgs. No control_request, no respawn.
       const liveState = getSessionTerminalState(opts.tabId)
       if (liveState === 'not-spawned') {
-        writeChatMode(db, opts.taskId, opts.mode, safe)
+        await writeChatMode(db, opts.taskId, opts.mode, safe)
         updateSessionChatMode(opts.tabId, safe)
         const refreshed = getSessionInfo(opts.tabId)
         if (refreshed) return refreshed
@@ -896,7 +947,7 @@ export function registerChatHandlers(
             subtype: 'set_permission_mode',
             mode: cliMode
           })
-          writeChatMode(db, opts.taskId, opts.mode, safe)
+          await writeChatMode(db, opts.taskId, opts.mode, safe)
           updateSessionChatMode(opts.tabId, safe)
           const refreshed = getSessionInfo(opts.tabId)
           if (refreshed) return refreshed
@@ -918,7 +969,7 @@ export function registerChatHandlers(
       removeSession(opts.tabId)
       hydrateSession(await buildHydrateOpts(db, opts, { fresh: false, chatModeOverride: safe }))
       const created = await ensureSpawned(opts.tabId)
-      writeChatMode(db, opts.taskId, opts.mode, safe)
+      await writeChatMode(db, opts.taskId, opts.mode, safe)
       // Returned ChatSessionInfo carries `chatMode: safe` via Session.chatMode,
       // so renderer trusts the server's resolved value (e.g. auto → auto-accept
       // downgrade) instead of its optimistic guess.
@@ -927,7 +978,7 @@ export function registerChatHandlers(
   )
 
   ipcMain.handle('chat:getModel', async (_, taskId: string, mode: string): Promise<string> => {
-    const cfg = readProviderConfig(db, taskId, mode)
+    const cfg = await readProviderConfig(db, taskId, mode)
     const stored = cfg.chatModel
     if (isValidModelForMode(mode, stored)) return stored
     // No (or legacy/invalid) stored value → provider default. codex-chat uses
@@ -947,7 +998,7 @@ export function registerChatHandlers(
       // Pre-spawn fast path: DB write + skeleton mutation only.
       const liveState = getSessionTerminalState(opts.tabId)
       if (liveState === 'not-spawned') {
-        writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
+        await writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
         updateSessionChatModel(opts.tabId, opts.chatModel)
         const refreshed = getSessionInfo(opts.tabId)
         if (refreshed) return refreshed
@@ -964,7 +1015,7 @@ export function registerChatHandlers(
             subtype: 'set_model',
             model: opts.chatModel
           })
-          writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
+          await writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
           updateSessionChatModel(opts.tabId, opts.chatModel)
           const refreshed = getSessionInfo(opts.tabId)
           if (refreshed) return refreshed
@@ -984,16 +1035,19 @@ export function registerChatHandlers(
         await buildHydrateOpts(db, opts, { fresh: false, chatModelOverride: opts.chatModel })
       )
       const created = await ensureSpawned(opts.tabId)
-      writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
+      await writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
       return created
     }
   )
 
-  ipcMain.handle('chat:getEffort', (_, taskId: string, mode: string): ChatEffort | null => {
-    const cfg = readProviderConfig(db, taskId, mode)
-    const stored = cfg.chatEffort ?? null
-    return isChatEffort(stored) ? stored : null
-  })
+  ipcMain.handle(
+    'chat:getEffort',
+    async (_, taskId: string, mode: string): Promise<ChatEffort | null> => {
+      const cfg = await readProviderConfig(db, taskId, mode)
+      const stored = cfg.chatEffort ?? null
+      return isChatEffort(stored) ? stored : null
+    }
+  )
 
   ipcMain.handle(
     'chat:setEffort',
@@ -1005,7 +1059,7 @@ export function registerChatHandlers(
       // first spawn via buildSpawnArgs reading the (now-updated) skeleton.
       const liveState = getSessionTerminalState(opts.tabId)
       if (liveState === 'not-spawned') {
-        writeChatEffort(db, opts.taskId, opts.mode, opts.chatEffort)
+        await writeChatEffort(db, opts.taskId, opts.mode, opts.chatEffort)
         updateSessionChatEffort(opts.tabId, opts.chatEffort)
         const refreshed = getSessionInfo(opts.tabId)
         if (refreshed) return refreshed
@@ -1018,16 +1072,16 @@ export function registerChatHandlers(
         await buildHydrateOpts(db, opts, { fresh: false, chatEffortOverride: opts.chatEffort })
       )
       const created = await ensureSpawned(opts.tabId)
-      writeChatEffort(db, opts.taskId, opts.mode, opts.chatEffort)
+      await writeChatEffort(db, opts.taskId, opts.mode, opts.chatEffort)
       return created
     }
   )
 
   ipcMain.handle(
     'chat:getCollaboration',
-    (_, taskId: string, mode: string): ChatCollaborationMode | null => {
+    async (_, taskId: string, mode: string): Promise<ChatCollaborationMode | null> => {
       if (!modeSupportsCollaboration(mode)) return null
-      const cfg = readProviderConfig(db, taskId, mode)
+      const cfg = await readProviderConfig(db, taskId, mode)
       const stored = cfg.chatCollaboration ?? null
       return isChatCollaborationMode(stored) ? stored : null
     }
@@ -1049,7 +1103,7 @@ export function registerChatHandlers(
       // off the skeleton when the first spawn builds the driver context.
       const liveState = getSessionTerminalState(opts.tabId)
       if (liveState === 'not-spawned') {
-        writeChatCollaboration(db, opts.taskId, opts.mode, opts.chatCollaboration)
+        await writeChatCollaboration(db, opts.taskId, opts.mode, opts.chatCollaboration)
         updateSessionChatCollaboration(opts.tabId, opts.chatCollaboration)
         const refreshed = getSessionInfo(opts.tabId)
         if (refreshed) return refreshed
@@ -1065,14 +1119,14 @@ export function registerChatHandlers(
         })
       )
       const created = await ensureSpawned(opts.tabId)
-      writeChatCollaboration(db, opts.taskId, opts.mode, opts.chatCollaboration)
+      await writeChatCollaboration(db, opts.taskId, opts.mode, opts.chatCollaboration)
       return created
     }
   )
 
-  ipcMain.handle('chat:getFastMode', (_, taskId: string, mode: string): boolean => {
+  ipcMain.handle('chat:getFastMode', async (_, taskId: string, mode: string): Promise<boolean> => {
     if (!modeSupportsFastMode(mode)) return false
-    const cfg = readProviderConfig(db, taskId, mode)
+    const cfg = await readProviderConfig(db, taskId, mode)
     return cfg.chatFastMode ?? false
   })
 
@@ -1092,7 +1146,7 @@ export function registerChatHandlers(
       // the skeleton when building the driver context.
       const liveState = getSessionTerminalState(opts.tabId)
       if (liveState === 'not-spawned') {
-        writeChatFastMode(db, opts.taskId, opts.mode, opts.chatFastMode)
+        await writeChatFastMode(db, opts.taskId, opts.mode, opts.chatFastMode)
         updateSessionChatFastMode(opts.tabId, opts.chatFastMode)
         const refreshed = getSessionInfo(opts.tabId)
         if (refreshed) return refreshed
@@ -1106,7 +1160,7 @@ export function registerChatHandlers(
         })
       )
       const created = await ensureSpawned(opts.tabId)
-      writeChatFastMode(db, opts.taskId, opts.mode, opts.chatFastMode)
+      await writeChatFastMode(db, opts.taskId, opts.mode, opts.chatFastMode)
       return created
     }
   )
@@ -1130,17 +1184,20 @@ export function registerChatHandlers(
     }
   )
 
-  ipcMain.handle('chat:bumpAutocompleteUsage', (_, source: string, name: string): void => {
-    try {
-      bumpAutocompleteUsage(db, source, name)
-    } catch (err) {
-      console.error('[chat-handlers] bumpAutocompleteUsage failed:', err)
+  ipcMain.handle(
+    'chat:bumpAutocompleteUsage',
+    async (_, source: string, name: string): Promise<void> => {
+      try {
+        await bumpAutocompleteUsage(db, source, name)
+      } catch (err) {
+        console.error('[chat-handlers] bumpAutocompleteUsage failed:', err)
+      }
     }
-  })
+  )
 
-  ipcMain.handle('chat:getAutocompleteUsage', (): UsageMap => {
+  ipcMain.handle('chat:getAutocompleteUsage', async (): Promise<UsageMap> => {
     try {
-      return getAutocompleteUsage(db)
+      return await getAutocompleteUsage(db)
     } catch (err) {
       console.error('[chat-handlers] getAutocompleteUsage failed:', err)
       return {}

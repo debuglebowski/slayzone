@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
 import type { ColumnConfig } from '@slayzone/projects/shared'
@@ -129,7 +129,7 @@ export function parseTasks(rows: Record<string, unknown>[]): Task[] {
 
 /** Attaches transient worktree_color field. Lazy-detects for cold projects (one IPC per
  *  unique project per process lifetime). Tasks without worktree_path are returned untouched. */
-export async function attachWorktreeColors(db: Database, tasks: Task[]): Promise<Task[]> {
+export async function attachWorktreeColors(db: SlayzoneDb, tasks: Task[]): Promise<Task[]> {
   const projectIds = new Set<string>()
   for (const t of tasks) {
     if (t.worktree_path && t.project_id) projectIds.add(t.project_id)
@@ -138,9 +138,10 @@ export async function attachWorktreeColors(db: Database, tasks: Task[]): Promise
 
   const ids = [...projectIds]
   const placeholders = ids.map(() => '?').join(',')
-  const rows = db
-    .prepare(`SELECT id, path FROM projects WHERE id IN (${placeholders})`)
-    .all(...ids) as { id: string; path: string }[]
+  const rows = (await db.all<{ id: string; path: string }>(
+    `SELECT id, path FROM projects WHERE id IN (${placeholders})`,
+    ids
+  )) as { id: string; path: string }[]
   const projectPaths = new Map(rows.filter((r) => r.path).map((r) => [r.id, r.path]))
 
   await Promise.all([...projectPaths.values()].map((p) => ensureProjectWorktreeColors(p)))
@@ -155,14 +156,14 @@ export async function attachWorktreeColors(db: Database, tasks: Task[]): Promise
 }
 
 export async function parseAndColorTasks(
-  db: Database,
+  db: SlayzoneDb,
   rows: Record<string, unknown>[]
 ): Promise<Task[]> {
   return attachWorktreeColors(db, parseTasks(rows))
 }
 
 export async function parseAndColorTask(
-  db: Database,
+  db: SlayzoneDb,
   row: Record<string, unknown> | undefined
 ): Promise<Task | null> {
   const task = parseTask(row)
@@ -172,7 +173,7 @@ export async function parseAndColorTask(
 }
 
 export async function colorOne<T extends Task | null | undefined>(
-  db: Database,
+  db: SlayzoneDb,
   task: T
 ): Promise<T> {
   if (!task) return task
@@ -180,21 +181,25 @@ export async function colorOne<T extends Task | null | undefined>(
   return colored as T
 }
 
-export function getProjectColumns(db: Database, projectId: string): ColumnConfig[] | null {
-  const row = db.prepare('SELECT columns_config FROM projects WHERE id = ?').get(projectId) as
-    | { columns_config: string | null }
-    | undefined
+export async function getProjectColumns(
+  db: SlayzoneDb,
+  projectId: string
+): Promise<ColumnConfig[] | null> {
+  const row = await db.get<{ columns_config: string | null }>(
+    'SELECT columns_config FROM projects WHERE id = ?',
+    [projectId]
+  )
   return parseColumnsConfig(row?.columns_config)
 }
 
 export type TerminalModeFlagsRow = { id: string; default_flags: string | null }
 
-export function getEnabledModeDefaults(db: Database): TerminalModeFlagsRow[] {
+export async function getEnabledModeDefaults(db: SlayzoneDb): Promise<TerminalModeFlagsRow[]> {
   let rows: TerminalModeFlagsRow[] = []
   try {
-    rows = db
-      .prepare('SELECT id, default_flags FROM terminal_modes WHERE enabled = 1')
-      .all() as TerminalModeFlagsRow[]
+    rows = await db.all<TerminalModeFlagsRow>(
+      'SELECT id, default_flags FROM terminal_modes WHERE enabled = 1'
+    )
   } catch {
     rows = []
   }
@@ -207,11 +212,15 @@ export function getEnabledModeDefaults(db: Database): TerminalModeFlagsRow[] {
   }))
 }
 
-export function getModeDefaultFlags(db: Database, modeId: string): string | undefined {
+export async function getModeDefaultFlags(
+  db: SlayzoneDb,
+  modeId: string
+): Promise<string | undefined> {
   try {
-    const row = db.prepare('SELECT default_flags FROM terminal_modes WHERE id = ?').get(modeId) as
-      | { default_flags: string | null }
-      | undefined
+    const row = await db.get<{ default_flags: string | null }>(
+      'SELECT default_flags FROM terminal_modes WHERE id = ?',
+      [modeId]
+    )
     if (row) return row.default_flags ?? ''
   } catch {
     // Fall back to built-in defaults when terminal_modes is unavailable or unseeded.
@@ -230,7 +239,7 @@ export function cleanupTaskImmediate(taskId: string): void {
  *  `batchIds` lists every task being cleaned up in the same operation so the shared-worktree
  *  guard ignores siblings that are about to be archived (e.g. cascade from parent). */
 export async function cleanupTaskFull(
-  db: Database,
+  db: SlayzoneDb,
   taskId: string,
   batchIds: string[] = [taskId]
 ): Promise<void> {
@@ -244,9 +253,10 @@ export async function cleanupTaskFull(
   )
   if (existsSync(artifactsBaseDir)) rmSync(artifactsBaseDir, { recursive: true, force: true })
 
-  const task = db.prepare('SELECT worktree_path, project_id FROM tasks WHERE id = ?').get(taskId) as
-    | { worktree_path: string | null; project_id: string }
-    | undefined
+  const task = await db.get<{ worktree_path: string | null; project_id: string }>(
+    'SELECT worktree_path, project_id FROM tasks WHERE id = ?',
+    [taskId]
+  )
 
   if (!task?.worktree_path) return
 
@@ -255,16 +265,15 @@ export async function cleanupTaskFull(
   // siblings short-circuit on `existsSync(worktreePath)` inside removeWorktree.
   const ids = batchIds.length > 0 ? batchIds : [taskId]
   const placeholders = ids.map(() => '?').join(',')
-  const sharedRow = db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders}) AND archived_at IS NULL AND deleted_at IS NULL`
-    )
-    .get(task.worktree_path, ...ids) as { n: number } | undefined
+  const sharedRow = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders}) AND archived_at IS NULL AND deleted_at IS NULL`,
+    [task.worktree_path, ...ids]
+  )
   if ((sharedRow?.n ?? 0) > 0) return
 
-  const project = db.prepare('SELECT path FROM projects WHERE id = ?').get(task.project_id) as
-    | { path: string }
-    | undefined
+  const project = await db.get<{ path: string }>('SELECT path FROM projects WHERE id = ?', [
+    task.project_id
+  ])
 
   if (project?.path) {
     try {
@@ -298,32 +307,34 @@ function parseBooleanSetting(value: string | null | undefined): boolean {
   return value === '1' || value.toLowerCase() === 'true'
 }
 
-function isAutoCreateWorktreeEnabled(db: Database, projectId: string): boolean {
-  const projectRow = db
-    .prepare('SELECT auto_create_worktree_on_task_create FROM projects WHERE id = ?')
-    .get(projectId) as { auto_create_worktree_on_task_create: number | null } | undefined
+async function isAutoCreateWorktreeEnabled(db: SlayzoneDb, projectId: string): Promise<boolean> {
+  const projectRow = await db.get<{ auto_create_worktree_on_task_create: number | null }>(
+    'SELECT auto_create_worktree_on_task_create FROM projects WHERE id = ?',
+    [projectId]
+  )
 
   if (projectRow?.auto_create_worktree_on_task_create === 1) return true
   if (projectRow?.auto_create_worktree_on_task_create === 0) return false
 
-  const globalRow = db
-    .prepare("SELECT value FROM settings WHERE key = 'auto_create_worktree_on_task_create'")
-    .get() as { value: string } | undefined
+  const globalRow = await db.get<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'auto_create_worktree_on_task_create'"
+  )
   return parseBooleanSetting(globalRow?.value)
 }
 
 export async function maybeAutoCreateWorktree(
-  db: Database,
+  db: SlayzoneDb,
   taskId: string,
   projectId: string,
   taskTitle: string,
   repoName?: string | null
 ): Promise<void> {
-  if (!isAutoCreateWorktreeEnabled(db, projectId)) return
+  if (!(await isAutoCreateWorktreeEnabled(db, projectId))) return
 
-  const projectRow = db
-    .prepare('SELECT path, worktree_source_branch FROM projects WHERE id = ?')
-    .get(projectId) as { path: string | null; worktree_source_branch: string | null } | undefined
+  const projectRow = await db.get<{
+    path: string | null
+    worktree_source_branch: string | null
+  }>('SELECT path, worktree_source_branch FROM projects WHERE id = ?', [projectId])
   if (!projectRow?.path) {
     runtimeAdapters.recordDiagnosticEvent({
       level: 'info',
@@ -359,11 +370,8 @@ export async function maybeAutoCreateWorktree(
   }
 
   const baseTemplate =
-    (
-      db.prepare("SELECT value FROM settings WHERE key = 'worktree_base_path'").get() as
-        | { value: string }
-        | undefined
-    )?.value || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+    (await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'worktree_base_path'"))
+      ?.value || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
   const basePath = resolveWorktreeBasePathTemplate(baseTemplate, repoPath)
   const branch = slugify(taskTitle) || `task-${taskId.slice(0, 8)}`
   const worktreePath = path.join(basePath, branch)
@@ -378,11 +386,14 @@ export async function maybeAutoCreateWorktree(
     // Git may exit non-zero after creating the worktree (e.g. post-checkout hook failure).
     // If the dir exists, still link it — better than orphaning a worktree the user can see.
     if (existsSync(worktreePath)) {
-      db.prepare(`
+      await db.run(
+        `
         UPDATE tasks
         SET worktree_path = ?, worktree_parent_branch = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(worktreePath, parentBranch, taskId)
+      `,
+        [worktreePath, parentBranch, taskId]
+      )
       runtimeAdapters.recordDiagnosticEvent({
         level: 'warn',
         source: 'task',
@@ -407,11 +418,14 @@ export async function maybeAutoCreateWorktree(
   }
 
   // Worktree created — link to task before any post-creation steps
-  db.prepare(`
+  await db.run(
+    `
     UPDATE tasks
     SET worktree_path = ?, worktree_parent_branch = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).run(worktreePath, parentBranch, taskId)
+  `,
+    [worktreePath, parentBranch, taskId]
+  )
   runtimeAdapters.recordDiagnosticEvent({
     level: 'info',
     source: 'task',
@@ -423,7 +437,7 @@ export async function maybeAutoCreateWorktree(
 
   // Block B: Post-creation extras (non-critical, won't affect linkage)
   try {
-    const { behavior: copyBehavior, customPaths } = resolveCopyBehavior(db, projectId)
+    const { behavior: copyBehavior, customPaths } = await resolveCopyBehavior(db, projectId)
     if (copyBehavior === 'all' || copyBehavior === 'custom') {
       await copyIgnoredFiles(repoPath, worktreePath, copyBehavior, customPaths)
     }
@@ -443,12 +457,13 @@ export async function maybeAutoCreateWorktree(
   void runWorktreeSetupScript(worktreePath, repoPath, sourceBranch)
 }
 
-export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
-  const existing = db
-    .prepare('SELECT project_id, status, is_temporary FROM tasks WHERE id = ?')
-    .get(data.id) as { project_id: string; status: string; is_temporary: number } | undefined
+export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise<Task | null> {
+  const existing = await db.get<{ project_id: string; status: string; is_temporary: number }>(
+    'SELECT project_id, status, is_temporary FROM tasks WHERE id = ?',
+    [data.id]
+  )
   const targetProjectId = data.projectId ?? existing?.project_id
-  const targetColumns = targetProjectId ? getProjectColumns(db, targetProjectId) : null
+  const targetColumns = targetProjectId ? await getProjectColumns(db, targetProjectId) : null
   const projectChanged = data.projectId !== undefined && existing?.project_id !== data.projectId
 
   // Auto-promote a temporary task when its title is renamed. Mirrors "Turn into task" behavior:
@@ -524,14 +539,34 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
     }
   }
   if (data.parentId !== undefined) {
-    const lookupStmt = db.prepare(
-      'SELECT id, project_id, parent_id, archived_at, deleted_at FROM tasks WHERE id = ?'
-    )
+    // `validateReparent` does synchronous `lookup(id)` calls (task, parent, and the
+    // ancestor chain walking up from parent). Pre-fetch every row it could touch into
+    // a Map up-front, then back the sync lookup with it. The recursive CTE collects the
+    // task row, the parent row, and all ancestors of the parent.
+    const lookupRows =
+      data.parentId === null
+        ? await db.all<ReparentTaskRow>(
+            'SELECT id, project_id, parent_id, archived_at, deleted_at FROM tasks WHERE id = ?',
+            [data.id]
+          )
+        : await db.all<ReparentTaskRow>(
+            `WITH RECURSIVE ancestors(id, project_id, parent_id, archived_at, deleted_at) AS (
+               SELECT id, project_id, parent_id, archived_at, deleted_at FROM tasks WHERE id = ?
+               UNION
+               SELECT t.id, t.project_id, t.parent_id, t.archived_at, t.deleted_at
+               FROM tasks t JOIN ancestors a ON t.id = a.parent_id
+             )
+             SELECT id, project_id, parent_id, archived_at, deleted_at FROM ancestors
+             UNION
+             SELECT id, project_id, parent_id, archived_at, deleted_at FROM tasks WHERE id = ?`,
+            [data.parentId, data.id]
+          )
+    const lookupMap = new Map(lookupRows.map((r) => [r.id, r]))
     const result = validateReparent({
       taskId: data.id,
       parentId: data.parentId,
       targetProjectId,
-      lookup: (id) => (lookupStmt.get(id) as ReparentTaskRow | undefined) ?? null
+      lookup: (id) => lookupMap.get(id) ?? null
     })
     if (!result.ok) {
       throw new Error(
@@ -614,9 +649,10 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
       shouldResetConversationIds
     ) {
       // Read current provider_config
-      const currentRow = db
-        .prepare('SELECT provider_config FROM tasks WHERE id = ?')
-        .get(data.id) as { provider_config: string } | undefined
+      const currentRow = await db.get<{ provider_config: string }>(
+        'SELECT provider_config FROM tasks WHERE id = ?',
+        [data.id]
+      )
       const current: ProviderConfig =
         (safeJsonParse(currentRow?.provider_config) as ProviderConfig) ?? {}
       // Deep merge: per-mode entry merge so partial updates don't clobber existing fields
@@ -646,7 +682,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
 
       // Seed default flags when switching terminal mode
       if (data.terminalMode !== undefined) {
-        const defaultFlags = getModeDefaultFlags(db, data.terminalMode)
+        const defaultFlags = await getModeDefaultFlags(db, data.terminalMode)
         if (defaultFlags !== undefined) {
           merged[data.terminalMode] = { ...merged[data.terminalMode], flags: defaultFlags }
         }
@@ -702,11 +738,12 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
     // (`markTabAgentTouched` in REST, `setTabLockedOp` in IPC) and must not
     // be clobbered by stale renderer state.
     const merged = data.browserTabs
-      ? (() => {
+      ? await (async () => {
           if (!data.browserTabs) return null
-          const existingRow = db
-            .prepare('SELECT browser_tabs FROM tasks WHERE id = ?')
-            .get(data.id) as { browser_tabs: string | null } | undefined
+          const existingRow = await db.get<{ browser_tabs: string | null }>(
+            'SELECT browser_tabs FROM tasks WHERE id = ?',
+            [data.id]
+          )
           let existingTabs: { id: string; agentTouched?: boolean; locked?: boolean }[] = []
           if (existingRow?.browser_tabs) {
             try {
@@ -819,16 +856,14 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   }
 
   if (fields.length === 0) {
-    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as
-      | Record<string, unknown>
-      | undefined
+    const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [data.id])
     return parseTask(row)
   }
 
   fields.push("updated_at = datetime('now')")
   values.push(data.id)
 
-  db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+  await db.run(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, values)
 
   const effectiveStatus = normalizedStatusForWrite
   const reachedTerminal =
@@ -847,9 +882,9 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
   }
   // Clear snooze when task reaches terminal status
   if (reachedTerminal && !fields.some((f) => f.startsWith('snoozed_until'))) {
-    db.prepare(
-      'UPDATE tasks SET snoozed_until = NULL WHERE id = ? AND snoozed_until IS NOT NULL'
-    ).run(data.id)
+    await db.run('UPDATE tasks SET snoozed_until = NULL WHERE id = ? AND snoozed_until IS NOT NULL', [
+      data.id
+    ])
   }
   // Revive path: task moved from a terminal status (e.g. `done`) back to an active
   // one (e.g. `in_progress`). Signal the renderer to respawn the main AI tab so
@@ -858,9 +893,7 @@ export function updateTask(db: Database, data: UpdateTaskInput): Task | null {
     runtimeAdapters.requestPtyRespawn(data.id)
   }
 
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(data.id) as
-    | Record<string, unknown>
-    | undefined
+  const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [data.id])
   return parseTask(row)
 }
 

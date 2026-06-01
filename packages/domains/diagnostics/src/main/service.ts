@@ -1,7 +1,7 @@
 import electron, { type IpcMain, type App } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Database } from 'better-sqlite3'
+import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   ClientDiagnosticEventInput,
   ClientErrorEventInput,
@@ -47,8 +47,8 @@ const CRITICAL_SETTINGS_KEYS = new Set([
   CONFIG_KEYS.retentionDays
 ])
 
-let settingsDb: Database | null = null // main DB — reads/writes diagnostics config from settings table
-let diagnosticsDb: Database | null = null // separate diagnostics-only DB — writes events to slayzone.dev.diagnostics.sqlite
+let settingsDb: SlayzoneDb | null = null // main DB — reads/writes diagnostics config from settings table
+let diagnosticsDb: SlayzoneDb | null = null // separate diagnostics-only DB — writes events to slayzone.dev.diagnostics.sqlite
 let isIpcInstrumented = false
 let cachedConfig: DiagnosticsConfig | null = null
 
@@ -99,49 +99,70 @@ function intFromSetting(value: string | null | undefined, fallback: number): num
   return parsed
 }
 
-function getSetting(db: Database, key: string): string | null {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+async function getSetting(db: SlayzoneDb, key: string): Promise<string | null> {
+  const row = (await db.prepare('SELECT value FROM settings WHERE key = ?').get(key)) as
     | { value: string }
     | undefined
   return row?.value ?? null
 }
 
-function setSetting(db: Database, key: string, value: string): void {
-  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
+async function setSetting(db: SlayzoneDb, key: string, value: string): Promise<void> {
+  await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
 }
 
-export function getDiagnosticsConfig(): DiagnosticsConfig {
+// Reads diagnostics config from the settings DB and populates the cache. Reads
+// are now async (worker-thread DB), so this seeds `cachedConfig` once and the
+// synchronous `getDiagnosticsConfig()` serves the hot path (per-event + IPC
+// wrapper) from that cache. Called on register and after every config save.
+async function loadDiagnosticsConfig(): Promise<DiagnosticsConfig> {
   if (!settingsDb) return DEFAULT_CONFIG
   if (cachedConfig) return cachedConfig
   cachedConfig = {
-    enabled: boolFromSetting(getSetting(settingsDb, CONFIG_KEYS.enabled), DEFAULT_CONFIG.enabled),
-    verbose: boolFromSetting(getSetting(settingsDb, CONFIG_KEYS.verbose), DEFAULT_CONFIG.verbose),
+    enabled: boolFromSetting(
+      await getSetting(settingsDb, CONFIG_KEYS.enabled),
+      DEFAULT_CONFIG.enabled
+    ),
+    verbose: boolFromSetting(
+      await getSetting(settingsDb, CONFIG_KEYS.verbose),
+      DEFAULT_CONFIG.verbose
+    ),
     includePtyOutput: boolFromSetting(
-      getSetting(settingsDb, CONFIG_KEYS.includePtyOutput),
+      await getSetting(settingsDb, CONFIG_KEYS.includePtyOutput),
       DEFAULT_CONFIG.includePtyOutput
     ),
     retentionDays: intFromSetting(
-      getSetting(settingsDb, CONFIG_KEYS.retentionDays),
+      await getSetting(settingsDb, CONFIG_KEYS.retentionDays),
       DEFAULT_CONFIG.retentionDays
     )
   }
   return cachedConfig
 }
 
-function saveDiagnosticsConfig(partial: Partial<DiagnosticsConfig>): DiagnosticsConfig {
+// Synchronous, cache-only view of the config. The DB read happens out-of-band
+// in loadDiagnosticsConfig; until that completes the cache is null and we fall
+// back to defaults. Keeping this sync preserves the fire-and-forget contract of
+// recordDiagnosticEvent and the IPC instrumentation hot path.
+export function getDiagnosticsConfig(): DiagnosticsConfig {
+  if (!settingsDb) return DEFAULT_CONFIG
+  return cachedConfig ?? DEFAULT_CONFIG
+}
+
+async function saveDiagnosticsConfig(
+  partial: Partial<DiagnosticsConfig>
+): Promise<DiagnosticsConfig> {
   if (!settingsDb) return DEFAULT_CONFIG
   const next: DiagnosticsConfig = {
-    ...getDiagnosticsConfig(),
+    ...(await loadDiagnosticsConfig()),
     ...partial
   }
 
-  setSetting(settingsDb, CONFIG_KEYS.enabled, next.enabled ? '1' : '0')
-  setSetting(settingsDb, CONFIG_KEYS.verbose, next.verbose ? '1' : '0')
-  setSetting(settingsDb, CONFIG_KEYS.includePtyOutput, next.includePtyOutput ? '1' : '0')
-  setSetting(settingsDb, CONFIG_KEYS.retentionDays, String(Math.max(1, next.retentionDays)))
+  await setSetting(settingsDb, CONFIG_KEYS.enabled, next.enabled ? '1' : '0')
+  await setSetting(settingsDb, CONFIG_KEYS.verbose, next.verbose ? '1' : '0')
+  await setSetting(settingsDb, CONFIG_KEYS.includePtyOutput, next.includePtyOutput ? '1' : '0')
+  await setSetting(settingsDb, CONFIG_KEYS.retentionDays, String(Math.max(1, next.retentionDays)))
 
   cachedConfig = null
-  return getDiagnosticsConfig()
+  return loadDiagnosticsConfig()
 }
 
 function maybeTrimLongString(value: string): string {
@@ -231,28 +252,46 @@ export function recordDiagnosticEvent(event: DiagnosticEvent): void {
   writeQueue.push(stamped)
 
   // Errors are signal — flush now so a subsequent crash doesn't lose them.
+  // Flush is async (worker DB); fire-and-forget to keep this path synchronous.
   if (stamped.level === 'error') {
-    flushWriteQueue()
+    void flushWriteQueue()
     return
   }
 
   if (writeQueue.length >= WRITE_BATCH_SIZE) {
-    flushWriteQueue()
+    void flushWriteQueue()
     return
   }
 
   if (!flushTimer) {
-    flushTimer = setTimeout(flushWriteQueue, WRITE_FLUSH_INTERVAL_MS)
+    flushTimer = setTimeout(() => void flushWriteQueue(), WRITE_FLUSH_INTERVAL_MS)
   }
 }
 
-export function flushWriteQueue(): void {
+const INSERT_EVENT_SQL = `
+      INSERT INTO diagnostics_events (
+        id, ts_ms, level, source, event, trace_id, task_id, project_id,
+        session_id, channel, message, payload_json, redaction_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+
+// Serializes overlapping flushes. The flush is async now (worker DB) and can be
+// triggered concurrently (timer, error, batch-size, export). Chaining keeps the
+// per-batch single-transaction semantics and stops two batchTxns interleaving.
+let flushInFlight: Promise<void> = Promise.resolve()
+
+export function flushWriteQueue(): Promise<void> {
   if (flushTimer) {
     clearTimeout(flushTimer)
     flushTimer = null
   }
+  flushInFlight = flushInFlight.then(drainWriteQueue, drainWriteQueue)
+  return flushInFlight
+}
+
+async function drainWriteQueue(): Promise<void> {
   if (writeQueue.length === 0 && droppedSinceLastFlush === 0) return
-  if (!diagnosticsDb || !diagnosticsDb.open) {
+  if (!diagnosticsDb) {
     // Hold the queue — DB may come back. Cap stops unbounded growth; once
     // cap is hit, drop counter takes over.
     return
@@ -276,15 +315,11 @@ export function flushWriteQueue(): void {
   }
 
   try {
-    const stmt = diagnosticsDb.prepare(`
-      INSERT INTO diagnostics_events (
-        id, ts_ms, level, source, event, trace_id, task_id, project_id,
-        session_id, channel, message, payload_json, redaction_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-    const txn = diagnosticsDb.transaction((events: DiagnosticEvent[]) => {
-      for (const event of events) {
-        stmt.run(
+    await diagnosticsDb.batchTxn(
+      batch.map((event) => ({
+        type: 'run' as const,
+        sql: INSERT_EVENT_SQL,
+        params: [
           event.id ?? crypto.randomUUID(),
           event.tsMs ?? Date.now(),
           event.level,
@@ -298,10 +333,9 @@ export function flushWriteQueue(): void {
           event.message ?? null,
           buildPayloadJson(event.payload),
           REDACTION_VERSION
-        )
-      }
-    })
-    txn(batch)
+        ]
+      }))
+    )
   } catch {
     // Race: DB may close mid-flush. Swallow — diagnostics must never escalate to fatal.
   }
@@ -599,19 +633,19 @@ async function runExport(request: DiagnosticsExportRequest): Promise<Diagnostics
 
   // Drain queued events so the export reflects the latest state, not whatever
   // happened to land in the DB before the periodic flush ran.
-  flushWriteQueue()
+  await flushWriteQueue()
 
   const fromTsMs = Math.max(0, request.fromTsMs)
   const toTsMs = Math.max(fromTsMs, request.toTsMs)
 
-  const rows = diagnosticsDb
+  const rows = (await diagnosticsDb
     .prepare(`
       SELECT id, ts_ms, level, source, event, trace_id, task_id, project_id, session_id, channel, message, payload_json
       FROM diagnostics_events
       WHERE ts_ms BETWEEN ? AND ?
       ORDER BY ts_ms ASC
     `)
-    .all(fromTsMs, toTsMs) as DiagnosticsEventRow[]
+    .all(fromTsMs, toTsMs)) as DiagnosticsEventRow[]
 
   const config = getDiagnosticsConfig()
   const bundle: DiagnosticsExportBundle = {
@@ -682,12 +716,17 @@ async function runExport(request: DiagnosticsExportRequest): Promise<Diagnostics
 
 export function registerDiagnosticsHandlers(
   ipcMain: IpcMain,
-  db: Database,
-  eventsDb: Database
+  db: SlayzoneDb,
+  eventsDb: SlayzoneDb
 ): void {
   settingsDb = db // main DB — for config settings reads/writes
   diagnosticsDb = eventsDb // separate diagnostics DB — writes to slayzone.dev.diagnostics.sqlite
   cachedConfig = null
+
+  // Warm the config cache from the (async, worker-thread) settings DB so the
+  // synchronous getDiagnosticsConfig() hot path serves real values. Fire-and-
+  // forget — until it resolves, callers fall back to defaults.
+  void loadDiagnosticsConfig()
 
   // Flush events buffered before registration. Splice out so re-registration
   // (tests) doesn't double-write, and recordDiagnosticEvent now writes directly.
@@ -826,7 +865,7 @@ export function registerProcessDiagnostics(electronApp: App): void {
   })
 }
 
-export function stopDiagnostics(): void {
-  flushWriteQueue()
+export async function stopDiagnostics(): Promise<void> {
+  await flushWriteQueue()
   stopRetentionScheduler()
 }

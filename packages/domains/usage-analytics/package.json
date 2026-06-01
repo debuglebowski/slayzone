@@ -18,7 +18,8 @@
     "@slayzone/types": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "lucide-react": "^0.562.0",
-    "recharts": "^2.15.3"
+    "recharts": "^2.15.3",
+    "@slayzone/platform": "workspace:*"
   },
   "peerDependencies": {
     "electron": "^41.0.0",

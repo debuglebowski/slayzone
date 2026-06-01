@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./main": "./src/main/index.ts"
+    "./main": "./src/main/index.ts",
+    "./recorder": "./src/main/recorder.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
@@ -19,5 +20,8 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@slayzone/platform": "workspace:*"
   }
 }
