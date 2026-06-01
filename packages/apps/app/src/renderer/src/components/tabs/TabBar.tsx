@@ -126,6 +126,7 @@ function TabContent({
         isDone={isDone}
         needsAttention={needsAttention}
         tooltipSide="bottom"
+        size={10}
       />
       {isSubTask && <span className="text-[10px] text-muted-foreground/60 shrink-0">SUB</span>}
       {isEditing ? (

@@ -211,6 +211,7 @@ export function KanbanCard({
                             isDone={isDone}
                             alwaysShow
                             noTooltip
+                            size={10}
                           />
                         </button>
                       </TaskProgressPopover>
