@@ -1020,6 +1020,9 @@ importers:
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
       zod:
         specifier: ^4
         version: 4.3.5
@@ -1030,6 +1033,9 @@ importers:
       '@types/diff':
         specifier: ^7.0.0
         version: 7.0.2
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
       better-sqlite3:
         specifier: ^12.4.1
         version: 12.8.0
