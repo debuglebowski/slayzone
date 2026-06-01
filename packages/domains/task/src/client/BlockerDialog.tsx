@@ -5,7 +5,7 @@ import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'
 import { SearchIcon } from 'lucide-react'
-import { BlockerStatusIcon } from '@slayzone/task/client'
+import { BlockerStatusIcon } from './TaskMetadataSidebar'
 
 interface BlockerDialogProps {
   taskId: string | null

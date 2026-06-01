@@ -25,7 +25,7 @@ import { KanbanCard } from './KanbanCard'
 import { KanbanPicker } from './KanbanPicker'
 import { useKanbanKeyboard } from './useKanbanKeyboard'
 import { useKanbanSelection } from './useKanbanSelection'
-import { BlockerDialog } from './BlockerDialog'
+import { BlockerDialog } from '@slayzone/task/client'
 import { useAppearance, useDialogStore } from '@slayzone/settings/client'
 import { track } from '@slayzone/telemetry/client'
 

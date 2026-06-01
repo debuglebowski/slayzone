@@ -54,8 +54,7 @@ import {
 } from 'lucide-react'
 import { track } from '@slayzone/telemetry/client'
 import { format } from 'date-fns'
-import { getSnoozePresets, CustomSnoozeDialog } from '@slayzone/task/client'
-import { BlockerDialog } from './BlockerDialog'
+import { getSnoozePresets, CustomSnoozeDialog, BlockerDialog } from '@slayzone/task/client'
 
 interface TaskContextMenuProps {
   task: Task

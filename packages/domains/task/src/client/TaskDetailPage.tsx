@@ -119,6 +119,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
 import { TaskMetadataSidebar, ExternalSyncCard } from './TaskMetadataSidebar'
+import { TaskStatusMenu } from './TaskStatusMenu'
 import {
   normalizeDescription,
   stripMarkdown,
@@ -2352,57 +2353,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 </div>
               ) : (
                 <div className="flex items-center gap-2 shrink-0">
-                  {(() => {
-                    const statusStyle = getColumnStatusStyle(task.status, project?.columns_config)
-                    if (!statusStyle) return null
-                    const StatusIcon = statusStyle.icon
-                    return (
-                      <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
-                        <PopoverTrigger asChild>
-                          <button
-                            type="button"
-                            className="shrink-0 cursor-pointer transition-opacity hover:opacity-70"
-                          >
-                            <StatusIcon
-                              className={cn('size-5', statusStyle.iconClass)}
-                              strokeWidth={3}
-                            />
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-44 p-1" align="start">
-                          {statusOptions.map((opt) => {
-                            const optStyle = getColumnStatusStyle(
-                              opt.value,
-                              project?.columns_config
-                            )
-                            const OptIcon = optStyle?.icon ?? Circle
-                            const isCurrent = opt.value === task.status
-                            return (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                className={cn(
-                                  'flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm cursor-pointer hover:bg-accent',
-                                  isCurrent && 'bg-accent font-medium'
-                                )}
-                                onClick={async () => {
-                                  const updated = await window.api.db.updateTask({
-                                    id: task.id,
-                                    status: opt.value
-                                  })
-                                  handleTaskUpdate(updated)
-                                  setStatusPopoverOpen(false)
-                                }}
-                              >
-                                <OptIcon className={cn('size-4', optStyle?.iconClass)} />
-                                {opt.label}
-                              </button>
-                            )
-                          })}
-                        </PopoverContent>
-                      </Popover>
-                    )
-                  })()}
+                  <TaskStatusMenu
+                    task={task}
+                    project={project}
+                    statusOptions={statusOptions}
+                    onTaskUpdate={handleTaskUpdate}
+                  />
                   <div className="inline-grid items-center min-w-[2ch]">
                     <span className="invisible col-start-1 row-start-1 text-2xl font-bold whitespace-pre">
                       {titleValue || ' '}
