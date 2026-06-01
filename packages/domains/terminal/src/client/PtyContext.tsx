@@ -8,16 +8,15 @@ import {
   useMemo,
   type ReactNode
 } from 'react'
-import { useVisibleInterval } from '@slayzone/ui'
 import type { TerminalState, PromptInfo } from '@slayzone/terminal/shared'
 import { disposeTerminal } from './terminal-cache'
+import { useTerminalStateStore } from './useTerminalStateStore'
 
 // Per-task state - no buffer (backend is source of truth)
 export interface PtyState {
   lastSeq: number // Last sequence number received for ordering
   exitCode?: number
   crashOutput?: string
-  state: TerminalState
   pendingPrompt?: PromptInfo
   quickRunPrompt?: string
 }
@@ -31,128 +30,6 @@ type DevServerCallback = (url: string) => void
 type TitleChangeCallback = (title: string) => void
 
 const ALIVE_STATES: Set<TerminalState> = new Set(['running', 'idle'])
-
-function taskIdFromSessionId(sessionId: string): string {
-  const idx = sessionId.indexOf(':')
-  return idx >= 0 ? sessionId.substring(0, idx) : sessionId
-}
-
-export function applyExitEvent(
-  sessionId: string,
-  exitCode: number,
-  state: PtyState | undefined,
-  stateSubs: Map<string, Set<StateChangeCallback>>,
-  exitSubs: Map<string, Set<ExitCallback>>,
-  reason?: string | null
-): void {
-  if (state) {
-    // Ensure state transitions to dead — the main process may not always
-    // emit pty:state-change (e.g. killPty deletes session before onExit fires)
-    if (state.state !== 'dead') {
-      const oldState = state.state
-      state.state = 'dead'
-      const currentStateSubs = stateSubs.get(sessionId)
-      if (currentStateSubs) {
-        currentStateSubs.forEach((cb) => cb('dead', oldState))
-      }
-    }
-  }
-
-  // Always notify explicit exit subscribers, even if session state was
-  // already cleaned up before the exit event reached the renderer.
-  const subs = exitSubs.get(sessionId)
-  if (subs) {
-    subs.forEach((cb) => cb(exitCode, reason ?? null))
-  }
-}
-
-/**
- * Drop a session's state-subscriber set ONLY when it has no subscribers.
- *
- * State subscribers can OUTLIVE the PTY session they watch: a single task is
- * killed + respawned (Retry/Reset/Stop/auto-revive all do `resetTaskState`
- * then `kill`) while its tab stays open, reusing the same sessionId. The
- * sidebar tracker (`useTerminalStateTracking`) keeps one long-lived cb for
- * that task across the respawn. Unconditionally deleting the set on exit /
- * cleanup orphaned that cb — it stopped receiving the recreated session's
- * transitions, so the tab/tree dot froze on its last value (the "spinner
- * stuck on running while the agent is idle" bug). Per-instance subscribers
- * (e.g. each <Terminal>) self-unsubscribe on unmount, so the set is empty
- * for a genuinely-gone session and still gets dropped here.
- */
-export function dropStateSubsIfEmpty(
-  stateSubs: Map<string, Set<StateChangeCallback>>,
-  sessionId: string
-): void {
-  const subs = stateSubs.get(sessionId)
-  if (!subs || subs.size === 0) stateSubs.delete(sessionId)
-}
-
-/**
- * Self-heal: reconcile local terminal state against the authoritative backend
- * session list, notifying state subscribers for anything that drifted.
- *
- * The manual pub/sub has no reconciliation — a single dropped `pty:state-change`
- * (claude's `idleTimeoutMs=Infinity` means an idle agent emits no further IPC to
- * self-correct) leaves the dot frozen forever. This is the missing convergence
- * step: re-pull `session.list()` on focus / after an exit / on a low-freq timer
- * and fix any divergence so the dot can never stick on a stale value. Pure (no
- * `window.api`) so it is unit-testable; mutates `states` in place and fires the
- * same `stateSubs` callbacks the live IPC handlers use.
- *
- * Returns whether any session's alive-ness (running|idle) changed, so the caller
- * can refresh derived active-task tracking only when needed.
- */
-export function reconcileSessionStates(
-  states: Map<string, PtyState>,
-  stateSubs: Map<string, Set<StateChangeCallback>>,
-  hibernated: Set<string>,
-  sessions: Array<{ sessionId: string; state: TerminalState }>
-): boolean {
-  let aliveChanged = false
-  const present = new Map<string, TerminalState>()
-  for (const s of sessions) present.set(s.sessionId, s.state)
-
-  const notify = (sid: string, next: TerminalState, old: TerminalState): void => {
-    stateSubs.get(sid)?.forEach((cb) => cb(next, old))
-  }
-
-  // Pass 1 — adopt backend drift (e.g. a dropped running->idle) and fill entries
-  // a subscriber is waiting on. Never revive a locally-'dead' session: a real
-  // respawn reuses the sessionId and re-creates it via its own IPC, and this
-  // avoids flicker if session.list() raced slightly ahead of a just-applied exit.
-  for (const [sid, listState] of present) {
-    if (hibernated.has(sid)) continue
-    const local = states.get(sid)
-    if (!local) {
-      states.set(sid, { lastSeq: -1, state: listState })
-      notify(sid, listState, 'starting')
-      if (ALIVE_STATES.has(listState)) aliveChanged = true
-      continue
-    }
-    if (local.state !== listState && local.state !== 'dead') {
-      const old = local.state
-      local.state = listState
-      notify(sid, listState, old)
-      if (ALIVE_STATES.has(old) !== ALIVE_STATES.has(listState)) aliveChanged = true
-    }
-  }
-
-  // Pass 2 — a locally-alive session absent from the list has exited (the list
-  // excludes dead/ended/not-spawned sessions), so a dropped pty:exit converges
-  // to 'dead'. Hibernated sessions are intentionally dead-on-backend; skip them.
-  for (const [sid, local] of states) {
-    if (hibernated.has(sid)) continue
-    if (ALIVE_STATES.has(local.state) && !present.has(sid)) {
-      const old = local.state
-      local.state = 'dead'
-      notify(sid, 'dead', old)
-      aliveChanged = true
-    }
-  }
-
-  return aliveChanged
-}
 
 interface PtyContextValue {
   subscribe: (sessionId: string, cb: DataCallback) => () => void
@@ -179,7 +56,6 @@ interface PtyContextValue {
 }
 
 const PtyContext = createContext<PtyContextValue | null>(null)
-const ActiveTaskIdsContext = createContext<Set<string>>(new Set())
 
 export function PtyProvider({ children }: { children: ReactNode }) {
   // Per-sessionId state (metadata only - backend is source of truth for buffer)
@@ -188,17 +64,10 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Per-sessionId subscriber sets
   const dataSubsRef = useRef<Map<string, Set<DataCallback>>>(new Map())
   const exitSubsRef = useRef<Map<string, Set<ExitCallback>>>(new Map())
-  const stateSubsRef = useRef<Map<string, Set<StateChangeCallback>>>(new Map())
   const promptSubsRef = useRef<Map<string, Set<PromptCallback>>>(new Map())
   const sessionDetectedSubsRef = useRef<Map<string, Set<SessionDetectedCallback>>>(new Map())
   const devServerSubsRef = useRef<Map<string, Set<DevServerCallback>>>(new Map())
   const titleSubsRef = useRef<Map<string, Set<TitleChangeCallback>>>(new Map())
-
-  // Sessions the idle-close feature hibernated. The PTY is actually dead, but
-  // we synthesize a 'hibernated' state (💤) and suppress the kill's 'dead'
-  // transition so the sidebar/tab dot shows "sleeping" until reopen. Cleared
-  // when the session transitions back to a live state (reopen).
-  const hibernatedRef = useRef<Set<string>>(new Set())
 
   // Track task IDs with pending prompts for global badge
   const [pendingPromptTaskIds, setPendingPromptTaskIds] = useState<Set<string>>(new Set())
@@ -206,93 +75,14 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   const pendingPromptTaskIdsRef = useRef(pendingPromptTaskIds)
   pendingPromptTaskIdsRef.current = pendingPromptTaskIds
 
-  // Track task IDs with alive terminals (running or idle)
-  const [activeTaskIds, setActiveTaskIds] = useState<Set<string>>(new Set())
-
-  /** Recompute activeTaskIds from statesRef. Only triggers re-render if the set actually changed. */
-  const refreshActiveTaskIds = useCallback(() => {
-    setActiveTaskIds((prev) => {
-      const next = new Set<string>()
-      for (const [sid, s] of statesRef.current) {
-        if (ALIVE_STATES.has(s.state)) next.add(taskIdFromSessionId(sid))
-      }
-      // Avoid new reference if nothing changed
-      if (next.size === prev.size && [...next].every((id) => prev.has(id))) return prev
-      return next
-    })
-  }, [])
-
-  // Self-heal: re-pull the authoritative session list and reconcile any local
-  // drift. The single missing convergence step that keeps a dropped
-  // pty:state-change / pty:exit from freezing the dot forever. Guarded so
-  // overlapping triggers (focus + timer + post-exit) don't pile up.
-  const reconcilingRef = useRef(false)
-  const reconcile = useCallback(async (): Promise<void> => {
-    if (reconcilingRef.current) return
-    reconcilingRef.current = true
-    try {
-      const sessions = await window.api.session.list()
-      const aliveChanged = reconcileSessionStates(
-        statesRef.current,
-        stateSubsRef.current,
-        hibernatedRef.current,
-        sessions
-      )
-      if (aliveChanged) refreshActiveTaskIds()
-    } catch {
-      // Best-effort; the next trigger retries.
-    } finally {
-      reconcilingRef.current = false
-    }
-  }, [refreshActiveTaskIds])
-  // Stable handle so effect/handler closures call the latest reconcile without
-  // re-subscribing the global IPC listeners.
-  const reconcileRef = useRef(reconcile)
-  reconcileRef.current = reconcile
-
-  // Seed from existing sessions on mount. Use the unified session registry so
-  // both PTY and chat-transport sessions hydrate after a renderer reload — the
-  // legacy `pty.list()` only sees pty-manager sessions, leaving chat tabs
-  // stuck on the default 'starting' state.
-  useEffect(() => {
-    performance.mark('sz:pty:start')
-    window.api.session.list().then((sessions) => {
-      for (const s of sessions) {
-        if (ALIVE_STATES.has(s.state)) {
-          const sid = s.sessionId
-          const existing = statesRef.current.get(sid)
-          if (existing) {
-            existing.state = s.state
-          } else {
-            statesRef.current.set(sid, { lastSeq: -1, state: s.state })
-          }
-        }
-      }
-      refreshActiveTaskIds()
-      performance.mark('sz:pty:end')
-    })
-    // Seed hibernated (idle-closed) sessions from the persisted DB flag so the
-    // 💤 dot shows for stale agents at boot, before any live session exists.
-    // Notify state subscribers too: the sidebar/tab tracker may have already
-    // subscribed and read the default 'starting' before this async seed lands,
-    // and there's no live backend state to correct it (the session is dead).
-    window.api.tabs.listHibernatedSessions().then((sessionIds) => {
-      for (const sid of sessionIds) {
-        hibernatedRef.current.add(sid)
-        const existing = statesRef.current.get(sid)
-        const oldState = existing?.state ?? 'starting'
-        if (existing) existing.state = 'hibernated'
-        else statesRef.current.set(sid, { lastSeq: -1, state: 'hibernated' })
-        const subs = stateSubsRef.current.get(sid)
-        if (subs) subs.forEach((cb) => cb('hibernated', oldState))
-      }
-    })
-  }, [refreshActiveTaskIds])
+  // Terminal STATE (incl. hibernation + self-heal reconcile + alive-task
+  // tracking) lives in the reactive store (useTerminalStateStore). PtyContext
+  // owns only the event streams (data/exit/prompt/title/...) + their metadata.
 
   const getOrCreateState = useCallback((sessionId: string): PtyState => {
     let state = statesRef.current.get(sessionId)
     if (!state) {
-      state = { lastSeq: -1, state: 'starting' }
+      state = { lastSeq: -1 }
       statesRef.current.set(sessionId, state)
     }
     return state
@@ -318,23 +108,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     })
 
     const unsubExit = window.api.pty.onExit(async (sessionId, exitCode, reason) => {
-      // Hibernation killed the PTY, but the UI should keep showing 💤 (not
-      // "stopped") until reopen. Preserve the synthesized 'hibernated' state +
-      // its long-lived state subscribers; only drop per-instance subs and fire
-      // explicit exit subscribers.
-      if (hibernatedRef.current.has(sessionId)) {
-        const subs = exitSubsRef.current.get(sessionId)
-        if (subs) subs.forEach((cb) => cb(exitCode, reason ?? null))
-        disposeTerminal(sessionId)
-        dataSubsRef.current.delete(sessionId)
-        promptSubsRef.current.delete(sessionId)
-        sessionDetectedSubsRef.current.delete(sessionId)
-        devServerSubsRef.current.delete(sessionId)
-        titleSubsRef.current.delete(sessionId)
-        refreshActiveTaskIds()
-        return
-      }
-
       const state = statesRef.current.get(sessionId)
 
       if (state) {
@@ -354,60 +127,32 @@ export function PtyProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      applyExitEvent(sessionId, exitCode, state, stateSubsRef.current, exitSubsRef.current, reason)
+      // Fire explicit exit subscribers (the exit event stream). Terminal STATE
+      // (→ 'dead', or preserved 'hibernated') is owned by the reactive store,
+      // which applies its own pty:exit handler + reconcile.
+      const subs = exitSubsRef.current.get(sessionId)
+      if (subs) subs.forEach((cb) => cb(exitCode, reason ?? null))
 
-      // Free xterm.js instance + PtyContext state. Handles the case where Terminal
-      // component is unmounted (tab closed before PTY exits). If Terminal was still
-      // mounted, it already called these synchronously above — all no-ops here.
+      // Free xterm.js instance + this session's event-stream bookkeeping.
       disposeTerminal(sessionId)
       statesRef.current.delete(sessionId)
       dataSubsRef.current.delete(sessionId)
       exitSubsRef.current.delete(sessionId)
-      // Preserve long-lived state subscribers across kill+respawn (same
-      // sessionId reused) so sidebar/tab dots don't freeze. See helper.
-      dropStateSubsIfEmpty(stateSubsRef.current, sessionId)
       promptSubsRef.current.delete(sessionId)
       sessionDetectedSubsRef.current.delete(sessionId)
       devServerSubsRef.current.delete(sessionId)
       titleSubsRef.current.delete(sessionId)
-      refreshActiveTaskIds()
-      // A session just ended — cross-check the fleet for any dropped exit /
-      // transition so a stale dot elsewhere converges now rather than next focus.
-      void reconcileRef.current()
     })
 
+    // Terminal STATE lives in the reactive store (which has its own
+    // onStateChange handler). PtyContext keeps only the pending-prompt side
+    // effect: clear it when the agent leaves the alive set (dead/error).
     const unsubStateChange = window.api.pty.onStateChange((sessionId, newState, oldState) => {
-      // Hibernated session: the kill emits 'dead' — swallow it so the 💤 dot
-      // persists. Any OTHER transition means the agent was reopened/respawned,
-      // so clear the marker and let it flow through normally.
-      if (hibernatedRef.current.has(sessionId)) {
-        if (newState === 'dead') return
-        hibernatedRef.current.delete(sessionId)
-      }
-
-      // Bootstrap state entry if missing — chat sessions may emit before any component subscribes.
-      // The entry is cheap; without it, early transitions are lost and `getState` stays 'starting'.
-      const state = getOrCreateState(sessionId)
-
-      state.state = newState as TerminalState
-
-      const subs = stateSubsRef.current.get(sessionId)
-      if (subs) {
-        subs.forEach((cb) => cb(newState as TerminalState, oldState as TerminalState))
-      }
-
-      // Update active task tracking
-      const wasAlive = ALIVE_STATES.has(oldState as TerminalState)
-      const isAlive = ALIVE_STATES.has(newState as TerminalState)
-      if (wasAlive !== isAlive) refreshActiveTaskIds()
-
-      // Clear pending prompt when state leaves the alive set (e.g. dead/error)
-      if (
-        ALIVE_STATES.has(oldState as TerminalState) &&
-        !ALIVE_STATES.has(newState as TerminalState)
-      ) {
-        state.pendingPrompt = undefined
+      if (ALIVE_STATES.has(oldState) && !ALIVE_STATES.has(newState)) {
+        const state = statesRef.current.get(sessionId)
+        if (state) state.pendingPrompt = undefined
         setPendingPromptTaskIds((prev) => {
+          if (!prev.has(sessionId)) return prev
           const next = new Set(prev)
           next.delete(sessionId)
           return next
@@ -451,19 +196,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     })
 
-    // Idle-close: synthesize a 'hibernated' state and notify state subscribers
-    // so the sidebar/tab dot shows 💤. Fires just before the kill's 'dead'
-    // (which we then swallow above).
-    const unsubHibernated = window.api.pty.onHibernated((sessionId) => {
-      hibernatedRef.current.add(sessionId)
-      const state = getOrCreateState(sessionId)
-      const oldState = state.state
-      state.state = 'hibernated'
-      const subs = stateSubsRef.current.get(sessionId)
-      if (subs) subs.forEach((cb) => cb('hibernated', oldState))
-      refreshActiveTaskIds()
-    })
-
     return () => {
       unsubData()
       unsubExit()
@@ -472,23 +204,8 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       unsubSessionDetected()
       unsubDevServer()
       unsubTitleChange()
-      unsubHibernated()
-    }
-  }, [getOrCreateState, refreshActiveTaskIds])
-
-  // Self-heal triggers. Window focus = the user looking at (possibly stale) dots
-  // (handles 99% of resync needs); the visible-gated timer backstops a tab that
-  // never regains focus. Cheap (session registry is an in-memory merge) and
-  // guarded against overlap inside reconcile. 30s is plenty — the focus event
-  // covers the case that matters.
-  useEffect(() => {
-    const onFocus = (): void => void reconcileRef.current()
-    window.addEventListener('focus', onFocus)
-    return () => {
-      window.removeEventListener('focus', onFocus)
     }
   }, [])
-  useVisibleInterval(() => void reconcileRef.current(), 30_000, { runOnVisible: true })
 
   const subscribe = useCallback(
     (sessionId: string, cb: DataCallback): (() => void) => {
@@ -520,46 +237,16 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Store-backed shim: state lives in the reactive store now. Preserves the
+  // `(newState, oldState)` callback contract that useLoopMode relies on.
   const subscribeState = useCallback(
     (sessionId: string, cb: StateChangeCallback): (() => void) => {
-      // Ensure state exists so onStateChange doesn't drop events
-      getOrCreateState(sessionId)
-
-      let subs = stateSubsRef.current.get(sessionId)
-      if (!subs) {
-        subs = new Set()
-        stateSubsRef.current.set(sessionId, subs)
-      }
-      subs.add(cb)
-
-      // Fetch initial state from backend if we don't have it yet. Goes through
-      // the session registry so chat-transport sessions resolve too — bare
-      // `pty.getState` returns null for chat tabs and leaves them stuck.
-      const state = statesRef.current.get(sessionId)
-      if (!state || state.state === 'starting') {
-        window.api.session.getState(sessionId).then((backendState) => {
-          if (backendState) {
-            const localState = getOrCreateState(sessionId)
-            if (localState.state !== backendState) {
-              const oldState = localState.state
-              localState.state = backendState
-              // Notify all subscribers of the initial state
-              const currentSubs = stateSubsRef.current.get(sessionId)
-              if (currentSubs) {
-                currentSubs.forEach((sub) => sub(backendState, oldState))
-              }
-              // Update active task tracking
-              if (ALIVE_STATES.has(backendState)) refreshActiveTaskIds()
-            }
-          }
-        })
-      }
-
-      return () => {
-        subs!.delete(cb)
-      }
+      return useTerminalStateStore.subscribe(
+        (s) => s.byId[sessionId] ?? 'starting',
+        (next, previous) => cb(next, previous)
+      )
     },
-    [getOrCreateState]
+    []
   )
 
   const subscribePrompt = useCallback((sessionId: string, cb: PromptCallback): (() => void) => {
@@ -629,7 +316,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const getState = useCallback((sessionId: string): TerminalState => {
-    return statesRef.current.get(sessionId)?.state ?? 'starting'
+    return useTerminalStateStore.getState().getSessionState(sessionId)
   }, [])
 
   const getPendingPrompt = useCallback((sessionId: string): PromptInfo | undefined => {
@@ -656,7 +343,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Sequence numbers handle ordering - no need for ignore mechanism
   const resetTaskState = useCallback((sessionId: string): void => {
     statesRef.current.delete(sessionId)
-    hibernatedRef.current.delete(sessionId)
+    useTerminalStateStore.getState().clearSession(sessionId)
     setPendingPromptTaskIds((prev) => {
       const next = new Set(prev)
       next.delete(sessionId)
@@ -667,12 +354,9 @@ export function PtyProvider({ children }: { children: ReactNode }) {
   // Clean up all memory for a task (call when PTY exits or task is deleted)
   const cleanupTask = useCallback((sessionId: string): void => {
     statesRef.current.delete(sessionId)
-    hibernatedRef.current.delete(sessionId)
+    useTerminalStateStore.getState().clearSession(sessionId)
     dataSubsRef.current.delete(sessionId)
     exitSubsRef.current.delete(sessionId)
-    // Preserve long-lived state subscribers across kill+respawn (same
-    // sessionId reused) so sidebar/tab dots don't freeze. See helper.
-    dropStateSubsIfEmpty(stateSubsRef.current, sessionId)
     promptSubsRef.current.delete(sessionId)
     sessionDetectedSubsRef.current.delete(sessionId)
     devServerSubsRef.current.delete(sessionId)
@@ -749,13 +433,7 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     ]
   )
 
-  return (
-    <PtyContext.Provider value={value}>
-      <ActiveTaskIdsContext.Provider value={activeTaskIds}>
-        {children}
-      </ActiveTaskIdsContext.Provider>
-    </PtyContext.Provider>
-  )
+  return <PtyContext.Provider value={value}>{children}</PtyContext.Provider>
 }
 
 export function usePty(): PtyContextValue {
@@ -773,13 +451,4 @@ export function usePty(): PtyContextValue {
 export function usePendingPrompts(): string[] {
   const ctx = usePty()
   return ctx.getPendingPromptTaskIds()
-}
-
-/**
- * Reactive set of task IDs with alive terminals (running or idle).
- * Uses a separate context so changes only re-render consumers of this hook,
- * not all usePty() consumers.
- */
-export function useActiveTaskIds(): Set<string> {
-  return useContext(ActiveTaskIdsContext)
 }
