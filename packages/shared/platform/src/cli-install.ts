@@ -32,7 +32,12 @@ export function getCliBinDir(): string {
 
 export function getCliBinTarget(): string {
   const name = process.platform === 'win32' ? 'slay.cmd' : 'slay'
-  return path.join(getCliBinDir(), name)
+  // Join with the flavor matching the TARGET platform, not the host running this
+  // code — getCliBinDir() returns posix dirs on darwin/linux. On a Windows CI host
+  // the default path.join would emit backslashes into a posix dir. Prod is unaffected
+  // (host OS already matches the branch).
+  const p = process.platform === 'win32' ? path.win32 : path.posix
+  return p.join(getCliBinDir(), name)
 }
 
 export function checkCliInstalled(): { installed: boolean; path?: string } {

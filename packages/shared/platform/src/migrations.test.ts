@@ -117,7 +117,11 @@ describe('migrateStateDir', () => {
 
   // --- Failure / rollback ---
 
-  test('fails and rolls back when newDir parent is not writable', () => {
+  // chmod 0o555 doesn't block dir writes on Windows (POSIX mode ignored) → rename
+  // succeeds → scenario untestable there.
+  test.skipIf(process.platform === 'win32')(
+    'fails and rolls back when newDir parent is not writable',
+    () => {
     if (process.getuid?.() === 0) {
       return // skip when running as root
     }
