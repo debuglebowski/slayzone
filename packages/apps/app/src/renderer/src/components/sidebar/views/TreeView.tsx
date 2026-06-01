@@ -2067,7 +2067,7 @@ export function TreeView({
           this wrapper's px-1 (4) = 68px). */}
       <div
         className="relative flex items-center h-11 window-drag-region"
-        style={{ paddingLeft: 68 }}
+        style={{ paddingLeft: 68, marginTop: 6 }}
       >
         <div
           aria-hidden
