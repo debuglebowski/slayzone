@@ -18,6 +18,20 @@ run_test() {
   fi
 }
 
+# Strict + custom loader. pipefail makes a real non-zero test exit propagate
+# through the grep filter, so a failure counts as FAIL (the lenient run_test
+# above counts PASS as long as any output prints). Uses Electron's node so
+# better-sqlite3's native ABI matches. Prefer this for new tests.
+run_test_electron_strict_loader() {
+  echo ""
+  echo "=== $1 (electron+loader, strict) ==="
+  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 run_test packages/domains/settings/src/main/handlers.test.ts
 run_test packages/domains/tags/src/main/handlers.test.ts
 run_test packages/domains/projects/src/main/handlers.test.ts
@@ -33,10 +47,14 @@ run_test packages/domains/file-editor/src/main/handlers.test.ts
 run_test packages/domains/diagnostics/src/main/service.test.ts
 run_test packages/domains/integrations/src/main/handlers.db.test.ts
 run_test packages/domains/worktrees/src/main/handlers.test.ts
-run_test packages/domains/agent-turns/src/main/db.test.ts
-run_test packages/domains/agent-turns/src/main/git-snapshot.test.ts
-run_test packages/domains/agent-turns/src/main/turn-tracker.test.ts
-run_test packages/shared/transport/src/server/routers/agent-turns.test.ts
+# agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
+# return adapted to {snapshotSha,headSha}). NOTE: ~36 other unit tests across domains
+# are still masked-broken by the same async-DB move (85fc667d) and remain on lenient
+# run_test below — tracked as a separate strict-migration + per-domain-fix task.
+run_test_electron_strict_loader packages/domains/agent-turns/src/main/db.test.ts
+run_test_electron_strict_loader packages/domains/agent-turns/src/main/git-snapshot.test.ts
+run_test_electron_strict_loader packages/domains/agent-turns/src/main/turn-tracker.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/agent-turns.test.ts
 run_test packages/domains/integrations/src/main/handlers.api.test.ts
 run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts

@@ -60,7 +60,7 @@ await describe('recordTurnBoundary — single snapshot per call', () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'first.txt'), 'first edit')
     await recordTurnBoundary(h.db, tabId, 'first prompt')
-    const list = listTurnsForWorktree(h.db, repo)
+    const list = (await listTurnsForWorktree(h.db, repo))
     expect(list).toHaveLength(1)
     expect(list[0].prompt_preview).toBe('first prompt')
     expect(list[0].prev_snapshot_sha).toBeNull()
@@ -73,7 +73,7 @@ await describe('recordTurnBoundary — single snapshot per call', () => {
     await recordTurnBoundary(h.db, tabId, 'p1')
     fs.writeFileSync(path.join(repo, 'edit.txt'), 'change 1')
     await recordTurnBoundary(h.db, tabId, 'p2')
-    const list = listTurnsForWorktree(h.db, repo)
+    const list = (await listTurnsForWorktree(h.db, repo))
     expect(list).toHaveLength(2)
     expect(list[1].prev_snapshot_sha).toBe(list[0].snapshot_sha)
   })
@@ -84,13 +84,13 @@ await describe('recordTurnBoundary — single snapshot per call', () => {
     await recordTurnBoundary(h.db, tabId, 'p1')
     // No edits between calls — second call must be deduped.
     await recordTurnBoundary(h.db, tabId, 'p2-noop')
-    expect(listTurnsForWorktree(h.db, repo)).toHaveLength(1)
+    expect((await listTurnsForWorktree(h.db, repo))).toHaveLength(1)
   })
 
   test('first call with NO edits (clean worktree) → dropped', async () => {
     const { tabId, repo } = freshTask()
     await recordTurnBoundary(h.db, tabId, 'noop on clean tree')
-    expect(listTurnsForWorktree(h.db, repo)).toHaveLength(0)
+    expect((await listTurnsForWorktree(h.db, repo))).toHaveLength(0)
   })
 })
 
@@ -120,7 +120,7 @@ await describe('multi-task in same worktree', () => {
     fs.writeFileSync(path.join(repo, 'b.txt'), 'from B')
     await recordTurnBoundary(h.db, tabB, 'B first')
 
-    const list = listTurnsForWorktree(h.db, repo)
+    const list = (await listTurnsForWorktree(h.db, repo))
     expect(list).toHaveLength(2)
     expect(list[0].task_id).toBe(taskA)
     expect(list[1].task_id).toBe(taskB)
@@ -132,13 +132,13 @@ await describe('task deletion sets task_id to NULL but keeps the turn', () => {
     const { taskId, tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'before-delete.txt'), 'data')
     await recordTurnBoundary(h.db, tabId, 'before delete')
-    expect(listTurnsForWorktree(h.db, repo)[0].task_id).toBe(taskId)
+    expect((await listTurnsForWorktree(h.db, repo))[0].task_id).toBe(taskId)
 
     // Cascade deletes the tab too. Drop tab first to avoid FK noise.
     h.db.prepare('DELETE FROM terminal_tabs WHERE id = ?').run(tabId)
     h.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
 
-    const list = listTurnsForWorktree(h.db, repo)
+    const list = (await listTurnsForWorktree(h.db, repo))
     expect(list).toHaveLength(1)
     expect(list[0].task_id).toBeNull()
   })
@@ -162,7 +162,7 @@ await describe('worktree path fallback', () => {
       .run(tabId, taskId, 'claude-code', 0)
     fs.writeFileSync(path.join(repo, 'fb.txt'), 'fb')
     await recordTurnBoundary(h.db, tabId, 'x')
-    expect(listTurnsForWorktree(h.db, repo)).toHaveLength(1)
+    expect((await listTurnsForWorktree(h.db, repo))).toHaveLength(1)
   })
 
   test('skips when both worktree_path AND project.path empty', async () => {
@@ -190,7 +190,7 @@ await describe('snapshot fail (no .git)', () => {
     const { tabId, repo } = freshTask()
     fs.rmSync(path.join(repo, '.git'), { recursive: true, force: true })
     await recordTurnBoundary(h.db, tabId, 'x')
-    expect(listTurnsForWorktree(h.db, repo)).toHaveLength(0)
+    expect((await listTurnsForWorktree(h.db, repo))).toHaveLength(0)
   })
 })
 
@@ -199,7 +199,7 @@ await describe('prompt_preview truncation', () => {
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'a.txt'), 'something')
     await recordTurnBoundary(h.db, tabId, '   line1\n\n\nline2 ' + 'x'.repeat(500))
-    const list = listTurnsForWorktree(h.db, repo)
+    const list = (await listTurnsForWorktree(h.db, repo))
     expect(list[0].prompt_preview.length).toBe(200)
     expect(list[0].prompt_preview.startsWith('line1 line2')).toBe(true)
   })
@@ -212,9 +212,9 @@ await describe('retention: 50 per worktree', () => {
     for (let i = 0; i < 51; i++) {
       fs.writeFileSync(path.join(repo, `r${i}.txt`), `${i}`)
       await recordTurnBoundary(h.db, tabId, `t${i}`)
-      if (i === 0) firstId = listTurnsForWorktree(h.db, repo)[0].id
+      if (i === 0) firstId = (await listTurnsForWorktree(h.db, repo))[0].id
     }
-    const list = listTurnsForWorktree(h.db, repo)
+    const list = (await listTurnsForWorktree(h.db, repo))
     expect(list).toHaveLength(50)
     expect(list.find((t) => t.id === firstId!) === undefined).toBe(true)
   })
@@ -228,7 +228,7 @@ await describe('initChatTurnSubscriber', () => {
     fs.writeFileSync(path.join(repo, 'fixed.txt'), 'patched')
     sub(tabId, { kind: 'result', isError: false } as never)
     await new Promise((r) => setTimeout(r, 250))
-    const list = listTurnsForWorktree(h.db, repo)
+    const list = (await listTurnsForWorktree(h.db, repo))
     expect(list).toHaveLength(1)
     expect(list[0].prompt_preview).toBe('fix me')
   })
@@ -241,7 +241,7 @@ await describe('initPtyTurnSubscriber', () => {
     const sub = initPtyTurnSubscriber(h.db)
     sub(`${taskId}:${tabId}`, taskId, 'do work\n')
     await new Promise((r) => setTimeout(r, 250))
-    const list = listTurnsForWorktree(h.db, repo)
+    const list = (await listTurnsForWorktree(h.db, repo))
     expect(list).toHaveLength(1)
     // Raw PTY stdin is unreliable (contains edit keystrokes/escapes) — we don't
     // reconstruct it. prompt_preview stays empty until a structured-event source
@@ -265,7 +265,7 @@ await describe('initPtyTurnSubscriber', () => {
     const sub = initPtyTurnSubscriber(h.db)
     sub(`${taskId}:${tabId}`, taskId, 'ls -la')
     await new Promise((r) => setTimeout(r, 250))
-    expect(listTurnsForWorktree(h.db, repo)).toHaveLength(0)
+    expect((await listTurnsForWorktree(h.db, repo))).toHaveLength(0)
   })
 })
 
