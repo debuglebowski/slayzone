@@ -453,7 +453,7 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
                         variant="ghost"
                         className={cn(
                           'h-7 w-7',
-                          diffTreeCollapsed && 'bg-primary/15 text-primary'
+                          !diffTreeCollapsed && 'bg-primary/15 text-primary'
                         )}
                         onClick={() => setBoolSetting('diff_tree_collapsed', !diffTreeCollapsed)}
                       >
