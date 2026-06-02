@@ -129,5 +129,43 @@ test('reconcile: respawn-orphan dropped-idle converges (the original bug)', () =
   expect(s().getSessionState('task:task')).toBe('idle')
 })
 
+console.log('\nuseTerminalStateStore — reconcile hibernation (cross-window self-heal)\n')
+
+test('reconcile adopts DB hibernated for a stale-idle session (cross-window bug)', () => {
+  // The bug: a session that hibernated while another window owned it never got
+  // the window-targeted pty:hibernated IPC, so this window shows stale 'idle'.
+  // The authoritative DB hibernated set (2nd arg) must heal it to 'hibernated'.
+  s().applyStateChange('t:t', 'idle')
+  s().reconcile([], ['t:t'])
+  expect(s().getSessionState('t:t')).toBe('hibernated')
+  expect(s().hibernated['t:t']).toBe(true)
+})
+
+test('reconcile: DB hibernated wins over a stale-alive list entry (100ms delete lag)', () => {
+  // Right after hibernate the killed session can still linger in session:list
+  // for ~100ms. DB is the authority — keep hibernated, ignore the stale 'idle'.
+  s().applyStateChange('x:x', 'idle')
+  s().reconcile([{ sessionId: 'x:x', state: 'idle' }], ['x:x'])
+  expect(s().getSessionState('x:x')).toBe('hibernated')
+})
+
+test('reconcile clears hibernated when alive again + dropped from DB set (cross-window reopen)', () => {
+  // Reopened in another window: that window got the respawn IPC, this one did
+  // not. DB flag cleared + session alive in the list → drop the marker here.
+  s().applyHibernated('r:r')
+  s().reconcile([{ sessionId: 'r:r', state: 'running' }], [])
+  expect(s().getSessionState('r:r')).toBe('running')
+  expect(s().hibernated['r:r']).toBe(undefined)
+})
+
+test('reconcile keeps hibernated during DB-write lag (absent from list AND set)', () => {
+  // pty:hibernated IPC set the local marker, but the async DB write has not
+  // landed yet (so the set is empty) and the PTY is already gone from the list.
+  // Must NOT clear — only positive alive evidence clears a marker.
+  s().applyHibernated('lag:lag')
+  s().reconcile([], [])
+  expect(s().getSessionState('lag:lag')).toBe('hibernated')
+})
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exitCode = 1

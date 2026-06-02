@@ -49,8 +49,13 @@ export interface TerminalStateStore {
   clearSession: (sessionId: string) => void
   /** Seed from session.list() on init — fill-only, never overwrite a known value. */
   hydrate: (sessions: SessionInfoLite[]) => void
-  /** Self-heal: converge local state to the authoritative session list. */
-  reconcile: (sessions: SessionInfoLite[]) => void
+  /** Self-heal: converge local state to the authoritative session list.
+   *  `hibernatedIds` (the persisted `terminal_tabs.hibernated` set) is the
+   *  authority for the 💤 state, which the live `sessions` list can't carry
+   *  (hibernating kills the PTY → it vanishes from the list). Passing it lets
+   *  any window heal hibernation it never received the window-targeted IPC for.
+   *  Omit it to reconcile only liveness (legacy callers / tests). */
+  reconcile: (sessions: SessionInfoLite[], hibernatedIds?: readonly string[]) => void
   /** Imperative read (non-reactive callers); default 'starting'. */
   getSessionState: (sessionId: string) => TerminalState
 }
@@ -106,18 +111,46 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
         return changed ? { byId } : {}
       }),
 
-    reconcile: (sessions) =>
+    reconcile: (sessions, hibernatedIds) =>
       set((s) => {
         const present = new Map(sessions.map((x) => [x.sessionId, x.state]))
+        // `null` = caller passed no set → reconcile liveness only, preserving the
+        // legacy local-marker behavior. A set (even empty) = DB is authoritative.
+        const hibSet = hibernatedIds ? new Set(hibernatedIds) : null
         const byId = { ...s.byId }
+        const hibernated = { ...s.hibernated }
         let changed = false
+
+        // Pass 0 — adopt the DB hibernated set (authoritative). Wins over a stale
+        // list entry (the killed PTY can linger ~100ms in session:list). A
+        // genuine reopen clears the DB flag, so a sid still in the set is asleep.
+        if (hibSet) {
+          for (const sid of hibSet) {
+            if (byId[sid] !== 'hibernated') {
+              byId[sid] = 'hibernated'
+              changed = true
+            }
+            if (!hibernated[sid]) {
+              hibernated[sid] = true
+              changed = true
+            }
+          }
+        }
 
         // Pass 1 — adopt backend drift (dropped running->idle) + fill missing.
         // Never revive a locally-'dead' sid (a respawn re-creates via its own
         // IPC; avoids flicker on a list that raced ahead of a just-applied exit).
-        // Skip hibernated (dead-on-backend by design).
+        // A hibernated sid (per DB authority, or locally when no set given) is
+        // dead-on-backend by design — skip it so a stale list entry can't revive
+        // it. When a set IS given and the sid dropped out of it but is alive in
+        // the list, that's a cross-window reopen → clear the marker + flow through.
         for (const [sid, listState] of present) {
-          if (s.hibernated[sid]) continue
+          const lockedHibernated = hibSet ? hibSet.has(sid) : !!s.hibernated[sid]
+          if (lockedHibernated) continue
+          if (hibSet && hibernated[sid]) {
+            delete hibernated[sid]
+            changed = true
+          }
           const cur = byId[sid]
           if (cur === undefined) {
             byId[sid] = listState
@@ -130,15 +163,18 @@ export const useTerminalStateStore = create<TerminalStateStore>()(
 
         // Pass 2 — a locally-alive sid absent from the list has exited (the
         // list excludes dead/ended/not-spawned), so a dropped pty:exit converges.
+        // Skip hibernated: it's absent-but-asleep, not dead. (We never clear a
+        // marker here — only positive alive evidence in Pass 1 clears it — so a
+        // DB-write lag right after hibernate can't flicker 💤 off.)
         for (const sid of Object.keys(byId)) {
-          if (s.hibernated[sid]) continue
+          if (hibernated[sid]) continue
           if (ALIVE_STATES.has(byId[sid]) && !present.has(sid)) {
             byId[sid] = 'dead'
             changed = true
           }
         }
 
-        return changed ? { byId } : {}
+        return changed ? { byId, hibernated } : {}
       }),
 
     getSessionState: (sessionId) => get().byId[sessionId] ?? 'starting'
@@ -199,10 +235,19 @@ async function pullReconcile(): Promise<void> {
   if (_reconciling || typeof window === 'undefined' || !window.api?.session?.list) return
   _reconciling = true
   try {
-    const sessions = await window.api.session.list()
+    // Pull liveness + the authoritative hibernated set together so reconcile can
+    // heal 💤 in any window, not just the one that owned the session when the
+    // window-targeted pty:hibernated IPC fired (the cross-window stale-dot bug).
+    const [sessions, hibernatedIds] = await Promise.all([
+      window.api.session.list(),
+      window.api.tabs?.listHibernatedSessions?.() ?? Promise.resolve<string[]>([])
+    ])
     useTerminalStateStore
       .getState()
-      .reconcile(sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })))
+      .reconcile(
+        sessions.map((s) => ({ sessionId: s.sessionId, state: s.state })),
+        hibernatedIds
+      )
   } catch {
     // Best-effort; the next trigger retries.
   } finally {
@@ -239,6 +284,11 @@ function wireTerminalStateStore(): void {
   // Self-heal triggers: window focus + a low-freq backstop interval. A dropped
   // pty:exit also triggers reconcile from the onExit handler above.
   window.addEventListener('focus', () => void pullReconcile())
+  // Module-scope wiring, not a component — useVisibleInterval (a hook) can't run
+  // here. The 15s tick must keep firing so a window left in the background still
+  // heals stale dots (e.g. 💤 from a cross-window hibernate); the focus listener
+  // above covers the foregrounded case. Low frequency keeps hidden-CPU trivial.
+  // eslint-disable-next-line no-restricted-syntax
   setInterval(() => void pullReconcile(), 15_000)
 
   // E2E/CDP handle (matches window.__slayzone_tabStore convention).

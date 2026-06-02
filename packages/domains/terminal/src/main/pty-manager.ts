@@ -521,6 +521,21 @@ function stripAnsiForSessionParse(data: string): string {
     .replace(/\x1b[()][AB012]/g, '') // Character set sequences
 }
 
+/** Send a PTY event to every live renderer window (excludes the splash `data:`
+ *  window). For events that represent a GLOBAL session fact rather than a
+ *  per-window stream — e.g. hibernation, which any window's sidebar must
+ *  reflect regardless of who currently owns the session's IPC channel. */
+function broadcastPtyEvent(channel: string, ...args: unknown[]): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || win.webContents.getURL().startsWith('data:')) continue
+    try {
+      win.webContents.send(channel, ...args)
+    } catch {
+      // Window torn down mid-send — ignore.
+    }
+  }
+}
+
 // Emit state change via IPC
 function emitStateChange(
   session: PtySession,
@@ -687,13 +702,12 @@ function hibernateSession(sessionId: string): void {
       idleMs: Date.now() - session.lastUserInteractionAt
     }
   })
-  if (!session.win.isDestroyed()) {
-    try {
-      session.win.webContents.send('pty:hibernated', sessionId)
-    } catch {
-      // Window destroyed, ignore
-    }
-  }
+  // Broadcast to ALL windows, not just session.win: hibernation is a global
+  // fact (the agent is asleep), and a session's owning window gets rerouted by
+  // redirectSessionWindow (secondary task window / floating agent panel / agent
+  // side-panel claim). A window-targeted send leaves every OTHER window's
+  // sidebar dot stale until reconcile heals it; broadcasting flips 💤 at once.
+  broadcastPtyEvent('pty:hibernated', sessionId)
   // Persist the status so 💤 / Reopen survive reload + restart.
   try {
     hibernatedSetter?.(resolveTabRowId(sessionId), true)
