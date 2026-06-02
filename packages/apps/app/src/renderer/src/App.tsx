@@ -2423,12 +2423,24 @@ function App(): React.JSX.Element {
               <div id="content-wrapper" className="flex-1 min-h-0 flex">
                 <div
                   id="main-area"
-                  className="flex-1 min-w-0 min-h-0 rounded-lg bg-surface-0 flex flex-col overflow-hidden p-4 gap-2"
+                  // No padding in normal mode: each content region owns its own 16px
+                  // frame (TaskDetailPage's header/#task-panels, #home-detail below), so
+                  // the focused-panel glow renders INSIDE its scroll box instead of being
+                  // cropped here. Explode keeps p-4 (its minis frame themselves).
+                  className={cn(
+                    'flex-1 min-w-0 min-h-0 rounded-lg bg-surface-0 flex flex-col overflow-hidden gap-2',
+                    explodeMode ? 'p-4' : ''
+                  )}
                 >
                   {visibleAuthFailures.length > 0 ? (
                     <div
                       data-testid="integrations-auth-failure-banner"
-                      className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-1.5 text-xs text-destructive"
+                      // Owns its 16px frame in normal mode (mirrors #main-area's
+                      // `explodeMode ? 'p-4' : ''`); explode already pads via p-4.
+                      className={cn(
+                        'flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-1.5 text-xs text-destructive',
+                        !explodeMode && 'mx-4 mt-4'
+                      )}
                     >
                       <AlertTriangle className="size-3.5 shrink-0" />
                       <button
@@ -2503,7 +2515,7 @@ function App(): React.JSX.Element {
                           inert={!explodeMode && !isViewActive ? true : undefined}
                         >
                           {tab.type === 'home' ? (
-                            <div id="home-detail" className="flex flex-col flex-1 h-full">
+                            <div id="home-detail" className="flex flex-col flex-1 h-full p-4">
                               {durationLocked && selectedProject?.lock_config ? (
                                 <ProjectLockScreen
                                   project={selectedProject}

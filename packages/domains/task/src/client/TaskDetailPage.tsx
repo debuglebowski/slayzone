@@ -2210,7 +2210,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const isTaskCompleted = isCompletedStatus(task.status, project?.columns_config)
 
   return (
-    <div id="task-detail" className={cn('h-full flex flex-col', compact ? 'p-0' : 'gap-4')}>
+    <div id="task-detail" className={cn('h-full flex flex-col', compact && 'p-0')}>
       {compact && (
         <div className="shrink-0 flex items-center gap-1.5 px-2 h-10 bg-surface-1 border-b border-border min-w-0">
           {!task.is_temporary &&
@@ -2305,7 +2305,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       )}
       {/* Header */}
       {!compact && !zenMode && (
-        <header className="shrink-0 relative">
+        <header className={cn('shrink-0 relative', !compact && 'mx-4 mt-4')}>
           <div>
             <div
               className={cn(
@@ -2642,11 +2642,21 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         />
       )}
 
-      {/* Split view: terminal | browser | settings | git diff */}
+      {/* Split view: terminal | browser | settings | git diff.
+          p-4 (non-compact) = the panel area owns its 16px frame on all sides. Overflow
+          clips at the padding-box edge, so the focused panel's outer glow renders into
+          this padding instead of being cropped by the scroll box. One consistent rule:
+          #main-area has NO padding in normal mode; the header (mt-4 mx-4), home-detail
+          (p-4) and this strip (p-4) each own their own 16px frame — no gap/negative-
+          margin cancellation. task-detail has no `gap-4`, so this strip's `pt-4` IS the
+          header↔panel gap (and doubles as top glow room; zen mode has no header, so the
+          same `pt-4` keeps the top symmetric with the sides). The dev-server toast is
+          position:fixed, so it's unaffected. containerWidth comes from contentRect
+          (excludes padding) → panel sizing unchanged. */}
       <div
         id="task-panels"
         ref={splitContainerRef}
-        className="flex-1 flex min-h-0 overflow-x-auto"
+        className={cn('flex-1 flex min-h-0 overflow-x-auto', !compact && 'p-4')}
       >
         {isTaskCompleted && !openCompletedAnyway ? (
           (() => {
