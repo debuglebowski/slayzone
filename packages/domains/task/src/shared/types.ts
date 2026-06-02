@@ -114,18 +114,36 @@ export interface PanelVisibility extends Record<string, boolean> {
  * Layout of a single panel — Figma / CSS-grid-track style.
  * - `unit`: `px` = absolute width; `fr` = share of the leftover space after the
  *   static (px/pct) panels; `pct` = percentage of the whole container width.
- * - `min`/`max`: optional px clamps applied after the unit resolves.
+ * - `min`/`max`: optional clamps with their own unit (`px`, `pct` = % of the
+ *   container, `fr` = N × the nominal fr unit). Applied after the size resolves.
  * - `align`: which window edge the panel anchors to. Left-anchored panels pack
  *   from the left, right-anchored from the right; leftover/`fr` fills the middle.
  */
 export type PanelUnit = 'px' | 'fr' | 'pct'
 export type PanelAlign = 'left' | 'right'
+/** A value + unit, used for a panel's min/max bound. */
+export interface PanelDimension {
+  value: number
+  unit: PanelUnit
+}
 export interface PanelLayout {
   unit: PanelUnit
   value: number
-  min?: number
-  max?: number
+  min?: PanelDimension
+  max?: PanelDimension
   align?: PanelAlign
+}
+
+/** Coerce a stored bound to PanelDimension; legacy bounds were plain px numbers. */
+export function coerceBound(x: unknown): PanelDimension | undefined {
+  if (x == null) return undefined
+  if (typeof x === 'number') return { value: x, unit: 'px' }
+  if (typeof x === 'object') {
+    const o = x as Record<string, unknown>
+    if (typeof o.value === 'number' && (o.unit === 'px' || o.unit === 'fr' || o.unit === 'pct'))
+      return { value: o.value, unit: o.unit }
+  }
+  return undefined
 }
 
 /**
@@ -142,15 +160,16 @@ export const DEFAULT_PANEL_MIN_WIDTH = 200
 // Hardcoded fallback layout per panel, keyed by PanelConfig.order ID. Used when
 // the global config has no `layout` entry. Most panels are `fr` (equal share);
 // `settings`/`processes` default to a fixed px form width; `kanban` is home-only.
+const px = (value: number): PanelDimension => ({ value, unit: 'px' })
 const PANEL_LAYOUT_DEFAULTS: Record<string, PanelLayout> = {
-  terminal: { unit: 'fr', value: 1, min: 200, align: 'left' },
-  browser: { unit: 'fr', value: 1, min: 200, align: 'left' },
-  editor: { unit: 'fr', value: 1, min: 250, align: 'left' },
-  artifacts: { unit: 'fr', value: 1, min: 200, align: 'left' },
-  git: { unit: 'fr', value: 1, min: 50, align: 'left' },
-  settings: { unit: 'px', value: 440, min: 200, align: 'left' },
-  processes: { unit: 'px', value: 600, min: 200, align: 'left' },
-  kanban: { unit: 'fr', value: 1, min: 400, align: 'left' }
+  terminal: { unit: 'fr', value: 1, min: px(200), align: 'left' },
+  browser: { unit: 'fr', value: 1, min: px(200), align: 'left' },
+  editor: { unit: 'fr', value: 1, min: px(250), align: 'left' },
+  artifacts: { unit: 'fr', value: 1, min: px(200), align: 'left' },
+  git: { unit: 'fr', value: 1, min: px(50), align: 'left' },
+  settings: { unit: 'px', value: 440, min: px(200), align: 'left' },
+  processes: { unit: 'px', value: 600, min: px(200), align: 'left' },
+  kanban: { unit: 'fr', value: 1, min: px(400), align: 'left' }
 }
 
 /** Hardcoded fallback layout for a panel, keyed by PanelConfig.order ID. */
@@ -159,7 +178,7 @@ export function panelLayoutFallback(orderId: string): PanelLayout {
     PANEL_LAYOUT_DEFAULTS[orderId] ?? {
       unit: 'fr',
       value: 1,
-      min: DEFAULT_PANEL_MIN_WIDTH,
+      min: px(DEFAULT_PANEL_MIN_WIDTH),
       align: 'left'
     }
   )

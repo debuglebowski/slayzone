@@ -2732,6 +2732,7 @@ function App(): React.JSX.Element {
                                               {isClusterBoundary && (
                                                 <div
                                                   aria-hidden
+                                                  data-testid="panel-gap"
                                                   className="shrink-0"
                                                   style={{ width: homePanel.homeResolved.gapPx }}
                                                 />
@@ -2744,10 +2745,22 @@ function App(): React.JSX.Element {
                                                     ] ?? 400
                                                   }
                                                   rightWidth={w}
-                                                  leftMinWidth={leftL.min ?? 200}
-                                                  rightMinWidth={rightL.min ?? 200}
-                                                  leftMaxWidth={leftL.max}
-                                                  rightMaxWidth={rightL.max}
+                                                  leftMinWidth={
+                                                    homePanel.homeResolved.minPx[
+                                                      HOME_PANEL_SIZE_KEY[leftId]
+                                                    ] ?? 200
+                                                  }
+                                                  rightMinWidth={
+                                                    homePanel.homeResolved.minPx[sizeKey] ?? 200
+                                                  }
+                                                  leftMaxWidth={
+                                                    homePanel.homeResolved.maxPx[
+                                                      HOME_PANEL_SIZE_KEY[leftId]
+                                                    ]
+                                                  }
+                                                  rightMaxWidth={
+                                                    homePanel.homeResolved.maxPx[sizeKey]
+                                                  }
                                                   onResize={(lw, rw) =>
                                                     updatePanelSizes(
                                                       applyBoundaryResize(

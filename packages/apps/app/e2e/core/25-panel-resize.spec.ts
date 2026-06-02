@@ -132,3 +132,113 @@ test.describe('Panel resize', () => {
     await expect(mainWindow.locator('input[placeholder="Enter URL..."]:visible')).toHaveCount(0)
   })
 })
+
+// Exercises the live behaviors driven by the global per-panel layout config
+// (anchor, overflow-scroll, unit bounds) — set via panel_config.layout and a
+// config-reload event, asserted against the rendered panels.
+test.describe('Panel layout config', () => {
+  let abbrev: string
+
+  const openTask = async (page: import('@playwright/test').Page, title: string) => {
+    await pressShortcut(page, 'search')
+    const input = page.getByPlaceholder('Search files, folders, commands, projects, and tasks...')
+    await expect(input).toBeVisible()
+    await input.fill(title)
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('task-settings-panel').last()).toBeVisible()
+  }
+
+  const settings = (page: import('@playwright/test').Page) =>
+    page.getByTestId('task-settings-panel').last()
+  const container = (page: import('@playwright/test').Page) =>
+    page.locator('#task-panels:visible').last()
+
+  // Set the global per-panel layout config, then fire the reload event so the
+  // open task's usePanelConfig re-reads it live (no remount needed).
+  const applyLayout = async (
+    page: import('@playwright/test').Page,
+    layout: Record<string, unknown>
+  ) => {
+    const s = seed(page)
+    const raw = await s.getSetting('panel_config')
+    const cfg = raw ? JSON.parse(raw) : {}
+    cfg.webPanels = cfg.webPanels ?? [] // loadConfig's merge requires this array
+    cfg.layout = layout
+    await s.setSetting('panel_config', JSON.stringify(cfg))
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('panel-config-changed')))
+  }
+
+  test.beforeAll(async ({ mainWindow }) => {
+    const s = seed(mainWindow)
+    const p = await s.createProject({
+      name: 'Layout Cfg',
+      color: '#22c55e',
+      path: TEST_PROJECT_PATH
+    })
+    abbrev = p.name.slice(0, 2).toUpperCase()
+    await s.createTask({ projectId: p.id, title: 'Layout task', status: 'todo' })
+    await s.refreshData()
+    await goHome(mainWindow)
+    await clickProject(mainWindow, abbrev)
+    await openTask(mainWindow, 'Layout task')
+  })
+
+  test.afterAll(async ({ mainWindow }) => {
+    // Don't leak layout config into later specs.
+    const s = seed(mainWindow)
+    const raw = await s.getSetting('panel_config')
+    if (raw) {
+      const cfg = JSON.parse(raw)
+      delete cfg.layout
+      await s.setSetting('panel_config', JSON.stringify(cfg))
+      await mainWindow.evaluate(() =>
+        window.dispatchEvent(new CustomEvent('panel-config-changed'))
+      )
+    }
+  })
+
+  test('right-anchored panel docks to the right with a gap', async ({ mainWindow }) => {
+    await applyLayout(mainWindow, {
+      terminal: { unit: 'px', value: 300, align: 'left' },
+      settings: { unit: 'px', value: 300, align: 'right' }
+    })
+    // Leftover space becomes a visible gap spacer between the clusters.
+    await expect
+      .poll(async () => {
+        const gap = mainWindow.getByTestId('panel-gap').last()
+        if (!(await gap.count())) return 0
+        return gap.evaluate((el) => parseInt((el as HTMLElement).style.width) || 0)
+      })
+      .toBeGreaterThan(0)
+    // Settings panel docks to the container's right edge.
+    await expect
+      .poll(async () => {
+        const c = await container(mainWindow).boundingBox()
+        const sb = await settings(mainWindow).boundingBox()
+        if (!c || !sb) return 999
+        return Math.abs(sb.x + sb.width - (c.x + c.width))
+      })
+      .toBeLessThan(6)
+  })
+
+  test('panels overflow → container scrolls horizontally', async ({ mainWindow }) => {
+    await applyLayout(mainWindow, { settings: { unit: 'px', value: 5000, align: 'left' } })
+    await expect
+      .poll(() => container(mainWindow).evaluate((el) => el.scrollWidth > el.clientWidth + 1))
+      .toBe(true)
+    const overflowX = await container(mainWindow).evaluate(
+      (el) => getComputedStyle(el).overflowX
+    )
+    expect(['auto', 'scroll']).toContain(overflowX)
+  })
+
+  test('max-width bound clamps the panel', async ({ mainWindow }) => {
+    // Default size 440px, capped at 250px → resolves to 250.
+    await applyLayout(mainWindow, {
+      settings: { unit: 'px', value: 440, max: { value: 250, unit: 'px' }, align: 'left' }
+    })
+    await expect
+      .poll(() => settings(mainWindow).evaluate((el) => parseInt((el as HTMLElement).style.width)))
+      .toBe(250)
+  })
+})

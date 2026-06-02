@@ -882,10 +882,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       <ResizeHandle
         leftWidth={resolvedWidths[leftId] ?? 200}
         rightWidth={resolvedWidths[panelId] ?? 200}
-        leftMinWidth={leftL.min ?? minWidthFor(leftId)}
-        rightMinWidth={rightL.min ?? minWidthFor(panelId)}
-        leftMaxWidth={leftL.max}
-        rightMaxWidth={rightL.max}
+        leftMinWidth={resolved.minPx[leftId] ?? minWidthFor(leftId)}
+        rightMinWidth={resolved.minPx[panelId] ?? minWidthFor(panelId)}
+        leftMaxWidth={resolved.maxPx[leftId]}
+        rightMaxWidth={resolved.maxPx[panelId]}
         onResize={(lw, rw) =>
           updatePanelSizes(
             applyBoundaryResize(leftL, rightL, leftId, panelId, lw, rw, containerWidth)
@@ -2838,6 +2838,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             {!compact && resolved.rightKeys.length > 0 && (
               <div
                 aria-hidden
+                data-testid="panel-gap"
                 className="shrink-0"
                 style={{ width: resolved.gapPx, order: spacerOrder }}
               />

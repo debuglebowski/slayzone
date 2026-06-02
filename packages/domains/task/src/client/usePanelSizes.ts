@@ -1,25 +1,33 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type {
   PanelLayout,
+  PanelDimension,
   PanelSizeOverride,
   PanelSizes,
   PanelConfig
 } from '../shared/types'
-import { taskIdToOrderId, panelLayoutFallback, DEFAULT_PANEL_MIN_WIDTH } from '../shared/types'
+import {
+  taskIdToOrderId,
+  panelLayoutFallback,
+  coerceBound,
+  DEFAULT_PANEL_MIN_WIDTH
+} from '../shared/types'
 
 export type { PanelLayout, PanelSizeOverride, PanelSizes }
 
 const HANDLE_WIDTH = 16 // w-4 = 1rem
 
-/** Fallback minimum width for a runtime panel id (used when no effective layout handy). */
+/** Fallback minimum width (px) for a runtime panel id, when no resolved bound is handy. */
 export function minWidthFor(id: string): number {
-  return panelLayoutFallback(taskIdToOrderId(id)).min ?? DEFAULT_PANEL_MIN_WIDTH
+  const m = panelLayoutFallback(taskIdToOrderId(id)).min
+  return m && m.unit === 'px' ? m.value : DEFAULT_PANEL_MIN_WIDTH
 }
 
 /**
  * Effective layout for a runtime panel id = hardcoded fallback ◀ global default
  * (panel_config.layout) ◀ per-task/home size override. min/max/align always come
  * from the default; the override only changes unit+value (the dragged size).
+ * Bounds are coerced for back-compat (legacy bounds were plain px numbers).
  */
 export function effectiveLayout(
   runtimeId: string,
@@ -28,6 +36,8 @@ export function effectiveLayout(
 ): PanelLayout {
   const orderId = taskIdToOrderId(runtimeId)
   const base: PanelLayout = { ...panelLayoutFallback(orderId), ...(config?.layout?.[orderId] ?? {}) }
+  base.min = coerceBound(base.min)
+  base.max = coerceBound(base.max)
   const ov = overrides[runtimeId]
   return ov ? { ...base, unit: ov.unit, value: ov.value } : base
 }
@@ -35,6 +45,10 @@ export function effectiveLayout(
 export interface ResolvedLayout {
   /** runtime-panel-id → resolved px width */
   widths: Record<string, number>
+  /** resolved min px per panel (absent = no min) */
+  minPx: Record<string, number>
+  /** resolved max px per panel (absent = no max) */
+  maxPx: Record<string, number>
   /** width of the flexible gap between the left and right clusters (0 if no right cluster) */
   gapPx: number
   /** true when panels + handles exceed the container (→ horizontal scroll) */
@@ -43,13 +57,6 @@ export interface ResolvedLayout {
   leftKeys: string[]
   /** right-anchored panel ids, in order */
   rightKeys: string[]
-}
-
-function clampMinMax(w: number, l: PanelLayout): number {
-  let v = w
-  if (l.min != null) v = Math.max(v, l.min)
-  if (l.max != null) v = Math.min(v, Math.max(l.min ?? 0, l.max))
-  return v
 }
 
 /**
@@ -78,6 +85,40 @@ export function resolveLayout(
     (hasBoundaryHandle ? 1 : 0)
   const handlesPx = handleCount * HANDLE_WIDTH
 
+  // Nominal fr unit (px per 1fr), used to resolve fr-unit min/max bounds. Computed
+  // once from raw (pre-clamp) sizes so it stays non-circular.
+  let staticBaseRaw = 0
+  let totalFrWeight = 0
+  for (const p of panels) {
+    const l = p.layout
+    if (l.unit === 'fr') totalFrWeight += Math.max(0, l.value)
+    else staticBaseRaw += l.unit === 'px' ? l.value : (l.value / 100) * W
+  }
+  const flexBase = Math.max(0, W - staticBaseRaw - handlesPx)
+  const frUnitPx = totalFrWeight > 0 ? flexBase / totalFrWeight : flexBase
+  const boundPx = (d: PanelDimension | undefined): number | undefined => {
+    if (!d) return undefined
+    if (d.unit === 'px') return d.value
+    if (d.unit === 'pct') return (d.value / 100) * W
+    return d.value * frUnitPx // fr → N × the nominal fr unit
+  }
+  const minPx: Record<string, number> = {}
+  const maxPx: Record<string, number> = {}
+  for (const p of panels) {
+    const lo = boundPx(p.layout.min)
+    const hi = boundPx(p.layout.max)
+    if (lo != null) minPx[p.key] = lo
+    if (hi != null) maxPx[p.key] = hi
+  }
+  const clamp = (w: number, key: string): number => {
+    let v = w
+    const lo = minPx[key]
+    const hi = maxPx[key]
+    if (lo != null) v = Math.max(v, lo)
+    if (hi != null) v = Math.min(v, Math.max(lo ?? 0, hi))
+    return v
+  }
+
   const widths: Record<string, number> = {}
   let staticSum = 0
   const frEntries: { key: string; layout: PanelLayout }[] = []
@@ -88,7 +129,7 @@ export function resolveLayout(
       continue
     }
     const raw = l.unit === 'px' ? l.value : (l.value / 100) * W
-    const w = clampMinMax(raw, l)
+    const w = clamp(raw, p.key)
     widths[p.key] = w
     staticSum += w
   }
@@ -100,14 +141,14 @@ export function resolveLayout(
   while (active.length > 0) {
     const totalWeight = active.reduce((s, p) => s + Math.max(0, p.layout.value), 0)
     if (totalWeight <= 0) {
-      for (const p of active) assigned[p.key] = clampMinMax(0, p.layout)
+      for (const p of active) assigned[p.key] = clamp(0, p.key)
       break
     }
     const locked: string[] = []
     let lockedSum = 0
     for (const p of active) {
       const share = (pool * Math.max(0, p.layout.value)) / totalWeight
-      const clamped = clampMinMax(share, p.layout)
+      const clamped = clamp(share, p.key)
       if (Math.abs(clamped - share) > 0.01) {
         assigned[p.key] = clamped
         locked.push(p.key)
@@ -135,7 +176,7 @@ export function resolveLayout(
   const gapPx = rightKeys.length > 0 ? Math.max(0, W - usedExclGap) : 0
   const overflow = usedExclGap > W + 0.5
 
-  return { widths, gapPx, overflow, leftKeys, rightKeys }
+  return { widths, minPx, maxPx, gapPx, overflow, leftKeys, rightKeys }
 }
 
 /**

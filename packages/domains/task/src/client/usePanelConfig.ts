@@ -15,7 +15,12 @@ function loadConfig(): Promise<PanelConfig> {
   return window.api.settings.get(SETTINGS_KEY).then((raw) => {
     if (raw) {
       try {
-        return mergePanelOrder(mergePredefinedWebPanels(JSON.parse(raw) as PanelConfig))
+        const parsed = JSON.parse(raw) as PanelConfig
+        // Tolerate partial configs: the merge helpers index `webPanels`, so a
+        // config missing it must not throw — that would silently reset the
+        // user's entire panel layout back to defaults.
+        if (!Array.isArray(parsed.webPanels)) parsed.webPanels = []
+        return mergePanelOrder(mergePredefinedWebPanels(parsed))
       } catch {
         /* ignore */
       }

@@ -50,7 +50,7 @@ describe('resolveLayout', () => {
   it('weights respecting min via lock-and-redistribute', () => {
     const r = resolveLayout(
       [
-        { key: 'a', layout: L({ unit: 'fr', value: 1, min: 800 }) },
+        { key: 'a', layout: L({ unit: 'fr', value: 1, min: { value: 800, unit: 'px' } }) },
         { key: 'b', layout: L({ unit: 'fr', value: 1 }) }
       ],
       1016
@@ -63,13 +63,39 @@ describe('resolveLayout', () => {
   it('respects max via lock-and-redistribute', () => {
     const r = resolveLayout(
       [
-        { key: 'a', layout: L({ unit: 'fr', value: 1, max: 300 }) },
+        { key: 'a', layout: L({ unit: 'fr', value: 1, max: { value: 300, unit: 'px' } }) },
         { key: 'b', layout: L({ unit: 'fr', value: 1 }) }
       ],
       1016
     )
     expect(r.widths.a).toBe(300)
     expect(r.widths.b).toBeCloseTo(700)
+  })
+
+  it('resolves bound units (px / % / fr) to px', () => {
+    const r = resolveLayout(
+      [
+        {
+          key: 'a',
+          layout: L({
+            unit: 'fr',
+            value: 1,
+            min: { value: 50, unit: 'pct' },
+            max: { value: 80, unit: 'pct' }
+          })
+        }
+      ],
+      1000
+    )
+    expect(r.minPx.a).toBe(500) // 50% of 1000
+    expect(r.maxPx.a).toBe(800) // 80% of 1000
+
+    // 1fr bound = (W - handles) / totalFrWeight; single fr panel → 1fr = 1000.
+    const r2 = resolveLayout(
+      [{ key: 'a', layout: L({ unit: 'fr', value: 1, min: { value: 1, unit: 'fr' } }) }],
+      1000
+    )
+    expect(r2.minPx.a).toBe(1000)
   })
 
   it('right-anchored panels produce a gap', () => {
@@ -107,7 +133,11 @@ describe('resolveLayout', () => {
 
 describe('resolvePanels + effectiveLayout', () => {
   it('uses hardcoded fallback when no config/override', () => {
-    expect(effectiveLayout('terminal', null, {})).toMatchObject({ unit: 'fr', value: 1, min: 200 })
+    expect(effectiveLayout('terminal', null, {})).toMatchObject({
+      unit: 'fr',
+      value: 1,
+      min: { value: 200, unit: 'px' }
+    })
     expect(effectiveLayout('settings', null, {})).toMatchObject({ unit: 'px', value: 440 })
   })
 
@@ -118,7 +148,12 @@ describe('resolvePanels + effectiveLayout', () => {
 
   it('override changes size only; min stays from the default', () => {
     const eff = effectiveLayout('terminal', null, { terminal: { unit: 'px', value: 700 } })
-    expect(eff).toMatchObject({ unit: 'px', value: 700, min: 200 })
+    expect(eff).toMatchObject({ unit: 'px', value: 700, min: { value: 200, unit: 'px' } })
+  })
+
+  it('coerces legacy numeric bounds to px dimensions', () => {
+    const cfg = { layout: { terminal: { unit: 'fr', value: 1, min: 333 } } } as unknown as PanelConfig
+    expect(effectiveLayout('terminal', cfg, {}).min).toEqual({ value: 333, unit: 'px' })
   })
 
   it('resolvePanels integrates fallback (fr terminal + px settings)', () => {
