@@ -2,8 +2,9 @@ import { createSuspenseCache } from '@slayzone/suspense'
 import type { Task } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects/shared'
-import type { PanelVisibility } from '@slayzone/task/shared'
+import type { PanelVisibility, PanelSizes } from '@slayzone/task/shared'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
+import { DEFAULT_SIZES } from './usePanelSizes'
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibility = {
   terminal: true,
@@ -24,6 +25,7 @@ export interface TaskDetailData {
   parentTask: Task | null
   projectPathMissing: boolean
   panelVisibility: PanelVisibility
+  panelSizes: PanelSizes
   browserTabs: BrowserTabsState
 }
 
@@ -67,6 +69,12 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
     ...(loadedTask.is_temporary ? { settings: false } : {})
   }
 
+  // Resolve panel sizes (per-task; defaults fill in any missing panels)
+  const panelSizes: PanelSizes = {
+    ...DEFAULT_SIZES,
+    ...(loadedTask.panel_sizes ?? {})
+  }
+
   // Resolve browser tabs (including fallback to first URL from other tasks)
   let browserTabs: BrowserTabsState
   if (loadedTask.browser_tabs) {
@@ -99,6 +107,7 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
     parentTask,
     projectPathMissing,
     panelVisibility,
+    panelSizes,
     browserTabs
   }
 }

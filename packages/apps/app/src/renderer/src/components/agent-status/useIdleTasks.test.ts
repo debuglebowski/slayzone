@@ -73,6 +73,7 @@ function makeTask(id: string, projectId: string, title: string): Task {
     opencode_flags: '',
     dangerously_skip_permissions: false,
     panel_visibility: null,
+    panel_sizes: null,
     worktree_path: null,
     worktree_parent_branch: null,
     base_dir: null,

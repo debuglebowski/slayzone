@@ -43,7 +43,7 @@ import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Task, PanelVisibility, UpdateTaskInput } from '@slayzone/task/shared'
+import type { Task, PanelVisibility, PanelSizes, UpdateTaskInput } from '@slayzone/task/shared'
 import type { TaskTemplate } from '@slayzone/task/shared'
 import type { TaskDetailData } from './taskDetailCache'
 import {
@@ -176,7 +176,7 @@ import type { BrowserPanelHandle } from '@slayzone/task-browser'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 import { track } from '@slayzone/telemetry/client'
-import { usePanelSizes, resolveWidths, minWidthFor } from './usePanelSizes'
+import { usePanelSizes, resolveWidths, minWidthFor, applyBoundaryResize } from './usePanelSizes'
 import { usePanelConfig } from './usePanelConfig'
 import { useSubTasks } from './useSubTasks'
 import { usePanelOwnership } from './usePanelOwnership'
@@ -820,8 +820,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     })
   }, [task?.id])
 
-  // Panel sizes for resizable panels
-  const [panelSizes, updatePanelSizes, resetPanelSize, resetAllPanels] = usePanelSizes()
+  // Panel sizes for resizable panels — per-task, persisted to the DB (mirrors
+  // panel_visibility). Secondary windows keep sizes local (no DB write).
+  const persistPanelSizes = useCallback(
+    (sizes: PanelSizes) => {
+      if (!task || isSecondaryWindow) return
+      void window.api.db.updateTask({ id: task.id, panelSizes: sizes }).then((updated) => {
+        if (updated) onTaskUpdated(updated)
+      })
+    },
+    [task?.id, isSecondaryWindow, onTaskUpdated] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const [panelSizes, updatePanelSizes, commitPanelSizes, resetPanelSize, resetAllPanels] =
+    usePanelSizes(initialData?.panelSizes, persistPanelSizes)
   const [isLocalResizing, setIsResizing] = useState(false)
   const isResizing = isLocalResizing || !!isSidePanelResizing
 
@@ -853,7 +864,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Renders the divider before `panelId`. Resizing transfers width between the
   // panel and its left neighbor, so the boundary moves cleanly no matter how
-  // panels are arranged. Returns null when `panelId` is the first visible panel.
+  // panels are arranged. Flex neighbors stay flex (only their relative weight
+  // shifts) so other panels keep their widths and the layout still reflows when
+  // a new panel opens. Persisted once on drag end. Returns null when `panelId`
+  // is the first visible panel.
   const renderResizeHandle = (panelId: string): React.ReactNode => {
     const leftId = getLeftNeighborId(panelId)
     if (!leftId) return null
@@ -863,9 +877,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         rightWidth={resolvedWidths[panelId] ?? 200}
         leftMinWidth={minWidthFor(leftId)}
         rightMinWidth={minWidthFor(panelId)}
-        onResize={(lw, rw) => updatePanelSizes({ [leftId]: lw, [panelId]: rw })}
+        onResize={(lw, rw) =>
+          updatePanelSizes(applyBoundaryResize(panelSizes, leftId, panelId, lw, rw))
+        }
         onDragStart={() => setIsResizing(true)}
-        onDragEnd={() => setIsResizing(false)}
+        onDragEnd={() => {
+          setIsResizing(false)
+          commitPanelSizes()
+        }}
         onReset={resetAllPanels}
         style={panelOrderStyle(panelId)}
       />

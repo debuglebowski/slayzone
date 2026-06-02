@@ -110,6 +110,17 @@ export interface PanelVisibility extends Record<string, boolean> {
   processes: boolean
 }
 
+/**
+ * Width of a single panel in the task-detail split view.
+ * - `fixed`: an absolute pixel width that does not reflow (e.g. settings form).
+ * - `flex`: a relative weight; flex panels share the leftover space (after
+ *   fixed panels) in proportion to their weights. New/closed panels always
+ *   re-divide that pool, so the layout can never overflow or strand a panel.
+ */
+export type PanelSize = { kind: 'fixed'; px: number } | { kind: 'flex'; weight: number }
+
+export type PanelSizes = Record<string, PanelSize>
+
 export interface DesktopHandoffPolicy {
   // URL protocol without :// (for example "figma", "slack", "notion")
   protocol: string
@@ -607,6 +618,8 @@ export interface Task {
   dangerously_skip_permissions: boolean
   // Panel visibility (JSON)
   panel_visibility: PanelVisibility | null
+  // Panel sizes (JSON) — per-task widths for the split-view panels
+  panel_sizes: PanelSizes | null
   // Worktree
   worktree_path: string | null
   worktree_parent_branch: string | null
@@ -731,6 +744,8 @@ export interface UpdateTaskInput {
   opencodeFlags?: string
   // Panel visibility
   panelVisibility?: PanelVisibility | null
+  // Panel sizes
+  panelSizes?: PanelSizes | null
   // Worktree
   worktreePath?: string | null
   worktreeParentBranch?: string | null

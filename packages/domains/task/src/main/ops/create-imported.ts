@@ -63,6 +63,7 @@ export async function createImportedTaskOp(
     repoName: null,
     dangerouslySkipPermissions: false,
     panelVisibility: null,
+    panelSizes: null,
     browserTabs: null,
     webPanelUrls: null,
     updatedAt: data.externalUpdatedAt

@@ -105,6 +105,7 @@ export function parseTask(row: Record<string, unknown> | undefined): Task | null
     gemini_flags: providerConfig['gemini']?.flags ?? '',
     opencode_flags: providerConfig['opencode']?.flags ?? '',
     panel_visibility: safeJsonParse(row.panel_visibility),
+    panel_sizes: safeJsonParse(row.panel_sizes),
     browser_tabs: safeJsonParse(row.browser_tabs),
     web_panel_urls: safeJsonParse(row.web_panel_urls),
     editor_open_files: safeJsonParse(row.editor_open_files),
@@ -709,6 +710,10 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   if (data.panelVisibility !== undefined) {
     fields.push('panel_visibility = ?')
     values.push(data.panelVisibility ? JSON.stringify(data.panelVisibility) : null)
+  }
+  if (data.panelSizes !== undefined) {
+    fields.push('panel_sizes = ?')
+    values.push(data.panelSizes ? JSON.stringify(data.panelSizes) : null)
   }
   // Note: these also get cleared to null on project change (see projectChanged block above)
   if (data.worktreePath !== undefined) {

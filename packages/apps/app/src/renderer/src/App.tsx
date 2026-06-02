@@ -61,7 +61,7 @@ import {
   BulkTaskContextMenu
 } from '@slayzone/tasks/hooks'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
-import { usePanelSizes } from '@slayzone/task/client/usePanelSizes'
+import { useGlobalPanelSizes, applyBoundaryResize } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/projects'
@@ -408,7 +408,7 @@ function App(): React.JSX.Element {
   const [focusedExplodeTaskId, setFocusedExplodeTaskId] = useState<string | null>(null)
   const explodeGridRef = useRef<HTMLDivElement | null>(null)
   const [explodeGridWidth, setExplodeGridWidth] = useState(0)
-  const [panelSizes, updatePanelSizes, resetPanelSize] = usePanelSizes()
+  const [panelSizes, updatePanelSizes, resetPanelSize] = useGlobalPanelSizes()
   const { isBuiltinEnabled: isHomePanelEnabled, getOrderedHomeIds } = usePanelConfig()
   const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
   const [updateVersion, setUpdateVersion] = useState<string | null>(null)
@@ -2720,10 +2720,15 @@ function App(): React.JSX.Element {
                                                   leftMinWidth={homeMinWidth(leftHomeId)}
                                                   rightMinWidth={homeMinWidth(id)}
                                                   onResize={(lw, rw) =>
-                                                    updatePanelSizes({
-                                                      [HOME_PANEL_SIZE_KEY[leftHomeId]]: lw,
-                                                      [HOME_PANEL_SIZE_KEY[id]]: rw
-                                                    })
+                                                    updatePanelSizes(
+                                                      applyBoundaryResize(
+                                                        panelSizes,
+                                                        HOME_PANEL_SIZE_KEY[leftHomeId],
+                                                        HOME_PANEL_SIZE_KEY[id],
+                                                        lw,
+                                                        rw
+                                                      )
+                                                    )
                                                   }
                                                   onReset={() => {
                                                     resetPanelSize(HOME_PANEL_SIZE_KEY[leftHomeId])

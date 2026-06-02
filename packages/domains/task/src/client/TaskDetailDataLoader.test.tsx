@@ -38,6 +38,7 @@ function makeTaskDetailData(overrides: Partial<TaskDetailData> = {}): TaskDetail
       artifacts: false,
       processes: false
     },
+    panelSizes: {},
     browserTabs: {
       tabs: [{ id: 'default', url: 'about:blank', title: 'New Tab' }],
       activeTabId: 'default'

@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useMemo } from 'react'
 import type { UnifiedGitPanelHandle, GitTabId } from '@slayzone/worktrees'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { track } from '@slayzone/telemetry/client'
+import { resolveFlexWidths } from '@slayzone/task/client/usePanelSizes'
+import type { PanelSizes } from '@slayzone/task/shared'
 import { useHomePanelState } from '@/hooks/useHomePanelVisibility'
 
 export type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
@@ -13,21 +15,24 @@ const DEFAULT_HOME_PANEL_ORDER: HomePanel[] = [
   'tests',
   'automations'
 ]
+// Identity map: each home panel stores its size under its own id. (Home has its
+// own global store, so it no longer shares task key-space — the old git→'diff'
+// remap is gone.)
 const HOME_PANEL_SIZE_KEY: Record<HomePanel, string> = {
   kanban: 'kanban',
-  git: 'diff',
+  git: 'git',
   editor: 'editor',
   processes: 'processes',
   tests: 'tests',
   automations: 'automations'
 }
-const HANDLE_WIDTH = 16
+const homeMinWidth = (id: HomePanel): number => (id === 'kanban' ? 400 : 200)
 
 export { DEFAULT_HOME_PANEL_ORDER as HOME_PANEL_ORDER, HOME_PANEL_SIZE_KEY }
 
 export function useHomePanel(
   selectedProjectId: string,
-  panelSizes: Record<string, number | 'auto'>,
+  panelSizes: PanelSizes,
   userOrderedIds?: string[]
 ) {
   const HOME_PANEL_ORDER: HomePanel[] = useMemo(() => {
@@ -96,18 +101,11 @@ export function useHomePanel(
   }, [])
 
   const homeResolvedWidths = useMemo(() => {
-    const visible = HOME_PANEL_ORDER.filter((id) => homePanelVisibility[id])
-    const handleCount = Math.max(0, visible.length - 1)
-    const available = homeContainerWidth - handleCount * HANDLE_WIDTH
-    const sizeOf = (id: HomePanel) => panelSizes[HOME_PANEL_SIZE_KEY[id]] ?? 'auto'
-    const autoCount = visible.filter((id) => sizeOf(id) === 'auto').length
-    const fixedSum = visible
-      .filter((id) => sizeOf(id) !== 'auto')
-      .reduce((s, id) => s + (sizeOf(id) as number), 0)
-    const autoWidth = autoCount > 0 ? Math.max(200, (available - fixedSum) / autoCount) : 0
-    return Object.fromEntries(
-      visible.map((id) => [id, sizeOf(id) === 'auto' ? autoWidth : (sizeOf(id) as number)])
-    )
+    const entries = HOME_PANEL_ORDER.filter((id) => homePanelVisibility[id]).map((id) => ({
+      key: HOME_PANEL_SIZE_KEY[id],
+      min: homeMinWidth(id)
+    }))
+    return resolveFlexWidths(entries, panelSizes, homeContainerWidth)
   }, [homeContainerWidth, homePanelVisibility, panelSizes])
 
   return {

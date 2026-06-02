@@ -172,8 +172,10 @@ vi.mock('./useTaskTagIds', () => ({
 }))
 
 vi.mock('./usePanelSizes', () => ({
-  usePanelSizes: () => [{}, vi.fn(), vi.fn(), vi.fn()],
-  resolveWidths: () => ({})
+  usePanelSizes: () => [{}, vi.fn(), vi.fn(), vi.fn(), vi.fn()],
+  resolveWidths: () => ({}),
+  minWidthFor: () => 200,
+  applyBoundaryResize: () => ({})
 }))
 
 vi.mock('./usePanelConfig', () => ({
@@ -234,6 +236,7 @@ function makeTaskDetailData(overrides: Partial<TaskDetailData> = {}): TaskDetail
       artifacts: false,
       processes: false
     },
+    panelSizes: {},
     browserTabs: {
       tabs: [{ id: 'default', url: 'about:blank', title: 'New Tab' }],
       activeTabId: 'default'

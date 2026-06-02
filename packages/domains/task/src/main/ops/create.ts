@@ -86,6 +86,7 @@ export async function createTaskOp(
     repoName: data.repoName ?? null,
     dangerouslySkipPermissions: dangerouslySkipPerms,
     panelVisibility,
+    panelSizes: null,
     browserTabs,
     webPanelUrls
   })

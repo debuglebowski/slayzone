@@ -20,6 +20,7 @@ export interface TaskRowData {
   repoName: string | null
   dangerouslySkipPermissions: boolean
   panelVisibility: string | null
+  panelSizes: string | null
   browserTabs: string | null
   webPanelUrls: string | null
   /** Override updated_at (ISO string from external source). When null, SQL `datetime('now')` is used. */
@@ -32,9 +33,9 @@ const INSERT_SQL = `
     status, priority, due_date, terminal_mode, provider_config,
     claude_flags, codex_flags, cursor_flags, gemini_flags, opencode_flags,
     is_temporary, repo_name,
-    dangerously_skip_permissions, panel_visibility, browser_tabs, web_panel_urls,
+    dangerously_skip_permissions, panel_visibility, panel_sizes, browser_tabs, web_panel_urls,
     updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
     COALESCE(?, datetime('now')))
 `
 
@@ -68,6 +69,7 @@ export async function insertTaskRow(db: SlayzoneDb, row: TaskRowData): Promise<T
     row.repoName,
     row.dangerouslySkipPermissions ? 1 : 0,
     row.panelVisibility,
+    row.panelSizes,
     row.browserTabs,
     row.webPanelUrls,
     row.updatedAt ?? null

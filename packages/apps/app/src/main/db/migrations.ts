@@ -2897,6 +2897,16 @@ export const migrations: Migration[] = [
       )
       db.prepare(`DELETE FROM settings WHERE key IN ('ccs_enabled', 'ccs_default_profile')`).run()
     }
+  },
+  {
+    version: 143,
+    up: (db) => {
+      // Per-task panel sizes (JSON). Previously panel widths lived in a single
+      // global setting (`taskDetailPanelSizes`) shared across every task, so
+      // resizing one task's panels leaked into all others. Sizes now persist
+      // per task, mirroring panel_visibility. NULL → runtime defaults.
+      db.exec(`ALTER TABLE tasks ADD COLUMN panel_sizes TEXT DEFAULT NULL;`)
+    }
   }
 ]
 

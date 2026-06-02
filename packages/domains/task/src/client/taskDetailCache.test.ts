@@ -135,6 +135,7 @@ describe('fetchTaskDetail', () => {
       diff: false,
       settings: true,
       editor: true,
+      artifacts: false,
       processes: false
     })
   })
