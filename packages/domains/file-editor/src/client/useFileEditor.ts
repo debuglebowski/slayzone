@@ -17,10 +17,21 @@ export interface OpenFile {
 }
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico', 'avif'])
+const PDF_EXTENSIONS = new Set(['pdf'])
 
 export function isImageFile(filePath: string): boolean {
   const ext = filePath.split('.').pop()?.toLowerCase()
   return !!ext && IMAGE_EXTENSIONS.has(ext)
+}
+
+export function isPdfFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase()
+  return !!ext && PDF_EXTENSIONS.has(ext)
+}
+
+/** Non-text files rendered by a dedicated viewer via slz-file:// — no content read. */
+export function isBinaryFile(filePath: string): boolean {
+  return isImageFile(filePath) || isPdfFile(filePath)
 }
 
 export function useFileEditor(
@@ -53,7 +64,7 @@ export function useFileEditor(
     ;(async () => {
       for (const filePath of initialEditorState.files) {
         try {
-          if (isImageFile(filePath)) {
+          if (isBinaryFile(filePath)) {
             setOpenFiles((prev) => {
               if (prev.some((f) => f.path === filePath)) return prev
               return [
@@ -268,8 +279,8 @@ export function useFileEditor(
       pendingOpen.current = filePath
 
       try {
-        // Binary files (images etc.) — rendered via slz-file:// protocol, no content needed
-        if (isImageFile(filePath)) {
+        // Binary files (images, PDFs) — rendered via slz-file:// protocol, no content needed
+        if (isBinaryFile(filePath)) {
           setOpenFiles((prev) => {
             if (prev.some((f) => f.path === filePath)) return prev
             return [...prev, { path: filePath, content: null, originalContent: null, binary: true }]

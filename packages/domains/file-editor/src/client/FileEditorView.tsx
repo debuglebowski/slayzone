@@ -54,7 +54,7 @@ import type {
   MarkdownViewMode,
   OpenFileOptions
 } from '@slayzone/file-editor/shared'
-import { useFileEditor } from './useFileEditor'
+import { useFileEditor, isImageFile, isPdfFile } from './useFileEditor'
 import { EditorFileTree, type EditorFileTreeHandle } from './EditorFileTree'
 import { EditorTabBar } from './EditorTabBar'
 import { CodeEditor } from './CodeEditor'
@@ -412,7 +412,9 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       [viewMode]
     )
 
-    const isImage = activeFile?.binary ?? false
+    // `binary` means "no text content"; derive the actual viewer from the extension.
+    const isImage = !!activeFile?.binary && isImageFile(activeFile.path)
+    const isPdf = !!activeFile?.binary && isPdfFile(activeFile.path)
 
     useImperativeHandle(
       ref,
@@ -815,6 +817,15 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
                 draggable={false}
               />
             </div>
+          ) : activeFile && isPdf ? (
+            <iframe
+              src={toSlzFileUrl(
+                `${projectPath}/${activeFile.path}`,
+                fileVersions.get(activeFile.path)
+              )}
+              className="flex-1 w-full min-h-0"
+              title="PDF preview"
+            />
           ) : activeFile?.tooLarge ? (
             <div className="flex-1 flex items-center justify-center text-muted-foreground">
               <div className="text-center space-y-3">

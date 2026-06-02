@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, cleanup } from '@testing-library/react'
-import { useFileEditor } from './useFileEditor'
+import { useFileEditor, isImageFile, isPdfFile, isBinaryFile } from './useFileEditor'
 
 type FileCallback = (rootPath: string, relPath: string) => void
 
@@ -286,5 +286,44 @@ describe('useFileEditor — delete handling', () => {
     await flush()
 
     expect(result.current.openFiles.map((f) => f.path)).toEqual(['src/c.ts'])
+  })
+})
+
+describe('file-type classifiers', () => {
+  it('isImageFile matches image extensions', () => {
+    expect(isImageFile('logo.png')).toBe(true)
+    expect(isImageFile('a/b/pic.JPG')).toBe(true)
+    expect(isImageFile('doc.pdf')).toBe(false)
+    expect(isImageFile('main.ts')).toBe(false)
+  })
+
+  it('isPdfFile matches only .pdf', () => {
+    expect(isPdfFile('doc.pdf')).toBe(true)
+    expect(isPdfFile('REPORT.PDF')).toBe(true)
+    expect(isPdfFile('logo.png')).toBe(false)
+    expect(isPdfFile('notes.md')).toBe(false)
+  })
+
+  it('isBinaryFile covers images and pdfs, not text', () => {
+    expect(isBinaryFile('logo.png')).toBe(true)
+    expect(isBinaryFile('doc.pdf')).toBe(true)
+    expect(isBinaryFile('main.ts')).toBe(false)
+  })
+})
+
+describe('useFileEditor — binary files', () => {
+  it('opens a pdf as binary without reading content', async () => {
+    const { result } = renderHook(() => useFileEditor(ROOT))
+    await flush()
+
+    await act(async () => {
+      await result.current.openFile('doc.pdf')
+    })
+
+    const opened = result.current.openFiles.find((f) => f.path === 'doc.pdf')
+    expect(opened).toMatchObject({ path: 'doc.pdf', binary: true, content: null })
+    expect(result.current.activeFilePath).toBe('doc.pdf')
+    // never read the bytes as text
+    expect(fs.readFile).not.toHaveBeenCalledWith(ROOT, 'doc.pdf')
   })
 })
