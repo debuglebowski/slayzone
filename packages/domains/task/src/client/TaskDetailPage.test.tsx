@@ -173,7 +173,16 @@ vi.mock('./useTaskTagIds', () => ({
 
 vi.mock('./usePanelSizes', () => ({
   usePanelSizes: () => [{}, vi.fn(), vi.fn(), vi.fn(), vi.fn()],
-  resolveWidths: () => ({}),
+  resolvePanels: () => ({ widths: {}, gapPx: 0, overflow: false, leftKeys: [], rightKeys: [] }),
+  planPanelStrip: () => ({
+    renderOrder: [],
+    rightStart: 0,
+    order: {},
+    spacerOrder: null,
+    leftNeighbor: {},
+    gapPx: 0
+  }),
+  effectiveLayout: () => ({ unit: 'fr', value: 1, min: 200, align: 'left' }),
   minWidthFor: () => 200,
   applyBoundaryResize: () => ({})
 }))

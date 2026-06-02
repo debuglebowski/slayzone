@@ -7,6 +7,9 @@ interface ResizeHandleProps {
   rightWidth: number
   leftMinWidth: number
   rightMinWidth: number
+  /** Optional max widths — drag won't grow a panel past these */
+  leftMaxWidth?: number
+  rightMaxWidth?: number
   /** Commit new widths for both adjacent panels (their sum is preserved) */
   onResize: (leftWidth: number, rightWidth: number) => void
   onDragStart?: () => void
@@ -26,6 +29,8 @@ export function ResizeHandle({
   rightWidth,
   leftMinWidth,
   rightMinWidth,
+  leftMaxWidth,
+  rightMaxWidth,
   onResize,
   onDragStart,
   onDragEnd,
@@ -57,10 +62,12 @@ export function ResizeHandle({
         if (!isDragging.current) return
         const delta = e.clientX - startX.current
         const total = startLeft.current + startRight.current
-        const newLeft = Math.min(
-          total - rightMinWidth,
-          Math.max(leftMinWidth, startLeft.current + delta)
-        )
+        // newLeft bounds: respect both panels' min AND max (right's bounds map to
+        // newLeft = total - rightWidth).
+        const lower = Math.max(leftMinWidth, total - (rightMaxWidth ?? Infinity))
+        const upper = Math.min(leftMaxWidth ?? Infinity, total - rightMinWidth)
+        const target = Math.min(upper, Math.max(lower, startLeft.current + delta))
+        const newLeft = lower > upper ? lower : target
         onResize(newLeft, total - newLeft)
       }
 
@@ -79,7 +86,17 @@ export function ResizeHandle({
         document.removeEventListener('mouseup', handleMouseUp)
       }
     },
-    [leftWidth, rightWidth, leftMinWidth, rightMinWidth, onResize, onDragStart, onDragEnd]
+    [
+      leftWidth,
+      rightWidth,
+      leftMinWidth,
+      rightMinWidth,
+      leftMaxWidth,
+      rightMaxWidth,
+      onResize,
+      onDragStart,
+      onDragEnd
+    ]
   )
 
   return (

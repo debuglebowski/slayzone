@@ -176,7 +176,14 @@ import type { BrowserPanelHandle } from '@slayzone/task-browser'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 import { track } from '@slayzone/telemetry/client'
-import { usePanelSizes, resolveWidths, minWidthFor, applyBoundaryResize } from './usePanelSizes'
+import {
+  usePanelSizes,
+  resolvePanels,
+  planPanelStrip,
+  effectiveLayout,
+  minWidthFor,
+  applyBoundaryResize
+} from './usePanelSizes'
 import { usePanelConfig } from './usePanelConfig'
 import { useSubTasks } from './useSubTasks'
 import { usePanelOwnership } from './usePanelOwnership'
@@ -735,20 +742,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const { config: panelConfig, updateConfig: updatePanelConfig, enabledWebPanels, isBuiltinEnabled, getOrderedTaskIds } =
     usePanelConfig()
   const orderedTaskIds = useMemo(() => getOrderedTaskIds(), [getOrderedTaskIds])
-  const panelOrderIdx = useMemo(() => {
-    const m: Record<string, number> = {}
-    orderedTaskIds.forEach((id, i) => {
-      m[id] = i
-    })
-    return m
-  }, [orderedTaskIds])
-  const panelOrderStyle = (id: string): { order: number } => ({ order: panelOrderIdx[id] ?? 0 })
-  // Visible panels in display order — used to find a resize handle's left neighbor.
-  const visiblePanelOrder = orderedTaskIds.filter((id) => panelVisibility[id])
-  const getLeftNeighborId = (id: string): string | null => {
-    const i = visiblePanelOrder.indexOf(id)
-    return i > 0 ? visiblePanelOrder[i - 1] : null
-  }
+  // Visible panels in config order (pre-cluster). Cluster order + handle neighbors
+  // are derived from `resolved` (left-anchored then right-anchored) below.
+  const visiblePanelOrder = useMemo(
+    () => orderedTaskIds.filter((id) => panelVisibility[id]),
+    [orderedTaskIds, panelVisibility]
+  )
 
   // Drag-reorder of the PanelToggle button row. Receives the reordered subset of
   // task-view panel ids (only the buttons actually shown) and merges it back into
@@ -856,29 +855,41 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }
   }, [])
 
-  // Resolved panel widths (auto panels get equal share of remaining space)
-  const resolvedWidths = useMemo(
-    () => resolveWidths(panelSizes, panelVisibility, containerWidth),
-    [panelSizes, panelVisibility, containerWidth]
+  // Resolve the Figma-style layout: per-panel px widths, the anchor gap, and the
+  // left/right cluster order. Reflows on size/config/container-width change.
+  const resolved = useMemo(
+    () => resolvePanels(visiblePanelOrder, panelConfig, panelSizes, containerWidth),
+    [visiblePanelOrder, panelConfig, panelSizes, containerWidth]
   )
+  const resolvedWidths = resolved.widths
 
-  // Renders the divider before `panelId`. Resizing transfers width between the
-  // panel and its left neighbor, so the boundary moves cleanly no matter how
-  // panels are arranged. Flex neighbors stay flex (only their relative weight
-  // shifts) so other panels keep their widths and the layout still reflows when
-  // a new panel opens. Persisted once on drag end. Returns null when `panelId`
-  // is the first visible panel.
+  // Placement (flex order, gap spacer, handle neighbors) — shared with the home tab.
+  const strip = useMemo(() => planPanelStrip(resolved), [resolved])
+  const panelOrderIdx = strip.order
+  const spacerOrder = strip.spacerOrder ?? 0
+  const panelOrderStyle = (id: string): { order: number } => ({ order: panelOrderIdx[id] ?? 0 })
+  const getLeftNeighborId = (id: string): string | null => strip.leftNeighbor[id] ?? null
+
+  // Renders the divider before `panelId`. Boundary drag transfers width between
+  // the panel and its same-cluster left neighbor, keeping each panel's unit (fr
+  // stays fr, px/pct stay static). Persisted once on drag end.
   const renderResizeHandle = (panelId: string): React.ReactNode => {
     const leftId = getLeftNeighborId(panelId)
     if (!leftId) return null
+    const leftL = effectiveLayout(leftId, panelConfig, panelSizes)
+    const rightL = effectiveLayout(panelId, panelConfig, panelSizes)
     return (
       <ResizeHandle
         leftWidth={resolvedWidths[leftId] ?? 200}
         rightWidth={resolvedWidths[panelId] ?? 200}
-        leftMinWidth={minWidthFor(leftId)}
-        rightMinWidth={minWidthFor(panelId)}
+        leftMinWidth={leftL.min ?? minWidthFor(leftId)}
+        rightMinWidth={rightL.min ?? minWidthFor(panelId)}
+        leftMaxWidth={leftL.max}
+        rightMaxWidth={rightL.max}
         onResize={(lw, rw) =>
-          updatePanelSizes(applyBoundaryResize(panelSizes, leftId, panelId, lw, rw))
+          updatePanelSizes(
+            applyBoundaryResize(leftL, rightL, leftId, panelId, lw, rw, containerWidth)
+          )
         }
         onDragStart={() => setIsResizing(true)}
         onDragEnd={() => {
@@ -2632,7 +2643,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       )}
 
       {/* Split view: terminal | browser | settings | git diff */}
-      <div id="task-panels" ref={splitContainerRef} className="flex-1 flex min-h-0">
+      <div
+        id="task-panels"
+        ref={splitContainerRef}
+        className="flex-1 flex min-h-0 overflow-x-auto"
+      >
         {isTaskCompleted && !openCompletedAnyway ? (
           (() => {
             const actionButtonClass =
@@ -2817,6 +2832,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   </p>
                 </div>
               </div>
+            )}
+
+            {/* Anchor gap: leftover space pushing right-aligned panels to the right edge */}
+            {!compact && resolved.rightKeys.length > 0 && (
+              <div
+                aria-hidden
+                className="shrink-0"
+                style={{ width: resolved.gapPx, order: spacerOrder }}
+              />
             )}
 
             {/* Resize handle before Terminal */}

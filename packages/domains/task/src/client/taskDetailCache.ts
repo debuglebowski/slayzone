@@ -4,7 +4,7 @@ import type { Tag } from '@slayzone/tags/shared'
 import type { Project } from '@slayzone/projects/shared'
 import type { PanelVisibility, PanelSizes } from '@slayzone/task/shared'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
-import { DEFAULT_SIZES } from './usePanelSizes'
+import { normalizeOverrides } from './usePanelSizes'
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibility = {
   terminal: true,
@@ -69,11 +69,10 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
     ...(loadedTask.is_temporary ? { settings: false } : {})
   }
 
-  // Resolve panel sizes (per-task; defaults fill in any missing panels)
-  const panelSizes: PanelSizes = {
-    ...DEFAULT_SIZES,
-    ...(loadedTask.panel_sizes ?? {})
-  }
+  // Resolve panel size overrides (per-task, size-only; defaults come from the
+  // global layout config at resolve time — do NOT seed defaults here, or they'd
+  // masquerade as per-task overrides).
+  const panelSizes: PanelSizes = normalizeOverrides(loadedTask.panel_sizes)
 
   // Resolve browser tabs (including fallback to first URL from other tasks)
   let browserTabs: BrowserTabsState

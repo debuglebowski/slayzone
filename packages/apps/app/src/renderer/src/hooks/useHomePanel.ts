@@ -2,8 +2,8 @@ import { useState, useCallback, useRef, useMemo } from 'react'
 import type { UnifiedGitPanelHandle, GitTabId } from '@slayzone/worktrees'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
 import { track } from '@slayzone/telemetry/client'
-import { resolveFlexWidths } from '@slayzone/task/client/usePanelSizes'
-import type { PanelSizes } from '@slayzone/task/shared'
+import { resolvePanels, planPanelStrip } from '@slayzone/task/client/usePanelSizes'
+import type { PanelSizes, PanelConfig } from '@slayzone/task/shared'
 import { useHomePanelState } from '@/hooks/useHomePanelVisibility'
 
 export type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
@@ -26,13 +26,12 @@ const HOME_PANEL_SIZE_KEY: Record<HomePanel, string> = {
   tests: 'tests',
   automations: 'automations'
 }
-const homeMinWidth = (id: HomePanel): number => (id === 'kanban' ? 400 : 200)
-
 export { DEFAULT_HOME_PANEL_ORDER as HOME_PANEL_ORDER, HOME_PANEL_SIZE_KEY }
 
 export function useHomePanel(
   selectedProjectId: string,
   panelSizes: PanelSizes,
+  panelConfig: PanelConfig,
   userOrderedIds?: string[]
 ) {
   const HOME_PANEL_ORDER: HomePanel[] = useMemo(() => {
@@ -100,13 +99,26 @@ export function useHomePanel(
     }
   }, [])
 
-  const homeResolvedWidths = useMemo(() => {
-    const entries = HOME_PANEL_ORDER.filter((id) => homePanelVisibility[id]).map((id) => ({
-      key: HOME_PANEL_SIZE_KEY[id],
-      min: homeMinWidth(id)
-    }))
-    return resolveFlexWidths(entries, panelSizes, homeContainerWidth)
-  }, [homeContainerWidth, homePanelVisibility, panelSizes])
+  const homeResolved = useMemo(() => {
+    const ids = HOME_PANEL_ORDER.filter((id) => homePanelVisibility[id]).map(
+      (id) => HOME_PANEL_SIZE_KEY[id]
+    )
+    return resolvePanels(ids, panelConfig, panelSizes, homeContainerWidth)
+  }, [homeContainerWidth, homePanelVisibility, panelSizes, panelConfig])
+  const homeResolvedWidths = homeResolved.widths
+
+  // Placement plan — same shared helper the task split-view uses. App renders home
+  // panels in DOM order (`homeRenderOrder`); `homeLeftCount` marks the cluster
+  // boundary and `homeLeftNeighbor` gives each panel's resize-handle partner.
+  const homeStrip = useMemo(() => planPanelStrip(homeResolved), [homeResolved])
+  const homeRenderOrder = useMemo(() => {
+    const visible = HOME_PANEL_ORDER.filter((id) => homePanelVisibility[id])
+    const bySizeKey = new Map(visible.map((id) => [HOME_PANEL_SIZE_KEY[id], id]))
+    return homeStrip.renderOrder
+      .map((k) => bySizeKey.get(k))
+      .filter((x): x is HomePanel => x != null)
+  }, [homePanelVisibility, homeStrip])
+  const homeLeftCount = homeStrip.rightStart
 
   return {
     homePanelVisibility,
@@ -119,7 +131,11 @@ export function useHomePanel(
     pendingHomeSearchToggleRef,
     homeEditorRefCallback,
     homeContainerRef,
+    homeContainerWidth,
+    homeResolved,
     homeResolvedWidths,
+    homeRenderOrder,
+    homeLeftCount,
     orderedHomePanelIds: HOME_PANEL_ORDER
   }
 }

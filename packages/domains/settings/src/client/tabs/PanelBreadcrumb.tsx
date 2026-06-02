@@ -12,7 +12,7 @@ export function PanelBreadcrumb({
   return (
     <button
       type="button"
-      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6"
+      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       onClick={onBack}
     >
       <ChevronLeft className="size-3.5" />

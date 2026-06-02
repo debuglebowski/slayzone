@@ -111,15 +111,59 @@ export interface PanelVisibility extends Record<string, boolean> {
 }
 
 /**
- * Width of a single panel in the task-detail split view.
- * - `fixed`: an absolute pixel width that does not reflow (e.g. settings form).
- * - `flex`: a relative weight; flex panels share the leftover space (after
- *   fixed panels) in proportion to their weights. New/closed panels always
- *   re-divide that pool, so the layout can never overflow or strand a panel.
+ * Layout of a single panel — Figma / CSS-grid-track style.
+ * - `unit`: `px` = absolute width; `fr` = share of the leftover space after the
+ *   static (px/pct) panels; `pct` = percentage of the whole container width.
+ * - `min`/`max`: optional px clamps applied after the unit resolves.
+ * - `align`: which window edge the panel anchors to. Left-anchored panels pack
+ *   from the left, right-anchored from the right; leftover/`fr` fills the middle.
  */
-export type PanelSize = { kind: 'fixed'; px: number } | { kind: 'flex'; weight: number }
+export type PanelUnit = 'px' | 'fr' | 'pct'
+export type PanelAlign = 'left' | 'right'
+export interface PanelLayout {
+  unit: PanelUnit
+  value: number
+  min?: number
+  max?: number
+  align?: PanelAlign
+}
 
-export type PanelSizes = Record<string, PanelSize>
+/**
+ * Per-task / per-home drag override — size only. `min`/`max`/`align` always come
+ * from the global default layout, so dragging only repositions the boundary.
+ */
+export type PanelSizeOverride = { unit: PanelUnit; value: number }
+
+/** panel_sizes column / home store: runtime-panel-id → size override. */
+export type PanelSizes = Record<string, PanelSizeOverride>
+
+export const DEFAULT_PANEL_MIN_WIDTH = 200
+
+// Hardcoded fallback layout per panel, keyed by PanelConfig.order ID. Used when
+// the global config has no `layout` entry. Most panels are `fr` (equal share);
+// `settings`/`processes` default to a fixed px form width; `kanban` is home-only.
+const PANEL_LAYOUT_DEFAULTS: Record<string, PanelLayout> = {
+  terminal: { unit: 'fr', value: 1, min: 200, align: 'left' },
+  browser: { unit: 'fr', value: 1, min: 200, align: 'left' },
+  editor: { unit: 'fr', value: 1, min: 250, align: 'left' },
+  artifacts: { unit: 'fr', value: 1, min: 200, align: 'left' },
+  git: { unit: 'fr', value: 1, min: 50, align: 'left' },
+  settings: { unit: 'px', value: 440, min: 200, align: 'left' },
+  processes: { unit: 'px', value: 600, min: 200, align: 'left' },
+  kanban: { unit: 'fr', value: 1, min: 400, align: 'left' }
+}
+
+/** Hardcoded fallback layout for a panel, keyed by PanelConfig.order ID. */
+export function panelLayoutFallback(orderId: string): PanelLayout {
+  return (
+    PANEL_LAYOUT_DEFAULTS[orderId] ?? {
+      unit: 'fr',
+      value: 1,
+      min: DEFAULT_PANEL_MIN_WIDTH,
+      align: 'left'
+    }
+  )
+}
 
 export interface DesktopHandoffPolicy {
   // URL protocol without :// (for example "figma", "slack", "notion")
@@ -156,6 +200,9 @@ export interface PanelConfig {
   // 'terminal', 'browser', 'editor', 'artifacts', 'git', 'settings', 'processes', 'web:*'.
   // 'git' maps to task panel 'diff' and home panel 'git'. Task-only panels are skipped on home.
   order?: string[]
+  // Per-panel DEFAULT layout, keyed by PanelConfig.order ID (same id-space as `order`).
+  // Absent → hardcoded fallback (see usePanelSizes). Per-task drag overrides the size on top.
+  layout?: Record<string, PanelLayout>
 }
 
 /** Check if a panel is enabled for a specific view. Defaults to true if not set. */
@@ -192,6 +239,11 @@ export type PanelOrderId = (typeof PANEL_ORDER_IDS)[number] | `web:${string}`
 /** Map a PanelConfig.order ID to its task-view panel ID. */
 export function orderIdToTaskId(id: string): string {
   return id === 'git' ? 'diff' : id
+}
+
+/** Inverse of orderIdToTaskId: map a task-view panel ID back to its PanelConfig.order ID. */
+export function taskIdToOrderId(id: string): string {
+  return id === 'diff' ? 'git' : id
 }
 
 /** Map a PanelConfig.order ID to its home-view panel ID, or null if task-only. */

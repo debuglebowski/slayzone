@@ -1,174 +1,268 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { PanelVisibility, PanelSize, PanelSizes } from '../shared/types'
+import type {
+  PanelLayout,
+  PanelSizeOverride,
+  PanelSizes,
+  PanelConfig
+} from '../shared/types'
+import { taskIdToOrderId, panelLayoutFallback, DEFAULT_PANEL_MIN_WIDTH } from '../shared/types'
 
-export type { PanelSize, PanelSizes }
-
-/**
- * Default size per panel. Most panels are `flex` (weight 1) so they split the
- * leftover space equally and always reflow when panels open/close. `settings`
- * and `processes` are `fixed` — form-style panels that want a stable width.
- */
-export const DEFAULT_SIZES: PanelSizes = {
-  terminal: { kind: 'flex', weight: 1 },
-  browser: { kind: 'flex', weight: 1 },
-  diff: { kind: 'flex', weight: 1 },
-  settings: { kind: 'fixed', px: 440 },
-  editor: { kind: 'flex', weight: 1 },
-  artifacts: { kind: 'flex', weight: 1 },
-  processes: { kind: 'fixed', px: 600 }
-}
-
-/** Smallest width a panel may be dragged/resolved to. Web panels fall back to DEFAULT_MIN_WIDTH. */
-const MIN_WIDTHS: Record<string, number> = {
-  terminal: 200,
-  browser: 200,
-  editor: 250,
-  artifacts: 200,
-  diff: 50,
-  settings: 200,
-  processes: 200
-}
-const DEFAULT_MIN_WIDTH = 200
-
-/** Minimum width for a panel id (built-in or `web:*`). */
-export function minWidthFor(id: string): number {
-  return MIN_WIDTHS[id] ?? DEFAULT_MIN_WIDTH
-}
+export type { PanelLayout, PanelSizeOverride, PanelSizes }
 
 const HANDLE_WIDTH = 16 // w-4 = 1rem
 
-// Built-in order: terminal, browser, editor, [web panels inserted here], diff, processes, settings
-const BUILTIN_ORDER = [
-  'terminal',
-  'browser',
-  'editor',
-  'artifacts',
-  'diff',
-  'processes',
-  'settings'
-]
-
-/** Build ordered panel list: built-ins in fixed order, web panels between editor and diff */
-export function buildPanelOrder(visibility: PanelVisibility): string[] {
-  const order: string[] = []
-  const webPanelIds = Object.keys(visibility).filter((id) => id.startsWith('web:'))
-
-  for (const id of BUILTIN_ORDER) {
-    order.push(id)
-    // Insert web panels after editor
-    if (id === 'editor') {
-      order.push(...webPanelIds)
-    }
-  }
-  return order
-}
-
-/** Size for a panel, defaulting unknown/unset panels to flex weight 1. Fixed
- *  defaults (settings/processes) are seeded into stored sizes at load time, so
- *  the resolver itself stays context-agnostic and is shared by task + home. */
-function sizeFor(sizes: PanelSizes, key: string): PanelSize {
-  return sizes[key] ?? { kind: 'flex', weight: 1 }
-}
-
-/** One visible panel for the sizing engine: storage/result `key` + its min px. */
-export interface PanelEntry {
-  key: string
-  min: number
+/** Fallback minimum width for a runtime panel id (used when no effective layout handy). */
+export function minWidthFor(id: string): number {
+  return panelLayoutFallback(taskIdToOrderId(id)).min ?? DEFAULT_PANEL_MIN_WIDTH
 }
 
 /**
- * Shared sizing engine for any ordered set of visible panels (task split-view
- * and home tab both use it — one model, one resolver). Fixed panels keep their
- * px; flex panels share whatever space is left after the fixed panels and the
- * resize handles, in proportion to their weights. Because the flex pool is
- * always re-divided, opening or closing a panel can never strand or overflow
- * one — fixing the "new panel doesn't fit" bug from pixel-pinned widths.
- * Returns px keyed by `entry.key`.
+ * Effective layout for a runtime panel id = hardcoded fallback ◀ global default
+ * (panel_config.layout) ◀ per-task/home size override. min/max/align always come
+ * from the default; the override only changes unit+value (the dragged size).
  */
-export function resolveFlexWidths(
-  entries: PanelEntry[],
-  sizes: PanelSizes,
-  containerWidth: number
-): Record<string, number> {
-  const handleCount = Math.max(0, entries.length - 1)
-  const available = containerWidth - handleCount * HANDLE_WIDTH
-
-  let fixedSum = 0
-  let totalWeight = 0
-  for (const e of entries) {
-    const s = sizeFor(sizes, e.key)
-    if (s.kind === 'fixed') fixedSum += s.px
-    else totalWeight += s.weight
-  }
-  const flexAvail = Math.max(0, available - fixedSum)
-
-  const result: Record<string, number> = {}
-  for (const e of entries) {
-    const s = sizeFor(sizes, e.key)
-    if (s.kind === 'fixed') {
-      result[e.key] = s.px
-    } else {
-      const raw = totalWeight > 0 ? (flexAvail * s.weight) / totalWeight : 0
-      result[e.key] = Math.max(e.min, raw)
-    }
-  }
-  return result
+export function effectiveLayout(
+  runtimeId: string,
+  config: PanelConfig | null | undefined,
+  overrides: PanelSizes
+): PanelLayout {
+  const orderId = taskIdToOrderId(runtimeId)
+  const base: PanelLayout = { ...panelLayoutFallback(orderId), ...(config?.layout?.[orderId] ?? {}) }
+  const ov = overrides[runtimeId]
+  return ov ? { ...base, unit: ov.unit, value: ov.value } : base
 }
 
-/** Task split-view widths: derives the visible/ordered entries from panel visibility. */
-export function resolveWidths(
-  sizes: PanelSizes,
-  visibility: PanelVisibility,
-  containerWidth: number
-): Record<string, number> {
-  const entries = buildPanelOrder(visibility)
-    .filter((p) => visibility[p])
-    .map((id) => ({ key: id, min: minWidthFor(id) }))
-  return resolveFlexWidths(entries, sizes, containerWidth)
+export interface ResolvedLayout {
+  /** runtime-panel-id → resolved px width */
+  widths: Record<string, number>
+  /** width of the flexible gap between the left and right clusters (0 if no right cluster) */
+  gapPx: number
+  /** true when panels + handles exceed the container (→ horizontal scroll) */
+  overflow: boolean
+  /** left-anchored panel ids, in order */
+  leftKeys: string[]
+  /** right-anchored panel ids, in order */
+  rightKeys: string[]
+}
+
+function clampMinMax(w: number, l: PanelLayout): number {
+  let v = w
+  if (l.min != null) v = Math.max(v, l.min)
+  if (l.max != null) v = Math.min(v, Math.max(l.min ?? 0, l.max))
+  return v
 }
 
 /**
- * Translate a boundary drag — the new resolved px of the two adjacent panels,
- * whose sum is preserved by ResizeHandle — back into stored sizes:
- * - both flex: redistribute their combined weight by the new px ratio. Their
- *   weight-sum is unchanged, so every other flex panel keeps its exact width.
- * - both fixed: store the new px on each (sum preserved → no shift).
- * - mixed: store the new px on the fixed panel only; the flex pool absorbs the
- *   delta collectively (gap-free; other flex panels may nudge slightly).
+ * Resolve a Figma/CSS-grid-like layout to concrete px widths.
+ * - `px`/`pct` panels are static (pct = % of the whole container), clamped to min/max.
+ * - `fr` panels share the leftover via bounded lock-and-redistribute: any panel
+ *   whose share clamps to its min/max is pinned and the rest re-divide the remainder
+ *   (a single pass silently over/underfills when an fr panel clamps).
+ * - Right-anchored panels pack to the right; `gapPx` is the leftover between clusters.
+ *   When statics overflow the container, `gapPx` is 0 and `overflow` is true.
+ */
+export function resolveLayout(
+  panels: { key: string; layout: PanelLayout }[],
+  containerWidth: number
+): ResolvedLayout {
+  const W = containerWidth
+  const leftKeys = panels.filter((p) => (p.layout.align ?? 'left') !== 'right').map((p) => p.key)
+  const rightKeys = panels.filter((p) => (p.layout.align ?? 'left') === 'right').map((p) => p.key)
+  // A resize handle sits at EVERY panel boundary, including the left↔right anchor
+  // boundary (when both clusters exist). The handle both provides the gap and
+  // resizes its two neighbors, so panels never touch regardless of alignment.
+  const hasBoundaryHandle = leftKeys.length > 0 && rightKeys.length > 0
+  const handleCount =
+    Math.max(0, leftKeys.length - 1) +
+    Math.max(0, rightKeys.length - 1) +
+    (hasBoundaryHandle ? 1 : 0)
+  const handlesPx = handleCount * HANDLE_WIDTH
+
+  const widths: Record<string, number> = {}
+  let staticSum = 0
+  const frEntries: { key: string; layout: PanelLayout }[] = []
+  for (const p of panels) {
+    const l = p.layout
+    if (l.unit === 'fr') {
+      frEntries.push(p)
+      continue
+    }
+    const raw = l.unit === 'px' ? l.value : (l.value / 100) * W
+    const w = clampMinMax(raw, l)
+    widths[p.key] = w
+    staticSum += w
+  }
+
+  // fr: bounded lock-and-redistribute
+  let pool = Math.max(0, W - staticSum - handlesPx)
+  let active = [...frEntries]
+  const assigned: Record<string, number> = {}
+  while (active.length > 0) {
+    const totalWeight = active.reduce((s, p) => s + Math.max(0, p.layout.value), 0)
+    if (totalWeight <= 0) {
+      for (const p of active) assigned[p.key] = clampMinMax(0, p.layout)
+      break
+    }
+    const locked: string[] = []
+    let lockedSum = 0
+    for (const p of active) {
+      const share = (pool * Math.max(0, p.layout.value)) / totalWeight
+      const clamped = clampMinMax(share, p.layout)
+      if (Math.abs(clamped - share) > 0.01) {
+        assigned[p.key] = clamped
+        locked.push(p.key)
+        lockedSum += clamped
+      }
+    }
+    if (locked.length === 0) {
+      for (const p of active) {
+        assigned[p.key] = (pool * Math.max(0, p.layout.value)) / totalWeight
+      }
+      break
+    }
+    pool -= lockedSum
+    active = active.filter((p) => !locked.includes(p.key))
+  }
+  let frSum = 0
+  for (const p of frEntries) {
+    widths[p.key] = assigned[p.key] ?? 0
+    frSum += widths[p.key]
+  }
+
+  const usedExclGap = staticSum + frSum + handlesPx
+  // Leftover beyond panels + handles → the anchor push between the clusters
+  // (can be 0; the boundary handle already separates them).
+  const gapPx = rightKeys.length > 0 ? Math.max(0, W - usedExclGap) : 0
+  const overflow = usedExclGap > W + 0.5
+
+  return { widths, gapPx, overflow, leftKeys, rightKeys }
+}
+
+/**
+ * Placement plan for rendering a resolved layout — the single source of truth for
+ * where panels, resize handles, and the anchor-gap spacer go. Both the task
+ * split-view (renders panels as fixed JSX blocks, ordered via flex `order`) and
+ * the home tab (renders via map in `renderOrder`) consume this, so the cluster /
+ * neighbor / spacer logic lives (and is tested) in exactly one place.
+ */
+export interface PanelStripPlan {
+  /** Visible panel keys in visual order (left cluster then right cluster). */
+  renderOrder: string[]
+  /** Index in renderOrder where the right (anchored) cluster begins. */
+  rightStart: number
+  /** Flex `order` value per panel key. */
+  order: Record<string, number>
+  /** Flex `order` for the gap spacer, or null when there's no right cluster. */
+  spacerOrder: number | null
+  /** Resize-handle left neighbor per key; the first right panel maps to the last
+   *  left panel (the boundary handle spans the anchor gap). Absent = no handle. */
+  leftNeighbor: Record<string, string>
+  /** Flexible anchor-push width between the clusters (may be 0). */
+  gapPx: number
+}
+
+export function planPanelStrip(resolved: ResolvedLayout): PanelStripPlan {
+  const { leftKeys, rightKeys, gapPx } = resolved
+  const order: Record<string, number> = {}
+  const leftNeighbor: Record<string, string> = {}
+  leftKeys.forEach((id, i) => {
+    order[id] = i
+    if (i > 0) leftNeighbor[id] = leftKeys[i - 1]
+  })
+  const spacerOrder = rightKeys.length > 0 ? leftKeys.length : null
+  const rightBase = leftKeys.length + 1 // +1 reserves the spacer slot
+  rightKeys.forEach((id, i) => {
+    order[id] = rightBase + i
+    if (i > 0) leftNeighbor[id] = rightKeys[i - 1]
+    else if (leftKeys.length > 0) leftNeighbor[id] = leftKeys[leftKeys.length - 1]
+  })
+  return {
+    renderOrder: [...leftKeys, ...rightKeys],
+    rightStart: leftKeys.length,
+    order,
+    spacerOrder,
+    leftNeighbor,
+    gapPx
+  }
+}
+
+/** Convenience: build entries from ordered ids + effective layouts, then resolve. */
+export function resolvePanels(
+  orderedIds: string[],
+  config: PanelConfig | null | undefined,
+  overrides: PanelSizes,
+  containerWidth: number
+): ResolvedLayout {
+  const panels = orderedIds.map((id) => ({ key: id, layout: effectiveLayout(id, config, overrides) }))
+  return resolveLayout(panels, containerWidth)
+}
+
+/**
+ * Translate a boundary drag (new resolved px for the two adjacent panels, sum
+ * preserved by ResizeHandle) into size-only overrides, keeping each panel's unit:
+ * - both fr: redistribute combined weight by the new px ratio (others unchanged).
+ * - both static: write each in its own unit (px→px, pct→% of container).
+ * - mixed: write the STATIC side only; the fr side reflows (writing both drifts
+ *   as the fr pool shifts).
  */
 export function applyBoundaryResize(
-  sizes: PanelSizes,
+  leftLayout: PanelLayout,
+  rightLayout: PanelLayout,
   leftId: string,
   rightId: string,
   newLeftPx: number,
-  newRightPx: number
+  newRightPx: number,
+  containerWidth: number
 ): Partial<PanelSizes> {
-  const l = sizeFor(sizes, leftId)
-  const r = sizeFor(sizes, rightId)
+  const toStatic = (l: PanelLayout, px: number): PanelSizeOverride =>
+    l.unit === 'pct'
+      ? { unit: 'pct', value: containerWidth > 0 ? (px / containerWidth) * 100 : l.value }
+      : { unit: 'px', value: px }
+
+  const lFr = leftLayout.unit === 'fr'
+  const rFr = rightLayout.unit === 'fr'
   const updates: Partial<PanelSizes> = {}
 
-  if (l.kind === 'flex' && r.kind === 'flex') {
-    const oldSum = l.weight + r.weight
+  if (lFr && rFr) {
+    const oldSum = leftLayout.value + rightLayout.value
     const total = newLeftPx + newRightPx
-    const wL = total > 0 ? (oldSum * newLeftPx) / total : l.weight
-    updates[leftId] = { kind: 'flex', weight: wL }
-    updates[rightId] = { kind: 'flex', weight: oldSum - wL }
-  } else if (l.kind === 'fixed' && r.kind === 'fixed') {
-    updates[leftId] = { kind: 'fixed', px: newLeftPx }
-    updates[rightId] = { kind: 'fixed', px: newRightPx }
-  } else if (l.kind === 'fixed') {
-    updates[leftId] = { kind: 'fixed', px: newLeftPx }
+    const wL = total > 0 ? (oldSum * newLeftPx) / total : leftLayout.value
+    updates[leftId] = { unit: 'fr', value: wL }
+    updates[rightId] = { unit: 'fr', value: oldSum - wL }
+  } else if (!lFr && !rFr) {
+    updates[leftId] = toStatic(leftLayout, newLeftPx)
+    updates[rightId] = toStatic(rightLayout, newRightPx)
+  } else if (lFr) {
+    updates[rightId] = toStatic(rightLayout, newRightPx)
   } else {
-    updates[rightId] = { kind: 'fixed', px: newRightPx }
+    updates[leftId] = toStatic(leftLayout, newLeftPx)
   }
   return updates
 }
 
+/** Normalize stored overrides, converting any legacy `{kind:'fixed'|'flex'}` shape. */
+export function normalizeOverrides(raw: unknown): PanelSizes {
+  if (!raw || typeof raw !== 'object') return {}
+  const out: PanelSizes = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!v || typeof v !== 'object') continue
+    const o = v as Record<string, unknown>
+    if (o.unit === 'px' || o.unit === 'fr' || o.unit === 'pct') {
+      out[k] = { unit: o.unit, value: Number(o.value) || 0 }
+    } else if (o.kind === 'fixed') {
+      out[k] = { unit: 'px', value: Number(o.px) || 0 }
+    } else if (o.kind === 'flex') {
+      out[k] = { unit: 'fr', value: Number(o.weight) || 1 }
+    }
+  }
+  return out
+}
+
 /**
- * Per-task panel sizes. Live state is updated on every drag frame; `commit`
- * persists the current sizes (call on drag end). `resetPanel`/`resetAll`
- * persist immediately. `persist` is a no-op-friendly callback the caller wires
- * to a per-task DB write (skipped for secondary windows).
+ * Per-task panel size overrides. Live state updates on every drag frame; `commit`
+ * persists (call on drag end). `resetPanel`/`resetAll` delete overrides so the
+ * panel falls back to its global default. `persist` is wired to a per-task DB
+ * write (skipped for secondary windows).
  */
 export function usePanelSizes(
   initial: PanelSizes | null | undefined,
@@ -180,16 +274,14 @@ export function usePanelSizes(
   (panel: string) => void,
   () => void
 ] {
-  const [sizes, setSizes] = useState<PanelSizes>(() => ({ ...DEFAULT_SIZES, ...(initial ?? {}) }))
+  const [sizes, setSizes] = useState<PanelSizes>(() => ({ ...(initial ?? {}) }))
   const sizesRef = useRef(sizes)
   sizesRef.current = sizes
 
-  // Live update only — no persistence (drag frames are high-frequency).
   const updateSizes = useCallback((updates: Partial<PanelSizes>) => {
     setSizes((prev) => ({ ...prev, ...updates }) as PanelSizes)
   }, [])
 
-  // Persist the latest live sizes — call on drag end.
   const commit = useCallback(() => {
     persist(sizesRef.current)
   }, [persist])
@@ -197,34 +289,28 @@ export function usePanelSizes(
   const resetPanel = useCallback(
     (panel: string) => {
       setSizes((prev) => {
-        const next: PanelSizes = {
-          ...prev,
-          [panel]: DEFAULT_SIZES[panel] ?? { kind: 'flex', weight: 1 }
-        }
-        persist(next)
-        return next
+        const { [panel]: _drop, ...rest } = prev
+        persist(rest)
+        return rest
       })
     },
     [persist]
   )
 
   const resetAll = useCallback(() => {
-    setSizes(DEFAULT_SIZES)
-    persist(DEFAULT_SIZES)
+    setSizes({})
+    persist({})
   }, [persist])
 
   return [sizes, updateSizes, commit, resetPanel, resetAll]
 }
 
-// ── Global (non-task) panel sizes ────────────────────────────────────────────
-// The home tab is a single, taskless surface, so its panel layout is shared
-// globally (stored in app settings) rather than per task. It uses the SAME
-// weight model + resolver (resolveFlexWidths) as tasks — only the storage is
-// global here. Persists on every update.
+// ── Global (non-task) panel size overrides ───────────────────────────────────
+// The home tab is taskless, so its size overrides are shared globally (settings).
+// Same model/resolver as tasks — only storage differs. Persists on every update.
 
-/** Versioned key — the v1 store held the legacy `number | 'auto'` pixel model;
- *  this holds the weight model, so home resets to defaults once on upgrade. */
-const GLOBAL_SETTINGS_KEY = 'homePanelSizesV2'
+/** Versioned key — v2 held the legacy `{kind}` model; v3 holds `{unit,value}`. */
+const GLOBAL_SETTINGS_KEY = 'homePanelSizesV3'
 
 export function useGlobalPanelSizes(): [
   PanelSizes,
@@ -238,8 +324,7 @@ export function useGlobalPanelSizes(): [
     window.api.settings.get(GLOBAL_SETTINGS_KEY).then((stored) => {
       if (stored) {
         try {
-          const parsed = JSON.parse(stored)
-          if (parsed && typeof parsed === 'object') setSizes(parsed as PanelSizes)
+          setSizes(normalizeOverrides(JSON.parse(stored)))
         } catch {
           /* ignore parse errors */
         }
@@ -260,12 +345,11 @@ export function useGlobalPanelSizes(): [
     })
   }, [])
 
-  // Reset a panel back to an equal flex share.
   const resetPanel = useCallback((panel: string) => {
     setSizes((prev) => {
-      const next: PanelSizes = { ...prev, [panel]: { kind: 'flex', weight: 1 } }
-      if (loaded.current) persist(next)
-      return next
+      const { [panel]: _drop, ...rest } = prev
+      if (loaded.current) persist(rest)
+      return rest
     })
   }, [])
 

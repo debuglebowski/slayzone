@@ -48,6 +48,9 @@ import {
 import type {
   PanelConfig,
   PanelView,
+  PanelLayout,
+  PanelUnit,
+  PanelAlign,
   WebPanelDefinition,
   GitTabId,
   GitTabVisibility
@@ -66,6 +69,7 @@ import {
   normalizeDesktopProtocol,
   normalizeGitTabOrder,
   normalizeGitTabVisibility,
+  panelLayoutFallback,
   validatePanelShortcut
 } from '@slayzone/task/shared'
 import { getVisibleModes, getModeLabel, groupTerminalModes } from '@slayzone/terminal'
@@ -87,6 +91,17 @@ interface PanelRowDescriptor {
   taskToggle: { enabled: boolean; onChange: (v: boolean) => void } | null
   onClick?: () => void
   webSubtitle?: string
+  /** Default size shown inline on the row, e.g. "440px" / "1fr" / "50%". */
+  sizeLabel?: string
+}
+
+/** Shared settings-card surface (matches the Appearance tab's Card background). */
+const CARD_CLASS = 'rounded-lg border bg-card p-5 space-y-6'
+
+/** Format a panel's effective default layout size for the row badge. */
+function layoutSizeLabel(orderId: string, panelConfig: PanelConfig): string {
+  const l = panelConfig.layout?.[orderId] ?? panelLayoutFallback(orderId)
+  return l.unit === 'px' ? `${l.value}px` : l.unit === 'pct' ? `${l.value}%` : `${l.value}fr`
 }
 
 function buildPanelRowDescriptors(
@@ -135,7 +150,8 @@ function buildPanelRowDescriptors(
     taskToggle: {
       enabled: isPanelEnabled(panelConfig, 'artifacts', 'task'),
       onChange: (c) => togglePanel('artifacts', 'task', c)
-    }
+    },
+    onClick: () => navigateTo('panels/artifacts')
   })
   m.set('git', {
     icon: GitCompare,
@@ -157,7 +173,8 @@ function buildPanelRowDescriptors(
     taskToggle: {
       enabled: isPanelEnabled(panelConfig, 'settings', 'task'),
       onChange: (c) => togglePanel('settings', 'task', c)
-    }
+    },
+    onClick: () => navigateTo('panels/settings')
   })
   m.set('processes', {
     icon: Cpu,
@@ -169,7 +186,8 @@ function buildPanelRowDescriptors(
     taskToggle: {
       enabled: isPanelEnabled(panelConfig, 'processes', 'task'),
       onChange: (c) => togglePanel('processes', 'task', c)
-    }
+    },
+    onClick: () => navigateTo('panels/processes')
   })
   for (const wp of panelConfig.webPanels) {
     m.set(wp.id, {
@@ -184,7 +202,88 @@ function buildPanelRowDescriptors(
       webSubtitle: wp.baseUrl
     })
   }
+  for (const [orderId, d] of m) d.sizeLabel = layoutSizeLabel(orderId, panelConfig)
   return m
+}
+
+/** Per-panel default layout editor (size + unit + min/max + anchor). Writes to
+ *  panel_config.layout[orderId]; falls back to the hardcoded default when unset. */
+function PanelLayoutControls({
+  orderId,
+  panelConfig,
+  onSave
+}: {
+  orderId: string
+  panelConfig: PanelConfig
+  onSave: (next: PanelConfig) => void
+}) {
+  const layout: PanelLayout = panelConfig.layout?.[orderId] ?? panelLayoutFallback(orderId)
+  const update = (patch: Partial<PanelLayout>): void => {
+    const next: PanelLayout = { ...layout, ...patch }
+    onSave({ ...panelConfig, layout: { ...(panelConfig.layout ?? {}), [orderId]: next } })
+  }
+  const numOrUndef = (s: string): number | undefined => {
+    const n = Number(s)
+    return s.trim() === '' || Number.isNaN(n) ? undefined : n
+  }
+  return (
+    <div className="space-y-3">
+      <Label className="text-base font-semibold">Layout</Label>
+      <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+        <span className="text-sm text-muted-foreground">Default size</span>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            className="w-24"
+            value={String(layout.value)}
+            onChange={(e) => update({ value: Number(e.target.value) || 0 })}
+          />
+          <Select value={layout.unit} onValueChange={(v) => update({ unit: v as PanelUnit })}>
+            <SelectTrigger className="w-auto min-w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="px">px</SelectItem>
+              <SelectItem value="fr">fr (fill)</SelectItem>
+              <SelectItem value="pct">% of window</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+        <span className="text-sm text-muted-foreground">Min width (px)</span>
+        <Input
+          type="number"
+          className="w-28"
+          placeholder="none"
+          value={layout.min != null ? String(layout.min) : ''}
+          onChange={(e) => update({ min: numOrUndef(e.target.value) })}
+        />
+      </div>
+      <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+        <span className="text-sm text-muted-foreground">Max width (px)</span>
+        <Input
+          type="number"
+          className="w-28"
+          placeholder="none"
+          value={layout.max != null ? String(layout.max) : ''}
+          onChange={(e) => update({ max: numOrUndef(e.target.value) })}
+        />
+      </div>
+      <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+        <span className="text-sm text-muted-foreground">Align</span>
+        <Select value={layout.align ?? 'left'} onValueChange={(v) => update({ align: v as PanelAlign })}>
+          <SelectTrigger className="w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="left">Left</SelectItem>
+            <SelectItem value="right">Right</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
 }
 
 function SortableGitTabRow({
@@ -254,7 +353,22 @@ function SortablePanelRow({ id, descriptor }: { id: string; descriptor: PanelRow
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-3 h-11 rounded-lg border px-2 w-full text-left hover:bg-accent/30 transition-colors"
+      role={descriptor.onClick ? 'button' : undefined}
+      tabIndex={descriptor.onClick ? 0 : undefined}
+      onClick={descriptor.onClick}
+      onKeyDown={
+        descriptor.onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                descriptor.onClick?.()
+              }
+            }
+          : undefined
+      }
+      className={`flex items-center gap-3 h-11 rounded-lg border bg-card px-2 w-full text-left transition-colors ${
+        descriptor.onClick ? 'cursor-pointer hover:bg-accent/30' : ''
+      }`}
     >
       <button
         type="button"
@@ -266,12 +380,7 @@ function SortablePanelRow({ id, descriptor }: { id: string; descriptor: PanelRow
       >
         <GripVertical className="size-4" />
       </button>
-      <button
-        type="button"
-        onClick={descriptor.onClick ?? (() => {})}
-        disabled={!descriptor.onClick}
-        className="flex items-center gap-3 flex-1 min-w-0 text-left disabled:cursor-default"
-      >
+      <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
         <Icon className="size-4 shrink-0" />
         <span className="text-sm font-medium truncate">{descriptor.label}</span>
         {descriptor.webSubtitle && (
@@ -279,13 +388,21 @@ function SortablePanelRow({ id, descriptor }: { id: string; descriptor: PanelRow
             {descriptor.webSubtitle}
           </span>
         )}
-      </button>
+      </div>
       {descriptor.webSubtitle && (
         <span className="shrink-0 px-1.5 py-0.5 rounded-full border border-border text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
           External
         </span>
       )}
-      <div className="flex items-center gap-5 shrink-0 pr-2">
+      {descriptor.sizeLabel && (
+        <span className="shrink-0 w-16 text-center px-1.5 py-0.5 rounded-full border border-border text-[10px] font-medium text-muted-foreground tabular-nums">
+          {descriptor.sizeLabel}
+        </span>
+      )}
+      <div
+        className="flex items-center gap-5 shrink-0 pr-2"
+        onClick={(e) => e.stopPropagation()}
+      >
         {descriptor.homeToggle ? (
           <Switch
             checked={descriptor.homeToggle.enabled}
@@ -697,8 +814,42 @@ export function PanelsSettingsTab({
   const panelDetailId = activeTab.startsWith('panels/') ? activeTab.slice(7) : null
 
   return (
-    <>
-      <SettingsTabIntro title="Panels" description="Choose which panels are available per view." />
+    <div className="space-y-6">
+      {activeTab === 'panels' ? (
+        <SettingsTabIntro
+          title="Panels"
+          description="Choose which panels are available per view."
+        />
+      ) : panelDetailId ? (
+        (() => {
+          const d = buildPanelRowDescriptors(panelConfig, navigateTo, togglePanel).get(panelDetailId)
+          return (
+            <div className="flex items-center justify-between">
+              <PanelBreadcrumb label={d?.label ?? panelDetailId} onBack={() => navigateTo('panels')} />
+              <div className="flex items-center gap-5 shrink-0">
+                {d?.homeToggle && (
+                  <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    Home
+                    <Switch
+                      checked={d.homeToggle.enabled}
+                      onCheckedChange={d.homeToggle.onChange}
+                    />
+                  </label>
+                )}
+                {d?.taskToggle && (
+                  <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    Task
+                    <Switch
+                      checked={d.taskToggle.enabled}
+                      onCheckedChange={d.taskToggle.onChange}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+          )
+        })()
+      ) : null}
 
       {activeTab === 'panels' &&
         (() => {
@@ -722,7 +873,7 @@ export function PanelsSettingsTab({
               <div className="space-y-3">
                 <div className="flex items-center gap-3 px-4">
                   <span className="w-3.5" />
-                  <Label className="text-base font-semibold flex-1">Panels</Label>
+                  <span className="flex-1" />
                   <div className="flex items-center gap-5 shrink-0">
                     <span className="text-[10px] font-medium text-muted-foreground w-8 text-center">
                       Home
@@ -830,17 +981,11 @@ export function PanelsSettingsTab({
         })()}
 
       {activeTab === 'panels/terminal' && (
-        <div className="rounded-lg border p-5 space-y-6">
-          <PanelBreadcrumb label="Agent" onBack={() => navigateTo('panels')} />
-          <div className="flex items-center justify-between">
-            <Label className="text-base font-semibold">Agent</Label>
-            <Switch
-              checked={isPanelEnabled(panelConfig, 'terminal', 'task')}
-              onCheckedChange={(c) => togglePanel('terminal', 'task', c)}
-            />
-          </div>
-          <div className="space-y-3">
-            <Label className="text-sm font-medium">Default agent provider</Label>
+        <>
+        <div className={CARD_CLASS}>
+          <Label className="text-base font-semibold">General</Label>
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+            <span className="text-sm text-muted-foreground">Default agent provider</span>
             <Select
               value={defaultTerminalMode}
               onValueChange={(v) => onDefaultTerminalModeChange(v as TerminalMode)}
@@ -984,18 +1129,16 @@ export function PanelsSettingsTab({
             </div>
           </div>
         </div>
+        <div className={CARD_CLASS}>
+          <PanelLayoutControls orderId="terminal" panelConfig={panelConfig} onSave={savePanelConfig} />
+        </div>
+        </>
       )}
 
       {activeTab === 'panels/browser' && (
-        <div className="rounded-lg border p-5 space-y-6">
-          <PanelBreadcrumb label="Browser" onBack={() => navigateTo('panels')} />
-          <div className="flex items-center justify-between">
-            <Label className="text-base font-semibold">Browser</Label>
-            <Switch
-              checked={isPanelEnabled(panelConfig, 'browser', 'task')}
-              onCheckedChange={(c) => togglePanel('browser', 'task', c)}
-            />
-          </div>
+        <>
+        <div className={CARD_CLASS}>
+          <Label className="text-base font-semibold">General</Label>
           <div className="space-y-3">
             <Label className="text-sm font-medium">Dev server</Label>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -1087,18 +1230,16 @@ export function PanelsSettingsTab({
             ))}
           </div>
         </div>
+        <div className={CARD_CLASS}>
+          <PanelLayoutControls orderId="browser" panelConfig={panelConfig} onSave={savePanelConfig} />
+        </div>
+        </>
       )}
 
       {activeTab === 'panels/editor' && (
-        <div className="rounded-lg border p-5 space-y-6">
-          <PanelBreadcrumb label="Editor" onBack={() => navigateTo('panels')} />
-          <div className="flex items-center justify-between">
-            <Label className="text-base font-semibold">Editor</Label>
-            <Switch
-              checked={isPanelEnabled(panelConfig, 'editor', 'task')}
-              onCheckedChange={(c) => togglePanel('editor', 'task', c)}
-            />
-          </div>
+        <>
+        <div className={CARD_CLASS}>
+          <Label className="text-base font-semibold">General</Label>
           <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
             <span className="text-sm text-muted-foreground">Word wrap</span>
             <Switch
@@ -1170,93 +1311,10 @@ export function PanelsSettingsTab({
             </Select>
           </div>
         </div>
-      )}
-
-      {activeTab === 'panels/diff' && (
-        <div className="rounded-lg border p-5 space-y-6">
-          <PanelBreadcrumb label="Diff" onBack={() => navigateTo('panels')} />
-          <div className="flex items-center justify-between">
-            <Label className="text-base font-semibold">Diff</Label>
-            <Switch
-              checked={isPanelEnabled(panelConfig, 'diff', 'task')}
-              onCheckedChange={(c) => togglePanel('diff', 'task', c)}
-            />
-          </div>
-          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-            <span className="text-sm text-muted-foreground">Context lines</span>
-            <Select
-              value={diffContextLines}
-              onValueChange={(v) => {
-                setDiffContextLines(v as any)
-                window.api.settings.set('diff_context_lines', v)
-              }}
-            >
-              <SelectTrigger className="max-w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="0">0</SelectItem>
-                <SelectItem value="3">3</SelectItem>
-                <SelectItem value="5">5</SelectItem>
-                <SelectItem value="all">All</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-            <span className="text-sm text-muted-foreground">Ignore whitespace</span>
-            <Switch
-              checked={diffIgnoreWhitespace}
-              onCheckedChange={(c) => {
-                setDiffIgnoreWhitespace(c)
-                window.api.settings.set('diff_ignore_whitespace', c ? '1' : '0')
-              }}
-            />
-          </div>
-          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-            <span className="text-sm text-muted-foreground">Continuous flow</span>
-            <Switch
-              checked={diffContinuousFlow}
-              onCheckedChange={(c) => {
-                setDiffContinuousFlow(c)
-                window.api.settings.set('diff_continuous_flow', c ? '1' : '0')
-                window.dispatchEvent(new Event('sz:settings-changed'))
-              }}
-            />
-          </div>
-          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-            <span className="text-sm text-muted-foreground">Hide file tree</span>
-            <Switch
-              checked={diffTreeCollapsed}
-              onCheckedChange={(c) => {
-                setDiffTreeCollapsed(c)
-                window.api.settings.set('diff_tree_collapsed', c ? '1' : '0')
-                window.dispatchEvent(new Event('sz:settings-changed'))
-              }}
-            />
-          </div>
-          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-            <span className="text-sm text-muted-foreground">Side-by-side</span>
-            <Switch
-              checked={diffSideBySide}
-              onCheckedChange={(c) => {
-                setDiffSideBySide(c)
-                window.api.settings.set('diff_side_by_side', c ? '1' : '0')
-                window.dispatchEvent(new Event('sz:settings-changed'))
-              }}
-            />
-          </div>
-          <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-            <span className="text-sm text-muted-foreground">Wrap lines</span>
-            <Switch
-              checked={diffWrap}
-              onCheckedChange={(c) => {
-                setDiffWrap(c)
-                window.api.settings.set('diff_wrap', c ? '1' : '0')
-                window.dispatchEvent(new Event('sz:settings-changed'))
-              }}
-            />
-          </div>
+        <div className={CARD_CLASS}>
+          <PanelLayoutControls orderId="editor" panelConfig={panelConfig} onSave={savePanelConfig} />
         </div>
+        </>
       )}
 
       {activeTab === 'panels/git' &&
@@ -1293,9 +1351,8 @@ export function PanelsSettingsTab({
             window.dispatchEvent(new Event('sz:settings-changed'))
           }
           return (
-            <div className="rounded-lg border p-5 space-y-6">
-              <PanelBreadcrumb label="Git" onBack={() => navigateTo('panels')} />
-
+            <>
+            <div className={CARD_CLASS}>
               {/* Tabs — order + visibility */}
               <div>
                 <Label className="text-base font-semibold">Tabs</Label>
@@ -1482,6 +1539,10 @@ export function PanelsSettingsTab({
                 </div>
               </div>
             </div>
+            <div className={CARD_CLASS}>
+              <PanelLayoutControls orderId="git" panelConfig={panelConfig} onSave={savePanelConfig} />
+            </div>
+            </>
           )
         })()}
 
@@ -1491,15 +1552,9 @@ export function PanelsSettingsTab({
           const wp = panelConfig.webPanels.find((p) => p.id === panelDetailId)
           if (!wp) return null
           return (
-            <div className="rounded-lg border p-5 space-y-6">
-              <PanelBreadcrumb label={wp.name} onBack={() => navigateTo('panels')} />
-              <div className="flex items-center justify-between">
-                <Label className="text-base font-semibold">{wp.name}</Label>
-                <Switch
-                  checked={isPanelEnabled(panelConfig, wp.id, 'task')}
-                  onCheckedChange={(c) => togglePanel(wp.id, 'task', c)}
-                />
-              </div>
+            <>
+            <div className={CARD_CLASS}>
+              <Label className="text-base font-semibold">General</Label>
               <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
                 <span className="text-sm text-muted-foreground">Name</span>
                 <Input value={editPanelName} onChange={(e) => setEditPanelName(e.target.value)} />
@@ -1569,8 +1624,32 @@ export function PanelsSettingsTab({
                 </Button>
               </div>
             </div>
+            <div className={CARD_CLASS}>
+              <PanelLayoutControls
+                orderId={wp.id}
+                panelConfig={panelConfig}
+                onSave={savePanelConfig}
+              />
+            </div>
+            </>
           )
         })()}
-    </>
+
+      {/* Panels without dedicated settings (artifacts/settings/processes): just the
+          Layout card — breadcrumb + enable toggle live in the tab title above. */}
+      {panelDetailId &&
+        ['artifacts', 'settings', 'processes'].includes(panelDetailId) &&
+        (() => {
+          return (
+            <div className={CARD_CLASS}>
+              <PanelLayoutControls
+                orderId={panelDetailId}
+                panelConfig={panelConfig}
+                onSave={savePanelConfig}
+              />
+            </div>
+          )
+        })()}
+    </div>
   )
 }

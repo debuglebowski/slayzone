@@ -61,7 +61,11 @@ import {
   BulkTaskContextMenu
 } from '@slayzone/tasks/hooks'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
-import { useGlobalPanelSizes, applyBoundaryResize } from '@slayzone/task/client/usePanelSizes'
+import {
+  useGlobalPanelSizes,
+  applyBoundaryResize,
+  effectiveLayout
+} from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/projects'
@@ -409,14 +413,18 @@ function App(): React.JSX.Element {
   const explodeGridRef = useRef<HTMLDivElement | null>(null)
   const [explodeGridWidth, setExplodeGridWidth] = useState(0)
   const [panelSizes, updatePanelSizes, resetPanelSize] = useGlobalPanelSizes()
-  const { isBuiltinEnabled: isHomePanelEnabled, getOrderedHomeIds } = usePanelConfig()
+  const {
+    config: homePanelConfig,
+    isBuiltinEnabled: isHomePanelEnabled,
+    getOrderedHomeIds
+  } = usePanelConfig()
   const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
   const [updateVersion, setUpdateVersion] = useState<string | null>(null)
   const [updateDownloadPercent, setUpdateDownloadPercent] = useState<number | null>(null)
   const [updateToastDismissed, setUpdateToastDismissed] = useState(false)
 
   // Home panel state (extracted — owns its own state fully)
-  const homePanel = useHomePanel(selectedProjectId, panelSizes, orderedHomeIds)
+  const homePanel = useHomePanel(selectedProjectId, panelSizes, homePanelConfig, orderedHomeIds)
 
   // Multi-repo detection for home tab
   const homeSelectedProject = useMemo(
@@ -2687,52 +2695,75 @@ function App(): React.JSX.Element {
                                   ) : (
                                     <div
                                       ref={homePanel.homeContainerRef}
-                                      className="flex-1 min-h-0 flex"
+                                      className="flex-1 min-h-0 flex overflow-x-auto"
                                     >
-                                      {homePanel.orderedHomePanelIds
-                                        .filter((id) => homePanel.homePanelVisibility[id])
-                                        .map((id, i) => {
+                                      {homePanel.homeRenderOrder.map((id, j) => {
                                           const projectPath =
                                             homeResolvedRepo.path ??
                                             projects.find((p) => p.id === selectedProjectId)
                                               ?.path ??
                                             null
-                                          const w = homePanel.homeResolvedWidths[id] ?? 400
-                                          // Boundary resize: the handle before this
-                                          // panel transfers width with the panel to
-                                          // its left (the previous visible panel).
-                                          const visibleHomePanelIds =
-                                            homePanel.orderedHomePanelIds.filter(
-                                              (v) => homePanel.homePanelVisibility[v]
-                                            )
-                                          const leftHomeId =
-                                            i > 0 ? visibleHomePanelIds[i - 1] : undefined
-                                          const homeMinWidth = (pid: string): number =>
-                                            pid === 'kanban' ? 400 : 200
+                                          const sizeKey = HOME_PANEL_SIZE_KEY[id]
+                                          const w = homePanel.homeResolvedWidths[sizeKey] ?? 400
+                                          // Cluster boundary (left→right anchor): the leftover gap sits
+                                          // just before the boundary handle (or the left edge if no
+                                          // left cluster).
+                                          const isClusterBoundary =
+                                            j === homePanel.homeLeftCount &&
+                                            homePanel.homeResolved.rightKeys.length > 0
+                                          // A handle renders before every panel except the very first —
+                                          // including the boundary (last-left ↔ first-right).
+                                          const leftId =
+                                            j > 0 ? homePanel.homeRenderOrder[j - 1] : undefined
+                                          const leftL = leftId
+                                            ? effectiveLayout(
+                                                HOME_PANEL_SIZE_KEY[leftId],
+                                                homePanelConfig,
+                                                panelSizes
+                                              )
+                                            : undefined
+                                          const rightL = effectiveLayout(
+                                            sizeKey,
+                                            homePanelConfig,
+                                            panelSizes
+                                          )
                                           return (
                                             <React.Fragment key={id}>
-                                              {i > 0 && leftHomeId && (
+                                              {isClusterBoundary && (
+                                                <div
+                                                  aria-hidden
+                                                  className="shrink-0"
+                                                  style={{ width: homePanel.homeResolved.gapPx }}
+                                                />
+                                              )}
+                                              {leftId && leftL && (
                                                 <ResizeHandle
                                                   leftWidth={
-                                                    homePanel.homeResolvedWidths[leftHomeId] ?? 400
+                                                    homePanel.homeResolvedWidths[
+                                                      HOME_PANEL_SIZE_KEY[leftId]
+                                                    ] ?? 400
                                                   }
                                                   rightWidth={w}
-                                                  leftMinWidth={homeMinWidth(leftHomeId)}
-                                                  rightMinWidth={homeMinWidth(id)}
+                                                  leftMinWidth={leftL.min ?? 200}
+                                                  rightMinWidth={rightL.min ?? 200}
+                                                  leftMaxWidth={leftL.max}
+                                                  rightMaxWidth={rightL.max}
                                                   onResize={(lw, rw) =>
                                                     updatePanelSizes(
                                                       applyBoundaryResize(
-                                                        panelSizes,
-                                                        HOME_PANEL_SIZE_KEY[leftHomeId],
-                                                        HOME_PANEL_SIZE_KEY[id],
+                                                        leftL,
+                                                        rightL,
+                                                        HOME_PANEL_SIZE_KEY[leftId],
+                                                        sizeKey,
                                                         lw,
-                                                        rw
+                                                        rw,
+                                                        homePanel.homeContainerWidth
                                                       )
                                                     )
                                                   }
                                                   onReset={() => {
-                                                    resetPanelSize(HOME_PANEL_SIZE_KEY[leftHomeId])
-                                                    resetPanelSize(HOME_PANEL_SIZE_KEY[id])
+                                                    resetPanelSize(HOME_PANEL_SIZE_KEY[leftId])
+                                                    resetPanelSize(sizeKey)
                                                   }}
                                                 />
                                               )}
