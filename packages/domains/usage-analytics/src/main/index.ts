@@ -1,2 +1,2 @@
 export { registerUsageAnalyticsHandlers } from './handlers'
-export { refreshUsageData, queryDailyTotals } from './cache'
+export { refreshUsageData, queryDailyTotals, queryAnalytics, queryTaskCost } from './cache'

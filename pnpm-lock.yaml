@@ -1681,6 +1681,9 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
+      '@slayzone/usage-analytics':
+        specifier: workspace:*
+        version: link:../../domains/usage-analytics
       '@tanstack/react-query':
         specifier: ^5.100.9
         version: 5.100.10(react@19.2.3)
