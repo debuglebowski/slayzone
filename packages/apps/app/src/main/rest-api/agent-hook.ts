@@ -68,11 +68,13 @@ const CLAUDE_BLOCKING_TOOLS: ReadonlySet<string> = new Set(['AskUserQuestion', '
  *
  *   UserPromptSubmit                → 'running' (active inside a turn)
  *   PreToolUse (non-blocking tool)  → 'running'
- *   PreToolUse (blocking tool)      → 'idle'   (agent paused for user)
- *   Stop / SessionEnd               → 'idle'   (turn complete / session over)
- *   Notification                    → 'idle'   (claude paused for user — sidebar dot)
- *   PostToolUse / SessionStart /
- *   SubagentStop / PreCompact       → null     (no-op; mid-turn or already-handled)
+ *   PreToolUse (blocking tool)      → 'idle'    (agent paused for user)
+ *   PostToolUse (blocking tool)     → 'running' (user answered → agent resumed)
+ *   PostToolUse (non-blocking tool) → null      (no-op; mid-turn, already 'running')
+ *   Stop / SessionEnd               → 'idle'    (turn complete / session over)
+ *   Notification                    → 'idle'    (claude paused for user — sidebar dot)
+ *   SessionStart / SubagentStop /
+ *   PreCompact                      → null      (no-op; mid-turn or already-handled)
  *
  * Mid-turn no-ops are deliberate: PostToolUse fires after every tool but the
  * agent is still working until Stop. Letting it flip to 'idle' caused the
@@ -86,6 +88,46 @@ function claudeCodeHookToTerminalState(hookEvent: string, raw?: unknown): Termin
       const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
       if (typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)) return 'idle'
       return 'running'
+    }
+    case 'PostToolUse': {
+      // The symmetric partner to the PreToolUse blocking-tool branch above, and
+      // the fix for "task sits idle (no spinner) after the user accepts a plan".
+      //
+      // WHY THIS IS NEEDED — the gap it closes:
+      //   A blocking tool (ExitPlanMode / AskUserQuestion) parks the session on
+      //   'idle' at PreToolUse while Claude waits for the user. On ACCEPT, Claude
+      //   runs the tool to completion and emits PostToolUse — and then keeps
+      //   working (thinking, writing the implementation) for as long as it takes
+      //   before its FIRST real tool call fires the next PreToolUse→'running'.
+      //   Measured gaps of 2+ minutes. Crucially there is NO UserPromptSubmit on
+      //   accept (the user didn't type a prompt), so this PostToolUse is the ONLY
+      //   hook that proves the agent resumed. Drop it (the old behaviour) and the
+      //   spinner stays dark through the whole gap.
+      //
+      // WHY KEYING ON EVENT PRESENCE IS SOUND (no is_error / accept-vs-reject
+      // inspection needed) — and why this is gated to BLOCKING tools only:
+      //   For a blocking tool, "execution" == the user's decision. ACCEPT → the
+      //   tool runs → PostToolUse fires. REJECT / Esc → the PreToolUse is denied,
+      //   the tool never executes → NO PostToolUse ever arrives here. Verified
+      //   empirically against the live hook log: rejected ExitPlanMode produced
+      //   zero PostToolUse; only accepts did. So for a blocking tool,
+      //   receiving PostToolUse ⟺ the user accepted ⟹ 'running'. The reject/Esc
+      //   path is therefore untouched by this branch (it correctly stays 'idle'
+      //   via PreToolUse, then resumes via UserPromptSubmit if the user replies).
+      //
+      // WHY NOT GENERALISE TO ALL PostToolUse:
+      //   A NON-blocking tool fires PostToolUse even when it ran-but-failed
+      //   (e.g. Bash exits non-zero). Mapping those to 'running' would be wrong,
+      //   AND would re-introduce the per-tool sidebar flicker the no-op was added
+      //   to kill. Blocking tools have no "ran-but-failed" state, so the
+      //   CLAUDE_BLOCKING_TOOLS gate is exactly what makes this safe WITHOUT an
+      //   is_error check (which isn't even carried on the PostToolUse payload).
+      //   Future blocking built-ins added to CLAUDE_BLOCKING_TOOLS inherit both
+      //   the pause (PreToolUse) and the resume (here) for free — one allowlist,
+      //   no drift. Non-blocking PostToolUse stays the no-op it always was.
+      const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
+      if (typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)) return 'running'
+      return null
     }
     case 'Stop':
     case 'SessionEnd':
@@ -198,6 +240,18 @@ function hookToAwaitingUser(agentId: string, hookEvent: string, raw?: unknown): 
   if (hookEvent === 'PreToolUse') {
     const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
     return typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)
+  }
+  if (hookEvent === 'PostToolUse') {
+    // Mirror of the PreToolUse branch: a blocking tool's PostToolUse fires only
+    // when the user accepted/answered (reject/Esc denies PreToolUse → no
+    // PostToolUse), so it is the authoritative "no longer blocked" signal.
+    // Clearing here keeps the awaiting flag coherent with the 'running' state
+    // that claudeCodeHookToTerminalState now returns for the same event — a
+    // running+awaiting pair would be contradictory and confuse the idle-close
+    // gate. Non-blocking PostToolUse stays a no-op (returns null below).
+    const toolName = (raw as { tool_name?: unknown } | undefined)?.tool_name
+    if (typeof toolName === 'string' && CLAUDE_BLOCKING_TOOLS.has(toolName)) return false
+    return null
   }
   if (hookEvent === 'UserPromptSubmit' || hookEvent === 'Stop' || hookEvent === 'SessionEnd')
     return false

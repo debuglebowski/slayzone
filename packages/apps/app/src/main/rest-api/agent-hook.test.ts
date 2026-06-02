@@ -264,6 +264,44 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
+  test('claude-code PostToolUse(ExitPlanMode) → awaitingInput false (resumed, hibernatable again)', async () => {
+    // The accept-resume must clear the awaiting flag PreToolUse set. Otherwise
+    // the session would report running+awaiting (contradiction) and the idle-
+    // close gate's bookkeeping drifts.
+    findSessionSpy.mockReturnValue('task-epm-accept')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-epm-accept',
+        raw: { tool_name: 'ExitPlanMode' }
+      })
+      expect(noteAwaitingInputSpy).toHaveBeenCalledWith('task-epm-accept', false)
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PostToolUse(non-blocking) → does NOT touch awaitingInput', async () => {
+    // Ordinary mid-turn tool completion must stay a no-op for the awaiting flag
+    // (and for state) — only blocking-tool PostToolUse is the resume signal.
+    findSessionSpy.mockReturnValue('task-post-bash')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-post-bash',
+        raw: { tool_name: 'Bash' }
+      })
+      expect(noteAwaitingInputSpy).not.toHaveBeenCalled()
+      expect(transitionSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
   test('claude-code Notification → does NOT set awaitingInput (idle_prompt stays hibernatable)', async () => {
     findSessionSpy.mockReturnValue('task-notif')
     const srv = await startServer()
@@ -392,6 +430,48 @@ describe('POST /api/agent-hook', () => {
       expect(broadcastSpy).toHaveBeenCalledTimes(1)
       expect(transitionSpy).not.toHaveBeenCalled()
       expect(markActiveSpy).toHaveBeenCalledWith('task-post')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PostToolUse(ExitPlanMode) → running (plan accepted, agent resumed)', async () => {
+    // The symmetric partner to "PreToolUse ExitPlanMode → idle". PreToolUse
+    // parked the session on 'idle' (agent blocked on the plan dialog). When the
+    // user ACCEPTS, Claude runs the tool to completion and fires PostToolUse —
+    // the ONLY hook between accept and the agent's first real tool call (which
+    // can be minutes of thinking/writing away). Without this the spinner stays
+    // dark through that whole gap. Reject never reaches here (denied PreToolUse
+    // fires no PostToolUse), so PostToolUse(blocking) ⟺ accepted ⟹ running.
+    findSessionSpy.mockReturnValue('task-epm-accept')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-epm-accept',
+        raw: { tool_name: 'ExitPlanMode' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-epm-accept', 'running', 'PostToolUse')
+      expect(markActiveSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('claude-code PostToolUse(AskUserQuestion) → running (answered, agent resumed)', async () => {
+    // Same shape as ExitPlanMode: PreToolUse parked on 'idle', the user's answer
+    // completes the tool → PostToolUse → resume → 'running'.
+    findSessionSpy.mockReturnValue('task-aq-answered')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'PostToolUse',
+        taskId: 'task-aq-answered',
+        raw: { tool_name: 'AskUserQuestion' }
+      })
+      expect(transitionSpy).toHaveBeenCalledWith('task-aq-answered', 'running', 'PostToolUse')
     } finally {
       await srv.close()
     }
