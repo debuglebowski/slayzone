@@ -4,6 +4,7 @@ import { automationsRouter } from './routers/automations'
 import { diagnosticsRouter } from './routers/diagnostics'
 import { historyRouter } from './routers/history'
 import { tagsRouter } from './routers/tags'
+import { testPanelRouter } from './routers/test-panel'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
 
 export const appRouter = router({
@@ -12,6 +13,7 @@ export const appRouter = router({
   diagnostics: diagnosticsRouter,
   history: historyRouter,
   tags: tagsRouter,
+  testPanel: testPanelRouter,
   usageAnalytics: usageAnalyticsRouter
 })
 
