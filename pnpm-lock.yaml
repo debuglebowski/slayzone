@@ -1669,6 +1669,9 @@ importers:
       '@slayzone/agent-turns':
         specifier: workspace:*
         version: link:../../domains/agent-turns
+      '@slayzone/diagnostics':
+        specifier: workspace:*
+        version: link:../../domains/diagnostics
       '@slayzone/history':
         specifier: workspace:*
         version: link:../../domains/history
