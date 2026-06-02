@@ -1,5 +1,6 @@
 import type { IpcMain } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { TypedEmitter } from '@slayzone/platform/events'
 import {
   sendUserMessage,
   ensureSpawned,
@@ -12,11 +13,30 @@ import { listChatQueue, removeChatQueueItem, clearChatQueue } from './chat-queue
 import type { QueuedChatMessage } from '../shared/types'
 
 /**
+ * Chat-queue event emitter — the source for the tRPC `chat.onQueueChanged` /
+ * `chat.onQueueDrained` subscriptions. Dual-emitted alongside the legacy
+ * `webContents.send` broadcasts in `broadcast()` below; the IPC path stays
+ * until the renderer drops `window.api` (slice 5).
+ */
+export type ChatQueueEventMap = {
+  'queue-changed': [tabId: string]
+  'queue-drained': [tabId: string, original: string]
+}
+export const chatQueueEvents = new TypedEmitter<ChatQueueEventMap>()
+
+/**
  * Lazy electron broadcast — same trick as chat-transport-manager so this file
  * stays importable from non-electron test contexts. In production wires
  * `chat:queue-changed` (refetch trigger) + `chat:queue-drained` (analytics).
+ * Dual-emits on `chatQueueEvents` first (tRPC subs, fires in every context incl.
+ * tests), then the legacy `webContents.send` path.
  */
 function broadcast(channel: 'chat:queue-changed' | 'chat:queue-drained', ...args: unknown[]): void {
+  if (channel === 'chat:queue-changed') {
+    chatQueueEvents.emit('queue-changed', args[0] as string)
+  } else {
+    chatQueueEvents.emit('queue-drained', args[0] as string, args[1] as string)
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { BrowserWindow } = require('electron') as typeof import('electron')
@@ -85,21 +105,23 @@ export async function drainChatQueue(db: SlayzoneDb, tabId: string): Promise<voi
   broadcast('chat:queue-drained', tabId, head.original)
 }
 
-export function registerChatQueueHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+/**
+ * Build the chat-queue ops object — the single implementation shared by the IPC
+ * handlers (`registerChatQueueHandlers`) and the tRPC `chat.queue` router
+ * (injected via `setChatDeps`). Wires the drainer side-effect once on creation.
+ */
+export function createChatQueueOps(db: SlayzoneDb) {
   // Wire drain into the transport so state transitions can pull from queue.
-  // drainChatQueue is async now; the drainer slot is fire-and-forget (invoked
-  // via setImmediate in the transport), so float the promise explicitly.
+  // drainChatQueue is async; the drainer slot is fire-and-forget (invoked via
+  // setImmediate in the transport), so float the promise explicitly.
   registerChatQueueDrainer((tabId) => {
     void drainChatQueue(db, tabId)
   })
 
-  ipcMain.handle('chat:queue:list', (_, tabId: string): Promise<QueuedChatMessage[]> => {
-    return listChatQueue(db, tabId)
-  })
+  return {
+    list: (tabId: string): Promise<QueuedChatMessage[]> => listChatQueue(db, tabId),
 
-  ipcMain.handle(
-    'chat:queue:push',
-    async (_, tabId: string, send: string, original: string): Promise<QueuedChatMessage> => {
+    push: async (tabId: string, send: string, original: string): Promise<QueuedChatMessage> => {
       const msg = await db.namedTxn<QueuedChatMessage>('chat-queue:push', {
         tabId,
         send,
@@ -112,21 +134,37 @@ export function registerChatQueueHandlers(ipcMain: IpcMain, db: SlayzoneDb): voi
       // sit. drainChatQueue itself gates on idle so this is safe.
       await drainChatQueue(db, tabId)
       return msg
+    },
+
+    remove: async (id: string): Promise<boolean> => {
+      const row = (await db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id)) as
+        | { tab_id: string }
+        | undefined
+      const removed = await removeChatQueueItem(db, id)
+      if (removed && row) broadcast('chat:queue-changed', row.tab_id)
+      return removed
+    },
+
+    clear: async (tabId: string): Promise<number> => {
+      const cleared = await clearChatQueue(db, tabId)
+      if (cleared > 0) broadcast('chat:queue-changed', tabId)
+      return cleared
     }
+  }
+}
+
+export type ChatQueueOps = ReturnType<typeof createChatQueueOps>
+
+/** Wire the IPC handlers to a shared `ChatQueueOps`. Logic-free delegation. */
+export function registerChatQueueHandlers(ipcMain: IpcMain, queueOps: ChatQueueOps): void {
+  ipcMain.handle('chat:queue:list', (_, tabId: string): Promise<QueuedChatMessage[]> =>
+    queueOps.list(tabId)
   )
-
-  ipcMain.handle('chat:queue:remove', async (_, id: string): Promise<boolean> => {
-    const row = (await db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id)) as
-      | { tab_id: string }
-      | undefined
-    const removed = await removeChatQueueItem(db, id)
-    if (removed && row) broadcast('chat:queue-changed', row.tab_id)
-    return removed
-  })
-
-  ipcMain.handle('chat:queue:clear', async (_, tabId: string): Promise<number> => {
-    const cleared = await clearChatQueue(db, tabId)
-    if (cleared > 0) broadcast('chat:queue-changed', tabId)
-    return cleared
-  })
+  ipcMain.handle(
+    'chat:queue:push',
+    (_, tabId: string, send: string, original: string): Promise<QueuedChatMessage> =>
+      queueOps.push(tabId, send, original)
+  )
+  ipcMain.handle('chat:queue:remove', (_, id: string): Promise<boolean> => queueOps.remove(id))
+  ipcMain.handle('chat:queue:clear', (_, tabId: string): Promise<number> => queueOps.clear(tabId))
 }

@@ -1687,6 +1687,9 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
+      '@slayzone/terminal':
+        specifier: workspace:*
+        version: link:../../domains/terminal
       '@slayzone/test-panel':
         specifier: workspace:*
         version: link:../../domains/test-panel

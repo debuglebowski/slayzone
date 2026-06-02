@@ -239,7 +239,9 @@ import {
   setPtyHibernatedTabRecorder,
   setIdleCloseConfigGetter,
   setChatSpawnedTabRecorder,
-  beginTerminalShutdown
+  beginTerminalShutdown,
+  chatEvents,
+  chatQueueEvents
 } from '@slayzone/terminal/main'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import {
@@ -1546,7 +1548,12 @@ app
       }
     })
     logBoot('terminal-tabs handlers registered')
-    registerChatHandlers(ipcMain, db, { onChatEvent: initChatTurnSubscriber(db) })
+    // Build the chat ops once (IPC handlers) and hand the SAME instances to the
+    // tRPC chat router via setChatDeps below — single source of truth, both
+    // transports coexist until the renderer drops IPC (slice 5).
+    const chatHandlerOps = registerChatHandlers(ipcMain, db, {
+      onChatEvent: initChatTurnSubscriber(db)
+    })
     // One-shot: backfill `chatMode` for tasks that pre-date the chat-mode UI so
     // upgraded users keep their current `--allow-dangerously-skip-permissions`
     // behavior instead of suddenly hitting denials.
@@ -1613,6 +1620,15 @@ app
       logBoot('trpc server import dispatched')
       import('@slayzone/transport/server')
         .then((mod) => {
+          // Inject the electron-coupled chat ops + streaming emitters BEFORE the
+          // server starts accepting connections, so the first chat procedure /
+          // subscription can't hit an uninitialized getChatDeps().
+          mod.setChatDeps({
+            ops: chatHandlerOps.ops,
+            queueOps: chatHandlerOps.queueOps,
+            events: chatEvents,
+            queueEvents: chatQueueEvents
+          })
           mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
           logBoot('trpc server started')

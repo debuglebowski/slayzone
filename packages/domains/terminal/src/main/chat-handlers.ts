@@ -32,7 +32,7 @@ import {
   getNextSeqForTab,
   clearChatEventsForTab
 } from './chat-events-store'
-import { registerChatQueueHandlers } from './chat-queue-handlers'
+import { registerChatQueueHandlers, createChatQueueOps } from './chat-queue-handlers'
 import { clearChatQueue } from './chat-queue-store'
 import { notifyGlobalStateListeners } from './pty-manager'
 import { parseShellArgs } from './adapters/flag-parser'
@@ -575,11 +575,13 @@ async function buildHydrateOpts(
   }
 }
 
-export function registerChatHandlers(
-  ipcMain: IpcMain,
-  db: SlayzoneDb,
-  opts: ChatHandlerOpts = {}
-): void {
+/**
+ * Build the chat ops object — the single implementation of every chat operation,
+ * shared by the IPC handlers (`registerChatHandlers`) and the tRPC `chat` router
+ * (injected via `setChatDeps`). Wires SQLite persistence + live-sync into the
+ * transport once on creation; the IPC and tRPC layers are thin delegators.
+ */
+export function createChatOps(db: SlayzoneDb, opts: ChatHandlerOpts = {}) {
   // Wire SQLite persistence into the transport. Default deps had a no-op
   // persistEvent; configureTransport keeps spawn/whichBinary/broadcast* untouched.
   configureTransport({
@@ -660,69 +662,59 @@ export function registerChatHandlers(
     }
   })
 
-  registerChatQueueHandlers(ipcMain, db)
+  return {
+    supports: (mode: string): boolean => supportsChatMode(mode),
 
-  ipcMain.handle('chat:supports', (_, mode: string): boolean => supportsChatMode(mode))
+    /**
+     * Lazy hydrate: load persisted buffer + chat metadata into an in-memory
+     * skeleton session WITHOUT spawning a subprocess. The actual OS process is
+     * started lazily on the first `chat:send` (or queue drain). Idempotent —
+     * reattaches to an existing live session for the same tab.
+     */
+    hydrate: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      return hydrateSession(await buildHydrateOpts(db, o, { fresh: false }))
+    },
 
-  /**
-   * Lazy hydrate: load persisted buffer + chat metadata into an in-memory
-   * skeleton session WITHOUT spawning a subprocess. The actual OS process is
-   * started lazily on the first `chat:send` (or queue drain). Idempotent —
-   * reattaches to an existing live session for the same tab.
-   */
-  ipcMain.handle('chat:hydrate', async (_, opts: ChatCreateOpts): Promise<ChatSessionInfo> => {
-    return hydrateSession(await buildHydrateOpts(db, opts, { fresh: false }))
-  })
+    /**
+     * Eager spawn entrypoint. Used by the renderer's "Restart" button after a
+     * session ended — user wants a live subprocess immediately, not on the next
+     * keystroke. Hydrates if needed, then `ensureSpawned`. Idempotent for live
+     * sessions.
+     */
+    start: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      hydrateSession(await buildHydrateOpts(db, o, { fresh: false }))
+      return ensureSpawned(o.tabId)
+    },
 
-  /**
-   * Eager spawn entrypoint. Used by the renderer's "Restart" button after a
-   * session ended — user wants a live subprocess immediately, not on the next
-   * keystroke. Hydrates if needed, then `ensureSpawned`. Idempotent for live
-   * sessions.
-   */
-  ipcMain.handle('chat:start', async (_, opts: ChatCreateOpts): Promise<ChatSessionInfo> => {
-    hydrateSession(await buildHydrateOpts(db, opts, { fresh: false }))
-    return ensureSpawned(opts.tabId)
-  })
+    send: async (tabId: string, text: string): Promise<boolean> => {
+      // Lazy trigger: a `chat:send` is the canonical "spawn this subprocess now"
+      // signal. ensureSpawned is idempotent + dedupes concurrent callers, so
+      // simultaneous send + queue drain on the same tab share one spawn.
+      try {
+        await ensureSpawned(tabId)
+      } catch (err) {
+        console.error('[chat-handlers] ensureSpawned failed during chat:send:', err)
+        return false
+      }
+      return sendUserMessage(tabId, text)
+    },
 
-  ipcMain.handle('chat:send', async (_, tabId: string, text: string): Promise<boolean> => {
-    // Lazy trigger: a `chat:send` is the canonical "spawn this subprocess now"
-    // signal. ensureSpawned is idempotent + dedupes concurrent callers, so
-    // simultaneous send + queue drain on the same tab share one spawn.
-    try {
-      await ensureSpawned(tabId)
-    } catch (err) {
-      console.error('[chat-handlers] ensureSpawned failed during chat:send:', err)
-      return false
-    }
-    return sendUserMessage(tabId, text)
-  })
-
-  // Inline tool-answer flows (e.g. AskUserQuestion). Resolves the pending
-  // tool_use_id with a tool_result content block so the SDK's turn machinery
-  // sees a normal completion. Returns false when the adapter lacks a
-  // structured-input channel — renderer falls back to chat:send.
-  ipcMain.handle(
-    'chat:sendToolResult',
-    (
-      _,
+    // Inline tool-answer flows (e.g. AskUserQuestion). Resolves the pending
+    // tool_use_id with a tool_result content block so the SDK's turn machinery
+    // sees a normal completion. Returns false when the adapter lacks a
+    // structured-input channel — renderer falls back to chat:send.
+    sendToolResult: (
       tabId: string,
       args: { toolUseId: string; content: string; isError?: boolean }
-    ): boolean => {
-      return sendToolResult(tabId, args)
-    }
-  )
+    ): boolean => sendToolResult(tabId, args),
 
-  // Reply to an inbound permission_request from the CLI (subtype:'can_use_tool',
-  // surfaces under `--permission-prompt-tool stdio`). The renderer collected
-  // the user's decision; this IPC writes the matching control_response so the
-  // CLI unblocks the tool. AskUserQuestion uses `behavior:'allow'` with
-  // `updatedInput.answers` populated; other tools the renderer decides
-  // independently.
-  ipcMain.handle(
-    'chat:respondPermission',
-    (
-      _,
+    // Reply to an inbound permission_request from the CLI (subtype:'can_use_tool',
+    // surfaces under `--permission-prompt-tool stdio`). The renderer collected
+    // the user's decision; this writes the matching control_response so the
+    // CLI unblocks the tool. AskUserQuestion uses `behavior:'allow'` with
+    // `updatedInput.answers` populated; other tools the renderer decides
+    // independently.
+    respondPermission: (
       tabId: string,
       args: {
         requestId: string
@@ -734,150 +726,130 @@ export function registerChatHandlers(
             }
           | { behavior: 'deny'; message: string; interrupt?: boolean }
       }
-    ): boolean => {
-      return respondToPermissionRequest(tabId, args)
-    }
-  )
+    ): boolean => respondToPermissionRequest(tabId, args),
 
-  // Interrupt = stop the current turn but keep the session. Fast path: live
-  // `interrupt` control_request preserves the warm subprocess + conversation
-  // state. Fallback: kill + respawn with --resume (legacy path; SIGINT was
-  // unreliable on claude-code per Spike C). The identity guard in the
-  // transport's exit handler swallows the dying child's process-exit
-  // broadcast on the fallback path so the renderer doesn't flash "Session
-  // ended". Mirrors `chat:setMode`.
-  ipcMain.handle('chat:interrupt', async (_, opts: ChatCreateOpts): Promise<ChatSessionInfo> => {
-    // Persist interrupted marker FIRST so replay sees the turn boundary
-    // regardless of which path resolves. recordInterrupted no-ops for
-    // pre-spawn skeletons (nothing to interrupt).
-    recordInterrupted(opts.tabId)
+    // Interrupt = stop the current turn but keep the session. Fast path: live
+    // `interrupt` control_request preserves the warm subprocess + conversation
+    // state. Fallback: kill + respawn with --resume (legacy path; SIGINT was
+    // unreliable on claude-code per Spike C). The identity guard in the
+    // transport's exit handler swallows the dying child's process-exit
+    // broadcast on the fallback path so the renderer doesn't flash "Session
+    // ended". Mirrors `setMode`.
+    interrupt: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      // Persist interrupted marker FIRST so replay sees the turn boundary
+      // regardless of which path resolves. recordInterrupted no-ops for
+      // pre-spawn skeletons (nothing to interrupt).
+      recordInterrupted(o.tabId)
 
-    // Fast path: control_request `interrupt` over stdin. Only applies to live
-    // (spawned, not-ended) sessions; pre-spawn skeletons have no turn in flight.
-    const liveState = getSessionTerminalState(opts.tabId)
-    const liveInfo = getSessionInfo(opts.tabId)
-    if (liveState && liveState !== 'not-spawned' && liveInfo && !liveInfo.ended) {
-      try {
-        await sendControlRequest(opts.tabId, { subtype: 'interrupt' })
-        const refreshed = getSessionInfo(opts.tabId)
-        if (refreshed) return refreshed
-      } catch (err) {
-        console.warn(
-          '[chat-handlers] interrupt control_request failed, falling back to kill+respawn:',
-          err
-        )
-        // fall through
+      // Fast path: control_request `interrupt` over stdin. Only applies to live
+      // (spawned, not-ended) sessions; pre-spawn skeletons have no turn in flight.
+      const liveState = getSessionTerminalState(o.tabId)
+      const liveInfo = getSessionInfo(o.tabId)
+      if (liveState && liveState !== 'not-spawned' && liveInfo && !liveInfo.ended) {
+        try {
+          await sendControlRequest(o.tabId, { subtype: 'interrupt' })
+          const refreshed = getSessionInfo(o.tabId)
+          if (refreshed) return refreshed
+        } catch (err) {
+          console.warn(
+            '[chat-handlers] interrupt control_request failed, falling back to kill+respawn:',
+            err
+          )
+          // fall through
+        }
       }
-    }
 
-    // Fallback: kill + respawn. Eager-spawn here mirrors the warm-subprocess
-    // semantics of the control_request fast path — after interrupt the user
-    // typically continues the turn immediately, so a ready process avoids the
-    // double-latency of "interrupt → next send waits on spawn".
-    removeSession(opts.tabId)
-    hydrateSession(await buildHydrateOpts(db, opts, { fresh: false }))
-    return ensureSpawned(opts.tabId)
-  })
+      // Fallback: kill + respawn. Eager-spawn here mirrors the warm-subprocess
+      // semantics of the control_request fast path — after interrupt the user
+      // typically continues the turn immediately, so a ready process avoids the
+      // double-latency of "interrupt → next send waits on spawn".
+      removeSession(o.tabId)
+      hydrateSession(await buildHydrateOpts(db, o, { fresh: false }))
+      return ensureSpawned(o.tabId)
+    },
 
-  // Stop-button / Esc path. Same kill+respawn as `chat:interrupt`, but if no
-  // assistant progress arrived since the trailing user-message we cancel that
-  // user-message instead of leaving an `interrupted` marker — Claude CLI parity
-  // for "abort an unanswered turn and edit the prompt". Authoritative verdict
-  // (`popped`) flows back to the caller so the renderer can restore the input.
-  ipcMain.handle(
-    'chat:abortAndPop',
-    async (
-      _,
-      opts: ChatCreateOpts
-    ): Promise<{
-      popped: boolean
-      text: string | null
-    }> => {
-      const result = popLastUserMessage(opts.tabId)
-      if (!result.popped) recordInterrupted(opts.tabId)
+    // Stop-button / Esc path. Same kill+respawn as `interrupt`, but if no
+    // assistant progress arrived since the trailing user-message we cancel that
+    // user-message instead of leaving an `interrupted` marker — Claude CLI parity
+    // for "abort an unanswered turn and edit the prompt". Authoritative verdict
+    // (`popped`) flows back to the caller so the renderer can restore the input.
+    abortAndPop: async (
+      o: ChatCreateOpts
+    ): Promise<{ popped: boolean; text: string | null }> => {
+      const result = popLastUserMessage(o.tabId)
+      if (!result.popped) recordInterrupted(o.tabId)
       // Stop button discards queued follow-ups alongside the in-flight turn —
       // matches pre-backend behavior where handleStop did `setQueuedMessages([])`.
       try {
-        await clearChatQueue(db, opts.tabId)
+        await clearChatQueue(db, o.tabId)
       } catch (err) {
         console.error('[chat-handlers] clearChatQueue failed:', err)
       }
-      removeSession(opts.tabId)
+      removeSession(o.tabId)
       // Eager respawn after Stop matches Claude CLI parity — user just hit the
       // big red button on a turn, the implicit expectation is "ready to keep
       // chatting"; making them wait for spawn on next send is worse UX than the
       // lazy mode the rest of the app uses for first-ever messages.
-      hydrateSession(await buildHydrateOpts(db, opts, { fresh: false }))
-      await ensureSpawned(opts.tabId)
+      hydrateSession(await buildHydrateOpts(db, o, { fresh: false }))
+      await ensureSpawned(o.tabId)
       return { popped: result.popped, text: result.text }
-    }
-  )
+    },
 
-  ipcMain.handle('chat:kill', (_, tabId: string): void => {
-    killChat(tabId)
-  })
+    kill: (tabId: string): void => {
+      killChat(tabId)
+    },
 
-  ipcMain.handle('chat:remove', async (_, tabId: string): Promise<void> => {
-    removeSession(tabId)
-    // Tab is gone — drop persisted history + queue. (FK ON DELETE CASCADE
-    // also clears them when the terminal_tabs row itself is deleted, but
-    // chat:remove can be invoked before the tab row is gone, so be explicit.)
-    try {
-      await clearChatEventsForTab(db, tabId)
-    } catch (err) {
-      console.error('[chat-handlers] clearChatEventsForTab failed:', err)
-    }
-    try {
-      await clearChatQueue(db, tabId)
-    } catch (err) {
-      console.error('[chat-handlers] clearChatQueue failed:', err)
-    }
-  })
+    remove: async (tabId: string): Promise<void> => {
+      removeSession(tabId)
+      // Tab is gone — drop persisted history + queue. (FK ON DELETE CASCADE
+      // also clears them when the terminal_tabs row itself is deleted, but
+      // chat:remove can be invoked before the tab row is gone, so be explicit.)
+      try {
+        await clearChatEventsForTab(db, tabId)
+      } catch (err) {
+        console.error('[chat-handlers] clearChatEventsForTab failed:', err)
+      }
+      try {
+        await clearChatQueue(db, tabId)
+      } catch (err) {
+        console.error('[chat-handlers] clearChatQueue failed:', err)
+      }
+    },
 
-  // Reset = atomic kill+wipe+spawn-fresh in a single IPC. Doing this client-side
-  // (kill → remove → create across multiple awaits) opened a race window where the
-  // old child's exit broadcast could leak between IPCs and stick "Session ended"
-  // in the renderer. Inlining the whole sequence on the main side closes that
-  // window: SIGTERM is sent + the session is removed from the map sync'ly, so any
-  // exit event the OS later delivers is swallowed by the identity guard in
-  // chat-transport-manager's child.on('exit') handler.
-  /**
-   * Atomic reset: kills the current session, wipes persisted history + queue +
-   * stored conversation id, and re-hydrates a fresh skeleton in one IPC. The
-   * fresh skeleton is `not-spawned` — no subprocess until the user's next
-   * `chat:send`. Matches the lazy-spawn end-to-end semantics: nothing runs
-   * until the user actually engages.
-   */
-  ipcMain.handle('chat:reset', async (_, opts: ChatCreateOpts): Promise<ChatSessionInfo> => {
-    removeSession(opts.tabId)
-    try {
-      await clearChatEventsForTab(db, opts.tabId)
-    } catch (err) {
-      console.error('[chat-handlers] clearChatEventsForTab failed:', err)
-    }
-    try {
-      await clearChatQueue(db, opts.tabId)
-    } catch (err) {
-      console.error('[chat-handlers] clearChatQueue failed:', err)
-    }
-    try {
-      await clearChatConversationId(db, opts.taskId, opts.mode)
-    } catch (err) {
-      console.error('[chat-handlers] clearChatConversationId failed:', err)
-    }
-    return hydrateSession(await buildHydrateOpts(db, opts, { fresh: true }))
-  })
+    /**
+     * Atomic reset: kills the current session, wipes persisted history + queue +
+     * stored conversation id, and re-hydrates a fresh skeleton in one call. The
+     * fresh skeleton is `not-spawned` — no subprocess until the user's next
+     * `chat:send`. Matches the lazy-spawn end-to-end semantics: nothing runs
+     * until the user actually engages. Inlining the whole sequence here closes a
+     * race where the old child's exit broadcast could leak between IPCs and stick
+     * "Session ended" in the renderer.
+     */
+    reset: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
+      removeSession(o.tabId)
+      try {
+        await clearChatEventsForTab(db, o.tabId)
+      } catch (err) {
+        console.error('[chat-handlers] clearChatEventsForTab failed:', err)
+      }
+      try {
+        await clearChatQueue(db, o.tabId)
+      } catch (err) {
+        console.error('[chat-handlers] clearChatQueue failed:', err)
+      }
+      try {
+        await clearChatConversationId(db, o.taskId, o.mode)
+      } catch (err) {
+        console.error('[chat-handlers] clearChatConversationId failed:', err)
+      }
+      return hydrateSession(await buildHydrateOpts(db, o, { fresh: true }))
+    },
 
-  ipcMain.handle('chat:getBufferSince', (_, tabId: string, afterSeq: number) => {
-    return getEventBufferSince(tabId, afterSeq)
-  })
+    getBufferSince: (tabId: string, afterSeq: number) => getEventBufferSince(tabId, afterSeq),
 
-  ipcMain.handle('chat:getInfo', (_, tabId: string) => getSessionInfo(tabId))
+    getInfo: (tabId: string) => getSessionInfo(tabId),
 
-  ipcMain.handle(
-    'chat:inspectPermissions',
-    async (
-      _,
+    inspectPermissions: async (
       taskId: string,
       mode: string
     ): Promise<ReturnType<typeof inspectPermissionFlags>> => {
@@ -894,42 +866,36 @@ export function registerChatHandlers(
       const providerCfg = await readProviderConfig(db, taskId, mode)
       const flagsString = providerCfg.flags ?? (await readTaskModeDefaultFlags(db, mode)) ?? ''
       return inspectPermissionFlags(parseShellArgs(flagsString))
-    }
-  )
+    },
 
-  ipcMain.handle('chat:getMode', async (_, taskId: string, mode: string): Promise<string> => {
-    const cfg = await readProviderConfig(db, taskId, mode)
-    const stored = cfg.chatMode ?? defaultChatModeForMode(mode)
-    // Hide stale `auto` from UI when capability is gone — pill would otherwise
-    // show violet, and the next mode change would attempt a forbidden flag.
-    return resolveSafeChatMode(stored)
-  })
+    getMode: async (taskId: string, mode: string): Promise<string> => {
+      const cfg = await readProviderConfig(db, taskId, mode)
+      const stored = cfg.chatMode ?? defaultChatModeForMode(mode)
+      // Hide stale `auto` from UI when capability is gone — pill would otherwise
+      // show violet, and the next mode change would attempt a forbidden flag.
+      return resolveSafeChatMode(stored)
+    },
 
-  ipcMain.handle(
-    'chat:getAutoEligibility',
-    (): Promise<AutoModeEligibility> => getAutoModeEligibility()
-  )
+    getAutoEligibility: (): Promise<AutoModeEligibility> => getAutoModeEligibility(),
 
-  ipcMain.handle(
-    'chat:setMode',
-    async (_, opts: ChatCreateOpts & { chatMode: string }): Promise<ChatSessionInfo> => {
+    setMode: async (o: ChatCreateOpts & { chatMode: string }): Promise<ChatSessionInfo> => {
       // Reject a mode that isn't valid for this terminal mode's vocabulary.
-      if (!isValidChatModeForMode(opts.mode, opts.chatMode)) {
-        throw new Error(`Invalid chat mode for mode ${opts.mode}: ${String(opts.chatMode)}`)
+      if (!isValidChatModeForMode(o.mode, o.chatMode)) {
+        throw new Error(`Invalid chat mode for mode ${o.mode}: ${String(o.chatMode)}`)
       }
       // Server-side guard: ignore `auto` when capability is missing. Renderer
-      // already filters in the pill, but a stale renderer or a direct IPC call
+      // already filters in the pill, but a stale renderer or a direct call
       // shouldn't be able to persist a forbidden mode.
-      const safe = await resolveSafeChatMode(opts.chatMode)
+      const safe = await resolveSafeChatMode(o.chatMode)
 
       // Pre-spawn fast path: skeleton session, no live subprocess to inform.
       // Just persist to DB + update the in-memory skeleton so the next spawn
       // picks it up via buildSpawnArgs. No control_request, no respawn.
-      const liveState = getSessionTerminalState(opts.tabId)
+      const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatMode(db, opts.taskId, opts.mode, safe)
-        updateSessionChatMode(opts.tabId, safe)
-        const refreshed = getSessionInfo(opts.tabId)
+        await writeChatMode(db, o.taskId, o.mode, safe)
+        updateSessionChatMode(o.tabId, safe)
+        const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
         // Skeleton vanished between checks — fall through to re-hydrate path below.
       }
@@ -939,17 +905,17 @@ export function registerChatHandlers(
       // CLI permission_mode value (bypass → null → fallback). For codex-chat
       // the runtime mode itself rides the control request — the driver applies
       // it to the next `turn/start`, no respawn.
-      const cliMode = opts.mode === 'codex-chat' ? safe : chatModeToCliPermissionMode(safe)
-      const liveInfo = getSessionInfo(opts.tabId)
+      const cliMode = o.mode === 'codex-chat' ? safe : chatModeToCliPermissionMode(safe)
+      const liveInfo = getSessionInfo(o.tabId)
       if (cliMode && liveState && liveState !== 'not-spawned' && liveInfo && !liveInfo.ended) {
         try {
-          await sendControlRequest(opts.tabId, {
+          await sendControlRequest(o.tabId, {
             subtype: 'set_permission_mode',
             mode: cliMode
           })
-          await writeChatMode(db, opts.taskId, opts.mode, safe)
-          updateSessionChatMode(opts.tabId, safe)
-          const refreshed = getSessionInfo(opts.tabId)
+          await writeChatMode(db, o.taskId, o.mode, safe)
+          updateSessionChatMode(o.tabId, safe)
+          const refreshed = getSessionInfo(o.tabId)
           if (refreshed) return refreshed
         } catch (err) {
           console.warn(
@@ -966,58 +932,55 @@ export function registerChatHandlers(
       // spawn first, persist DB after spawn succeeds. chatModeOverride bypasses
       // DB read so the new child uses `safe` flags even though provider_config
       // still has the old value.
-      removeSession(opts.tabId)
-      hydrateSession(await buildHydrateOpts(db, opts, { fresh: false, chatModeOverride: safe }))
-      const created = await ensureSpawned(opts.tabId)
-      await writeChatMode(db, opts.taskId, opts.mode, safe)
+      removeSession(o.tabId)
+      hydrateSession(await buildHydrateOpts(db, o, { fresh: false, chatModeOverride: safe }))
+      const created = await ensureSpawned(o.tabId)
+      await writeChatMode(db, o.taskId, o.mode, safe)
       // Returned ChatSessionInfo carries `chatMode: safe` via Session.chatMode,
       // so renderer trusts the server's resolved value (e.g. auto → auto-accept
       // downgrade) instead of its optimistic guess.
       return created
-    }
-  )
+    },
 
-  ipcMain.handle('chat:getModel', async (_, taskId: string, mode: string): Promise<string> => {
-    const cfg = await readProviderConfig(db, taskId, mode)
-    const stored = cfg.chatModel
-    if (isValidModelForMode(mode, stored)) return stored
-    // No (or legacy/invalid) stored value → provider default. codex-chat uses
-    // its own default; claude-chat resolves the account default from
-    // `~/.claude/settings.json` (Pro → sonnet, Max → opus, …).
-    if (mode === 'codex-chat') return defaultModelForMode(mode)
-    return resolveAccountDefaultModel()
-  })
+    getModel: async (taskId: string, mode: string): Promise<string> => {
+      const cfg = await readProviderConfig(db, taskId, mode)
+      const stored = cfg.chatModel
+      if (isValidModelForMode(mode, stored)) return stored
+      // No (or legacy/invalid) stored value → provider default. codex-chat uses
+      // its own default; claude-chat resolves the account default from
+      // `~/.claude/settings.json` (Pro → sonnet, Max → opus, …).
+      if (mode === 'codex-chat') return defaultModelForMode(mode)
+      return resolveAccountDefaultModel()
+    },
 
-  ipcMain.handle(
-    'chat:setModel',
-    async (_, opts: ChatCreateOpts & { chatModel: string }): Promise<ChatSessionInfo> => {
-      if (!isValidModelForMode(opts.mode, opts.chatModel)) {
-        throw new Error(`Invalid chat model for mode ${opts.mode}: ${String(opts.chatModel)}`)
+    setModel: async (o: ChatCreateOpts & { chatModel: string }): Promise<ChatSessionInfo> => {
+      if (!isValidModelForMode(o.mode, o.chatModel)) {
+        throw new Error(`Invalid chat model for mode ${o.mode}: ${String(o.chatModel)}`)
       }
 
       // Pre-spawn fast path: DB write + skeleton mutation only.
-      const liveState = getSessionTerminalState(opts.tabId)
+      const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
-        updateSessionChatModel(opts.tabId, opts.chatModel)
-        const refreshed = getSessionInfo(opts.tabId)
+        await writeChatModel(db, o.taskId, o.mode, o.chatModel)
+        updateSessionChatModel(o.tabId, o.chatModel)
+        const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
       }
 
       // Fast path: `set_model` control_request — preserves warm subprocess +
-      // conversation state. Same shape as `chat:setMode` (subtype
+      // conversation state. Same shape as `setMode` (subtype
       // set_permission_mode). The CLI accepts the chat model alias directly
       // (`opus`/`sonnet`/`haiku`) on `--model`; protocol mirrors that.
-      const liveInfo = getSessionInfo(opts.tabId)
+      const liveInfo = getSessionInfo(o.tabId)
       if (liveState && liveState !== 'not-spawned' && liveInfo && !liveInfo.ended) {
         try {
-          await sendControlRequest(opts.tabId, {
+          await sendControlRequest(o.tabId, {
             subtype: 'set_model',
-            model: opts.chatModel
+            model: o.chatModel
           })
-          await writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
-          updateSessionChatModel(opts.tabId, opts.chatModel)
-          const refreshed = getSessionInfo(opts.tabId)
+          await writeChatModel(db, o.taskId, o.mode, o.chatModel)
+          updateSessionChatModel(o.tabId, o.chatModel)
+          const refreshed = getSessionInfo(o.tabId)
           if (refreshed) return refreshed
         } catch (err) {
           console.warn(
@@ -1030,179 +993,254 @@ export function registerChatHandlers(
 
       // Fallback: kill + respawn. chatModelOverride bypasses DB so the new
       // child uses the requested model before we persist.
-      removeSession(opts.tabId)
+      removeSession(o.tabId)
       hydrateSession(
-        await buildHydrateOpts(db, opts, { fresh: false, chatModelOverride: opts.chatModel })
+        await buildHydrateOpts(db, o, { fresh: false, chatModelOverride: o.chatModel })
       )
-      const created = await ensureSpawned(opts.tabId)
-      await writeChatModel(db, opts.taskId, opts.mode, opts.chatModel)
+      const created = await ensureSpawned(o.tabId)
+      await writeChatModel(db, o.taskId, o.mode, o.chatModel)
       return created
-    }
-  )
+    },
 
-  ipcMain.handle(
-    'chat:getEffort',
-    async (_, taskId: string, mode: string): Promise<ChatEffort | null> => {
+    getEffort: async (taskId: string, mode: string): Promise<ChatEffort | null> => {
       const cfg = await readProviderConfig(db, taskId, mode)
       const stored = cfg.chatEffort ?? null
       return isChatEffort(stored) ? stored : null
-    }
-  )
+    },
 
-  ipcMain.handle(
-    'chat:setEffort',
-    async (_, opts: ChatCreateOpts & { chatEffort: ChatEffort }): Promise<ChatSessionInfo> => {
-      if (!isChatEffort(opts.chatEffort)) {
-        throw new Error(`Invalid chat effort: ${String(opts.chatEffort)}`)
+    // `chatEffort` is typed `string` (not `ChatEffort`) so the tRPC router can
+    // pass a structurally-validated string without an `as never` cast; the
+    // value guard below narrows it + owns the vocabulary (single source).
+    setEffort: async (o: ChatCreateOpts & { chatEffort: string }): Promise<ChatSessionInfo> => {
+      if (!isChatEffort(o.chatEffort)) {
+        throw new Error(`Invalid chat effort: ${String(o.chatEffort)}`)
       }
       // Pre-spawn: DB write + skeleton mutation. Effort flag takes effect on
       // first spawn via buildSpawnArgs reading the (now-updated) skeleton.
-      const liveState = getSessionTerminalState(opts.tabId)
+      const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatEffort(db, opts.taskId, opts.mode, opts.chatEffort)
-        updateSessionChatEffort(opts.tabId, opts.chatEffort)
-        const refreshed = getSessionInfo(opts.tabId)
+        await writeChatEffort(db, o.taskId, o.mode, o.chatEffort)
+        updateSessionChatEffort(o.tabId, o.chatEffort)
+        const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
       }
-      // Same kill+respawn pattern as chat:setMode/setModel — effort flag only
+      // Same kill+respawn pattern as setMode/setModel — effort flag only
       // takes effect on a fresh process. chatEffortOverride bypasses DB so the
       // new child uses the requested level before we persist.
-      removeSession(opts.tabId)
+      removeSession(o.tabId)
       hydrateSession(
-        await buildHydrateOpts(db, opts, { fresh: false, chatEffortOverride: opts.chatEffort })
+        await buildHydrateOpts(db, o, { fresh: false, chatEffortOverride: o.chatEffort })
       )
-      const created = await ensureSpawned(opts.tabId)
-      await writeChatEffort(db, opts.taskId, opts.mode, opts.chatEffort)
+      const created = await ensureSpawned(o.tabId)
+      await writeChatEffort(db, o.taskId, o.mode, o.chatEffort)
       return created
-    }
-  )
+    },
 
-  ipcMain.handle(
-    'chat:getCollaboration',
-    async (_, taskId: string, mode: string): Promise<ChatCollaborationMode | null> => {
+    getCollaboration: async (
+      taskId: string,
+      mode: string
+    ): Promise<ChatCollaborationMode | null> => {
       if (!modeSupportsCollaboration(mode)) return null
       const cfg = await readProviderConfig(db, taskId, mode)
       const stored = cfg.chatCollaboration ?? null
       return isChatCollaborationMode(stored) ? stored : null
-    }
-  )
+    },
 
-  ipcMain.handle(
-    'chat:setCollaboration',
-    async (
-      _,
-      opts: ChatCreateOpts & { chatCollaboration: ChatCollaborationMode }
+    // `chatCollaboration` typed `string` (not `ChatCollaborationMode`) so the
+    // tRPC router passes a structurally-validated string without an `as never`
+    // cast; the value guard below narrows it + owns the vocabulary.
+    setCollaboration: async (
+      o: ChatCreateOpts & { chatCollaboration: string }
     ): Promise<ChatSessionInfo> => {
-      if (!isChatCollaborationMode(opts.chatCollaboration)) {
-        throw new Error(`Invalid chat collaboration mode: ${String(opts.chatCollaboration)}`)
+      if (!isChatCollaborationMode(o.chatCollaboration)) {
+        throw new Error(`Invalid chat collaboration mode: ${String(o.chatCollaboration)}`)
       }
-      if (!modeSupportsCollaboration(opts.mode)) {
-        throw new Error(`Collaboration mode not supported for "${opts.mode}"`)
+      if (!modeSupportsCollaboration(o.mode)) {
+        throw new Error(`Collaboration mode not supported for "${o.mode}"`)
       }
       // Pre-spawn: DB write + skeleton mutation. The collaboration mode is read
       // off the skeleton when the first spawn builds the driver context.
-      const liveState = getSessionTerminalState(opts.tabId)
+      const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatCollaboration(db, opts.taskId, opts.mode, opts.chatCollaboration)
-        updateSessionChatCollaboration(opts.tabId, opts.chatCollaboration)
-        const refreshed = getSessionInfo(opts.tabId)
+        await writeChatCollaboration(db, o.taskId, o.mode, o.chatCollaboration)
+        updateSessionChatCollaboration(o.tabId, o.chatCollaboration)
+        const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
       }
-      // Live session: kill+respawn (same pattern as chat:setEffort). Codex
+      // Live session: kill+respawn (same pattern as setEffort). Codex
       // applies `collaborationMode` per `turn/start`, but a respawn keeps the
       // thread cleanly re-initialized on the new mode.
-      removeSession(opts.tabId)
+      removeSession(o.tabId)
       hydrateSession(
-        await buildHydrateOpts(db, opts, {
+        await buildHydrateOpts(db, o, {
           fresh: false,
-          chatCollaborationOverride: opts.chatCollaboration
+          chatCollaborationOverride: o.chatCollaboration
         })
       )
-      const created = await ensureSpawned(opts.tabId)
-      await writeChatCollaboration(db, opts.taskId, opts.mode, opts.chatCollaboration)
+      const created = await ensureSpawned(o.tabId)
+      await writeChatCollaboration(db, o.taskId, o.mode, o.chatCollaboration)
       return created
-    }
-  )
+    },
 
-  ipcMain.handle('chat:getFastMode', async (_, taskId: string, mode: string): Promise<boolean> => {
-    if (!modeSupportsFastMode(mode)) return false
-    const cfg = await readProviderConfig(db, taskId, mode)
-    return cfg.chatFastMode ?? false
-  })
+    getFastMode: async (taskId: string, mode: string): Promise<boolean> => {
+      if (!modeSupportsFastMode(mode)) return false
+      const cfg = await readProviderConfig(db, taskId, mode)
+      return cfg.chatFastMode ?? false
+    },
 
-  ipcMain.handle(
-    'chat:setFastMode',
-    async (
-      _,
-      opts: ChatCreateOpts & { chatFastMode: boolean }
+    setFastMode: async (
+      o: ChatCreateOpts & { chatFastMode: boolean }
     ): Promise<ChatSessionInfo> => {
-      if (typeof opts.chatFastMode !== 'boolean') {
-        throw new Error(`Invalid chat fast mode: ${String(opts.chatFastMode)}`)
+      if (typeof o.chatFastMode !== 'boolean') {
+        throw new Error(`Invalid chat fast mode: ${String(o.chatFastMode)}`)
       }
-      if (!modeSupportsFastMode(opts.mode)) {
-        throw new Error(`Fast mode not supported for "${opts.mode}"`)
+      if (!modeSupportsFastMode(o.mode)) {
+        throw new Error(`Fast mode not supported for "${o.mode}"`)
       }
       // Pre-spawn: DB write + skeleton mutation. The next spawn reads it off
       // the skeleton when building the driver context.
-      const liveState = getSessionTerminalState(opts.tabId)
+      const liveState = getSessionTerminalState(o.tabId)
       if (liveState === 'not-spawned') {
-        await writeChatFastMode(db, opts.taskId, opts.mode, opts.chatFastMode)
-        updateSessionChatFastMode(opts.tabId, opts.chatFastMode)
-        const refreshed = getSessionInfo(opts.tabId)
+        await writeChatFastMode(db, o.taskId, o.mode, o.chatFastMode)
+        updateSessionChatFastMode(o.tabId, o.chatFastMode)
+        const refreshed = getSessionInfo(o.tabId)
         if (refreshed) return refreshed
       }
-      // Live session: kill+respawn (same pattern as chat:setEffort).
-      removeSession(opts.tabId)
+      // Live session: kill+respawn (same pattern as setEffort).
+      removeSession(o.tabId)
       hydrateSession(
-        await buildHydrateOpts(db, opts, {
+        await buildHydrateOpts(db, o, {
           fresh: false,
-          chatFastModeOverride: opts.chatFastMode
+          chatFastModeOverride: o.chatFastMode
         })
       )
-      const created = await ensureSpawned(opts.tabId)
-      await writeChatFastMode(db, opts.taskId, opts.mode, opts.chatFastMode)
+      const created = await ensureSpawned(o.tabId)
+      await writeChatFastMode(db, o.taskId, o.mode, o.chatFastMode)
       return created
-    }
-  )
+    },
 
-  ipcMain.handle('chat:listSkills', async (_, cwd: string): Promise<SkillInfo[]> => {
-    return listSkills(cwd)
-  })
+    listSkills: (cwd: string): Promise<SkillInfo[]> => listSkills(cwd),
 
-  ipcMain.handle('chat:listCommands', async (_, cwd: string): Promise<CommandInfo[]> => {
-    return listCommands(cwd)
-  })
+    listCommands: (cwd: string): Promise<CommandInfo[]> => listCommands(cwd),
 
-  ipcMain.handle('chat:listAgents', async (_, cwd: string): Promise<AgentInfo[]> => {
-    return listAgents(cwd)
-  })
+    listAgents: (cwd: string): Promise<AgentInfo[]> => listAgents(cwd),
 
-  ipcMain.handle(
-    'chat:listFiles',
-    async (_, cwd: string, query: string, limit?: number): Promise<FileMatch[]> => {
-      return listProjectFiles(cwd, query, limit ?? 50)
-    }
-  )
+    listFiles: (cwd: string, query: string, limit?: number): Promise<FileMatch[]> =>
+      listProjectFiles(cwd, query, limit ?? 50),
 
-  ipcMain.handle(
-    'chat:bumpAutocompleteUsage',
-    async (_, source: string, name: string): Promise<void> => {
+    bumpAutocompleteUsage: async (source: string, name: string): Promise<void> => {
       try {
         await bumpAutocompleteUsage(db, source, name)
       } catch (err) {
         console.error('[chat-handlers] bumpAutocompleteUsage failed:', err)
       }
-    }
-  )
+    },
 
-  ipcMain.handle('chat:getAutocompleteUsage', async (): Promise<UsageMap> => {
-    try {
-      return await getAutocompleteUsage(db)
-    } catch (err) {
-      console.error('[chat-handlers] getAutocompleteUsage failed:', err)
-      return {}
+    getAutocompleteUsage: async (): Promise<UsageMap> => {
+      try {
+        return await getAutocompleteUsage(db)
+      } catch (err) {
+        console.error('[chat-handlers] getAutocompleteUsage failed:', err)
+        return {}
+      }
     }
-  })
+  }
+}
+
+export type ChatOps = ReturnType<typeof createChatOps>
+
+/**
+ * Register the chat IPC handlers. Builds the shared `ChatOps` + `ChatQueueOps`
+ * (single source of truth) and wires `ipcMain.handle` delegations to them.
+ * Returns the ops so the composition root can hand the SAME instances to the
+ * tRPC `chat` router via `setChatDeps` (IPC + tRPC coexist until slice 5).
+ */
+export function registerChatHandlers(
+  ipcMain: IpcMain,
+  db: SlayzoneDb,
+  opts: ChatHandlerOpts = {}
+): { ops: ChatOps; queueOps: ReturnType<typeof createChatQueueOps> } {
+  const ops = createChatOps(db, opts)
+  const queueOps = createChatQueueOps(db)
+  registerChatQueueHandlers(ipcMain, queueOps)
+
+  ipcMain.handle('chat:supports', (_, mode: string): boolean => ops.supports(mode))
+  ipcMain.handle('chat:hydrate', (_, o: ChatCreateOpts) => ops.hydrate(o))
+  ipcMain.handle('chat:start', (_, o: ChatCreateOpts) => ops.start(o))
+  ipcMain.handle('chat:send', (_, tabId: string, text: string) => ops.send(tabId, text))
+  ipcMain.handle(
+    'chat:sendToolResult',
+    (_, tabId: string, args: { toolUseId: string; content: string; isError?: boolean }) =>
+      ops.sendToolResult(tabId, args)
+  )
+  ipcMain.handle(
+    'chat:respondPermission',
+    (
+      _,
+      tabId: string,
+      args: {
+        requestId: string
+        decision:
+          | {
+              behavior: 'allow'
+              updatedInput?: Record<string, unknown>
+              updatedPermissions?: unknown[]
+            }
+          | { behavior: 'deny'; message: string; interrupt?: boolean }
+      }
+    ) => ops.respondPermission(tabId, args)
+  )
+  ipcMain.handle('chat:interrupt', (_, o: ChatCreateOpts) => ops.interrupt(o))
+  ipcMain.handle('chat:abortAndPop', (_, o: ChatCreateOpts) => ops.abortAndPop(o))
+  ipcMain.handle('chat:kill', (_, tabId: string) => ops.kill(tabId))
+  ipcMain.handle('chat:remove', (_, tabId: string) => ops.remove(tabId))
+  ipcMain.handle('chat:reset', (_, o: ChatCreateOpts) => ops.reset(o))
+  ipcMain.handle('chat:getBufferSince', (_, tabId: string, afterSeq: number) =>
+    ops.getBufferSince(tabId, afterSeq)
+  )
+  ipcMain.handle('chat:getInfo', (_, tabId: string) => ops.getInfo(tabId))
+  ipcMain.handle('chat:inspectPermissions', (_, taskId: string, mode: string) =>
+    ops.inspectPermissions(taskId, mode)
+  )
+  ipcMain.handle('chat:getMode', (_, taskId: string, mode: string) => ops.getMode(taskId, mode))
+  ipcMain.handle('chat:getAutoEligibility', () => ops.getAutoEligibility())
+  ipcMain.handle('chat:setMode', (_, o: ChatCreateOpts & { chatMode: string }) => ops.setMode(o))
+  ipcMain.handle('chat:getModel', (_, taskId: string, mode: string) => ops.getModel(taskId, mode))
+  ipcMain.handle('chat:setModel', (_, o: ChatCreateOpts & { chatModel: string }) =>
+    ops.setModel(o)
+  )
+  ipcMain.handle('chat:getEffort', (_, taskId: string, mode: string) =>
+    ops.getEffort(taskId, mode)
+  )
+  ipcMain.handle('chat:setEffort', (_, o: ChatCreateOpts & { chatEffort: ChatEffort }) =>
+    ops.setEffort(o)
+  )
+  ipcMain.handle('chat:getCollaboration', (_, taskId: string, mode: string) =>
+    ops.getCollaboration(taskId, mode)
+  )
+  ipcMain.handle(
+    'chat:setCollaboration',
+    (_, o: ChatCreateOpts & { chatCollaboration: ChatCollaborationMode }) =>
+      ops.setCollaboration(o)
+  )
+  ipcMain.handle('chat:getFastMode', (_, taskId: string, mode: string) =>
+    ops.getFastMode(taskId, mode)
+  )
+  ipcMain.handle('chat:setFastMode', (_, o: ChatCreateOpts & { chatFastMode: boolean }) =>
+    ops.setFastMode(o)
+  )
+  ipcMain.handle('chat:listSkills', (_, cwd: string) => ops.listSkills(cwd))
+  ipcMain.handle('chat:listCommands', (_, cwd: string) => ops.listCommands(cwd))
+  ipcMain.handle('chat:listAgents', (_, cwd: string) => ops.listAgents(cwd))
+  ipcMain.handle('chat:listFiles', (_, cwd: string, query: string, limit?: number) =>
+    ops.listFiles(cwd, query, limit)
+  )
+  ipcMain.handle('chat:bumpAutocompleteUsage', (_, source: string, name: string) =>
+    ops.bumpAutocompleteUsage(source, name)
+  )
+  ipcMain.handle('chat:getAutocompleteUsage', () => ops.getAutocompleteUsage())
+
+  return { ops, queueOps }
 }
 
 /** Call on app quit to reap child processes. */

@@ -12,6 +12,7 @@ import type {
 import { getBackend } from './agents/registry'
 import { whichBinary as realWhichBinary } from './shell-env'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { TypedEmitter } from '@slayzone/platform/events'
 import type { BufferedEvent } from './chat-events-store'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
@@ -105,13 +106,29 @@ function electronBroadcast(
   }
 }
 
+/**
+ * Unified chat event emitter — the source for the tRPC `chat.onEvent` /
+ * `chat.onExit` subscriptions. Dual-emitted alongside the legacy
+ * `webContents.send('chat:event'|'chat:exit')` broadcasts below; the IPC path
+ * stays until the renderer drops `window.api` (slice 5). Staged/dropped
+ * resume-failure events never reach `broadcastEvent`, so the emitter inherits
+ * the same filtering the IPC broadcast has.
+ */
+export type ChatEventMap = {
+  event: [tabId: string, agentEvent: AgentEvent, seq: number]
+  exit: [tabId: string, sessionId: string, code: number | null, signal: string | null]
+}
+export const chatEvents = new TypedEmitter<ChatEventMap>()
+
 const defaultDeps: TransportDeps = {
   spawn: realSpawn,
   whichBinary: realWhichBinary,
   broadcastEvent: (tabId, event, seq) => {
+    chatEvents.emit('event', tabId, event, seq)
     electronBroadcast('chat:event')(tabId, event, seq)
   },
   broadcastExit: (tabId, sessionId, code, signal) => {
+    chatEvents.emit('exit', tabId, sessionId, code, signal)
     electronBroadcast('chat:exit')(tabId, sessionId, code, signal)
   },
   broadcastStateChange: (sessionId, newState, oldState) => {

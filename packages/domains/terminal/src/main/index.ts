@@ -46,14 +46,26 @@ export { syncTerminalModes } from './startup-sync'
 export { isHookDrivenMode, HOOK_DRIVEN_MODES } from './adapters'
 export {
   registerChatHandlers,
+  createChatOps,
   shutdownChatTransports,
   killAllChatTransports,
   inspectPermissionFlags,
   backfillChatModes,
   chatModeToFlags,
-  type ChatMode
+  type ChatMode,
+  type ChatOps
 } from './chat-handlers'
-export { setSpawnedTabRecorder as setChatSpawnedTabRecorder } from './chat-transport-manager'
+export {
+  createChatQueueOps,
+  chatQueueEvents,
+  type ChatQueueOps,
+  type ChatQueueEventMap
+} from './chat-queue-handlers'
+export {
+  setSpawnedTabRecorder as setChatSpawnedTabRecorder,
+  chatEvents,
+  type ChatEventMap
+} from './chat-transport-manager'
 export { beginTerminalShutdown } from './shutdown'
 export { listSessions, getSessionState } from './session-registry'
 export { getAutoModeEligibility, type AutoModeEligibility } from './auto-mode-eligibility'

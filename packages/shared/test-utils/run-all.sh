@@ -55,6 +55,7 @@ run_test_electron_strict_loader packages/domains/agent-turns/src/main/db.test.ts
 run_test_electron_strict_loader packages/domains/agent-turns/src/main/git-snapshot.test.ts
 run_test_electron_strict_loader packages/domains/agent-turns/src/main/turn-tracker.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/agent-turns.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/chat.test.ts
 run_test packages/domains/integrations/src/main/handlers.api.test.ts
 run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts
