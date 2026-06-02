@@ -259,6 +259,11 @@ test.describe('Phase 1 — uncommitted changes', () => {
   let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
+    // Reset first — the prior describe leaves its (now done) task tab active, and
+    // an inherited active tab makes ensureGitPanelVisible match the wrong panel,
+    // leaving this describe's tab inactive (hidden). Start from a clean slate.
+    await resetApp(mainWindow)
+
     resetRepo()
     setupCleanBranch()
 
@@ -297,7 +302,9 @@ test.describe('Phase 1 — uncommitted changes', () => {
       })
       .toBe('uncommitted')
 
-    await expect(mainWindow.getByTestId('git-diff-panel').last()).toBeVisible()
+    // Scope to :visible — prior describes leave their task tabs mounted (display:none),
+    // so a plain .last() can resolve to a hidden tab's diff panel.
+    await expect(mainWindow.locator('[data-testid="git-diff-panel"]:visible').last()).toBeVisible()
     await expect(
       mainWindow.getByText('Stage and commit your changes to continue the merge')
     ).toBeVisible()
@@ -306,7 +313,7 @@ test.describe('Phase 1 — uncommitted changes', () => {
 
   test('Cancel exits merge mode', async ({ mainWindow }) => {
     await mainWindow
-      .getByTestId('git-diff-panel')
+      .locator('[data-testid="git-diff-panel"]:visible')
       .last()
       .getByRole('button', { name: 'Cancel' })
       .click()
@@ -334,6 +341,10 @@ test.describe('Phase 2 — conflict resolution', () => {
   let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
+    // Isolate from prior describes — an inherited active tab breaks tab/git-panel
+    // activation for this describe's task.
+    await resetApp(mainWindow)
+
     resetRepo()
     setupConflict()
     git('git merge --no-commit --no-ff test-branch || true')
@@ -416,6 +427,9 @@ test.describe('Accept Theirs resolution', () => {
   let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
+    // Isolate from prior describes (see Phase 2 note).
+    await resetApp(mainWindow)
+
     resetRepo()
     setupConflict()
     git('git merge --no-commit --no-ff test-branch || true')
@@ -471,6 +485,9 @@ test.describe('Abort merge', () => {
   let projectAbbrev: string
 
   test.beforeAll(async ({ mainWindow }) => {
+    // Isolate from prior describes (see Phase 2 note).
+    await resetApp(mainWindow)
+
     resetRepo()
     setupConflict()
 

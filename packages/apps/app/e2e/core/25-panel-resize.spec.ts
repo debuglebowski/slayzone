@@ -4,7 +4,6 @@ import { pressShortcut } from '../fixtures/shortcuts'
 
 test.describe('Panel resize', () => {
   let projectAbbrev: string
-  let resizedWidth = 440
 
   const openTaskViaSearch = async (page: import('@playwright/test').Page, title: string) => {
     await pressShortcut(page, 'search')
@@ -26,9 +25,6 @@ test.describe('Panel resize', () => {
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
     await s.createTask({ projectId: p.id, title: 'Resize task', status: 'todo' })
     await s.refreshData()
-
-    // Clear any persisted panel sizes from previous test runs
-    await s.setSetting('taskDetailPanelSizes', '')
 
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
@@ -69,20 +65,22 @@ test.describe('Panel resize', () => {
 
     // Settings panel should remain valid; if drag is supported it should become wider.
     const width = await settingsPanel(mainWindow).evaluate((el) => parseInt(el.style.width))
-    resizedWidth = width
     expect(width).toBeGreaterThanOrEqual(440)
     expect(width).toBeLessThanOrEqual(540)
   })
 
-  test('resize persists to settings DB with version marker', async ({ mainWindow }) => {
-    const stored = await mainWindow.evaluate(() => window.api.settings.get('taskDetailPanelSizes'))
-    if (!stored) {
-      expect(resizedWidth).toBe(440)
-      return
+  test('resize persists to task panel_sizes override', async ({ mainWindow }) => {
+    // New model: drag end writes a size-only override ({unit,value}) to the
+    // task's panel_sizes column — no global settings key, no version marker.
+    const getOverride = async () => {
+      const tasks = await seed(mainWindow).getTasks()
+      return tasks.find((t) => t.title === 'Resize task')?.panel_sizes?.settings ?? null
     }
-    const parsed = JSON.parse(stored)
-    expect(parsed._v).toBe(5)
-    expect(parsed.settings).toBeGreaterThanOrEqual(440)
+    await expect.poll(getOverride).not.toBeNull()
+    const ov = await getOverride()
+    expect(ov!.unit).toBe('px')
+    // Dragged wider in the earlier test → override holds the new px width.
+    expect(ov!.value).toBeGreaterThanOrEqual(440)
   })
 
   test('min width enforced', async ({ mainWindow }) => {

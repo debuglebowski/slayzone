@@ -75,20 +75,39 @@ function mapModeRow(row: any): TerminalModeInfo {
   }
 }
 
+/**
+ * Every IPC channel registerPtyHandlers binds, recorded automatically by the
+ * self-tracking `handle` wrapper below. e2e teardown (__restorePtyHandlers)
+ * removes exactly this set before re-registering — so a newly-added handler can
+ * never drift out of the remove-list (the recurring "second handler" bug).
+ */
+const PTY_HANDLER_CHANNELS: string[] = []
+
+/** Channels bound by registerPtyHandlers (populated after the first call). */
+export function getPtyHandlerChannels(): readonly string[] {
+  return PTY_HANDLER_CHANNELS
+}
+
 export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   // Set database reference for notifications
   setDatabase(db)
+
+  // Self-tracking registrar — see PTY_HANDLER_CHANNELS above.
+  const handle = (channel: string, listener: Parameters<IpcMain['handle']>[1]): void => {
+    if (!PTY_HANDLER_CHANNELS.includes(channel)) PTY_HANDLER_CHANNELS.push(channel)
+    ipcMain.handle(channel, listener)
+  }
 
   // Built-in terminal modes are synchronized inside the DB worker on startup
   // (see db-worker.ts) — no main-thread sync needed here.
 
   // Terminal Modes CRUD
-  ipcMain.handle('terminalModes:list', async () => {
+  handle('terminalModes:list', async () => {
     const rows = await db.prepare('SELECT * FROM terminal_modes ORDER BY "order" ASC').all()
     return rows.map(mapModeRow)
   })
 
-  ipcMain.handle('terminalModes:test', async (_, command: string) => {
+  handle('terminalModes:test', async (_, command: string) => {
     try {
       const parts = parseShellArgs(command)
       const bin = parts[0]
@@ -103,12 +122,12 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     }
   })
 
-  ipcMain.handle('terminalModes:get', async (_, id: string) => {
+  handle('terminalModes:get', async (_, id: string) => {
     const row = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(id)
     return row ? mapModeRow(row) : null
   })
 
-  ipcMain.handle('terminalModes:create', async (_, input: CreateTerminalModeInput) => {
+  handle('terminalModes:create', async (_, input: CreateTerminalModeInput) => {
     const id = input.id
     await db
       .prepare(
@@ -135,7 +154,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     return mapModeRow(row)
   })
 
-  ipcMain.handle(
+  handle(
     'terminalModes:update',
     async (_, id: string, updates: UpdateTerminalModeInput) => {
       const builtinRow = (await db
@@ -202,7 +221,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     }
   )
 
-  ipcMain.handle('terminalModes:delete', async (_, id: string) => {
+  handle('terminalModes:delete', async (_, id: string) => {
     const deleteRow = (await db
       .prepare('SELECT is_builtin FROM terminal_modes WHERE id = ?')
       .get(id)) as { is_builtin: number } | undefined
@@ -213,7 +232,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     return true
   })
 
-  ipcMain.handle('terminalModes:restoreDefaults', async () => {
+  handle('terminalModes:restoreDefaults', async () => {
     const insertSql = `
         INSERT OR IGNORE INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
@@ -236,7 +255,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     await db.batchTxn(ops)
   })
 
-  ipcMain.handle('terminalModes:resetToDefaultState', async () => {
+  handle('terminalModes:resetToDefaultState', async () => {
     const insertSql = `
         INSERT INTO terminal_modes (id, label, type, initial_command, resume_command, headless_command, default_flags, enabled, is_builtin, "order")
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
@@ -262,7 +281,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     await db.batchTxn(ops)
   })
 
-  ipcMain.handle('pty:create', async (event, opts: PtyCreateOpts) => {
+  handle('pty:create', async (event, opts: PtyCreateOpts) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return { success: false, error: 'No window found' }
 
@@ -300,71 +319,71 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     })
   })
 
-  ipcMain.handle('pty:testExecutionContext', async (_, context: ExecutionContext) => {
+  handle('pty:testExecutionContext', async (_, context: ExecutionContext) => {
     return testExecutionContext(context)
   })
 
-  ipcMain.handle('pty:write', (_, sessionId: string, data: string) => {
+  handle('pty:write', (_, sessionId: string, data: string) => {
     return writePty(sessionId, data)
   })
 
-  ipcMain.handle('pty:submit', (_, sessionId: string, text: string) => {
+  handle('pty:submit', (_, sessionId: string, text: string) => {
     return submitPty(sessionId, text)
   })
 
-  ipcMain.handle('pty:resize', (_, sessionId: string, cols: number, rows: number) => {
+  handle('pty:resize', (_, sessionId: string, cols: number, rows: number) => {
     return resizePty(sessionId, cols, rows)
   })
 
-  ipcMain.handle('pty:kill', (_, sessionId: string) => {
+  handle('pty:kill', (_, sessionId: string) => {
     return killPty(sessionId)
   })
 
-  ipcMain.handle('pty:touch', (_, sessionId: string) => {
+  handle('pty:touch', (_, sessionId: string) => {
     return touchPty(sessionId)
   })
 
-  ipcMain.handle('pty:interrupt', (_, sessionId: string) => {
+  handle('pty:interrupt', (_, sessionId: string) => {
     return interruptPty(sessionId)
   })
 
-  ipcMain.handle('pty:exists', (_, sessionId: string) => {
+  handle('pty:exists', (_, sessionId: string) => {
     return hasPty(sessionId)
   })
 
-  ipcMain.handle('pty:getBuffer', (_, sessionId: string) => {
+  handle('pty:getBuffer', (_, sessionId: string) => {
     return getBuffer(sessionId)
   })
 
-  ipcMain.handle('pty:clearBuffer', (_, sessionId: string) => {
+  handle('pty:clearBuffer', (_, sessionId: string) => {
     return clearBuffer(sessionId)
   })
 
-  ipcMain.handle('pty:getBufferSince', (_, sessionId: string, afterSeq: number) => {
+  handle('pty:getBufferSince', (_, sessionId: string, afterSeq: number) => {
     return getBufferSince(sessionId, afterSeq)
   })
 
-  ipcMain.handle('pty:list', () => {
+  handle('pty:list', () => {
     return listPtys()
   })
 
-  ipcMain.handle('chat:list', () => {
+  handle('chat:list', () => {
     return listChatSessions()
   })
 
-  ipcMain.handle('pty:getState', (_, sessionId: string) => {
+  handle('pty:getState', (_, sessionId: string) => {
     return getState(sessionId)
   })
 
-  ipcMain.handle('session:list', () => {
+  handle('session:list', () => {
     return listSessions()
   })
 
-  ipcMain.handle('session:getState', (_, sessionId: string) => {
+  handle('session:getState', (_, sessionId: string) => {
     return getSessionState(sessionId)
   })
 
-  ipcMain.handle(
+  handle(
     'pty:set-theme',
     (
       _,
@@ -374,7 +393,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     }
   )
 
-  ipcMain.handle('pty:validate', async (_, mode: TerminalMode) => {
+  handle('pty:validate', async (_, mode: TerminalMode) => {
     const modeRow = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(mode)
     const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
     const adapter = getAdapter({
@@ -388,7 +407,7 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     return adapter.validate ? adapter.validate() : []
   })
 
-  ipcMain.handle('pty:setShellOverride', (_, value: string | null) => {
+  handle('pty:setShellOverride', (_, value: string | null) => {
     setShellOverride(value)
   })
 }

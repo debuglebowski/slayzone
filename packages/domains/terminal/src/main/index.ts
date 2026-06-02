@@ -1,4 +1,4 @@
-export { registerPtyHandlers } from './handlers'
+export { registerPtyHandlers, getPtyHandlerChannels } from './handlers'
 export { registerUsageHandlers } from './usage'
 export {
   killAllPtys,

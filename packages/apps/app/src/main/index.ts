@@ -212,6 +212,7 @@ import {
 } from '@slayzone/settings/main'
 import {
   registerPtyHandlers,
+  getPtyHandlerChannels,
   registerUsageHandlers,
   killAllPtys,
   shutdownAllPtys,
@@ -1511,31 +1512,9 @@ app
       ;(globalThis as Record<string, unknown>).__clearSessionUserInputMark =
         clearSessionUserInputMark
       ;(globalThis as Record<string, unknown>).__restorePtyHandlers = () => {
-        for (const ch of [
-          'terminalModes:list',
-          'terminalModes:test',
-          'terminalModes:get',
-          'terminalModes:create',
-          'terminalModes:update',
-          'terminalModes:delete',
-          'terminalModes:restoreDefaults',
-          'terminalModes:resetToDefaultState',
-          'pty:create',
-          'pty:testExecutionContext',
-          'pty:write',
-          'pty:resize',
-          'pty:kill',
-          'pty:touch',
-          'pty:exists',
-          'pty:getBuffer',
-          'pty:clearBuffer',
-          'pty:getBufferSince',
-          'pty:list',
-          'pty:getState',
-          'pty:set-theme',
-          'pty:validate',
-          'pty:setShellOverride'
-        ]) {
+        // Remove exactly the channels registerPtyHandlers binds (self-tracked, so
+        // the list can never drift out of sync), then re-register.
+        for (const ch of getPtyHandlerChannels()) {
           ipcMain.removeHandler(ch)
         }
         registerPtyHandlers(ipcMain, db)

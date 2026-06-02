@@ -54,8 +54,11 @@ test.describe('Kanban scrollbars', () => {
       )
       .toEqual([900, 800])
 
+    // The board's own horizontal scroller carries `scrollbar-thin`. Home now wraps
+    // the panel row in an outer `overflow-x-auto` (panel overflow), so match the
+    // inner scroller specifically rather than the first overflow-x-auto ancestor.
     const boardScroller = mainWindow
-      .locator('div.overflow-x-auto')
+      .locator('div.overflow-x-auto.scrollbar-thin')
       .filter({
         has: mainWindow.locator('h3').getByText('Inbox', { exact: true })
       })

@@ -183,6 +183,10 @@ test.describe('Browser panel', () => {
 
   test('Alt+Shift+Click on a browser link opens a prefilled task draft', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
+    // A prior test may leave a second browser tab active; the click path needs a
+    // laid-out (visible) view, but an inactive tab's WCV collapses to ~1px. Activate
+    // the first tab so its view is the on-screen one before we measure + click it.
+    await tabEntries(mainWindow).first().click()
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     await testInvoke(
@@ -205,6 +209,16 @@ test.describe('Browser panel', () => {
         { timeout: 10_000 }
       )
       .toBe(true)
+
+    // Wait for the view to actually be laid out — bounds sync to the visible tab
+    // can lag, leaving a collapsed (~1px) viewport that yields a (0,0) click point.
+    await expect
+      .poll(
+        async () =>
+          (await testInvoke(mainWindow, 'browser:execute-js', viewId, 'window.innerWidth')) as number,
+        { timeout: 8_000 }
+      )
+      .toBeGreaterThan(50)
 
     const clickPoint = (await testInvoke(
       mainWindow,
