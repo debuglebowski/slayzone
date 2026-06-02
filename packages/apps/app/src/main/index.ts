@@ -1613,7 +1613,7 @@ app
       logBoot('trpc server import dispatched')
       import('@slayzone/transport/server')
         .then((mod) => {
-          mod.startTrpcServer({ db, dataRoot: ensureDataRoot() })
+          mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
           logBoot('trpc server started')
         })
@@ -2994,7 +2994,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         mcpMod.startMcpServer(db, { automationEngine })
         mcpCleanup = () => mcpMod.stopMcpServer()
         const trpcMod = await import('@slayzone/transport/server')
-        trpcMod.startTrpcServer({ db, dataRoot: ensureDataRoot() })
+        trpcMod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
         trpcCleanup = () => trpcMod.stopTrpcServer()
         // Wait for both servers to be listening
         await new Promise<void>((resolve) => {

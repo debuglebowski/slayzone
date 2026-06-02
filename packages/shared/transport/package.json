@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@slayzone/agent-turns": "workspace:*",
+    "@slayzone/automations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/history": "workspace:*",
     "@slayzone/platform": "workspace:*",
