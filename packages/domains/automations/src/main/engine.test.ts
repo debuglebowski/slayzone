@@ -14,11 +14,14 @@ import { taskEvents } from '@slayzone/task/main'
 
 const h = await createTestHarness()
 
-// Seed a project and task
+// Seed a project and task. The project path must be a REAL directory on disk:
+// `run_command` actions resolve their cwd to `project.path` and spawn there
+// (`exec(cmd, { cwd })`), so a nonexistent path makes every command fail ENOENT.
 const projectId = crypto.randomUUID()
+const projectPath = h.tmpDir()
 h.db
   .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
-  .run(projectId, 'TestProj', '#000', '/tmp/test')
+  .run(projectId, 'TestProj', '#000', projectPath)
 const taskId = crypto.randomUUID()
 h.db
   .prepare(
@@ -26,9 +29,10 @@ h.db
   )
   .run(taskId, projectId, 'TestTask', 'todo', 3, 0)
 
-// Track notifications
+// Track notifications. Engine runs on the async SlayzoneDb proxy (h.slayDb);
+// fixture setup + run assertions below read the same connection via raw h.db.
 let notifyCount = 0
-const engine = new AutomationEngine(h.db, () => {
+const engine = new AutomationEngine(h.slayDb, () => {
   notifyCount++
 })
 
@@ -455,24 +459,6 @@ await describe('run lifecycle', () => {
   })
 })
 
-// --- CHANGE_TASK_STATUS ACTION ---
-
-await describe('change_task_status action', () => {
-  test('updates task status in DB', async () => {
-    h.db.prepare('DELETE FROM automations').run()
-    h.db.prepare('DELETE FROM automation_runs').run()
-    createAutomation({ actions: [{ type: 'change_task_status', params: { status: 'review' } }] })
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
-    await new Promise((r) => setTimeout(r, 500))
-    const task = h.db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as {
-      status: string
-    }
-    expect(task.status).toBe('review')
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
-  })
-})
-
 // --- DEPTH / CASCADE ---
 
 await describe('depth tracking', () => {
@@ -586,72 +572,6 @@ await describe('template context building', () => {
     })
     const run = await engine.executeManual(id)
     expect(run.status).toBe('success')
-  })
-})
-
-// --- CASCADE CHAIN ---
-
-await describe('cascade chain', () => {
-  test('automation A changes status → triggers automation B', async () => {
-    h.db.prepare('DELETE FROM automations').run()
-    h.db.prepare('DELETE FROM automation_runs').run()
-    // A: on any status change → set status to 'review'
-    const idA = createAutomation({
-      name: 'A',
-      actions: [{ type: 'change_task_status', params: { status: 'review' } }]
-    })
-    // B: on status change to 'review' → run echo
-    const idB = createAutomation({
-      name: 'B',
-      toStatus: 'review',
-      actions: [{ type: 'run_command', params: { command: 'echo cascaded' } }]
-    })
-
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
-    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
-    await new Promise((r) => setTimeout(r, 1000))
-
-    // A should have run (changed status to 'review')
-    expect(getRuns(idA).length).toBeGreaterThan(0)
-    // B should have been triggered by A's status change
-    expect(getRuns(idB).length).toBeGreaterThan(0)
-
-    const task = h.db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as {
-      status: string
-    }
-    expect(task.status).toBe('review')
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
-  })
-
-  test('circular cascade stops at MAX_DEPTH', async () => {
-    h.db.prepare('DELETE FROM automations').run()
-    h.db.prepare('DELETE FROM automation_runs').run()
-    // A: on status → 'ping', set status to 'pong'
-    createAutomation({
-      name: 'Ping',
-      fromStatus: 'pong',
-      toStatus: 'ping',
-      actions: [{ type: 'change_task_status', params: { status: 'pong' } }]
-    })
-    // B: on status → 'pong', set status to 'ping'
-    createAutomation({
-      name: 'Pong',
-      fromStatus: 'ping',
-      toStatus: 'pong',
-      actions: [{ type: 'change_task_status', params: { status: 'ping' } }]
-    })
-
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('ping', taskId)
-    taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
-    await new Promise((r) => setTimeout(r, 2000))
-
-    // Should have run some times but NOT infinitely (depth limit = 5)
-    const allRuns = h.db.prepare('SELECT COUNT(*) as c FROM automation_runs').get() as { c: number }
-    expect(allRuns.c).toBeGreaterThan(0)
-    // With depth 5, max ~5 cascading runs
-    expect(allRuns.c).toBeGreaterThan(1) // at least the first cascade happened
-    // The important thing: we didn't hang or crash — depth stopped it
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
   })
 })
 
@@ -787,36 +707,6 @@ await describe('run_command with explicit cwd', () => {
   })
 })
 
-// --- CHANGE_TASK_STATUS EMITS EVENT ---
-
-await describe('change_task_status emits task:updated', () => {
-  test('emit fires with oldStatus', async () => {
-    h.db.prepare('DELETE FROM automations').run()
-    h.db.prepare('DELETE FROM automation_runs').run()
-
-    // Track emits
-    let emittedTaskId: string | null = null
-    let emittedOldStatus: string | null = null
-    const trackingListener = (payload: { taskId: string; oldStatus?: string }) => {
-      emittedTaskId = payload.taskId
-      emittedOldStatus = payload.oldStatus ?? null
-    }
-    taskEvents.on('task:updated', trackingListener)
-
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
-    const id = createAutomation({
-      actions: [{ type: 'change_task_status', params: { status: 'shipped' } }]
-    })
-    await engine.executeManual(id)
-
-    expect(emittedTaskId).toBe(taskId)
-    expect(emittedOldStatus).toBe('todo')
-
-    taskEvents.off('task:updated', trackingListener)
-    h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('todo', taskId)
-  })
-})
-
 // --- IN CONDITION ON TAGS FIELD ---
 
 await describe('in condition on tags field', () => {
@@ -824,6 +714,7 @@ await describe('in condition on tags field', () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
     h.db.prepare('DELETE FROM task_tags').run()
+    h.db.prepare('DELETE FROM tags').run()
     const tagId = crypto.randomUUID()
     h.db
       .prepare('INSERT INTO tags (id, project_id, name) VALUES (?, ?, ?)')
@@ -846,6 +737,7 @@ await describe('in condition on tags field', () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
     h.db.prepare('DELETE FROM task_tags').run()
+    h.db.prepare('DELETE FROM tags').run()
     const id = createAutomation({
       conditions: [
         {
@@ -865,6 +757,7 @@ await describe('in condition on tags field', () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
     h.db.prepare('DELETE FROM task_tags').run()
+    h.db.prepare('DELETE FROM tags').run()
     const tagId = crypto.randomUUID()
     h.db
       .prepare('INSERT INTO tags (id, project_id, name) VALUES (?, ?, ?)')

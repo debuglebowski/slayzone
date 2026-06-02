@@ -9,6 +9,7 @@
  */
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS } from '@slayzone/platform'
+import type { SlayzoneDb, BatchOp, RunResult } from '@slayzone/platform'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -23,7 +24,17 @@ export interface MockIpcMain {
 }
 
 export interface TestHarness {
+  /** Raw synchronous better-sqlite3 handle — use for fixture setup (`db.prepare(...).run(...)`). */
   db: Database.Database
+  /**
+   * Async `SlayzoneDb` proxy over the SAME in-memory connection — pass THIS to
+   * `registerXHandlers(ipcMain, db, ...)`. Main-process handlers moved to the
+   * async worker-thread DB interface, so they call `db.all/get/run/namedTxn/
+   * batchTxn`; the raw better-sqlite3 handle doesn't expose those. `namedTxn`
+   * runs against the real production `txnRegistry` (lazy-loaded on first use).
+   * Handler results are therefore Promises — `await h.invoke(...)` in tests.
+   */
+  slayDb: SlayzoneDb
   ipcMain: MockIpcMain
   invoke(channel: string, ...args: unknown[]): unknown
   tmpDir(): string
@@ -31,6 +42,86 @@ export interface TestHarness {
 }
 
 const fakeEvent = { sender: { send: () => {} } }
+
+// The production named-transaction registry lives in the app package; load it
+// the same way the harness loads migrations (runtime dynamic import — keeps
+// shared/test-utils free of a static dep on app). Memoized + lazy so tests that
+// never call `namedTxn` never pay the import, and one failing domain `./db`
+// module can't break every harness-based test.
+let _txnRegistry: Record<string, (db: Database.Database, params: never) => unknown> | null = null
+async function loadTxnRegistry(): Promise<
+  Record<string, (db: Database.Database, params: never) => unknown>
+> {
+  if (_txnRegistry) return _txnRegistry
+  const registryPath = path.resolve(
+    import.meta.dirname,
+    '../../apps/app/src/main/db/txn-registry.ts'
+  )
+  const mod = await import(registryPath)
+  _txnRegistry = mod.txnRegistry
+  return _txnRegistry!
+}
+
+/**
+ * Wraps a synchronous in-memory better-sqlite3 `Database` in the async
+ * `SlayzoneDb` surface that main-process handlers now expect. Mirrors the DB
+ * worker's dispatch (`db-worker.ts`) exactly — `get/all/run` spread params,
+ * `batchTxn` runs the op list in one `db.transaction`, `namedTxn` invokes the
+ * registered fn directly (it owns its own transaction; no re-wrap). Every call
+ * resolves immediately (the underlying better-sqlite3 work is synchronous).
+ */
+export function createSlayzoneDbAdapter(raw: Database.Database): SlayzoneDb {
+  const toRunResult = (r: Database.RunResult): RunResult => ({
+    changes: r.changes,
+    lastInsertRowid: r.lastInsertRowid
+  })
+  return {
+    async get<T = unknown>(sql: string, params: unknown[] = []): Promise<T | undefined> {
+      return raw.prepare(sql).get(...params) as T | undefined
+    },
+    async all<T = unknown>(sql: string, params: unknown[] = []): Promise<T[]> {
+      return raw.prepare(sql).all(...params) as T[]
+    },
+    async run(sql: string, params: unknown[] = []): Promise<RunResult> {
+      return toRunResult(raw.prepare(sql).run(...params))
+    },
+    async exec(sql: string): Promise<void> {
+      raw.exec(sql)
+    },
+    async batchTxn(ops: BatchOp[]): Promise<unknown[]> {
+      const run = raw.transaction((list: BatchOp[]) =>
+        list.map((op) => raw.prepare(op.sql)[op.type](...op.params))
+      )
+      return run(ops)
+    },
+    async namedTxn<T = unknown>(name: string, params: unknown): Promise<T> {
+      const registry = await loadTxnRegistry()
+      const fn = registry[name]
+      if (!fn) throw new Error(`Unknown named transaction: ${name}`)
+      return fn(raw, params as never) as T
+    },
+    async backup(): Promise<void> {
+      /* no-op in tests */
+    },
+    prepare(sql: string) {
+      const s = raw.prepare(sql)
+      return {
+        async get<T = unknown>(...params: unknown[]): Promise<T | undefined> {
+          return s.get(...params) as T | undefined
+        },
+        async all<T = unknown>(...params: unknown[]): Promise<T[]> {
+          return s.all(...params) as T[]
+        },
+        async run(...params: unknown[]): Promise<RunResult> {
+          return toRunResult(s.run(...params))
+        }
+      }
+    },
+    async close(): Promise<void> {
+      /* harness.cleanup() closes the raw connection */
+    }
+  }
+}
 
 export async function createTestHarness(): Promise<TestHarness> {
   const db = new Database(':memory:')
@@ -64,6 +155,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 
   return {
     db,
+    slayDb: createSlayzoneDbAdapter(db),
     ipcMain,
     invoke(channel: string, ...args: unknown[]) {
       const handler = handlers.get(channel)
