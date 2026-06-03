@@ -94,7 +94,7 @@ Tags are project-scoped — a tag name must exist in the project before it can b
 
 ## Templates
 
-Templates define defaults for new tasks: terminal mode, status, priority, provider config, panel visibility, browser tabs, and CCS profile.
+Templates define defaults for new tasks: terminal mode, status, priority, provider config, panel visibility, and browser tabs.
 
 - `slay templates list [--project <name|id>] [--json]` — list templates.
   - `--project` defaults to `$SLAYZONE_PROJECT_ID`

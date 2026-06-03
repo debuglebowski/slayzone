@@ -15,7 +15,7 @@ Orchestrate any set of slay tasks toward completion. The user tells you *which* 
 ## 1. Resolve the target set
 
 1. Parse the user's free-form selector.
-2. Resolve to concrete task IDs via `slay tasks list --json` (filter client-side as needed), `slay tasks search`, or `slay tasks subtasks <parent>`.
+2. Resolve to concrete task IDs via `slay --dev tasks list --json` (filter client-side as needed), `slay --dev tasks search`, or `slay --dev tasks subtasks <parent>`.
 3. If **zero** tasks match, stop and tell the user no tasks were found for that selector. Do not guess or expand scope.
 4. List matched tasks (id + title) back to the user as confirmation, then proceed.
 
@@ -32,12 +32,12 @@ Create an artifact on the orchestrator's own task (`$SLAYZONE_TASK_ID`) named `o
 
 Create once:
 ```bash
-printf '# Orchestration log\n\n| time | task | event | note |\n|------|------|-------|------|\n' | slay tasks artifacts create "orchestration-log.md"
+printf '# Orchestration log\n\n| time | task | event | note |\n|------|------|-------|------|\n' | slay --dev tasks artifacts create "orchestration-log.md"
 ```
 
 Append rows throughout the run:
 ```bash
-printf '| %s | %s | %s | %s |\n' "$(date -u +%FT%TZ)" "<taskId>" "<event>" "<note>" | slay tasks artifacts append <artifactId>
+printf '| %s | %s | %s | %s |\n' "$(date -u +%FT%TZ)" "<taskId>" "<event>" "<note>" | slay --dev tasks artifacts append <artifactId>
 ```
 
 Event vocabulary: `started`, `plan-ready`, `plan-refined`, `plan-approved`, `question`, `stuck`, `done`, `error`.
@@ -48,10 +48,10 @@ Event vocabulary: `started`, `plan-ready`, `plan-refined`, `plan-approved`, `que
 
 Per task:
 ```bash
-slay tasks open <id>
-slay pty wait <id> --state attention
-slay pty submit <id> "Enter plan mode. Read the task with \`slay tasks view\`. Design the most sustainable, robust long-term solution. Preserve all requested functionality — do not drop features to simplify."
-slay pty write <id> $'\r'
+slay --dev tasks open <id>
+slay --dev pty wait <id> --state attention
+slay --dev pty submit <id> "Enter plan mode. Read the task with \`slay --dev tasks view\`. Design the most sustainable, robust long-term solution. Preserve all requested functionality — do not drop features to simplify."
+slay --dev pty write <id> $'\r'
 ```
 
 Log `started`.
@@ -60,9 +60,9 @@ Parallelize by backgrounding each dispatch block with `&` and `wait`.
 
 ## 4. Supervise
 
-Poll `slay pty list --json` on a short interval. Act on each task that enters `attention`:
+Poll `slay --dev pty list --json` on a short interval. Act on each task that enters `attention`:
 
-1. Read buffer: `slay pty buffer <id>`.
+1. Read buffer: `slay --dev pty buffer <id>`.
 2. Classify what the agent is waiting on and respond per the table below.
 3. Append a log row.
 
@@ -73,9 +73,9 @@ Poll `slay pty list --json` on a short interval. Act on each task that enters `a
 | Ultraplan trap ("◆ ultraplan ready" or "Run ultraplan in the cloud?") | Recovery: `pty write <id> $'\x1b[B'` → `$'\r'` → `"2"` → `$'\r'`, then `pty submit <id> "Execute the plan directly, no more planning"`. For the cloud prompt, just send `2` + enter. |
 | Agent asks a user-directed question it cannot answer from the task description | Append `question` row to log with the verbatim question, **ping the user** in chat, and wait. Do not guess on the user's behalf. |
 | Agent appears stuck (no progress for an extended period, repeated same buffer) | Append `stuck` row, ping user with the last buffer snippet. |
-| Agent finished (completion message + no prompt) | Verify: read changed files directly, run typecheck/build if the task warrants it. Then `slay tasks done <id>`. Log `done`. |
+| Agent finished (completion message + no prompt) | Verify: read changed files directly, run typecheck/build if the task warrants it. Then `slay --dev tasks done <id>`. Log `done`. |
 
-After every approval/feedback action, always follow `pty submit` with `slay pty write <id> $'\r'` — submit does not reliably press enter.
+After every approval/feedback action, always follow `pty submit` with `slay --dev pty write <id> $'\r'` — submit does not reliably press enter.
 
 ## 5. Plan review bar
 
@@ -103,7 +103,7 @@ When all target tasks are `done` (or blocked on user), append a final summary ro
 
 ```bash
 while :; do
-  slay pty list --json | jq -r '.[] | select(.task_id | IN($ids[])) | "\(.task_id) \(.state)"' --argjson ids '["id1","id2"]'
+  slay --dev pty list --json | jq -r '.[] | select(.task_id | IN($ids[])) | "\(.task_id) \(.state)"' --argjson ids '["id1","id2"]'
   sleep 5
 done
 ```
