@@ -6,6 +6,8 @@ export interface KanbanSelectionAPI {
   anchorId: string | null
   isSelected: (id: string) => boolean
   toggle: (id: string) => void
+  // Shift-click: additively select the contiguous range from anchor to id, within id's column
+  selectRange: (id: string) => void
   replace: (id: string) => void
   clear: () => void
   selectAll: (ids: string[]) => void
@@ -61,6 +63,30 @@ export function useKanbanSelection({
     setAnchorId(id)
   }, [])
 
+  // Range-add within the clicked card's column. Same-column anchor → add anchor..id (inclusive),
+  // keep anchor so further shift-clicks extend from it. No usable anchor → add single + set anchor.
+  const selectRange = useCallback(
+    (id: string) => {
+      const col = columns.find((c) => c.tasks.some((t) => t.id === id))
+      if (!col) return
+      const order = col.tasks.map((t) => t.id)
+      const toIdx = order.indexOf(id)
+      const anchorIdx = anchorId ? order.indexOf(anchorId) : -1
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (anchorIdx === -1) {
+          next.add(id)
+          return next
+        }
+        const [lo, hi] = anchorIdx <= toIdx ? [anchorIdx, toIdx] : [toIdx, anchorIdx]
+        for (let k = lo; k <= hi; k++) next.add(order[k])
+        return next
+      })
+      if (anchorIdx === -1) setAnchorId(id)
+    },
+    [columns, anchorId]
+  )
+
   const replace = useCallback((id: string) => {
     setSelectedIds(new Set([id]))
     setAnchorId(id)
@@ -81,6 +107,7 @@ export function useKanbanSelection({
     anchorId,
     isSelected,
     toggle,
+    selectRange,
     replace,
     clear,
     selectAll,

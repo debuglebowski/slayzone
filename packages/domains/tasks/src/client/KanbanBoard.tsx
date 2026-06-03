@@ -119,13 +119,20 @@ export function KanbanBoard({
   const dragSetRef = useRef<string[]>([])
   const [dragSetSize, setDragSetSize] = useState(1)
 
-  // Wrap onTaskClick: shift = toggle selection (no open); meta = bg open (existing); plain = clear + open
-  const handleCardClick = (task: Task, e: { metaKey: boolean; shiftKey?: boolean }): void => {
-    if (e.shiftKey) {
+  // Wrap onTaskClick: meta/ctrl = toggle selection (multi-choose); shift = range-add; plain = clear + open
+  const handleCardClick = (
+    task: Task,
+    e: { metaKey: boolean; ctrlKey?: boolean; shiftKey?: boolean }
+  ): void => {
+    if (e.metaKey || e.ctrlKey) {
       selection.toggle(task.id)
       return
     }
-    if (!e.metaKey) selection.clear()
+    if (e.shiftKey) {
+      selection.selectRange(task.id)
+      return
+    }
+    selection.clear()
     onTaskClick?.(task, e)
   }
 

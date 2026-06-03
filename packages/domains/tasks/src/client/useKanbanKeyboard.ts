@@ -155,6 +155,35 @@ export function useKanbanKeyboard({
     [focusedTaskId, gridLookup, columns, focusFirst]
   )
 
+  // Shift+Arrow: grow selection one card up/down within the focused card's column (additive)
+  const extendSelection = useCallback(
+    (direction: 'up' | 'down') => {
+      if (!selection) return
+      if (!focusedTaskId) {
+        focusFirst()
+        return
+      }
+      const pos = gridLookup.get(focusedTaskId)
+      if (!pos) {
+        focusFirst()
+        return
+      }
+      const col = columns[pos.col]
+      const nextRow =
+        direction === 'down'
+          ? Math.min(col.tasks.length - 1, pos.row + 1)
+          : Math.max(0, pos.row - 1)
+      // Seed the current card so a range exists to grow from
+      if (selection.size === 0) selection.selectRange(focusedTaskId)
+      const target = col.tasks[nextRow]
+      if (!target || target.id === focusedTaskId) return // at column edge
+      setFocusedTaskId(target.id)
+      cardRefs.current.get(target.id)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      selection.selectRange(target.id)
+    },
+    [selection, focusedTaskId, gridLookup, columns, focusFirst]
+  )
+
   const enabled = isActive && !pickerState && !isDragging
 
   useGuardedHotkeys(
@@ -189,6 +218,22 @@ export function useKanbanKeyboard({
     },
     { enabled }
   )
+  useGuardedHotkeys(
+    'shift+ArrowDown, shift+j',
+    (e) => {
+      e.preventDefault()
+      extendSelection('down')
+    },
+    { enabled }
+  )
+  useGuardedHotkeys(
+    'shift+ArrowUp, shift+k',
+    (e) => {
+      e.preventDefault()
+      extendSelection('up')
+    },
+    { enabled }
+  )
 
   useGuardedHotkeys(
     'enter',
@@ -197,17 +242,6 @@ export function useKanbanKeyboard({
       e.preventDefault()
       const task = findTask(focusedTaskId)
       if (task) onTaskClick?.(task, { metaKey: false })
-    },
-    { enabled }
-  )
-
-  useGuardedHotkeys(
-    'mod+enter',
-    (e) => {
-      if (!focusedTaskId) return
-      e.preventDefault()
-      const task = findTask(focusedTaskId)
-      if (task) onTaskClick?.(task, { metaKey: true })
     },
     { enabled }
   )

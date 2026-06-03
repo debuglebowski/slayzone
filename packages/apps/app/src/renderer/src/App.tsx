@@ -733,13 +733,6 @@ function App(): React.JSX.Element {
     [guardTaskOpen, rawOpenTask, startTransition]
   )
 
-  const guardedOpenTaskInBackground = useCallback(
-    (taskId: string) => {
-      guardTaskOpen(taskId, openTaskInBackground)
-    },
-    [guardTaskOpen, openTaskInBackground]
-  )
-
   const openTaskRef = useRef(openTask)
   openTaskRef.current = openTask
 
@@ -1751,9 +1744,8 @@ function App(): React.JSX.Element {
       useDialogStore.getState().closeDeleteTask()
     }
   }
-  const handleTaskClick = (task: Task, e: { metaKey: boolean; shiftKey?: boolean }): void => {
-    if (e.metaKey) guardedOpenTaskInBackground(task.id)
-    else openTask(task.id)
+  const handleTaskClick = (task: Task): void => {
+    openTask(task.id)
   }
   const handleTaskMove = (taskId: string, newColumnId: string, targetIndex: number): void => {
     moveTask(taskId, newColumnId, targetIndex, getViewConfig(filter).groupBy)
@@ -2909,9 +2901,7 @@ function App(): React.JSX.Element {
                                                       tasks={tasks}
                                                       filter={filter}
                                                       projects={projects}
-                                                      onTaskClick={(t) =>
-                                                        handleTaskClick(t, { metaKey: false })
-                                                      }
+                                                      onTaskClick={(t) => handleTaskClick(t)}
                                                       onUpdateTask={(data) =>
                                                         window.api.db.updateTask(data).then((t) => {
                                                           updateTask(t)
