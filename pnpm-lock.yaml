@@ -1678,6 +1678,9 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics
+      '@slayzone/file-editor':
+        specifier: workspace:*
+        version: link:../../domains/file-editor
       '@slayzone/history':
         specifier: workspace:*
         version: link:../../domains/history
