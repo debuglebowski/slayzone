@@ -5,6 +5,7 @@ import { chatRouter } from './routers/chat'
 import { diagnosticsRouter } from './routers/diagnostics'
 import { fileEditorRouter } from './routers/file-editor'
 import { historyRouter } from './routers/history'
+import { projectsRouter } from './routers/projects'
 import { tagsRouter } from './routers/tags'
 import { testPanelRouter } from './routers/test-panel'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
@@ -16,6 +17,7 @@ export const appRouter = router({
   diagnostics: diagnosticsRouter,
   fileEditor: fileEditorRouter,
   history: historyRouter,
+  projects: projectsRouter,
   tags: tagsRouter,
   testPanel: testPanelRouter,
   usageAnalytics: usageAnalyticsRouter

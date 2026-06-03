@@ -20,6 +20,7 @@
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/history": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/projects": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
