@@ -58,6 +58,20 @@ const api: ElectronAPI = {
     uploadProjectIcon: (projectId, sourcePath) =>
       ipcRenderer.invoke('db:projects:uploadIcon', projectId, sourcePath),
 
+    // Project groups (Discord-style folders / tree labels)
+    getProjectGroups: () => ipcRenderer.invoke('db:project-groups:getAll'),
+    createProjectGroup: (data) => ipcRenderer.invoke('db:project-groups:create', data),
+    createFolderWithProjects: (projectIds) =>
+      ipcRenderer.invoke('db:project-groups:createWith', projectIds),
+    updateProjectGroup: (data) => ipcRenderer.invoke('db:project-groups:update', data),
+    deleteProjectGroup: (id) => ipcRenderer.invoke('db:project-groups:delete', id),
+    moveProjectToGroup: (projectId, groupId, targetIndex) =>
+      ipcRenderer.invoke('db:project-groups:moveProject', projectId, groupId, targetIndex),
+    reorderTopLevel: (entries) =>
+      ipcRenderer.invoke('db:project-groups:reorderTopLevel', entries),
+    reorderProjectsInGroup: (groupId, projectIds) =>
+      ipcRenderer.invoke('db:project-groups:reorderWithin', groupId, projectIds),
+
     // Tasks
     getTasks: () => ipcRenderer.invoke('db:tasks:getAll'),
     loadBoardData: () => ipcRenderer.invoke('db:loadBoardData'),

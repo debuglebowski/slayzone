@@ -62,10 +62,49 @@ export interface Project {
   icon_letters: string | null
   /** Absolute path to icon image on disk. Overrides letters when set. */
   icon_image_path: string | null
+  /**
+   * Position. When `group_id` is null → position in the top-level sidebar list
+   * (shared integer space with `ProjectGroup.sort_order`). When `group_id` is
+   * set → position within that group.
+   */
   sort_order: number
+  /** Group this project belongs to, or null = ungrouped (top-level). */
+  group_id: string | null
   created_at: string
   updated_at: string
 }
+
+/**
+ * A group of projects. Renders as a Discord-style folder in the rail view and
+ * a collapsible labeled section in the tree view — one shared entity for both.
+ */
+export interface ProjectGroup {
+  id: string
+  /** Label (tree-view header + rail folder tooltip/expanded title). May be ''. */
+  name: string
+  /** Top-level position, shares one integer space with ungrouped projects. */
+  sort_order: number
+  /** 0/1 — persisted expand/collapse, shared across rail + tree views. */
+  collapsed: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateProjectGroupInput {
+  name?: string
+}
+
+export interface UpdateProjectGroupInput {
+  id: string
+  name?: string
+  collapsed?: boolean
+}
+
+/**
+ * A reference to one top-level sidebar slot — either an ungrouped project or a
+ * group. Used as the `reorderTopLevel` payload (the merged ordered list).
+ */
+export type TopLevelEntryRef = { kind: 'project' | 'group'; id: string }
 
 export interface DetectedRepo {
   name: string

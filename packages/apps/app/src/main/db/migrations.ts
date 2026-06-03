@@ -2907,6 +2907,31 @@ export const migrations: Migration[] = [
       // per task, mirroring panel_visibility. NULL → runtime defaults.
       db.exec(`ALTER TABLE tasks ADD COLUMN panel_sizes TEXT DEFAULT NULL;`)
     }
+  },
+  {
+    version: 144,
+    up: (db) => {
+      // Project groups — Discord-style folders (rail view) + labeled collapsible
+      // sections (tree view). One shared entity drives both renderings.
+      //
+      // Ordering model: `project_groups.sort_order` and the `sort_order` of
+      // UNGROUPED projects (group_id IS NULL) share ONE integer space — the
+      // top-level list is the merge of both, sorted by sort_order (Discord's
+      // rail is a single ordered list mixing folders + loose servers). A
+      // GROUPED project's `sort_order` is its position WITHIN its group instead.
+      // `collapsed` persists expand/collapse, shared across both views.
+      db.exec(`
+        CREATE TABLE project_groups (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          collapsed INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        ALTER TABLE projects ADD COLUMN group_id TEXT DEFAULT NULL;
+      `)
+    }
   }
 ]
 

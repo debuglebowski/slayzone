@@ -2,8 +2,18 @@ import type {
   Project,
   CreateProjectInput,
   UpdateProjectInput,
+  ProjectGroup,
+  CreateProjectGroupInput,
+  UpdateProjectGroupInput,
+  TopLevelEntryRef,
   ExecutionContext
 } from '@slayzone/projects/shared'
+
+/** Authoritative state returned by project-group mutations (renderer replaces). */
+export interface ProjectGroupsSnapshot {
+  projects: Project[]
+  groups: ProjectGroup[]
+}
 import type {
   Task,
   CreateTaskInput,
@@ -373,6 +383,23 @@ export interface ElectronAPI {
     deleteProject: (id: string) => Promise<boolean>
     reorderProjects: (projectIds: string[]) => Promise<void>
     uploadProjectIcon: (projectId: string, sourcePath: string) => Promise<Project>
+
+    // Project groups (Discord-style folders / tree labels)
+    getProjectGroups: () => Promise<ProjectGroup[]>
+    createProjectGroup: (data: CreateProjectGroupInput) => Promise<ProjectGroupsSnapshot>
+    createFolderWithProjects: (projectIds: string[]) => Promise<ProjectGroupsSnapshot>
+    updateProjectGroup: (data: UpdateProjectGroupInput) => Promise<ProjectGroup>
+    deleteProjectGroup: (id: string) => Promise<ProjectGroupsSnapshot>
+    moveProjectToGroup: (
+      projectId: string,
+      groupId: string | null,
+      targetIndex: number
+    ) => Promise<ProjectGroupsSnapshot>
+    reorderTopLevel: (entries: TopLevelEntryRef[]) => Promise<ProjectGroupsSnapshot>
+    reorderProjectsInGroup: (
+      groupId: string,
+      projectIds: string[]
+    ) => Promise<ProjectGroupsSnapshot>
 
     // Tasks
     getTasks: () => Promise<Task[]>
