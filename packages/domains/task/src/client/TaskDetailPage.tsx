@@ -973,14 +973,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       gitTabSyncedRef.current = true
     }
   }, [task?.git_active_tab])
-  const handleGitTabChange = useCallback(
-    (tab: GitTabId) => {
-      setGitDefaultTab(tab)
-      gitTabSyncedRef.current = true
-      if (task?.id) void window.api.db.updateTask({ id: task.id, gitActiveTab: tab })
-    },
-    [task?.id]
-  )
+  const handleGitTabChange = (tab: GitTabId) => {
+    setGitDefaultTab(tab)
+    gitTabSyncedRef.current = true
+    if (task?.id) void window.api.db.updateTask({ id: task.id, gitActiveTab: tab })
+  }
   const fileEditorRef = useRef<FileEditorViewHandle>(null)
   const terminalContainerRef = useRef<TerminalContainerHandle>(null)
   const browserPanelRef = useRef<BrowserPanelHandle>(null)

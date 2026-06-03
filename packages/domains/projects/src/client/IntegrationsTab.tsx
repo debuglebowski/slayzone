@@ -900,7 +900,7 @@ export function IntegrationsTab({
           ? 'jira'
           : null
 
-  const collectSyncRows = useCallback(async (): Promise<TaskSyncRow[]> => {
+  const collectSyncRows = async (): Promise<TaskSyncRow[]> => {
     const provider = syncSetupProvider
     if (!provider) return []
 
@@ -920,7 +920,7 @@ export function IntegrationsTab({
     setSyncRows(rows)
     setSyncSummary(summarizeSyncRows(rows))
     return rows
-  }, [project, syncSetupProvider])
+  }
 
   const handleCheckDiffs = async () => {
     setCheckingSync(true)

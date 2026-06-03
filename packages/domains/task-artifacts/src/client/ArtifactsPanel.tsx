@@ -1211,37 +1211,34 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       return out
     }, [childFolders, artifactsByFolder, expandedFolders])
 
-    const handleArtifactClick = useCallback(
-      (e: React.MouseEvent, artifactId: string) => {
-        const isMeta = e.metaKey || e.ctrlKey
-        const isShift = e.shiftKey
-        if (isMeta) {
-          setSelectedIds((prev) => {
-            const next = new Set(prev)
-            if (next.has(artifactId)) next.delete(artifactId)
-            else next.add(artifactId)
-            return next
-          })
-          lastClickedRef.current = artifactId
+    const handleArtifactClick = (e: React.MouseEvent, artifactId: string) => {
+      const isMeta = e.metaKey || e.ctrlKey
+      const isShift = e.shiftKey
+      if (isMeta) {
+        setSelectedIds((prev) => {
+          const next = new Set(prev)
+          if (next.has(artifactId)) next.delete(artifactId)
+          else next.add(artifactId)
+          return next
+        })
+        lastClickedRef.current = artifactId
+        setSelectedId(artifactId)
+        return
+      }
+      if (isShift && lastClickedRef.current) {
+        const startIdx = flatArtifactIds.indexOf(lastClickedRef.current)
+        const endIdx = flatArtifactIds.indexOf(artifactId)
+        if (startIdx >= 0 && endIdx >= 0) {
+          const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
+          setSelectedIds(new Set(flatArtifactIds.slice(lo, hi + 1)))
           setSelectedId(artifactId)
           return
         }
-        if (isShift && lastClickedRef.current) {
-          const startIdx = flatArtifactIds.indexOf(lastClickedRef.current)
-          const endIdx = flatArtifactIds.indexOf(artifactId)
-          if (startIdx >= 0 && endIdx >= 0) {
-            const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
-            setSelectedIds(new Set(flatArtifactIds.slice(lo, hi + 1)))
-            setSelectedId(artifactId)
-            return
-          }
-        }
-        setSelectedIds(new Set([artifactId]))
-        lastClickedRef.current = artifactId
-        setSelectedId(artifactId)
-      },
-      [flatArtifactIds, setSelectedId]
-    )
+      }
+      setSelectedIds(new Set([artifactId]))
+      lastClickedRef.current = artifactId
+      setSelectedId(artifactId)
+    }
 
     const getEffectiveArtifactIds = useCallback(
       (artifactId: string): string[] => {
@@ -1279,39 +1276,36 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       [writeArtifactsToOsClipboard]
     )
 
-    const handleArtifactPaste = useCallback(
-      async (destFolderId: string | null) => {
-        const osPaths = await window.api.clipboard.readFilePaths()
-        if (!osPaths.length) return
-        const created = await window.api.artifacts.pasteFiles({
-          sourcePaths: osPaths,
-          destTaskId: taskId,
-          destFolderId
-        })
-        // Cut-mode source delete only if internal clipboard markers still match OS clipboard
-        if (clipboard?.mode === 'cut') {
-          const sourcePathSet = new Set(osPaths)
-          const internalPaths = (
-            await Promise.all(clipboard.ids.map((id) => getFilePath(id)))
-          ).filter((p): p is string => !!p)
-          const matchesInternal =
-            internalPaths.length === osPaths.length &&
-            internalPaths.every((p) => sourcePathSet.has(p))
-          if (matchesInternal) {
-            for (const id of clipboard.ids) {
-              await deleteArtifact(id)
-            }
-            setClipboard(null)
+    const handleArtifactPaste = async (destFolderId: string | null) => {
+      const osPaths = await window.api.clipboard.readFilePaths()
+      if (!osPaths.length) return
+      const created = await window.api.artifacts.pasteFiles({
+        sourcePaths: osPaths,
+        destTaskId: taskId,
+        destFolderId
+      })
+      // Cut-mode source delete only if internal clipboard markers still match OS clipboard
+      if (clipboard?.mode === 'cut') {
+        const sourcePathSet = new Set(osPaths)
+        const internalPaths = (
+          await Promise.all(clipboard.ids.map((id) => getFilePath(id)))
+        ).filter((p): p is string => !!p)
+        const matchesInternal =
+          internalPaths.length === osPaths.length &&
+          internalPaths.every((p) => sourcePathSet.has(p))
+        if (matchesInternal) {
+          for (const id of clipboard.ids) {
+            await deleteArtifact(id)
           }
+          setClipboard(null)
         }
-        if (created.length) {
-          setSelectedIds(new Set(created.map((a) => a.id)))
-          setSelectedId(created[created.length - 1].id)
-          lastClickedRef.current = created[created.length - 1].id
-        }
-      },
-      [clipboard, taskId, getFilePath, deleteArtifact, setSelectedId]
-    )
+      }
+      if (created.length) {
+        setSelectedIds(new Set(created.map((a) => a.id)))
+        setSelectedId(created[created.length - 1].id)
+        lastClickedRef.current = created[created.length - 1].id
+      }
+    }
 
     const handleArtifactDuplicate = useCallback(
       async (ids: string[]) => {
@@ -1331,98 +1325,81 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       [getFilePath, artifacts, taskId]
     )
 
-    const handleDeleteSelected = useCallback(
-      async (ids: string[]) => {
-        for (const id of ids) await deleteArtifact(id)
-        setSelectedIds(new Set())
-      },
-      [deleteArtifact]
-    )
+    const handleDeleteSelected = async (ids: string[]) => {
+      for (const id of ids) await deleteArtifact(id)
+      setSelectedIds(new Set())
+    }
 
-    const handleSelectAll = useCallback(() => {
+    const handleSelectAll = () => {
       setSelectedIds(new Set(flatArtifactIds))
-    }, [flatArtifactIds])
+    }
 
-    const handlePanelKeyDown = useCallback(
-      (e: React.KeyboardEvent) => {
-        const meta = e.metaKey || e.ctrlKey
-        const target = e.target as HTMLElement
-        const inEditableField =
-          target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
-        const inSidebar = target.closest('[data-testid="artifacts-sidebar"]') !== null
+    const handlePanelKeyDown = (e: React.KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey
+      const target = e.target as HTMLElement
+      const inEditableField =
+        target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      const inSidebar = target.closest('[data-testid="artifacts-sidebar"]') !== null
 
-        if (meta && e.key === 'f') {
+      if (meta && e.key === 'f') {
+        e.preventDefault()
+        e.stopPropagation()
+        const rm = selectedArtifact
+          ? getEffectiveRenderMode(selectedArtifact.title, selectedArtifact.render_mode)
+          : null
+        if (selectedArtifact && rm && !isBinaryRenderMode(rm)) {
+          setFindOpen(true)
+          setFindFocusToken((t) => t + 1)
+        }
+        return
+      }
+
+      if (!inSidebar || inEditableField) return
+
+      if (meta && e.key === 'c') {
+        const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
+        if (ids.length) {
           e.preventDefault()
-          e.stopPropagation()
-          const rm = selectedArtifact
-            ? getEffectiveRenderMode(selectedArtifact.title, selectedArtifact.render_mode)
-            : null
-          if (selectedArtifact && rm && !isBinaryRenderMode(rm)) {
-            setFindOpen(true)
-            setFindFocusToken((t) => t + 1)
-          }
-          return
+          handleArtifactCopy(ids)
         }
-
-        if (!inSidebar || inEditableField) return
-
-        if (meta && e.key === 'c') {
-          const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
-          if (ids.length) {
-            e.preventDefault()
-            handleArtifactCopy(ids)
-          }
-          return
-        }
-        if (meta && e.key === 'x') {
-          const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
-          if (ids.length) {
-            e.preventDefault()
-            handleArtifactCut(ids)
-          }
-          return
-        }
-        if (meta && e.key === 'v') {
+        return
+      }
+      if (meta && e.key === 'x') {
+        const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
+        if (ids.length) {
           e.preventDefault()
-          const focusedArtifact = selectedId ? artifacts.find((a) => a.id === selectedId) : null
-          void handleArtifactPaste(focusedArtifact?.folder_id ?? null)
-          return
+          handleArtifactCut(ids)
         }
-        if (meta && e.key === 'd') {
-          const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
-          if (ids.length) {
-            e.preventDefault()
-            void handleArtifactDuplicate(ids)
-          }
-          return
-        }
-        if (meta && e.key === 'a') {
+        return
+      }
+      if (meta && e.key === 'v') {
+        e.preventDefault()
+        const focusedArtifact = selectedId ? artifacts.find((a) => a.id === selectedId) : null
+        void handleArtifactPaste(focusedArtifact?.folder_id ?? null)
+        return
+      }
+      if (meta && e.key === 'd') {
+        const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
+        if (ids.length) {
           e.preventDefault()
-          handleSelectAll()
-          return
+          void handleArtifactDuplicate(ids)
         }
-        if ((e.key === 'Backspace' || e.key === 'Delete') && (selectedIds.size > 0 || selectedId)) {
-          const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
-          if (ids.length) {
-            e.preventDefault()
-            void handleDeleteSelected(ids)
-          }
-          return
+        return
+      }
+      if (meta && e.key === 'a') {
+        e.preventDefault()
+        handleSelectAll()
+        return
+      }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && (selectedIds.size > 0 || selectedId)) {
+        const ids = selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []
+        if (ids.length) {
+          e.preventDefault()
+          void handleDeleteSelected(ids)
         }
-      },
-      [
-        selectedArtifact,
-        selectedId,
-        selectedIds,
-        artifacts,
-        handleArtifactCopy,
-        handleArtifactCut,
-        handleArtifactPaste,
-        handleArtifactDuplicate,
-        handleDeleteSelected,
-        handleSelectAll
-      ]
-    )
+        return
+      }
+    }
 
     // --- Render inline input ---
 
