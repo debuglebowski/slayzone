@@ -2515,6 +2515,13 @@ function App(): React.JSX.Element {
                     {tabs.map((tab, i) => {
                       const isVisible = toVisibleIndex(i) >= 0
                       if (explodeMode && (tab.type !== 'task' || !isVisible)) return null
+                      // Inactive tabs hide via `invisible` (visibility:hidden). CSS does not
+                      // interpolate `visibility`, so a descendant carrying a `transition` (e.g.
+                      // Button's `transition-all`) stays fully painted for the whole transition
+                      // duration before snapping off — that was the "Turn into task" button
+                      // lingering on tab switch. Hidden tabs are inert, so we also kill their
+                      // descendant transitions (`[&_*]:transition-none!` below) → the hide is
+                      // instant for every element, not just ones without a transition.
                       const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
                       const isExplodeFocused =
                         explodeMode && tab.type === 'task' && focusedExplodeTaskId === tab.taskId
@@ -2532,7 +2539,7 @@ function App(): React.JSX.Element {
                                     ? 'border-primary/60 ring-2 ring-primary/40'
                                     : 'border-border'
                                 )
-                              : `absolute inset-0 ${!isViewActive ? 'invisible' : 'z-10'}`
+                              : `absolute inset-0 ${!isViewActive ? 'invisible [&_*]:transition-none!' : 'z-10'}`
                           }
                           inert={!explodeMode && !isViewActive ? true : undefined}
                         >
