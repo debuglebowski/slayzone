@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.33.1",
+    "date": "2026-06-03",
+    "tagline": "Jira goes live",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Jira out of Labs",
+        "description": "The Jira integration is now generally available, no longer behind the Labs flag."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal status no longer clobbers live conversations",
+        "description": "Reviving terminal status no longer overwrites an active AI conversation."
+      }
+    ]
+  },
+  {
     "version": "0.33.0",
     "date": "2026-06-03",
     "tagline": "Groups, panels, speed",

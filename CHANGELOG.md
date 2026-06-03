@@ -1,6 +1,30 @@
 # Changelog
 
 
+## v0.33.1
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.33.0...v0.33.1)
+
+### 🚀 Enhancements
+
+- **integrations:** Promote Jira out of Labs ([618cd0cb](https://github.com/debuglebowski/slayzone/commit/618cd0cb))
+
+### 🩹 Fixes
+
+- **terminal:** Stop status-revive from clobbering live AI conversations ([cfdb25cd](https://github.com/debuglebowski/slayzone/commit/cfdb25cd))
+
+### 💅 Refactors
+
+- Drop redundant manual memoization so React Compiler optimizes ([c382a798](https://github.com/debuglebowski/slayzone/commit/c382a798))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.33.0 ([fcd9cbd7](https://github.com/debuglebowski/slayzone/commit/fcd9cbd7))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.33.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.32.3...v0.33.0)
