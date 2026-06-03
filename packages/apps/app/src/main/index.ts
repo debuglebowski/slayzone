@@ -1427,14 +1427,16 @@ app
 
     // Persist the host-kill timestamp into provider_config so the revive flow can
     // choose between resume (hot) and fresh conversation (cold) — see COLD_RESPAWN_MS.
-    setOnHostKillHandler(async (taskId, mode) => {
+    setOnHostKillHandler(async (taskId) => {
       try {
         const row = (await db
-          .prepare('SELECT provider_config FROM tasks WHERE id = ?')
-          .get(taskId)) as { provider_config: string | null } | undefined
-        if (!row) return
+          .prepare('SELECT provider_config, terminal_mode FROM tasks WHERE id = ?')
+          .get(taskId)) as
+          | { provider_config: string | null; terminal_mode: string | null }
+          | undefined
+        if (!row?.terminal_mode) return
         const cfg: ProviderConfig = row.provider_config ? JSON.parse(row.provider_config) : {}
-        const next = setProviderLastKilledAt(cfg, mode, Date.now())
+        const next = setProviderLastKilledAt(cfg, row.terminal_mode, Date.now())
         await db.prepare('UPDATE tasks SET provider_config = ? WHERE id = ?').run(
           JSON.stringify(next),
           taskId

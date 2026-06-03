@@ -90,6 +90,25 @@ export function setProviderLastKilledAt(
  *  days later. */
 export const COLD_RESPAWN_MS = 30 * 60 * 1000
 
+export type ReviveMode = 'resume' | 'fresh'
+
+/**
+ * Decide whether a status-revive (issue #77) should RESUME the existing AI
+ * conversation or start a FRESH one.
+ *
+ * Only go fresh with POSITIVE evidence the task sat past the cold threshold. An
+ * unknown kill time (`killedAt == null`) MUST resume, never reset: resume is
+ * non-destructive (a genuinely-gone session surfaces the friendly overlay),
+ * whereas a fresh start clears the stored conversation id and — if the new
+ * session dies before it persists — strands the real transcript as an
+ * unreachable phantom. Defaulting unknown→fresh is exactly what silently
+ * abandoned live conversations (see plans/conversation-id-robustness.md, RC2).
+ */
+export function decideReviveMode(killedAt: number | null, now: number): ReviveMode {
+  if (killedAt == null) return 'resume'
+  return now - killedAt > COLD_RESPAWN_MS ? 'fresh' : 'resume'
+}
+
 /** Returns a partial ProviderConfig that sets conversationId=null for all modes in cfg.
  *  Does NOT include flags — the handler deep-merges, so existing flags survive. */
 export function clearAllConversationIds(cfg: ProviderConfig | undefined | null): ProviderConfig {

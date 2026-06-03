@@ -54,7 +54,7 @@ import {
   setProviderFlags,
   clearAllConversationIds,
   getProviderLastKilledAt,
-  COLD_RESPAWN_MS,
+  decideReviveMode,
   priorityOptions
 } from '@slayzone/task/shared'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
@@ -1274,8 +1274,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         return
       }
       const killedAt = getProviderLastKilledAt(task.provider_config, task.terminal_mode)
-      const isCold = killedAt == null || Date.now() - killedAt > COLD_RESPAWN_MS
-      if (isCold) {
+      // Unknown kill time defaults to RESUME (non-destructive). A cold start is
+      // destructive — it clears the conversation id — so it requires positive
+      // evidence the task sat past the threshold. See decideReviveMode / RC2.
+      if (decideReviveMode(killedAt, Date.now()) === 'fresh') {
         await handleResetTerminal()
       } else {
         await handleRestartTerminal()
