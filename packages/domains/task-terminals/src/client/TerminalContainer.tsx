@@ -35,6 +35,8 @@ interface TerminalContainerProps {
   initialPrompt?: string | null
   providerFlags?: string
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
+  /** Owning task is temporary — disables terminal auto-start (regular-task-only). */
+  isTemporary?: boolean
   isActive?: boolean
   /** Owns keyboard shortcuts (Cmd+D, Cmd+T). Defaults to `isActive`. In explode mode, only the focused cell has this true. */
   hasShortcutFocus?: boolean
@@ -72,6 +74,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       initialPrompt,
       providerFlags,
       executionContext,
+      isTemporary,
       isActive = true,
       hasShortcutFocus,
       focusRequestId = 0,
@@ -377,6 +380,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           initialPrompt: tab.isMain ? initialPrompt : undefined,
           providerFlags: tab.isMain ? providerFlags : undefined,
           executionContext,
+          isTemporary,
           onConversationCreated: tab.isMain ? handleConversationCreated : undefined,
           onStartFresh: tab.isMain ? onStartFresh : undefined,
           onReady: tab.isMain ? handleTerminalReady : undefined,
@@ -412,6 +416,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       initialPrompt,
       providerFlags,
       executionContext,
+      isTemporary,
       handleConversationCreated,
       onStartFresh,
       handleTerminalReady,

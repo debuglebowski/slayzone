@@ -25,6 +25,13 @@ export interface TerminalStarterProps extends TerminalProps {
    * auto-mounting, even across reload/restart.
    */
   hibernated?: boolean
+  /**
+   * The owning task is temporary (ephemeral terminal tab). Auto-start is a
+   * regular-task-only feature: a temp task never auto-spawns from the
+   * `terminal_auto_start` setting, so the Start gate always shows. Reattach to
+   * a live PTY and warm-set restore (`wasSpawned`) still bypass the gate.
+   */
+  isTemporary?: boolean
 }
 
 // Lazy-spawn wrapper: hold off mounting <Terminal> (and thus PTY creation)
@@ -34,7 +41,8 @@ export interface TerminalStarterProps extends TerminalProps {
 // (after crash or quit) brings the agent back without user action.
 export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
   function TerminalStarter(props, ref) {
-    const { sessionId, mode = 'claude-code', wasSpawned, hibernated, ...terminalProps } = props
+    const { sessionId, mode = 'claude-code', wasSpawned, hibernated, isTemporary, ...terminalProps } =
+      props
     const [started, setStarted] = useState(false)
     const [existsChecked, setExistsChecked] = useState(false)
     const [dontShowAgain, setDontShowAgain] = useState(false)
@@ -72,13 +80,15 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         window.api.settings.get('terminal_auto_start')
       ]).then(([exists, autoStart]) => {
         if (cancelled) return
-        if (exists || autoStart === '1') setStarted(true)
+        // Auto-start is regular-task-only: temp tasks ignore the setting and
+        // keep the Start gate. Reattaching to a live PTY (`exists`) still skips.
+        if (exists || (autoStart === '1' && !isTemporary)) setStarted(true)
         setExistsChecked(true)
       })
       return () => {
         cancelled = true
       }
-    }, [sessionId, wasSpawned, hibernated])
+    }, [sessionId, wasSpawned, hibernated, isTemporary])
 
     // Idle-close (hibernation) signals from main. `warn` arms a visual
     // countdown; `cancelled` aborts it; `hibernated` means main killed the PTY
@@ -213,15 +223,20 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
             {Icon ? <Icon className="size-4" /> : <Play className="size-4" />}
             {isHibernated ? `Reopen ${label}` : `Open ${label}`}
           </button>
-          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={dontShowAgain}
-              onChange={(e) => setDontShowAgain(e.target.checked)}
-              className="cursor-pointer"
-            />
-            <span>{isHibernated ? "Don't auto-close this agent" : "Don't show this again"}</span>
-          </label>
+          {/* The "Don't show again" path sets terminal_auto_start=1, which is a
+              no-op for temp tasks (auto-start is regular-task-only) — hide it so
+              the control never lies. Hibernation's checkbox is unrelated. */}
+          {(isHibernated || !isTemporary) && (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={dontShowAgain}
+                onChange={(e) => setDontShowAgain(e.target.checked)}
+                className="cursor-pointer"
+              />
+              <span>{isHibernated ? "Don't auto-close this agent" : "Don't show this again"}</span>
+            </label>
+          )}
         </div>
       </div>
     )

@@ -32,6 +32,8 @@ interface PaneProps {
   providerFlags?: string
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   permissionNotice?: string | null
+  /** Owning task is temporary — gates auto-start off (regular-task-only). */
+  isTemporary?: boolean
   onConversationCreated?: (conversationId: string) => void
   onStartFresh?: () => void
   onReady?: (api: {
@@ -207,7 +209,11 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
           {...(shouldGate
-            ? { wasSpawned: pane.tab.wasSpawned, hibernated: pane.tab.hibernated }
+            ? {
+                wasSpawned: pane.tab.wasSpawned,
+                hibernated: pane.tab.hibernated,
+                isTemporary: pane.isTemporary
+              }
             : {})}
         />
       )

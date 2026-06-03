@@ -2979,6 +2979,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           ref={terminalContainerRef}
                           key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${task.worktree_path || ''}-${task.base_dir || ''}`}
                           taskId={task.id}
+                          isTemporary={task.is_temporary}
                           isActive={isActive}
                           hasShortcutFocus={shortcutActive}
                           cwd={effectiveRepoPath || project?.path || ''}
