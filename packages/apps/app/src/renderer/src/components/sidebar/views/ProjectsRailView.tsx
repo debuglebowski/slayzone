@@ -9,6 +9,7 @@ import {
   pointerWithin,
   type CollisionDetection,
   type DragStartEvent,
+  type DragMoveEvent,
   type DragOverEvent,
   type DragEndEvent
 } from '@dnd-kit/core'
@@ -65,6 +66,9 @@ export function ProjectsRailView({
   onReorderProjectsInGroup,
   idleByProject
 }: SidebarViewContext) {
+  'use no memo' // React Compiler froze the per-item insertion-line render
+  // (drag state read via a closure wasn't tracked) — opt out so the indicator
+  // re-renders live during a drag.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const entries = useMemo(
     () => buildTopLevelEntries(projects, projectGroups),
@@ -90,11 +94,36 @@ export function ProjectsRailView({
   // so a folder can't be dropped inside another folder (no nesting). Project /
   // member drags prefer pointerWithin (precise, no jitter) → closestCenter for
   // gaps so reorder lines still resolve.
-  const collisionDetection = useMemo<CollisionDetection>(
-    () => (args) => {
+  const collisionDetection = useMemo<CollisionDetection>(() => {
+    // closestCenter measures from the ACTIVE item's collision rect, which never
+    // moves under the noShift strategy → it always "collides" with itself, so
+    // `over` becomes the dragged item and the indicator nulls. When the pointer
+    // is in empty space (above the first item, below the last, or in a gap),
+    // pick the droppable whose center is nearest the POINTER, excluding the
+    // active one. This is what makes the top/bottom insertion line resolve.
+    const closestToPointer: CollisionDetection = (args) => {
+      const p = args.pointerCoordinates
+      if (!p) return closestCenter(args)
+      let best: { id: string | number } | null = null
+      let bestDist = Infinity
+      for (const c of args.droppableContainers) {
+        if (c.id === args.active.id) continue
+        const r = args.droppableRects.get(c.id)
+        if (!r) continue
+        const cx = r.left + r.width / 2
+        const cy = r.top + r.height / 2
+        const dist = (cx - p.x) ** 2 + (cy - p.y) ** 2
+        if (dist < bestDist) {
+          bestDist = dist
+          best = { id: c.id }
+        }
+      }
+      return best ? [best] : []
+    }
+    return (args) => {
       const kind = (args.active.data.current as DragData | undefined)?.kind
       if (kind === 'group') {
-        return closestCenter({
+        return closestToPointer({
           ...args,
           droppableContainers: args.droppableContainers.filter((c) =>
             topLevelDroppableIds.has(String(c.id))
@@ -102,10 +131,9 @@ export function ProjectsRailView({
         })
       }
       const within = pointerWithin(args)
-      return within.length > 0 ? within : closestCenter(args)
-    },
-    [topLevelDroppableIds]
-  )
+      return within.length > 0 ? within : closestToPointer(args)
+    }
+  }, [topLevelDroppableIds])
 
   const groupMembers = (groupId: string): Project[] => {
     const entry = entries.find((e) => e.kind === 'group' && e.id === groupId)
@@ -123,18 +151,40 @@ export function ProjectsRailView({
     }
   }
 
-  const computeMode = (event: DragOverEvent | DragEndEvent): DropMode => {
+  const computeMode = (event: DragMoveEvent | DragOverEvent | DragEndEvent): DropMode => {
     const aKind = (event.active.data.current as DragData | undefined)?.kind
-    // Folders use the same 3-zone as projects: top → before, middle → merge
-    // (join the folder), bottom → after. This keeps a folder's edges reorderable
-    // — so a project can be dropped AFTER a folder that's the last item.
-    let mode = dropModeFromPointer(pointerYFromEvent(event), event.over?.rect)
-    // A dragged folder never merges into anything → coerce its middle to a line.
-    if (aKind === 'group' && mode === 'merge') mode = 'before'
-    return mode
+    const oKind = (event.over?.data.current as DragData | undefined)?.kind
+    const py = pointerYFromEvent(event)
+    const rect = event.over?.rect
+    const raw = dropModeFromPointer(py, rect)
+    const overId = String(event.over?.id ?? '')
+    const idx = entries.findIndex(
+      (e) => (e.kind === 'group' ? `group:${e.id}` : `top-project:${e.id}`) === overId
+    )
+    const half = rect ? rect.top + rect.height / 2 : 0
+    let result: DropMode
+    if (aKind === 'group') {
+      // A dragged FOLDER never merges → reorder line only.
+      result = raw === 'merge' ? 'before' : raw
+    } else if (py != null && rect && idx === 0 && py < half) {
+      result = 'before'
+    } else if (py != null && rect && idx === entries.length - 1 && py >= half) {
+      result = 'after'
+    } else if (oKind === 'group') {
+      result = 'merge'
+    } else {
+      result = raw
+    }
+    return result
   }
 
-  const handleDragOver = (event: DragOverEvent) => {
+  // Driven by onDragMove (fires every pointer move) — NOT onDragOver, which only
+  // fires when the `over` target changes. With the static-placeholder layout the
+  // pointer can travel a long way inside one `over` (e.g. past the last folder)
+  // without `over` changing; onDragOver would freeze the mode (stuck on 'merge')
+  // so the bottom/top insertion line was unreachable. onDragMove recomputes the
+  // mode continuously as the cursor moves within the same target.
+  const handleDragMove = (event: DragMoveEvent | DragOverEvent) => {
     const { active, over } = event
     if (!over || active.id === over.id) {
       setIndicator(null)
@@ -185,37 +235,40 @@ export function ProjectsRailView({
     e.kind === 'group' ? `group:${e.id}` : `top-project:${e.id}`
   )
 
-  const lineFor = (sortableId: string): DropMode | null =>
-    indicator && indicator.overId === sortableId ? indicator.mode : null
-
   return (
     <SidebarMenu className="flex flex-col items-center gap-2">
       <DndContext
         sensors={sensors}
         collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
+        onDragMove={handleDragMove}
+        onDragOver={handleDragMove}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={sortableIds} strategy={noShift}>
           {entries.map((entry) => {
             const sid = entry.kind === 'group' ? `group:${entry.id}` : `top-project:${entry.id}`
-            const line = lineFor(sid)
+            // Read `indicator` DIRECTLY here (not via a closure) so the compiler
+            // tracks it and the line re-renders during a drag.
+            const line: DropMode | null =
+              indicator && indicator.overId === sid ? indicator.mode : null
             return (
               <SidebarMenuItem key={sid}>
                 <div className="relative">
-                  {/* gap is 8px (gap-2) → line center pinned at exactly 4px into it */}
+                  {/* gap is 8px (gap-2) → center pinned 4px into it. Line is
+                      WIDER than the 40px tile (-left-2 -right-2) so it sticks out
+                      past the drag chip and stays visible at the cursor. */}
                   {line === 'before' && (
                     <span
                       style={{ top: -4 }}
-                      className="pointer-events-none absolute left-0 right-0 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground"
+                      className="pointer-events-none absolute -left-2 -right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground"
                     />
                   )}
                   {line === 'after' && (
                     <span
                       style={{ bottom: -4 }}
-                      className="pointer-events-none absolute left-0 right-0 z-20 h-1 translate-y-1/2 rounded-full bg-foreground"
+                      className="pointer-events-none absolute -left-2 -right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground"
                     />
                   )}
                   {entry.kind === 'project' ? (
