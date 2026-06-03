@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -286,11 +287,6 @@ interface TaskBranchCtx {
   pinnedSet: Set<string>
   selectedTaskIds: Set<string>
   selectedTaskIdArr: string[]
-  /** For each selected task, whether it sits at the top/bottom of its
-   * contiguous selection run in the project's render order. Used to draw a
-   * single subtle border around the run when multi-selecting. Empty when
-   * fewer than 2 tasks are selected. */
-  selectionRunInfo: Map<string, { firstInRun: boolean; lastInRun: boolean }>
   /** Id of the currently-dragged row (null when no drag). Used so all rows
    * in a multi-drag can hide together — the dragged row plus every other
    * selected row vanishes while the floating preview shows the count. */
@@ -510,37 +506,21 @@ function TaskRowView({
       <span
         className={cn(
           'relative flex flex-1 items-center gap-2 px-1.5 py-1 min-w-0 transition-colors',
-          // Selection visuals: single = bold ring; multi = subtle bg + a single
-          // border around contiguous run. Run-position (first/last) controls
-          // which sides get borders + corner rounding so adjacent selected
-          // rows fuse into one outlined block.
+          // Selection = a self-contained border on every selected row (same for
+          // any count, rows NOT aware of neighbors). Background + text stay
+          // driven purely by active/open state — selecting never changes them.
+          // A transparent border is reserved on all rows so selecting causes no
+          // 1px layout shift.
           (() => {
-            if (!isSelected) {
-              return cn(
-                'rounded-md',
-                isActive
-                  ? 'bg-white/15 text-foreground'
-                  : isOpenTab
-                    ? 'text-foreground hover:bg-accent/40'
-                    : 'text-muted-foreground/45 hover:bg-accent/40 hover:text-accent-foreground'
-              )
-            }
-            const isMulti = ctx.selectedTaskIds.size > 1
-            if (!isMulti) {
-              return 'rounded-md bg-accent/60 text-accent-foreground ring-1 ring-accent ring-inset'
-            }
-            const run = ctx.selectionRunInfo.get(task.id)
-            const first = run?.firstInRun ?? true
-            const last = run?.lastInRun ?? true
-            return cn(
-              'bg-accent/30 text-foreground border-l border-r border-foreground/25',
-              first && 'border-t',
-              last && 'border-b',
-              first && last && 'rounded-md',
-              first && !last && 'rounded-t-md rounded-b-none',
-              !first && last && 'rounded-b-md rounded-t-none',
-              !first && !last && 'rounded-none'
+            const base = cn(
+              'rounded-md border border-transparent',
+              isActive
+                ? 'bg-white/15 text-foreground'
+                : isOpenTab
+                  ? 'text-foreground hover:bg-accent/40'
+                  : 'text-muted-foreground/45 hover:bg-accent/40 hover:text-accent-foreground'
             )
+            return isSelected ? cn(base, 'border-foreground/25') : base
           })()
         )}
       >
@@ -1061,6 +1041,24 @@ export function TreeView({
   )
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const selectedTaskIdArr = useMemo(() => [...selectedTaskIds], [selectedTaskIds])
+
+  // Esc clears the row selection (current/active task is separate — it lives in
+  // the tab store and is untouched). Listener only runs while something is
+  // selected, and bails when focus sits in a text-input surface (rename/search
+  // input, terminal xterm textarea, editor) so we never steal their Esc.
+  const hasSelection = selectedTaskIds.size > 0
+  useEffect(() => {
+    if (!hasSelection) return
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const el = document.activeElement as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
+        return
+      setSelectedTaskIds(new Set())
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [hasSelection])
   const treeGroupBy = useTabStore((s) => s.treeGroupBy)
   const treeOrderBy = useTabStore((s) => s.treeOrderBy)
   const treeOrderDir = useTabStore((s) => s.treeOrderDir)
@@ -2148,20 +2146,6 @@ export function TreeView({
     // surrounding rows, but their drag listeners are disabled — they slide,
     // they don't drag. The temporary group is excluded from `sortableRowIds`.
     const { rows, sortableRowIds } = buildRowList(groups, project.id)
-    const flatTaskIds = rows.flatMap((r) => (r.kind === 'task' ? [r.rowId] : []))
-    // Compute first/last-in-run flags for each selected task, scanning
-    // adjacency in flat render order. Skipped when fewer than 2 selected
-    // (single-select uses its own visual treatment).
-    const selectionRunInfo = new Map<string, { firstInRun: boolean; lastInRun: boolean }>()
-    if (selectedTaskIds.size > 1) {
-      for (let i = 0; i < flatTaskIds.length; i++) {
-        const id = flatTaskIds[i]
-        if (!selectedTaskIds.has(id)) continue
-        const prevSelected = i > 0 && selectedTaskIds.has(flatTaskIds[i - 1])
-        const nextSelected = i < flatTaskIds.length - 1 && selectedTaskIds.has(flatTaskIds[i + 1])
-        selectionRunInfo.set(id, { firstInRun: !prevSelected, lastInRun: !nextSelected })
-      }
-    }
     const branchCtx: TaskBranchCtx = {
       childrenByParent,
       activeTaskId,
@@ -2172,7 +2156,6 @@ export function TreeView({
       pinnedSet,
       selectedTaskIds,
       selectedTaskIdArr,
-      selectionRunInfo,
       activeDragTaskId,
       treeShowStatus,
       treeShowPriority,

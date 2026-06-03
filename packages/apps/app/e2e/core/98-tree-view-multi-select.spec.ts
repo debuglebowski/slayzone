@@ -72,6 +72,27 @@ async function getTabTaskIds(page: Page): Promise<string[]> {
   })
 }
 
+// The "current/active task" = the task at the active tab index (null if home).
+// Distinct from the sidebar row selection; Esc must not disturb it.
+async function getActiveTaskId(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const store = (
+      window as unknown as {
+        __slayzone_tabStore?: {
+          getState: () => {
+            tabs: Array<{ type: string; taskId?: string }>
+            activeTabIndex: number
+          }
+        }
+      }
+    ).__slayzone_tabStore
+    if (!store) return null
+    const st = store.getState()
+    const tab = st.tabs[st.activeTabIndex]
+    return tab?.type === 'task' ? (tab.taskId ?? null) : null
+  })
+}
+
 test.describe('TreeView multi-select', () => {
   let projectId: string
   const projectName = 'Tree Multi-Select'
@@ -367,5 +388,61 @@ test.describe('TreeView multi-select', () => {
     await expect
       .poll(() => getSelectedIds(mainWindow, [rootA, rootB, rootC]), { timeout: 3_000 })
       .toEqual([rootA])
+  })
+
+  test('escape clears the whole selection but keeps the active task', async ({ mainWindow }) => {
+    // rootA is the current/active task tab (index 1; index 0 is home).
+    await setTabs(mainWindow, [rootA])
+    await patchStore(mainWindow, { activeTabIndex: 1 })
+
+    // Multi-select A, B, C.
+    await taskRow(mainWindow, rootA).click()
+    await taskRow(mainWindow, rootB).click({ modifiers: ['Meta'] })
+    await taskRow(mainWindow, rootC).click({ modifiers: ['Meta'] })
+    await expect
+      .poll(() => getSelectedIds(mainWindow, [rootA, rootB, rootC]), { timeout: 3_000 })
+      .toEqual([rootA, rootB, rootC])
+    expect(await getActiveTaskId(mainWindow)).toBe(rootA)
+
+    // A sidebar interaction leaves focus off any text surface — drop focus to
+    // body so the Esc handler is allowed to run (it bails inside inputs).
+    await mainWindow.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await mainWindow.keyboard.press('Escape')
+
+    // Every row deselected...
+    await expect
+      .poll(() => getSelectedIds(mainWindow, [rootA, rootB, rootC]), { timeout: 3_000 })
+      .toEqual([])
+    // ...but the current/active task is untouched.
+    expect(await getActiveTaskId(mainWindow)).toBe(rootA)
+  })
+
+  test('escape does NOT clear the selection while focus is in a text input', async ({
+    mainWindow
+  }) => {
+    await taskRow(mainWindow, rootA).click()
+    await taskRow(mainWindow, rootB).click({ modifiers: ['Meta'] })
+    await expect
+      .poll(() => getSelectedIds(mainWindow, [rootA, rootB, rootC]), { timeout: 3_000 })
+      .toEqual([rootA, rootB])
+
+    // Simulate focus sitting in a text-input surface — the guard's real
+    // triggers are the terminal xterm textarea, the editor, and search inputs.
+    // The Esc handler must bail so it never steals Escape from the field.
+    await mainWindow.evaluate(() => {
+      const ta = document.createElement('textarea')
+      ta.id = '__esc_guard_probe'
+      document.body.appendChild(ta)
+      ta.focus()
+    })
+
+    await mainWindow.keyboard.press('Escape')
+    // Give any (wrongful) clear a chance to land before asserting it did not.
+    await mainWindow.waitForTimeout(250)
+
+    // Selection survives — guard bailed because a textarea was focused.
+    expect(await getSelectedIds(mainWindow, [rootA, rootB, rootC])).toEqual([rootA, rootB])
+
+    await mainWindow.evaluate(() => document.getElementById('__esc_guard_probe')?.remove())
   })
 })
