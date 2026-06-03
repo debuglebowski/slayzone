@@ -1684,6 +1684,9 @@ importers:
       '@slayzone/history':
         specifier: workspace:*
         version: link:../../domains/history
+      '@slayzone/integrations':
+        specifier: workspace:*
+        version: link:../../domains/integrations
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform

@@ -15,6 +15,7 @@ import type {
   ChatEventMap,
   ChatQueueEventMap
 } from '@slayzone/terminal/main'
+import type { IntegrationOps } from '@slayzone/integrations/main'
 
 // Chat deps — ops + queue ops + the two streaming emitters the subscriptions
 // subscribe to. Same instances back the IPC handlers (coexistence until slice 5).
@@ -34,4 +35,19 @@ export function setChatDeps(deps: ChatDeps): void {
 export function getChatDeps(): ChatDeps {
   if (!chatDeps) throw new Error('chatDeps not initialized — call setChatDeps() in main host first')
   return chatDeps
+}
+
+// Integration ops — the electron-coupled domain ops (`@slayzone/integrations/main`
+// pulls electron + node clients), injected by the host so the `integrationsRouter`
+// and the still-live IPC handlers share one instance (coexistence until slice 5).
+let integrationOps: IntegrationOps | null = null
+
+export function setIntegrationOps(ops: IntegrationOps): void {
+  integrationOps = ops
+}
+
+export function getIntegrationOps(): IntegrationOps {
+  if (!integrationOps)
+    throw new Error('integrationOps not initialized — call setIntegrationOps() in main host first')
+  return integrationOps
 }

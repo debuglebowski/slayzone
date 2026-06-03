@@ -1630,6 +1630,9 @@ app
             events: chatEvents,
             queueEvents: chatQueueEvents
           })
+          // Same ops instance the IPC handlers delegate to → IPC + integrationsRouter
+          // share one implementation while both coexist (renderer cutover is slice 5).
+          mod.setIntegrationOps(integrationHandles.ops)
           mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
           logBoot('trpc server started')
