@@ -364,6 +364,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // watchdog overrides ('dead'/'error') reasserted by the next store change.
   const storeState = useSessionState(sessionId)
   const [ptyState, setPtyState] = useState<TerminalState>(() => storeState)
+  // Mirror for non-reactive reads (e.g. the focus-loss diagnostic below) so we
+  // can include the current state without re-subscribing the listener effect.
+  const ptyStateRef = useRef(ptyState)
+  useEffect(() => {
+    ptyStateRef.current = ptyState
+  }, [ptyState])
 
   const clearBufferWithoutRestart = useCallback(async (): Promise<void> => {
     const result = await window.api.pty.clearBuffer(sessionId)
@@ -1643,6 +1649,87 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       container.removeEventListener('focusin', onFocus, true)
     }
   }, [sessionId])
+
+  // DIAGNOSTIC (gated by the diagnostics config in main; off → no-op): catch the
+  // intermittent focus-theft regression where the xterm helper textarea blurs
+  // and focus does NOT return shortly after, while the OS window is still
+  // focused — i.e. an in-app steal, not the user switching apps. Records WHERE
+  // focus landed so a prod repro names the culprit. Self-healed blurs (focus
+  // returns to this terminal) and window-blur (alt-tab) are ignored; throttled.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const REPORT_THROTTLE_MS = 3000
+    let lastReportAt = 0
+
+    const ownsHelperTextarea = (el: EventTarget | null): boolean =>
+      el instanceof Element &&
+      el.classList.contains('xterm-helper-textarea') &&
+      !!terminalRef.current?.element?.contains(el)
+
+    const describe = (el: Element | null): Record<string, unknown> => {
+      if (!el) return { tag: null }
+      const panel = el.closest('[data-testid],[data-panel],[role="dialog"]')
+      return {
+        tag: el.tagName,
+        cls: (el.className?.toString?.() ?? '').slice(0, 80),
+        id: el.id || null,
+        testid: el.getAttribute('data-testid'),
+        nearestPanel:
+          panel?.getAttribute('data-testid') ??
+          panel?.getAttribute('data-panel') ??
+          panel?.getAttribute('role') ??
+          null
+      }
+    }
+
+    const onFocusOut = (e: FocusEvent): void => {
+      if (!ownsHelperTextarea(e.target)) return
+      const immediate = e.relatedTarget as Element | null
+      window.setTimeout(() => {
+        const active = document.activeElement
+        if (ownsHelperTextarea(active)) return // self-healed → not a failure
+        if (!document.hasFocus()) return // alt-tab / window blur → not in-app
+        // Only the observed failure signature: focus went NOWHERE (body/root) →
+        // the user "must click again". Intentional moves to another control
+        // (editor, sidebar, dialog input) land on a real focusable and are NOT
+        // this bug — skip them to keep the signal clean.
+        const wentNowhere =
+          active == null ||
+          active === document.body ||
+          active === document.documentElement
+        if (!wentNowhere) return
+        const now = performance.now()
+        if (now - lastReportAt < REPORT_THROTTLE_MS) return
+        lastReportAt = now
+        void window.api.diagnostics
+          .recordClientEvent({
+            event: 'terminal.focus_lost_no_refocus',
+            level: 'warn',
+            sessionId,
+            message: `xterm lost focus and did not refocus within 300ms (mode=${mode})`,
+            payload: {
+              mode,
+              ptyState: ptyStateRef.current,
+              landedOn: describe(active),
+              immediateRelated: describe(immediate),
+              visibility: document.visibilityState,
+              // hibernate-warn countdown overlay (Moon icon) lives in the
+              // TerminalStarter wrapper (sibling of <Terminal>), so look up to
+              // the nearest positioned ancestor, not inside our own container.
+              countdownVisible: !!(container.closest('div.relative') ?? container.parentElement)?.querySelector(
+                '.animate-pulse'
+              )
+            }
+          })
+          .catch(() => {})
+      }, 300)
+    }
+
+    container.addEventListener('focusout', onFocusOut, true)
+    return () => container.removeEventListener('focusout', onFocusOut, true)
+  }, [sessionId, mode])
 
   // Intercept Cmd+C / right-click Copy (xterm's native path writes raw
   // selection text, which includes trailing spaces from rendered padding).
