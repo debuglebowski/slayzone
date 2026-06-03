@@ -219,6 +219,9 @@ const ProjectSettingsDialog = lazy(() =>
 const DeleteProjectDialog = lazy(() =>
   import('@slayzone/projects').then((m) => ({ default: m.DeleteProjectDialog }))
 )
+const GroupSettingsDialog = lazy(() =>
+  import('@slayzone/projects').then((m) => ({ default: m.GroupSettingsDialog }))
+)
 const OnboardingDialog = lazy(() =>
   import('@slayzone/onboarding').then((m) => ({ default: m.OnboardingDialog }))
 )
@@ -292,6 +295,7 @@ function App(): React.JSX.Element {
   const {
     tasks,
     projects,
+    projectGroups,
     tags,
     taskTags,
     blockedTaskIds,
@@ -318,7 +322,15 @@ function App(): React.JSX.Element {
     clearBlockers,
     updateProject,
     reorderProjects,
-    deleteProject
+    deleteProject,
+    createProjectGroup,
+    createFolderWithProjects,
+    renameProjectGroup,
+    deleteProjectGroup,
+    setGroupCollapsed,
+    reorderTopLevel,
+    moveProjectToGroup,
+    reorderProjectsInGroup
   } = useTasksData()
 
   // Snooze wake-up timer — clears snooze + notifies when expiry passes
@@ -390,6 +402,7 @@ function App(): React.JSX.Element {
   const [projectSettingsOnboardingProvider, setProjectSettingsOnboardingProvider] =
     useState<ProjectIntegrationOnboardingProvider | null>(null)
   const deletingProject = useDialogStore((s) => s.deletingProject)
+  const groupSettingsTarget = useDialogStore((s) => s.groupSettingsTarget)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsRevision, setSettingsRevision] = useState(0)
   const [colorTintsEnabled, setColorTintsEnabled] = useState(true)
@@ -2242,6 +2255,7 @@ function App(): React.JSX.Element {
         <div id="app-shell" className="h-full w-full flex">
           <AppSidebar
             projects={projects}
+            projectGroups={projectGroups}
             tasks={tasks}
             selectedProjectId={selectedProjectId}
             onSelectProject={handleSidebarSelectProject}
@@ -2263,6 +2277,14 @@ function App(): React.JSX.Element {
             onboardingChecklist={onboardingChecklist}
             idleByProject={idleByProject}
             onReorderProjects={reorderProjects}
+            onCreateProjectGroup={createProjectGroup}
+            onCreateFolderWithProjects={createFolderWithProjects}
+            onRenameProjectGroup={renameProjectGroup}
+            onDeleteProjectGroup={deleteProjectGroup}
+            onSetGroupCollapsed={setGroupCollapsed}
+            onReorderTopLevel={reorderTopLevel}
+            onMoveProjectToGroup={moveProjectToGroup}
+            onReorderProjectsInGroup={reorderProjectsInGroup}
             onTaskReorder={reorderTasks}
             onTaskMove={handleSidebarTaskMove}
             onTaskReparent={reparentTask}
@@ -3207,6 +3229,17 @@ function App(): React.JSX.Element {
                   if (!open) useDialogStore.getState().closeDeleteProject()
                 }}
                 onDeleted={handleProjectDeleted}
+              />
+            </Suspense>
+          )}
+          {groupSettingsTarget && (
+            <Suspense fallback={null}>
+              <GroupSettingsDialog
+                group={groupSettingsTarget}
+                open={!!groupSettingsTarget}
+                onClose={() => useDialogStore.getState().closeGroupSettings()}
+                onRename={(name) => renameProjectGroup(groupSettingsTarget.id, name)}
+                onDelete={() => deleteProjectGroup(groupSettingsTarget.id)}
               />
             </Suspense>
           )}

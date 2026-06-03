@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { CreateTaskDraft } from '@slayzone/task/shared'
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup } from '@slayzone/projects/shared'
 
 export interface SearchFileContext {
   projectPath: string
@@ -34,6 +34,11 @@ interface DialogState {
   deletingProject: Project | null
   openDeleteProject: (project: Project) => void
   closeDeleteProject: () => void
+
+  // Project-group (folder) settings
+  groupSettingsTarget: ProjectGroup | null
+  openGroupSettings: (group: ProjectGroup) => void
+  closeGroupSettings: () => void
 
   // Simple booleans
   onboardingOpen: boolean
@@ -83,6 +88,10 @@ export const useDialogStore = create<DialogState>()((set) => ({
   deletingProject: null,
   openDeleteProject: (project) => set({ deletingProject: project }),
   closeDeleteProject: () => set({ deletingProject: null }),
+
+  groupSettingsTarget: null,
+  openGroupSettings: (group) => set({ groupSettingsTarget: group }),
+  closeGroupSettings: () => set({ groupSettingsTarget: null }),
 
   onboardingOpen: false,
   openOnboarding: () => set({ onboardingOpen: true }),

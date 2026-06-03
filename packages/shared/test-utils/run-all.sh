@@ -36,10 +36,15 @@ run_test packages/domains/settings/src/main/handlers.test.ts
 run_test packages/domains/tags/src/main/handlers.test.ts
 run_test packages/domains/projects/src/main/handlers.test.ts
 run_test packages/domains/projects/src/main/task-automation.test.ts
+# Project-group ordering — pure named txns (shared top-level sort_order space).
+# Strict+electron: better-sqlite3 native ABI matches Electron's node only.
+run_test_electron_strict_loader packages/domains/projects/src/main/project-groups-txns.test.ts
 run_test packages/domains/task-terminals/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/template-handlers.test.ts
 run_test packages/domains/task/src/client/card-water-fill.test.ts
+run_test packages/apps/app/src/renderer/src/components/sidebar/views/projectGrouping.test.ts
+run_test packages/apps/app/src/renderer/src/components/sidebar/views/projectDrop.test.ts
 run_test packages/domains/ai-config/src/main/handlers.items.test.ts
 run_test packages/domains/ai-config/src/main/handlers.selections.test.ts
 run_test packages/domains/ai-config/src/main/handlers.context.test.ts

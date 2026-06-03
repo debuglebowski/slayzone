@@ -11,7 +11,7 @@ import {
 import { useTabStore } from '@slayzone/settings'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task/shared'
-import type { Project, ColumnConfig } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup, ColumnConfig, TopLevelEntryRef } from '@slayzone/projects/shared'
 import type { OnboardingChecklistState } from '@/hooks/useOnboardingChecklist'
 import { SidebarFooterIcons } from './SidebarFooterIcons'
 import { SidebarViewSwitcher } from './SidebarViewSwitcher'
@@ -20,6 +20,7 @@ import { getView } from './views/registry'
 
 interface AppSidebarProps {
   projects: Project[]
+  projectGroups: ProjectGroup[]
   tasks: Task[]
   selectedProjectId: string
   onSelectProject: (id: string) => void
@@ -35,6 +36,14 @@ interface AppSidebarProps {
   onboardingChecklist: OnboardingChecklistState
   idleByProject?: Map<string, number>
   onReorderProjects: (projectIds: string[]) => void
+  onCreateProjectGroup?: (name?: string) => void
+  onCreateFolderWithProjects?: (projectIds: string[]) => void
+  onRenameProjectGroup?: (id: string, name: string) => void
+  onDeleteProjectGroup?: (id: string) => void
+  onSetGroupCollapsed?: (id: string, collapsed: boolean) => void
+  onReorderTopLevel?: (entries: TopLevelEntryRef[]) => void
+  onMoveProjectToGroup?: (projectId: string, groupId: string | null, targetIndex: number) => void
+  onReorderProjectsInGroup?: (groupId: string, projectIds: string[]) => void
   onTaskReorder?: (taskIds: string[]) => void
   onTaskMove?: (
     taskId: string,
@@ -122,6 +131,7 @@ function UpdateStatusCard({ state }: { state: UpdateState }) {
 
 export function AppSidebar({
   projects,
+  projectGroups,
   tasks,
   selectedProjectId,
   onSelectProject,
@@ -137,6 +147,14 @@ export function AppSidebar({
   onboardingChecklist,
   idleByProject,
   onReorderProjects,
+  onCreateProjectGroup,
+  onCreateFolderWithProjects,
+  onRenameProjectGroup,
+  onDeleteProjectGroup,
+  onSetGroupCollapsed,
+  onReorderTopLevel,
+  onMoveProjectToGroup,
+  onReorderProjectsInGroup,
   onTaskReorder,
   onTaskMove,
   onTaskReparent,
@@ -220,6 +238,7 @@ export function AppSidebar({
           <SidebarGroupContent>
             {view.render({
               projects,
+              projectGroups,
               tasks,
               selectedProjectId,
               onSelectProject,
@@ -229,6 +248,14 @@ export function AppSidebar({
               onOpenTaskInBackground,
               onCreateTemporaryTask,
               onReorderProjects,
+              onCreateProjectGroup,
+              onCreateFolderWithProjects,
+              onRenameProjectGroup,
+              onDeleteProjectGroup,
+              onSetGroupCollapsed,
+              onReorderTopLevel,
+              onMoveProjectToGroup,
+              onReorderProjectsInGroup,
               onTaskReorder,
               onTaskMove,
               onTaskReparent,

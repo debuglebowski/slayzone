@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  FolderPlus,
   GitBranch,
   Home,
   Pin,
@@ -26,19 +27,16 @@ import {
   DragOverlay,
   PointerSensor,
   closestCenter,
+  pointerWithin,
   useSensor,
   useSensors,
   type CollisionDetection,
   type DraggableSyntheticListeners,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent
 } from '@dnd-kit/core'
-import {
-  SortableContext,
-  arrayMove,
-  useSortable,
-  verticalListSortingStrategy
-} from '@dnd-kit/sortable'
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useSessionStateRaw } from '@slayzone/terminal'
 import {
@@ -49,7 +47,12 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-  useShortcutDisplay
+  useShortcutDisplay,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator
 } from '@slayzone/ui'
 import { type Task } from '@slayzone/task/shared'
 import { useDialogStore, useTabStore } from '@slayzone/settings'
@@ -64,8 +67,129 @@ import {
 import { useActiveSessionTaskIds } from '@/components/agent-status/useIdleTasks'
 import { useStaleSkillCounts } from '@slayzone/ai-config/client'
 import { TreeDisplaySettings } from '../TreeDisplaySettings'
+import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
+import {
+  resolveProjectDrop,
+  applyProjectDrop,
+  pointerYFromEvent,
+  dropModeFromPointer
+} from './projectDrop'
 import logo from '@/assets/logo.svg'
 import type { SidebarViewContext } from './types'
+import type { ProjectGroup } from '@slayzone/projects/shared'
+
+// Project rows don't shift during a project drag (Discord behavior) — the
+// dragged row stays as a static placeholder; the drop spot shows as an
+// insertion line / merge ring instead. Returning null disables the sort
+// transform for the project-level context (task rows keep their own strategy).
+const noShiftStrategy = () => null
+
+type ProjDropMode = 'before' | 'after' | 'merge'
+
+/**
+ * Drop mode over a project row, shared by the move-indicator and the drop. Folder
+ * MEMBERS can't start a group, so their row splits in HALF (before/after, no
+ * merge dead-zone) — that makes the whole row reorderable, incl. the bottom of
+ * the group. Top-level rows keep the 3-zone split (middle = merge = new folder).
+ */
+function treeProjectDropMode(event: DragMoveEvent | DragEndEvent): ProjDropMode {
+  const over = event.over
+  if (!over) return 'merge'
+  const py = pointerYFromEvent(event)
+  const od = over.data.current as { kind?: string; groupId?: string | null } | undefined
+  if (od?.kind === 'project' && od.groupId != null) {
+    if (py == null) return 'before'
+    return py > over.rect.top + over.rect.height / 2 ? 'after' : 'before'
+  }
+  return dropModeFromPointer(py, over.rect)
+}
+
+/**
+ * Collapsible group label header in the tree. It's a SORTABLE (drag the label
+ * to reorder the folder among top-level slots) AND a droppable join target.
+ * The gear opens a dropdown → Settings (modal, shared with the rail) / Delete.
+ */
+function TreeGroupHeader({
+  group,
+  line,
+  onSettings,
+  onDelete
+}: {
+  group: ProjectGroup
+  line: ProjDropMode | null
+  onSettings: () => void
+  onDelete: () => void
+}) {
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
+    id: `group:${group.id}`,
+    data: { kind: 'group', groupId: group.id }
+  })
+  if (isDragging) {
+    return (
+      <div ref={setNodeRef} className="px-2">
+        <div className="h-7 rounded-md border-2 border-dashed border-primary/50 bg-primary/5" />
+      </div>
+    )
+  }
+  const style = { transform: CSS.Transform.toString(transform), transition }
+  return (
+    <div ref={setNodeRef} style={style} className="relative">
+      {/* gap-3 (0.75rem) child → center line at half-gap (-top-1.5). */}
+      {line === 'before' && (
+        <span className="pointer-events-none absolute -top-1.5 left-2 right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground" />
+      )}
+      {line === 'after' && (
+        <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
+      )}
+      <div
+        className={cn(
+          'group/gh flex w-full items-center gap-1 rounded-md',
+          line === 'merge' && 'bg-primary text-primary-foreground ring-2 ring-inset ring-primary'
+        )}
+      >
+        <Collapsible.Trigger asChild>
+          <button
+            type="button"
+            className="flex flex-1 items-center gap-1 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70 hover:text-foreground transition-colors min-w-0"
+            {...attributes}
+            {...listeners}
+          >
+            <ChevronDown
+              className={cn(
+                'size-3 shrink-0 transition-transform',
+                group.collapsed !== 0 && '-rotate-90'
+              )}
+            />
+            <span className="truncate">{group.name.trim() || 'Folder'}</span>
+            {line === 'merge' && <FolderPlus className="ml-auto size-3.5" />}
+          </button>
+        </Collapsible.Trigger>
+        {line !== 'merge' && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={`Settings for ${group.name.trim() || 'folder'}`}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="mr-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:text-foreground transition-colors"
+              >
+                <Settings className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={onSettings}>Settings</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={onDelete} className="text-destructive">
+                Delete folder
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function ContextStaleDot({ count }: { count: number }) {
   if (count <= 0) return null
@@ -149,6 +273,9 @@ interface GroupDropData {
 
 interface ProjectDragData {
   kind: 'project'
+  projectId: string
+  /** Group the project currently belongs to, or null = top-level. */
+  groupId: string | null
 }
 
 interface TaskBranchCtx {
@@ -817,10 +944,12 @@ type RowItem =
  */
 function SortableProject({
   projectId,
+  groupId,
   disabled,
   children
 }: {
   projectId: string
+  groupId: string | null
   disabled: boolean
   children: (args: {
     setNodeRef: (el: HTMLElement | null) => void
@@ -831,17 +960,22 @@ function SortableProject({
 }) {
   const { setNodeRef, transform, transition, listeners, isDragging } = useSortable({
     id: `project:${projectId}`,
-    data: { kind: 'project' } satisfies ProjectDragData,
+    data: { kind: 'project', projectId, groupId } satisfies ProjectDragData,
     disabled
   })
-  // While dragging, the floating preview renders via DragOverlay — hide the
-  // source block (opacity 0) but keep its layout reserved so
-  // verticalListSortingStrategy can measure rects for the sibling slide.
+  // While dragging, the floating preview renders via DragOverlay; the original
+  // slot shows an explicit dashed placeholder (Discord behavior). Siblings don't
+  // shift (no-op sort strategy on the project context).
+  if (isDragging) {
+    return (
+      <div ref={setNodeRef} className="px-2 py-1">
+        <div className="h-8 rounded-md border-2 border-dashed border-primary/50 bg-primary/5" />
+      </div>
+    )
+  }
   const style: CSSProperties = {
-    transform: isDragging ? undefined : CSS.Transform.toString(transform),
-    transition: isDragging ? undefined : transition,
-    opacity: isDragging ? 0 : 1,
-    pointerEvents: isDragging ? 'none' : undefined
+    transform: CSS.Transform.toString(transform),
+    transition
   }
   return <>{children({ setNodeRef, style, listeners, isDragging })}</>
 }
@@ -867,7 +1001,13 @@ export function TreeView({
   onTaskBulkReparent,
   onTaskFieldUpdate,
   onTaskBulkFieldUpdate,
-  onReorderProjects,
+  onReorderTopLevel,
+  onCreateFolderWithProjects,
+  onMoveProjectToGroup,
+  onReorderProjectsInGroup,
+  onSetGroupCollapsed,
+  onDeleteProjectGroup,
+  projectGroups,
   onSetTasksPinned,
   onSetCollapsed,
   onPinnedReorder
@@ -914,6 +1054,12 @@ export function TreeView({
   const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null)
   // Project id (not prefixed) currently being drag-reordered, or null.
   const [activeDragProjectId, setActiveDragProjectId] = useState<string | null>(null)
+  // Group id currently being drag-reordered (folder label dragged), or null.
+  const [activeDragGroupId, setActiveDragGroupId] = useState<string | null>(null)
+  // Drop indicator for project drags: over sortable/header id + mode.
+  const [projectDrop, setProjectDrop] = useState<{ overId: string; mode: ProjDropMode } | null>(
+    null
+  )
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const selectedTaskIdArr = useMemo(() => [...selectedTaskIds], [selectedTaskIds])
   const treeGroupBy = useTabStore((s) => s.treeGroupBy)
@@ -1227,6 +1373,42 @@ export function TreeView({
   )
   const visibleProjects = showAll ? sortedProjects : activeProjects
 
+  // Top-level entries (ungrouped projects + groups) for the visible set. Empty
+  // groups (no visible member) fold away — they reappear via "Show all".
+  const treeEntries = useMemo(
+    () => buildTopLevelEntries(visibleProjects, projectGroups).filter(
+      (e) => e.kind === 'project' || e.projects.length > 0
+    ),
+    [visibleProjects, projectGroups]
+  )
+  const renderedProjectIds = useMemo(
+    () =>
+      treeEntries.flatMap((e) =>
+        e.kind === 'project' ? [e.id] : e.projects.map((p) => p.id)
+      ),
+    [treeEntries]
+  )
+  // pid → its group id (null = top level). Used to keep the "one line per gap"
+  // normalization within a single sibling scope.
+  const groupIdByProject = useMemo(
+    () => new Map(projects.map((p) => [p.id, p.group_id ?? null])),
+    [projects]
+  )
+  // FULL top-level set (ignores the active/visible filter) — drag/reorder needs
+  // every slot so a move stays complete even when some projects are hidden.
+  const fullEntries = useMemo(
+    () => buildTopLevelEntries(sortedProjects, projectGroups),
+    [sortedProjects, projectGroups]
+  )
+  const allTopLevelRefs = useMemo(() => entriesToRefs(fullEntries), [fullEntries])
+  const fullGroupMembers = useCallback(
+    (gid: string): string[] => {
+      const g = fullEntries.find((e) => e.kind === 'group' && e.id === gid)
+      return g && g.kind === 'group' ? g.projects.map((p) => p.id) : []
+    },
+    [fullEntries]
+  )
+
   const { counts: staleSkillCounts } = useStaleSkillCounts(visibleProjects)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
@@ -1239,33 +1421,81 @@ export function TreeView({
   // mental model "drop between groups lands between groups".
   const collisionDetection = useCallback<CollisionDetection>((args) => {
     const kind = (args.active.data.current as { kind?: string } | undefined)?.kind
-    // A project drag may only land on another project header — filter the
-    // droppable set so `over` is never a task row / group header (which would
-    // make the drop a silent no-op).
-    if (kind === 'project') {
-      return closestCenter({
-        ...args,
-        droppableContainers: args.droppableContainers.filter(
-          (c) => (c.data.current as { kind?: string } | undefined)?.kind === 'project'
-        )
+    // A project/folder drag may land on a project row or a group header —
+    // never a task row. Prefer pointerWithin (precise, no jitter); fall back to
+    // closestCenter for gaps so reorder lines resolve.
+    if (kind === 'project' || kind === 'group') {
+      const containers = args.droppableContainers.filter((c) => {
+        const k = (c.data.current as { kind?: string } | undefined)?.kind
+        return k === 'project' || k === 'group'
       })
+      const within = pointerWithin({ ...args, droppableContainers: containers })
+      return within.length > 0 ? within : closestCenter({ ...args, droppableContainers: containers })
     }
     return closestCenter(args)
   }, [])
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
-    // Project drags get their own overlay preview, not task-drag bookkeeping.
-    // `active.id` is the prefixed sortable id (`project:<id>`) — strip it.
-    if ((event.active.data.current as { kind?: string } | undefined)?.kind === 'project') {
+    // Project / group drags get their own overlay preview, not task bookkeeping.
+    const kind = (event.active.data.current as { kind?: string } | undefined)?.kind
+    if (kind === 'project') {
       setActiveDragProjectId((event.active.id as string).replace(/^project:/, ''))
+      return
+    }
+    if (kind === 'group') {
+      setActiveDragGroupId((event.active.id as string).replace(/^group:/, ''))
       return
     }
     setActiveDragTaskId(event.active.id as string)
   }, [])
 
+  // Track the project-drop indicator (insertion line / merge ring). Only for
+  // project drags — task drags keep their existing slide behavior untouched.
+  const handleDragMove = useCallback(
+    (event: DragMoveEvent) => {
+      const { active, over } = event
+      const activeKind = (active.data.current as { kind?: string } | undefined)?.kind
+      if (activeKind !== 'project' && activeKind !== 'group') return
+      if (!over || active.id === over.id) {
+        setProjectDrop(null)
+        return
+      }
+      const overKind = (over.data.current as { kind?: string } | undefined)?.kind
+      // A dragged FOLDER only reorders (never merges) → always a line.
+      // A dragged project onto a group header = join (whole header target).
+      if (overKind === 'group' && activeKind === 'project') {
+        setProjectDrop({ overId: String(over.id), mode: 'merge' })
+        return
+      }
+      let mode = treeProjectDropMode(event)
+      // Folders never merge → coerce the middle zone to a reorder line.
+      if (activeKind === 'group' && mode === 'merge') mode = 'before'
+      let overId = String(over.id)
+      // ONE line per gap: a gap between rows X and Y can resolve as either
+      // "after X" or "before Y" depending on cursor side. Normalize every
+      // 'after' to 'before next-row' so both map to the SAME single line (no
+      // double indicator). Last row keeps 'after' (its trailing edge).
+      if (mode === 'after') {
+        const pid = overId.replace(/^project:/, '')
+        const i = renderedProjectIds.indexOf(pid)
+        const next = i >= 0 ? renderedProjectIds[i + 1] : undefined
+        // Collapse only within the same scope (both top-level, or same group) —
+        // the last row of a scope keeps its own 'after' line.
+        if (next && groupIdByProject.get(pid) === groupIdByProject.get(next)) {
+          overId = `project:${next}`
+          mode = 'before'
+        }
+      }
+      setProjectDrop({ overId, mode })
+    },
+    [renderedProjectIds, groupIdByProject]
+  )
+
   const handleDragCancel = useCallback(() => {
     setActiveDragTaskId(null)
     setActiveDragProjectId(null)
+    setActiveDragGroupId(null)
+    setProjectDrop(null)
   }, [])
 
   // Multi-selection — Shift = sibling range, Cmd/Ctrl = toggle individual,
@@ -1426,23 +1656,50 @@ export function TreeView({
     (event: DragEndEvent) => {
       setActiveDragTaskId(null)
       setActiveDragProjectId(null)
+      setActiveDragGroupId(null)
+      setProjectDrop(null)
       const { active, over } = event
       if (!over) return
       const activeData = active.data.current as
         | TaskRowDragData
         | GroupDropData
         | ProjectDragData
+        | { kind: 'group'; groupId: string }
         | undefined
 
-      // === Project reorder. Drag data kind='project'; ids are prefixed
-      // `project:<id>`. arrayMove over the FULL sorted list so every id is
-      // submitted — `db:projects:reorder` requires the complete set.
-      if (activeData?.kind === 'project') {
+      // === Project drag (top-level / member) OR folder drag. Geometry computed
+      // here; the membership/reorder decision is the shared resolver (unit-
+      // tested, shared with the rail). A dragged folder (kind='group') only
+      // reorders the top level (isGroup → resolver ignores merge).
+      if (activeData?.kind === 'project' || activeData?.kind === 'group') {
         if (active.id === over.id) return
-        const oldIndex = sortedProjects.findIndex((p) => `project:${p.id}` === active.id)
-        const newIndex = sortedProjects.findIndex((p) => `project:${p.id}` === over.id)
-        if (oldIndex === -1 || newIndex === -1) return
-        onReorderProjects(arrayMove(sortedProjects, oldIndex, newIndex).map((p) => p.id))
+        const isGroup = activeData.kind === 'group'
+        const od = over.data.current as
+          | ProjectDragData
+          | { kind: 'group'; groupId: string }
+          | undefined
+        const action = resolveProjectDrop({
+          active: isGroup
+            ? { id: (activeData as { groupId: string }).groupId, group: null, isGroup: true }
+            : { id: activeData.projectId, group: activeData.groupId },
+          over:
+            od?.kind === 'group'
+              ? { kind: 'group', id: od.groupId, group: null }
+              : {
+                  kind: 'project',
+                  id: od?.kind === 'project' ? od.projectId : (over.id as string).replace(/^project:/, ''),
+                  group: od?.kind === 'project' ? od.groupId : null
+                },
+          mode: treeProjectDropMode(event),
+          topLevel: allTopLevelRefs,
+          members: fullGroupMembers
+        })
+        applyProjectDrop(action, {
+          onCreateFolderWithProjects,
+          onMoveProjectToGroup,
+          onReorderProjectsInGroup,
+          onReorderTopLevel
+        })
         return
       }
 
@@ -1825,7 +2082,13 @@ export function TreeView({
       wouldCycle,
       inheritOrderByField,
       sortedProjects,
-      onReorderProjects,
+      onReorderTopLevel,
+      onCreateFolderWithProjects,
+      onMoveProjectToGroup,
+      onReorderProjectsInGroup,
+      allTopLevelRefs,
+      fullEntries,
+      fullGroupMembers,
       onSetTasksPinned,
       onPinnedReorder
     ]
@@ -1869,7 +2132,10 @@ export function TreeView({
     return { rows, sortableRowIds }
   }
 
-  const renderProject = (project: (typeof sortedProjects)[number]) => {
+  const renderProject = (
+    project: (typeof sortedProjects)[number],
+    opts?: { groupId?: string | null }
+  ) => {
     const projectTasks = tasksByProject.get(project.id) ?? []
     const groups = rootGroupsByProject.get(project.id) ?? []
     const isOpen = openProjects[project.id] ?? false
@@ -1938,7 +2204,12 @@ export function TreeView({
     // index 0 of that group. The temporary group is excluded entirely: its
     // rows render plain (no `useSortable`) and never drag, drop, or slide.
     return (
-      <SortableProject key={project.id} projectId={project.id} disabled={!showAll}>
+      <SortableProject
+        key={project.id}
+        projectId={project.id}
+        groupId={opts?.groupId ?? null}
+        disabled={false}
+      >
         {({ setNodeRef, style, listeners }) => (
           <Collapsible.Root
             ref={setNodeRef}
@@ -2115,17 +2386,100 @@ export function TreeView({
         sensors={sensors}
         collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
         <SortableContext
-          items={visibleProjects.map((p) => `project:${p.id}`)}
-          strategy={verticalListSortingStrategy}
+          items={treeEntries.flatMap((e) =>
+            e.kind === 'project'
+              ? [`project:${e.id}`]
+              : [`group:${e.id}`, ...e.projects.map((p) => `project:${p.id}`)]
+          )}
+          strategy={noShiftStrategy}
         >
-          {visibleProjects.map(renderProject)}
+          <div className="flex flex-col gap-3">
+          {treeEntries.map((entry) => {
+            if (entry.kind === 'project') {
+              const line = projectDrop?.overId === `project:${entry.id}` ? projectDrop.mode : null
+              return (
+                <div key={`project:${entry.id}`} className="relative">
+                  {/* Centered in the gap-3 (0.75rem) between top-level rows:
+                      -top-1.5 (0.75rem) = half-gap; -translate-y-1/2 puts the
+                      line CENTER at that offset. rem-based → exact at any zoom. */}
+                  {line === 'before' && (
+                    <span className="pointer-events-none absolute -top-1.5 left-2 right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground" />
+                  )}
+                  {line === 'after' && (
+                    <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
+                  )}
+                  <div className="relative">
+                    {renderProject(entry.project)}
+                    {/* Overlay ON TOP of the opaque project block (matches its
+                        rounded-lg) — a fill behind it is hidden, leaving only
+                        the ring's corners. */}
+                    {line === 'merge' && (
+                      <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-end rounded-lg bg-primary/30 pr-2 text-primary ring-2 ring-inset ring-primary">
+                        <FolderPlus className="size-4" />
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            }
+            return (
+              <Collapsible.Root
+                key={`group:${entry.id}`}
+                open={entry.group.collapsed === 0}
+                onOpenChange={(open) => onSetGroupCollapsed?.(entry.id, !open)}
+              >
+                <TreeGroupHeader
+                  group={entry.group}
+                  line={projectDrop?.overId === `group:${entry.id}` ? projectDrop.mode : null}
+                  onSettings={() => useDialogStore.getState().openGroupSettings(entry.group)}
+                  onDelete={() => onDeleteProjectGroup?.(entry.id)}
+                />
+                <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+                  {/* Reference `projectDrop` DIRECTLY in JSX (no IIFE) so the
+                      React Compiler tracks it as a dep and re-renders mid-drag.
+                      Separator = ABSOLUTE overlay centered in the gap-3 (0.75rem)
+                      gap → -top-1.5 (0.75rem) = half-gap, rem-based (zoom-safe). */}
+                  {/* py-3 (12px) ≥ the ±1.5 edge-line offset so the first/last
+                      member's insertion line isn't clipped by Collapsible.Content's
+                      overflow-hidden. */}
+                  <div className="ml-5 flex flex-col gap-3 py-3">
+                    {entry.projects.map((p) => (
+                      <div key={`project:${p.id}`} className="relative">
+                        {projectDrop?.overId === `project:${p.id}` &&
+                          projectDrop.mode === 'before' && (
+                            <span className="pointer-events-none absolute -top-1.5 left-2 right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground" />
+                          )}
+                        {projectDrop?.overId === `project:${p.id}` &&
+                          projectDrop.mode === 'after' && (
+                            <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
+                          )}
+                        <div className="relative">{renderProject(p, { groupId: entry.id })}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Collapsible.Content>
+              </Collapsible.Root>
+            )
+          })}
+          </div>
         </SortableContext>
         <DragOverlay dropAnimation={null}>
-          {activeDragProjectId
+          {activeDragGroupId
+            ? (() => {
+                const g = projectGroups.find((pg) => pg.id === activeDragGroupId)
+                return (
+                  <div className="flex items-center gap-1 rounded-md bg-surface-2 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-foreground shadow-lg">
+                    <ChevronDown className="size-3 shrink-0" />
+                    <span className="truncate">{g?.name.trim() || 'Folder'}</span>
+                  </div>
+                )
+              })()
+            : activeDragProjectId
             ? (() => {
                 const proj = sortedProjects.find((p) => p.id === activeDragProjectId)
                 return proj ? <ProjectDragPreview project={proj} /> : null

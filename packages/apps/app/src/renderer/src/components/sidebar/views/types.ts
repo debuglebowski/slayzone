@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
-import type { Project, ColumnConfig } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup, ColumnConfig, TopLevelEntryRef } from '@slayzone/projects/shared'
 
 export interface SidebarViewContext {
   projects: Project[]
+  /** Project groups — Discord-style folders (rail) / collapsible labels (tree). */
+  projectGroups: ProjectGroup[]
   tasks: Task[]
   selectedProjectId: string
   onSelectProject: (id: string) => void
@@ -17,6 +19,21 @@ export interface SidebarViewContext {
   /** Create a temporary "scratch" task in the given project. */
   onCreateTemporaryTask?: (projectId: string) => void
   onReorderProjects: (projectIds: string[]) => void
+  // ── Project-group handlers (Discord folders / tree labels) ────────────────
+  /** Create an empty group (appended to the top level). */
+  onCreateProjectGroup?: (name?: string) => void
+  /** Create a folder from dropped projects — Discord's drag-onto gesture. */
+  onCreateFolderWithProjects?: (projectIds: string[]) => void
+  onRenameProjectGroup?: (id: string, name: string) => void
+  onDeleteProjectGroup?: (id: string) => void
+  /** Persist a group's expand/collapse (shared across rail + tree). */
+  onSetGroupCollapsed?: (id: string, collapsed: boolean) => void
+  /** Reorder the full top-level list (ungrouped projects + groups interleaved). */
+  onReorderTopLevel?: (entries: TopLevelEntryRef[]) => void
+  /** Move a project into a group (or out to top level) at a target index. */
+  onMoveProjectToGroup?: (projectId: string, groupId: string | null, targetIndex: number) => void
+  /** Reorder projects within a single group. */
+  onReorderProjectsInGroup?: (groupId: string, projectIds: string[]) => void
   idleByProject?: Map<string, number>
   /** Render a task-row context-menu wrapper. Caller wires update/archive/delete + tag handlers. */
   taskContextMenuRender?: (task: Task, child: ReactNode) => ReactNode

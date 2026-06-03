@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
+import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import type { GroupKey } from './kanban'
 
@@ -32,6 +32,7 @@ interface UseTasksDataReturn {
   // Data
   tasks: Task[]
   projects: Project[]
+  projectGroups: ProjectGroup[]
   tags: Tag[]
   taskTags: Map<string, string[]>
   blockedTaskIds: Set<string>
@@ -39,6 +40,7 @@ interface UseTasksDataReturn {
   // Setters (for dialog callbacks)
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>
+  setProjectGroups: React.Dispatch<React.SetStateAction<ProjectGroup[]>>
   setTags: React.Dispatch<React.SetStateAction<Tag[]>>
   setTaskTags: React.Dispatch<React.SetStateAction<Map<string, string[]>>>
 
@@ -69,11 +71,22 @@ interface UseTasksDataReturn {
     selectedProjectId: string,
     setSelectedProjectId: (id: string) => void
   ) => void
+
+  // Project-group handlers (Discord folders / tree labels)
+  createProjectGroup: (name?: string) => void
+  createFolderWithProjects: (projectIds: string[]) => void
+  renameProjectGroup: (id: string, name: string) => void
+  deleteProjectGroup: (id: string) => void
+  setGroupCollapsed: (id: string, collapsed: boolean) => void
+  reorderTopLevel: (entries: TopLevelEntryRef[]) => void
+  moveProjectToGroup: (projectId: string, groupId: string | null, targetIndex: number) => void
+  reorderProjectsInGroup: (groupId: string, projectIds: string[]) => void
 }
 
 export function useTasksData(): UseTasksDataReturn {
   const [tasks, setTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
+  const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [taskTags, setTaskTags] = useState<Map<string, string[]>>(new Map())
   const [blockedTaskIds, setBlockedTaskIds] = useState<Set<string>>(new Set())
@@ -95,11 +108,11 @@ export function useTasksData(): UseTasksDataReturn {
         performance.mark('sz:loadBoardData:start')
         window.api.app.bootMark?.('loadBoardData start')
       }
-      window.api.db
-        .loadBoardData()
-        .then((data) => {
+      Promise.all([window.api.db.loadBoardData(), window.api.db.getProjectGroups()])
+        .then(([data, groups]) => {
           setTasks(data.tasks as Task[])
           setProjects(data.projects as Project[])
+          setProjectGroups(groups as ProjectGroup[])
           setTags(data.tags as Tag[])
           setTaskTags(new Map(Object.entries(data.taskTags)))
           setBlockedTaskIds(new Set(data.blockedTaskIds))
@@ -567,14 +580,95 @@ export function useTasksData(): UseTasksDataReturn {
     []
   )
 
+  // ── Project groups ───────────────────────────────────────────────────────
+  // Ordering mutations return an authoritative { projects, groups } snapshot
+  // (the server re-packs both scopes to contiguous 0..n-1). We snapshot current
+  // state for rollback, then replace with the server's truth on success. No
+  // client-side optimism here — the dnd-kit drop animation covers the local IPC
+  // round-trip, and replacing wholesale avoids client/server order divergence.
+  const runGroupMutation = useCallback(
+    (fn: () => Promise<{ projects: Project[]; groups: ProjectGroup[] }>) => {
+      let projSnap: Project[] = []
+      let groupSnap: ProjectGroup[] = []
+      setProjects((p) => {
+        projSnap = p
+        return p
+      })
+      setProjectGroups((g) => {
+        groupSnap = g
+        return g
+      })
+      fn()
+        .then((snap) => {
+          setProjects(snap.projects)
+          setProjectGroups(snap.groups)
+        })
+        .catch(() => {
+          setProjects(projSnap)
+          setProjectGroups(groupSnap)
+        })
+    },
+    []
+  )
+
+  const createProjectGroup = useCallback(
+    (name?: string) => runGroupMutation(() => window.api.db.createProjectGroup({ name })),
+    [runGroupMutation]
+  )
+  const createFolderWithProjects = useCallback(
+    (projectIds: string[]) => {
+      if (projectIds.length === 0) return
+      runGroupMutation(() => window.api.db.createFolderWithProjects(projectIds))
+    },
+    [runGroupMutation]
+  )
+  const deleteProjectGroup = useCallback(
+    (id: string) => runGroupMutation(() => window.api.db.deleteProjectGroup(id)),
+    [runGroupMutation]
+  )
+  const reorderTopLevel = useCallback(
+    (entries: TopLevelEntryRef[]) => runGroupMutation(() => window.api.db.reorderTopLevel(entries)),
+    [runGroupMutation]
+  )
+  const moveProjectToGroup = useCallback(
+    (projectId: string, groupId: string | null, targetIndex: number) =>
+      runGroupMutation(() => window.api.db.moveProjectToGroup(projectId, groupId, targetIndex)),
+    [runGroupMutation]
+  )
+  const reorderProjectsInGroup = useCallback(
+    (groupId: string, projectIds: string[]) =>
+      runGroupMutation(() => window.api.db.reorderProjectsInGroup(groupId, projectIds)),
+    [runGroupMutation]
+  )
+
+  // Rename / collapse return a single group → optimistic patch (instant toggle).
+  const renameProjectGroup = useCallback((id: string, name: string) => {
+    let snap: ProjectGroup[] = []
+    setProjectGroups((prev) => {
+      snap = prev
+      return prev.map((g) => (g.id === id ? { ...g, name } : g))
+    })
+    window.api.db.updateProjectGroup({ id, name }).catch(() => setProjectGroups(snap))
+  }, [])
+  const setGroupCollapsed = useCallback((id: string, collapsed: boolean) => {
+    let snap: ProjectGroup[] = []
+    setProjectGroups((prev) => {
+      snap = prev
+      return prev.map((g) => (g.id === id ? { ...g, collapsed: collapsed ? 1 : 0 } : g))
+    })
+    window.api.db.updateProjectGroup({ id, collapsed }).catch(() => setProjectGroups(snap))
+  }, [])
+
   return {
     tasks,
     projects,
+    projectGroups,
     tags,
     taskTags,
     blockedTaskIds,
     setTasks,
     setProjects,
+    setProjectGroups,
     setTags,
     setTaskTags,
     updateTask,
@@ -596,6 +690,14 @@ export function useTasksData(): UseTasksDataReturn {
     clearBlockers,
     updateProject,
     reorderProjects,
-    deleteProject
+    deleteProject,
+    createProjectGroup,
+    createFolderWithProjects,
+    renameProjectGroup,
+    deleteProjectGroup,
+    setGroupCollapsed,
+    reorderTopLevel,
+    moveProjectToGroup,
+    reorderProjectsInGroup
   }
 }
