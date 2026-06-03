@@ -1693,6 +1693,9 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags
+      '@slayzone/task-terminals':
+        specifier: workspace:*
+        version: link:../../domains/task-terminals
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal

@@ -1,5 +1,6 @@
 import type { Express } from 'express'
 import { updateTabRow } from '@slayzone/task-terminals/main'
+import { tabsEvents } from '@slayzone/task-terminals/server'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import type { RestApiDeps } from '../types'
 
@@ -24,7 +25,9 @@ export function registerTabsRenameRoute(app: Express, deps: RestApiDeps): void {
       return
     }
 
+    // Dual-emit: legacy IPC broadcast + tRPC tabsEvents (subscribers in slice 5).
     broadcastToWindows('tabs:changed', { taskId: tab.taskId })
+    tabsEvents.emit('tabs:changed', { taskId: tab.taskId })
 
     res.json({ tab })
   })

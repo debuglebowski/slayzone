@@ -1,5 +1,6 @@
 import type { Express } from 'express'
 import { splitTabRow } from '@slayzone/task-terminals/main'
+import { tabsEvents } from '@slayzone/task-terminals/server'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import type { RestApiDeps } from '../types'
 
@@ -18,7 +19,9 @@ export function registerTabsSplitRoute(app: Express, deps: RestApiDeps): void {
     }
 
     broadcastToWindows('app:open-task', tab.taskId)
+    // Dual-emit: legacy IPC broadcast + tRPC tabsEvents (subscribers in slice 5).
     broadcastToWindows('tabs:changed', { taskId: tab.taskId, focusTabId: tab.id })
+    tabsEvents.emit('tabs:changed', { taskId: tab.taskId, focusTabId: tab.id })
 
     res.json({ tab, sessionId: `${tab.taskId}:${tab.id}` })
   })

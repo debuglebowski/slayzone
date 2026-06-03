@@ -7,6 +7,7 @@ import { fileEditorRouter } from './routers/file-editor'
 import { historyRouter } from './routers/history'
 import { projectsRouter } from './routers/projects'
 import { tagsRouter } from './routers/tags'
+import { taskTerminalsRouter } from './routers/task-terminals'
 import { testPanelRouter } from './routers/test-panel'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
 
@@ -19,6 +20,7 @@ export const appRouter = router({
   history: historyRouter,
   projects: projectsRouter,
   tags: tagsRouter,
+  taskTerminals: taskTerminalsRouter,
   testPanel: testPanelRouter,
   usageAnalytics: usageAnalyticsRouter
 })

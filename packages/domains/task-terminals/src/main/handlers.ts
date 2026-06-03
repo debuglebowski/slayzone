@@ -1,35 +1,16 @@
 import type { IpcMain } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { PtyInfo } from '@slayzone/terminal/shared'
-import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
-
-interface TabRow {
-  id: string
-  task_id: string
-  group_id: string | null
-  label: string | null
-  mode: string
-  is_main: number
-  position: number
-  created_at: string
-  was_spawned: number
-  hibernated: number
-}
-
-function rowToTab(row: TabRow): TerminalTab {
-  return {
-    id: row.id,
-    taskId: row.task_id,
-    groupId: row.group_id || row.id,
-    label: row.label,
-    mode: row.mode as TerminalTab['mode'],
-    isMain: row.is_main === 1,
-    position: row.position,
-    createdAt: row.created_at,
-    wasSpawned: row.was_spawned === 1,
-    hibernated: row.hibernated === 1
-  }
-}
+import type { CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
+import {
+  listTabsForTask,
+  ensureMainTab,
+  createTabRow,
+  updateTabRow,
+  splitTabRow,
+  moveTabToGroup,
+  deleteTab
+} from '../server'
 
 /**
  * Mark a tab's subprocess liveness in DB. Called by pty-manager + chat-transport
@@ -77,98 +58,6 @@ export async function listHibernatedSessionIds(db: SlayzoneDb): Promise<string[]
   return rows.map((r) => `${r.task_id}:${r.task_id}`)
 }
 
-/**
- * Idempotent main-tab insert/update. Shared between the `tabs:ensureMain` IPC
- * handler (renderer mount) and the REST `startMainPty` helper (CLI cold-start)
- * so both code paths produce identical rows. Returns the canonical TerminalTab.
- *
- * Main-tab convention: row `id = task_id`, group_id = task_id, is_main = 1.
- * Used in conjunction with the renderer's `getMainSessionId(t) => ${t}:${t}`.
- */
-export async function ensureMainTab(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string
-): Promise<TerminalTab> {
-  const existing = (await db
-    .prepare('SELECT * FROM terminal_tabs WHERE task_id = ? AND is_main = 1')
-    .get(taskId)) as TabRow | undefined
-
-  if (existing) {
-    if (existing.mode !== mode) {
-      await db.prepare('UPDATE terminal_tabs SET mode = ? WHERE id = ?').run(mode, existing.id)
-      existing.mode = mode
-    }
-    if (!existing.group_id) {
-      await db
-        .prepare('UPDATE terminal_tabs SET group_id = ? WHERE id = ?')
-        .run(existing.id, existing.id)
-      existing.group_id = existing.id
-    }
-    return rowToTab(existing)
-  }
-
-  const now = new Date().toISOString()
-  await db
-    .prepare(`
-    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
-    VALUES (?, ?, NULL, ?, 1, 0, ?, ?)
-  `)
-    .run(taskId, taskId, mode, taskId, now)
-
-  return {
-    id: taskId,
-    taskId,
-    groupId: taskId,
-    label: null,
-    mode: mode as TerminalTab['mode'],
-    isMain: true,
-    position: 0,
-    createdAt: now,
-    wasSpawned: false,
-    hibernated: false
-  }
-}
-
-/** Pure DB write — insert a new tab (new group). Used by both IPC handler
- *  (`tabs:create`) and REST route (`POST /api/tabs/create`). Caller is
- *  responsible for any IPC broadcast. */
-export async function createTabRow(
-  db: SlayzoneDb,
-  input: CreateTerminalTabInput
-): Promise<TerminalTab> {
-  const id = crypto.randomUUID()
-  const mode = input.mode || 'terminal'
-
-  const maxPos = (await db
-    .prepare('SELECT COALESCE(MAX(position), -1) as max_pos FROM terminal_tabs WHERE task_id = ?')
-    .get(input.taskId)) as { max_pos: number }
-  const position = maxPos.max_pos + 1
-
-  const label = input.label ?? null
-
-  const now = new Date().toISOString()
-  await db
-    .prepare(`
-    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
-    VALUES (?, ?, ?, ?, 0, ?, ?, ?)
-  `)
-    .run(id, input.taskId, label, mode, position, id, now)
-
-  return {
-    id,
-    taskId: input.taskId,
-    groupId: id,
-    label,
-    mode: mode as TerminalTab['mode'],
-    isMain: false,
-    position,
-    createdAt: now,
-    wasSpawned: false,
-    hibernated: false
-  }
-}
-
 /** Returns an enricher for pty-manager's `listPtys()` that attaches `tabId` +
  *  `label` from `terminal_tabs`. Wire via `setPtyEnricher` at app boot — keeps
  *  pty-manager from touching the task-terminals schema directly. sessionId
@@ -203,137 +92,39 @@ export function createPtyEnricher(db: SlayzoneDb): (raw: PtyInfo[]) => Promise<P
   }
 }
 
-/** Pure DB write — update a tab. Returns null if not found.
- *  Used by both IPC handler (`tabs:update`) and REST route. */
-export async function updateTabRow(
-  db: SlayzoneDb,
-  input: UpdateTerminalTabInput
-): Promise<TerminalTab | null> {
-  const existing = (await db.prepare('SELECT * FROM terminal_tabs WHERE id = ?').get(input.id)) as
-    | TabRow
-    | undefined
-  if (!existing) return null
-
-  const mode = input.mode ?? existing.mode
-  const label = input.label !== undefined ? input.label : existing.label
-
-  await db
-    .prepare(`
-    UPDATE terminal_tabs
-    SET label = ?,
-        mode = ?,
-        position = COALESCE(?, position)
-    WHERE id = ?
-  `)
-    .run(label, mode, input.position, input.id)
-
-  const updated = (await db
-    .prepare('SELECT * FROM terminal_tabs WHERE id = ?')
-    .get(input.id)) as TabRow
-  return rowToTab(updated)
-}
-
-/** Pure DB write — insert a new pane in the same group as the target tab.
- *  Returns null if target not found. Used by both IPC handler (`tabs:split`)
- *  and REST route (`POST /api/tabs/split`). */
-export async function splitTabRow(db: SlayzoneDb, tabId: string): Promise<TerminalTab | null> {
-  const target = (await db.prepare('SELECT * FROM terminal_tabs WHERE id = ?').get(tabId)) as
-    | TabRow
-    | undefined
-  if (!target) return null
-
-  const groupId = target.group_id || target.id
-  const id = crypto.randomUUID()
-
-  const maxPos = (await db
-    .prepare(
-      'SELECT COALESCE(MAX(position), -1) as max_pos FROM terminal_tabs WHERE task_id = ? AND group_id = ?'
-    )
-    .get(target.task_id, groupId)) as { max_pos: number }
-  const position = maxPos.max_pos + 1
-
-  const now = new Date().toISOString()
-  await db
-    .prepare(`
-    INSERT INTO terminal_tabs (id, task_id, label, mode, is_main, position, group_id, created_at)
-    VALUES (?, ?, NULL, 'terminal', 0, ?, ?, ?)
-  `)
-    .run(id, target.task_id, position, groupId, now)
-
-  return {
-    id,
-    taskId: target.task_id,
-    groupId,
-    label: null,
-    mode: 'terminal',
-    isMain: false,
-    position,
-    createdAt: now,
-    wasSpawned: false,
-    hibernated: false
-  }
-}
-
+/**
+ * Thin IPC wrappers over the electron-free tab store (`../server`). Both these
+ * `tabs:*` handlers and the tRPC `taskTerminals` router call the same store, so
+ * they share one implementation while IPC + tRPC coexist (renderer cutover +
+ * handler deletion land in a later slice). `tabs:listHibernatedSessions` stays
+ * local — it's PTY-hibernation seeding, not tab CRUD.
+ */
 export function registerTerminalTabsHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   // List tabs for a task
-  ipcMain.handle('tabs:list', async (_, taskId: string): Promise<TerminalTab[]> => {
-    const rows = (await db
-      .prepare('SELECT * FROM terminal_tabs WHERE task_id = ? ORDER BY position ASC')
-      .all(taskId)) as TabRow[]
-
-    return rows.map(rowToTab)
-  })
+  ipcMain.handle('tabs:list', (_, taskId: string) => listTabsForTask(db, taskId))
 
   // Main-tab session ids flagged hibernated — seeds PtyContext's 💤 dots at boot.
-  ipcMain.handle('tabs:listHibernatedSessions', (): Promise<string[]> => {
-    return listHibernatedSessionIds(db)
-  })
+  ipcMain.handle('tabs:listHibernatedSessions', () => listHibernatedSessionIds(db))
 
   // Create a new tab (new group)
-  ipcMain.handle('tabs:create', (_, input: CreateTerminalTabInput): Promise<TerminalTab> => {
-    return createTabRow(db, input)
-  })
+  ipcMain.handle('tabs:create', (_, input: CreateTerminalTabInput) => createTabRow(db, input))
 
   // Split: create a new pane in the same group as the target tab
-  ipcMain.handle('tabs:split', (_, tabId: string): Promise<TerminalTab | null> => {
-    return splitTabRow(db, tabId)
-  })
+  ipcMain.handle('tabs:split', (_, tabId: string) => splitTabRow(db, tabId))
 
   // Move a tab to a different group (or create a new group if targetGroupId is null)
-  ipcMain.handle(
-    'tabs:moveToGroup',
-    async (_, tabId: string, targetGroupId: string | null): Promise<TerminalTab | null> => {
-      const tab = (await db.prepare('SELECT * FROM terminal_tabs WHERE id = ?').get(tabId)) as
-        | TabRow
-        | undefined
-      if (!tab) return null
-
-      const newGroupId = targetGroupId ?? tabId // null = become own group
-      await db.prepare('UPDATE terminal_tabs SET group_id = ? WHERE id = ?').run(newGroupId, tabId)
-      tab.group_id = newGroupId
-      return rowToTab(tab)
-    }
+  ipcMain.handle('tabs:moveToGroup', (_, tabId: string, targetGroupId: string | null) =>
+    moveTabToGroup(db, tabId, targetGroupId)
   )
 
   // Update a tab
-  ipcMain.handle('tabs:update', (_, input: UpdateTerminalTabInput): Promise<TerminalTab | null> => {
-    return updateTabRow(db, input)
-  })
+  ipcMain.handle('tabs:update', (_, input: UpdateTerminalTabInput) => updateTabRow(db, input))
 
   // Delete a tab (reject if main)
-  ipcMain.handle('tabs:delete', async (_, tabId: string): Promise<boolean> => {
-    const tab = (await db
-      .prepare('SELECT is_main, task_id FROM terminal_tabs WHERE id = ?')
-      .get(tabId)) as { is_main: number; task_id: string } | undefined
-    if (!tab) return false
-    if (tab.is_main === 1) return false // Can't delete main tab
-
-    await db.prepare('DELETE FROM terminal_tabs WHERE id = ?').run(tabId)
-    return true
-  })
+  ipcMain.handle('tabs:delete', (_, tabId: string) => deleteTab(db, tabId))
 
   // Ensure main tab exists for a task (creates if missing)
-  ipcMain.handle('tabs:ensureMain', (_, taskId: string, mode: string): Promise<TerminalTab> => {
-    return ensureMainTab(db, taskId, mode)
-  })
+  ipcMain.handle('tabs:ensureMain', (_, taskId: string, mode: string) =>
+    ensureMainTab(db, taskId, mode)
+  )
 }

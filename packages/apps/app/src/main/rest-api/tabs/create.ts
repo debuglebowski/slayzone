@@ -1,5 +1,6 @@
 import type { Express } from 'express'
 import { createTabRow } from '@slayzone/task-terminals/main'
+import { tabsEvents } from '@slayzone/task-terminals/server'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import type { RestApiDeps } from '../types'
@@ -25,8 +26,10 @@ export function registerTabsCreateRoute(app: Express, deps: RestApiDeps): void {
     // TerminalView mounts in the renderer). Also fires for already-open tasks
     // — broadcast is idempotent.
     broadcastToWindows('app:open-task', taskId)
-    // Trigger renderer re-fetch + auto-focus the new group.
+    // Trigger renderer re-fetch + auto-focus the new group. Dual-emit: legacy
+    // IPC broadcast + tRPC tabsEvents (renderer subscribers land in slice 5).
     broadcastToWindows('tabs:changed', { taskId, focusTabId: tab.id })
+    tabsEvents.emit('tabs:changed', { taskId, focusTabId: tab.id })
 
     res.json({ tab, sessionId: `${taskId}:${tab.id}` })
   })
