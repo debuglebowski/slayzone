@@ -16,6 +16,13 @@ export interface TerminalProgressDotProps {
   noTooltip?: boolean
   /** Override style with a pulsing amber "needs attention" indicator. */
   needsAttention?: boolean
+  /**
+   * When true, a hibernated (paused) session keeps its pause icon even while
+   * `needsAttention` is set — the pause symbol wins over the amber override.
+   * Use where unread is surfaced separately (e.g. a trailing pill) so the blob
+   * can show real state. Default: false (attention overrides every state).
+   */
+  pauseOverridesAttention?: boolean
   size?: number
   /** Larger footprint while running / loading. Default: same as `size`. */
   activeSize?: number
@@ -30,21 +37,26 @@ export function TerminalProgressDot({
   tooltipSide,
   noTooltip = false,
   needsAttention = false,
+  pauseOverridesAttention = false,
   size = 14,
   activeSize = size,
   className
 }: TerminalProgressDotProps): React.JSX.Element | null {
   const baseStyle = getTerminalStateStyle(state)
-  const stateStyle = needsAttention ? ATTENTION_STATE_STYLE : baseStyle
+  // Attention normally overrides every state. With `pauseOverridesAttention`,
+  // a hibernated session keeps its pause icon — the pause symbol wins.
+  const attentionWins =
+    needsAttention && !(pauseOverridesAttention && state === 'hibernated')
+  const stateStyle = attentionWins ? ATTENTION_STATE_STYLE : baseStyle
   const showProgress = !isDone && progress != null && progress > 0
   const showState = !!stateStyle || alwaysShow
   if (!showState && !showProgress) return null
 
   const dotColor = stateStyle?.color ?? 'bg-muted-foreground/40'
   const stateLabel = stateStyle?.label ?? 'No session'
-  const isRunning = !needsAttention && state === 'running'
+  const isRunning = !attentionWins && state === 'running'
   // Hibernated (idle-closed) sessions show a pause icon instead of a dot.
-  const isHibernated = !needsAttention && state === 'hibernated'
+  const isHibernated = !attentionWins && state === 'hibernated'
 
   // Wrapper footprint is the constant max of size/activeSize, so the row layout
   // never shifts when a terminal goes active. The indicator renders at `size`

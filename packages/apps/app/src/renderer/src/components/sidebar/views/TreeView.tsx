@@ -549,6 +549,7 @@ function TaskRowView({
           progress={progress}
           isDone={isDone}
           needsAttention={Boolean(task.needs_attention)}
+          pauseOverridesAttention
           alwaysShow
           tooltipSide="right"
           size={8}
