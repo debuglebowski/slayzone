@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
+    "./theme": "./src/main/theme-core.ts",
     "./main": "./src/main/index.ts",
     "./client": "./src/client/index.ts",
     "./client/UserSettingsDialog": "./src/client/UserSettingsDialog.tsx",

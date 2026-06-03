@@ -1466,10 +1466,11 @@ app
     registerFeedbackHandlers(ipcMain, db)
     logBoot('core domain handlers registered')
 
-    registerThemeHandlers(ipcMain, db)
-    // tRPC `settings.onThemeChanged` source; coexists with the IPC broadcast
-    // above (dual-emit) until the renderer drops IPC (slice 5).
+    // Single OS→app theme listener. Both the tRPC `settings.onThemeChanged`
+    // subscription and the IPC `theme:changed` broadcast (registerThemeHandlers)
+    // derive from this one bus. Permanent — survives the slice-5 IPC removal.
     wireNativeThemeBridge()
+    registerThemeHandlers(ipcMain, db)
     registerUsageHandlers(ipcMain, db)
     registerPtyHandlers(ipcMain, db)
     logBoot('pty handlers registered')

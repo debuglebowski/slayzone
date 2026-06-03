@@ -7,15 +7,15 @@ import { router, publicProcedure } from '../trpc'
 const themeInput = z.enum(['light', 'dark', 'system'])
 
 /**
- * Theme procedures dynamically import @slayzone/settings/main because the
- * underlying nativeTheme API is Electron-main-only. In standalone server mode
- * the import fails and they throw a clear error (remote-mode UI hides the theme
- * controls). settings get/set/getAll stay on the electron-free /server import so
- * they work headless too.
+ * Theme procedures dynamically import @slayzone/settings/theme — the narrow
+ * nativeTheme-only surface (no IPC/handler-registration barrel) — because that
+ * API is Electron-main-only. In standalone server mode the import fails and they
+ * throw a clear error (remote-mode UI hides the theme controls). settings
+ * get/set/getAll stay on the electron-free /server import so they work headless.
  */
-async function getThemeModule(): Promise<typeof import('@slayzone/settings/main') | null> {
+async function getThemeModule(): Promise<typeof import('@slayzone/settings/theme') | null> {
   try {
-    return await import('@slayzone/settings/main')
+    return await import('@slayzone/settings/theme')
   } catch {
     return null
   }
