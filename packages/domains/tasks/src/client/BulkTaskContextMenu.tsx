@@ -174,7 +174,7 @@ export function BulkTaskContextMenu({
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent className="w-64">
-          <div className="px-2 py-1 text-xs text-muted-foreground select-none">
+          <div className="col-span-full px-2 py-1 text-xs text-muted-foreground select-none">
             {taskIds.length} tasks selected
           </div>
           <ContextMenuSeparator />
