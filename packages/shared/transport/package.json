@@ -22,6 +22,7 @@
     "@slayzone/integrations": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/projects": "workspace:*",
+    "@slayzone/settings": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",

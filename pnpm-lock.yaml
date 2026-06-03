@@ -1693,6 +1693,9 @@ importers:
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects
+      '@slayzone/settings':
+        specifier: workspace:*
+        version: link:../../domains/settings
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../../domains/tags

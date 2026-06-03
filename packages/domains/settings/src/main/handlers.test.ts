@@ -9,7 +9,7 @@ import {
   describe
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerSettingsHandlers } from './handlers.js'
-import { SettingsService } from './service.js'
+import { SettingsService } from '../server/service.js'
 
 const h = await createTestHarness()
 // Handlers share the app's warmed SettingsService instance so an IPC `set`

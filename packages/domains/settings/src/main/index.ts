@@ -1,3 +1,9 @@
 export { registerSettingsHandlers } from './handlers'
-export { registerThemeHandlers } from './theme'
-export { SettingsService, type ThemePreference } from './service'
+export {
+  registerThemeHandlers,
+  getEffectiveTheme,
+  getThemeSource,
+  setTheme,
+  wireNativeThemeBridge
+} from './theme'
+export { SettingsService, type ThemePreference } from '../server/service'

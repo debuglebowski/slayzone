@@ -208,6 +208,7 @@ import { registerFeedbackHandlers } from '@slayzone/feedback/main'
 import {
   registerSettingsHandlers,
   registerThemeHandlers,
+  wireNativeThemeBridge,
   SettingsService
 } from '@slayzone/settings/main'
 import {
@@ -1466,6 +1467,9 @@ app
     logBoot('core domain handlers registered')
 
     registerThemeHandlers(ipcMain, db)
+    // tRPC `settings.onThemeChanged` source; coexists with the IPC broadcast
+    // above (dual-emit) until the renderer drops IPC (slice 5).
+    wireNativeThemeBridge()
     registerUsageHandlers(ipcMain, db)
     registerPtyHandlers(ipcMain, db)
     logBoot('pty handlers registered')

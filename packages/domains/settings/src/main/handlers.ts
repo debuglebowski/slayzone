@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { SettingsService } from './service'
+import type { SettingsService } from '../server/service'
 
 // Takes the app's shared SettingsService rather than minting its own. A separate
 // instance would write to SQLite but never touch the warmed cache that sync
