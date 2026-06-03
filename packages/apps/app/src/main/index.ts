@@ -1127,7 +1127,6 @@ app
     // Migrations (run in the worker) have already seeded defaults by now.
     await settings.warmCache([
       'labs_tests_panel',
-      'labs_jira_integration',
       'labs_loop_mode',
       'terminal_auto_close_idle',
       'terminal_idle_close_value',
@@ -2178,10 +2177,6 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     ipcMain.on('app:is-tests-panel-enabled-sync', (event) => {
       event.returnValue = isLabEnabled('labs_tests_panel')
     })
-    ipcMain.handle('app:is-jira-integration-enabled', () => isLabEnabled('labs_jira_integration'))
-    ipcMain.on('app:is-jira-integration-enabled-sync', (event) => {
-      event.returnValue = isLabEnabled('labs_jira_integration')
-    })
     ipcMain.handle('app:is-loop-mode-enabled', () => isLabEnabled('labs_loop_mode'))
     ipcMain.on('app:is-loop-mode-enabled-sync', (event) => {
       event.returnValue = isLabEnabled('labs_loop_mode')
@@ -3003,7 +2998,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         // 7b. Seed post-onboarding baseline so tests skip the onboarding wizard
         await settings.seedOnboardingCompleted()
         // Re-warm cache after settings table was dropped + re-migrated
-        await settings.warmCache(['labs_tests_panel', 'labs_jira_integration', 'labs_loop_mode'])
+        await settings.warmCache(['labs_tests_panel', 'labs_loop_mode'])
 
         // 8. Restart MCP + tRPC (after table drop so ports persist to fresh settings table)
         const mcpMod = await import('./mcp-server')

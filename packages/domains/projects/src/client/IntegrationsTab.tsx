@@ -194,7 +194,6 @@ export function IntegrationsTab({
   const [disconnectingProjectConnectionProvider, setDisconnectingProjectConnectionProvider] =
     useState<IntegrationProvider | null>(null)
   const [switchingProvider, setSwitchingProvider] = useState(false)
-  const [jiraEnabled, setJiraEnabled] = useState(window.api.app.isJiraIntegrationEnabledSync)
   const [syncStep, setSyncStep] = useState<1 | 2 | 3>(1)
   const [syncStepEditing, setSyncStepEditing] = useState<1 | 2 | 3 | null>(null)
   const [loadingSyncStatuses, setLoadingSyncStatuses] = useState(false)
@@ -203,7 +202,6 @@ export function IntegrationsTab({
     if (open) {
       setSelectedIntegrationEntry(null)
       setSelectedIntegrationMode(null)
-      window.api.app.isJiraIntegrationEnabled().then(setJiraEnabled)
     }
   }, [open, project.id])
 
@@ -1227,34 +1225,30 @@ export function IntegrationsTab({
         }
       ]
     },
-    ...(jiraEnabled
-      ? [
-          {
-            provider: 'jira' as const,
-            title: 'Jira',
-            items: [
-              {
-                key: 'jira-continuous-sync',
-                entry: 'jira' as IntegrationSetupEntry,
-                mode: 'continuous' as const,
-                label: 'Continuous sync',
-                description: 'Sync with a Jira Cloud project.',
-                disabled: switchingProvider,
-                testId: 'project-integration-provider-jira'
-              },
-              {
-                key: 'jira-one-time-import',
-                entry: 'jira' as IntegrationSetupEntry,
-                mode: 'import' as const,
-                label: 'One-time import',
-                description: 'Import Jira issues once.',
-                disabled: switchingProvider,
-                testId: 'project-integration-provider-jira-import'
-              }
-            ]
-          }
-        ]
-      : [])
+    {
+      provider: 'jira' as const,
+      title: 'Jira',
+      items: [
+        {
+          key: 'jira-continuous-sync',
+          entry: 'jira' as IntegrationSetupEntry,
+          mode: 'continuous' as const,
+          label: 'Continuous sync',
+          description: 'Sync with a Jira Cloud project.',
+          disabled: switchingProvider,
+          testId: 'project-integration-provider-jira'
+        },
+        {
+          key: 'jira-one-time-import',
+          entry: 'jira' as IntegrationSetupEntry,
+          mode: 'import' as const,
+          label: 'One-time import',
+          description: 'Import Jira issues once.',
+          disabled: switchingProvider,
+          testId: 'project-integration-provider-jira-import'
+        }
+      ]
+    }
   ]
   const selectedIntegrationViewMeta = (() => {
     if (isGithubContinuousView) {

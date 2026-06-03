@@ -10,12 +10,6 @@ const LABS_FEATURES = [
     loader: () => window.api.app.isTestsPanelEnabled()
   },
   {
-    key: 'labs_jira_integration',
-    label: 'Jira Integration',
-    description: 'Sync tasks with Jira Cloud issues',
-    loader: () => window.api.app.isJiraIntegrationEnabled()
-  },
-  {
     key: 'labs_loop_mode',
     label: 'Loop Command',
     description: 'Repeat a prompt until acceptance criteria are met',

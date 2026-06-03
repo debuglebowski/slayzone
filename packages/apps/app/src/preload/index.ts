@@ -250,10 +250,6 @@ const api: ElectronAPI = {
     revealSidecarLog: () => ipcRenderer.invoke('app:reveal-sidecar-log'),
     isTestsPanelEnabled: () => ipcRenderer.invoke('app:is-tests-panel-enabled'),
     isTestsPanelEnabledSync: ipcRenderer.sendSync('app:is-tests-panel-enabled-sync') as boolean,
-    isJiraIntegrationEnabled: () => ipcRenderer.invoke('app:is-jira-integration-enabled'),
-    isJiraIntegrationEnabledSync: ipcRenderer.sendSync(
-      'app:is-jira-integration-enabled-sync'
-    ) as boolean,
     isLoopModeEnabled: () => ipcRenderer.invoke('app:is-loop-mode-enabled'),
     isLoopModeEnabledSync: ipcRenderer.sendSync('app:is-loop-mode-enabled-sync') as boolean,
     getZoomFactor: () => ipcRenderer.invoke('app:get-zoom-factor'),

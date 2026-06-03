@@ -627,8 +627,6 @@ export interface ElectronAPI {
     revealSidecarLog: () => Promise<void>
     isTestsPanelEnabled: () => Promise<boolean>
     isTestsPanelEnabledSync: boolean
-    isJiraIntegrationEnabled: () => Promise<boolean>
-    isJiraIntegrationEnabledSync: boolean
     isLoopModeEnabled: () => Promise<boolean>
     isLoopModeEnabledSync: boolean
     getZoomFactor: () => Promise<number>
