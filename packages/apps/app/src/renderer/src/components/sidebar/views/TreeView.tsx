@@ -68,12 +68,7 @@ import { useActiveSessionTaskIds } from '@/components/agent-status/useIdleTasks'
 import { useStaleSkillCounts } from '@slayzone/ai-config/client'
 import { TreeDisplaySettings } from '../TreeDisplaySettings'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
-import {
-  resolveProjectDrop,
-  applyProjectDrop,
-  pointerYFromEvent,
-  dropModeFromPointer
-} from './projectDrop'
+import { resolveProjectDrop, applyProjectDrop, pointerYFromEvent, resolveDropMode } from './projectDrop'
 import logo from '@/assets/logo.svg'
 import type { SidebarViewContext } from './types'
 import type { ProjectGroup } from '@slayzone/projects/shared'
@@ -87,21 +82,24 @@ const noShiftStrategy = () => null
 type ProjDropMode = 'before' | 'after' | 'merge'
 
 /**
- * Drop mode over a project row, shared by the move-indicator and the drop. Folder
- * MEMBERS can't start a group, so their row splits in HALF (before/after, no
- * merge dead-zone) — that makes the whole row reorderable, incl. the bottom of
- * the group. Top-level rows keep the 3-zone split (middle = merge = new folder).
+ * Drop mode over a project row, shared by the move-indicator and the drop. Uses
+ * the same `resolveDropMode` as the rail view (single source of truth): folder
+ * MEMBERS split in HALF (before/after — the whole row reorders, incl. the
+ * group's bottom), top-level rows use the 3-zone split (middle = merge = new
+ * folder / join), and a dragged folder never merges. Tree members are tagged
+ * `kind:'project'` with a non-null `groupId`.
  */
 function treeProjectDropMode(event: DragMoveEvent | DragEndEvent): ProjDropMode {
   const over = event.over
   if (!over) return 'merge'
-  const py = pointerYFromEvent(event)
   const od = over.data.current as { kind?: string; groupId?: string | null } | undefined
-  if (od?.kind === 'project' && od.groupId != null) {
-    if (py == null) return 'before'
-    return py > over.rect.top + over.rect.height / 2 ? 'after' : 'before'
-  }
-  return dropModeFromPointer(py, over.rect)
+  const aKind = (event.active.data.current as { kind?: string } | undefined)?.kind
+  return resolveDropMode({
+    pointerY: pointerYFromEvent(event),
+    rect: over.rect,
+    overIsMember: od?.kind === 'project' && od.groupId != null,
+    activeIsGroup: aKind === 'group'
+  })
 }
 
 /**

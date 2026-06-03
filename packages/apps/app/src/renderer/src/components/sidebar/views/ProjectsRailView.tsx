@@ -10,7 +10,6 @@ import {
   type CollisionDetection,
   type DragStartEvent,
   type DragMoveEvent,
-  type DragOverEvent,
   type DragEndEvent
 } from '@dnd-kit/core'
 import { SortableContext } from '@dnd-kit/sortable'
@@ -29,12 +28,7 @@ import { ProjectItem } from '../ProjectItem'
 import { ProjectFolderTile, FolderMiniGrid } from '../ProjectFolderTile'
 import { ProjectAvatar } from '../ProjectAvatar'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
-import {
-  resolveProjectDrop,
-  applyProjectDrop,
-  pointerYFromEvent,
-  dropModeFromPointer
-} from './projectDrop'
+import { resolveProjectDrop, applyProjectDrop, pointerYFromEvent, resolveDropMode } from './projectDrop'
 import type { SidebarViewContext } from './types'
 
 type DragKind = 'top-project' | 'group' | 'member'
@@ -66,9 +60,6 @@ export function ProjectsRailView({
   onReorderProjectsInGroup,
   idleByProject
 }: SidebarViewContext) {
-  'use no memo' // React Compiler froze the per-item insertion-line render
-  // (drag state read via a closure wasn't tracked) — opt out so the indicator
-  // re-renders live during a drag.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const entries = useMemo(
     () => buildTopLevelEntries(projects, projectGroups),
@@ -151,40 +142,24 @@ export function ProjectsRailView({
     }
   }
 
-  const computeMode = (event: DragMoveEvent | DragOverEvent | DragEndEvent): DropMode => {
+  const computeMode = (event: DragMoveEvent | DragEndEvent): DropMode => {
     const aKind = (event.active.data.current as DragData | undefined)?.kind
     const oKind = (event.over?.data.current as DragData | undefined)?.kind
-    const py = pointerYFromEvent(event)
-    const rect = event.over?.rect
-    const raw = dropModeFromPointer(py, rect)
-    const overId = String(event.over?.id ?? '')
-    const idx = entries.findIndex(
-      (e) => (e.kind === 'group' ? `group:${e.id}` : `top-project:${e.id}`) === overId
-    )
-    const half = rect ? rect.top + rect.height / 2 : 0
-    let result: DropMode
-    if (aKind === 'group') {
-      // A dragged FOLDER never merges → reorder line only.
-      result = raw === 'merge' ? 'before' : raw
-    } else if (py != null && rect && idx === 0 && py < half) {
-      result = 'before'
-    } else if (py != null && rect && idx === entries.length - 1 && py >= half) {
-      result = 'after'
-    } else if (oKind === 'group') {
-      result = 'merge'
-    } else {
-      result = raw
-    }
-    return result
+    return resolveDropMode({
+      pointerY: pointerYFromEvent(event),
+      rect: event.over?.rect,
+      overIsMember: oKind === 'member',
+      activeIsGroup: aKind === 'group'
+    })
   }
 
   // Driven by onDragMove (fires every pointer move) — NOT onDragOver, which only
-  // fires when the `over` target changes. With the static-placeholder layout the
+  // fires when the `over` target CHANGES. Under the static-placeholder layout the
   // pointer can travel a long way inside one `over` (e.g. past the last folder)
   // without `over` changing; onDragOver would freeze the mode (stuck on 'merge')
   // so the bottom/top insertion line was unreachable. onDragMove recomputes the
   // mode continuously as the cursor moves within the same target.
-  const handleDragMove = (event: DragMoveEvent | DragOverEvent) => {
+  const handleDragMove = (event: DragMoveEvent) => {
     const { active, over } = event
     if (!over || active.id === over.id) {
       setIndicator(null)
@@ -242,7 +217,6 @@ export function ProjectsRailView({
         collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
-        onDragOver={handleDragMove}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >

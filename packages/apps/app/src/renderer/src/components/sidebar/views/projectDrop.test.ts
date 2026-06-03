@@ -7,6 +7,7 @@ import { test, expect, describe } from '../../../../../../../../shared/test-util
 import {
   resolveProjectDrop,
   dropModeFromPointer,
+  resolveDropMode,
   pointerYFromEvent,
   type DropInput,
   type DropMode
@@ -39,6 +40,49 @@ await describe('dropModeFromPointer (pointer, not dragged-rect center)', async (
     expect(pointerYFromEvent({ activatorEvent: { clientY: 200 } as Event, delta: { y: 15 } })).toBe(215)
     expect(pointerYFromEvent({ activatorEvent: null, delta: { y: 15 } })).toBeNull()
   })
+})
+
+await describe('resolveDropMode (shared rail + tree mode decision)', async () => {
+  const rect = { top: 100, height: 30 } // center 115; thirds: <110 before, >120 after
+  const base = { overIsMember: false, activeIsGroup: false }
+
+  test('top-level: top third → before', () =>
+    expect(resolveDropMode({ ...base, pointerY: 104, rect })).toBe('before'))
+  test('top-level: middle → merge (new folder / join)', () =>
+    expect(resolveDropMode({ ...base, pointerY: 115, rect })).toBe('merge'))
+  test('top-level: bottom third → after', () =>
+    expect(resolveDropMode({ ...base, pointerY: 126, rect })).toBe('after'))
+
+  // Extremes fall out of thirds (pointer-nearest collision makes the edge tile
+  // the over): above the first tile / below the last → before / after, no
+  // first/last special case needed.
+  test('pointer ABOVE the tile (extreme top) → before', () =>
+    expect(resolveDropMode({ ...base, pointerY: 80, rect })).toBe('before'))
+  test('pointer BELOW the tile (extreme bottom) → after', () =>
+    expect(resolveDropMode({ ...base, pointerY: 150, rect })).toBe('after'))
+
+  // Folder MEMBER: split in half, no merge dead-zone.
+  test('member: above center → before', () =>
+    expect(resolveDropMode({ ...base, overIsMember: true, pointerY: 114, rect })).toBe('before'))
+  test('member: below center → after', () =>
+    expect(resolveDropMode({ ...base, overIsMember: true, pointerY: 116, rect })).toBe('after'))
+  // Member rows have NO merge dead-zone: even the exact center resolves to a
+  // line (here 'before', since pointerY is not strictly past center).
+  test('member: center resolves to a line, never merge', () =>
+    expect(resolveDropMode({ ...base, overIsMember: true, pointerY: 115, rect })).toBe('before'))
+
+  // Dragging a FOLDER never merges → center coerced to nearest edge.
+  test('folder drag: middle coerces to before (above center)', () =>
+    expect(resolveDropMode({ ...base, activeIsGroup: true, pointerY: 113, rect })).toBe('before'))
+  test('folder drag: middle coerces to after (below center)', () =>
+    expect(resolveDropMode({ ...base, activeIsGroup: true, pointerY: 117, rect })).toBe('after'))
+  test('folder drag: edges still resolve to lines', () => {
+    expect(resolveDropMode({ ...base, activeIsGroup: true, pointerY: 104, rect })).toBe('before')
+    expect(resolveDropMode({ ...base, activeIsGroup: true, pointerY: 126, rect })).toBe('after')
+  })
+
+  test('null rect → merge (no geometry yet)', () =>
+    expect(resolveDropMode({ ...base, pointerY: 115, rect: null })).toBe('merge'))
 })
 
 await describe('resolveProjectDrop', async () => {

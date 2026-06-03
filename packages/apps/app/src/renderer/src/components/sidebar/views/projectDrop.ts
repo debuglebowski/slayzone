@@ -37,6 +37,44 @@ export function dropModeFromPointer(
   return 'merge'
 }
 
+/**
+ * The single drop-mode decision for BOTH sidebar views (rail folders + tree
+ * labels). Given the pointer Y, the over-target's rect, and two facts about the
+ * drag, return before / after / merge. Deliberately uniform — no first/last or
+ * "over is a group" special cases:
+ *
+ * - **Top-level project or group target** → 3-zone thirds (top → before line,
+ *   middle → merge, bottom → after line). Thirds also resolve the list extremes
+ *   and mid-list folders for free: the pointer-nearest collision makes the edge
+ *   tile the `over`, and a pointer above the first / below the last simply lands
+ *   in that tile's top / bottom third → before / after. A folder in the MIDDLE
+ *   gets a real before/after line on its edges (its center still merges = join).
+ * - **Folder member target** (`overIsMember`) → split in HALF (before/after, no
+ *   merge dead-zone): nothing folds into a member, so the whole row reorders,
+ *   incl. the group's bottom edge.
+ * - **Dragging a folder** (`activeIsGroup`) → never merges; its center band is
+ *   coerced to the nearest edge so a folder always reorders, never nests.
+ */
+export function resolveDropMode(input: {
+  pointerY: number | null
+  rect: { top: number; height: number } | null | undefined
+  overIsMember: boolean
+  activeIsGroup: boolean
+}): DropMode {
+  const { pointerY, rect, overIsMember, activeIsGroup } = input
+  if (!rect) return 'merge'
+  const center = rect.top + rect.height / 2
+  if (overIsMember) {
+    if (pointerY == null) return 'before'
+    return pointerY > center ? 'after' : 'before'
+  }
+  const mode = dropModeFromPointer(pointerY, rect)
+  if (mode === 'merge' && activeIsGroup) {
+    return pointerY != null && pointerY < center ? 'before' : 'after'
+  }
+  return mode
+}
+
 export type DropAction =
   | { type: 'none' }
   /** Discord drag-onto → new folder of [target, dragged]. */
