@@ -1,5 +1,107 @@
 [
   {
+    "version": "0.33.0",
+    "date": "2026-06-03",
+    "tagline": "Groups, panels, speed",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Project group folders",
+        "description": "Organize projects into collapsible group folders in the sidebar, with drag-to-reorder."
+      },
+      {
+        "category": "feature",
+        "title": "Auto-hibernate idle agents",
+        "description": "Idle agent terminals can auto-hibernate to free resources, showing a pause icon and \"Paused\" label."
+      },
+      {
+        "category": "feature",
+        "title": "Figma-style panel layout",
+        "description": "Web panels gain per-panel layout with size units, min/max bounds, and anchoring."
+      },
+      {
+        "category": "feature",
+        "title": "Inline PDF preview",
+        "description": "PDFs now render inline in the file editor."
+      },
+      {
+        "category": "feature",
+        "title": "Blocked and Snooze task states",
+        "description": "The status menu adds Blocked, Blocked-by, and Snooze options."
+      },
+      {
+        "category": "feature",
+        "title": "Integration auto-recovery",
+        "description": "Integrations auto-disable on auth failure (401/403) and offer a reconnect UI scoped to affected projects."
+      },
+      {
+        "category": "improvement",
+        "title": "Faster startup and smoother rendering",
+        "description": "Idle prewarming, lazy-loaded panels, GPU rasterization, and React Activity wrapping cut startup time and smooth out the UI."
+      },
+      {
+        "category": "improvement",
+        "title": "More responsive under heavy data",
+        "description": "Moved SQLite to a worker thread so the UI stays responsive during heavy database work."
+      },
+      {
+        "category": "improvement",
+        "title": "Smoother terminal painting",
+        "description": "Adaptive paint cadence keeps terminals smooth on slow-drip output."
+      },
+      {
+        "category": "improvement",
+        "title": "More reliable terminal status",
+        "description": "Agent status indicators now self-heal and stay accurate across interrupts, resumes, hibernation, and PTY respawns."
+      },
+      {
+        "category": "improvement",
+        "title": "Browser panels keep rendering on hidden tabs",
+        "description": "Web panels keep painting when their task tab is in the background."
+      },
+      {
+        "category": "fix",
+        "title": "Friendly session-expired overlay",
+        "description": "Stale terminal sessions now show a clear \"session expired\" overlay instead of failing quietly."
+      },
+      {
+        "category": "fix",
+        "title": "Git diff tree",
+        "description": "The diff tree always shows with auto-selection outside flow mode, and its toggle reflects open state."
+      },
+      {
+        "category": "fix",
+        "title": "Editor focuses on open",
+        "description": "Opening a file now focuses the editor."
+      },
+      {
+        "category": "fix",
+        "title": "Settings cards no longer overflow",
+        "description": "Long descriptions in settings cards water-fill instead of spilling over."
+      },
+      {
+        "category": "fix",
+        "title": "Settings stay fresh after idle",
+        "description": "Settings no longer go stale after the app sits idle."
+      },
+      {
+        "category": "fix",
+        "title": "Window button alignment",
+        "description": "Traffic-light window buttons are aligned correctly in project and tree views."
+      },
+      {
+        "category": "fix",
+        "title": "Worktree nesting",
+        "description": "Worktrees no longer create a nested src/src when a tracked directory has ignored children."
+      },
+      {
+        "category": "fix",
+        "title": "Sidebar drag insertion line",
+        "description": "The project rail drag insertion line now reaches the top and bottom of the list."
+      }
+    ]
+  },
+  {
     "version": "0.32.3",
     "date": "2026-05-23",
     "tagline": "Atlas cleanup",

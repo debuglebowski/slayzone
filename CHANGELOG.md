@@ -1,6 +1,117 @@
 # Changelog
 
 
+## v0.33.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.32.3...v0.33.0)
+
+### 🚀 Enhancements
+
+- **transport:** Tags router (P2 — pilot) ([609bc0a2](https://github.com/debuglebowski/slayzone/commit/609bc0a2))
+- **integrations:** Auto-disable connections on 401/403 + reconnect UI ([84481f41](https://github.com/debuglebowski/slayzone/commit/84481f41))
+- **terminal:** Scramble detector + auto-downgrade + telemetry ([d9a57799](https://github.com/debuglebowski/slayzone/commit/d9a57799))
+- **hooks:** Persist claude-code session id on SessionStart ([46d3e7be](https://github.com/debuglebowski/slayzone/commit/46d3e7be))
+- **terminal:** Auto-hibernate idle agent terminals (opt-in) ([e48330fe](https://github.com/debuglebowski/slayzone/commit/e48330fe))
+- **terminal:** Pause icon + "Paused" label for hibernated agents ([61379d3f](https://github.com/debuglebowski/slayzone/commit/61379d3f))
+- **ui:** UseVisibleInterval hook + eslint guard ([edf9f882](https://github.com/debuglebowski/slayzone/commit/edf9f882))
+- **terminal:** Add reactive terminal-state store ([ef1f6761](https://github.com/debuglebowski/slayzone/commit/ef1f6761))
+- **terminal:** Shrink progress dot to 10px in tabs + kanban ([8771a0af](https://github.com/debuglebowski/slayzone/commit/8771a0af))
+- **browser:** Keep WCV painting on hidden task tabs ([c8da942b](https://github.com/debuglebowski/slayzone/commit/c8da942b))
+- **db:** Move better-sqlite3 to worker thread, async SlayzoneDb ([85fc667d](https://github.com/debuglebowski/slayzone/commit/85fc667d))
+- **boot:** Prewarm task-detail + panel chunks on idle ([546bf8d4](https://github.com/debuglebowski/slayzone/commit/546bf8d4))
+- **transport:** Agent-turns router (P6 — first streaming subscription) ([63ca2c5a](https://github.com/debuglebowski/slayzone/commit/63ca2c5a))
+- **task:** Add Blocked/Blocked-by/Snooze to status-icon menu ([c5b3707a](https://github.com/debuglebowski/slayzone/commit/c5b3707a))
+- **file-editor:** Render PDFs inline via slz-file:// iframe ([36f0f411](https://github.com/debuglebowski/slayzone/commit/36f0f411))
+- **transport:** History router (P5) ([72e8f1c3](https://github.com/debuglebowski/slayzone/commit/72e8f1c3))
+- **transport:** Diagnostics router (P4) ([3c2d1854](https://github.com/debuglebowski/slayzone/commit/3c2d1854))
+- **transport:** Usage-analytics router (P9) ([4d5de6d5](https://github.com/debuglebowski/slayzone/commit/4d5de6d5))
+- **transport:** Automations router (P7) ([cc5d6ef7](https://github.com/debuglebowski/slayzone/commit/cc5d6ef7))
+- **panels:** Figma-style per-panel layout (units + min/max + anchor) ([469be4c2](https://github.com/debuglebowski/slayzone/commit/469be4c2))
+- **panels:** Unit-aware min/max bounds + harden config load ([6ab4d638](https://github.com/debuglebowski/slayzone/commit/6ab4d638))
+- **transport:** Test-panel router (P10) ([edd1b72f](https://github.com/debuglebowski/slayzone/commit/edd1b72f))
+- **transport:** Chat router (P18 — 26 chat + 4 queue handlers + 4 streaming subs) ([2b475bb1](https://github.com/debuglebowski/slayzone/commit/2b475bb1))
+- **projects:** Project groups backend ([7186a02f](https://github.com/debuglebowski/slayzone/commit/7186a02f))
+- **sidebar:** Project group folders UI ([2bcdd063](https://github.com/debuglebowski/slayzone/commit/2bcdd063))
+
+### 🔥 Performance
+
+- **renderer:** Strip dev sourcemaps to cut V8 overhead ([d1a654cf](https://github.com/debuglebowski/slayzone/commit/d1a654cf))
+- **renderer:** Alias React to prod CJS in dev ([2db28f95](https://github.com/debuglebowski/slayzone/commit/2db28f95))
+- **renderer:** Prod React + compiler in dev ([3492cf0a](https://github.com/debuglebowski/slayzone/commit/3492cf0a))
+- **renderer:** Prod React + compiler in dev ([2a3ba31f](https://github.com/debuglebowski/slayzone/commit/2a3ba31f))
+- **renderer:** Defer tab content under load ([bc0b6a86](https://github.com/debuglebowski/slayzone/commit/bc0b6a86))
+- **main:** Enable GPU raster + zero-copy + OOP canvas ([8156f9c2](https://github.com/debuglebowski/slayzone/commit/8156f9c2))
+- **renderer:** Wrap non-terminal panels in React 19 Activity ([47077cda](https://github.com/debuglebowski/slayzone/commit/47077cda))
+- **terminal:** Adaptive paint cadence — 20fps on slow-drip ([39199da8](https://github.com/debuglebowski/slayzone/commit/39199da8))
+- **bundle:** Lazy-load heavy panels + strip framer from startup ([bc9542cf](https://github.com/debuglebowski/slayzone/commit/bc9542cf))
+- Raise cadence on 3 gated intervals ([33512a5c](https://github.com/debuglebowski/slayzone/commit/33512a5c))
+
+### 🩹 Fixes
+
+- **worktrees:** No nest src/src when tracked dir has ignored children ([164072e5](https://github.com/debuglebowski/slayzone/commit/164072e5))
+- **git-diff:** Always show tree + auto-select in non-flow mode ([b97e5489](https://github.com/debuglebowski/slayzone/commit/b97e5489))
+- **terminal:** Skip replay overlay when no missed chunks on tab switch ([225f9893](https://github.com/debuglebowski/slayzone/commit/225f9893))
+- **integrations:** Scope auth-failure banner to mapped projects only ([13d03433](https://github.com/debuglebowski/slayzone/commit/13d03433))
+- **layout:** Restore flex-row for side panels broken by auth banner ([3c8c6b16](https://github.com/debuglebowski/slayzone/commit/3c8c6b16))
+- **terminal:** Preserve state subscribers across PTY respawn ([2f466f0e](https://github.com/debuglebowski/slayzone/commit/2f466f0e))
+- **dev:** Single prod-React mechanism — kill dual-React useMemo crash ([b35ff31f](https://github.com/debuglebowski/slayzone/commit/b35ff31f))
+- **terminal:** Hook-driven agents skip optimistic input-flip ([4655366d](https://github.com/debuglebowski/slayzone/commit/4655366d))
+- **terminal:** Friendly "session expired" overlay for stale resume ([#90](https://github.com/debuglebowski/slayzone/pull/90))
+- **terminal:** Clear running dot on interrupt ([4ed50eee](https://github.com/debuglebowski/slayzone/commit/4ed50eee))
+- **terminal:** Self-heal stuck status dot via reconcile ([fb17d00e](https://github.com/debuglebowski/slayzone/commit/fb17d00e))
+- **terminal:** Stop flagging replayed Error: lines on resume ([c7bd4c28](https://github.com/debuglebowski/slayzone/commit/c7bd4c28))
+- **task-artifacts:** Declare react peer + @types/react dev ([7994a0ea](https://github.com/debuglebowski/slayzone/commit/7994a0ea))
+- **platform:** Make CLI-install path + migration test Windows-portable ([e7754008](https://github.com/debuglebowski/slayzone/commit/e7754008))
+- **window-controls:** Nudge project-view traffic-light pos to x:9 y:15 ([addee615](https://github.com/debuglebowski/slayzone/commit/addee615))
+- **window-controls:** Nudge tree-view traffic-light + header down ([c2cf369a](https://github.com/debuglebowski/slayzone/commit/c2cf369a))
+- **settings:** Share one SettingsService per DB ([b308e392](https://github.com/debuglebowski/slayzone/commit/b308e392))
+- **bundle:** Register task-artifacts in tailwind @source ([fa907ab3](https://github.com/debuglebowski/slayzone/commit/fa907ab3))
+- **editor:** Focus editor when opening file ([b395442b](https://github.com/debuglebowski/slayzone/commit/b395442b))
+- **task:** Water-fill settings cards so long descriptions don't overflow ([3943e082](https://github.com/debuglebowski/slayzone/commit/3943e082))
+- **panels:** Per-task weight-based panel sizing ([46d9fe8b](https://github.com/debuglebowski/slayzone/commit/46d9fe8b))
+- **agent-hook:** Drive 'running' on blocking-tool PostToolUse ([b2f3f642](https://github.com/debuglebowski/slayzone/commit/b2f3f642))
+- **terminal:** Heal hibernated dot across windows ([7f95e36f](https://github.com/debuglebowski/slayzone/commit/7f95e36f))
+- **worktrees:** Diff tree toggle active when tree open ([b9f2a67f](https://github.com/debuglebowski/slayzone/commit/b9f2a67f))
+- **panels:** Focused-panel glow no longer clipped ([5d76291b](https://github.com/debuglebowski/slayzone/commit/5d76291b))
+- **sidebar:** Rail drag insertion line reaches list top/bottom ([1b2c59a8](https://github.com/debuglebowski/slayzone/commit/1b2c59a8))
+- **tabs:** Kill transitions on hidden tabs so buttons stop lingering ([d947bdc1](https://github.com/debuglebowski/slayzone/commit/d947bdc1))
+
+### 💅 Refactors
+
+- **terminal:** Drop debug downgrade toast, add renderer-ok telemetry ([4a33f0b5](https://github.com/debuglebowski/slayzone/commit/4a33f0b5))
+- Gate renderer setInterval timers by visibility ([72beab94](https://github.com/debuglebowski/slayzone/commit/72beab94))
+- **terminal:** Read per-component dots from the store ([f2306d9e](https://github.com/debuglebowski/slayzone/commit/f2306d9e))
+- **terminal:** Push tree-view dot down to the store ([45aeda59](https://github.com/debuglebowski/slayzone/commit/45aeda59))
+- **terminal:** Delete the shadow terminalStates map ([f9c68cdc](https://github.com/debuglebowski/slayzone/commit/f9c68cdc))
+- **terminal:** Gut PtyContext state layer; store is sole truth ([c486c58d](https://github.com/debuglebowski/slayzone/commit/c486c58d))
+- **sidebar:** Unify project drop-mode into one tested resolveDropMode ([d4f8aada](https://github.com/debuglebowski/slayzone/commit/d4f8aada))
+
+### 📖 Documentation
+
+- **skills:** Use --dev flag for dogfooding; drop CCS-profile note ([c5811aa8](https://github.com/debuglebowski/slayzone/commit/c5811aa8))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.32.3 ([9b9bcb73](https://github.com/debuglebowski/slayzone/commit/9b9bcb73))
+
+### ✅ Tests
+
+- **git-diff:** Worktree scenarios for diff panel ([4d207fb7](https://github.com/debuglebowski/slayzone/commit/4d207fb7))
+- **ui:** Unit tests for useVisibleInterval + useDocumentVisibility ([530ec9c1](https://github.com/debuglebowski/slayzone/commit/530ec9c1))
+- **transport:** Agent-turns onChanged subscription ([fa28aa77](https://github.com/debuglebowski/slayzone/commit/fa28aa77))
+- **agent-turns:** Fix async-DB rot + strict-gate the suite ([529112cb](https://github.com/debuglebowski/slayzone/commit/529112cb))
+- **e2e:** Fix panel/codex/browser/git specs ([7a6c5f3f](https://github.com/debuglebowski/slayzone/commit/7a6c5f3f))
+- **terminal:** Drop stale scramble-downgrade spec ([a9c4be08](https://github.com/debuglebowski/slayzone/commit/a9c4be08))
+- **automations:** Restore handler+engine coverage on async-DB harness ([56713051](https://github.com/debuglebowski/slayzone/commit/56713051))
+
+### 🎨 Styles
+
+- **sidebar:** Bump tree-view active row bg contrast ([8dd36098](https://github.com/debuglebowski/slayzone/commit/8dd36098))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.32.3
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.32.2...v0.32.3)
