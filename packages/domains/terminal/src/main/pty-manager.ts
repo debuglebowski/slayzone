@@ -39,6 +39,7 @@ import {
 import { shouldShellFallback, buildRecoveryMessage } from './pty-exit-strategy'
 import { computeSyncQueryResponse, type TerminalTheme } from './sync-query-response'
 import { filterBufferData } from './filter-buffer-data'
+import { shouldHonorDetectedError } from './session-error-gate'
 import { buildMcpEnv } from './mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
 import { markSessionUserInput, clearSessionUserInputMark } from './user-input-tracker'
@@ -1656,9 +1657,16 @@ export async function createPty(
             }
           }
 
-          // Use adapter for error detection
+          // Use adapter for error detection. SESSION_NOT_FOUND is only honored
+          // during the resume startup window (checkingForSessionError); after it
+          // closes a match is a mid-session echo of the literal "No conversation
+          // found with session ID:" string (e.g. an agent discussing this very
+          // bug — which is how task 753 froze itself) and must be ignored.
           const detectedError = session.adapter.detectError(data)
-          if (detectedError) {
+          if (
+            detectedError &&
+            shouldHonorDetectedError(detectedError.code, session.checkingForSessionError ?? false)
+          ) {
             session.error = detectedError
             session.checkingForSessionError = false
             session.pendingTransitionTrigger = {
@@ -1987,12 +1995,18 @@ export async function createPty(
       }
     }, 300)
 
-    // Stop checking for session errors after 5 seconds
+    // Stop checking for session errors after 5 seconds.
     if (resuming) {
       setTimeout(() => {
         const session = sessions.get(sessionId)
         if (session) {
           session.checkingForSessionError = false
+          // Safety net: a real stale resume exits within the window (the dead
+          // overlay rides that exit), so a session still alive here did NOT fail
+          // that way. Release output suppression unconditionally — it must never
+          // outlive the startup window, or the terminal goes permanently blind
+          // (records output but never displays it) until a tab-switch replay.
+          session.suppressOutput = false
         }
       }, 5000)
     }
