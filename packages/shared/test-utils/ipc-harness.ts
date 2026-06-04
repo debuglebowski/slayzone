@@ -266,6 +266,27 @@ export function expect(actual: unknown) {
       } catch (e: unknown) {
         if (e instanceof Error && e.message === 'Expected function to throw') throw e
       }
+    },
+    // Negated matchers. Additive — existing matchers above are unchanged.
+    not: {
+      toBe(expected: unknown) {
+        if (actual === expected)
+          throw new Error(`Expected not ${JSON.stringify(expected)}, but got it`)
+      },
+      toEqual(expected: unknown) {
+        if (JSON.stringify(actual) === JSON.stringify(expected))
+          throw new Error(`Expected not ${JSON.stringify(expected)}, but got it`)
+      },
+      toContain(item: unknown) {
+        if (Array.isArray(actual) && actual.includes(item))
+          throw new Error(`Expected array not to contain ${JSON.stringify(item)}`)
+      },
+      toBeNull() {
+        if (actual === null) throw new Error('Expected not null')
+      },
+      toBeUndefined() {
+        if (actual === undefined) throw new Error('Expected not undefined')
+      }
     }
   }
 }

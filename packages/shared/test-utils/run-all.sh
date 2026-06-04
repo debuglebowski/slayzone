@@ -11,7 +11,7 @@ FAIL=0
 run_test() {
   echo ""
   echo "=== $1 ==="
-  if $TSX $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import'; then
+  if ( set -o pipefail; $TSX $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
@@ -54,9 +54,12 @@ run_test packages/domains/diagnostics/src/main/service.test.ts
 run_test packages/domains/integrations/src/main/handlers.db.test.ts
 run_test packages/domains/worktrees/src/main/handlers.test.ts
 # agent-turns suite runs strict: async-DB rot fixed (awaits added; snapshotWorktree
-# return adapted to {snapshotSha,headSha}). NOTE: ~36 other unit tests across domains
-# are still masked-broken by the same async-DB move (85fc667d) and remain on lenient
-# run_test below — tracked as a separate strict-migration + per-domain-fix task.
+# return adapted to {snapshotSha,headSha}). NOTE: all run_test* helpers are now strict
+# (pipefail), so the ~30 still-broken domain suites no longer mask as PASS — they now
+# count as FAIL. Two known buckets remain, tracked as a separate per-domain-fix task:
+#   1. better-sqlite3 ERR_DLOPEN — DB-handler tests on plain-node `run_test` need the
+#      Electron runner (some also need async-DB await fixes once they load).
+#   2. rest-api/tasks/* + mcp-tools/* — real assertion failures (async-DB move fallout).
 run_test_electron_strict_loader packages/domains/agent-turns/src/main/db.test.ts
 run_test_electron_strict_loader packages/domains/agent-turns/src/main/git-snapshot.test.ts
 run_test_electron_strict_loader packages/domains/agent-turns/src/main/turn-tracker.test.ts
@@ -97,7 +100,7 @@ run_test_electron_strict_loader packages/domains/terminal/src/main/adopt-pty.tes
 run_test_no_loader() {
   echo ""
   echo "=== $1 (integration) ==="
-  if ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import'; then
+  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 npx electron --import tsx/esm "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
@@ -107,7 +110,7 @@ run_test_no_loader() {
 run_test_electron_loader() {
   echo ""
   echo "=== $1 (electron+loader) ==="
-  if ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import'; then
+  if ( set -o pipefail; ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron --import tsx/esm $LOADER "$1" 2>&1 | grep -v 'npm warn\|Migration\|ExperimentalWarning\|--trace-warnings\|--import' ); then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
@@ -147,13 +150,15 @@ run_test_electron_loader packages/apps/app/src/main/mcp-tools/unarchive-task.tes
 run_test_electron_loader packages/apps/app/src/main/mcp-tools/update-task.test.ts
 run_test_electron_loader packages/apps/cli/test/tasks-rest.test.ts
 
-# CLI command tests (need Electron Node for better-sqlite3 + ESM interop)
-run_test_no_loader packages/apps/cli/test/db.test.ts
-run_test_no_loader packages/apps/cli/test/tags.test.ts
-run_test_no_loader packages/apps/cli/test/templates.test.ts
-run_test_no_loader packages/apps/cli/test/automations.test.ts
-run_test_no_loader packages/apps/cli/test/tasks-ext.test.ts
-run_test_no_loader packages/apps/cli/test/projects-update.test.ts
+# CLI command tests (need Electron Node for better-sqlite3 + ESM interop).
+# Use the loader so @dagrejs/dagre (pulled transitively via the ai-config barrel)
+# is mocked — the real ESM build trips Node's require(esm)-in-cycle guard.
+run_test_electron_loader packages/apps/cli/test/db.test.ts
+run_test_electron_loader packages/apps/cli/test/tags.test.ts
+run_test_electron_loader packages/apps/cli/test/templates.test.ts
+run_test_electron_loader packages/apps/cli/test/automations.test.ts
+run_test_electron_loader packages/apps/cli/test/tasks-ext.test.ts
+run_test_electron_loader packages/apps/cli/test/projects-update.test.ts
 
 if [ -n "$LINEAR_API_KEY" ]; then
   run_test_no_loader packages/domains/integrations/src/main/handlers.integration.linear.test.ts

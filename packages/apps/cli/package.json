@@ -2,6 +2,7 @@
   "name": "@slayzone/cli",
   "version": "0.33.1",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsgo --noEmit"

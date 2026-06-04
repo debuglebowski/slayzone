@@ -25,7 +25,15 @@ h.db
   .run(projectId2, 'OtherProj', '#111')
 
 // --- helpers that mirror the CLI tag SQL ---
-function createTag(name: string, pid: string, color = '#6366f1', textColor = '#ffffff') {
+// Schema enforces UNIQUE(project_id, color, text_color); default to a unique
+// color per tag so repeated default-color inserts in one project don't collide.
+let colorSeq = 0
+function createTag(
+  name: string,
+  pid: string,
+  color = `#${(0x100000 + colorSeq++).toString(16).slice(-6)}`,
+  textColor = '#ffffff'
+) {
   const id = crypto.randomUUID()
   const nextOrder = (
     h.db
@@ -49,7 +57,7 @@ function listTags(pid: string) {
 
 describe('tags create', () => {
   test('creates with defaults', () => {
-    const tag = createTag('bug', projectId)
+    const tag = createTag('bug', projectId, '#6366f1')
     const row = h.db.prepare('SELECT * FROM tags WHERE id = ?').get(tag.id) as Record<
       string,
       unknown

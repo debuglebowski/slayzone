@@ -24,14 +24,17 @@ h.db
   .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
   .run(projectId, 'TaskExtProj', '#000')
 
-// Create tags
+// Create tags — schema enforces UNIQUE(project_id, color, text_color), so give
+// each tag a distinct color.
+let colorSeq = 0
 function createTag(name: string) {
   const id = crypto.randomUUID()
+  const color = `#${(0x100000 + colorSeq++).toString(16).slice(-6)}`
   h.db
     .prepare(
       'INSERT INTO tags (id, project_id, name, color, text_color, sort_order) VALUES (?, ?, ?, ?, ?, 0)'
     )
-    .run(id, projectId, name, '#6366f1', '#ffffff')
+    .run(id, projectId, name, color, '#ffffff')
   return id
 }
 const bugTagId = createTag('bug')
