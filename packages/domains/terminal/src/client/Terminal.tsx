@@ -35,6 +35,10 @@ const trimSelectionTrailingSpaces = (s: string): string =>
     .map((l) => l.replace(/[ \t]+$/, ''))
     .join('\n')
 
+// Keep Option available for keyboard-layout chars ($, €, etc.). Option+Arrow
+// word nav is handled explicitly in handleTerminalKeyEvent.
+const MAC_OPTION_IS_META = false
+
 // Override xterm underline styles - Claude Code outputs these and they persist incorrectly
 // This is a definitive fix that works regardless of ANSI code filtering
 const underlineOverride = document.createElement('style')
@@ -641,6 +645,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             searchAddonRef.current = cached.searchAddon
             webglAddonRef.current = cached.webglAddon ?? null
             registerActiveAddon(sessionId, cached.serializeAddon)
+            cached.terminal.options.macOptionIsMeta = MAC_OPTION_IS_META
             if (cached.lastRenderedSeq !== undefined) {
               lastRenderedSeqRef.current = cached.lastRenderedSeq
             }
@@ -792,7 +797,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         // Create new terminal
         const terminal = new XTerm({
           allowProposedApi: true,
-          macOptionIsMeta: true,
+          macOptionIsMeta: MAC_OPTION_IS_META,
           cursorBlink: false,
           fontSize: terminalFontSize,
           fontFamily: terminalFontFamily,
