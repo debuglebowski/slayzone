@@ -658,3 +658,26 @@ useTabStore.subscribe(
   },
   { equalityFn: shallow }
 )
+
+// Warm-process gate: push this window's per-project open-task-tab counts to main so it
+// keeps exactly one warm agent shell ready per project that has ≥1 open tab. Full snapshot
+// each time (idempotent on the main side), debounced to coalesce rapid tab churn.
+let _warmDebounceTimer: ReturnType<typeof setTimeout> | null = null
+useTabStore.subscribe(
+  (state) => ({ tabs: state.tabs, _taskLookup: state._taskLookup }),
+  ({ tabs, _taskLookup }) => {
+    if (typeof window === 'undefined' || !window.api?.warm) return
+    const counts: Record<string, number> = {}
+    for (const tab of tabs) {
+      if (tab.type !== 'task') continue
+      const projectId = _taskLookup.tasks.find((t) => t.id === tab.taskId)?.project_id
+      if (!projectId) continue
+      counts[projectId] = (counts[projectId] ?? 0) + 1
+    }
+    if (_warmDebounceTimer) clearTimeout(_warmDebounceTimer)
+    _warmDebounceTimer = setTimeout(() => {
+      void window.api.warm.setProjectTabCounts(counts)
+    }, 150)
+  },
+  { equalityFn: shallow }
+)

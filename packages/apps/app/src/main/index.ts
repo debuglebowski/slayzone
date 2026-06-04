@@ -242,6 +242,8 @@ import {
   setIdleCloseConfigGetter,
   setChatSpawnedTabRecorder,
   beginTerminalShutdown,
+  initWarmProcessManager,
+  teardownAllWarm,
   chatEvents,
   chatQueueEvents
 } from '@slayzone/terminal/main'
@@ -487,6 +489,8 @@ function shutdownSubprocessesForQuit(): Promise<void> {
   quitSubprocessCleanupPromise = (async () => {
     try {
       beginTerminalShutdown()
+      // Kill held warm shells and suppress re-arm before the pty sweep runs.
+      teardownAllWarm()
     } catch (err) {
       console.error('[main] quit subprocess cleanup failed in beginTerminalShutdown:', err)
     }
@@ -1132,7 +1136,8 @@ app
       'labs_loop_mode',
       'terminal_auto_close_idle',
       'terminal_idle_close_value',
-      'terminal_idle_close_unit'
+      'terminal_idle_close_unit',
+      'terminal_prewarm_enabled'
     ])
     logBoot('migrations applied')
 
@@ -1552,6 +1557,20 @@ app
       return {
         enabled: settings.getCached('terminal_auto_close_idle') === '1',
         idleMs: value * unitMs
+      }
+    })
+    // Warm-process pool: keep one ready agent shell per project that has open tabs,
+    // so the first agent a task opens skips shell-init cold start. Opt-in, read live;
+    // raw `=== '1'` keeps it strictly off until enabled.
+    initWarmProcessManager({
+      db,
+      isEnabled: () => settings.getCached('terminal_prewarm_enabled') === '1',
+      getProjectRoot: async (projectId) => {
+        const row = await db.get<{ path?: string }>(
+          'SELECT path FROM projects WHERE id = ?',
+          [projectId]
+        )
+        return row?.path ?? null
       }
     })
     logBoot('terminal-tabs handlers registered')

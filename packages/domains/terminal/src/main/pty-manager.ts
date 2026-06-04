@@ -917,6 +917,77 @@ function stopTitlePolling(session: PtySession): void {
   }
 }
 
+/** Base shell environment shared by every PTY spawn (cold createPty + warm pool). */
+function buildBaseEnv(): Record<string, string> {
+  return {
+    ...process.env,
+    USER: process.env.USER || process.env.USERNAME || userInfo().username,
+    HOME: process.env.HOME || homedir(),
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    COLORFGBG: nativeTheme.shouldUseDarkColors ? '15;0' : '0;15',
+    TERM_BACKGROUND: nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+  } as Record<string, string>
+}
+
+/**
+ * Low-level shell spawn shared by createPty and the warm-process pool. Non-transport
+ * spawns get wrapped in `/bin/sh -c 'ulimit -n 65535; exec <shell> <args>'` so child
+ * processes inherit a soft fd limit high enough for Bun-compiled CLIs. Transport spawns
+ * (docker/ssh) handle their own env on the remote side.
+ */
+function spawnWrappedShell(
+  file: string,
+  args: string[],
+  spawnOptions: pty.IPtyForkOptions,
+  transport: boolean
+): pty.IPty {
+  if (transport) return pty.spawn(file, args, spawnOptions)
+  const wrapped = wrapShellWithUlimit(file, args)
+  return pty.spawn(wrapped.file, wrapped.args, spawnOptions)
+}
+
+/**
+ * Spawn a bare login+interactive shell (no post-spawn command) for the warm-process
+ * pool. Reuses the exact shell resolution, startup args, ulimit wrap, and interactive-only
+ * fallback that createPty's initial spawn uses, so an adopted warm shell is indistinguishable
+ * from a cold spawn. The caller writes `exec <agent>` later, at adopt time.
+ */
+export function spawnLoginShell(opts: {
+  cwd: string
+  extraEnv?: Record<string, string>
+  cols?: number
+  rows?: number
+}): { pty: pty.IPty; shell: string; usedArgs: string[]; usedFallback: boolean } {
+  const shell = resolveUserShell()
+  const args = getShellStartupArgs(shell)
+  const spawnOptions: pty.IPtyForkOptions = {
+    name: 'xterm-256color',
+    cols: opts.cols ?? 80,
+    rows: opts.rows ?? 24,
+    cwd: opts.cwd,
+    env: { ...buildBaseEnv(), ...(opts.extraEnv ?? {}) }
+  }
+  try {
+    return {
+      pty: spawnWrappedShell(shell, args, spawnOptions, false),
+      shell,
+      usedArgs: args,
+      usedFallback: false
+    }
+  } catch (err) {
+    // Some shells reject the login+interactive combo on certain hosts — retry without -l.
+    if (!(args.includes('-i') && args.includes('-l'))) throw err
+    const fallbackArgs = args.filter((a) => a !== '-l')
+    return {
+      pty: spawnWrappedShell(shell, fallbackArgs, spawnOptions, false),
+      shell,
+      usedArgs: fallbackArgs,
+      usedFallback: true
+    }
+  }
+}
+
 export interface CreatePtyOptions {
   win: BrowserWindow
   sessionId: string
@@ -935,6 +1006,14 @@ export interface CreatePtyOptions {
   patternError?: string | null
   cols?: number
   rows?: number
+  /**
+   * Adopt an already-spawned, idle login shell instead of spawning a fresh one
+   * (warm-process pool). When present, the initial `pty.spawn()` is skipped and
+   * this pty is registered under `sessionId` from the start — the session is never
+   * renamed, so the core I/O path is untouched. The post-spawn command (e.g.
+   * `export SLAYZONE_TASK_ID=…; exec claude …`) is written into the live shell.
+   */
+  adoptPty?: { pty: pty.IPty; seedBuffer?: string }
 }
 
 export async function createPty(
@@ -1050,15 +1129,20 @@ export async function createPty(
 
     const mcpEnv = await buildMcpEnv(db, taskId, terminalMode)
 
-    const baseEnv = {
-      ...process.env,
-      USER: process.env.USER || process.env.USERNAME || userInfo().username,
-      HOME: process.env.HOME || homedir(),
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor',
-      COLORFGBG: nativeTheme.shouldUseDarkColors ? '15;0' : '0;15',
-      TERM_BACKGROUND: nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-    } as Record<string, string>
+    // Adoption: the warm shell was spawned without the task-scoped MCP env
+    // (SLAYZONE_TASK_ID etc.) — env can't be mutated on a live process, so export
+    // it into the shell immediately before `exec <agent>`. Reuses the SAME mcpEnv a
+    // cold spawn bakes in, so the adopted agent's task identity is byte-for-byte correct.
+    if (opts.adoptPty && spawnConfig.postSpawnCommand) {
+      const exportPrefix = Object.entries(mcpEnv)
+        .map(([k, v]) => `export ${k}=${quoteForShell(v)}`)
+        .join('; ')
+      if (exportPrefix) {
+        spawnConfig.postSpawnCommand = `${exportPrefix}; ${spawnConfig.postSpawnCommand}`
+      }
+    }
+
+    const baseEnv = buildBaseEnv()
 
     // Check for docker/ssh transport wrapping
     const transport = buildTransportSpawn(
@@ -1126,7 +1210,8 @@ export async function createPty(
     // When a post-spawn command is present, pass it via -c flag instead of
     // writing to stdin after a delay.  This prevents shell init prompts
     // (e.g. oh-my-zsh update [Y/n]) from consuming/corrupting the command.
-    const directExec = !transport && !!spawnConfig.postSpawnCommand && platform() !== 'win32'
+    const directExec =
+      !transport && !!spawnConfig.postSpawnCommand && platform() !== 'win32' && !opts.adoptPty
     if (directExec) {
       initialArgs.push('-c', spawnConfig.postSpawnCommand!)
     }
@@ -1142,32 +1227,37 @@ export async function createPty(
     // <shell> <args>'` so child processes inherit a soft fd limit high enough
     // for Bun-compiled CLIs (e.g. droid). Transport spawns (docker/ssh) handle
     // their own env on the remote side.
-    const spawn = (rawFile: string, rawArgs: string[]): pty.IPty => {
-      if (transport) return pty.spawn(rawFile, rawArgs, spawnOptions)
-      const wrapped = wrapShellWithUlimit(rawFile, rawArgs)
-      return pty.spawn(wrapped.file, wrapped.args, spawnOptions)
-    }
-    try {
-      ptyProcess = spawn(spawnFile, initialArgs)
-    } catch (err) {
-      // Fallback for shells that reject login flag combinations (host only).
-      if (!canRetryInteractiveOnly) throw err
-      usedArgs = initialArgs.filter((arg) => arg !== '-l')
-      ptyProcess = spawn(spawnFile, usedArgs)
-      usedFallback = true
-      recordDiagnosticEvent({
-        level: 'warn',
-        source: 'pty',
-        event: 'pty.spawn_fallback',
-        sessionId,
-        taskId: taskIdFromSessionId(sessionId),
-        message: (err as Error).message,
-        payload: {
-          shell: spawnConfig.shell,
-          fromArgs: initialArgs,
-          toArgs: usedArgs
-        }
-      })
+    const spawn = (rawFile: string, rawArgs: string[]): pty.IPty =>
+      spawnWrappedShell(rawFile, rawArgs, spawnOptions, !!transport)
+    if (opts.adoptPty) {
+      // Warm-process adoption: reuse the already-spawned, rc-initialized idle shell.
+      // Skip the initial spawn entirely; the post-spawn command (export + exec agent)
+      // is written into the live shell below. Fallback paths still re-spawn fresh
+      // shells via `spawn` if the agent exits, exactly as for a cold spawn.
+      ptyProcess = opts.adoptPty.pty
+    } else {
+      try {
+        ptyProcess = spawn(spawnFile, initialArgs)
+      } catch (err) {
+        // Fallback for shells that reject login flag combinations (host only).
+        if (!canRetryInteractiveOnly) throw err
+        usedArgs = initialArgs.filter((arg) => arg !== '-l')
+        ptyProcess = spawn(spawnFile, usedArgs)
+        usedFallback = true
+        recordDiagnosticEvent({
+          level: 'warn',
+          source: 'pty',
+          event: 'pty.spawn_fallback',
+          sessionId,
+          taskId: taskIdFromSessionId(sessionId),
+          message: (err as Error).message,
+          payload: {
+            shell: spawnConfig.shell,
+            fromArgs: initialArgs,
+            toArgs: usedArgs
+          }
+        })
+      }
     }
     const shellSpawnMs = Date.now() - spawnStartTs
 
@@ -1198,6 +1288,11 @@ export async function createPty(
       syncQueryPending: '',
       lastEmittedTitle: ''
     })
+    // Adoption: seed the fresh RingBuffer with whatever the warm shell already
+    // emitted (its rc prompt), so getBufferSince / hibernation history stay consistent.
+    if (opts.adoptPty?.seedBuffer) {
+      sessions.get(sessionId)?.buffer.append(opts.adoptPty.seedBuffer)
+    }
     // Record this tab as warm — survives across app shutdown so next boot
     // auto-restarts. Cleared in finalizeSessionExit on natural/user exit.
     // Also clear any hibernated flag — a fresh spawn means it's no longer asleep.
@@ -1379,6 +1474,13 @@ export async function createPty(
       // no need to write to stdin.
       if (directExec) {
         commandDispatchedTs = Date.now()
+        return
+      }
+      // Adoption: the warm shell is already rc-initialized and idle at its prompt,
+      // so write the launch command immediately — no shell-init delay needed.
+      if (opts.adoptPty) {
+        commandDispatchedTs = Date.now()
+        target.write(`${spawnConfig.postSpawnCommand}\r`)
         return
       }
       // Fallback for Windows: delay to let shell initialize

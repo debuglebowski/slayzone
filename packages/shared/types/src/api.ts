@@ -812,6 +812,10 @@ export interface ElectronAPI {
     setShellOverride: (value: string | null) => Promise<void>
     claimSession: (sessionId: string) => Promise<{ ok: boolean }>
   }
+  warm: {
+    /** Push this window's full per-project open-task-tab snapshot (keyed by projectId). */
+    setProjectTabCounts: (counts: Record<string, number>) => Promise<void>
+  }
   session: {
     list: () => Promise<SessionInfo[]>
     getState: (sessionId: string) => Promise<TerminalState | null>

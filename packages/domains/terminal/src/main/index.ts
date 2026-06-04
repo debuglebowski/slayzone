@@ -1,6 +1,11 @@
 export { registerPtyHandlers, getPtyHandlerChannels } from './handlers'
 export { registerUsageHandlers } from './usage'
 export {
+  initWarmProcessManager,
+  teardownAllWarm,
+  getWarmStatus
+} from './warm-process-manager'
+export {
   killAllPtys,
   shutdownAllPtys,
   killPty,

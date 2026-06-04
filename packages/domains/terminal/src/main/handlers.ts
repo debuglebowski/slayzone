@@ -23,6 +23,11 @@ import {
 } from './pty-manager'
 import { listSessions, getSessionState } from './session-registry'
 import { listChatSessions } from './chat-transport-manager'
+import {
+  claimWarmShell,
+  setProjectTabCounts,
+  clearWindowTabCounts
+} from './warm-process-manager'
 
 const execFileAsync = promisify(execFile)
 import { getAdapter, type ExecutionContext } from './adapters'
@@ -298,6 +303,27 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     const modeRow = await db.prepare('SELECT * FROM terminal_modes WHERE id = ?').get(modeId)
     const modeInfo = modeRow ? mapModeRow(modeRow) : undefined
 
+    // Warm-process pool: if this project has a ready warm shell that matches this
+    // spawn (default mode, project-root cwd, fresh start), adopt it instead of
+    // cold-spawning. Resolve the project via the session's task. A miss is silent —
+    // createPty cold-spawns exactly as before.
+    let warmClaim: ReturnType<typeof claimWarmShell> = null
+    const taskId = opts.sessionId.split(':')[0]
+    if (taskId) {
+      const taskRow = (await db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(taskId)) as
+        | { project_id?: string }
+        | undefined
+      const projectId = taskRow?.project_id
+      if (projectId) {
+        warmClaim = claimWarmShell({
+          projectId,
+          mode: modeId,
+          cwd: opts.cwd,
+          resuming: !!opts.existingConversationId
+        })
+      }
+    }
+
     return createPty({
       win,
       sessionId: opts.sessionId,
@@ -315,7 +341,8 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
       patternWorking: modeInfo?.patternWorking,
       patternError: modeInfo?.patternError,
       cols: opts.cols,
-      rows: opts.rows
+      rows: opts.rows,
+      adoptPty: warmClaim ?? undefined
     })
   })
 
@@ -369,6 +396,23 @@ export function registerPtyHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
 
   handle('chat:list', () => {
     return listChatSessions()
+  })
+
+  // Warm-process gate: the renderer pushes its full per-project open-task-tab snapshot
+  // (keyed by projectId). Main unions across windows to decide which projects keep a warm
+  // shell. Idempotent — a full snapshot each time, so dropped messages self-heal. A window's
+  // contribution is cleared when its webContents is destroyed.
+  const warmHookedSenders = new Set<number>()
+  handle('warm:setProjectTabCounts', (event, counts: Record<string, number>) => {
+    const windowId = event.sender.id
+    setProjectTabCounts(windowId, counts)
+    if (!warmHookedSenders.has(windowId)) {
+      warmHookedSenders.add(windowId)
+      event.sender.once('destroyed', () => {
+        warmHookedSenders.delete(windowId)
+        clearWindowTabCounts(windowId)
+      })
+    }
   })
 
   handle('pty:getState', (_, sessionId: string) => {

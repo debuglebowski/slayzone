@@ -525,6 +525,9 @@ const api: ElectronAPI = {
     readFilePaths: () => ipcRenderer.invoke('clipboard:readFilePaths'),
     hasFiles: () => ipcRenderer.invoke('clipboard:hasFiles')
   },
+  warm: {
+    setProjectTabCounts: (counts) => ipcRenderer.invoke('warm:setProjectTabCounts', counts)
+  },
   pty: {
     create: (opts) => ipcRenderer.invoke('pty:create', opts),
     testExecutionContext: (context) => ipcRenderer.invoke('pty:testExecutionContext', context),

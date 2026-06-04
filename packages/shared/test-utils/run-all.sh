@@ -88,6 +88,12 @@ run_test packages/domains/terminal/src/main/adapters/codex-adapter.test.ts
 # Terminal — chat transport manager (session lifecycle + liveness watchdog)
 run_test packages/domains/terminal/src/main/chat-transport-manager.test.ts
 
+# Terminal — warm-process pool (per-project gate + adopt-match). Strict+electron:
+# pty-manager pulls in `electron`; a fake spawnShell is injected so no real shells spawn.
+run_test_electron_strict_loader packages/domains/terminal/src/main/warm-process-manager.test.ts
+# Terminal — createPty warm-shell adoption branch (fake pty/win/db, no real spawn).
+run_test_electron_strict_loader packages/domains/terminal/src/main/adopt-pty.test.ts
+
 run_test_no_loader() {
   echo ""
   echo "=== $1 (integration) ==="
