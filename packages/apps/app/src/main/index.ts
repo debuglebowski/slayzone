@@ -1464,7 +1464,7 @@ app
       mainWindow?.webContents.send('tasks:changed')
     }
     registerProjectHandlers(ipcMain, db)
-    registerTaskHandlers(ipcMain, db, notifyTasksChanged)
+    registerTaskHandlers(ipcMain, db, notifyTasksChanged, ensureDataRoot())
     registerTaskTemplateHandlers(ipcMain, db)
     registerTagHandlers(ipcMain, db)
     registerHistoryHandlers(ipcMain, db)

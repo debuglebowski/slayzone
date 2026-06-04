@@ -54,7 +54,12 @@ export type { TaskRuntimeAdapters, DiagnosticEventPayload, DiagnosticLevel } fro
 export function registerTaskHandlers(
   ipcMain: IpcMain,
   db: SlayzoneDb,
-  onMutation?: () => void
+  onMutation?: () => void,
+  /** App data root — the host passes its canonical `ensureDataRoot()`, the SAME value
+   *  the tRPC artifacts router resolves from `ctx.dataRoot`, so IPC + tRPC artifact file
+   *  paths can't silently diverge. Falls back to the legacy env/userData expression only
+   *  when unwired (tests / no host). */
+  dataRoot?: string
 ): void {
   // Startup purges run async (fire-and-forget) since the DB is now an async
   // worker proxy. Registration of IPC handlers below stays synchronous.
@@ -182,7 +187,7 @@ export function registerTaskHandlers(
   // fan-out. The download *dialogs* below stay here — they need Electron `dialog`/
   // `BrowserWindow`/`shell` + the artifact-export renderers.
 
-  const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+  const dataDir = dataRoot ?? (process.env.SLAYZONE_DB_DIR || app.getPath('userData'))
   const artifactsDir = path.join(dataDir, 'artifacts')
   startArtifactWatcher(artifactsDir)
   const store = createArtifactStore(dataDir)
