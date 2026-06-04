@@ -1,4 +1,4 @@
-import { assignNewWorktreeColors } from '@slayzone/ui'
+import { assignNewWorktreeColors } from '../shared'
 import { detectWorktrees } from './git-worktree'
 
 const registry = new Map<string, Map<string, string>>()

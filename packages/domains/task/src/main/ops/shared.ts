@@ -903,6 +903,9 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
 }
 
 export interface OpDeps {
-  ipcMain: import('electron').IpcMain
+  /** Optional: the in-process IPC bus used to fan out `db:tasks:*:done` events to
+   *  app/main listeners. Absent when ops are called from a tRPC procedure (the task
+   *  router injects ops with `{}` deps). Emit sites guard with `?.`. */
+  ipcMain?: import('electron').IpcMain
   onMutation?: () => void
 }

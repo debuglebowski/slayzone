@@ -9,6 +9,9 @@ import { integrationsRouter } from './routers/integrations'
 import { projectsRouter } from './routers/projects'
 import { settingsRouter } from './routers/settings'
 import { tagsRouter } from './routers/tags'
+import { taskRouter } from './routers/task'
+import { templateRouter } from './routers/template'
+import { artifactsRouter } from './routers/artifacts'
 import { taskTerminalsRouter } from './routers/task-terminals'
 import { testPanelRouter } from './routers/test-panel'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
@@ -16,6 +19,7 @@ import { usageAnalyticsRouter } from './routers/usage-analytics'
 export const appRouter = router({
   agentTurns: agentTurnsRouter,
   automations: automationsRouter,
+  artifacts: artifactsRouter,
   chat: chatRouter,
   diagnostics: diagnosticsRouter,
   fileEditor: fileEditorRouter,
@@ -24,6 +28,8 @@ export const appRouter = router({
   projects: projectsRouter,
   settings: settingsRouter,
   tags: tagsRouter,
+  task: taskRouter,
+  template: templateRouter,
   taskTerminals: taskTerminalsRouter,
   testPanel: testPanelRouter,
   usageAnalytics: usageAnalyticsRouter

@@ -201,7 +201,8 @@ import {
   registerTaskTemplateHandlers,
   registerFilesHandlers,
   closeArtifactWatcher,
-  handleAttentionTransition
+  handleAttentionTransition,
+  taskOps
 } from '@slayzone/task/main'
 import { registerTagHandlers } from '@slayzone/tags/main'
 import { registerFeedbackHandlers } from '@slayzone/feedback/main'
@@ -1638,6 +1639,10 @@ app
           // Same ops instance the IPC handlers delegate to → IPC + integrationsRouter
           // share one implementation while both coexist (renderer cutover is slice 5).
           mod.setIntegrationOps(integrationHandles.ops)
+          // Task CRUD/deps/board ops for the task router (electron-coupled → injected;
+          // artifacts/template stores are electron-free + imported directly). Same ops
+          // the IPC handlers call — one implementation, both transports.
+          mod.setTaskDeps({ ops: taskOps })
           mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
           logBoot('trpc server started')

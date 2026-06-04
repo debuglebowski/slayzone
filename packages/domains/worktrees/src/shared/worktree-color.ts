@@ -1,3 +1,7 @@
+// Deterministic worktree-color palette + slot assignment. Pure (zero deps) worktree
+// domain logic — lives in /shared so both worktrees/main (color-registry) and renderer
+// consumers can use it without a renderer (@slayzone/ui) dependency. Previously lived in
+// @slayzone/ui, which forced a backwards main→ui edge.
 export const WORKTREE_COLORS = [
   '#6366f1',
   '#f59e0b',

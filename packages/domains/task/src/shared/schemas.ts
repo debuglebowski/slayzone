@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { taskStatusOptions as sharedStatusOptions } from '@slayzone/ui'
 import type { TaskStatus } from './types'
 
 // Status keys are project-defined at runtime.
@@ -67,9 +66,6 @@ export interface UpdateTaskFormData {
 
 export type CreateProjectFormData = z.infer<typeof createProjectSchema>
 export type UpdateProjectFormData = z.infer<typeof updateProjectSchema>
-
-// Status options for Select - re-exported from shared ui
-export const statusOptions = sharedStatusOptions
 
 // Priority options for Select
 export const priorityOptions = [

@@ -43,7 +43,7 @@ export async function updateManyTasksOp(
 
   for (const r of results) {
     if (!r.next) continue
-    ipcMain.emit('db:tasks:update:done', null, r.id, { oldStatus: r.previous?.status })
+    ipcMain?.emit('db:tasks:update:done', null, r.id, { oldStatus: r.previous?.status })
     const projectId = r.next.project_id ?? r.previous?.project_id
     if (projectId) {
       taskEvents.emit('task:updated', {

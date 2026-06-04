@@ -1,46 +1,25 @@
 import type { IpcMain } from 'electron'
-import { app, dialog, BrowserWindow, shell } from 'electron'
+import { app } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   CreateTaskInput,
   UpdateTaskInput,
   CreateArtifactInput,
   UpdateArtifactInput,
-  TaskArtifact,
-  RenderMode,
-  ArtifactFolder,
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
 } from '@slayzone/task/shared'
-import {
-  getExtensionFromTitle,
-  getEffectiveRenderMode,
-  canExportAsPdf,
-  canExportAsPng,
-  canExportAsHtml
-} from '@slayzone/task/shared'
 import path from 'path'
-import {
-  existsSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  unlinkSync,
-  rmSync,
-  copyFileSync,
-  statSync,
-  createWriteStream
-} from 'fs'
-import archiver from 'archiver'
-import {
-  buildPdfHtml,
-  buildMermaidPdfHtml,
-  buildPngHtml,
-  renderToPdf,
-  renderToPng
-} from './artifact-export'
 import { startArtifactWatcher } from './artifact-watcher'
-import type { VersionRef } from '@slayzone/task-artifacts/shared'
+import { createArtifactStore } from '../server/artifact-store'
+import {
+  downloadArtifactFile,
+  downloadArtifactFolder,
+  downloadArtifactAsPdf,
+  downloadArtifactAsPng,
+  downloadArtifactAsHtml,
+  downloadAllArtifactsAsZip
+} from './artifact-downloads'
 import {
   addBlockerOp,
   archiveManyTasksOp,
@@ -196,331 +175,129 @@ export function registerTaskHandlers(
   ipcMain.handle('db:loadBoardData', () => loadBoardDataOp(db))
 
   // --- Task Artifacts ---
+  //
+  // CRUD/version/folder logic lives in the electron-free ../server/artifact-store
+  // (shared with the tRPC `artifacts` router). These handlers stay registered for
+  // renderer coexistence (slice 5 cutover) and own the post-mutation `onMutation`
+  // fan-out. The download *dialogs* below stay here — they need Electron `dialog`/
+  // `BrowserWindow`/`shell` + the artifact-export renderers.
 
   const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
   const artifactsDir = path.join(dataDir, 'artifacts')
   startArtifactWatcher(artifactsDir)
+  const store = createArtifactStore(dataDir)
 
-  function getArtifactFilePath(taskId: string, artifactId: string, title: string): string {
-    const ext = getExtensionFromTitle(title) || '.txt'
-    return path.join(artifactsDir, taskId, `${artifactId}${ext}`)
-  }
-
-  // Fallback to pre-v127 path for users where the boot-time disk migration
-  // silently failed (permission/FS errors). Belt-and-suspenders — read on
-  // every miss, don't mutate. Cost: one existsSync per missing-file path.
-  function getLegacyArtifactFilePath(taskId: string, artifactId: string, title: string): string {
-    const ext = getExtensionFromTitle(title) || '.txt'
-    return path.join(dataDir, 'assets', taskId, `${artifactId}${ext}`)
-  }
-
-  function parseArtifact(row: Record<string, unknown> | undefined): TaskArtifact | null {
-    if (!row) return null
-    return {
-      id: row.id as string,
-      task_id: row.task_id as string,
-      folder_id: (row.folder_id as string) ?? null,
-      title: row.title as string,
-      render_mode: (row.render_mode as RenderMode) ?? null,
-      view_mode: (row.view_mode as string) ?? null,
-      readability_override: (row.readability_override as 'compact' | 'normal' | null) ?? null,
-      width_override: (row.width_override as 'narrow' | 'wide' | null) ?? null,
-      language: (row.language as string) ?? null,
-      order: row.order as number,
-      created_at: row.created_at as string,
-      updated_at: row.updated_at as string,
-      current_version_id: (row.current_version_id as string) ?? null
-    }
-  }
-
-  function parseFolder(row: Record<string, unknown> | undefined): ArtifactFolder | null {
-    if (!row) return null
-    return {
-      id: row.id as string,
-      task_id: row.task_id as string,
-      parent_id: (row.parent_id as string) ?? null,
-      name: row.name as string,
-      order: row.order as number,
-      created_at: row.created_at as string
-    }
-  }
-
-  ipcMain.handle('db:artifacts:getByTask', async (_, taskId: string) => {
-    const rows = (await db
-      .prepare(
-        'SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY "order" ASC, created_at ASC'
-      )
-      .all(taskId)) as Record<string, unknown>[]
-    return rows.map(parseArtifact).filter(Boolean)
-  })
-
-  ipcMain.handle('db:artifacts:get', async (_, id: string) => {
-    const row = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    return parseArtifact(row)
-  })
-
+  ipcMain.handle('db:artifacts:getByTask', (_, taskId: string) =>
+    store.listArtifactsByTask(db, taskId)
+  )
+  ipcMain.handle('db:artifacts:get', (_, id: string) => store.getArtifact(db, id))
   ipcMain.handle('db:artifacts:create', async (_, data: CreateArtifactInput) => {
-    const row = await db.namedTxn<Record<string, unknown> | undefined>('task-artifacts:create', {
-      dataDir,
-      taskId: data.taskId,
-      folderId: data.folderId ?? null,
-      title: data.title,
-      renderMode: data.renderMode ?? null,
-      language: data.language ?? null,
-      content: data.content ?? ''
-    })
+    const r = await store.createArtifact(db, data)
     onMutation?.()
-    return parseArtifact(row)
+    return r
   })
-
   ipcMain.handle(
     'db:artifacts:update',
     async (_, data: UpdateArtifactInput & { mutateVersion?: boolean }) => {
-      // Mirror the original `data.x !== undefined` checks: only forward keys the
-      // caller actually provided so the worker rebuilds the same SET clause.
-      const setKeys: string[] = []
-      for (const key of [
-        'title',
-        'folderId',
-        'renderMode',
-        'viewMode',
-        'readabilityOverride',
-        'widthOverride',
-        'language',
-        'content'
-      ] as const) {
-        if (data[key] !== undefined) setKeys.push(key)
-      }
-      const row = await db.namedTxn<Record<string, unknown> | null | undefined>(
-        'task-artifacts:update',
-        {
-          dataDir,
-          id: data.id,
-          mutateVersion: data.mutateVersion,
-          title: data.title,
-          folderId: data.folderId,
-          renderMode: data.renderMode,
-          viewMode: data.viewMode,
-          readabilityOverride: data.readabilityOverride,
-          widthOverride: data.widthOverride,
-          language: data.language,
-          content: data.content,
-          setKeys
-        }
-      )
-      if (row === null) return null
+      const r = await store.updateArtifact(db, data)
+      if (r === null) return null
       onMutation?.()
-      return parseArtifact(row ?? undefined)
+      return r
     }
   )
-
   ipcMain.handle('db:artifacts:delete', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return false
-
-    const filePath = getArtifactFilePath(existing.task_id as string, id, existing.title as string)
-    if (existsSync(filePath)) unlinkSync(filePath)
-
-    await db.prepare('DELETE FROM task_artifacts WHERE id = ?').run(id)
-    onMutation?.()
-    return true
+    const ok = await store.deleteArtifact(db, id)
+    if (ok) onMutation?.()
+    return ok
   })
-
   ipcMain.handle(
     'db:artifacts:reorder',
-    async (_, data: string[] | { folderId: string | null; artifactIds: string[] }) => {
-      const artifactIds = Array.isArray(data) ? data : data.artifactIds
-      await db.batchTxn(
-        artifactIds.map((id, index) => ({
-          type: 'run',
-          sql: 'UPDATE task_artifacts SET "order" = ? WHERE id = ?',
-          params: [index, id]
-        }))
-      )
-    }
+    (_, data: string[] | { folderId: string | null; artifactIds: string[] }) =>
+      store.reorderArtifacts(db, data)
   )
-
-  ipcMain.handle('db:artifacts:readContent', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return null
-    const filePath = getArtifactFilePath(existing.task_id as string, id, existing.title as string)
-    if (existsSync(filePath)) return readFileSync(filePath, 'utf-8')
-    const legacyPath = getLegacyArtifactFilePath(
-      existing.task_id as string,
-      id,
-      existing.title as string
-    )
-    if (existsSync(legacyPath)) return readFileSync(legacyPath, 'utf-8')
-    return ''
-  })
-
-  ipcMain.handle('db:artifacts:getFilePath', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return null
-    return getArtifactFilePath(existing.task_id as string, id, existing.title as string)
-  })
-
-  ipcMain.handle('db:artifacts:getMtime', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return null
-    const filePath = getArtifactFilePath(existing.task_id as string, id, existing.title as string)
-    try {
-      return statSync(filePath).mtimeMs
-    } catch {
-      return null
-    }
-  })
+  ipcMain.handle('db:artifacts:readContent', (_, id: string) => store.readArtifactContent(db, id))
+  ipcMain.handle('db:artifacts:getFilePath', (_, id: string) => store.getArtifactPath(db, id))
+  ipcMain.handle('db:artifacts:getMtime', (_, id: string) => store.getArtifactMtime(db, id))
 
   ipcMain.handle(
     'db:artifacts:upload',
     async (_, data: { taskId: string; sourcePath: string; title?: string }) => {
-      const row = await db.namedTxn<Record<string, unknown> | undefined>('task-artifacts:upload', {
-        dataDir,
-        taskId: data.taskId,
-        sourcePath: data.sourcePath,
-        title: data.title ?? path.basename(data.sourcePath)
-      })
+      const r = await store.uploadArtifact(db, data)
       onMutation?.()
-      return parseArtifact(row)
+      return r
     }
   )
-
   ipcMain.handle(
     'db:artifacts:pasteFiles',
     async (_, data: { sourcePaths: string[]; destTaskId: string; destFolderId: string | null }) => {
-      const rows = await db.namedTxn<Record<string, unknown>[]>('task-artifacts:pasteFiles', {
-        dataDir,
-        sourcePaths: data.sourcePaths,
-        destTaskId: data.destTaskId,
-        destFolderId: data.destFolderId
-      })
+      const r = await store.pasteArtifactFiles(db, data)
       onMutation?.()
-      return rows.map(parseArtifact).filter(Boolean) as TaskArtifact[]
+      return r
     }
   )
-
   ipcMain.handle(
     'db:artifacts:uploadBlob',
     async (
       _,
       data: { taskId: string; title: string; bytes: Uint8Array; folderId?: string | null }
-    ): Promise<TaskArtifact | null> => {
-      const row = await db.namedTxn<Record<string, unknown> | undefined>(
-        'task-artifacts:uploadBlob',
-        {
-          dataDir,
-          taskId: data.taskId,
-          title: data.title,
-          bytes: data.bytes,
-          folderId: data.folderId ?? null
-        }
-      )
+    ) => {
+      const r = await store.uploadArtifactBlob(db, data)
       onMutation?.()
-      return parseArtifact(row)
+      return r
     }
   )
-
   ipcMain.handle(
     'db:artifacts:uploadDir',
     async (_, data: { taskId: string; dirPath: string; parentFolderId: string | null }) => {
-      const result = await db.namedTxn<{
-        folders: (Record<string, unknown> | undefined)[]
-        artifacts: (Record<string, unknown> | undefined)[]
-      }>('task-artifacts:uploadDir', {
-        dataDir,
-        taskId: data.taskId,
-        dirPath: data.dirPath,
-        parentFolderId: data.parentFolderId
-      })
-
+      const r = await store.uploadArtifactDir(db, data)
       onMutation?.()
-      return {
-        folders: result.folders.map(parseFolder).filter(Boolean),
-        artifacts: result.artifacts.map(parseArtifact).filter(Boolean)
-      }
+      return r
     }
   )
 
   // Cleanup artifact files when a task is permanently deleted
-  ipcMain.handle('db:artifacts:cleanupTask', (_, taskId: string) => {
-    const taskDir = path.join(artifactsDir, taskId)
-    if (existsSync(taskDir)) rmSync(taskDir, { recursive: true, force: true })
-  })
+  ipcMain.handle('db:artifacts:cleanupTask', (_, taskId: string) =>
+    store.cleanupTaskArtifacts(taskId)
+  )
 
   // --- Artifact Versions ---
-  //
-  // The `@slayzone/task-artifacts` version helpers operate on a synchronous
-  // better-sqlite3 db + `TxnRunner`, so they run inside the DB worker via
-  // `namedTxn` (see ./artifacts-txns). Each named txn re-formats `VersionError`
-  // into a serializable `[CODE] message` string before it crosses the worker
-  // boundary, preserving the renderer-facing error contract.
-
   ipcMain.handle(
     'db:artifacts:versions:list',
-    (_, data: { artifactId: string; limit?: number; offset?: number }) => {
-      return db.namedTxn('task-artifacts:versions:list', {
-        artifactId: data.artifactId,
-        limit: data.limit,
-        offset: data.offset
-      })
-    }
+    (_, data: { artifactId: string; limit?: number; offset?: number }) =>
+      store.listArtifactVersions(db, data)
   )
-
   ipcMain.handle(
     'db:artifacts:versions:read',
-    (_, data: { artifactId: string; versionRef: VersionRef }) => {
-      return db.namedTxn('task-artifacts:versions:read', {
-        dataDir,
-        artifactId: data.artifactId,
-        versionRef: data.versionRef
-      })
-    }
+    (_, data: { artifactId: string; versionRef: import('@slayzone/task-artifacts/shared').VersionRef }) =>
+      store.readArtifactVersion(db, data)
   )
-
   ipcMain.handle(
     'db:artifacts:versions:create',
-    (_, data: { artifactId: string; name?: string | null }) => {
-      return db.namedTxn('task-artifacts:versions:create', {
-        dataDir,
-        artifactId: data.artifactId,
-        name: data.name ?? null
-      })
-    }
+    (_, data: { artifactId: string; name?: string | null }) =>
+      store.createArtifactVersion(db, data)
   )
-
   ipcMain.handle(
     'db:artifacts:versions:rename',
-    (_, data: { artifactId: string; versionRef: VersionRef; newName: string | null }) => {
-      return db.namedTxn('task-artifacts:versions:rename', {
-        artifactId: data.artifactId,
-        versionRef: data.versionRef,
-        newName: data.newName
-      })
-    }
+    (
+      _,
+      data: {
+        artifactId: string
+        versionRef: import('@slayzone/task-artifacts/shared').VersionRef
+        newName: string | null
+      }
+    ) => store.renameArtifactVersion(db, data)
   )
-
   ipcMain.handle(
     'db:artifacts:versions:diff',
-    (_, data: { artifactId: string; a: VersionRef; b?: VersionRef }) => {
-      return db.namedTxn('task-artifacts:versions:diff', {
-        dataDir,
-        artifactId: data.artifactId,
-        a: data.a,
-        b: data.b
-      })
-    }
+    (
+      _,
+      data: {
+        artifactId: string
+        a: import('@slayzone/task-artifacts/shared').VersionRef
+        b?: import('@slayzone/task-artifacts/shared').VersionRef
+      }
+    ) => store.diffArtifactVersions(db, data)
   )
-
   ipcMain.handle(
     'db:artifacts:versions:prune',
     (
@@ -532,398 +309,78 @@ export function registerTaskHandlers(
         keepCurrent?: boolean
         dryRun?: boolean
       }
-    ) => {
-      return db.namedTxn('task-artifacts:versions:prune', {
-        dataDir,
-        artifactId: data.artifactId,
-        keepLast: data.keepLast,
-        keepNamed: data.keepNamed,
-        keepCurrent: data.keepCurrent,
-        dryRun: data.dryRun
-      })
-    }
+    ) => store.pruneArtifactVersions(db, data)
   )
-
   ipcMain.handle(
     'db:artifacts:versions:setCurrent',
-    async (_, data: { artifactId: string; versionRef: VersionRef }) => {
-      // The worker switches the current pointer AND flushes the version's bytes
-      // back to the artifact's on-disk file; it returns the version row.
-      const result = await db.namedTxn<{ version: unknown }>('task-artifacts:versions:setCurrent', {
-        dataDir,
-        artifactId: data.artifactId,
-        versionRef: data.versionRef
-      })
+    async (
+      _,
+      data: { artifactId: string; versionRef: import('@slayzone/task-artifacts/shared').VersionRef }
+    ) => {
+      const version = await store.setCurrentArtifactVersion(db, data)
       onMutation?.()
-      return result.version
+      return version
     }
   )
 
-  // --- Artifact Download ---
+  // --- Artifact Download (Electron-only: native dialogs + export renderers) ---
+  // Logic lives in ./artifact-downloads (shared with the tRPC artifacts router, which
+  // dynamic-imports it only in the Electron-main host).
 
-  ipcMain.handle('db:artifacts:downloadFile', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return false
-    const srcPath = getArtifactFilePath(existing.task_id as string, id, existing.title as string)
-    if (!existsSync(srcPath)) return false
-
-    const defaultPath = path.join(app.getPath('downloads'), existing.title as string)
-    const win = BrowserWindow.getFocusedWindow()
-    const result = win
-      ? await dialog.showSaveDialog(win, { title: 'Download Artifact', defaultPath })
-      : await dialog.showSaveDialog({ title: 'Download Artifact', defaultPath })
-    if (result.canceled || !result.filePath) return false
-
-    copyFileSync(srcPath, result.filePath)
-    return true
-  })
-
-  ipcMain.handle('db:artifacts:downloadFolder', async (_, folderId: string) => {
-    const folder = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(
-      folderId
-    )) as Record<string, unknown> | undefined
-    if (!folder) return false
-
-    const win = BrowserWindow.getFocusedWindow()
-    const result = win
-      ? await dialog.showOpenDialog(win, {
-          title: 'Download Folder To',
-          properties: ['openDirectory', 'createDirectory']
-        })
-      : await dialog.showOpenDialog({
-          title: 'Download Folder To',
-          properties: ['openDirectory', 'createDirectory']
-        })
-    if (result.canceled || !result.filePaths.length) return false
-
-    const destRoot = result.filePaths[0]
-    const taskId = folder.task_id as string
-
-    // Build folder path map: folderId -> name segments
-    const allFolders = (await db
-      .prepare('SELECT * FROM artifact_folders WHERE task_id = ?')
-      .all(taskId)) as Record<string, unknown>[]
-    const byId = new Map(allFolders.map((f) => [f.id as string, f]))
-    function folderPath(id: string): string {
-      const f = byId.get(id)
-      if (!f) return ''
-      const parent = f.parent_id as string | null
-      return parent ? path.join(folderPath(parent), f.name as string) : (f.name as string)
-    }
-
-    // Collect target folder ids (folderId + all descendants)
-    const targetIds = new Set<string>([folderId])
-    let changed = true
-    while (changed) {
-      changed = false
-      for (const f of allFolders) {
-        const id = f.id as string
-        const parentId = f.parent_id as string | null
-        if (parentId && targetIds.has(parentId) && !targetIds.has(id)) {
-          targetIds.add(id)
-          changed = true
-        }
-      }
-    }
-
-    // Compute relative path from the target folder's parent
-    const rootFolderPath = folderPath(folderId)
-    const rootParentPath = path.dirname(rootFolderPath)
-
-    // Create all subdirectories
-    for (const id of targetIds) {
-      const rel =
-        rootParentPath === '.' ? folderPath(id) : path.relative(rootParentPath, folderPath(id))
-      mkdirSync(path.join(destRoot, rel), { recursive: true })
-    }
-
-    // Copy artifacts in target folders
-    const artifacts = (await db
-      .prepare(
-        'SELECT * FROM task_artifacts WHERE task_id = ? AND folder_id IN (' +
-          [...targetIds].map(() => '?').join(',') +
-          ')'
-      )
-      .all(taskId, ...targetIds)) as Record<string, unknown>[]
-    for (const artifact of artifacts) {
-      const srcPath = getArtifactFilePath(taskId, artifact.id as string, artifact.title as string)
-      if (!existsSync(srcPath)) continue
-      const folderRel =
-        rootParentPath === '.'
-          ? folderPath(artifact.folder_id as string)
-          : path.relative(rootParentPath, folderPath(artifact.folder_id as string))
-      copyFileSync(srcPath, path.join(destRoot, folderRel, artifact.title as string))
-    }
-
-    return true
-  })
-
-  // --- Download as PDF ---
-
-  ipcMain.handle('db:artifacts:downloadAsPdf', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return false
-
-    const title = existing.title as string
-    const mode = getEffectiveRenderMode(title, existing.render_mode as string | null as any)
-    if (!canExportAsPdf(mode)) return false
-
-    const srcPath = getArtifactFilePath(existing.task_id as string, id, title)
-    if (!existsSync(srcPath)) return false
-    const content = readFileSync(srcPath, 'utf-8')
-
-    const isMermaid = mode === 'mermaid-preview'
-    const html = isMermaid
-      ? buildMermaidPdfHtml(content, title)
-      : buildPdfHtml(content, mode, title)
-
-    const baseName = title.replace(/\.[^.]+$/, '') || title
-    const defaultPath = path.join(app.getPath('downloads'), `${baseName}.pdf`)
-    const win = BrowserWindow.getFocusedWindow()
-    const result = win
-      ? await dialog.showSaveDialog(win, {
-          title: 'Download as PDF',
-          defaultPath,
-          filters: [{ name: 'PDF', extensions: ['pdf'] }]
-        })
-      : await dialog.showSaveDialog({
-          title: 'Download as PDF',
-          defaultPath,
-          filters: [{ name: 'PDF', extensions: ['pdf'] }]
-        })
-    if (result.canceled || !result.filePath) return false
-
-    const pdfBuffer = await renderToPdf(html, isMermaid)
-    writeFileSync(result.filePath, pdfBuffer)
-    shell.showItemInFolder(result.filePath)
-    return true
-  })
-
-  // --- Download as PNG ---
-
-  ipcMain.handle('db:artifacts:downloadAsPng', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return false
-
-    const title = existing.title as string
-    const mode = getEffectiveRenderMode(title, existing.render_mode as string | null as any)
-    if (!canExportAsPng(mode)) return false
-
-    const srcPath = getArtifactFilePath(existing.task_id as string, id, title)
-    if (!existsSync(srcPath)) return false
-    const content = readFileSync(srcPath, 'utf-8')
-
-    const html = buildPngHtml(content, mode, title)
-    if (!html) return false
-
-    const baseName = title.replace(/\.[^.]+$/, '') || title
-    const defaultPath = path.join(app.getPath('downloads'), `${baseName}.png`)
-    const win = BrowserWindow.getFocusedWindow()
-    const result = win
-      ? await dialog.showSaveDialog(win, {
-          title: 'Download as PNG',
-          defaultPath,
-          filters: [{ name: 'PNG', extensions: ['png'] }]
-        })
-      : await dialog.showSaveDialog({
-          title: 'Download as PNG',
-          defaultPath,
-          filters: [{ name: 'PNG', extensions: ['png'] }]
-        })
-    if (result.canceled || !result.filePath) return false
-
-    const pngBuffer = await renderToPng(html)
-    writeFileSync(result.filePath, pngBuffer)
-    shell.showItemInFolder(result.filePath)
-    return true
-  })
-
-  // --- Download as HTML ---
-
-  ipcMain.handle('db:artifacts:downloadAsHtml', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM task_artifacts WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return false
-
-    const title = existing.title as string
-    const mode = getEffectiveRenderMode(title, existing.render_mode as string | null as any)
-    if (!canExportAsHtml(mode)) return false
-
-    const srcPath = getArtifactFilePath(existing.task_id as string, id, title)
-    if (!existsSync(srcPath)) return false
-    const content = readFileSync(srcPath, 'utf-8')
-
-    const isMermaid = mode === 'mermaid-preview'
-    const html = isMermaid
-      ? buildMermaidPdfHtml(content, title)
-      : buildPdfHtml(content, mode, title)
-
-    const baseName = title.replace(/\.[^.]+$/, '') || title
-    const defaultPath = path.join(app.getPath('downloads'), `${baseName}.html`)
-    const win = BrowserWindow.getFocusedWindow()
-    const result = win
-      ? await dialog.showSaveDialog(win, {
-          title: 'Download as HTML',
-          defaultPath,
-          filters: [{ name: 'HTML', extensions: ['html'] }]
-        })
-      : await dialog.showSaveDialog({
-          title: 'Download as HTML',
-          defaultPath,
-          filters: [{ name: 'HTML', extensions: ['html'] }]
-        })
-    if (result.canceled || !result.filePath) return false
-
-    writeFileSync(result.filePath, html, 'utf-8')
-    shell.showItemInFolder(result.filePath)
-    return true
-  })
-
-  // --- Download All as ZIP ---
-
-  ipcMain.handle('db:artifacts:downloadAllAsZip', async (_, taskId: string) => {
-    const allArtifacts = (await db
-      .prepare('SELECT * FROM task_artifacts WHERE task_id = ?')
-      .all(taskId)) as Record<string, unknown>[]
-    if (allArtifacts.length === 0) return false
-
-    const allFolders = (await db
-      .prepare('SELECT * FROM artifact_folders WHERE task_id = ?')
-      .all(taskId)) as Record<string, unknown>[]
-    const byId = new Map(allFolders.map((f) => [f.id as string, f]))
-    function folderPath(id: string): string {
-      const f = byId.get(id)
-      if (!f) return ''
-      const parent = f.parent_id as string | null
-      return parent ? path.join(folderPath(parent), f.name as string) : (f.name as string)
-    }
-
-    const win = BrowserWindow.getFocusedWindow()
-    const defaultPath = path.join(app.getPath('downloads'), 'artifacts.zip')
-    const result = win
-      ? await dialog.showSaveDialog(win, {
-          title: 'Download All as ZIP',
-          defaultPath,
-          filters: [{ name: 'ZIP', extensions: ['zip'] }]
-        })
-      : await dialog.showSaveDialog({
-          title: 'Download All as ZIP',
-          defaultPath,
-          filters: [{ name: 'ZIP', extensions: ['zip'] }]
-        })
-    if (result.canceled || !result.filePath) return false
-
-    const output = createWriteStream(result.filePath)
-    const archive = archiver('zip', { zlib: { level: 9 } })
-    archive.pipe(output)
-
-    for (const artifact of allArtifacts) {
-      const srcPath = getArtifactFilePath(taskId, artifact.id as string, artifact.title as string)
-      if (!existsSync(srcPath)) continue
-      const folderId = artifact.folder_id as string | null
-      const rel = folderId
-        ? path.join(folderPath(folderId), artifact.title as string)
-        : (artifact.title as string)
-      archive.file(srcPath, { name: rel })
-    }
-
-    await archive.finalize()
-    await new Promise<void>((resolve, reject) => {
-      output.on('close', resolve)
-      output.on('error', reject)
-    })
-
-    shell.showItemInFolder(result.filePath)
-    return true
-  })
+  ipcMain.handle('db:artifacts:downloadFile', (_, id: string) =>
+    downloadArtifactFile(db, dataDir, id)
+  )
+  ipcMain.handle('db:artifacts:downloadFolder', (_, folderId: string) =>
+    downloadArtifactFolder(db, dataDir, folderId)
+  )
+  ipcMain.handle('db:artifacts:downloadAsPdf', (_, id: string) =>
+    downloadArtifactAsPdf(db, dataDir, id)
+  )
+  ipcMain.handle('db:artifacts:downloadAsPng', (_, id: string) =>
+    downloadArtifactAsPng(db, dataDir, id)
+  )
+  ipcMain.handle('db:artifacts:downloadAsHtml', (_, id: string) =>
+    downloadArtifactAsHtml(db, dataDir, id)
+  )
+  ipcMain.handle('db:artifacts:downloadAllAsZip', (_, taskId: string) =>
+    downloadAllArtifactsAsZip(db, dataDir, taskId)
+  )
 
   // --- Artifact Folders ---
 
-  ipcMain.handle('db:artifactFolders:getByTask', async (_, taskId: string) => {
-    const rows = (await db
-      .prepare(
-        'SELECT * FROM artifact_folders WHERE task_id = ? ORDER BY "order" ASC, created_at ASC'
-      )
-      .all(taskId)) as Record<string, unknown>[]
-    return rows.map(parseFolder).filter(Boolean)
-  })
+  ipcMain.handle('db:artifactFolders:getByTask', (_, taskId: string) =>
+    store.listFoldersByTask(db, taskId)
+  )
 
   ipcMain.handle(
     'db:artifactFolders:getOrCreateByName',
     async (_, data: { taskId: string; name: string }) => {
-      const row = await db.namedTxn<Record<string, unknown> | undefined>(
-        'task-artifacts:folders:getOrCreateByName',
-        { taskId: data.taskId, name: data.name }
-      )
+      const r = await store.getOrCreateFolderByName(db, data)
       onMutation?.()
-      return parseFolder(row)
+      return r
     }
   )
 
   ipcMain.handle('db:artifactFolders:create', async (_, data: CreateArtifactFolderInput) => {
-    const row = await db.namedTxn<Record<string, unknown> | undefined>(
-      'task-artifacts:folders:create',
-      { taskId: data.taskId, parentId: data.parentId ?? null, name: data.name }
-    )
+    const r = await store.createFolder(db, data)
     onMutation?.()
-    return parseFolder(row)
+    return r
   })
 
   ipcMain.handle('db:artifactFolders:update', async (_, data: UpdateArtifactFolderInput) => {
-    const existing = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(
-      data.id
-    )) as Record<string, unknown> | undefined
-    if (!existing) return null
-
-    const sets: string[] = []
-    const values: unknown[] = []
-    if (data.name !== undefined) {
-      sets.push('name = ?')
-      values.push(data.name)
-    }
-    if (data.parentId !== undefined) {
-      sets.push('parent_id = ?')
-      values.push(data.parentId)
-    }
-    if (sets.length > 0) {
-      values.push(data.id)
-      await db.prepare(`UPDATE artifact_folders SET ${sets.join(', ')} WHERE id = ?`).run(...values)
-    }
-
-    onMutation?.()
-    const row = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(data.id)) as
-      | Record<string, unknown>
-      | undefined
-    return parseFolder(row)
+    const r = await store.updateFolder(db, data)
+    if (r) onMutation?.()
+    return r
   })
 
   ipcMain.handle('db:artifactFolders:delete', async (_, id: string) => {
-    const existing = (await db.prepare('SELECT * FROM artifact_folders WHERE id = ?').get(id)) as
-      | Record<string, unknown>
-      | undefined
-    if (!existing) return false
-    await db.prepare('DELETE FROM artifact_folders WHERE id = ?').run(id)
-    onMutation?.()
-    return true
+    const ok = await store.deleteFolder(db, id)
+    if (ok) onMutation?.()
+    return ok
   })
 
   ipcMain.handle(
     'db:artifactFolders:reorder',
-    async (_, data: { parentId: string | null; folderIds: string[] }) => {
-      await db.batchTxn(
-        data.folderIds.map((id, index) => ({
-          type: 'run',
-          sql: 'UPDATE artifact_folders SET "order" = ? WHERE id = ?',
-          params: [index, id]
-        }))
-      )
-    }
+    (_, data: { parentId: string | null; folderIds: string[] }) => store.reorderFolders(db, data)
   )
 }

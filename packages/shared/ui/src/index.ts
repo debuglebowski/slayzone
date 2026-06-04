@@ -21,12 +21,6 @@ export { useShortcutDisplay } from './useShortcutDisplay'
 export { useShortcutAction } from './useShortcutAction'
 export { projectColorBg, type ProjectColorVariant } from './project-color'
 export {
-  WORKTREE_COLORS,
-  hashStr,
-  assignWorktreeColors,
-  assignNewWorktreeColors
-} from './worktree-color'
-export {
   useAppearance,
   AppearanceContext,
   appearanceDefaults,

@@ -133,7 +133,7 @@ export async function createTaskOp(
   const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
   const task = parseTask(row)
   if (task) {
-    ipcMain.emit('db:tasks:create:done', null, id, data.projectId)
+    ipcMain?.emit('db:tasks:create:done', null, id, data.projectId)
     taskEvents.emit('task:created', { taskId: id, projectId: data.projectId })
     onMutation?.()
   }

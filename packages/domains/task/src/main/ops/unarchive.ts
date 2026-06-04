@@ -31,7 +31,7 @@ export async function unarchiveTaskOp(
   if (task) {
     taskEvents.emit('task:unarchived', { taskId: id, projectId: task.project_id })
   }
-  ipcMain.emit('db:tasks:unarchive:done', null, id)
+  ipcMain?.emit('db:tasks:unarchive:done', null, id)
   onMutation?.()
   return task
 }

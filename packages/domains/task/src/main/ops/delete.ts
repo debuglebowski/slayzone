@@ -35,7 +35,7 @@ export async function deleteTaskOp(
     events: previousTask ? buildTaskDeletedEvents(previousTask) : []
   })
   if (result.changes > 0) {
-    ipcMain.emit('db:tasks:delete:done', null, id)
+    ipcMain?.emit('db:tasks:delete:done', null, id)
     if (previousTask) {
       taskEvents.emit('task:deleted', { taskId: id, projectId: previousTask.project_id })
     }

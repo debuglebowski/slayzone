@@ -4,3 +4,9 @@ export {
   resolveWorktreeBasePathTemplate,
   joinWorktreePath
 } from './path-template'
+export {
+  WORKTREE_COLORS,
+  hashStr,
+  assignWorktreeColors,
+  assignNewWorktreeColors
+} from './worktree-color'

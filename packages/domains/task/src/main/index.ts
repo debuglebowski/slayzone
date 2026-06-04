@@ -14,6 +14,8 @@ export type { CreateImportedTaskInput } from './ops'
 export { taskEvents } from './events'
 export type { TaskEventMap } from './events'
 export type { OpDeps } from './ops/shared'
+export { taskOps } from './task-ops-bundle'
+export type { TaskOps } from './task-ops-bundle'
 export { registerTaskTemplateHandlers } from './template-handlers'
 export { registerFilesHandlers } from './files'
 export {

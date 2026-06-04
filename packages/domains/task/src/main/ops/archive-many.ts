@@ -41,7 +41,7 @@ export async function archiveManyTasksOp(
     events: buildTaskArchivedEvents(existingTasks.filter((task) => allIds.includes(task.id)))
   })
   for (const id of allIds) {
-    ipcMain.emit('db:tasks:archive:done', null, id)
+    ipcMain?.emit('db:tasks:archive:done', null, id)
     const projectRow = await db.get<{ project_id: string }>(
       'SELECT project_id FROM tasks WHERE id = ?',
       [id]

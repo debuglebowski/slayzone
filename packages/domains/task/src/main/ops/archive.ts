@@ -40,7 +40,7 @@ export async function archiveTaskOp(
   })
   const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
   const archivedTask = parseTask(row)
-  ipcMain.emit('db:tasks:archive:done', null, id)
+  ipcMain?.emit('db:tasks:archive:done', null, id)
   if (projectRow) {
     taskEvents.emit('task:archived', { taskId: id, projectId: projectRow.project_id })
   }
