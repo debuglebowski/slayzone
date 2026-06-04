@@ -80,9 +80,10 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         window.api.settings.get('terminal_auto_start')
       ]).then(([exists, autoStart]) => {
         if (cancelled) return
-        // Auto-start is regular-task-only: temp tasks ignore the setting and
-        // keep the Start gate. Reattaching to a live PTY (`exists`) still skips.
-        if (exists || (autoStart === '1' && !isTemporary)) setStarted(true)
+        // Temp tasks always auto-start (scratch terminals are "always live");
+        // regular tasks honor the `terminal_auto_start` setting. Reattaching to a
+        // live PTY (`exists`) always starts.
+        if (exists || isTemporary || autoStart === '1') setStarted(true)
         setExistsChecked(true)
       })
       return () => {
@@ -224,7 +225,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
             {isHibernated ? `Reopen ${label}` : `Open ${label}`}
           </button>
           {/* The "Don't show again" path sets terminal_auto_start=1, which is a
-              no-op for temp tasks (auto-start is regular-task-only) — hide it so
+              no-op for temp tasks (they always auto-start regardless) — hide it so
               the control never lies. Hibernation's checkbox is unrelated. */}
           {(isHibernated || !isTemporary) && (
             <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
