@@ -8,7 +8,7 @@ import type {
 } from '@slayzone/automations/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { AutomationCard } from './AutomationCard'
-import { AutomationDialog } from './AutomationDialog'
+import { AutomationDialog } from './automation-dialog'
 
 interface AutomationsPanelProps {
   projectId: string
