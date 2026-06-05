@@ -1,6 +1,5 @@
 import React, {
   Suspense,
-  lazy,
   useState,
   useEffect,
   useRef,
@@ -9,35 +8,8 @@ import React, {
   useDeferredValue,
   useTransition
 } from 'react'
-import { useGuardedHotkeys } from '@slayzone/ui'
 import { initShortcuts } from './shortcut-init'
-import {
-  AlertTriangle,
-  FolderClosed,
-  LayoutGrid,
-  TerminalSquare,
-  GitBranch,
-  FileCode,
-  Cpu,
-  Kanban,
-  FlaskConical,
-  Zap,
-  BookOpen,
-  Lock,
-  Focus,
-  MoreHorizontal,
-  Settings,
-  Trophy,
-  BarChart3,
-  Megaphone,
-  ListTree,
-  PanelLeftClose,
-  Bell,
-  Bot,
-  Check,
-  Monitor
-} from 'lucide-react'
-import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task/shared'
+import { AlertTriangle, BookOpen } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
 import {
@@ -47,7 +19,6 @@ import {
   isCompletedStatus,
   resolveRepoPath
 } from '@slayzone/projects/shared'
-import type { Tag } from '@slayzone/tags/shared'
 // Domains
 import {
   useTasksData,
@@ -60,91 +31,31 @@ import {
   TaskContextMenu,
   BulkTaskContextMenu
 } from '@slayzone/tasks/hooks'
-import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
-import {
-  useGlobalPanelSizes,
-  applyBoundaryResize,
-  effectiveLayout
-} from '@slayzone/task/client/usePanelSizes'
+import { useGlobalPanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { useProjectRepos } from '@slayzone/worktrees/hooks'
-import type { ProjectCreationContext, ProjectStartMode } from '@slayzone/projects'
+import type { ProjectCreationContext } from '@slayzone/projects'
 import {
-  ProjectLockPopover,
-  ProjectLockScreen,
   isRateLimited,
   recordTaskOpen,
   isProjectLocked,
-  PROJECT_LOCKED_TOAST,
-  hasActiveLockOverride,
-  clearLockOverrides
+  PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
-import {
-  useTabStore,
-  useDialogStore,
-  AppearanceProvider,
-  type SearchFileContext
-} from '@slayzone/settings'
-import { track, trackShortcut } from '@slayzone/telemetry/client'
+import { useTabStore, useDialogStore, AppearanceProvider } from '@slayzone/settings'
+import { track } from '@slayzone/telemetry/client'
 import { usePtyStatus, useTerminalStateStore } from '@slayzone/terminal/client'
 // Shared
-import {
-  Button,
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-  Toaster,
-  toast,
-  UpdateButton,
-  UpdateToast
-} from '@slayzone/ui'
-import {
-  SidebarProvider,
-  cn,
-  PanelToggle,
-  useUndo,
-  matchesShortcut,
-  useShortcutStore,
-  shortcutDefinitions,
-  useShortcutDisplay,
-  withShortcut,
-  withModalGuard,
-  scopeTracker,
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator
-} from '@slayzone/ui'
+import { Tooltip, TooltipTrigger, TooltipContent, toast } from '@slayzone/ui'
+import { SidebarProvider, cn, useUndo, useShortcutDisplay } from '@slayzone/ui'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
-import { useAuthFailedConnections } from './useAuthFailedConnections'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
 import { TabBar } from '@/components/tabs/TabBar'
+import { useGlobalAgentPanelState } from '@/components/global-agent-panel'
 import {
-  GlobalAgentPanelButton,
-  GLOBAL_AGENT_PANEL_MIN_WIDTH,
-  GLOBAL_AGENT_PANEL_MAX_WIDTH,
-  useGlobalAgentPanelState,
-  DEFAULT_GLOBAL_AGENT_PANEL_WIDTH
-} from '@/components/global-agent-panel'
-import {
-  AgentStatusButton,
-  AGENT_STATUS_PANEL_MIN_WIDTH,
-  AGENT_STATUS_PANEL_MAX_WIDTH,
   useIdleTasks,
   useActiveSessionTaskIds,
-  useAgentStatusState,
-  DEFAULT_AGENT_STATUS_PANEL_WIDTH
+  useAgentStatusState
 } from '@/components/agent-status'
 import { UsagePopover } from '@/components/usage/UsagePopover'
 import { BoostPill } from '@/components/usage/BoostPill'
@@ -152,141 +63,37 @@ import { useUsage } from '@/components/usage/useUsage'
 import { useOnboardingChecklist } from '@/hooks/useOnboardingChecklist'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
 // Extracted hooks (self-contained, clean interfaces)
-import { useHomePanel, HOME_PANEL_SIZE_KEY } from '@/hooks/useHomePanel'
+import { useHomePanel } from '@/hooks/useHomePanel'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
 import { useTabColors } from '@/hooks/useTabColors'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
 import { useDiagnosticsSync } from '@/hooks/useDiagnosticsSync'
-// Lazy-loaded: heavy components not needed for first paint
-const TaskDetailDataLoader = lazy(() =>
-  import('@slayzone/task/client/TaskDetailDataLoader').then((m) => ({
-    default: m.TaskDetailDataLoader
-  }))
-)
-const FileEditorView = lazy(() =>
-  import('@slayzone/file-editor/client/FileEditorView').then((m) => ({ default: m.FileEditorView }))
-)
-const UserSettingsDialog = lazy(() =>
-  import('@slayzone/settings/client/UserSettingsDialog').then((m) => ({
-    default: m.UserSettingsDialog
-  }))
-)
-const TutorialAnimationModal = lazy(() =>
-  import('@/components/tutorial/TutorialAnimationModal').then((m) => ({
-    default: m.TutorialAnimationModal
-  }))
-)
-// Home panels
-const UnifiedGitPanel = lazy(() =>
-  import('@slayzone/worktrees').then((m) => ({ default: m.UnifiedGitPanel }))
-)
-const TestPanel = lazy(() => import('@slayzone/test-panel').then((m) => ({ default: m.TestPanel })))
-const ProcessesPanel = lazy(() =>
-  import('@slayzone/task').then((m) => ({ default: m.ProcessesPanel }))
-)
-const AutomationsPanel = lazy(() =>
-  import('@slayzone/automations').then((m) => ({ default: m.AutomationsPanel }))
-)
-// Overlay pages
-const LeaderboardPage = lazy(() =>
-  import('@/components/leaderboard/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage }))
-)
-const UsageAnalyticsPage = lazy(() =>
-  import('@slayzone/usage-analytics/client').then((m) => ({ default: m.UsageAnalyticsPage }))
-)
-const ContextManagerPage = lazy(() =>
-  import('@slayzone/ai-config/client').then((m) => ({ default: m.ContextManagerPage }))
-)
-// Dialogs
-const CreateTaskDialog = lazy(() =>
-  import('@slayzone/task').then((m) => ({ default: m.CreateTaskDialog }))
-)
-const EditTaskDialog = lazy(() =>
-  import('@slayzone/task').then((m) => ({ default: m.EditTaskDialog }))
-)
-const DeleteTaskDialog = lazy(() =>
-  import('@slayzone/task').then((m) => ({ default: m.DeleteTaskDialog }))
-)
-const TemplatesSettingsTab = lazy(() =>
-  import('@slayzone/task').then((m) => ({ default: m.TemplatesSettingsTab }))
-)
-const CreateProjectDialog = lazy(() =>
-  import('@slayzone/projects').then((m) => ({ default: m.CreateProjectDialog }))
-)
-const ProjectSettingsDialog = lazy(() =>
-  import('@slayzone/projects').then((m) => ({ default: m.ProjectSettingsDialog }))
-)
-const DeleteProjectDialog = lazy(() =>
-  import('@slayzone/projects').then((m) => ({ default: m.DeleteProjectDialog }))
-)
-const GroupSettingsDialog = lazy(() =>
-  import('@slayzone/projects').then((m) => ({ default: m.GroupSettingsDialog }))
-)
-const OnboardingDialog = lazy(() =>
-  import('@slayzone/onboarding').then((m) => ({ default: m.OnboardingDialog }))
-)
-const SearchDialog = lazy(() =>
-  import('@/components/dialogs/SearchDialog').then((m) => ({ default: m.SearchDialog }))
-)
-const CliInstallDialog = lazy(() =>
-  import('@/components/dialogs/CliInstallDialog').then((m) => ({ default: m.CliInstallDialog }))
-)
-const ChangelogDialog = lazy(() =>
-  import('@/components/changelog/ChangelogDialog').then((m) => ({ default: m.ChangelogDialog }))
-)
-const KanbanBoard = lazy(() =>
-  import('@slayzone/tasks').then((m) => ({ default: m.KanbanBoard }))
-)
-const KanbanListView = lazy(() =>
-  import('@slayzone/tasks').then((m) => ({ default: m.KanbanListView }))
-)
-const FilterBar = lazy(() =>
-  import('@slayzone/tasks').then((m) => ({ default: m.FilterBar }))
-)
-const GlobalAgentSidePanel = lazy(() =>
-  import('@/components/global-agent-panel/GlobalAgentSidePanel').then((m) => ({
-    default: m.GlobalAgentSidePanel
-  }))
-)
-const AgentStatusSidePanel = lazy(() =>
-  import('@/components/agent-status/AgentStatusSidePanel').then((m) => ({
-    default: m.AgentStatusSidePanel
-  }))
-)
-const TerminalStatusDialog = lazy(() =>
-  import('@slayzone/terminal').then((m) => ({ default: m.TerminalStatusDialog }))
-)
-
-type ProjectSettingsTab =
-  | 'general'
-  | 'environment'
-  | 'tasks'
-  | 'tasks/general'
-  | 'tasks/statuses'
-  | 'integrations'
-  | 'ai-config'
-  | 'tests'
-type ProjectIntegrationOnboardingProvider = Exclude<ProjectStartMode, 'scratch'>
-type ContextManagerSection =
-  | 'providers'
-  | 'instructions'
-  | 'skill'
-  | 'mcp'
-  | 'files'
-  | 'provider-sync'
-  | 'skills'
-  | 'mcps'
-const COMMUNITY_DISCORD_URL = 'https://discord.gg/g7xPHXaU98'
-const COMMUNITY_X_URL = 'https://x.com/debuglebowski'
-
-// Lazy-mount: first trigger loads the chunk + mounts; stays mounted after so close/reopen animations work.
-function useLazyMounted() {
-  const set = useRef(new Set<string>())
-  return (key: string, open: boolean) => {
-    if (open) set.current.add(key)
-    return set.current.has(key)
-  }
-}
+// Extracted shell: lazy components, types/constants, hooks, panels (see ./app-shell)
+import {
+  TaskDetailDataLoader,
+  LeaderboardPage,
+  UsageAnalyticsPage,
+  ContextManagerPage,
+  useLazyMounted,
+  AppHeaderActions,
+  CompactFooter,
+  HomeDetail,
+  AppSidePanels,
+  AppDialogs,
+  useExplodeMode,
+  useProjectPathGuard,
+  useAppUpdates,
+  useAuthFailureBanner,
+  useAppShortcuts,
+  useAppIpcListeners,
+  COMMUNITY_DISCORD_URL,
+  COMMUNITY_X_URL
+} from './app-shell'
+import type {
+  ProjectSettingsTab,
+  ProjectIntegrationOnboardingProvider,
+  ContextManagerSection
+} from './app-shell'
 
 function App(): React.JSX.Element {
   performance.mark('sz:app:render')
@@ -419,12 +226,6 @@ function App(): React.JSX.Element {
   const completeTaskDialogOpen = useDialogStore((s) => s.completeTaskDialogOpen)
   const [terminalFocusRequests, setTerminalFocusRequests] = useState<Record<string, number>>({})
   const [zenMode, setZenMode] = useState(false)
-  const [explodeMode, setExplodeMode] = useState(false)
-  // In explode mode, tracks which grid cell owns keyboard shortcuts (Cmd+D etc.).
-  // Null outside explode mode. Updated via focusin bubble on the grid wrapper.
-  const [focusedExplodeTaskId, setFocusedExplodeTaskId] = useState<string | null>(null)
-  const explodeGridRef = useRef<HTMLDivElement | null>(null)
-  const [explodeGridWidth, setExplodeGridWidth] = useState(0)
   const [panelSizes, updatePanelSizes, resetPanelSize] = useGlobalPanelSizes()
   const {
     config: homePanelConfig,
@@ -432,9 +233,8 @@ function App(): React.JSX.Element {
     getOrderedHomeIds
   } = usePanelConfig()
   const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
-  const [updateVersion, setUpdateVersion] = useState<string | null>(null)
-  const [updateDownloadPercent, setUpdateDownloadPercent] = useState<number | null>(null)
-  const [updateToastDismissed, setUpdateToastDismissed] = useState(false)
+  const { updateVersion, updateDownloadPercent, updateToastDismissed, setUpdateToastDismissed } =
+    useAppUpdates()
 
   // Home panel state (extracted — owns its own state fully)
   const homePanel = useHomePanel(selectedProjectId, panelSizes, homePanelConfig, orderedHomeIds)
@@ -471,17 +271,12 @@ function App(): React.JSX.Element {
     [homeSelectedProject?.id, updateProject]
   )
 
-  // Project path validation
-  const [projectPathMissing, setProjectPathMissing] = useState(false)
-  const validateProjectPath = useCallback(async (project: Project | undefined) => {
-    if (!project?.path) {
-      setProjectPathMissing(false)
-      return
-    }
-    const fn = window.api.files?.pathExists
-    if (typeof fn !== 'function') return
-    setProjectPathMissing(!(await fn(project.path)))
-  }, [])
+  // Project path validation (extracted — validates on select + window focus)
+  const { projectPathMissing, validateProjectPath, handleFixProjectPath } = useProjectPathGuard(
+    selectedProjectId,
+    projects,
+    updateProject
+  )
 
   // Project rename state
   const [projectNameValue, setProjectNameValue] = useState('')
@@ -495,6 +290,10 @@ function App(): React.JSX.Element {
     [tabs]
   )
   const activeAgentTaskIds = useActiveSessionTaskIds()
+
+  // Explode mode (multi-task grid) — owns toggle, focused cell, grid ref + width
+  const { explodeMode, setExplodeMode, focusedExplodeTaskId, explodeGridRef, explodeGridWidth } =
+    useExplodeMode(openTaskIds, tabs, activeTabIndex)
 
   // Tab lifecycle (extracted — manages sync, cleanup, cache eviction, page tracking)
   useTabLifecycle({ tasks, projects, tabs, activeTabIndex, setTerminalFocusRequests })
@@ -736,6 +535,39 @@ function App(): React.JSX.Element {
   const openTaskRef = useRef(openTask)
   openTaskRef.current = openTask
 
+  // Tab management (declared early so IPC-listener refs below can close over closeTab)
+  const closeTab = useCallback(
+    (index: number): void => {
+      const store = useTabStore.getState()
+      const tab = store.tabs[index]
+      if (tab?.type === 'task') {
+        const task = store._taskLookup.tasks.find((t) => t.id === tab.taskId)
+        if (task?.is_temporary) {
+          window.api.pty.kill(`${tab.taskId}:${tab.taskId}`)
+          window.api.db.deleteTask(tab.taskId)
+          setTasks((prev) => prev.filter((t) => t.id !== tab.taskId))
+        }
+      }
+      store.closeTab(index)
+    },
+    [setTasks]
+  )
+
+  const closeTabByTaskId = useCallback(
+    (taskId: string): void => {
+      const index = useTabStore
+        .getState()
+        .tabs.findIndex((t) => t.type === 'task' && t.taskId === taskId)
+      if (index >= 0) closeTab(index)
+    },
+    [closeTab]
+  )
+
+  const goBack = useCallback((): void => {
+    const { activeTabIndex: idx } = useTabStore.getState()
+    if (idx > 0) closeTab(idx)
+  }, [closeTab])
+
   // Stale-skill dot on Context Manager tab
   const { count: staleSkillCount, refresh: refreshStaleSkillCount } = useStaleSkillCount(
     selectedProjectId,
@@ -815,54 +647,6 @@ function App(): React.JSX.Element {
       setSelectedProjectId(activeTaskProjectId)
   }, [activeTaskProjectId, selectedProjectId, setSelectedProjectId])
 
-  // Auto-disable explode mode when fewer than 2 task tabs
-  useEffect(() => {
-    if (openTaskIds.length < 2) setExplodeMode(false)
-  }, [openTaskIds.length])
-
-  // Seed / clear focused explode cell on mode toggle; keep valid as tabs change
-  useEffect(() => {
-    if (!explodeMode) {
-      setFocusedExplodeTaskId(null)
-      return
-    }
-    setFocusedExplodeTaskId((prev) => {
-      if (prev && openTaskIds.includes(prev)) return prev
-      const activeTab = tabs[activeTabIndex]
-      if (activeTab?.type === 'task') return activeTab.taskId
-      return openTaskIds[0] ?? null
-    })
-  }, [explodeMode, openTaskIds, activeTabIndex, tabs])
-
-  // Delegated focusin: bubble from xterm / editor / browser → grid cell; resolve task id.
-  useEffect(() => {
-    if (!explodeMode) return
-    const grid = explodeGridRef.current
-    if (!grid) return
-    const handleFocusIn = (e: FocusEvent): void => {
-      const target = e.target as HTMLElement | null
-      const cell = target?.closest('[data-explode-task-id]')
-      const id = cell?.getAttribute('data-explode-task-id')
-      if (id) setFocusedExplodeTaskId(id)
-    }
-    grid.addEventListener('focusin', handleFocusIn)
-    return () => grid.removeEventListener('focusin', handleFocusIn)
-  }, [explodeMode])
-
-  // Track grid width so explode mode can pack more columns as the window grows.
-  useEffect(() => {
-    if (!explodeMode) return
-    const grid = explodeGridRef.current
-    if (!grid) return
-    setExplodeGridWidth(grid.clientWidth)
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0
-      setExplodeGridWidth(w)
-    })
-    ro.observe(grid)
-    return () => ro.disconnect()
-  }, [explodeMode])
-
   // Read settings on mount and whenever settings change
   useEffect(() => {
     window.api.settings
@@ -884,20 +668,6 @@ function App(): React.JSX.Element {
       if (project) setProjectNameValue(project.name)
     }
   }, [selectedProjectId, projects])
-
-  useEffect(() => {
-    validateProjectPath(projects.find((p) => p.id === selectedProjectId))
-  }, [selectedProjectId, projects, validateProjectPath])
-
-  useEffect(() => {
-    const project = projects.find((p) => p.id === selectedProjectId)
-    if (!project?.path) return
-    const handleFocus = (): void => {
-      validateProjectPath(project)
-    }
-    window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
-  }, [selectedProjectId, projects, validateProjectPath])
 
   // Computed values
   const projectTasks = selectedProjectId
@@ -934,22 +704,35 @@ function App(): React.JSX.Element {
     projectPathMissing
   })
 
-  // Shortcut store (dynamic hotkey bindings)
-  const overrides = useShortcutStore((s) => s.overrides)
-  const isRecording = useShortcutStore((s) => s.isRecording)
-  // Resolve effective keys from overrides + defaults. Subscribing to `overrides` above
-  // ensures re-render when shortcuts change, so useHotkeys picks up new key strings.
-  const getKeys = useCallback(
-    (id: string): string => {
-      if (overrides[id]) return overrides[id]
-      const def = shortcutDefinitions.find((d) => d.id === id)
-      return def?.defaultKeys ?? ''
-    },
-    [overrides]
-  )
-  useEffect(() => {
-    useShortcutStore.getState().load()
-  }, [])
+  // Global keyboard shortcuts (extracted — react-hotkeys + home-tab keydown listener)
+  useAppShortcuts({
+    projects,
+    homePanel,
+    selectedProjectId,
+    tabs,
+    activeTabIndex,
+    visibleTabs,
+    toFullIndex,
+    toVisibleIndex,
+    tabCycleOrder,
+    setActiveTabIndex,
+    setSelectedProjectId,
+    reopenClosedTab,
+    openTaskRef,
+    undo,
+    redo,
+    zenMode,
+    setZenMode,
+    explodeMode,
+    setExplodeMode,
+    openTaskIds,
+    globalAgentPanelState,
+    setGlobalAgentPanelState,
+    agentStatusState,
+    setAgentStatusState,
+    isHomePanelEnabled,
+    testsPanelEnabled
+  })
 
   // Shortcut display strings (reactive to user customization)
   const projectScopedTabs = useTabStore((s) => s.projectScopedTabs)
@@ -1021,590 +804,29 @@ function App(): React.JSX.Element {
     floatingGlobalAgentPanelState.kind === 'detached' &&
     floatingGlobalAgentPanelState.mode === 'manual'
 
-  // Keyboard shortcuts
-  useGuardedHotkeys(
-    getKeys('new-task'),
-    (e) => {
-      if (projects.length > 0) {
-        e.preventDefault()
-        trackShortcut(getKeys('new-task'))
-        useDialogStore.getState().openCreateTask()
-      }
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  // Build a snapshot of the home file-open context for the unified palette.
-  // Captured into the dialog payload at the moment the shortcut fires; cleared on close.
-  const buildHomeFileContext = useCallback((): SearchFileContext | undefined => {
-    const project = projects.find((p) => p.id === selectedProjectId)
-    if (!project?.path) return undefined
-    return {
-      projectPath: project.path,
-      openFile: (filePath) => {
-        if (homePanel.homeEditorRef.current) {
-          if (!homePanel.homePanelVisibility.editor) {
-            homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
-          }
-          homePanel.homeEditorRef.current.openFile(filePath)
-        } else {
-          homePanel.pendingHomeEditorFileRef.current = filePath
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
-        }
-      }
-    }
-  }, [projects, selectedProjectId, homePanel])
-
-  useGuardedHotkeys(
-    getKeys('search'),
-    (e) => {
-      // Only fire on home tab; TaskDetailPage owns the search shortcut when a task tab is active.
-      if (tabs[activeTabIndex]?.type !== 'home') return
-      e.preventDefault()
-      trackShortcut(getKeys('search'))
-      useDialogStore.getState().openSearch({ fileContext: buildHomeFileContext() })
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    'mod+z',
-    async (e) => {
-      const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
-      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
-      e.preventDefault()
-      const label = await undo()
-      if (label) {
-        track('undo_used')
-        toast(`Undid: ${label}`)
-      }
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    'mod+shift+z',
-    async (e) => {
-      const el = e.target as HTMLElement
-      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
-      if (el.closest?.('.cm-editor') || el.closest?.('.xterm')) return
-      e.preventDefault()
-      const label = await redo()
-      if (label) {
-        track('redo_used')
-        toast(`Redid: ${label}`)
-      }
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  // Stable refs for IPC listeners
-  const closeActiveTaskRef = useRef<() => void>(() => {})
-  closeActiveTaskRef.current = () => {
-    const activeTab = tabs[activeTabIndex]
-    if (activeTab?.type === 'task') closeTab(activeTabIndex)
-    else void window.api.window.close()
-  }
-  const closeCurrentHomeRef = useRef<() => void>(() => {})
-  closeCurrentHomeRef.current = () => {
-    const activeTab = tabs[activeTabIndex]
-    if (activeTab?.type === 'home') void window.api.window.close()
-  }
-
-  useEffect(() => {
-    return window.api.app.onCloseActiveTask(() => closeActiveTaskRef.current())
-  }, [])
-  useEffect(() => {
-    return window.api.app.onCloseCurrent(() => closeCurrentHomeRef.current())
-  }, [])
-  useEffect(() => {
-    return window.api.app.onCloseTask((taskId) => {
-      useTabStore.getState().closeTabByTaskId(taskId)
-      void window.api.processes.killTask(taskId)
-    })
-  }, [])
-  useEffect(() => {
-    return window.api.app.onOpenTask((taskId, background) => {
-      if (background) guardTaskOpen(taskId, openTaskInBackground)
-      else openTaskRef.current(taskId)
-    })
-  }, [guardTaskOpen, openTaskInBackground])
-  useEffect(() => {
-    return window.api.app.onGoHome(() => {
-      const homeIndex = useTabStore.getState().tabs.findIndex((tab) => tab.type === 'home')
-      if (homeIndex >= 0) setActiveTabIndex(homeIndex)
-    })
-  }, [])
-  useEffect(() => {
-    return window.api.app.onToggleGlobalAgentPanel(() => {
-      if (selectedProjectId) setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })
-    })
-  }, [selectedProjectId, globalAgentPanelState.isOpen])
-  useEffect(() => {
-    return window.api.app.onToggleAgentStatusPanel(() => {
-      setAgentStatusState({ isLocked: !agentStatusState.isLocked })
-    })
-  }, [agentStatusState.isLocked])
-  useEffect(() => {
-    return window.api.app.onOpenSettings(() => {
-      setSettingsInitialTab('appearance')
-      setSettingsInitialAiConfigSection(null)
-      setSettingsOpen(true)
-    })
-  }, [])
-  useEffect(() => {
-    return window.api.app.onOpenProjectSettings(() => {
-      if (!selectedProjectId) return
-      const project = projects.find((p) => p.id === selectedProjectId)
-      if (!project) return
-      setProjectSettingsInitialTab('general')
-      setProjectSettingsOnboardingProvider(null)
-      setEditingProject(project)
-    })
-  }, [selectedProjectId, projects])
-
-  useEffect(() => {
-    return window.api.app.onUpdateStatus((status) => {
-      switch (status.type) {
-        case 'checking':
-          toast.loading('Checking for updates...', { id: 'update-check' })
-          break
-        case 'downloading':
-          setUpdateDownloadPercent(status.percent)
-          setUpdateVersion(null)
-          toast.dismiss('update-check')
-          break
-        case 'downloaded':
-          toast.dismiss('update-check')
-          setUpdateDownloadPercent(null)
-          setUpdateVersion(status.version)
-          setUpdateToastDismissed(false)
-          break
-        case 'not-available':
-          setUpdateDownloadPercent(null)
-          toast.success("You're on the latest version", { id: 'update-check' })
-          break
-        case 'error':
-          setUpdateDownloadPercent(null)
-          toast.dismiss('update-check')
-          toast.error(`Update failed: ${status.message}`, { duration: 8000 })
-          break
-      }
-    })
-  }, [])
-
-  useGuardedHotkeys(
-    'mod+1,mod+2,mod+3,mod+4,mod+5,mod+6,mod+7,mod+8,mod+9',
-    (e) => {
-      e.preventDefault()
-      const num = parseInt(e.key, 10)
-      if (num < visibleTabs.length) setActiveTabIndex(toFullIndex(num))
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    'mod+shift+1,mod+shift+2,mod+shift+3,mod+shift+4,mod+shift+5,mod+shift+6,mod+shift+7,mod+shift+8,mod+shift+9',
-    (e) => {
-      e.preventDefault()
-      const num = parseInt(e.code.replace('Digit', ''), 10)
-      if (num > 0 && num <= projects.length) {
-        setSelectedProjectId(projects[num - 1].id)
-        setActiveTabIndex(0)
-      }
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  const navigateCycle = useCallback(
-    (direction: 1 | -1) => {
-      const cycle = tabCycleOrder.filter((i) => toVisibleIndex(i) >= 0)
-      if (cycle.length === 0) return
-      const { activeTabIndex: idx, activeView: view } = useTabStore.getState()
-      const pos = view === 'context' ? -1 : cycle.indexOf(idx)
-      const current = pos >= 0 ? pos : 0
-      const target = cycle[(current + direction + cycle.length) % cycle.length]
-      useTabStore.getState().setActiveView('tabs')
-      setActiveTabIndex(target)
-    },
-    [tabCycleOrder, toVisibleIndex, setActiveTabIndex]
-  )
-
-  const cycleSidebarTreeItems = useCallback((direction: 1 | -1) => {
-    const items = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-sidebar-tree-item="task"][data-task-id]')
-    )
-    if (items.length === 0) return
-    const activeIdx = items.findIndex((el) => el.dataset.active === 'true')
-    const nextIdx =
-      activeIdx === -1
-        ? direction === 1
-          ? 0
-          : items.length - 1
-        : (activeIdx + direction + items.length) % items.length
-    const id = items[nextIdx]?.dataset.taskId
-    if (id) openTaskRef.current(id)
-  }, [])
-
-  useGuardedHotkeys(
-    getKeys('next-tab'),
-    (e) => {
-      e.preventDefault()
-      const { sidebarView: sv } = useTabStore.getState()
-      if (sv === 'tree') cycleSidebarTreeItems(1)
-      else navigateCycle(1)
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('prev-tab'),
-    (e) => {
-      e.preventDefault()
-      const { sidebarView: sv } = useTabStore.getState()
-      if (sv === 'tree') cycleSidebarTreeItems(-1)
-      else navigateCycle(-1)
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('reopen-closed-tab'),
-    (e) => {
-      e.preventDefault()
-      track('tab_reopened')
-      reopenClosedTab()
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('toggle-project-tabs'),
-    (e) => {
-      e.preventDefault()
-      trackShortcut(getKeys('toggle-project-tabs'))
-      useTabStore.getState().toggleProjectScopedTabs()
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('complete-close-tab'),
-    (e) => {
-      e.preventDefault()
-      if (tabs[activeTabIndex].type === 'task') useDialogStore.getState().openCompleteTaskDialog()
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('zen-mode'),
-    (e) => {
-      e.preventDefault()
-      track('zen_mode_toggled')
-      trackShortcut(getKeys('zen-mode'))
-      setZenMode((prev) => !prev)
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('sidebar-auto-hide'),
-    (e) => {
-      e.preventDefault()
-      trackShortcut(getKeys('sidebar-auto-hide'))
-      useTabStore.getState().setSidebarAutoHide(!useTabStore.getState().sidebarAutoHide)
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('explode-mode'),
-    (e) => {
-      e.preventDefault()
-      if (openTaskIds.length >= 2) {
-        track('explode_mode_toggled')
-        trackShortcut(getKeys('explode-mode'))
-        setExplodeMode((prev) => !prev)
-      }
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('exit-zen-explode'),
-    () => {
-      if (explodeMode) setExplodeMode(false)
-      else if (zenMode) setZenMode(false)
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('global-agent-panel'),
-    (e) => {
-      e.preventDefault()
-      trackShortcut(getKeys('global-agent-panel'))
-      if (selectedProjectId) setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  useGuardedHotkeys(
-    getKeys('agent-status-panel'),
-    (e) => {
-      e.preventDefault()
-      trackShortcut(getKeys('agent-status-panel'))
-      setAgentStatusState({ isLocked: !agentStatusState.isLocked })
-    },
-    { enableOnFormTags: true, enabled: !isRecording }
-  )
-
-  // Home tab panel shortcuts
-  useEffect(() => {
-    const handleKeyDown = withModalGuard((e: KeyboardEvent): void => {
-      if (tabs[activeTabIndex]?.type !== 'home') return
-      if (!selectedProjectId) return
-      if (isRecording) return
-
-      // These shortcuts work even inside editors (no binding conflict)
-      if (matchesShortcut(e, getKeys('editor-search')) && isHomePanelEnabled('editor', 'home')) {
-        e.preventDefault()
-        if (homePanel.homeEditorRef.current) {
-          if (!homePanel.homePanelVisibility.editor)
-            homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
-          homePanel.homeEditorRef.current.toggleSearch()
-        } else {
-          homePanel.pendingHomeSearchToggleRef.current = true
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: true }))
-        }
-        return
-      }
-
-      // Git Diff (panel-git-diff)
-      if (matchesShortcut(e, getKeys('panel-git-diff')) && isHomePanelEnabled('git', 'home')) {
-        e.preventDefault()
-        if (!homePanel.homePanelVisibility.git) {
-          homePanel.setHomeGitDefaultTab('changes')
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: true }))
-        } else if (homePanel.homeGitPanelRef.current?.getActiveTab() === 'changes') {
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: false }))
-        } else {
-          homePanel.homeGitPanelRef.current?.switchToTab('changes')
-        }
-        return
-      }
-
-      // Git (panel-git)
-      if (matchesShortcut(e, getKeys('panel-git')) && isHomePanelEnabled('git', 'home')) {
-        e.preventDefault()
-        if (!homePanel.homePanelVisibility.git) {
-          homePanel.setHomeGitDefaultTab('general')
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: true }))
-        } else if (homePanel.homeGitPanelRef.current?.getActiveTab() === 'general') {
-          homePanel.setHomePanelVisibility((prev) => ({ ...prev, git: false }))
-        } else {
-          homePanel.homeGitPanelRef.current?.switchToTab('general')
-        }
-      } else if (
-        matchesShortcut(e, getKeys('panel-editor')) &&
-        isHomePanelEnabled('editor', 'home')
-      ) {
-        e.preventDefault()
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, editor: !prev.editor }))
-      } else if (
-        matchesShortcut(e, getKeys('panel-processes')) &&
-        isHomePanelEnabled('processes', 'home')
-      ) {
-        e.preventDefault()
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, processes: !prev.processes }))
-      } else if (
-        matchesShortcut(e, getKeys('panel-tests')) &&
-        testsPanelEnabled &&
-        isHomePanelEnabled('tests', 'home')
-      ) {
-        e.preventDefault()
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, tests: !prev.tests }))
-      } else if (
-        matchesShortcut(e, getKeys('panel-automations')) &&
-        isHomePanelEnabled('automations', 'home')
-      ) {
-        e.preventDefault()
-        homePanel.setHomePanelVisibility((prev) => ({ ...prev, automations: !prev.automations }))
-      }
-    })
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
+  // Main↔renderer IPC subscriptions (extracted — close/open/toggle/settings + browser view wiring)
+  useAppIpcListeners({
     tabs,
     activeTabIndex,
+    closeTab,
+    guardTaskOpen,
+    openTaskInBackground,
+    openTaskRef,
+    setActiveTabIndex,
     selectedProjectId,
-    homePanel.homePanelVisibility,
-    getKeys,
-    isRecording,
-    buildHomeFileContext
-  ])
-
-  // Cmd+R: reload the active browser view (WebContentsView or webview fallback)
-  useEffect(() => {
-    return window.api.app.onReloadBrowser(() => {
-      // Find visible WebContentsView placeholder and reload via IPC
-      const placeholder = document.querySelector(
-        '[data-browser-panel][data-view-id]'
-      ) as HTMLElement | null
-      const viewId = placeholder?.dataset.viewId
-      if (viewId) {
-        void window.api.browser.reload(viewId)
-        return
-      }
-      // Fallback: webview (multi-device grid)
-      const webview = document.querySelector('[data-browser-panel] webview') as any
-      if (webview?.reload) webview.reload()
-    })
-  }, [])
-
-  // Cmd+Shift+R: reload the app
-  useEffect(() => {
-    return window.api.app.onReloadApp?.(() => {
-      window.location.reload()
-    })
-  }, [])
-
-  // Keep app zoom on an explicit IPC path instead of relying on Electron's default zoom roles.
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
-
-      if (e.key === '=' || e.key === '+') {
-        e.preventDefault()
-        void window.api.app.adjustZoom('in')
-        return
-      }
-
-      if (e.key === '-') {
-        e.preventDefault()
-        void window.api.app.adjustZoom('out')
-        return
-      }
-
-      if (e.key === '0') {
-        e.preventDefault()
-        void window.api.app.adjustZoom('reset')
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
-  // Forward keyboard shortcuts from WebContentsView back into the DOM
-  useEffect(() => {
-    return window.api.browser.onBrowserViewShortcut((payload) => {
-      // WebContentsView is a separate web contents — focusin never fires in
-      // renderer when it has focus. Set browser scope before dispatching so
-      // the shortcut registry sees the correct active scopes.
-      // Web panels should NOT activate browser scope — browser-scoped shortcuts
-      // (T for new tab, D for split) are wrong for web panels.
-      if (payload.kind !== 'web-panel') {
-        scopeTracker.setComponentScope('browser', payload.viewId)
-      }
-      // Dispatch on document (not window) so react-hotkeys-hook sees it —
-      // it listens on document. Events on document also bubble to window,
-      // so raw window.addEventListener handlers still work.
-      // react-hotkeys-hook tracks pressed keys by e.code via keydown events.
-      // Emit modifier keydowns first so the pressed-key set is correct, then
-      // emit the actual key. Include code on all events.
-      const key = payload.key
-      const code = key.length === 1 ? `Key${key.toUpperCase()}` : key
-      const mods = {
-        shiftKey: payload.shift,
-        metaKey: payload.meta,
-        ctrlKey: payload.control,
-        altKey: payload.alt
-      }
-      if (payload.control)
-        document.dispatchEvent(
-          new KeyboardEvent('keydown', {
-            key: 'Control',
-            code: 'ControlLeft',
-            ...mods,
-            bubbles: true
-          })
-        )
-      if (payload.meta)
-        document.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'Meta', code: 'MetaLeft', ...mods, bubbles: true })
-        )
-      if (payload.shift)
-        document.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', ...mods, bubbles: true })
-        )
-      if (payload.alt)
-        document.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'Alt', code: 'AltLeft', ...mods, bubbles: true })
-        )
-      document.dispatchEvent(new KeyboardEvent('keydown', { key, code, ...mods, bubbles: true }))
-    })
-  }, [])
-
-  // When a WebContentsView gains focus, dispatch a synthetic focusin on the
-  // owning panel element so TaskDetailPage's glow tracking picks it up.
-  // Uses DOM lookup via data-view-id → closest data-panel-id to work for
-  // both browser tabs and web panels.
-  useEffect(() => {
-    return window.api.browser.onBrowserViewFocused(({ viewId }) => {
-      const el = document.querySelector(`[data-view-id="${viewId}"]`)
-      const panel = el?.closest('[data-panel-id]')
-      if (panel) {
-        panel.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
-      }
-    })
-  }, [])
-
-  useEffect(() => {
-    return window.api.browser.onCreateTaskFromLink((intent) => {
-      const sourceTask = tasksMap.get(intent.taskId)
-      const fallbackProjectId = sourceTask?.project_id ?? selectedProjectId ?? projects[0]?.id
-      useDialogStore.getState().openCreateTask({
-        ...buildCreateTaskDraftFromBrowserLink(intent.url, intent.linkText),
-        projectId: fallbackProjectId
-      })
-    })
-  }, [tasksMap, selectedProjectId, projects])
-
-  // Tab management
-  const closeTab = useCallback(
-    (index: number): void => {
-      const store = useTabStore.getState()
-      const tab = store.tabs[index]
-      if (tab?.type === 'task') {
-        const task = store._taskLookup.tasks.find((t) => t.id === tab.taskId)
-        if (task?.is_temporary) {
-          window.api.pty.kill(`${tab.taskId}:${tab.taskId}`)
-          window.api.db.deleteTask(tab.taskId)
-          setTasks((prev) => prev.filter((t) => t.id !== tab.taskId))
-        }
-      }
-      store.closeTab(index)
-    },
-    [setTasks]
-  )
-
-  const closeTabByTaskId = useCallback(
-    (taskId: string): void => {
-      const index = useTabStore
-        .getState()
-        .tabs.findIndex((t) => t.type === 'task' && t.taskId === taskId)
-      if (index >= 0) closeTab(index)
-    },
-    [closeTab]
-  )
-
-  const goBack = useCallback((): void => {
-    const { activeTabIndex: idx } = useTabStore.getState()
-    if (idx > 0) closeTab(idx)
-  }, [closeTab])
+    globalAgentPanelState,
+    setGlobalAgentPanelState,
+    agentStatusState,
+    setAgentStatusState,
+    setSettingsInitialTab,
+    setSettingsInitialAiConfigSection,
+    setSettingsOpen,
+    projects,
+    setProjectSettingsInitialTab,
+    setProjectSettingsOnboardingProvider,
+    setEditingProject,
+    tasksMap
+  })
 
   const handleCompleteTaskConfirm = async (): Promise<void> => {
     const activeTab = tabs[activeTabIndex]
@@ -1811,33 +1033,12 @@ function App(): React.JSX.Element {
     setProjectSettingsOnboardingProvider(null)
   }, [])
 
-  const { failed: authFailedConnections, refetch: refetchAuthFailures } =
-    useAuthFailedConnections()
-  useEffect(() => {
-    if (!editingProject) refetchAuthFailures()
-  }, [editingProject, refetchAuthFailures])
-  const [dismissedAuthFailureIds, setDismissedAuthFailureIds] = useState<Set<string>>(new Set())
-  const visibleAuthFailures = useMemo(
-    () =>
-      authFailedConnections.filter(
-        (f) =>
-          !dismissedAuthFailureIds.has(f.connection.id) &&
-          selectedProjectId !== null &&
-          f.projectIds.includes(selectedProjectId)
-      ),
-    [authFailedConnections, dismissedAuthFailureIds, selectedProjectId]
+  const { visibleAuthFailures, reconnectAuthFailure, dismissAuthFailures } = useAuthFailureBanner(
+    editingProject,
+    selectedProjectId,
+    projects,
+    openProjectSettings
   )
-  const reconnectAuthFailure = useCallback(() => {
-    if (!selectedProjectId) return
-    const project = projects.find((p) => p.id === selectedProjectId)
-    if (!project) return
-    openProjectSettings(project, { initialTab: 'integrations' })
-  }, [selectedProjectId, projects, openProjectSettings])
-  const dismissAuthFailures = useCallback(() => {
-    setDismissedAuthFailureIds(
-      (prev) => new Set([...prev, ...visibleAuthFailures.map((f) => f.connection.id)])
-    )
-  }, [visibleAuthFailures])
 
   const handleProjectCreated = (project: Project, context: ProjectCreationContext): void => {
     setProjects((prev) => [...prev, project])
@@ -1896,19 +1097,6 @@ function App(): React.JSX.Element {
     }
   }
 
-  const handleFixProjectPath = useCallback(async (): Promise<void> => {
-    const project = projects.find((p) => p.id === selectedProjectId)
-    if (!project) return
-    const result = await window.api.dialog.showOpenDialog({
-      title: 'Select Project Directory',
-      defaultPath: project.path || undefined,
-      properties: ['openDirectory']
-    })
-    if (result.canceled || !result.filePaths[0]) return
-    const updated = await window.api.db.updateProject({ id: project.id, path: result.filePaths[0] })
-    updateProject(updated)
-    validateProjectPath(updated)
-  }, [selectedProjectId, projects, updateProject, validateProjectPath])
 
   const handleProjectDeleted = (): void => {
     if (deletingProject) {
@@ -1958,287 +1146,58 @@ function App(): React.JSX.Element {
     window.api.window.setTrafficLightPosition(pos)
   }, [sidebarView])
   const activePtyCount = usePtyStatus().size
-  const renderHeaderActions = (compact: boolean) => {
-    const btnSize = compact ? 'h-7 w-7' : 'size-10 rounded-lg'
-    const iconSize = compact ? 'size-3.5' : 'size-5'
-    return (
-      <>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => useTabStore.getState().toggleProjectScopedTabs()}
-              className={cn(
-                btnSize,
-                'flex items-center justify-center transition-colors border-b-2',
-                projectScopedTabs
-                  ? 'text-foreground border-foreground'
-                  : 'text-muted-foreground border-transparent hover:text-foreground'
-              )}
-            >
-              <FolderClosed className={iconSize} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            {projectScopedTabs ? 'Show all tabs' : 'Show project tabs only'} ({projectTabsShortcut})
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setZenMode((prev) => !prev)}
-              className={cn(
-                btnSize,
-                'flex items-center justify-center transition-colors border-b-2',
-                zenMode
-                  ? 'text-foreground border-foreground'
-                  : 'text-muted-foreground border-transparent hover:text-foreground'
-              )}
-            >
-              <Focus className={iconSize} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            {zenMode ? 'Exit zen mode' : 'Zen mode'} ({zenModeShortcut})
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              disabled={openTaskIds.length < 2}
-              onClick={() => setExplodeMode((prev) => !prev)}
-              className={cn(
-                btnSize,
-                'flex items-center justify-center transition-colors border-b-2',
-                explodeMode
-                  ? 'text-foreground border-foreground'
-                  : 'text-muted-foreground border-transparent hover:text-foreground',
-                openTaskIds.length < 2 && 'opacity-30 pointer-events-none'
-              )}
-            >
-              <LayoutGrid className={iconSize} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            {explodeMode ? 'Exit explode mode' : 'Explode mode'} ({explodeModeShortcut})
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              aria-label="New temporary task"
-              onClick={
-                selectedProjectId && !durationLocked
-                  ? () => {
-                      void handleCreateScratchTerminal()
-                    }
-                  : undefined
-              }
-              disabled={!selectedProjectId || durationLocked}
-              className={cn(
-                btnSize,
-                'flex items-center justify-center transition-colors',
-                selectedProjectId && !durationLocked
-                  ? 'text-muted-foreground hover:text-foreground'
-                  : 'text-muted-foreground/40 cursor-not-allowed'
-              )}
-            >
-              <TerminalSquare className={iconSize} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs max-w-64">
-            {!selectedProjectId ? (
-              <p>Select a project first</p>
-            ) : durationLocked ? (
-              <p>Project locked</p>
-            ) : (
-              <div className="space-y-1">
-                <p>{withShortcut('New temporary task', newTempTaskShortcut)}</p>
-                <p className="text-muted-foreground">Temporary tasks auto-delete on close.</p>
-              </div>
-            )}
-          </TooltipContent>
-        </Tooltip>
-        <AgentStatusButton
-          active={agentStatusState.isLocked}
-          count={attentionTaskIds.size}
-          onClick={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })}
-          shortcutHint={agentStatusPanelShortcut}
-          size={compact ? 'sm' : 'lg'}
-        />
-        <GlobalAgentPanelButton
-          active={globalAgentPanelState.isOpen}
-          disabled={!selectedProjectId}
-          onClick={() => setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })}
-          shortcutHint={globalAgentPanelShortcut}
-          size={compact ? 'sm' : 'lg'}
-        />
-        <UpdateButton
-          version={updateVersion}
-          downloadPercent={updateDownloadPercent}
-          onRestart={() => window.api.app.restartForUpdate()}
-          size={compact ? 'sm' : 'lg'}
-        />
-      </>
-    )
-  }
   const tabBarRightContent = (
     <div className="flex items-center gap-1">
       <BoostPill />
       <div className="w-4" />
       <UsagePopover data={usageData} onRefresh={refreshUsage} />
       <div className="w-4" />
-      {renderHeaderActions(true)}
+      <AppHeaderActions
+        compact
+        projectScopedTabs={projectScopedTabs}
+        projectTabsShortcut={projectTabsShortcut}
+        zenMode={zenMode}
+        setZenMode={setZenMode}
+        zenModeShortcut={zenModeShortcut}
+        explodeMode={explodeMode}
+        setExplodeMode={setExplodeMode}
+        explodeModeShortcut={explodeModeShortcut}
+        openTaskIds={openTaskIds}
+        selectedProjectId={selectedProjectId}
+        durationLocked={durationLocked}
+        handleCreateScratchTerminal={handleCreateScratchTerminal}
+        newTempTaskShortcut={newTempTaskShortcut}
+        agentStatusState={agentStatusState}
+        setAgentStatusState={setAgentStatusState}
+        attentionTaskIds={attentionTaskIds}
+        agentStatusPanelShortcut={agentStatusPanelShortcut}
+        globalAgentPanelState={globalAgentPanelState}
+        setGlobalAgentPanelState={setGlobalAgentPanelState}
+        globalAgentPanelShortcut={globalAgentPanelShortcut}
+        updateVersion={updateVersion}
+        updateDownloadPercent={updateDownloadPercent}
+      />
     </div>
   )
   const compactFooterContent = (
-    <div className="flex items-center justify-between gap-2 px-2 py-1">
-      <div className="min-w-0 flex items-center">
-        <UsagePopover data={usageData} onRefresh={refreshUsage} />
-      </div>
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          onClick={handleOpenSettings}
-          className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Settings"
-        >
-          <Settings className="size-4" />
-        </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="More"
-              className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="end" className="min-w-[240px]">
-            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              Layout
-            </DropdownMenuLabel>
-            <DropdownMenuItem
-              onSelect={() => setExplodeMode((p) => !p)}
-              disabled={openTaskIds.length < 2}
-              className="cursor-pointer"
-            >
-              <LayoutGrid className="size-4" />
-              <span>Explode mode</span>
-              {explodeMode && <Check className="size-4 col-start-3" />}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              Panels
-            </DropdownMenuLabel>
-            <DropdownMenuItem
-              onSelect={() => useDialogStore.getState().openTerminals()}
-              className="cursor-pointer"
-            >
-              <Monitor className="size-4" />
-              <span className="flex items-center gap-2">
-                <span>Active terminals</span>
-                {activePtyCount > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-foreground text-background text-[10px] font-medium tabular-nums">
-                    {activePtyCount}
-                  </span>
-                )}
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })}
-              disabled={!selectedProjectId}
-              className="cursor-pointer"
-            >
-              <Bot className="size-4" />
-              <span>Global Agent panel</span>
-              {globalAgentPanelState.isOpen && <Check className="size-4 col-start-3" />}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => setAgentStatusState({ isLocked: !agentStatusState.isLocked })}
-              className="cursor-pointer"
-            >
-              <Bell className="size-4" />
-              <span className="flex items-center gap-2">
-                <span>Agent status panel</span>
-                {idleTasks.length > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-foreground text-background text-[10px] font-medium tabular-nums">
-                    {idleTasks.length}
-                  </span>
-                )}
-              </span>
-              {agentStatusState.isLocked && <Check className="size-4 col-start-3" />}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              Insights
-            </DropdownMenuLabel>
-            <DropdownMenuItem
-              onSelect={() => useTabStore.getState().setActiveView('leaderboard')}
-              className="cursor-pointer"
-            >
-              <Trophy className="size-4" />
-              <span>Leaderboard</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => useTabStore.getState().setActiveView('usage-analytics')}
-              className="cursor-pointer"
-            >
-              <BarChart3 className="size-4" />
-              <span>Usage Analytics</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => useDialogStore.getState().openChangelog()}
-              className="cursor-pointer"
-            >
-              <Megaphone className="size-4" />
-              <span>What's New</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              Sidebar
-            </DropdownMenuLabel>
-            <DropdownMenuItem
-              onSelect={() => useTabStore.getState().setSidebarView('tree')}
-              className="cursor-pointer"
-            >
-              <ListTree className="size-4" />
-              <span>Tree view</span>
-              {sidebarView === 'tree' && <Check className="size-4 col-start-3" />}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => useTabStore.getState().setSidebarView('projects')}
-              className="cursor-pointer"
-            >
-              <Kanban className="size-4" />
-              <span>Projects view</span>
-              {sidebarView === 'projects' && <Check className="size-4 col-start-3" />}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault()
-                useTabStore.getState().setSidebarAutoHide(!sidebarAutoHide)
-              }}
-              className="cursor-pointer"
-            >
-              <PanelLeftClose className="size-4" />
-              <span>Auto-hide sidebar</span>
-              {sidebarAutoHide && <Check className="size-4 col-start-3" />}
-            </DropdownMenuItem>
-            {updateVersion && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={() => window.api.app.restartForUpdate()}
-                  className="cursor-pointer text-green-500"
-                >
-                  <span>Restart to install v{updateVersion}</span>
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
+    <CompactFooter
+      usageData={usageData}
+      refreshUsage={refreshUsage}
+      handleOpenSettings={handleOpenSettings}
+      explodeMode={explodeMode}
+      setExplodeMode={setExplodeMode}
+      openTaskIds={openTaskIds}
+      activePtyCount={activePtyCount}
+      globalAgentPanelState={globalAgentPanelState}
+      setGlobalAgentPanelState={setGlobalAgentPanelState}
+      selectedProjectId={selectedProjectId}
+      agentStatusState={agentStatusState}
+      setAgentStatusState={setAgentStatusState}
+      idleTasks={idleTasks}
+      sidebarView={sidebarView}
+      sidebarAutoHide={sidebarAutoHide}
+      updateVersion={updateVersion}
+    />
   )
 
   return (
@@ -2536,447 +1495,64 @@ function App(): React.JSX.Element {
                           inert={!explodeMode && !isViewActive ? true : undefined}
                         >
                           {tab.type === 'home' ? (
-                            <div id="home-detail" className="flex flex-col flex-1 h-full p-4">
-                              {durationLocked && selectedProject?.lock_config ? (
-                                <ProjectLockScreen
-                                  project={selectedProject}
-                                  lockedUntil={selectedProject.lock_config?.locked_until}
-                                  schedule={selectedProject.lock_config?.schedule}
-                                  onUnlocked={updateProject}
-                                />
-                              ) : (
-                                <>
-                                  <header className="mb-4 window-no-drag space-y-2">
-                                    <div className="flex items-center gap-4">
-                                      <div className="flex-shrink-0">
-                                        <textarea
-                                          ref={selectedProject ? projectNameInputRef : undefined}
-                                          value={
-                                            selectedProject
-                                              ? projectNameValue
-                                              : 'No project selected'
-                                          }
-                                          readOnly={!selectedProject}
-                                          tabIndex={selectedProject ? undefined : -1}
-                                          onChange={
-                                            selectedProject
-                                              ? (e) => setProjectNameValue(e.target.value)
-                                              : undefined
-                                          }
-                                          onBlur={
-                                            selectedProject ? handleProjectNameSave : undefined
-                                          }
-                                          onKeyDown={
-                                            selectedProject ? handleProjectNameKeyDown : undefined
-                                          }
-                                          className={cn(
-                                            'text-2xl font-bold bg-transparent border-none outline-none resize-none p-0',
-                                            selectedProject
-                                              ? 'cursor-text'
-                                              : 'cursor-default select-none'
-                                          )}
-                                          style={
-                                            {
-                                              caretColor: 'currentColor',
-                                              fieldSizing: 'content'
-                                            } as React.CSSProperties
-                                          }
-                                          rows={1}
-                                        />
-                                      </div>
-                                      {projects.length > 0 &&
-                                        !(projectPathMissing && selectedProjectId) && (
-                                          <div className="ml-auto flex items-center gap-1">
-                                            {selectedProject &&
-                                              hasActiveLockOverride(selectedProject) && (
-                                                <Button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="h-7 gap-1.5 px-2 text-xs font-medium text-amber-600 dark:text-amber-400"
-                                                  onClick={() => {
-                                                    clearLockOverrides(selectedProject.id)
-                                                    updateProject(selectedProject)
-                                                  }}
-                                                >
-                                                  <Lock className="size-3.5" />
-                                                  Re-lock
-                                                </Button>
-                                              )}
-                                            {selectedProject && (
-                                              <ProjectLockPopover
-                                                project={selectedProject}
-                                                onUpdated={updateProject}
-                                              />
-                                            )}
-                                            <div className="h-4 w-px bg-border" />
-                                            <Suspense fallback={null}>
-                                              <FilterBar
-                                                filter={filter}
-                                                onChange={setFilter}
-                                                tags={projectTags}
-                                                columns={selectedProject?.columns_config}
-                                              />
-                                            </Suspense>
-                                          </div>
-                                        )}
-                                      {projects.length > 0 &&
-                                        (() => {
-                                          const entries: Record<
-                                            string,
-                                            {
-                                              id: string
-                                              icon: typeof Kanban
-                                              label: string
-                                              shortcut?: string | null
-                                              active: boolean
-                                              disabled: boolean
-                                            }
-                                          > = {
-                                            kanban: {
-                                              id: 'kanban',
-                                              icon: Kanban,
-                                              label: 'Kanban',
-                                              active: homePanel.homePanelVisibility.kanban,
-                                              disabled: !selectedProjectId
-                                            },
-                                            git: {
-                                              id: 'git',
-                                              icon: GitBranch,
-                                              label: 'Git',
-                                              shortcut: panelGitShortcut,
-                                              active: homePanel.homePanelVisibility.git,
-                                              disabled: !selectedProjectId
-                                            },
-                                            editor: {
-                                              id: 'editor',
-                                              icon: FileCode,
-                                              label: 'Editor',
-                                              shortcut: panelEditorShortcut,
-                                              active: homePanel.homePanelVisibility.editor,
-                                              disabled: !selectedProjectId
-                                            },
-                                            processes: {
-                                              id: 'processes',
-                                              icon: Cpu,
-                                              label: 'Processes',
-                                              shortcut: panelProcessesShortcut,
-                                              active: homePanel.homePanelVisibility.processes,
-                                              disabled: !selectedProjectId
-                                            },
-                                            tests: {
-                                              id: 'tests',
-                                              icon: FlaskConical,
-                                              label: 'Tests',
-                                              shortcut: panelTestsShortcut,
-                                              active: homePanel.homePanelVisibility.tests,
-                                              disabled: !selectedProjectId
-                                            },
-                                            automations: {
-                                              id: 'automations',
-                                              icon: Zap,
-                                              label: 'Automations',
-                                              shortcut: panelAutomationsShortcut,
-                                              active: homePanel.homePanelVisibility.automations,
-                                              disabled: !selectedProjectId
-                                            }
-                                          }
-                                          const ordered = homePanel.orderedHomePanelIds
-                                            .map((id) => entries[id])
-                                            .filter((e): e is NonNullable<typeof e> => !!e)
-                                            .filter(
-                                              (p) =>
-                                                p.id === 'kanban' ||
-                                                isHomePanelEnabled(p.id, 'home')
-                                            )
-                                            .filter((p) => p.id !== 'tests' || testsPanelEnabled)
-                                          return (
-                                            <div className="min-w-0">
-                                              <PanelToggle
-                                                panels={ordered}
-                                                onChange={(id, active) =>
-                                                  homePanel.setHomePanelVisibility((prev) => ({
-                                                    ...prev,
-                                                    [id]: active
-                                                  }))
-                                                }
-                                              />
-                                            </div>
-                                          )
-                                        })()}
-                                    </div>
-                                  </header>
-
-                                  {projects.length === 0 ? (
-                                    <div className="text-center text-muted-foreground">
-                                      Click + in sidebar to create a project
-                                    </div>
-                                  ) : projectPathMissing && selectedProjectId ? (
-                                    <div className="flex-1 flex items-center justify-center">
-                                      <div className="text-center space-y-4">
-                                        <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto" />
-                                        <p className="text-lg font-medium">
-                                          Project path not found
-                                        </p>
-                                        <p className="text-sm text-muted-foreground">
-                                          <code className="bg-muted px-2 py-1 rounded">
-                                            {projects.find((p) => p.id === selectedProjectId)?.path}
-                                          </code>
-                                        </p>
-                                        <Button onClick={handleFixProjectPath}>Update path</Button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div
-                                      ref={homePanel.homeContainerRef}
-                                      className="flex-1 min-h-0 flex overflow-x-auto"
-                                    >
-                                      {homePanel.homeRenderOrder.map((id, j) => {
-                                          const projectPath =
-                                            homeResolvedRepo.path ??
-                                            projects.find((p) => p.id === selectedProjectId)
-                                              ?.path ??
-                                            null
-                                          const sizeKey = HOME_PANEL_SIZE_KEY[id]
-                                          const w = homePanel.homeResolvedWidths[sizeKey] ?? 400
-                                          // Cluster boundary (left→right anchor): the leftover gap sits
-                                          // just before the boundary handle (or the left edge if no
-                                          // left cluster).
-                                          const isClusterBoundary =
-                                            j === homePanel.homeLeftCount &&
-                                            homePanel.homeResolved.rightKeys.length > 0
-                                          // A handle renders before every panel except the very first —
-                                          // including the boundary (last-left ↔ first-right).
-                                          const leftId =
-                                            j > 0 ? homePanel.homeRenderOrder[j - 1] : undefined
-                                          const leftL = leftId
-                                            ? effectiveLayout(
-                                                HOME_PANEL_SIZE_KEY[leftId],
-                                                homePanelConfig,
-                                                panelSizes
-                                              )
-                                            : undefined
-                                          const rightL = effectiveLayout(
-                                            sizeKey,
-                                            homePanelConfig,
-                                            panelSizes
-                                          )
-                                          return (
-                                            <React.Fragment key={id}>
-                                              {isClusterBoundary && (
-                                                <div
-                                                  aria-hidden
-                                                  data-testid="panel-gap"
-                                                  className="shrink-0"
-                                                  style={{ width: homePanel.homeResolved.gapPx }}
-                                                />
-                                              )}
-                                              {leftId && leftL && (
-                                                <ResizeHandle
-                                                  leftWidth={
-                                                    homePanel.homeResolvedWidths[
-                                                      HOME_PANEL_SIZE_KEY[leftId]
-                                                    ] ?? 400
-                                                  }
-                                                  rightWidth={w}
-                                                  leftMinWidth={
-                                                    homePanel.homeResolved.minPx[
-                                                      HOME_PANEL_SIZE_KEY[leftId]
-                                                    ] ?? 200
-                                                  }
-                                                  rightMinWidth={
-                                                    homePanel.homeResolved.minPx[sizeKey] ?? 200
-                                                  }
-                                                  leftMaxWidth={
-                                                    homePanel.homeResolved.maxPx[
-                                                      HOME_PANEL_SIZE_KEY[leftId]
-                                                    ]
-                                                  }
-                                                  rightMaxWidth={
-                                                    homePanel.homeResolved.maxPx[sizeKey]
-                                                  }
-                                                  onResize={(lw, rw) =>
-                                                    updatePanelSizes(
-                                                      applyBoundaryResize(
-                                                        leftL,
-                                                        rightL,
-                                                        HOME_PANEL_SIZE_KEY[leftId],
-                                                        sizeKey,
-                                                        lw,
-                                                        rw,
-                                                        homePanel.homeContainerWidth
-                                                      )
-                                                    )
-                                                  }
-                                                  onReset={() => {
-                                                    resetPanelSize(HOME_PANEL_SIZE_KEY[leftId])
-                                                    resetPanelSize(sizeKey)
-                                                  }}
-                                                />
-                                              )}
-                                              <div
-                                                className={cn(
-                                                  'shrink-0 min-h-0 overflow-hidden',
-                                                  cn(
-                                                    'rounded-lg border border-border',
-                                                    id === 'kanban' &&
-                                                      Object.values(
-                                                        homePanel.homePanelVisibility
-                                                      ).filter(Boolean).length <= 1 &&
-                                                      !globalAgentPanelState.isOpen &&
-                                                      !agentStatusState.isLocked
-                                                      ? 'border-transparent'
-                                                      : id === 'kanban'
-                                                        ? 'bg-surface-1 p-3'
-                                                        : 'bg-surface-1'
-                                                  )
-                                                )}
-                                                style={{ width: w }}
-                                              >
-                                                {id === 'kanban' && filter.viewMode !== 'list' && (
-                                                  <Suspense fallback={null}>
-                                                    <KanbanBoard
-                                                      tasks={displayTasks}
-                                                      columns={selectedProject?.columns_config}
-                                                      viewConfig={getViewConfig(filter)}
-                                                      isActive={tabs[activeTabIndex]?.type === 'home'}
-                                                      onTaskMove={handleTaskMove}
-                                                      onTaskBulkMove={handleTaskBulkMove}
-                                                      onTaskReorder={reorderTasks}
-                                                      onTaskClick={handleTaskClick}
-                                                      cardProperties={filter.cardProperties}
-                                                      taskTags={taskTags}
-                                                      tags={projectTags}
-                                                      onTaskTagsChange={handleTaskTagsChange}
-                                                      blockedTaskIds={blockedTaskIds}
-                                                      allProjects={projects}
-                                                      onUpdateTask={contextMenuUpdate}
-                                                      onBulkUpdateTasks={bulkContextMenuUpdate}
-                                                      onClearBlockers={clearBlockers}
-                                                      onArchiveTask={archiveTask}
-                                                      onDeleteTask={deleteTask}
-                                                      onBulkDeleteTasks={bulkDelete}
-                                                      onArchiveAllTasks={archiveTasks}
-                                                      activeAgentTaskIds={activeAgentTaskIds}
-                                                      onShutdownAgent={shutdownAgentForTask}
-                                                      selectionResetKey={selectedProjectId}
-                                                    />
-                                                  </Suspense>
-                                                )}
-                                                {id === 'kanban' && filter.viewMode === 'list' && (
-                                                  <Suspense fallback={null}>
-                                                    <KanbanListView
-                                                      tasks={displayTasks}
-                                                      columns={selectedProject?.columns_config}
-                                                      viewConfig={getViewConfig(filter)}
-                                                      onTaskMove={handleTaskMove}
-                                                      onTaskReorder={reorderTasks}
-                                                      onTaskClick={handleTaskClick}
-                                                      cardProperties={filter.cardProperties}
-                                                      blockedTaskIds={blockedTaskIds}
-                                                      allProjects={projects}
-                                                      onUpdateTask={contextMenuUpdate}
-                                                      onArchiveTask={archiveTask}
-                                                      onDeleteTask={deleteTask}
-                                                      tags={projectTags}
-                                                      taskTags={taskTags}
-                                                      onTaskTagsChange={handleTaskTagsChange}
-                                                      activeAgentTaskIds={activeAgentTaskIds}
-                                                      onShutdownAgent={shutdownAgentForTask}
-                                                    />
-                                                  </Suspense>
-                                                )}
-                                                {id === 'git' && (
-                                                  <Suspense
-                                                    fallback={
-                                                      <div className="h-full animate-pulse bg-muted/30 rounded" />
-                                                    }
-                                                  >
-                                                    <UnifiedGitPanel
-                                                      ref={homePanel.homeGitPanelRef}
-                                                      projectId={selectedProjectId}
-                                                      projectPath={projectPath}
-                                                      visible={isViewActive}
-                                                      defaultTab={homePanel.homeGitDefaultTab}
-                                                      onTabChange={homePanel.setHomeGitDefaultTab}
-                                                      tasks={tasks}
-                                                      filter={filter}
-                                                      projects={projects}
-                                                      onTaskClick={(t) => handleTaskClick(t)}
-                                                      onUpdateTask={(data) =>
-                                                        window.api.db.updateTask(data).then((t) => {
-                                                          updateTask(t)
-                                                          return t
-                                                        })
-                                                      }
-                                                      detectedRepos={homeDetectedRepos}
-                                                      selectedRepoName={
-                                                        homeSelectedProject?.selected_repo
-                                                      }
-                                                      isRepoStale={homeResolvedRepo.stale}
-                                                      onRepoChange={handleHomeRepoChange}
-                                                    />
-                                                  </Suspense>
-                                                )}
-                                                {id === 'editor' && (
-                                                  <Suspense>
-                                                    <FileEditorView
-                                                      ref={homePanel.homeEditorRefCallback}
-                                                      projectPath={projectPath ?? ''}
-                                                    />
-                                                  </Suspense>
-                                                )}
-                                                {id === 'processes' && (
-                                                  <Suspense
-                                                    fallback={
-                                                      <div className="h-full animate-pulse bg-muted/30 rounded" />
-                                                    }
-                                                  >
-                                                    <ProcessesPanel
-                                                      taskId={null}
-                                                      projectId={selectedProjectId}
-                                                      cwd={projectPath}
-                                                    />
-                                                  </Suspense>
-                                                )}
-                                                {id === 'tests' && (
-                                                  <Suspense
-                                                    fallback={
-                                                      <div className="h-full animate-pulse bg-muted/30 rounded" />
-                                                    }
-                                                  >
-                                                    <TestPanel
-                                                      projectId={selectedProjectId}
-                                                      projectPath={projectPath}
-                                                      groupBy={testGroupBy}
-                                                      onOpenSettings={() => {
-                                                        if (selectedProject)
-                                                          openProjectSettings(selectedProject, {
-                                                            initialTab: 'tests'
-                                                          })
-                                                      }}
-                                                    />
-                                                  </Suspense>
-                                                )}
-                                                {id === 'automations' && (
-                                                  <Suspense
-                                                    fallback={
-                                                      <div className="h-full animate-pulse bg-muted/30 rounded" />
-                                                    }
-                                                  >
-                                                    <AutomationsPanel
-                                                      projectId={selectedProjectId}
-                                                    />
-                                                  </Suspense>
-                                                )}
-                                              </div>
-                                            </React.Fragment>
-                                          )
-                                        })}
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
+                            <HomeDetail
+                              durationLocked={durationLocked}
+                              selectedProject={selectedProject}
+                              selectedProjectId={selectedProjectId}
+                              projects={projects}
+                              updateProject={updateProject}
+                              updateTask={updateTask}
+                              projectNameInputRef={projectNameInputRef}
+                              projectNameValue={projectNameValue}
+                              setProjectNameValue={setProjectNameValue}
+                              handleProjectNameSave={handleProjectNameSave}
+                              handleProjectNameKeyDown={handleProjectNameKeyDown}
+                              projectPathMissing={projectPathMissing}
+                              handleFixProjectPath={handleFixProjectPath}
+                              filter={filter}
+                              setFilter={setFilter}
+                              projectTags={projectTags}
+                              homePanel={homePanel}
+                              homePanelConfig={homePanelConfig}
+                              isHomePanelEnabled={isHomePanelEnabled}
+                              panelSizes={panelSizes}
+                              updatePanelSizes={updatePanelSizes}
+                              resetPanelSize={resetPanelSize}
+                              testsPanelEnabled={testsPanelEnabled}
+                              testGroupBy={testGroupBy}
+                              homeResolvedRepo={homeResolvedRepo}
+                              homeDetectedRepos={homeDetectedRepos}
+                              homeSelectedProject={homeSelectedProject}
+                              handleHomeRepoChange={handleHomeRepoChange}
+                              isViewActive={isViewActive}
+                              isHomeTabActive={tabs[activeTabIndex]?.type === 'home'}
+                              tasks={tasks}
+                              displayTasks={displayTasks}
+                              taskTags={taskTags}
+                              blockedTaskIds={blockedTaskIds}
+                              handleTaskMove={handleTaskMove}
+                              handleTaskBulkMove={handleTaskBulkMove}
+                              reorderTasks={reorderTasks}
+                              handleTaskClick={handleTaskClick}
+                              handleTaskTagsChange={handleTaskTagsChange}
+                              contextMenuUpdate={contextMenuUpdate}
+                              bulkContextMenuUpdate={bulkContextMenuUpdate}
+                              clearBlockers={clearBlockers}
+                              archiveTask={archiveTask}
+                              deleteTask={deleteTask}
+                              bulkDelete={bulkDelete}
+                              archiveTasks={archiveTasks}
+                              activeAgentTaskIds={activeAgentTaskIds}
+                              shutdownAgentForTask={shutdownAgentForTask}
+                              globalAgentPanelState={globalAgentPanelState}
+                              agentStatusState={agentStatusState}
+                              openProjectSettings={openProjectSettings}
+                              panelGitShortcut={panelGitShortcut}
+                              panelEditorShortcut={panelEditorShortcut}
+                              panelProcessesShortcut={panelProcessesShortcut}
+                              panelTestsShortcut={panelTestsShortcut}
+                              panelAutomationsShortcut={panelAutomationsShortcut}
+                            />
                           ) : (
                             <Suspense fallback={<TaskShell />}>
                               <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
@@ -3039,337 +1615,102 @@ function App(): React.JSX.Element {
                     )}
                   </div>
 
-                  {agentSessionId &&
-                    globalAgentPanelMountedRef.current &&
-                    globalAgentPanelState.isOpen &&
-                    !hideSidebarPanel && (
-                      <ResizeHandle
-                        // Edge side panel against the flex-1 main area. The boundary
-                        // handle needs two widths; model the left (main) side as
-                        // effectively unbounded so the drag just resizes this panel
-                        // and the flex-1 main absorbs the slack. 100_000 is large
-                        // enough that the left clamp never binds yet keeps the
-                        // `total - newLeft` arithmetic exact. Max is enforced here.
-                        leftWidth={100_000}
-                        rightWidth={globalAgentPanelState.panelWidth}
-                        leftMinWidth={0}
-                        rightMinWidth={GLOBAL_AGENT_PANEL_MIN_WIDTH}
-                        onResize={(_lw, rw) =>
-                          setGlobalAgentPanelState({
-                            panelWidth: Math.min(
-                              GLOBAL_AGENT_PANEL_MAX_WIDTH,
-                              Math.max(GLOBAL_AGENT_PANEL_MIN_WIDTH, rw)
-                            )
-                          })
-                        }
-                        onDragStart={() => setIsSidePanelResizing(true)}
-                        onDragEnd={() => setIsSidePanelResizing(false)}
-                        onReset={() =>
-                          setGlobalAgentPanelState({ panelWidth: DEFAULT_GLOBAL_AGENT_PANEL_WIDTH })
-                        }
-                      />
-                    )}
-                  {agentSessionId && globalAgentPanelMountedRef.current && !hideSidebarPanel && (
-                    <div
-                      className={
-                        globalAgentPanelState.isOpen ? 'min-h-0' : 'w-0 overflow-hidden invisible'
-                      }
-                      style={
-                        globalAgentPanelState.isOpen ? undefined : { position: 'absolute' as const }
-                      }
-                    >
-                      <Suspense fallback={null}>
-                        <GlobalAgentSidePanel
-                          width={globalAgentPanelState.panelWidth}
-                          sessionId={agentSessionId}
-                          cwd={projects.find((p) => p.id === selectedProjectId)?.path ?? ''}
-                          mode={agentMode as import('@slayzone/terminal/shared').TerminalMode}
-                          isActive={globalAgentPanelState.isOpen}
-                          isResizing={isSidePanelResizing}
-                          onNewSession={handleAgentNewSession}
-                          onModeChange={handleAgentModeChange}
-                          floatingEnabled={globalAgentPanelState.floatingEnabled}
-                          onToggleFloating={() =>
-                            setGlobalAgentPanelState({
-                              floatingEnabled: !globalAgentPanelState.floatingEnabled
-                            })
-                          }
-                          floatingState={floatingGlobalAgentPanelState.kind}
-                          onDetach={() => window.api.floatingGlobalAgentPanel.detach()}
-                          onReattach={() => window.api.floatingGlobalAgentPanel.reattach()}
-                        />
-                      </Suspense>
-                    </div>
-                  )}
-                  {agentStatusState.isLocked && (
-                    <ResizeHandle
-                      // Edge side panel — left side modeled as unbounded (see the
-                      // GlobalAgentSidePanel handle above); max enforced here.
-                      leftWidth={100_000}
-                      rightWidth={agentStatusState.panelWidth}
-                      leftMinWidth={0}
-                      rightMinWidth={AGENT_STATUS_PANEL_MIN_WIDTH}
-                      onResize={(_lw, rw) =>
-                        setAgentStatusState({
-                          panelWidth: Math.min(
-                            AGENT_STATUS_PANEL_MAX_WIDTH,
-                            Math.max(AGENT_STATUS_PANEL_MIN_WIDTH, rw)
-                          )
-                        })
-                      }
-                      onDragStart={() => setIsSidePanelResizing(true)}
-                      onDragEnd={() => setIsSidePanelResizing(false)}
-                      onReset={() =>
-                        setAgentStatusState({ panelWidth: DEFAULT_AGENT_STATUS_PANEL_WIDTH })
-                      }
-                    />
-                  )}
-                  {agentStatusState.isLocked && (
-                    <Suspense fallback={null}>
-                      <AgentStatusSidePanel
-                        width={agentStatusState.panelWidth}
-                        idleTasks={idleTasks}
-                        filterCurrentProject={agentStatusState.filterCurrentProject}
-                        onFilterToggle={() =>
-                          setAgentStatusState({
-                            filterCurrentProject: !agentStatusState.filterCurrentProject
-                          })
-                        }
-                        onNavigate={openTask}
-                        onDismiss={handleDismissIdle}
-                        columnsByProjectId={columnsByProjectId}
-                        selectedProjectId={selectedProjectId}
-                        currentProjectName={projects.find((p) => p.id === selectedProjectId)?.name}
-                      />
-                    </Suspense>
-                  )}
+                  <AppSidePanels
+                    agentSessionId={agentSessionId}
+                    globalAgentPanelMounted={globalAgentPanelMountedRef.current}
+                    hideSidebarPanel={hideSidebarPanel}
+                    globalAgentPanelState={globalAgentPanelState}
+                    setGlobalAgentPanelState={setGlobalAgentPanelState}
+                    isSidePanelResizing={isSidePanelResizing}
+                    setIsSidePanelResizing={setIsSidePanelResizing}
+                    projects={projects}
+                    selectedProjectId={selectedProjectId}
+                    agentMode={agentMode}
+                    handleAgentNewSession={handleAgentNewSession}
+                    handleAgentModeChange={handleAgentModeChange}
+                    floatingState={floatingGlobalAgentPanelState.kind}
+                    agentStatusState={agentStatusState}
+                    setAgentStatusState={setAgentStatusState}
+                    idleTasks={idleTasks}
+                    openTask={openTask}
+                    handleDismissIdle={handleDismissIdle}
+                    columnsByProjectId={columnsByProjectId}
+                  />
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Dialogs — lazy-mounted on first trigger, stay mounted for close/reopen animations */}
-          {shouldMount('createTask', createTaskOpen) && (
-            <Suspense fallback={null}>
-              <CreateTaskDialog
-                open={createTaskOpen}
-                onOpenChange={(open) => {
-                  if (!open) useDialogStore.getState().closeCreateTask()
-                }}
-                onCreated={handleTaskCreated}
-                onCreatedAndOpen={handleTaskCreatedAndOpen}
-                draft={createTaskDialogDraft}
-                tags={projectTags}
-                onTagCreated={(tag: Tag) => setTags((prev) => [...prev, tag])}
-              />
-            </Suspense>
-          )}
-          {shouldMount('editTask', !!editingTask) && (
-            <Suspense fallback={null}>
-              <EditTaskDialog
-                task={editingTask}
-                open={!!editingTask}
-                onOpenChange={(open) => {
-                  if (!open) useDialogStore.getState().closeEditTask()
-                }}
-                onUpdated={handleTaskUpdated}
-              />
-            </Suspense>
-          )}
-          {shouldMount('deleteTask', !!deletingTask) && (
-            <Suspense fallback={null}>
-              <DeleteTaskDialog
-                task={deletingTask}
-                open={!!deletingTask}
-                onOpenChange={(open) => {
-                  if (!open) useDialogStore.getState().closeDeleteTask()
-                }}
-                onDeleted={handleTaskDeleted}
-              />
-            </Suspense>
-          )}
-          {shouldMount('createProject', createProjectOpen) && (
-            <Suspense fallback={null}>
-              <CreateProjectDialog
-                open={createProjectOpen}
-                onOpenChange={(open) => {
-                  if (!open) useDialogStore.getState().closeCreateProject()
-                }}
-                onCreated={handleProjectCreated}
-              />
-            </Suspense>
-          )}
-          {shouldMount('projectSettings', !!editingProject) && (
-            <Suspense fallback={null}>
-              <ProjectSettingsDialog
-                project={editingProject}
-                open={!!editingProject}
-                onOpenChange={(open) => !open && closeProjectSettings()}
-                initialTab={projectSettingsInitialTab}
-                groupBy={testGroupBy}
-                onGroupByChange={setTestGroupBy}
-                integrationOnboardingProvider={projectSettingsOnboardingProvider}
-                onIntegrationOnboardingHandled={() => setProjectSettingsOnboardingProvider(null)}
-                onUpdated={handleProjectUpdated}
-                onChanged={handleProjectChanged}
-                renderTemplatesTab={(projectId) => <TemplatesSettingsTab projectId={projectId} />}
-              />
-            </Suspense>
-          )}
-          {shouldMount('deleteProject', !!deletingProject) && (
-            <Suspense fallback={null}>
-              <DeleteProjectDialog
-                project={deletingProject}
-                open={!!deletingProject}
-                onOpenChange={(open) => {
-                  if (!open) useDialogStore.getState().closeDeleteProject()
-                }}
-                onDeleted={handleProjectDeleted}
-              />
-            </Suspense>
-          )}
-          {groupSettingsTarget && (
-            <Suspense fallback={null}>
-              <GroupSettingsDialog
-                group={groupSettingsTarget}
-                open={!!groupSettingsTarget}
-                onClose={() => useDialogStore.getState().closeGroupSettings()}
-                onRename={(name) => renameProjectGroup(groupSettingsTarget.id, name)}
-                onDelete={() => deleteProjectGroup(groupSettingsTarget.id)}
-              />
-            </Suspense>
-          )}
-          {shouldMount('settings', settingsOpen) && (
-            <Suspense fallback={null}>
-              <UserSettingsDialog
-                open={settingsOpen}
-                onOpenChange={(open) => {
-                  setSettingsOpen(open)
-                  if (!open) {
-                    setSettingsRevision((r) => r + 1)
-                    setSettingsInitialAiConfigSection(null)
-                  }
-                }}
-                initialTab={settingsInitialTab}
-                initialAiConfigSection={settingsInitialAiConfigSection}
-                onTabChange={setSettingsInitialTab}
-              />
-            </Suspense>
-          )}
-          {shouldMount('search', searchOpen) && (
-            <Suspense fallback={null}>
-              <SearchDialog
-                open={searchOpen}
-                onOpenChange={(open) => {
-                  if (!open) useDialogStore.getState().closeSearch()
-                }}
-                tasks={tasks}
-                projects={projects}
-                closedTabs={closedTabs}
-                openTaskTabs={tabs.filter(
-                  (t): t is Extract<typeof t, { type: 'task' }> => t.type === 'task'
-                )}
-                activeTaskId={(() => {
-                  const t = tabs[activeTabIndex]
-                  return t && t.type === 'task' ? t.taskId : null
-                })()}
-                onSelectTask={openTask}
-                onSelectProject={setSelectedProjectId}
-                onNewTask={() => useDialogStore.getState().openCreateTask()}
-                onNewTemporaryTask={() => {
-                  void handleCreateScratchTerminal()
-                }}
-                onReopenClosedTab={() => useTabStore.getState().reopenClosedTab()}
-                onAddProject={() => useDialogStore.getState().openCreateProject()}
-                onGoHome={() => {
-                  const hi = useTabStore.getState().tabs.findIndex((t) => t.type === 'home')
-                  if (hi >= 0) setActiveTabIndex(hi)
-                }}
-                onToggleGlobalAgentPanel={() => {
-                  if (selectedProjectId)
-                    setGlobalAgentPanelState({ isOpen: !globalAgentPanelState.isOpen })
-                }}
-                onOpenChangelog={() => useDialogStore.getState().openChangelog()}
-                onOpenSettings={handleOpenSettings}
-              />
-            </Suspense>
-          )}
-          {shouldMount('onboarding', shouldMountOnboarding) && (
-            <Suspense fallback={null}>
-              <OnboardingDialog
-                externalOpen={onboardingOpen}
-                onExternalClose={async () => {
-                  useDialogStore.getState().closeOnboarding()
-                  const [onboardingCompleted, prompted] = await Promise.all([
-                    window.api.settings.get('onboarding_completed'),
-                    window.api.settings.get('tutorial_prompted')
-                  ])
-                  if (onboardingCompleted === 'true') markSetupGuideCompleted()
-                  if (!prompted) {
-                    void window.api.settings.set('tutorial_prompted', 'true')
-                    toast('Want a quick tour?', {
-                      duration: 8000,
-                      action: { label: 'Take the tour', onClick: startTour }
-                    })
-                  }
-                }}
-              />
-            </Suspense>
-          )}
-          <Suspense fallback={null}>
-            <CliInstallDialog />
-          </Suspense>
-          {shouldMount('tutorial', showAnimatedTour) && (
-            <Suspense fallback={null}>
-              <TutorialAnimationModal
-                open={showAnimatedTour}
-                onClose={() => useDialogStore.getState().closeAnimatedTour()}
-              />
-            </Suspense>
-          )}
-          {shouldMount('changelog', changelogOpen || autoChangelogOpen) && (
-            <Suspense fallback={null}>
-              <ChangelogDialog
-                open={changelogOpen || autoChangelogOpen}
-                onOpenChange={(open) => {
-                  if (!open) {
-                    useDialogStore.getState().closeChangelog()
-                    dismissAutoChangelog()
-                  }
-                }}
-                lastSeenVersion={autoChangelogOpen ? lastSeenVersion : null}
-              />
-            </Suspense>
-          )}
-          <AlertDialog
-            open={completeTaskDialogOpen}
-            onOpenChange={(open) => {
-              if (!open) useDialogStore.getState().closeCompleteTaskDialog()
-            }}
-          >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Complete Task</AlertDialogTitle>
-                <AlertDialogDescription>Mark as complete and close tab?</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction autoFocus onClick={handleCompleteTaskConfirm}>
-                  Complete
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          <UpdateToast
-            version={updateToastDismissed ? null : updateVersion}
-            onRestart={() => window.api.app.restartForUpdate()}
-            onDismiss={() => setUpdateToastDismissed(true)}
+          <AppDialogs
+            shouldMount={shouldMount}
+            createTaskOpen={createTaskOpen}
+            handleTaskCreated={handleTaskCreated}
+            handleTaskCreatedAndOpen={handleTaskCreatedAndOpen}
+            createTaskDialogDraft={createTaskDialogDraft}
+            projectTags={projectTags}
+            setTags={setTags}
+            editingTask={editingTask}
+            handleTaskUpdated={handleTaskUpdated}
+            deletingTask={deletingTask}
+            handleTaskDeleted={handleTaskDeleted}
+            createProjectOpen={createProjectOpen}
+            handleProjectCreated={handleProjectCreated}
+            editingProject={editingProject}
+            closeProjectSettings={closeProjectSettings}
+            projectSettingsInitialTab={projectSettingsInitialTab}
+            testGroupBy={testGroupBy}
+            setTestGroupBy={setTestGroupBy}
+            projectSettingsOnboardingProvider={projectSettingsOnboardingProvider}
+            setProjectSettingsOnboardingProvider={setProjectSettingsOnboardingProvider}
+            handleProjectUpdated={handleProjectUpdated}
+            handleProjectChanged={handleProjectChanged}
+            deletingProject={deletingProject}
+            handleProjectDeleted={handleProjectDeleted}
+            groupSettingsTarget={groupSettingsTarget}
+            renameProjectGroup={renameProjectGroup}
+            deleteProjectGroup={deleteProjectGroup}
+            settingsOpen={settingsOpen}
+            setSettingsOpen={setSettingsOpen}
+            setSettingsRevision={setSettingsRevision}
+            settingsInitialTab={settingsInitialTab}
+            setSettingsInitialTab={setSettingsInitialTab}
+            settingsInitialAiConfigSection={settingsInitialAiConfigSection}
+            setSettingsInitialAiConfigSection={setSettingsInitialAiConfigSection}
+            searchOpen={searchOpen}
+            tasks={tasks}
+            projects={projects}
+            closedTabs={closedTabs}
+            openTaskTabs={tabs.filter(
+              (t): t is Extract<typeof t, { type: 'task' }> => t.type === 'task'
+            )}
+            activeTaskId={(() => {
+              const t = tabs[activeTabIndex]
+              return t && t.type === 'task' ? t.taskId : null
+            })()}
+            openTask={openTask}
+            setSelectedProjectId={setSelectedProjectId}
+            setActiveTabIndex={setActiveTabIndex}
+            handleCreateScratchTerminal={handleCreateScratchTerminal}
+            selectedProjectId={selectedProjectId}
+            globalAgentPanelState={globalAgentPanelState}
+            setGlobalAgentPanelState={setGlobalAgentPanelState}
+            handleOpenSettings={handleOpenSettings}
+            shouldMountOnboarding={shouldMountOnboarding}
+            onboardingOpen={onboardingOpen}
+            markSetupGuideCompleted={markSetupGuideCompleted}
+            startTour={startTour}
+            showAnimatedTour={showAnimatedTour}
+            changelogOpen={changelogOpen}
+            autoChangelogOpen={autoChangelogOpen}
+            dismissAutoChangelog={dismissAutoChangelog}
+            lastSeenVersion={lastSeenVersion}
+            completeTaskDialogOpen={completeTaskDialogOpen}
+            handleCompleteTaskConfirm={handleCompleteTaskConfirm}
+            updateToastDismissed={updateToastDismissed}
+            updateVersion={updateVersion}
+            setUpdateToastDismissed={setUpdateToastDismissed}
           />
-          <Suspense fallback={null}>
-            <TerminalStatusDialog tasks={tasks} onTaskClick={openTask} />
-          </Suspense>
-          <Toaster position="bottom-right" theme="dark" closeButton />
         </div>
       </SidebarProvider>
     </AppearanceProvider>
