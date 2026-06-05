@@ -1,0 +1,319 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import type { Task } from '@slayzone/task/shared'
+import {
+  getProviderConversationId,
+  setProviderConversationId,
+  getProviderLastKilledAt,
+  decideReviveMode
+} from '@slayzone/task/shared'
+import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
+import { markSkipCache } from '@slayzone/terminal'
+
+export interface UseTaskTerminalSessionParams {
+  task: Task | null
+  onTaskUpdated: (task: Task) => void
+  shortcutActive: boolean | undefined
+  getMainSessionId: (id: string) => string
+  resetTaskState: (sessionId: string) => void
+  subscribeSessionDetected: (sessionId: string, cb: (sessionId: string) => void) => () => void
+  setTerminalKey: React.Dispatch<React.SetStateAction<number>>
+}
+
+export interface UseTaskTerminalSessionResult {
+  sessionIdCommand: string | undefined
+  showSessionBanner: boolean
+  showUnavailableBanner: boolean
+  detectedSessionId: string | null
+  setSessionUnavailableDismissed: React.Dispatch<React.SetStateAction<string | null>>
+  handleDetectSessionId: () => Promise<void>
+  getConversationIdForMode: (t: Task) => string | null
+  handleUpdateSessionId: () => Promise<void>
+  handleRestartTerminal: () => Promise<void>
+  handleStopAgent: () => Promise<void>
+  handleResetTerminal: () => Promise<void>
+  handleReattachTerminal: () => void
+}
+
+/**
+ * Terminal session lifecycle: session-id discovery (detect/sync/persist), restart/reset/stop,
+ * revive-on-respawn, and the CLI ensure-alive coalescing. Owns `detectedSessionId`; drives the
+ * terminal remount via the `setTerminalKey` setter passed in by the parent.
+ */
+export function useTaskTerminalSession({
+  task,
+  onTaskUpdated,
+  shortcutActive,
+  getMainSessionId,
+  resetTaskState,
+  subscribeSessionDetected,
+  setTerminalKey
+}: UseTaskTerminalSessionParams): UseTaskTerminalSessionResult {
+  // Detected session ID from /status command
+  const [detectedSessionId, setDetectedSessionId] = useState<string | null>(null)
+
+  // Session ID discovery: providers that don't support --session-id at creation
+  const sessionIdCommand = task ? SESSION_ID_COMMANDS[task.terminal_mode] : undefined
+  const showSessionBanner =
+    !!sessionIdCommand &&
+    !!task &&
+    !getProviderConversationId(task.provider_config, task.terminal_mode) &&
+    !detectedSessionId
+
+  // Providers where session ID detection is not possible
+  const sessionIdUnavailable = !!task && SESSION_ID_UNAVAILABLE.includes(task.terminal_mode)
+  const [sessionUnavailableDismissed, setSessionUnavailableDismissed] = useState<string | null>(
+    null
+  )
+  const showUnavailableBanner =
+    sessionIdUnavailable &&
+    !getProviderConversationId(task?.provider_config, task?.terminal_mode ?? '') &&
+    sessionUnavailableDismissed !== task?.id
+
+  const handleDetectSessionId = useCallback(async () => {
+    if (!task || !sessionIdCommand) return
+    const sid = getMainSessionId(task.id)
+    const exists = await window.api.pty.exists(sid)
+    if (!exists) return
+    await window.api.pty.write(sid, sessionIdCommand + '\r')
+  }, [task, sessionIdCommand, getMainSessionId])
+
+  const getConversationIdForMode = useCallback((t: Task): string | null => {
+    return getProviderConversationId(t.provider_config, t.terminal_mode)
+  }, [])
+
+  // Subscribe to session detected events
+  useEffect(() => {
+    if (!task) return
+    return subscribeSessionDetected(getMainSessionId(task.id), (id) => {
+      const current = getConversationIdForMode(task)
+      if (id !== current) {
+        setDetectedSessionId(id)
+      }
+    })
+  }, [task, subscribeSessionDetected, getMainSessionId, getConversationIdForMode])
+
+  // Update DB with detected session ID
+  const handleUpdateSessionId = useCallback(async () => {
+    if (!task || !detectedSessionId) return
+    const updated = await window.api.db.updateTask({
+      id: task.id,
+      providerConfig: setProviderConversationId(
+        task.provider_config,
+        task.terminal_mode,
+        detectedSessionId
+      )
+    })
+    onTaskUpdated(updated)
+    setDetectedSessionId(null)
+  }, [task, detectedSessionId, onTaskUpdated])
+
+  const handleUpdateSessionIdRef = useRef(handleUpdateSessionId)
+  useEffect(() => {
+    handleUpdateSessionIdRef.current = handleUpdateSessionId
+  }, [handleUpdateSessionId])
+
+  // Cmd+Shift+U: sync detected session ID to DB (only when this task is active and banner is showing)
+  useEffect(() => {
+    if (!shortcutActive) return
+    return window.api.app.onSyncSessionId(() => {
+      void handleUpdateSessionIdRef.current()
+    })
+  }, [shortcutActive])
+
+  // Persist detected conversation IDs immediately for modes that need session discovery.
+  useEffect(() => {
+    if (!task || !detectedSessionId || !sessionIdCommand) return
+    if (getConversationIdForMode(task) === detectedSessionId) {
+      setDetectedSessionId(null)
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      const updated = await window.api.db.updateTask({
+        id: task.id,
+        providerConfig: setProviderConversationId(
+          task.provider_config,
+          task.terminal_mode,
+          detectedSessionId
+        )
+      })
+      if (cancelled) return
+      onTaskUpdated(updated)
+      setDetectedSessionId(null)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [task, detectedSessionId, sessionIdCommand, onTaskUpdated, getConversationIdForMode])
+
+  // Restart terminal (kill PTY, remount, keep session for --resume)
+  const handleRestartTerminal = useCallback(async () => {
+    if (!task) return
+    const mainSessionId = getMainSessionId(task.id)
+    resetTaskState(mainSessionId)
+    await window.api.pty.kill(mainSessionId)
+    await new Promise((r) => setTimeout(r, 100))
+    markSkipCache(mainSessionId)
+    setTerminalKey((k) => k + 1)
+  }, [task, resetTaskState, getMainSessionId])
+
+  // Power-off agent (kill PTY only — no remount; user clicks Retry to resume)
+  const handleStopAgent = useCallback(async () => {
+    if (!task) return
+    const mainSessionId = getMainSessionId(task.id)
+    resetTaskState(mainSessionId)
+    await window.api.pty.kill(mainSessionId)
+  }, [task, resetTaskState, getMainSessionId])
+
+  // Reset terminal (kill PTY, clear session ID, remount fresh)
+  const handleResetTerminal = useCallback(async () => {
+    if (!task) return
+    const mainSessionId = getMainSessionId(task.id)
+    resetTaskState(mainSessionId)
+    await window.api.pty.kill(mainSessionId)
+    // Clear session ID so new session starts fresh
+    const updated = await window.api.db.updateTask({
+      id: task.id,
+      providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, null)
+    })
+    onTaskUpdated(updated)
+    await new Promise((r) => setTimeout(r, 100))
+    markSkipCache(mainSessionId)
+    setTerminalKey((k) => k + 1)
+  }, [task, resetTaskState, onTaskUpdated, getMainSessionId])
+
+  // Revive: when main broadcasts pty:respawn-suggested for this task (after a
+  // terminal → non-terminal status transition), remount the terminal so the user
+  // can keep typing without clicking Retry. See GitHub issue #77.
+  // Plain shell mode is skipped — no conversation model, respawning a shell would
+  // surprise the user. Hot bounces resume the existing conversation; cold (>30 min)
+  // bounces start a fresh one.
+  useEffect(() => {
+    if (!task) return
+    const unsubscribe = window.api.pty.onRespawnSuggested(async (taskId) => {
+      if (taskId !== task.id) return
+      if (task.terminal_mode === 'terminal') return
+      const sid = getMainSessionId(task.id)
+      // Idempotent: if a PTY is already alive, another listener (or the user) beat
+      // us to it — skip to avoid a double-spawn.
+      try {
+        if (await window.api.pty.exists(sid)) return
+      } catch {
+        return
+      }
+      const killedAt = getProviderLastKilledAt(task.provider_config, task.terminal_mode)
+      // Unknown kill time defaults to RESUME (non-destructive). A cold start is
+      // destructive — it clears the conversation id — so it requires positive
+      // evidence the task sat past the threshold. See decideReviveMode / RC2.
+      if (decideReviveMode(killedAt, Date.now()) === 'fresh') {
+        await handleResetTerminal()
+      } else {
+        await handleRestartTerminal()
+      }
+    })
+    return unsubscribe
+  }, [task, getMainSessionId, handleRestartTerminal, handleResetTerminal])
+
+  // Ensure-alive: CLI-triggered (`slay pty respawn` w/ force=true, or
+  // `slay pty start` / `slay tasks open --start` / auto-start w/ force=false).
+  // Each REST call gets a unique reqId from main. We dedupe stale retries
+  // (race: ack in-flight while main fires one more retry) by tracking handled
+  // reqIds. Concurrent reqIds arriving during an in-flight run are coalesced —
+  // they all receive the current run's outcome (idempotent).
+  const ensureAliveInFlightRef = useRef(false)
+  const ensureAlivePendingReqsRef = useRef<Set<number>>(new Set())
+  const ensureAliveHandledReqsRef = useRef<number[]>([])
+  useEffect(() => {
+    if (!task) return
+    return window.api.pty.onEnsureAlive(async (taskId, reqId, force) => {
+      if (taskId !== task.id) return
+      // Stale retry for an already-completed reqId — re-ack idempotently.
+      if (ensureAliveHandledReqsRef.current.includes(reqId)) {
+        window.api.pty.ackEnsureAlive(reqId, 'ok')
+        return
+      }
+      // Fast path for non-forced ensure when PTY already alive — no work, no
+      // coalescing. Main's `hasPty` short-circuit usually catches this before
+      // the broadcast, but a race during spawn can land us here.
+      if (!force) {
+        const sid = getMainSessionId(task.id)
+        try {
+          if (await window.api.pty.exists(sid)) {
+            ensureAliveHandledReqsRef.current.push(reqId)
+            window.api.pty.ackEnsureAlive(reqId, 'already-alive')
+            return
+          }
+        } catch {
+          window.api.pty.ackEnsureAlive(reqId, 'error')
+          return
+        }
+      }
+      // In-flight: coalesce. The current run's result will ack this reqId too.
+      if (ensureAliveInFlightRef.current) {
+        ensureAlivePendingReqsRef.current.add(reqId)
+        return
+      }
+      ensureAliveInFlightRef.current = true
+      ensureAlivePendingReqsRef.current.add(reqId)
+      let result: 'ok' | 'error' = 'error'
+      try {
+        if (force) {
+          await handleRestartTerminal()
+          result = 'ok'
+        } else {
+          // Server has flipped `terminal_tabs.was_spawned=1` and broadcast
+          // `tabs:changed`, so useTaskTerminals will re-fetch and TerminalStarter
+          // will auto-mount <Terminal>, which spawns via pty:create IPC. Poll
+          // pty.exists until alive or timeout.
+          const sid = getMainSessionId(task.id)
+          const deadline = Date.now() + 5000
+          while (Date.now() < deadline) {
+            try {
+              if (await window.api.pty.exists(sid)) {
+                result = 'ok'
+                break
+              }
+            } catch {
+              break
+            }
+            await new Promise((r) => setTimeout(r, 100))
+          }
+        }
+      } finally {
+        const reqs = [...ensureAlivePendingReqsRef.current]
+        ensureAlivePendingReqsRef.current.clear()
+        for (const r of reqs) {
+          ensureAliveHandledReqsRef.current.push(r)
+          window.api.pty.ackEnsureAlive(r, result)
+        }
+        if (ensureAliveHandledReqsRef.current.length > 100) {
+          ensureAliveHandledReqsRef.current = ensureAliveHandledReqsRef.current.slice(-50)
+        }
+        ensureAliveInFlightRef.current = false
+      }
+    })
+  }, [task, handleRestartTerminal, getMainSessionId])
+
+  // Re-attach terminal (remount without killing PTY - reuses cached terminal)
+  const handleReattachTerminal = useCallback(() => {
+    if (!task) return
+    setTerminalKey((k) => k + 1)
+  }, [task])
+
+  return {
+    sessionIdCommand,
+    showSessionBanner,
+    showUnavailableBanner,
+    detectedSessionId,
+    setSessionUnavailableDismissed,
+    handleDetectSessionId,
+    getConversationIdForMode,
+    handleUpdateSessionId,
+    handleRestartTerminal,
+    handleStopAgent,
+    handleResetTerminal,
+    handleReattachTerminal
+  }
+}

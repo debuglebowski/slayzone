@@ -1,4 +1,4 @@
-import React, { Activity, useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
+import React, { Activity, useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import {
   MoreHorizontal,
   Archive,
@@ -14,7 +14,6 @@ import {
   ChevronRight,
   Flag,
   Plus,
-  GripVertical,
   X,
   Info,
   Check,
@@ -27,13 +26,6 @@ import {
   LayoutTemplate,
   Paperclip,
   Power,
-  Eye,
-  Trophy,
-  Sparkles,
-  PartyPopper,
-  Shuffle,
-  Swords,
-  Flame,
   PanelsTopLeft
 } from 'lucide-react'
 import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
@@ -41,20 +33,15 @@ import type { ArtifactsPanelHandle } from '@slayzone/task-artifacts/client'
 import { useArtifacts } from '@slayzone/task-artifacts/client'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import type { Task, PanelVisibility, PanelSizes, UpdateTaskInput } from '@slayzone/task/shared'
 import type { TaskTemplate } from '@slayzone/task/shared'
 import type { TaskDetailData } from './taskDetailCache'
 import {
   BUILTIN_PANEL_IDS,
-  getProviderConversationId,
   getProviderFlags,
-  setProviderConversationId,
   setProviderFlags,
   clearAllConversationIds,
-  getProviderLastKilledAt,
-  decideReviveMode,
   priorityOptions
 } from '@slayzone/task/shared'
 import type { BrowserTabsState } from '@slayzone/task-browser/shared'
@@ -65,16 +52,10 @@ import {
   getDoneStatus,
   isCompletedStatus,
   isTerminalStatus,
-  resolveColumns,
   resolveRepoPath
 } from '@slayzone/projects/shared'
 import { useDetectedRepos } from '@slayzone/projects'
-import {
-  DEV_SERVER_URL_PATTERN,
-  SESSION_ID_COMMANDS,
-  SESSION_ID_UNAVAILABLE
-} from '@slayzone/terminal/shared'
-import type { TerminalMode, ValidationResult } from '@slayzone/terminal/shared'
+import type { TerminalMode } from '@slayzone/terminal/shared'
 import {
   Button,
   IconButton,
@@ -93,14 +74,8 @@ import {
 } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import {
-  ContextMenu,
-  ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
   ContextMenuRadioGroup,
   ContextMenuRadioItem
 } from '@slayzone/ui'
@@ -148,8 +123,7 @@ import {
   LoopModeDialog,
   SlayNudgeBanner,
   useSlayNudge,
-  PtyStateDot,
-  PtyProgressDot
+  PtyStateDot
 } from '@slayzone/terminal'
 import type { LoopConfig } from '@slayzone/terminal/shared'
 import {
@@ -174,7 +148,7 @@ import {
 } from '@slayzone/ui'
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
-import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
+import type { OpenFileOptions } from '@slayzone/file-editor/shared'
 import { track } from '@slayzone/telemetry/client'
 import {
   usePanelSizes,
@@ -196,209 +170,22 @@ import { ProcessesPanel } from './ProcessesPanel'
 import { TaskSettingsPanel } from './TaskSettingsPanel'
 import { PanelLoadingSkeleton } from './PanelLoadingSkeleton'
 import { useSharedCardHeights } from './useSharedCardHeights'
-
-const ArtifactsPanel = lazy(() =>
-  import('@slayzone/task-artifacts/client').then((m) => ({ default: m.ArtifactsPanel }))
-)
-const DescriptionDialog = lazy(() =>
-  import('./DescriptionDialog').then((m) => ({ default: m.DescriptionDialog }))
-)
-const RichTextEditor = lazy(() =>
-  import('@slayzone/editor').then((m) => ({ default: m.RichTextEditor }))
-)
-const UnifiedGitPanel = lazy(() =>
-  import('@slayzone/worktrees').then((m) => ({ default: m.UnifiedGitPanel }))
-)
-const BrowserPanel = lazy(() =>
-  import('@slayzone/task-browser').then((m) => ({ default: m.BrowserPanel }))
-)
-const FileEditorView = lazy(() =>
-  import('@slayzone/file-editor/client').then((m) => ({ default: m.FileEditorView }))
-)
-
-function TaskOverviewRow({
-  sub,
-  columns,
-  statusOptions,
-  onNavigate,
-  onUpdate,
-  onDelete,
-  dragHandle,
-  rowRef,
-  rowStyle,
-  isDragging
-}: {
-  sub: Task
-  columns?: Project['columns_config']
-  statusOptions: Array<{ value: string; label: string }>
-  onNavigate?: (id: string) => void
-  onUpdate: (id: string, updates: Record<string, unknown>) => void
-  onDelete?: (id: string) => void
-  dragHandle?: React.ReactNode
-  rowRef?: (node: HTMLElement | null) => void
-  rowStyle?: React.CSSProperties
-  isDragging?: boolean
-}): React.JSX.Element {
-  const statusStyle = getColumnStatusStyle(sub.status, columns)
-  const StatusIcon = statusStyle?.icon
-  const [statusOpen, setStatusOpen] = useState(false)
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          ref={rowRef}
-          style={rowStyle}
-          className={cn(
-            'relative flex items-center gap-2 py-1 px-1 rounded cursor-pointer hover:bg-muted/50 group select-none',
-            isDragging && 'opacity-50'
-          )}
-        >
-          {dragHandle}
-          <Popover open={statusOpen} onOpenChange={setStatusOpen}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={`Status: ${statusStyle?.label ?? sub.status}`}
-                    onClick={(e) => e.stopPropagation()}
-                    className="shrink-0 cursor-pointer transition-opacity hover:opacity-70"
-                  >
-                    {StatusIcon && (
-                      <StatusIcon className={cn('size-3.5', statusStyle?.iconClass)} />
-                    )}
-                  </button>
-                </PopoverTrigger>
-              </TooltipTrigger>
-              <TooltipContent>
-                {statusStyle?.label ?? sub.status} — {Math.round(sub.progress ?? 0)}% complete
-              </TooltipContent>
-            </Tooltip>
-            <PopoverContent className="w-44 p-1" align="start" onClick={(e) => e.stopPropagation()}>
-              {statusOptions.map((opt) => {
-                const optStyle = getColumnStatusStyle(opt.value, columns)
-                const OptIcon = optStyle?.icon ?? Circle
-                const isCurrent = opt.value === sub.status
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm cursor-pointer hover:bg-accent',
-                      isCurrent && 'bg-accent font-medium'
-                    )}
-                    onClick={() => {
-                      onUpdate(sub.id, { status: opt.value })
-                      setStatusOpen(false)
-                    }}
-                  >
-                    <OptIcon className={cn('size-4', optStyle?.iconClass)} />
-                    {opt.label}
-                  </button>
-                )
-              })}
-            </PopoverContent>
-          </Popover>
-          <span
-            className={cn(
-              'text-xs flex-1 truncate',
-              isTerminalStatus(sub.status, columns ?? null) && 'line-through text-muted-foreground'
-            )}
-            onClick={() => onNavigate?.(sub.id)}
-          >
-            {sub.title}
-          </span>
-          <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <PtyProgressDot sessionId={`${sub.id}:${sub.id}`} progress={sub.progress} alwaysShow />
-          </div>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        <ContextMenuItem onSelect={() => onNavigate?.(sub.id)}>Open</ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>Status</ContextMenuSubTrigger>
-          <ContextMenuSubContent>
-            <ContextMenuRadioGroup
-              value={sub.status}
-              onValueChange={(v) => onUpdate(sub.id, { status: v })}
-            >
-              {statusOptions.map((s) => (
-                <ContextMenuRadioItem key={s.value} value={s.value}>
-                  {s.label}
-                </ContextMenuRadioItem>
-              ))}
-            </ContextMenuRadioGroup>
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>Priority</ContextMenuSubTrigger>
-          <ContextMenuSubContent>
-            <ContextMenuRadioGroup
-              value={String(sub.priority)}
-              onValueChange={(v) => onUpdate(sub.id, { priority: parseInt(v, 10) })}
-            >
-              {Object.entries({ 1: 'Urgent', 2: 'High', 3: 'Medium', 4: 'Low', 5: 'Someday' }).map(
-                ([value, label]) => (
-                  <ContextMenuRadioItem key={value} value={value}>
-                    {label}
-                  </ContextMenuRadioItem>
-                )
-              )}
-            </ContextMenuRadioGroup>
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-        {onDelete && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem variant="destructive" onSelect={() => onDelete(sub.id)}>
-              Delete
-            </ContextMenuItem>
-          </>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
-  )
-}
-
-function SortableSubTask(props: {
-  sub: Task
-  columns?: Project['columns_config']
-  statusOptions: Array<{ value: string; label: string }>
-  onNavigate?: (id: string) => void
-  onUpdate: (id: string, updates: Record<string, unknown>) => void
-  onDelete: (id: string) => void
-}): React.JSX.Element {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: props.sub.id
-  })
-  const style = { transform: CSS.Transform.toString(transform), transition }
-  const dragHandle = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          {...attributes}
-          {...listeners}
-          className="shrink-0 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground touch-none"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <GripVertical className="size-3" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>Drag to reorder</TooltipContent>
-    </Tooltip>
-  )
-  return (
-    <TaskOverviewRow
-      {...props}
-      rowRef={setNodeRef}
-      rowStyle={style}
-      isDragging={isDragging}
-      dragHandle={dragHandle}
-    />
-  )
-}
+import {
+  SortableSubTask,
+  ArtifactsPanel,
+  DescriptionDialog,
+  RichTextEditor,
+  UnifiedGitPanel,
+  BrowserPanel,
+  FileEditorView,
+  useTaskTemplates,
+  useTaskDoctor,
+  useTaskTitleEditing,
+  usePersistenceSaves,
+  useDevServerDetection,
+  useTaskTerminalSession,
+  TaskCompletedScreen
+} from './task-detail'
 
 export interface TaskDetailPageProps {
   taskId: string
@@ -599,24 +386,23 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const terminalRestartShortcut = useShortcutDisplay('terminal-restart')
   const syncSessionIdShortcut = useShortcutDisplay('sync-session-id')
 
-  // Detected session ID from /status command
-  const [detectedSessionId, setDetectedSessionId] = useState<string | null>(null)
-
   // Title editing state
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [titleValue, setTitleValue] = useState(task?.title ?? '')
-  const titleInputRef = useRef<HTMLInputElement>(null)
+  const {
+    editingTitle,
+    setEditingTitle,
+    titleValue,
+    setTitleValue,
+    titleInputRef,
+    handleTitleSave,
+    handleTitleKeyDown
+  } = useTaskTitleEditing(task, onTaskUpdated)
 
   // Delete/archive dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
 
   // Templates for temporary tasks
-  const [templates, setTemplates] = useState<TaskTemplate[]>([])
-  useEffect(() => {
-    if (!task?.is_temporary || !task.project_id) return
-    window.api.taskTemplates.getByProject(task.project_id).then(setTemplates)
-  }, [task?.is_temporary, task?.project_id])
+  const { templates } = useTaskTemplates(task)
 
   // Description fullscreen dialog
   const [descriptionFullscreen, setDescriptionFullscreen] = useState(false)
@@ -638,9 +424,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   ])
 
   // Doctor dialog state
-  const [doctorDialogOpen, setDoctorDialogOpen] = useState(false)
-  const [doctorResults, setDoctorResults] = useState<ValidationResult[] | null>(null)
-  const [doctorLoading, setDoctorLoading] = useState(false)
+  const { doctorDialogOpen, setDoctorDialogOpen, doctorResults, doctorLoading, handleDoctor } =
+    useTaskDoctor(task)
 
   // In-progress prompt state
 
@@ -717,11 +502,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [])
   const hasOpenSecondary = !!task && openTaskWindowIds.includes(task.id)
 
-  // Sync title/description from global state when changed externally
-  useEffect(() => {
-    if (task && !editingTitle) setTitleValue(task.title)
-  }, [task?.title, editingTitle])
-
+  // Sync description from global state when changed externally
   useEffect(() => {
     if (task) {
       setDescriptionValue(normalizeDescription(task.description, task.description_format))
@@ -951,16 +732,19 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   })
 
   // Dev server URL detection
-  const [detectedDevUrl, setDetectedDevUrl] = useState<string | null>(null)
-  const devUrlDismissedRef = useRef<Set<string>>(new Set())
-  const devServerToastEnabledRef = useRef(true)
-  const devServerAutoOpenRef = useRef(false)
-  const devServerAutoOpenCallbackRef = useRef<((url: string) => void) | null>(null)
-  const devUrlToastDismissedRef = useRef<boolean>(!!task?.dev_url_toast_dismissed)
-  useEffect(() => {
-    devUrlToastDismissedRef.current = !!task?.dev_url_toast_dismissed
-  }, [task?.dev_url_toast_dismissed])
-  const browserOpenRef = useRef(panelVisibility.browser)
+  const {
+    detectedDevUrl,
+    setDetectedDevUrl,
+    browserOpenRef,
+    devServerAutoOpenCallbackRef,
+    devUrlToastDismissedRef
+  } = useDevServerDetection({
+    task,
+    browserVisible: panelVisibility.browser,
+    settingsRevision,
+    subscribeDevServer,
+    getMainSessionId
+  })
   const gitPanelRef = useRef<UnifiedGitPanelHandle>(null)
   const [gitDefaultTab, setGitDefaultTab] = useState<GitTabId>(
     () => task?.git_active_tab ?? 'general'
@@ -995,56 +779,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       pendingSearchToggleRef.current = false
     }
   }, [])
-  useEffect(() => {
-    browserOpenRef.current = panelVisibility.browser
-  }, [panelVisibility.browser])
-
-  // Load dev server settings (re-read on settingsRevision change)
-  useEffect(() => {
-    Promise.all([
-      window.api.settings.get('dev_server_toast_enabled'),
-      window.api.settings.get('dev_server_auto_open_browser')
-    ]).then(([toast, autoOpen]) => {
-      devServerToastEnabledRef.current = toast !== '0'
-      devServerAutoOpenRef.current = autoOpen === '1'
-    })
-  }, [settingsRevision])
-
-  useEffect(() => {
-    if (!task) return
-    const sid = getMainSessionId(task.id)
-
-    const handleUrl = (url: string) => {
-      if (browserOpenRef.current || devUrlDismissedRef.current.has(url)) return
-      if (devUrlToastDismissedRef.current) return
-      devUrlDismissedRef.current.add(url)
-      if (devServerAutoOpenRef.current) {
-        devServerAutoOpenCallbackRef.current?.(url)
-      } else if (devServerToastEnabledRef.current) {
-        setDetectedDevUrl(url)
-      }
-    }
-
-    // Subscribe first, then check buffer (avoids race where URL emits between read and subscribe)
-    const unsub = subscribeDevServer(sid, handleUrl)
-
-    window.api.pty.getBuffer(sid).then((buf) => {
-      if (!buf || browserOpenRef.current) return
-      DEV_SERVER_URL_PATTERN.lastIndex = 0
-      const match = buf.match(DEV_SERVER_URL_PATTERN)
-      if (match) {
-        const url = match[match.length - 1].replace('0.0.0.0', 'localhost')
-        handleUrl(url)
-      }
-    })
-
-    return unsub
-  }, [task?.id, subscribeDevServer, getMainSessionId])
-
-  useEffect(() => {
-    if (panelVisibility.browser) setDetectedDevUrl(null)
-  }, [panelVisibility.browser])
-
   // Re-check project path on window focus
   useEffect(() => {
     if (!project?.path) return
@@ -1100,272 +834,29 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     [onTerminalFocusRequestHandled, taskId]
   )
 
-  // Session ID discovery: providers that don't support --session-id at creation
-  const sessionIdCommand = task ? SESSION_ID_COMMANDS[task.terminal_mode] : undefined
-  const showSessionBanner =
-    !!sessionIdCommand &&
-    !!task &&
-    !getProviderConversationId(task.provider_config, task.terminal_mode) &&
-    !detectedSessionId
-
-  // Providers where session ID detection is not possible
-  const sessionIdUnavailable = !!task && SESSION_ID_UNAVAILABLE.includes(task.terminal_mode)
-  const [sessionUnavailableDismissed, setSessionUnavailableDismissed] = useState<string | null>(
-    null
-  )
-  const showUnavailableBanner =
-    sessionIdUnavailable &&
-    !getProviderConversationId(task?.provider_config, task?.terminal_mode ?? '') &&
-    sessionUnavailableDismissed !== task?.id
-
-  const handleDetectSessionId = useCallback(async () => {
-    if (!task || !sessionIdCommand) return
-    const sid = getMainSessionId(task.id)
-    const exists = await window.api.pty.exists(sid)
-    if (!exists) return
-    await window.api.pty.write(sid, sessionIdCommand + '\r')
-  }, [task, sessionIdCommand, getMainSessionId])
-
-  const getConversationIdForMode = useCallback((t: Task): string | null => {
-    return getProviderConversationId(t.provider_config, t.terminal_mode)
-  }, [])
-
-  // Subscribe to session detected events
-  useEffect(() => {
-    if (!task) return
-    return subscribeSessionDetected(getMainSessionId(task.id), (id) => {
-      const current = getConversationIdForMode(task)
-      if (id !== current) {
-        setDetectedSessionId(id)
-      }
-    })
-  }, [task, subscribeSessionDetected, getMainSessionId, getConversationIdForMode])
-
-  // Update DB with detected session ID
-  const handleUpdateSessionId = useCallback(async () => {
-    if (!task || !detectedSessionId) return
-    const updated = await window.api.db.updateTask({
-      id: task.id,
-      providerConfig: setProviderConversationId(
-        task.provider_config,
-        task.terminal_mode,
-        detectedSessionId
-      )
-    })
-    onTaskUpdated(updated)
-    setDetectedSessionId(null)
-  }, [task, detectedSessionId, onTaskUpdated])
-
-  const handleUpdateSessionIdRef = useRef(handleUpdateSessionId)
-  useEffect(() => {
-    handleUpdateSessionIdRef.current = handleUpdateSessionId
-  }, [handleUpdateSessionId])
-
-  // Cmd+Shift+U: sync detected session ID to DB (only when this task is active and banner is showing)
-  useEffect(() => {
-    if (!shortcutActive) return
-    return window.api.app.onSyncSessionId(() => {
-      void handleUpdateSessionIdRef.current()
-    })
-  }, [shortcutActive])
-
-  // Persist detected conversation IDs immediately for modes that need session discovery.
-  useEffect(() => {
-    if (!task || !detectedSessionId || !sessionIdCommand) return
-    if (getConversationIdForMode(task) === detectedSessionId) {
-      setDetectedSessionId(null)
-      return
-    }
-
-    let cancelled = false
-    void (async () => {
-      const updated = await window.api.db.updateTask({
-        id: task.id,
-        providerConfig: setProviderConversationId(
-          task.provider_config,
-          task.terminal_mode,
-          detectedSessionId
-        )
-      })
-      if (cancelled) return
-      onTaskUpdated(updated)
-      setDetectedSessionId(null)
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [task, detectedSessionId, sessionIdCommand, onTaskUpdated, getConversationIdForMode])
-
-  // Restart terminal (kill PTY, remount, keep session for --resume)
-  const handleRestartTerminal = useCallback(async () => {
-    if (!task) return
-    const mainSessionId = getMainSessionId(task.id)
-    resetTaskState(mainSessionId)
-    await window.api.pty.kill(mainSessionId)
-    await new Promise((r) => setTimeout(r, 100))
-    markSkipCache(mainSessionId)
-    setTerminalKey((k) => k + 1)
-  }, [task, resetTaskState, getMainSessionId])
-
-  // Power-off agent (kill PTY only — no remount; user clicks Retry to resume)
-  const handleStopAgent = useCallback(async () => {
-    if (!task) return
-    const mainSessionId = getMainSessionId(task.id)
-    resetTaskState(mainSessionId)
-    await window.api.pty.kill(mainSessionId)
-  }, [task, resetTaskState, getMainSessionId])
-
-  // Reset terminal (kill PTY, clear session ID, remount fresh)
-  const handleResetTerminal = useCallback(async () => {
-    if (!task) return
-    const mainSessionId = getMainSessionId(task.id)
-    resetTaskState(mainSessionId)
-    await window.api.pty.kill(mainSessionId)
-    // Clear session ID so new session starts fresh
-    const updated = await window.api.db.updateTask({
-      id: task.id,
-      providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, null)
-    })
-    onTaskUpdated(updated)
-    await new Promise((r) => setTimeout(r, 100))
-    markSkipCache(mainSessionId)
-    setTerminalKey((k) => k + 1)
-  }, [task, resetTaskState, onTaskUpdated, getMainSessionId])
-
-  // Revive: when main broadcasts pty:respawn-suggested for this task (after a
-  // terminal → non-terminal status transition), remount the terminal so the user
-  // can keep typing without clicking Retry. See GitHub issue #77.
-  // Plain shell mode is skipped — no conversation model, respawning a shell would
-  // surprise the user. Hot bounces resume the existing conversation; cold (>30 min)
-  // bounces start a fresh one.
-  useEffect(() => {
-    if (!task) return
-    const unsubscribe = window.api.pty.onRespawnSuggested(async (taskId) => {
-      if (taskId !== task.id) return
-      if (task.terminal_mode === 'terminal') return
-      const sid = getMainSessionId(task.id)
-      // Idempotent: if a PTY is already alive, another listener (or the user) beat
-      // us to it — skip to avoid a double-spawn.
-      try {
-        if (await window.api.pty.exists(sid)) return
-      } catch {
-        return
-      }
-      const killedAt = getProviderLastKilledAt(task.provider_config, task.terminal_mode)
-      // Unknown kill time defaults to RESUME (non-destructive). A cold start is
-      // destructive — it clears the conversation id — so it requires positive
-      // evidence the task sat past the threshold. See decideReviveMode / RC2.
-      if (decideReviveMode(killedAt, Date.now()) === 'fresh') {
-        await handleResetTerminal()
-      } else {
-        await handleRestartTerminal()
-      }
-    })
-    return unsubscribe
-  }, [task, getMainSessionId, handleRestartTerminal, handleResetTerminal])
-
-  // Ensure-alive: CLI-triggered (`slay pty respawn` w/ force=true, or
-  // `slay pty start` / `slay tasks open --start` / auto-start w/ force=false).
-  // Each REST call gets a unique reqId from main. We dedupe stale retries
-  // (race: ack in-flight while main fires one more retry) by tracking handled
-  // reqIds. Concurrent reqIds arriving during an in-flight run are coalesced —
-  // they all receive the current run's outcome (idempotent).
-  const ensureAliveInFlightRef = useRef(false)
-  const ensureAlivePendingReqsRef = useRef<Set<number>>(new Set())
-  const ensureAliveHandledReqsRef = useRef<number[]>([])
-  useEffect(() => {
-    if (!task) return
-    return window.api.pty.onEnsureAlive(async (taskId, reqId, force) => {
-      if (taskId !== task.id) return
-      // Stale retry for an already-completed reqId — re-ack idempotently.
-      if (ensureAliveHandledReqsRef.current.includes(reqId)) {
-        window.api.pty.ackEnsureAlive(reqId, 'ok')
-        return
-      }
-      // Fast path for non-forced ensure when PTY already alive — no work, no
-      // coalescing. Main's `hasPty` short-circuit usually catches this before
-      // the broadcast, but a race during spawn can land us here.
-      if (!force) {
-        const sid = getMainSessionId(task.id)
-        try {
-          if (await window.api.pty.exists(sid)) {
-            ensureAliveHandledReqsRef.current.push(reqId)
-            window.api.pty.ackEnsureAlive(reqId, 'already-alive')
-            return
-          }
-        } catch {
-          window.api.pty.ackEnsureAlive(reqId, 'error')
-          return
-        }
-      }
-      // In-flight: coalesce. The current run's result will ack this reqId too.
-      if (ensureAliveInFlightRef.current) {
-        ensureAlivePendingReqsRef.current.add(reqId)
-        return
-      }
-      ensureAliveInFlightRef.current = true
-      ensureAlivePendingReqsRef.current.add(reqId)
-      let result: 'ok' | 'error' = 'error'
-      try {
-        if (force) {
-          await handleRestartTerminal()
-          result = 'ok'
-        } else {
-          // Server has flipped `terminal_tabs.was_spawned=1` and broadcast
-          // `tabs:changed`, so useTaskTerminals will re-fetch and TerminalStarter
-          // will auto-mount <Terminal>, which spawns via pty:create IPC. Poll
-          // pty.exists until alive or timeout.
-          const sid = getMainSessionId(task.id)
-          const deadline = Date.now() + 5000
-          while (Date.now() < deadline) {
-            try {
-              if (await window.api.pty.exists(sid)) {
-                result = 'ok'
-                break
-              }
-            } catch {
-              break
-            }
-            await new Promise((r) => setTimeout(r, 100))
-          }
-        }
-      } finally {
-        const reqs = [...ensureAlivePendingReqsRef.current]
-        ensureAlivePendingReqsRef.current.clear()
-        for (const r of reqs) {
-          ensureAliveHandledReqsRef.current.push(r)
-          window.api.pty.ackEnsureAlive(r, result)
-        }
-        if (ensureAliveHandledReqsRef.current.length > 100) {
-          ensureAliveHandledReqsRef.current = ensureAliveHandledReqsRef.current.slice(-50)
-        }
-        ensureAliveInFlightRef.current = false
-      }
-    })
-  }, [task, handleRestartTerminal, getMainSessionId])
-
-  // Doctor: validate CLI binary and dependencies
-  const handleDoctor = useCallback(async () => {
-    if (!task) return
-    setDoctorLoading(true)
-    setDoctorResults(null)
-    setDoctorDialogOpen(true)
-    try {
-      const results = await window.api.pty.validate(task.terminal_mode)
-      setDoctorResults(results)
-    } catch {
-      setDoctorResults([{ check: 'Validation', ok: false, detail: 'Failed to run checks' }])
-    } finally {
-      setDoctorLoading(false)
-    }
-  }, [task])
-
-  // Re-attach terminal (remount without killing PTY - reuses cached terminal)
-  const handleReattachTerminal = useCallback(() => {
-    if (!task) return
-    setTerminalKey((k) => k + 1)
-  }, [task])
+  // Terminal session lifecycle: session-id discovery, restart/reset/stop, revive, ensure-alive
+  const {
+    sessionIdCommand,
+    showSessionBanner,
+    showUnavailableBanner,
+    detectedSessionId,
+    setSessionUnavailableDismissed,
+    handleDetectSessionId,
+    getConversationIdForMode,
+    handleUpdateSessionId,
+    handleRestartTerminal,
+    handleStopAgent,
+    handleResetTerminal,
+    handleReattachTerminal
+  } = useTaskTerminalSession({
+    task,
+    onTaskUpdated,
+    shortcutActive,
+    getMainSessionId,
+    resetTaskState,
+    subscribeSessionDetected,
+    setTerminalKey
+  })
 
   // Inject task title into terminal (no execute)
   const handleInjectTitle = useCallback(async () => {
@@ -1832,38 +1323,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     buildTaskFileContext
   ])
 
-  // Focus and select title input when editing
-  useEffect(() => {
-    if (editingTitle && titleInputRef.current) {
-      titleInputRef.current.focus()
-      titleInputRef.current.select()
-    }
-  }, [editingTitle])
-
-  const handleTitleSave = async (): Promise<void> => {
-    if (!task || titleValue === task.title) {
-      setEditingTitle(false)
-      return
-    }
-
-    const updated = await window.api.db.updateTask({
-      id: task.id,
-      title: titleValue
-    })
-    onTaskUpdated(updated)
-    setEditingTitle(false)
-  }
-
-  const handleTitleKeyDown = async (e: React.KeyboardEvent): Promise<void> => {
-    if (e.key === 'Enter') {
-      await handleTitleSave()
-    } else if (e.key === 'Escape') {
-      setTitleValue(task?.title ?? '')
-      setEditingTitle(false)
-      titleInputRef.current?.blur()
-    }
-  }
-
   const handleDescriptionSave = async (): Promise<void> => {
     if (!task || !descriptionDirty.current) return
     descriptionDirty.current = false
@@ -1976,111 +1435,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     [task]
   )
 
-  // Web panel URL persistence — use ref to avoid stale closures
-  const webPanelUrlsRef = useRef<Record<string, string>>({})
-  const webPanelUrlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const taskIdRef = useRef<string | null>(null)
-
-  // Flush any pending URL save (fire-and-forget)
-  const flushPendingUrlSave = useCallback(() => {
-    if (webPanelUrlTimerRef.current) {
-      clearTimeout(webPanelUrlTimerRef.current)
-      webPanelUrlTimerRef.current = null
-      if (taskIdRef.current && Object.keys(webPanelUrlsRef.current).length > 0) {
-        window.api.db.updateTask({
-          id: taskIdRef.current,
-          webPanelUrls: { ...webPanelUrlsRef.current }
-        })
-      }
-    }
-  }, [])
-
-  // Active artifact persistence — debounced, ref-based
-  const activeArtifactIdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const flushPendingActiveArtifactSave = useCallback(() => {
-    if (activeArtifactIdTimerRef.current) {
-      clearTimeout(activeArtifactIdTimerRef.current)
-      activeArtifactIdTimerRef.current = null
-    }
-  }, [])
-
-  const handleActiveArtifactIdChange = useCallback((id: string | null) => {
-    if (activeArtifactIdTimerRef.current) clearTimeout(activeArtifactIdTimerRef.current)
-    const taskId = taskIdRef.current
-    activeArtifactIdTimerRef.current = setTimeout(async () => {
-      if (!taskId) return
-      await window.api.db.updateTask({ id: taskId, activeArtifactId: id })
-    }, 500)
-  }, [])
-
-  // Editor open files persistence — debounced, ref-based (same pattern as webPanelUrls)
-  const editorStateRef = useRef<EditorOpenFilesState | null>(null)
-  const editorStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const flushPendingEditorSave = useCallback(() => {
-    if (editorStateTimerRef.current) {
-      clearTimeout(editorStateTimerRef.current)
-      editorStateTimerRef.current = null
-      if (taskIdRef.current && editorStateRef.current) {
-        window.api.db.updateTask({
-          id: taskIdRef.current,
-          editorOpenFiles: editorStateRef.current
-        })
-      }
-    }
-  }, [])
-
-  // Initialize from task on load — flush old task's pending saves first
-  useEffect(() => {
-    flushPendingUrlSave()
-    flushPendingEditorSave()
-    flushPendingActiveArtifactSave()
-    taskIdRef.current = task?.id ?? null
-    if (task?.web_panel_urls) webPanelUrlsRef.current = { ...task.web_panel_urls }
-    else webPanelUrlsRef.current = {}
-  }, [task?.id, flushPendingUrlSave, flushPendingEditorSave, flushPendingActiveArtifactSave])
-
-  // Flush pending saves on unmount
-  useEffect(() => {
-    return () => {
-      flushPendingUrlSave()
-      flushPendingEditorSave()
-      flushPendingActiveArtifactSave()
-    }
-  }, [flushPendingUrlSave, flushPendingEditorSave])
-
-  const handleWebPanelUrlChange = useCallback((panelId: string, url: string) => {
-    if (!taskIdRef.current) return
-    webPanelUrlsRef.current = { ...webPanelUrlsRef.current, [panelId]: url }
-    if (webPanelUrlTimerRef.current) clearTimeout(webPanelUrlTimerRef.current)
-    const id = taskIdRef.current
-    const urlSnapshot = { ...webPanelUrlsRef.current }
-    webPanelUrlTimerRef.current = setTimeout(async () => {
-      await window.api.db.updateTask({
-        id,
-        webPanelUrls: urlSnapshot
-      })
-    }, 500)
-  }, [])
-
-  const handleEditorStateChange = useCallback((state: EditorOpenFilesState) => {
-    editorStateRef.current = state
-    if (editorStateTimerRef.current) clearTimeout(editorStateTimerRef.current)
-    const id = taskIdRef.current
-    editorStateTimerRef.current = setTimeout(async () => {
-      if (!id) return
-      await window.api.db.updateTask({
-        id,
-        editorOpenFiles: state
-      })
-    }, 500)
-  }, [])
-
-  // Handle web panel favicon change
-  const handleWebPanelFaviconChange = useCallback((_panelId: string, _favicon: string) => {
-    // Favicon caching — no-op for now, auto-fetched by webview on each load
-  }, [])
+  // Debounced persistence of web-panel URLs, editor open-files, and active artifact id
+  const {
+    webPanelUrlsRef,
+    handleActiveArtifactIdChange,
+    handleWebPanelUrlChange,
+    handleEditorStateChange,
+    handleWebPanelFaviconChange
+  } = usePersistenceSaves(task)
 
   // Open a dev server URL in the browser panel (used by both auto-open and toast)
   const openDevServerInBrowser = useCallback(
@@ -2637,178 +1999,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         className={cn('flex-1 flex min-h-0 overflow-x-auto', !compact && 'p-4')}
       >
         {isTaskCompleted && !openCompletedAnyway ? (
-          (() => {
-            const actionButtonClass =
-              'inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-surface-1/80 backdrop-blur px-3 py-1.5 text-sm cursor-pointer hover:bg-accent'
-            const actionButtons = (
-              <div className="mt-6 grid grid-cols-2 gap-2 w-full max-w-sm mx-auto">
-                <button
-                  type="button"
-                  className={actionButtonClass}
-                  onClick={() => onCloseTab(task.id)}
-                >
-                  <Check className="size-4 text-emerald-400" strokeWidth={3} />
-                  Close task
-                </button>
-                <button
-                  type="button"
-                  className={actionButtonClass}
-                  onClick={() => setOpenCompletedAnyway(true)}
-                >
-                  <Eye className="size-4 text-sky-400" strokeWidth={3} />
-                  Show details
-                </button>
-                {resolveColumns(project?.columns_config)
-                  .filter((col) => col.category === 'started')
-                  .map((col) => {
-                    const optStyle = getColumnStatusStyle(col.id, project?.columns_config)
-                    const OptIcon = optStyle?.icon ?? Circle
-                    return (
-                      <button
-                        key={col.id}
-                        type="button"
-                        className={actionButtonClass}
-                        onClick={async () => {
-                          const updated = await window.api.db.updateTask({
-                            id: task.id,
-                            status: col.id
-                          })
-                          handleTaskUpdate(updated)
-                        }}
-                      >
-                        <OptIcon className={cn('size-4', optStyle?.iconClass)} strokeWidth={3} />
-                        Move to {col.label}
-                      </button>
-                    )
-                  })}
-              </div>
-            )
-            const variantLabels = [
-              'Trophy hero',
-              'Sword slash',
-              'Confetti light',
-              'Medallion',
-              'Stamp'
-            ]
-            const switcher = (
-              <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-md border border-border bg-surface-1/80 backdrop-blur px-2 py-1 text-xs text-muted-foreground">
-                <Shuffle className="size-3" strokeWidth={2.5} />
-                <select
-                  value={completedVariant}
-                  onChange={(e) => setCompletedVariant(Number(e.target.value))}
-                  className="bg-transparent outline-none cursor-pointer text-foreground"
-                >
-                  {variantLabels.map((label, i) => (
-                    <option key={i} value={i} className="bg-surface-1 text-foreground">
-                      {i + 1}. {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )
-            const variants = [
-              // V1: Trophy hero — soft glow bg, big trophy
-              <div
-                key="v1"
-                className="flex-1 flex flex-col items-center justify-center relative overflow-hidden"
-              >
-                {switcher}
-                <div className="absolute inset-0 bg-[radial-gradient(circle_closest-side_at_50%_50%,_rgba(245,158,11,0.12)_25%,_transparent_100%)] pointer-events-none" />
-                <div className="relative flex flex-col items-center text-center">
-                  <div className="size-20 rounded-full bg-amber-500/15 flex items-center justify-center mb-5 ring-4 ring-amber-500/10">
-                    <Trophy className="size-10 text-amber-500" strokeWidth={2} />
-                  </div>
-                  <p className="text-5xl font-bold tracking-tight">Slayed!</p>
-                  <p className="mt-3 text-base text-muted-foreground">
-                    Task wrapped. Take the win.
-                  </p>
-                  {actionButtons}
-                </div>
-              </div>,
-              // V2: Sword slash — angled accent line + sword icon
-              <div
-                key="v2"
-                className="flex-1 flex flex-col items-center justify-center relative overflow-hidden"
-              >
-                {switcher}
-                <div className="absolute inset-x-0 top-1/2 h-px bg-gradient-to-r from-transparent via-rose-500/40 to-transparent -rotate-6 pointer-events-none" />
-                <div className="absolute inset-x-0 top-1/2 h-px bg-gradient-to-r from-transparent via-rose-500/20 to-transparent rotate-3 translate-y-3 pointer-events-none" />
-                <div className="relative flex flex-col items-center text-center">
-                  <Swords className="size-12 text-rose-500 mb-4 -rotate-12" strokeWidth={2} />
-                  <p className="text-5xl font-bold tracking-tight">Task slayed</p>
-                  <p className="mt-3 text-base text-muted-foreground">Clean cut. Onto the next.</p>
-                  {actionButtons}
-                </div>
-              </div>,
-              // V3: Confetti light — few tasteful pieces, big check
-              <div
-                key="v3"
-                className="flex-1 flex flex-col items-center justify-center relative overflow-hidden"
-              >
-                {switcher}
-                <PartyPopper className="absolute top-[18%] left-[22%] size-6 text-fuchsia-400/60 -rotate-12" />
-                <Sparkles className="absolute top-[24%] right-[24%] size-5 text-amber-400/60" />
-                <Sparkles className="absolute bottom-[26%] left-[28%] size-5 text-emerald-400/60" />
-                <PartyPopper className="absolute bottom-[20%] right-[22%] size-6 text-sky-400/60 rotate-12" />
-                <div className="relative flex flex-col items-center text-center">
-                  <div className="size-20 rounded-full bg-emerald-500/15 flex items-center justify-center mb-5 ring-4 ring-emerald-500/10">
-                    <CheckCircle2 className="size-11 text-emerald-500" strokeWidth={2.25} />
-                  </div>
-                  <p className="text-5xl font-bold tracking-tight">You slayed it!</p>
-                  <p className="mt-3 text-base text-muted-foreground">Another one in the books.</p>
-                  {actionButtons}
-                </div>
-              </div>,
-              // V4: Medallion — gradient circle badge
-              <div key="v4" className="flex-1 flex flex-col items-center justify-center relative">
-                {switcher}
-                <div className="flex flex-col items-center text-center">
-                  <div className="relative mb-5">
-                    <div className="size-24 rounded-full bg-gradient-to-br from-emerald-400/40 via-emerald-500/30 to-emerald-700/40 flex items-center justify-center ring-2 ring-emerald-500/50 shadow-[0_0_40px_rgba(16,185,129,0.25)]">
-                      <Flame
-                        className="size-12 text-emerald-400"
-                        strokeWidth={2}
-                        fill="currentColor"
-                        fillOpacity={0.2}
-                      />
-                    </div>
-                  </div>
-                  <p className="text-[11px] uppercase tracking-[0.4em] text-emerald-500 font-bold">
-                    Slayer
-                  </p>
-                  <p className="mt-2 text-4xl font-bold tracking-tight">Task slayed</p>
-                  <p className="mt-3 text-base text-muted-foreground">
-                    Earned. Want to peek inside?
-                  </p>
-                  {actionButtons}
-                </div>
-              </div>,
-              // V5: Stamp — visible rotated SLAYED banner
-              <div
-                key="v5"
-                className="flex-1 flex flex-col items-center justify-center relative overflow-hidden"
-              >
-                {switcher}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
-                  <span className="text-emerald-500/[0.08] font-black tracking-[0.2em] text-[clamp(5rem,15vw,13rem)] leading-none -rotate-12">
-                    SLAYED
-                  </span>
-                </div>
-                <div className="relative flex flex-col items-center text-center">
-                  <div className="-rotate-6 inline-flex items-center gap-2 rounded-md border-2 border-emerald-500/70 bg-emerald-500/10 px-4 py-1.5 mb-5">
-                    <CheckCircle2 className="size-5 text-emerald-500" strokeWidth={2.5} />
-                    <span className="text-emerald-500 font-bold tracking-[0.25em] uppercase text-sm">
-                      Slayed
-                    </span>
-                  </div>
-                  <p className="text-4xl font-bold tracking-tight">Stamped & done</p>
-                  <p className="mt-3 text-base text-muted-foreground">Locked in the win column.</p>
-                  {actionButtons}
-                </div>
-              </div>
-            ]
-            return variants[completedVariant] ?? variants[0]
-          })()
+          <TaskCompletedScreen
+            task={task}
+            project={project}
+            completedVariant={completedVariant}
+            setCompletedVariant={setCompletedVariant}
+            onCloseTab={onCloseTab}
+            onShowDetails={() => setOpenCompletedAnyway(true)}
+            onTaskUpdate={handleTaskUpdate}
+          />
         ) : (
           <>
             {!compact && !hasVisiblePanels && (
