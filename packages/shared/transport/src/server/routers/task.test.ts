@@ -78,3 +78,21 @@ test('task router: create fires taskEvents (backs the onChanged subscription)', 
   taskEvents.off('task:created', handler)
   expect(fired).toBeGreaterThanOrEqual(1)
 })
+
+// Contract the migration ADDED: these procedures throw NOT_FOUND on a missing id
+// (the IPC handlers returned null). Surfaces what IPC hid; the renderer must handle
+// the throw at cutover (slice 5).
+test('task router: missing id throws (NOT_FOUND, not silent null)', async () => {
+  const throws = async (fn: () => Promise<unknown>): Promise<boolean> => {
+    try {
+      await fn()
+      return false
+    } catch {
+      return true
+    }
+  }
+  expect(await throws(() => caller.update({ id: 'nope', title: 'x' } as unknown as UpdateTaskInput))).toBeTruthy()
+  expect(await throws(() => caller.archive({ id: 'nope' }))).toBeTruthy()
+  expect(await throws(() => caller.restore({ id: 'nope' }))).toBeTruthy()
+  expect(await throws(() => caller.unarchive({ id: 'nope' }))).toBeTruthy()
+})

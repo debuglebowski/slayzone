@@ -63,3 +63,10 @@ test('artifacts router: delete', async () => {
   const a = await caller.create(mkArtifact('del.md', 'x'))
   expect(await caller.delete({ id: a!.id })).toBe(true)
 })
+
+// Contract: artifacts return null/false on a missing id (no throw).
+test('artifacts router: missing id → null / false (no throw)', async () => {
+  expect(await caller.get({ id: 'nope' })).toBeNull()
+  expect(await caller.readContent({ id: 'nope' })).toBeNull()
+  expect(await caller.delete({ id: 'nope' })).toBe(false)
+})

@@ -42,3 +42,11 @@ test('template router: update → setDefault → delete', async () => {
   expect(await caller.delete({ id: t!.id })).toBe(true)
   expect(await caller.get({ id: t!.id })).toBeNull()
 })
+
+// Contract: templates do NOT throw on a missing id (unlike the task router) — get/update
+// return null, delete returns false. Locks the cross-router asymmetry.
+test('template router: missing id → null / false (no throw)', async () => {
+  expect(await caller.get({ id: 'nope' })).toBeNull()
+  expect(await caller.update({ id: 'nope', name: 'x' } as unknown as UpdateTaskTemplateInput)).toBeNull()
+  expect(await caller.delete({ id: 'nope' })).toBe(false)
+})
