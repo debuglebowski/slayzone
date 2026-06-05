@@ -11,6 +11,10 @@ export interface TerminalProps {
   providerFlags?: string | null
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   isActive?: boolean
+  /** Owning panel is mid-resize. Skip the ResizeObserver fit while true, then
+   *  fit once when it clears — avoids per-frame xterm reflow/atlas churn during
+   *  a drag without unmounting the terminal (which would lose focus + state). */
+  paused?: boolean
   onAttached?: (api: { sessionId: string; focus: () => void }) => void
   /** Start a brand-new session: clear the stored conversation id + remount.
    *  Wired to the dead overlay's "Start fresh" action for a stale (auto-cleaned)

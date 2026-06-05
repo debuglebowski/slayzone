@@ -58,13 +58,15 @@ export interface TerminalSplitGroupHandle {
 interface TerminalSplitGroupProps {
   panes: PaneProps[]
   isActive?: boolean
+  /** Panel is mid-resize — pause xterm re-fit in each pane (no remount). */
+  paused?: boolean
   onAttached?: (api: { sessionId: string; focus: () => void }) => void
   onOpenUrl?: (url: string) => void
   onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
 }
 
 export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalSplitGroupProps>(
-  function TerminalSplitGroup({ panes, isActive, onAttached, onOpenUrl, onOpenFile }, ref) {
+  function TerminalSplitGroup({ panes, isActive, paused, onAttached, onOpenUrl, onOpenFile }, ref) {
     const [sizes, setSizes] = useState<number[]>(() => panes.map(() => 100 / panes.length))
     const containerRef = useRef<HTMLDivElement>(null)
     const draggingRef = useRef<{ index: number; startX: number; startSizes: number[] } | null>(null)
@@ -199,6 +201,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           providerFlags={pane.providerFlags}
           executionContext={pane.executionContext}
           isActive={isActive}
+          paused={paused}
           onAttached={onAttached}
           onStartFresh={pane.onStartFresh}
           onReady={pane.onReady}

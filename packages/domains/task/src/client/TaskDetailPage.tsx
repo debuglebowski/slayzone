@@ -2148,12 +2148,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       />
                     )}
                     {/* Terminal + mode bar wrapper */}
-                    <div className="flex-1 min-h-0 overflow-hidden">
-                      {isResizing ? (
-                        <div className="h-full bg-black" />
-                      ) : (effectiveRepoPath || project?.path) && !projectPathMissing ? (
+                    <div className="relative flex-1 min-h-0 overflow-hidden">
+                      {(effectiveRepoPath || project?.path) && !projectPathMissing ? (
                         <TerminalContainer
                           ref={terminalContainerRef}
+                          paused={isResizing}
                           key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${task.worktree_path || ''}-${task.base_dir || ''}`}
                           taskId={task.id}
                           isTemporary={task.is_temporary}
@@ -2467,6 +2466,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           </div>
                         </div>
                       )}
+                      {/* Black cover during a panel resize. The terminal stays
+                          mounted underneath — preserving active group + focused
+                          pane — while the `paused` prop skips xterm fit churn. */}
+                      {isResizing && <div className="absolute inset-0 z-10 bg-black" />}
                     </div>
                   </>
                 )}

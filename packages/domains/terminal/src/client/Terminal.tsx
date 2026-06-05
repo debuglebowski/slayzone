@@ -71,6 +71,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     providerFlags,
     executionContext,
     isActive = true,
+    paused = false,
     onAttached,
     onStartFresh,
     onReady,
@@ -136,6 +137,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   onReadyRef.current = onReady
   const isActiveRef = useRef(isActive)
   isActiveRef.current = isActive
+  const pausedRef = useRef(paused)
+  pausedRef.current = paused
   const onAttachedRef = useRef(onAttached)
   onAttachedRef.current = onAttached
   const onFirstInputRef = useRef(onFirstInput)
@@ -1179,6 +1182,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Handle resize
   useEffect(() => {
     const handleResize = () => {
+      // Mid panel-resize: the terminal is covered by an opaque overlay and its
+      // width churns every frame. Skip the fit now — a single fit runs when
+      // `paused` clears (effect below). Keeps the terminal mounted (focus +
+      // active group preserved) without per-frame reflow/atlas churn.
+      if (pausedRef.current) return
       // Don't fit when container is hidden (0 dimensions from CSS display:none)
       const rect = containerRef.current?.getBoundingClientRect()
       if (!rect || rect.width === 0 || rect.height === 0) {
@@ -1210,6 +1218,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       observer.disconnect()
     }
   }, [initTerminal, sessionId, scheduleAtlasCorrection])
+
+  // Panel resize just ended (`paused` true → false): the ResizeObserver fits
+  // were skipped during the drag, so the container now has its final width but
+  // stale cols/rows. Do one fit to catch up. xterm's `onResize` propagates the
+  // new size to the PTY, so no manual pty.resize here. Initial mount (false) and
+  // entering a resize (→ true) are no-ops.
+  const wasPausedRef = useRef(paused)
+  useEffect(() => {
+    const justResumed = wasPausedRef.current && !paused
+    wasPausedRef.current = paused
+    if (!justResumed || !terminalRef.current) return
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0 || rect.height === 0) return
+    fitAddonRef.current?.fit()
+    diag(sessionId, 'fit', { site: 'resize-end', terminal: terminalRef.current })
+    scheduleAtlasCorrection()
+  }, [paused, sessionId, scheduleAtlasCorrection])
 
   // Update font size at runtime when setting changes.
   // Await the font at the NEW size before fitting — otherwise fit() measures

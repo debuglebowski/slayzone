@@ -38,6 +38,8 @@ interface TerminalContainerProps {
   /** Owning task is temporary — disables terminal auto-start (regular-task-only). */
   isTemporary?: boolean
   isActive?: boolean
+  /** Panel is mid-resize — keep the terminal mounted but pause xterm re-fit. */
+  paused?: boolean
   /** Owns keyboard shortcuts (Cmd+D, Cmd+T). Defaults to `isActive`. In explode mode, only the focused cell has this true. */
   hasShortcutFocus?: boolean
   focusRequestId?: number
@@ -75,6 +77,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       executionContext,
       isTemporary,
       isActive = true,
+      paused = false,
       hasShortcutFocus,
       focusRequestId = 0,
       onStartFresh,
@@ -448,6 +451,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
               key={activeGroupId}
               panes={paneProps}
               isActive={isActive}
+              paused={paused}
               onAttached={handlePaneAttached}
               onOpenUrl={onOpenUrl}
               onOpenFile={onOpenFile}
