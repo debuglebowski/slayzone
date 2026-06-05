@@ -1425,7 +1425,7 @@ export function createIntegrationOps(
       // Clear sibling provider, (re)point connection, then upsert mapping. Reads
       // the existing mapping id to reuse it (conditional), so this runs as one
       // worker txn that returns the id used.
-      const mappingId = await db.namedTxn<string>('integrations:set-project-mapping', {
+      const mappingId = await db.namedTxn('integrations:set-project-mapping', {
         input,
         otherProvider
       })

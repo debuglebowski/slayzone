@@ -1,3 +1,5 @@
+import type { TxnName, TxnParams, TxnResult } from './txn-registry-map'
+
 /** SQLite PRAGMAs required for all connections to the SlayZone database. */
 export const DB_PRAGMAS = [
   'journal_mode = WAL',
@@ -48,7 +50,13 @@ export interface SlayzoneDb {
   run(sql: string, params?: unknown[]): Promise<RunResult>
   exec(sql: string): Promise<void>
   batchTxn(ops: BatchOp[]): Promise<unknown[]>
-  namedTxn<T = unknown>(name: string, params: unknown): Promise<T>
+  /**
+   * Invoke a pre-registered named transaction. `name` is keyed off the
+   * `TxnRegistry` map (augmented by each domain), so the params shape and the
+   * resolved result type are inferred from the registered impl — no generic to
+   * pass, no `as` casts. Unknown names are a compile error.
+   */
+  namedTxn<K extends TxnName>(name: K, params: TxnParams<K>): Promise<Awaited<TxnResult<K>>>
   /** Online backup of the live connection to `destPath` (manual/restore backups). */
   backup(destPath: string): Promise<void>
   prepare(sql: string): PreparedBridge

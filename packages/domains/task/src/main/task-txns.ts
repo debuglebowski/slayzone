@@ -122,4 +122,4 @@ export const taskTxns = {
   'task:archive': archive,
   'task:update': update,
   'task:record-events': recordEvents
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

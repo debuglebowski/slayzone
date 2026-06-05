@@ -75,4 +75,4 @@ export const templatesTxns = {
       | Record<string, unknown>
       | undefined
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

@@ -7,7 +7,9 @@ import {
   type SlayzoneDb,
   type PreparedBridge,
   type BatchOp,
-  type RunResult
+  type RunResult,
+  type TxnName,
+  type TxnResult
 } from '@slayzone/platform'
 
 /**
@@ -71,7 +73,7 @@ class SyncSlayzoneDb implements SlayzoneDb {
     return this.db.transaction(() => ops.map((op) => this.db.prepare(op.sql)[op.type](...op.params)))()
   }
 
-  async namedTxn<T = unknown>(): Promise<T> {
+  async namedTxn<K extends TxnName>(): Promise<Awaited<TxnResult<K>>> {
     throw new Error('namedTxn is not supported in the standalone server')
   }
 

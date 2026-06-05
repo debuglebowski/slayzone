@@ -211,4 +211,4 @@ export const integrationTxns = {
       return mappingId
     })()
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

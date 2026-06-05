@@ -71,7 +71,7 @@ export async function listAllProjects(db: SlayzoneDb): Promise<Project[]> {
 
 export async function createProject(db: SlayzoneDb, data: CreateProjectInput): Promise<Project> {
   const prepared = prepareProjectCreate(data)
-  const row = await db.namedTxn<Record<string, unknown> | undefined>('projects:create', {
+  const row = await db.namedTxn('projects:create', {
     id: prepared.id,
     name: prepared.name,
     color: prepared.color,
@@ -177,7 +177,7 @@ export async function updateProject(
   fields.push("updated_at = datetime('now')")
   values.push(data.id)
 
-  const row = await db.namedTxn<Record<string, unknown> | undefined>('projects:update', {
+  const row = await db.namedTxn('projects:update', {
     id: data.id,
     sql: `UPDATE projects SET ${fields.join(', ')} WHERE id = ?`,
     params: values,

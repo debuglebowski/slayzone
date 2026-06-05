@@ -1168,10 +1168,10 @@ app
     {
       const dataDir = process.env.SLAYZONE_DB_DIR || app.getPath('userData')
       const artifactsDir = join(dataDir, 'artifacts')
-      const seedReport = await db.namedTxn<{ seeded: number; skippedMissing: number }>(
-        'artifacts:seed-initial-versions',
-        { dataDir, artifactsDir }
-      )
+      const seedReport = await db.namedTxn('artifacts:seed-initial-versions', {
+        dataDir,
+        artifactsDir
+      })
       if (seedReport.seeded > 0 || seedReport.skippedMissing > 0) {
         console.log(
           `[artifact-versions] seeded=${seedReport.seeded} skippedMissing=${seedReport.skippedMissing}`

@@ -46,7 +46,7 @@ export async function createAutomation(
   data: CreateAutomationInput
 ): Promise<Automation> {
   const id = crypto.randomUUID()
-  const row = await db.namedTxn<AutomationRow>('automations:create', {
+  const row = await db.namedTxn('automations:create', {
     id,
     projectId: data.project_id,
     name: data.name,

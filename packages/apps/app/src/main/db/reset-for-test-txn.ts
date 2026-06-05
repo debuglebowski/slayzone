@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import type { TxnSigOf } from '@slayzone/platform'
 import { ensureIntegrationSchemaSync } from '@slayzone/integrations/db'
 import { syncTerminalModes } from '@slayzone/terminal/db'
 import { runMigrations } from './migrations'
@@ -28,4 +29,8 @@ export const resetForTestTxns = {
     syncTerminalModes(db)
     return null
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}
+
+declare module '@slayzone/platform' {
+  interface TxnRegistry extends TxnSigOf<typeof resetForTestTxns> {}
+}

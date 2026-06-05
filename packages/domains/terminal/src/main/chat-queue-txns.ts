@@ -21,4 +21,4 @@ export const chatQueueTxns = {
     requeueAtHead(db, p.msg)
     return null
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

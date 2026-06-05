@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import type { AutomationRow } from '@slayzone/automations/shared'
 import {
   finishAutomationActionRun,
   recordActivityEvent,
@@ -26,8 +27,6 @@ import {
  * Returns are kept structured-cloneable (raw rows / scalars): the IPC layer
  * parses rows via `parseAutomationRow` after the call.
  */
-
-type Row = Record<string, unknown> | undefined
 
 export interface CreateAutomationTxnParams {
   id: string
@@ -66,7 +65,7 @@ export interface CompleteRunTxnParams {
 export const automationsTxns = {
   // Reads MAX(sort_order)+1, then inserts at that order — conditional, so it
   // can't be a static op list. Returns the created row for `parseAutomationRow`.
-  'automations:create': (db: Database, p: CreateAutomationTxnParams): Row =>
+  'automations:create': (db: Database, p: CreateAutomationTxnParams): AutomationRow =>
     db.transaction(() => {
       const maxOrder = db
         .prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM automations WHERE project_id = ?')
@@ -85,7 +84,7 @@ export const automationsTxns = {
         maxOrder.m + 1,
         p.catchupOnStart
       )
-      return db.prepare('SELECT * FROM automations WHERE id = ?').get(p.id) as Row
+      return db.prepare('SELECT * FROM automations WHERE id = ?').get(p.id) as AutomationRow
     })(),
 
   // Insert a 'running' action-run row and return its id. Wraps the synchronous
@@ -125,4 +124,4 @@ export const automationsTxns = {
     })()
     return null
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

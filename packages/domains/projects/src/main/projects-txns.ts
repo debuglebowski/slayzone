@@ -250,8 +250,8 @@ export interface CreateProjectTxnParams {
   id: string
   name: string
   color: string
-  path: string
-  columnsConfigJson: string
+  path: string | null
+  columnsConfigJson: string | null
   createdAt: string
   updatedAt: string
 }
@@ -484,4 +484,4 @@ export const projectsTxns = {
       for (const og of oldGroups) repackGroup(db, og)
       return groupsSnapshot(db)
     })()
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

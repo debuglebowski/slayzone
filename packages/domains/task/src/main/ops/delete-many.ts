@@ -44,7 +44,7 @@ export async function deleteManyTasksOp(
   // Soft-delete every deletable task + record deletion events in one transaction.
   // The named txn records events only for rows whose UPDATE actually changed a row
   // and returns the ids that were deleted.
-  const { deletedIds } = await db.namedTxn<{ deletedIds: string[] }>('task:soft-delete-many', {
+  const { deletedIds } = await db.namedTxn('task:soft-delete-many', {
     ops: deletable.map(({ id, previous }) => ({
       id,
       sql: `

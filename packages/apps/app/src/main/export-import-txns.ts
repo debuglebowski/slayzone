@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import type { TxnSigOf } from '@slayzone/platform'
 import crypto from 'node:crypto'
 
 /**
@@ -288,4 +289,8 @@ export const exportImportTxns = {
     }
     return { success: true }
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}
+
+declare module '@slayzone/platform' {
+  interface TxnRegistry extends TxnSigOf<typeof exportImportTxns> {}
+}

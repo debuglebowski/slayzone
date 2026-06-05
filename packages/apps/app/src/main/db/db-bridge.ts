@@ -1,5 +1,13 @@
 import { join } from 'node:path'
-import type { SlayzoneDb, PreparedBridge, BatchOp, RunResult } from '@slayzone/platform'
+import type {
+  SlayzoneDb,
+  PreparedBridge,
+  BatchOp,
+  RunResult,
+  TxnName,
+  TxnParams,
+  TxnResult
+} from '@slayzone/platform'
 import { WorkerRpcClient } from './worker-rpc-client'
 import type { DbWorkerData } from './worker-protocol'
 
@@ -35,8 +43,8 @@ export class WorkerDbBridge implements SlayzoneDb {
     return this.rpc.send<unknown[]>({ type: 'batch-txn', ops })
   }
 
-  namedTxn<T = unknown>(name: string, params: unknown): Promise<T> {
-    return this.rpc.send<T>({ type: 'named-txn', name, params })
+  namedTxn<K extends TxnName>(name: K, params: TxnParams<K>): Promise<Awaited<TxnResult<K>>> {
+    return this.rpc.send<Awaited<TxnResult<K>>>({ type: 'named-txn', name, params })
   }
 
   backup(destPath: string): Promise<void> {

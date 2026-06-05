@@ -689,4 +689,4 @@ export const artifactsTxns = {
 
     return selectFolder(db, id)
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

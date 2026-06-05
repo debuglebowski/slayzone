@@ -213,4 +213,4 @@ export const marketplaceTxns = {
     seedBuiltinEntries(db)
     return null
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

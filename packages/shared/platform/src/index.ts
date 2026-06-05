@@ -32,6 +32,13 @@ export {
   type RunResult
 } from './db'
 export {
+  type TxnRegistry,
+  type TxnSigOf,
+  type TxnName,
+  type TxnParams,
+  type TxnResult
+} from './txn-registry-map'
+export {
   setShellOverride,
   getShellOverride,
   shellExists,

@@ -57,7 +57,10 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: SlayzoneDb): void 
   // complex read-modify-write ordering lives in worker-safe named txns
   // (projects-txns.ts); these handlers stay thin. Mutating ops return an
   // authoritative { projects, groups } snapshot the renderer replaces state with.
-  type RawSnapshot = { projects: Record<string, unknown>[]; groups: Record<string, unknown>[] }
+  type RawSnapshot = {
+    projects: (Record<string, unknown> | undefined)[]
+    groups: (Record<string, unknown> | undefined)[]
+  }
   const parseSnapshot = (snap: RawSnapshot) => ({
     projects: snap.projects.map((row) => parseProject(row)),
     groups: snap.groups
@@ -69,7 +72,7 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: SlayzoneDb): void 
 
   ipcMain.handle('db:project-groups:create', async (_, data: CreateProjectGroupInput) => {
     const now = new Date().toISOString()
-    const snap = await db.namedTxn<RawSnapshot>('project-groups:create', {
+    const snap = await db.namedTxn('project-groups:create', {
       id: crypto.randomUUID(),
       name: (data?.name ?? '').trim(),
       createdAt: now,
@@ -82,7 +85,7 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: SlayzoneDb): void 
     if (!Array.isArray(projectIds) || projectIds.length === 0)
       throw new Error('createWith: projectIds must be a non-empty array')
     const now = new Date().toISOString()
-    const snap = await db.namedTxn<RawSnapshot>('project-groups:createWith', {
+    const snap = await db.namedTxn('project-groups:createWith', {
       id: crypto.randomUUID(),
       name: '',
       createdAt: now,
@@ -113,14 +116,14 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: SlayzoneDb): void 
   })
 
   ipcMain.handle('db:project-groups:delete', async (_, id: string) => {
-    const snap = await db.namedTxn<RawSnapshot>('project-groups:delete', { id })
+    const snap = await db.namedTxn('project-groups:delete', { id })
     return parseSnapshot(snap)
   })
 
   ipcMain.handle(
     'db:project-groups:moveProject',
     async (_, projectId: string, groupId: string | null, targetIndex: number) => {
-      const snap = await db.namedTxn<RawSnapshot>('project-groups:moveProject', {
+      const snap = await db.namedTxn('project-groups:moveProject', {
         projectId,
         groupId: groupId ?? null,
         targetIndex
@@ -131,7 +134,7 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: SlayzoneDb): void 
 
   ipcMain.handle('db:project-groups:reorderTopLevel', async (_, entries: TopLevelEntryRef[]) => {
     if (!Array.isArray(entries)) throw new Error('reorderTopLevel: entries must be an array')
-    const snap = await db.namedTxn<RawSnapshot>('project-groups:reorderTopLevel', { entries })
+    const snap = await db.namedTxn('project-groups:reorderTopLevel', { entries })
     return parseSnapshot(snap)
   })
 
@@ -140,7 +143,7 @@ export function registerProjectHandlers(ipcMain: IpcMain, db: SlayzoneDb): void 
     async (_, groupId: string, projectIds: string[]) => {
       if (!Array.isArray(projectIds))
         throw new Error('reorderWithin: projectIds must be an array')
-      const snap = await db.namedTxn<RawSnapshot>('project-groups:reorderWithin', {
+      const snap = await db.namedTxn('project-groups:reorderWithin', {
         groupId,
         projectIds
       })

@@ -84,7 +84,7 @@ export async function drainChatQueue(db: SlayzoneDb, tabId: string): Promise<voi
   const info = getSessionInfo(tabId)
   if (!info || info.ended) return
 
-  const head = await db.namedTxn<QueuedChatMessage | null>('chat-queue:pop', { tabId })
+  const head = await db.namedTxn('chat-queue:pop', { tabId })
   if (!head) return
 
   const sent = sendUserMessage(tabId, head.send)
@@ -122,7 +122,7 @@ export function createChatQueueOps(db: SlayzoneDb) {
     list: (tabId: string): Promise<QueuedChatMessage[]> => listChatQueue(db, tabId),
 
     push: async (tabId: string, send: string, original: string): Promise<QueuedChatMessage> => {
-      const msg = await db.namedTxn<QueuedChatMessage>('chat-queue:push', {
+      const msg = await db.namedTxn('chat-queue:push', {
         tabId,
         send,
         original

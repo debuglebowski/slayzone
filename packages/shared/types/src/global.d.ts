@@ -1,3 +1,4 @@
+/// <reference path="./txn-registry.d.ts" />
 import type { ElectronAPI } from './api'
 
 declare global {

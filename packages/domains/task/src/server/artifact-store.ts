@@ -129,7 +129,7 @@ export function createArtifactStore(dataDir: string) {
     },
 
     async createArtifact(db: SlayzoneDb, data: CreateArtifactInput): Promise<TaskArtifact | null> {
-      const row = await db.namedTxn<Record<string, unknown> | undefined>('task-artifacts:create', {
+      const row = await db.namedTxn('task-artifacts:create', {
         dataDir,
         taskId: data.taskId,
         folderId: data.folderId ?? null,
@@ -160,7 +160,7 @@ export function createArtifactStore(dataDir: string) {
       ] as const) {
         if (data[key] !== undefined) setKeys.push(key)
       }
-      const row = await db.namedTxn<Record<string, unknown> | null | undefined>(
+      const row = await db.namedTxn(
         'task-artifacts:update',
         {
           dataDir,
@@ -239,7 +239,7 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: { taskId: string; sourcePath: string; title?: string }
     ): Promise<TaskArtifact | null> {
-      const row = await db.namedTxn<Record<string, unknown> | undefined>('task-artifacts:upload', {
+      const row = await db.namedTxn('task-artifacts:upload', {
         dataDir,
         taskId: data.taskId,
         sourcePath: data.sourcePath,
@@ -252,7 +252,7 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: { sourcePaths: string[]; destTaskId: string; destFolderId: string | null }
     ): Promise<TaskArtifact[]> {
-      const rows = await db.namedTxn<Record<string, unknown>[]>('task-artifacts:pasteFiles', {
+      const rows = await db.namedTxn('task-artifacts:pasteFiles', {
         dataDir,
         sourcePaths: data.sourcePaths,
         destTaskId: data.destTaskId,
@@ -265,7 +265,7 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: { taskId: string; title: string; bytes: Uint8Array; folderId?: string | null }
     ): Promise<TaskArtifact | null> {
-      const row = await db.namedTxn<Record<string, unknown> | undefined>('task-artifacts:uploadBlob', {
+      const row = await db.namedTxn('task-artifacts:uploadBlob', {
         dataDir,
         taskId: data.taskId,
         title: data.title,
@@ -279,10 +279,7 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: { taskId: string; dirPath: string; parentFolderId: string | null }
     ): Promise<{ folders: ArtifactFolder[]; artifacts: TaskArtifact[] }> {
-      const result = await db.namedTxn<{
-        folders: (Record<string, unknown> | undefined)[]
-        artifacts: (Record<string, unknown> | undefined)[]
-      }>('task-artifacts:uploadDir', {
+      const result = await db.namedTxn('task-artifacts:uploadDir', {
         dataDir,
         taskId: data.taskId,
         dirPath: data.dirPath,
@@ -387,7 +384,7 @@ export function createArtifactStore(dataDir: string) {
     ): Promise<unknown> {
       // The worker switches the current pointer AND flushes the version's bytes back to
       // the artifact's on-disk file; it returns the version row.
-      const result = await db.namedTxn<{ version: unknown }>('task-artifacts:versions:setCurrent', {
+      const result = await db.namedTxn('task-artifacts:versions:setCurrent', {
         dataDir,
         artifactId: data.artifactId,
         versionRef: data.versionRef
@@ -410,7 +407,7 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: { taskId: string; name: string }
     ): Promise<ArtifactFolder | null> {
-      const row = await db.namedTxn<Record<string, unknown> | undefined>(
+      const row = await db.namedTxn(
         'task-artifacts:folders:getOrCreateByName',
         { taskId: data.taskId, name: data.name }
       )
@@ -421,7 +418,7 @@ export function createArtifactStore(dataDir: string) {
       db: SlayzoneDb,
       data: CreateArtifactFolderInput
     ): Promise<ArtifactFolder | null> {
-      const row = await db.namedTxn<Record<string, unknown> | undefined>(
+      const row = await db.namedTxn(
         'task-artifacts:folders:create',
         { taskId: data.taskId, parentId: data.parentId ?? null, name: data.name }
       )

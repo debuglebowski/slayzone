@@ -4,6 +4,6 @@
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../types/src/txn-registry.d.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

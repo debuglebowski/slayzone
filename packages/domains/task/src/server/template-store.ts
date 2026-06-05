@@ -84,7 +84,7 @@ export async function createTemplate(
   db: SlayzoneDb,
   data: CreateTaskTemplateInput
 ): Promise<TaskTemplate | null> {
-  const row = await db.namedTxn<Record<string, unknown> | undefined>('task-templates:create', {
+  const row = await db.namedTxn('task-templates:create', {
     id: randomUUID(),
     projectId: data.projectId,
     name: data.name,

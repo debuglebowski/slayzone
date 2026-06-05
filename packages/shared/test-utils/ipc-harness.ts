@@ -9,7 +9,7 @@
  */
 import Database from 'better-sqlite3'
 import { DB_PRAGMAS } from '@slayzone/platform'
-import type { SlayzoneDb, BatchOp, RunResult } from '@slayzone/platform'
+import type { SlayzoneDb, BatchOp, RunResult, TxnName, TxnParams, TxnResult } from '@slayzone/platform'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -94,11 +94,14 @@ export function createSlayzoneDbAdapter(raw: Database.Database): SlayzoneDb {
       )
       return run(ops)
     },
-    async namedTxn<T = unknown>(name: string, params: unknown): Promise<T> {
+    async namedTxn<K extends TxnName>(
+      name: K,
+      params: TxnParams<K>
+    ): Promise<Awaited<TxnResult<K>>> {
       const registry = await loadTxnRegistry()
       const fn = registry[name]
       if (!fn) throw new Error(`Unknown named transaction: ${name}`)
-      return fn(raw, params as never) as T
+      return fn(raw, params as never) as Awaited<TxnResult<K>>
     },
     async backup(): Promise<void> {
       /* no-op in tests */

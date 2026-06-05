@@ -27,7 +27,7 @@ export async function deleteTaskOp(
   // Soft-delete + delete-event recording must commit atomically; the event list is
   // known up-front (built from the pre-read task), and the event write is gated on
   // the UPDATE actually changing a row — a conditional that lives in the named txn.
-  const result = await db.namedTxn<{ changes: number }>('task:soft-delete', {
+  const result = await db.namedTxn('task:soft-delete', {
     sql: `
       UPDATE tasks SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
     `,

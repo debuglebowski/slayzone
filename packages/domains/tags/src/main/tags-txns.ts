@@ -66,4 +66,4 @@ export const tagsTxns = {
     setTagsForTask(db, p.taskId, p.tagIds)
     return null
   }
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}

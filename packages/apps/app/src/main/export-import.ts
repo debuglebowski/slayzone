@@ -4,7 +4,6 @@ import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   ImportTxnParams,
-  ImportTxnResult,
   SetTaskParentTxnParams,
   SlayExportData
 } from './export-import-txns'
@@ -153,7 +152,7 @@ async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExp
 // run atomically inside the DB worker — see `export-import-txns.ts`. Here we
 // just hand the bundle data to the named transaction and reshape the result.
 async function importBundle(db: SlayzoneDb, bundle: SlayExportBundle): Promise<ImportResult> {
-  const result = await db.namedTxn<ImportTxnResult>('export-import:import', {
+  const result = await db.namedTxn('export-import:import', {
     data: bundle.data
   } satisfies ImportTxnParams)
   return result

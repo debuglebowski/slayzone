@@ -1784,6 +1784,9 @@ importers:
       '@slayzone/integrations':
         specifier: workspace:*
         version: link:../../domains/integrations
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@slayzone/projects':
         specifier: workspace:*
         version: link:../../domains/projects

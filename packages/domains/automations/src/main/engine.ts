@@ -336,7 +336,7 @@ export class AutomationEngine {
       for (let i = 0; i < automation.actions.length; i++) {
         const action = automation.actions[i]
         const resolved = await this.resolveAction(action, ctx)
-        const actionRunId = await this.db.namedTxn<string>('automations:start-action-run', {
+        const actionRunId = await this.db.namedTxn('automations:start-action-run', {
           input: {
             runId,
             automationId: automation.id,

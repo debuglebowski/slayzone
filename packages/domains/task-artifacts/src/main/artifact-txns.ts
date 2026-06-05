@@ -246,4 +246,4 @@ export const artifactTxns = {
       a: p.a,
       b: p.b
     })
-} satisfies Record<string, (db: Database, params: never) => unknown>
+}
