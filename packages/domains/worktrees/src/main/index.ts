@@ -1,4 +1,5 @@
-export { registerWorktreeHandlers, resolveCopyBehavior } from './handlers'
+export { registerWorktreeHandlers } from './handlers'
+export { resolveCopyBehavior } from './composite-ops'
 export { getGitWatcher, closeGitWatcher } from './git-watcher'
 export {
   removeWorktree,

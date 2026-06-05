@@ -89,4 +89,13 @@ export { runAiCommand } from '../main/merge-ai'
 export { listProjectRepos } from '../main/list-project-repos'
 export { ensureColors } from '../main/color-registry'
 export { getGitWatcher } from '../main/git-watcher'
-export { resolveCopyBehavior, resolveSubmoduleInitBehavior } from '../main/handlers'
+// Composite orchestrations + behavior resolvers shared with the IPC handlers.
+export {
+  detectChildRepos,
+  detectWorktreesWithColors,
+  resolveCopyBehavior,
+  resolveSubmoduleInitBehavior,
+  createWorktreeWithSetup,
+  mergeWithAI,
+  analyzeConflict
+} from '../main/composite-ops'

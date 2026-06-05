@@ -10,7 +10,7 @@ import {
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerWorktreeHandlers } from './handlers.js'
 import { createWorktree, runWorktreeSetupScriptSync, initSubmodulesSync } from './git-worktree.js'
-import { resolveSubmoduleInitBehavior } from './handlers.js'
+import { resolveSubmoduleInitBehavior } from './composite-ops.js'
 import { execSync } from 'child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'

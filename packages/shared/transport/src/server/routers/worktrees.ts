@@ -2,10 +2,7 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import {
   isGitRepo,
-  detectWorktrees,
-  createWorktree,
   removeWorktree,
-  runWorktreeSetupScript,
   initRepo,
   getCurrentBranch,
   listBranches,
@@ -14,7 +11,6 @@ import {
   hasUncommittedChanges,
   mergeIntoParent,
   abortMerge,
-  startMergeNoCommit,
   isMergeInProgress,
   getConflictedFiles,
   getConflictContent,
@@ -58,7 +54,6 @@ import {
   resolveChildBranches,
   copyIgnoredFiles,
   getIgnoredFileTree,
-  initSubmodules,
   getResolvedCommitDag,
   getResolvedForkGraph,
   getResolvedUpstreamGraph,
@@ -71,8 +66,11 @@ import {
   branchFromStash,
   getStashDiff,
   resolveCopyBehavior,
-  resolveSubmoduleInitBehavior,
-  ensureColors as ensureWorktreeColors,
+  detectChildRepos,
+  detectWorktreesWithColors,
+  createWorktreeWithSetup,
+  mergeWithAI,
+  analyzeConflict,
   listProjectRepos,
   getGitWatcher,
   checkGhInstalled,
@@ -85,13 +83,10 @@ import {
   mergePr,
   getPrDiff,
   getGhUser,
-  editPrComment,
-  runAiCommand
+  editPrComment
 } from '@slayzone/worktrees/server'
 import type {
-  WorktreeSubmoduleResult,
-  MergeWithAIResult,
-  ConflictAnalysis,
+  CreateWorktreeOpts,
   CreatePrInput,
   MergePrInput,
   EditPrCommentInput
@@ -116,57 +111,15 @@ export const worktreesRouter = router({
   listProjectRepos: publicProcedure
     .input(obj({ projectPath: s, opts: u.optional() }))
     .query(({ input }) => listProjectRepos(input.projectPath, (input.opts ?? {}) as never)),
-  detectChildRepos: publicProcedure.input(obj({ projectPath: s })).query(async ({ input }) => {
-    const fs = await import('node:fs/promises')
-    const path = await import('node:path')
-    if (await isGitRepo(input.projectPath)) return []
-    try {
-      const entries = await fs.readdir(input.projectPath)
-      const repos: { name: string; path: string }[] = []
-      await Promise.all(
-        entries.map(async (entry) => {
-          const fullPath = path.join(input.projectPath, entry)
-          try {
-            const st = await fs.stat(fullPath)
-            if (st.isDirectory() && (await isGitRepo(fullPath)))
-              repos.push({ name: entry, path: fullPath })
-          } catch {
-            /* skip inaccessible */
-          }
-        })
-      )
-      repos.sort((a, b) => a.name.localeCompare(b.name))
-      return repos
-    } catch {
-      return []
-    }
-  }),
-  detectWorktrees: publicProcedure.input(obj({ repoPath: s })).query(async ({ input }) => {
-    const detected = await detectWorktrees(input.repoPath)
-    const nonMainPaths = detected.filter((d) => !d.isMain).map((d) => d.path)
-    const colors = ensureWorktreeColors(input.repoPath, nonMainPaths)
-    return detected.map((d) => (d.isMain ? d : { ...d, color: colors.get(d.path) }))
-  }),
-  createWorktree: publicProcedure.input(u).mutation(async ({ ctx, input }) => {
-    const opts = input as {
-      repoPath: string
-      targetPath: string
-      branch?: string
-      sourceBranch?: string
-      projectId?: string
-    }
-    await createWorktree(opts.repoPath, opts.targetPath, opts.branch, opts.sourceBranch)
-    const { behavior, customPaths } = await resolveCopyBehavior(ctx.db, opts.projectId)
-    if (behavior === 'all' || behavior === 'custom') {
-      await copyIgnoredFiles(opts.repoPath, opts.targetPath, behavior, customPaths)
-    }
-    const submoduleBehavior = await resolveSubmoduleInitBehavior(ctx.db, opts.projectId)
-    let submoduleResult: WorktreeSubmoduleResult
-    if (submoduleBehavior === 'skip') submoduleResult = { ran: false, reason: 'skipped' }
-    else submoduleResult = await initSubmodules(opts.targetPath)
-    const setupResult = await runWorktreeSetupScript(opts.targetPath, opts.repoPath, opts.sourceBranch)
-    return { setupResult, submoduleResult }
-  }),
+  detectChildRepos: publicProcedure
+    .input(obj({ projectPath: s }))
+    .query(({ input }) => detectChildRepos(input.projectPath)),
+  detectWorktrees: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => detectWorktreesWithColors(input.repoPath)),
+  createWorktree: publicProcedure
+    .input(u)
+    .mutation(({ ctx, input }) => createWorktreeWithSetup(ctx.db, input as CreateWorktreeOpts)),
   removeWorktree: publicProcedure
     .input(obj({ repoPath: s, worktreePath: s, branchHint: s.optional() }))
     .mutation(({ input }) => removeWorktree(input.repoPath, input.worktreePath, input.branchHint)),
@@ -194,36 +147,7 @@ export const worktreesRouter = router({
   abortMerge: publicProcedure.input(obj({ path: s })).mutation(({ input }) => abortMerge(input.path)),
   mergeWithAI: publicProcedure
     .input(obj({ projectPath: s, worktreePath: s, parentBranch: s, sourceBranch: s }))
-    .mutation(async ({ input }): Promise<MergeWithAIResult> => {
-      try {
-        const hasChanges = await hasUncommittedChanges(input.worktreePath)
-        const result = await startMergeNoCommit(
-          input.projectPath,
-          input.parentBranch,
-          input.sourceBranch
-        )
-        if (result.clean && !hasChanges) return { success: true }
-        const steps: string[] = []
-        if (hasChanges)
-          steps.push(
-            `Step 1: Commit uncommitted changes in this worktree\n- git add -A\n- git commit -m "WIP: changes before merge"`
-          )
-        if (result.conflictedFiles.length > 0) {
-          const stepNum = hasChanges ? 2 : 1
-          steps.push(
-            `Step ${stepNum}: Resolve merge conflicts in ${input.projectPath}\nConflicted files:\n${result.conflictedFiles.map((f) => `- ${f}`).join('\n')}\n\n- cd "${input.projectPath}"\n- Read each conflicted file\n- Resolve conflicts (prefer source branch when unclear)\n- git add <resolved files>\n- git commit -m "Merge ${input.sourceBranch} into ${input.parentBranch}"`
-          )
-        } else if (hasChanges) {
-          steps.push(
-            `Step 2: Complete the merge\n- cd "${input.projectPath}"\n- git merge "${input.sourceBranch}" --no-ff\n- If conflicts occur, resolve them`
-          )
-        }
-        const prompt = `Complete this merge: "${input.sourceBranch}" → "${input.parentBranch}"\n\n${steps.join('\n\n')}`
-        return { resolving: true, conflictedFiles: result.conflictedFiles, prompt }
-      } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) }
-      }
-    }),
+    .mutation(({ input }) => mergeWithAI(input)),
   isMergeInProgress: publicProcedure
     .input(obj({ path: s }))
     .query(({ input }) => isMergeInProgress(input.path)),
@@ -263,18 +187,9 @@ export const worktreesRouter = router({
     .mutation(({ input }) => commitFiles(input.repoPath, input.message)),
   analyzeConflict: publicProcedure
     .input(obj({ mode: s, filePath: s, base: sn, ours: sn, theirs: sn }))
-    .mutation(async ({ input }): Promise<ConflictAnalysis> => {
-      const prompt = `Analyze this merge conflict for file "${input.filePath}".\n\nBASE (common ancestor):\n\`\`\`\n${input.base ?? '(file did not exist)'}\n\`\`\`\n\nOURS (current branch):\n\`\`\`\n${input.ours ?? '(file did not exist)'}\n\`\`\`\n\nTHEIRS (incoming branch):\n\`\`\`\n${input.theirs ?? '(file did not exist)'}\n\`\`\`\n\nRespond in this exact format (no extra text):\nSUMMARY: <2-3 sentences explaining what each branch changed and why they conflict>\n---RESOLUTION---\n<the complete resolved file content, picking the best combination of both sides>`
-      const result = await runAiCommand(input.mode as 'claude-code' | 'codex', prompt)
-      const sepIdx = result.indexOf('---RESOLUTION---')
-      if (sepIdx === -1) return { summary: result, suggestion: '' }
-      const summary = result
-        .slice(0, sepIdx)
-        .replace(/^SUMMARY:\s*/i, '')
-        .trim()
-      const suggestion = result.slice(sepIdx + '---RESOLUTION---'.length).trim()
-      return { summary, suggestion }
-    }),
+    .mutation(({ input }) =>
+      analyzeConflict(input.mode, input.filePath, input.base, input.ours, input.theirs)
+    ),
 
   // Rebase
   isRebaseInProgress: publicProcedure
