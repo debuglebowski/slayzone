@@ -1,5 +1,52 @@
 [
   {
+    "version": "0.34.0",
+    "date": "2026-06-05",
+    "tagline": "Sessions, selection, speed",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Kanban multi-select gestures",
+        "description": "Select multiple kanban cards with standard shift- and cmd-click gestures."
+      },
+      {
+        "category": "feature",
+        "title": "Tree-view row selection",
+        "description": "Tree view gains per-row selection borders, with Esc to clear the selection."
+      },
+      {
+        "category": "improvement",
+        "title": "Pre-warmed agent shells",
+        "description": "Agent shells pre-warm per project so the first agent starts faster."
+      },
+      {
+        "category": "improvement",
+        "title": "Smarter agent auto-start",
+        "description": "Agent auto-start now fires reliably for temporary tasks and is scoped correctly for regular ones."
+      },
+      {
+        "category": "improvement",
+        "title": "Reopen overlay for hibernated sessions",
+        "description": "A loading overlay shows while a hibernated terminal session reopens."
+      },
+      {
+        "category": "fix",
+        "title": "No more false \"session expired\"",
+        "description": "Phantom conversation IDs are healed and mid-session \"Session not found\" echoes no longer freeze the terminal or trigger false expiry."
+      },
+      {
+        "category": "fix",
+        "title": "Tree-view pause icon priority",
+        "description": "The pause icon now wins over the unread blob in tree-view rows."
+      },
+      {
+        "category": "fix",
+        "title": "Bulk menu header alignment",
+        "description": "The bulk multi-select context menu header now aligns to the grid."
+      }
+    ]
+  },
+  {
     "version": "0.33.1",
     "date": "2026-06-03",
     "tagline": "Jira goes live",

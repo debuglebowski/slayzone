@@ -1,6 +1,50 @@
 # Changelog
 
 
+## v0.34.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.33.1...v0.34.0)
+
+### 🚀 Enhancements
+
+- **transport:** File-editor router (P11) ([79897803](https://github.com/debuglebowski/slayzone/commit/79897803))
+- **terminal:** Gate auto-start to regular tasks only ([c84f2784](https://github.com/debuglebowski/slayzone/commit/c84f2784))
+- **tasks:** Standard kanban multi-select gestures ([eb45766d](https://github.com/debuglebowski/slayzone/commit/eb45766d))
+- **transport:** Projects router (P3) ([648160e8](https://github.com/debuglebowski/slayzone/commit/648160e8))
+- **transport:** Task-terminals router (P8) ([d8413b6a](https://github.com/debuglebowski/slayzone/commit/d8413b6a))
+- **transport:** Integrations router (P16) ([6e36d5bf](https://github.com/debuglebowski/slayzone/commit/6e36d5bf))
+- **transport:** Settings + theme router (P12) ([143ab7bc](https://github.com/debuglebowski/slayzone/commit/143ab7bc))
+- **terminal:** Log xterm focus-steal diagnostic event ([9632b38f](https://github.com/debuglebowski/slayzone/commit/9632b38f))
+- **tree-view:** Per-row select borders + esc clears ([6dfb8913](https://github.com/debuglebowski/slayzone/commit/6dfb8913))
+- **transport:** Task router (P13 — mega; ~50 procedures) ([7f4250e1](https://github.com/debuglebowski/slayzone/commit/7f4250e1))
+- **terminal:** Pre-warm agent shell per project ([1e962315](https://github.com/debuglebowski/slayzone/commit/1e962315))
+
+### 🩹 Fixes
+
+- **tasks:** Align bulk context menu header to grid ([d4d5015d](https://github.com/debuglebowski/slayzone/commit/d4d5015d))
+- **tree-view:** Pause icon wins over unread in row blob ([c553f387](https://github.com/debuglebowski/slayzone/commit/c553f387))
+- **terminal:** Always auto-start temp task agents ([8211d3b7](https://github.com/debuglebowski/slayzone/commit/8211d3b7))
+- **task:** Converge artifact dir to host dataRoot (single source) ([97c320c2](https://github.com/debuglebowski/slayzone/commit/97c320c2))
+- **terminal:** Don't freeze on mid-session "Session not found" echo ([1ee5aad3](https://github.com/debuglebowski/slayzone/commit/1ee5aad3))
+- **terminal:** Heal phantom conv-ids; stop false "session expired" ([70649036](https://github.com/debuglebowski/slayzone/commit/70649036))
+- **terminal:** Show loading overlay while reopening a hibernated session ([6f983774](https://github.com/debuglebowski/slayzone/commit/6f983774))
+
+### 💅 Refactors
+
+- **settings:** Narrow theme tRPC import + single nativeTheme listener ([e5804d70](https://github.com/debuglebowski/slayzone/commit/e5804d70))
+- **db:** Strongly type namedTxn via TxnRegistry declaration-merging ([9f122406](https://github.com/debuglebowski/slayzone/commit/9f122406))
+
+### ✅ Tests
+
+- Make unit runner strict; fix 6 CLI suites ([eb36745e](https://github.com/debuglebowski/slayzone/commit/eb36745e))
+- **transport:** Task/template/artifacts router contract tests + unbreak runner ([3a6ee39a](https://github.com/debuglebowski/slayzone/commit/3a6ee39a))
+- **transport:** Pin missing-id contract for task/template/artifacts routers ([93b380e7](https://github.com/debuglebowski/slayzone/commit/93b380e7))
+- **transport:** Assert NOT_FOUND code (not just "threw") in task router ([7aab2f9e](https://github.com/debuglebowski/slayzone/commit/7aab2f9e))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.33.1
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.33.0...v0.33.1)
