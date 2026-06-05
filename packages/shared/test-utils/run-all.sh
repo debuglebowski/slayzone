@@ -3,7 +3,10 @@
 # Usage: bash packages/shared/test-utils/run-all.sh
 
 set -e
-LOADER="--loader ./packages/shared/test-utils/loader.ts"
+# Node 24 removed the bare `--loader` flag; `--experimental-loader` is the working
+# equivalent (eventual replacement: `--import` + `module.register()`). Registers the
+# electron/dep mock loader for both the npx-tsx and Electron runners below.
+LOADER="--experimental-loader ./packages/shared/test-utils/loader.ts"
 TSX="npx tsx"
 PASS=0
 FAIL=0
@@ -68,6 +71,10 @@ run_test_electron_strict_loader packages/domains/agent-turns/src/main/git-snapsh
 run_test_electron_strict_loader packages/domains/agent-turns/src/main/turn-tracker.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/agent-turns.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/chat.test.ts
+# Transport routers P13 — task + template + artifacts (createCaller contract tests)
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/task.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/template.test.ts
+run_test_electron_strict_loader packages/shared/transport/src/server/routers/artifacts.test.ts
 run_test packages/domains/integrations/src/main/handlers.api.test.ts
 run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts
