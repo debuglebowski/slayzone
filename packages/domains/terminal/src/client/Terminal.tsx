@@ -5,15 +5,13 @@
 // bundle and undo the boot-time split. The package's "./client/Terminal"
 // export exists only for the lazy wrapper itself.
 import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
-import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { matchesShortcut, useShortcutStore, PulseGrid } from '@slayzone/ui'
-import { WebLinkProvider, FileLinkProvider } from './web-link-provider'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
-import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
+import { createXterm } from './xterm-init'
 import { loadWebglRenderer, correctAtlas, type DowngradeReason } from './webgl-loader'
 import { monitorFrameTime, createScrambleProbe, type ScrambleProbe } from './scramble-detector'
 import { decideThrottle, DEFAULT_THROTTLE_OPTIONS } from './paint-throttle'
@@ -23,75 +21,17 @@ import {
   reportRendererOk
 } from './scramble-telemetry'
 import { diag } from './terminal-webgl-diag'
+import { trimSelectionTrailingSpaces, waitForDimensions } from './Terminal.utils'
+import { TerminalDeadOverlay } from './TerminalDeadOverlay'
 import '@xterm/xterm/css/xterm.css'
 
-// Strip trailing whitespace from each line of selection text.
-// xterm's getTrimmedLength treats rendered spaces (e.g. from padded UI like
-// lazygit, fzf, tables) as real content, so copies include them. Pasting
-// that into a narrower terminal wraps → phantom line breaks.
-const trimSelectionTrailingSpaces = (s: string): string =>
-  s
-    .split('\n')
-    .map((l) => l.replace(/[ \t]+$/, ''))
-    .join('\n')
-
-// Override xterm underline styles - Claude Code outputs these and they persist incorrectly
-// This is a definitive fix that works regardless of ANSI code filtering
-const underlineOverride = document.createElement('style')
-underlineOverride.textContent = `
-  .xterm-underline-1, .xterm-underline-2, .xterm-underline-3,
-  .xterm-underline-4, .xterm-underline-5 {
-    text-decoration: none !important;
-  }
-`
-document.head.appendChild(underlineOverride)
-
-// Once WebGL construction fails (driver blocklist, lost GPU), every subsequent
-// terminal skips it and uses the DOM renderer — no repeated throw, no half-init.
-let webglDisabled = false
-
-// Sessions where the WebGL renderer was swapped out for the DOM renderer by
-// a detection signal (context-loss / frame-time / canary / manual). Scoped to
-// the current renderer process — a reload re-attempts WebGL.
-//
-// Distinct from {@link webglDisabled}: that one is a *process-wide* latch for
-// construction failures (driver blocklist), this is a *per-session* latch for
-// post-construction misbehavior. Different scopes, different reasons.
-const downgradedSessions = new Set<string>()
-
-// Sessions that have already emitted a `terminal.webgl_renderer_ok` telemetry
-// event. Deduped so the downgrade-rate denominator counts sessions, not every
-// WebGL (re)load — a forceCompat toggle or cache-reattach can re-run the load
-// path within one session.
-const rendererOkReportedSessions = new Set<string>()
-
-// Test-only registry: maps sessionId → the live `handleDowngrade` closure for
-// that terminal. Exposed via `window.__slayzone_scrambleDetector` so the e2e
-// suite can simulate a detector fire (downgrade + telemetry path) without
-// touching real GPU state. Populated when initTerminal constructs handleDowngrade,
-// cleared in the unmount cleanup. Production code never reads this — the
-// detectors call handleDowngrade directly via the `onDowngrade` option.
-const fakeDowngradeRegistry = new Map<string, (reason: DowngradeReason) => void>()
-
-if (typeof window !== 'undefined') {
-  ;(
-    window as unknown as {
-      __slayzone_scrambleDetector: {
-        fireDowngrade: (sessionId: string, reason: DowngradeReason) => boolean
-        sessions: () => string[]
-      }
-    }
-  ).__slayzone_scrambleDetector = {
-    fireDowngrade: (sessionId, reason): boolean => {
-      const fn = fakeDowngradeRegistry.get(sessionId)
-      if (!fn) return false
-      fn(reason)
-      return true
-    },
-    sessions: (): string[] => Array.from(fakeDowngradeRegistry.keys())
-  }
-}
-
+import {
+  isWebglDisabled,
+  markWebglDisabled,
+  downgradedSessions,
+  rendererOkReportedSessions,
+  fakeDowngradeRegistry
+} from './terminal-webgl-sessions'
 import {
   getTerminal,
   setTerminal,
@@ -105,103 +45,12 @@ import { useSessionState } from './useTerminalStateStore'
 import { useTheme, useAppearance } from '@slayzone/settings/client'
 import { getThemeTerminalColors } from '@slayzone/ui'
 import { TerminalSearchBar } from './TerminalSearchBar'
-import type { TerminalMode, TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalState } from '@slayzone/terminal/shared'
+import type { TerminalProps, TerminalHandle } from './Terminal.types'
 import { stripUnderlineCodes, KITTY_SHIFT_ENTER, DETECTION_ENGINES } from '@slayzone/terminal/shared'
 import { track } from '@slayzone/telemetry/client'
 
-// Wait for container to have non-zero dimensions before opening terminal
-function waitForDimensions(
-  container: HTMLElement,
-  signal: AbortSignal,
-  timeoutMs = 3000
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // Already has dimensions? Resolve immediately
-    const rect = container.getBoundingClientRect()
-    if (rect.width > 0 && rect.height > 0) {
-      resolve()
-      return
-    }
-
-    let settled = false
-    const cleanup = () => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeoutId)
-      observer.disconnect()
-      signal.removeEventListener('abort', onAbort)
-    }
-
-    // Timeout to prevent hanging forever
-    const timeoutId = setTimeout(() => {
-      cleanup()
-      resolve()
-    }, timeoutMs)
-
-    // Otherwise wait for ResizeObserver
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-        cleanup()
-        resolve()
-      }
-    })
-
-    // Handle abort (component unmount)
-    const onAbort = (): void => {
-      cleanup()
-      reject(new DOMException('Aborted', 'AbortError'))
-    }
-    signal.addEventListener('abort', onAbort)
-
-    observer.observe(container)
-  })
-}
-
-export interface TerminalProps {
-  sessionId: string
-  cwd: string
-  mode?: TerminalMode
-  conversationId?: string | null
-  existingConversationId?: string | null
-  supportsSessionId?: boolean
-  initialPrompt?: string | null
-  providerFlags?: string | null
-  executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
-  isActive?: boolean
-  onAttached?: (api: { sessionId: string; focus: () => void }) => void
-  /** Start a brand-new session: clear the stored conversation id + remount.
-   *  Wired to the dead overlay's "Start fresh" action for a stale (auto-cleaned)
-   *  session — see issue #90. */
-  onStartFresh?: () => void
-  onReady?: (api: {
-    sendInput: (text: string) => Promise<void>
-    write: (data: string) => Promise<boolean>
-    focus: () => void
-    clearBuffer: () => Promise<void>
-  }) => void
-  onFirstInput?: () => void
-  onRetry?: () => void
-  onOpenUrl?: (url: string) => void
-  onOpenFile?: (filePath: string, options?: { position?: { line: number; col?: number } }) => void
-}
-
-function stripAnsi(str: string): string {
-  return str
-    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
-    .replace(/\x1b\][^\x07]*\x07/g, '')
-    .replace(/\x1b[()][AB012]/g, '')
-}
-
-export interface TerminalHandle {
-  focus: () => void
-  hasSelection: () => boolean
-  getSelection: () => string
-  selectAll: () => void
-  scrollToBottom: () => void
-  openSearch: () => void
-  clearBuffer: () => Promise<void>
-}
+export type { TerminalProps, TerminalHandle } from './Terminal.types'
 
 // Reopen respawns the CLI with --resume; it re-streams the transcript over the
 // next few seconds, during which the terminal would otherwise sit blank (the
@@ -609,10 +458,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
               createAddon: () => new WebglAddon({ preserveDrawingBuffer: true }),
               isAborted: () => signal.aborted,
               isCurrentTerminal: () => terminalRef.current === terminalInst,
-              isWebglDisabled: () => webglDisabled,
-              onWebglDisabled: () => {
-                webglDisabled = true
-              },
+              isWebglDisabled,
+              onWebglDisabled: markWebglDisabled,
               getActiveAddon: () => webglAddonRef.current,
               setActiveAddon: (a) => {
                 webglAddonRef.current = a
@@ -759,156 +606,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           }
         }
 
-        // Link tooltip — shown on hover for all link types (URLs, files, OSC 8).
-        // Uses xterm-hover class so mouse events don't fall through to other links.
-        // Positioned at initial hover point (doesn't follow cursor).
-        let tooltipEl: HTMLDivElement | null = null
-        const getTooltip = () => {
-          if (!tooltipEl) {
-            tooltipEl = document.createElement('div')
-            tooltipEl.className = 'xterm-hover'
-            tooltipEl.style.cssText =
-              'display:none;position:fixed;z-index:50;padding:2px 6px;border-radius:3px;font-size:11px;line-height:1.3;max-width:600px;white-space:normal;word-break:break-all;pointer-events:none;opacity:0.85;background:#1e1e1e;color:#aaa;border:1px solid #333'
-          }
-          return tooltipEl
-        }
-        let tooltipShown = false
-        const showTooltip = (event: MouseEvent, text: string, hint: string) => {
-          if (tooltipShown) return // Don't reposition on subsequent mousemove events
-          tooltipShown = true
-          const el = getTooltip()
-          if (!el.parentNode && terminalRef.current?.element) {
-            terminalRef.current.element.appendChild(el)
-          }
-          el.textContent = `${text}  ${hint}`
-          el.style.display = 'block'
-          el.style.left = `${event.clientX}px`
-          el.style.top = `${event.clientY - el.offsetHeight - 2}px`
-        }
-        const hideTooltip = () => {
-          tooltipShown = false
-          if (tooltipEl) tooltipEl.style.display = 'none'
-        }
-
-        const urlHint = '— ⌘+Click open · ⌘⇧+Click external'
-        const fileHint = '— ⌘+Click open'
-
-        // xterm measures the character cell from whatever font is loaded when
-        // open() runs. If the terminal webfont has not loaded yet (cold start)
-        // it measures a fallback face and bakes in the wrong cell size — the
-        // WebGL glyph atlas then renders scrambled, and only a panel resize
-        // (which forces xterm to re-measure) corrects it. `document.fonts.ready`
-        // is not sufficient: it resolves early when the font has not been
-        // requested. Explicitly request the face and wait for it, bounded so a
-        // missing/slow font cannot block terminal creation.
-        await Promise.race([
-          document.fonts
-            .load(`${terminalFontSize}px ${terminalFontFamily}`)
-            .catch(() => undefined),
-          new Promise((resolve) => setTimeout(resolve, 1500))
-        ])
-        if (signal.aborted) return
-
-        // Create new terminal
-        const terminal = new XTerm({
-          allowProposedApi: true,
-          macOptionIsMeta: true,
-          cursorBlink: false,
+        // Build the xterm instance + addons + link providers + tooltip. The
+        // font preload + abort check live inside the factory (font must load
+        // before xterm measures the cell). See xterm-init.ts.
+        const created = await createXterm({
           fontSize: terminalFontSize,
           fontFamily: terminalFontFamily,
           scrollback: terminalScrollback,
-          scrollOnEraseInDisplay: true,
           theme: resolvedTerminalTheme,
           minimumContrastRatio: resolvedTerminalVariant === 'light' ? 4.5 : 1,
-          // OSC 8 hyperlinks — explicit links from CLI tools (gh, cargo, ls --hyperlink).
-          // Same Cmd+Click routing as WebLinkProvider. Without this, xterm shows
-          // a confirm() dialog + window.open().
-          linkHandler: {
-            activate: (event: MouseEvent, uri: string) => {
-              if (event.metaKey && event.shiftKey) {
-                void window.api.shell.openExternal(uri)
-              } else if (event.metaKey && onOpenUrlRef.current) {
-                onOpenUrlRef.current(uri)
-              } else if (event.metaKey) {
-                void window.api.shell.openExternal(uri)
-              }
-            },
-            hover: (e: MouseEvent, text: string) => showTooltip(e, text, urlHint),
-            leave: () => hideTooltip()
-          }
+          cwd,
+          sessionId,
+          signal,
+          getOnOpenUrl: () => onOpenUrlRef.current,
+          getOnOpenFile: () => onOpenFileRef.current
         })
-
-        const fitAddon = new FitAddon()
-        const serializeAddon = new SerializeAddon()
-        const searchAddon = new SearchAddon()
-
-        terminal.loadAddon(fitAddon)
-        terminal.loadAddon(serializeAddon)
-        terminal.loadAddon(searchAddon)
-
-        // xterm defaults to Unicode v6 widths — modern glyphs in TUIs (Claude Code
-        // box-draw, emoji, combining marks) desync cursor → overlapping redraws.
-        terminal.loadAddon(new UnicodeGraphemesAddon())
-        terminal.unicode.activeVersion = '15-graphemes'
-
-        // Clickable URLs — pointer cursor on hover, no underline decoration.
-        // Underline disabled to avoid persistent-underline bugs with WebGL LinkRenderLayer.
-        // Cmd+Click → browser panel, Cmd+Shift+Click → external browser
-        const linkProvider = new WebLinkProvider(
-          terminal,
-          (event, uri) => {
-            if (event.metaKey && event.shiftKey) {
-              void window.api.shell.openExternal(uri)
-            } else if (event.metaKey && onOpenUrlRef.current) {
-              onOpenUrlRef.current(uri)
-            } else if (event.metaKey) {
-              void window.api.shell.openExternal(uri)
-            }
-          },
-          (e, text) => showTooltip(e, text, urlHint),
-          hideTooltip
-        )
-        terminal.registerLinkProvider(linkProvider)
-
-        // Clickable file paths — Cmd+Click → editor (in-project) or Finder (external).
-        // Shift+Click is consumed by xterm for text selection, so no Shift variant.
-        terminal.registerLinkProvider(
-          new FileLinkProvider(
-            terminal,
-            (event, filePath, line, col) => {
-              if (!event.metaKey) return
-              // Resolve relative paths against terminal cwd
-              const resolved = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
-              const isInProject = resolved.startsWith(cwd + '/') || resolved === cwd
-              if (!isInProject) {
-                void window.api.git.revealInFinder(resolved)
-              } else if (onOpenFileRef.current) {
-                // Pass relative path to editor panel
-                const relative = resolved.startsWith(cwd + '/')
-                  ? resolved.slice(cwd.length + 1)
-                  : filePath
-                // Terminal file links use 1-based col; normalize to 0-based
-                onOpenFileRef.current(
-                  relative,
-                  line != null
-                    ? { position: { line, col: col != null ? col - 1 : undefined } }
-                    : undefined
-                )
-              } else {
-                void window.api.git.revealInFinder(resolved)
-              }
-            },
-            (e, text) => showTooltip(e, text, fileHint),
-            hideTooltip
-          )
-        )
-
-        // Test helper — allows e2e tests to trigger link activation without mouse coordinates
-        const w = window as unknown as Record<string, unknown>
-        w.__slayzone_terminalLinks = {
-          ...(w.__slayzone_terminalLinks as object),
-          [sessionId]: linkProvider
-        }
+        if (!created) return
+        const { terminal, fitAddon, serializeAddon, searchAddon } = created
 
         terminalRef.current = terminal
         fitAddonRef.current = fitAddon
@@ -2044,87 +1758,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             </div>
           </div>
         )}
-        {showDeadOverlay && isStaleSession && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-background dark:bg-surface-0 z-10 p-6 gap-3 overflow-y-auto text-center">
-            <p className="text-sm font-medium text-foreground">
-              {providerLabel} session expired
-            </p>
-            <p className="text-sm text-muted-foreground max-w-md">
-              This conversation was cleaned up — agent sessions expire over time. Your task and
-              files are untouched. Start a fresh session to continue.
-            </p>
-            <button
-              onClick={handleStartFresh}
-              className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              Start fresh
-            </button>
-          </div>
-        )}
-        {showDeadOverlay && !isStaleSession && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-background dark:bg-surface-0 z-10 p-6 gap-4 overflow-y-auto">
-            {deadCrashOutput && (
-              <pre className="text-xs text-muted-foreground dark:text-muted-foreground max-h-32 overflow-y-auto w-full max-w-lg bg-surface-2 dark:bg-surface-0 rounded p-3 font-mono whitespace-pre-wrap break-all">
-                {stripAnsi(deadCrashOutput).split('\n').slice(-20).join('\n')}
-              </pre>
-            )}
-            <p className="text-sm text-muted-foreground">Process exited with code {deadExitCode}</p>
-            <div className="flex gap-2">
-              {onRetry && (
-                <button
-                  onClick={handleRetry}
-                  className="px-3 py-1.5 text-sm rounded-md bg-surface-2 dark:bg-surface-2 hover:bg-accent dark:hover:bg-accent text-foreground dark:text-foreground transition-colors"
-                >
-                  Retry
-                </button>
-              )}
-              <button
-                onClick={() => void handleDoctor()}
-                disabled={doctorLoading}
-                className="px-3 py-1.5 text-sm rounded-md bg-surface-2 dark:bg-surface-2 hover:bg-accent dark:hover:bg-accent text-foreground dark:text-foreground transition-colors disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {doctorLoading ? (
-                  <>
-                    <Loader2 className="size-3.5 animate-spin" />
-                    Checking…
-                  </>
-                ) : (
-                  'Doctor'
-                )}
-              </button>
-            </div>
-            {doctorResults && (
-              <div className="w-full max-w-sm space-y-2">
-                {doctorResults.map((r) => (
-                  <div
-                    key={r.check}
-                    className={`rounded-lg border p-3 space-y-1.5 ${r.ok ? 'border-green-500/20 bg-green-50/40 dark:bg-green-950/20' : 'border-red-500/20 bg-red-50/40 dark:bg-red-950/20'}`}
-                  >
-                    <div className="flex items-start gap-2">
-                      {r.ok ? (
-                        <CheckCircle2 className="size-3.5 text-green-600 dark:text-green-400 shrink-0 mt-px" />
-                      ) : (
-                        <XCircle className="size-3.5 text-red-500 dark:text-red-400 shrink-0 mt-px" />
-                      )}
-                      <div className="min-w-0 space-y-0.5">
-                        <p className="text-xs font-medium leading-none">{r.check}</p>
-                        <p className="text-xs text-muted-foreground dark:text-muted-foreground">
-                          {r.detail}
-                        </p>
-                      </div>
-                    </div>
-                    {!r.ok && r.fix && (
-                      <div className="ml-5">
-                        <code className="text-xs bg-surface-2 dark:bg-surface-2 text-muted-foreground dark:text-foreground rounded px-2 py-1 font-mono block">
-                          {r.fix}
-                        </code>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {showDeadOverlay && (
+          <TerminalDeadOverlay
+            isStaleSession={isStaleSession}
+            providerLabel={providerLabel}
+            deadCrashOutput={deadCrashOutput}
+            deadExitCode={deadExitCode}
+            onRetry={onRetry}
+            onStartFresh={handleStartFresh}
+            onRetryClick={handleRetry}
+            onDoctor={() => void handleDoctor()}
+            doctorLoading={doctorLoading}
+            doctorResults={doctorResults}
+          />
         )}
       </div>
     </div>
