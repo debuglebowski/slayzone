@@ -1,4 +1,5 @@
 export { registerPtyHandlers, getPtyHandlerChannels } from './handlers'
+export { createPtyOps, type PtyCreateOpts } from './pty-store'
 export { registerUsageHandlers } from './usage'
 export {
   initWarmProcessManager,
@@ -92,4 +93,4 @@ export {
   markSessionUserInput,
   clearSessionUserInputMark
 } from './user-input-tracker'
-export { notifyGlobalStateListeners } from './pty-manager'
+export { notifyGlobalStateListeners, ptyEvents, type PtyEventMap } from './pty-manager'

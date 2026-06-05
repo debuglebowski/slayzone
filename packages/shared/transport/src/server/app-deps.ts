@@ -13,7 +13,9 @@ import type {
   createChatOps,
   createChatQueueOps,
   ChatEventMap,
-  ChatQueueEventMap
+  ChatQueueEventMap,
+  createPtyOps,
+  PtyEventMap
 } from '@slayzone/terminal/main'
 import type { IntegrationOps } from '@slayzone/integrations/main'
 import type { TaskOps } from '@slayzone/task/main'
@@ -36,6 +38,27 @@ export function setChatDeps(deps: ChatDeps): void {
 export function getChatDeps(): ChatDeps {
   if (!chatDeps) throw new Error('chatDeps not initialized — call setChatDeps() in main host first')
   return chatDeps
+}
+
+// Pty deps — ops + the single streaming emitter the pty subscriptions subscribe
+// to. `createPtyOps`/`ptyEvents` live in `@slayzone/terminal/main` (electron +
+// node-pty), so `import type` only here; the Electron-main host injects the
+// concrete instances via `setPtyDeps()`. Same instances back the IPC handlers
+// (coexistence until slice 5).
+export type PtyDeps = {
+  ops: ReturnType<typeof createPtyOps>
+  events: TypedEmitter<PtyEventMap>
+}
+
+let ptyDeps: PtyDeps | null = null
+
+export function setPtyDeps(deps: PtyDeps): void {
+  ptyDeps = deps
+}
+
+export function getPtyDeps(): PtyDeps {
+  if (!ptyDeps) throw new Error('ptyDeps not initialized — call setPtyDeps() in main host first')
+  return ptyDeps
 }
 
 // Integration ops — the electron-coupled domain ops (`@slayzone/integrations/main`

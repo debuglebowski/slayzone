@@ -245,7 +245,9 @@ import {
   initWarmProcessManager,
   teardownAllWarm,
   chatEvents,
-  chatQueueEvents
+  chatQueueEvents,
+  createPtyOps,
+  ptyEvents
 } from '@slayzone/terminal/main'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import {
@@ -1662,6 +1664,10 @@ app
             events: chatEvents,
             queueEvents: chatQueueEvents
           })
+          // Pty ops + the dual-emit event stream for the pty router. Same ops the
+          // IPC handlers (registerPtyHandlers, still live below) delegate to → one
+          // implementation, both transports coexist (renderer cutover is slice 5).
+          mod.setPtyDeps({ ops: createPtyOps(db), events: ptyEvents })
           // Same ops instance the IPC handlers delegate to → IPC + integrationsRouter
           // share one implementation while both coexist (renderer cutover is slice 5).
           mod.setIntegrationOps(integrationHandles.ops)

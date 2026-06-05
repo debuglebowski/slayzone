@@ -4,6 +4,7 @@ import { execFile } from 'child_process'
 import { BrowserWindow, nativeTheme, ipcMain } from 'electron'
 import { homedir, platform, userInfo } from 'os'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { TypedEmitter } from '@slayzone/platform/events'
 import { DEV_SERVER_URL_PATTERN, extractOscTitle, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
@@ -44,6 +45,32 @@ import { buildMcpEnv } from './mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
 import { markSessionUserInput, clearSessionUserInputMark } from './user-input-tracker'
 export { filterBufferData }
+
+/**
+ * Transport-agnostic PTY event stream (IPC → tRPC migration, slice 3 / P17).
+ * Every `webContents.send('pty:*', ...)` below ALSO fans out through this
+ * emitter (dual-emit), so the tRPC `pty` router's subscriptions can mirror the
+ * exact IPC event surface while the renderer is still on IPC (renderer cutover
+ * is slice 5). The emitter is window-agnostic — it fires regardless of which
+ * BrowserWindow currently owns the session — so it carries the GLOBAL event,
+ * not a per-window stream. Reuses the shared TypedEmitter (P6).
+ */
+export type PtyEventMap = {
+  data: [sessionId: string, data: string, seq: number]
+  'state-change': [sessionId: string, newState: TerminalState, oldState: TerminalState]
+  'title-change': [sessionId: string, title: string]
+  exit: [sessionId: string, exitCode: number | null, errorCode: string | null]
+  prompt: [sessionId: string, prompt: unknown]
+  'session-detected': [sessionId: string, conversationId: string]
+  'dev-server-detected': [sessionId: string, url: string]
+  'respawn-suggested': [taskId: string]
+  'ensure-alive': [taskId: string, reqId: number, force: boolean]
+  'hibernate-warn': [sessionId: string, graceSecs: number]
+  'hibernate-cancelled': [sessionId: string]
+  hibernated: [sessionId: string]
+}
+
+export const ptyEvents = new TypedEmitter<PtyEventMap>()
 
 // Database reference (held for future use; legacy from notification feature)
 let db: SlayzoneDb | null = null
@@ -587,6 +614,7 @@ function emitStateChange(
     }
   })
 
+  ptyEvents.emit('state-change', sessionId, newState, oldState)
   if (session.win && !session.win.isDestroyed()) {
     try {
       session.win.webContents.send('pty:state-change', sessionId, newState, oldState)
@@ -663,6 +691,7 @@ function checkInactiveSessions(): void {
     // been idle past the window. The kill itself (→ Start screen) happens after
     // the grace, unless input/output/touch cancels it first.
     if (!session.hibernateTimer && isHibernateEligible(session)) {
+      ptyEvents.emit('hibernate-warn', sessionId, HIBERNATE_GRACE_MS / 1000)
       if (!session.win.isDestroyed()) {
         try {
           session.win.webContents.send('pty:hibernate-warn', sessionId, HIBERNATE_GRACE_MS / 1000)
@@ -699,6 +728,7 @@ function cancelHibernateCountdown(session: PtySession): void {
   if (!session.hibernateTimer) return
   clearTimeout(session.hibernateTimer)
   session.hibernateTimer = undefined
+  ptyEvents.emit('hibernate-cancelled', session.sessionId)
   if (!session.win.isDestroyed()) {
     try {
       session.win.webContents.send('pty:hibernate-cancelled', session.sessionId)
@@ -735,6 +765,7 @@ function hibernateSession(sessionId: string): void {
   // side-panel claim). A window-targeted send leaves every OTHER window's
   // sidebar dot stale until reconcile heals it; broadcasting flips 💤 at once.
   broadcastPtyEvent('pty:hibernated', sessionId)
+  ptyEvents.emit('hibernated', sessionId)
   // Persist the status so 💤 / Reopen survive reload + restart.
   try {
     hibernatedSetter?.(resolveTabRowId(sessionId), true)
@@ -913,6 +944,7 @@ const TITLE_POLL_MS = 500
 function emitTitle(session: PtySession, title: string): void {
   if (!title || title === session.lastEmittedTitle) return
   session.lastEmittedTitle = title
+  ptyEvents.emit('title-change', session.sessionId, title)
   if (!session.win.isDestroyed()) {
     try {
       session.win.webContents.send('pty:title-change', session.sessionId, title)
@@ -1448,6 +1480,8 @@ export async function createPty(
         clearSessionUserInputMark(sessionId)
         notifySessionChange()
       }, 100)
+      ptyEvents.emit('title-change', sessionId, '')
+      ptyEvents.emit('exit', sessionId, exitCode, exitSession?.error?.code ?? null)
       const exitWin = getWin()
       if (!exitWin.isDestroyed()) {
         try {
@@ -1594,6 +1628,7 @@ export async function createPty(
                     taskId: taskIdFromSessionId(sessionId),
                     payload: { conversationId: detected, method: 'disk' }
                   })
+                  ptyEvents.emit('session-detected', sessionId, detected)
                   const detectedWin = getWin()
                   if (!detectedWin.isDestroyed()) {
                     try {
@@ -1744,6 +1779,7 @@ export async function createPty(
           // hibernation blocker — the fuzzy match (any line ending in '?') gave
           // sticky false positives. Hibernation uses the hook signal instead.
           const prompt = session.adapter.detectPrompt(data)
+          if (prompt) ptyEvents.emit('prompt', sessionId, prompt)
           if (prompt && !win.isDestroyed()) {
             try {
               win.webContents.send('pty:prompt', sessionId, prompt)
@@ -1760,6 +1796,7 @@ export async function createPty(
             if (oscTitle) emitTitle(session, oscTitle)
           }
 
+          if (!session.suppressOutput) ptyEvents.emit('data', sessionId, cleanData, currentSeq)
           if (!win.isDestroyed() && !session.suppressOutput) {
             try {
               // cleanData already filtered above (buffer append)
@@ -1777,6 +1814,7 @@ export async function createPty(
               const normalized = url.replace('0.0.0.0', 'localhost')
               if (!session.detectedDevUrls.has(normalized)) {
                 session.detectedDevUrls.add(normalized)
+                ptyEvents.emit('dev-server-detected', sessionId, normalized)
                 try {
                   win.webContents.send('pty:dev-server-detected', sessionId, normalized)
                 } catch {
@@ -1823,6 +1861,7 @@ export async function createPty(
                   conversationId: detectedConversationId
                 }
               })
+              ptyEvents.emit('session-detected', sessionId, detectedConversationId)
               if (!win.isDestroyed()) {
                 try {
                   win.webContents.send('pty:session-detected', sessionId, detectedConversationId)
@@ -2474,6 +2513,7 @@ export function killAllPtys(): void {
  *  whether any mounted TaskDetailPage should act (e.g. main tab PTY no longer
  *  exists and AI mode is configured). Matches the pty:exit IPC dispatch pattern. */
 export function broadcastRespawnRequest(taskId: string): void {
+  ptyEvents.emit('respawn-suggested', taskId)
   if (!mainWindow || mainWindow.isDestroyed()) return
   try {
     mainWindow.webContents.send('pty:respawn-suggested', taskId)
@@ -2557,6 +2597,9 @@ export function requestEnsureAlive(
       resolve(r)
     }
     pendingEnsureAliveAcks.set(reqId, (result) => finish(result))
+    // tRPC mirror: emit once (the request is idempotent by reqId). The IPC ack
+    // path (pty:ensure-alive:ack) still drives the retry/resolve below.
+    ptyEvents.emit('ensure-alive', taskId, reqId, opts.force)
     const send = (): void => {
       if (liveWindow.isDestroyed()) {
         finish('timeout')
