@@ -30,6 +30,7 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
+    "@slayzone/worktrees": "workspace:*",
     "@tanstack/react-query": "^5.100.9",
     "@trpc/client": "^11.17.0",
     "@trpc/react-query": "^11.17.0",

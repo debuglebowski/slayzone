@@ -1,0 +1,500 @@
+import { z } from 'zod'
+import { observable } from '@trpc/server/observable'
+import {
+  isGitRepo,
+  detectWorktrees,
+  createWorktree,
+  removeWorktree,
+  runWorktreeSetupScript,
+  initRepo,
+  getCurrentBranch,
+  listBranches,
+  checkoutBranch,
+  createBranch,
+  hasUncommittedChanges,
+  mergeIntoParent,
+  abortMerge,
+  startMergeNoCommit,
+  isMergeInProgress,
+  getConflictedFiles,
+  getConflictContent,
+  writeResolvedFile,
+  commitFiles,
+  getWorkingDiff,
+  stageFile,
+  unstageFile,
+  discardFile,
+  stageAll,
+  unstageAll,
+  getFileDiff,
+  getUntrackedFileDiff,
+  isRebaseInProgress,
+  getRebaseProgress,
+  abortRebase,
+  continueRebase,
+  skipRebaseCommit,
+  getMergeContext,
+  getRecentCommits,
+  getAheadBehind,
+  getAheadBehindUpstream,
+  getStatusSummary,
+  getRemoteUrl,
+  gitFetch,
+  gitPush,
+  gitPull,
+  getDefaultBranch,
+  listBranchesDetailed,
+  listRemoteBranches,
+  getMergeBase,
+  getCommitsSince,
+  getCommitsBeforeRef,
+  deleteBranch,
+  pruneRemote,
+  rebaseOnto,
+  mergeFrom,
+  getDiffStats,
+  getWorktreeMetadata,
+  getCommitDag,
+  resolveChildBranches,
+  copyIgnoredFiles,
+  getIgnoredFileTree,
+  initSubmodules,
+  getResolvedCommitDag,
+  getResolvedForkGraph,
+  getResolvedUpstreamGraph,
+  getResolvedRecentCommits,
+  listStashes,
+  createStash,
+  applyStash,
+  popStash,
+  dropStash,
+  branchFromStash,
+  getStashDiff,
+  resolveCopyBehavior,
+  resolveSubmoduleInitBehavior,
+  ensureColors as ensureWorktreeColors,
+  listProjectRepos,
+  getGitWatcher,
+  checkGhInstalled,
+  hasGithubRemote,
+  listOpenPrs,
+  getPrByUrl,
+  createPr,
+  getPrComments,
+  addPrComment,
+  mergePr,
+  getPrDiff,
+  getGhUser,
+  editPrComment,
+  runAiCommand
+} from '@slayzone/worktrees/server'
+import type {
+  WorktreeSubmoduleResult,
+  MergeWithAIResult,
+  ConflictAnalysis,
+  CreatePrInput,
+  MergePrInput,
+  EditPrCommentInput
+} from '@slayzone/worktrees/shared'
+import { router, publicProcedure } from '../trpc'
+
+const u = z.unknown()
+const s = z.string()
+const sn = z.string().nullable()
+const obj = z.object
+
+export const worktreesRouter = router({
+  // Watch / unwatch (refcounted)
+  watchStart: publicProcedure.input(obj({ worktreePath: s })).mutation(({ input }) => {
+    getGitWatcher().subscribe(input.worktreePath)
+  }),
+  watchStop: publicProcedure.input(obj({ worktreePath: s })).mutation(({ input }) => {
+    getGitWatcher().unsubscribe(input.worktreePath)
+  }),
+
+  isGitRepo: publicProcedure.input(obj({ path: s })).query(({ input }) => isGitRepo(input.path)),
+  listProjectRepos: publicProcedure
+    .input(obj({ projectPath: s, opts: u.optional() }))
+    .query(({ input }) => listProjectRepos(input.projectPath, (input.opts ?? {}) as never)),
+  detectChildRepos: publicProcedure.input(obj({ projectPath: s })).query(async ({ input }) => {
+    const fs = await import('node:fs/promises')
+    const path = await import('node:path')
+    if (await isGitRepo(input.projectPath)) return []
+    try {
+      const entries = await fs.readdir(input.projectPath)
+      const repos: { name: string; path: string }[] = []
+      await Promise.all(
+        entries.map(async (entry) => {
+          const fullPath = path.join(input.projectPath, entry)
+          try {
+            const st = await fs.stat(fullPath)
+            if (st.isDirectory() && (await isGitRepo(fullPath)))
+              repos.push({ name: entry, path: fullPath })
+          } catch {
+            /* skip inaccessible */
+          }
+        })
+      )
+      repos.sort((a, b) => a.name.localeCompare(b.name))
+      return repos
+    } catch {
+      return []
+    }
+  }),
+  detectWorktrees: publicProcedure.input(obj({ repoPath: s })).query(async ({ input }) => {
+    const detected = await detectWorktrees(input.repoPath)
+    const nonMainPaths = detected.filter((d) => !d.isMain).map((d) => d.path)
+    const colors = ensureWorktreeColors(input.repoPath, nonMainPaths)
+    return detected.map((d) => (d.isMain ? d : { ...d, color: colors.get(d.path) }))
+  }),
+  createWorktree: publicProcedure.input(u).mutation(async ({ ctx, input }) => {
+    const opts = input as {
+      repoPath: string
+      targetPath: string
+      branch?: string
+      sourceBranch?: string
+      projectId?: string
+    }
+    await createWorktree(opts.repoPath, opts.targetPath, opts.branch, opts.sourceBranch)
+    const { behavior, customPaths } = await resolveCopyBehavior(ctx.db, opts.projectId)
+    if (behavior === 'all' || behavior === 'custom') {
+      await copyIgnoredFiles(opts.repoPath, opts.targetPath, behavior, customPaths)
+    }
+    const submoduleBehavior = await resolveSubmoduleInitBehavior(ctx.db, opts.projectId)
+    let submoduleResult: WorktreeSubmoduleResult
+    if (submoduleBehavior === 'skip') submoduleResult = { ran: false, reason: 'skipped' }
+    else submoduleResult = await initSubmodules(opts.targetPath)
+    const setupResult = await runWorktreeSetupScript(opts.targetPath, opts.repoPath, opts.sourceBranch)
+    return { setupResult, submoduleResult }
+  }),
+  removeWorktree: publicProcedure
+    .input(obj({ repoPath: s, worktreePath: s, branchHint: s.optional() }))
+    .mutation(({ input }) => removeWorktree(input.repoPath, input.worktreePath, input.branchHint)),
+  init: publicProcedure.input(obj({ path: s })).mutation(({ input }) => initRepo(input.path)),
+  getCurrentBranch: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => getCurrentBranch(input.path)),
+  listBranches: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => listBranches(input.path)),
+  checkoutBranch: publicProcedure
+    .input(obj({ path: s, branch: s }))
+    .mutation(({ input }) => checkoutBranch(input.path, input.branch)),
+  createBranch: publicProcedure
+    .input(obj({ path: s, branch: s }))
+    .mutation(({ input }) => createBranch(input.path, input.branch)),
+  hasUncommittedChanges: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => hasUncommittedChanges(input.path)),
+  mergeIntoParent: publicProcedure
+    .input(obj({ projectPath: s, parentBranch: s, sourceBranch: s }))
+    .mutation(({ input }) =>
+      mergeIntoParent(input.projectPath, input.parentBranch, input.sourceBranch)
+    ),
+  abortMerge: publicProcedure.input(obj({ path: s })).mutation(({ input }) => abortMerge(input.path)),
+  mergeWithAI: publicProcedure
+    .input(obj({ projectPath: s, worktreePath: s, parentBranch: s, sourceBranch: s }))
+    .mutation(async ({ input }): Promise<MergeWithAIResult> => {
+      try {
+        const hasChanges = await hasUncommittedChanges(input.worktreePath)
+        const result = await startMergeNoCommit(
+          input.projectPath,
+          input.parentBranch,
+          input.sourceBranch
+        )
+        if (result.clean && !hasChanges) return { success: true }
+        const steps: string[] = []
+        if (hasChanges)
+          steps.push(
+            `Step 1: Commit uncommitted changes in this worktree\n- git add -A\n- git commit -m "WIP: changes before merge"`
+          )
+        if (result.conflictedFiles.length > 0) {
+          const stepNum = hasChanges ? 2 : 1
+          steps.push(
+            `Step ${stepNum}: Resolve merge conflicts in ${input.projectPath}\nConflicted files:\n${result.conflictedFiles.map((f) => `- ${f}`).join('\n')}\n\n- cd "${input.projectPath}"\n- Read each conflicted file\n- Resolve conflicts (prefer source branch when unclear)\n- git add <resolved files>\n- git commit -m "Merge ${input.sourceBranch} into ${input.parentBranch}"`
+          )
+        } else if (hasChanges) {
+          steps.push(
+            `Step 2: Complete the merge\n- cd "${input.projectPath}"\n- git merge "${input.sourceBranch}" --no-ff\n- If conflicts occur, resolve them`
+          )
+        }
+        const prompt = `Complete this merge: "${input.sourceBranch}" → "${input.parentBranch}"\n\n${steps.join('\n\n')}`
+        return { resolving: true, conflictedFiles: result.conflictedFiles, prompt }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }),
+  isMergeInProgress: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => isMergeInProgress(input.path)),
+  getConflictedFiles: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => getConflictedFiles(input.path)),
+  getWorkingDiff: publicProcedure
+    .input(obj({ path: s, opts: u.optional() }))
+    .query(({ input }) => getWorkingDiff(input.path, input.opts as never)),
+  stageFile: publicProcedure
+    .input(obj({ path: s, filePath: s }))
+    .mutation(({ input }) => stageFile(input.path, input.filePath)),
+  unstageFile: publicProcedure
+    .input(obj({ path: s, filePath: s }))
+    .mutation(({ input }) => unstageFile(input.path, input.filePath)),
+  discardFile: publicProcedure
+    .input(obj({ path: s, filePath: s, untracked: z.boolean().optional() }))
+    .mutation(({ input }) => discardFile(input.path, input.filePath, input.untracked)),
+  stageAll: publicProcedure.input(obj({ path: s })).mutation(({ input }) => stageAll(input.path)),
+  unstageAll: publicProcedure
+    .input(obj({ path: s }))
+    .mutation(({ input }) => unstageAll(input.path)),
+  getFileDiff: publicProcedure
+    .input(obj({ repoPath: s, filePath: s, staged: z.boolean(), opts: u.optional() }))
+    .query(({ input }) => getFileDiff(input.repoPath, input.filePath, input.staged, input.opts as never)),
+  getUntrackedFileDiff: publicProcedure
+    .input(obj({ repoPath: s, filePath: s }))
+    .query(({ input }) => getUntrackedFileDiff(input.repoPath, input.filePath)),
+  getConflictContent: publicProcedure
+    .input(obj({ repoPath: s, filePath: s }))
+    .query(({ input }) => getConflictContent(input.repoPath, input.filePath)),
+  writeResolvedFile: publicProcedure
+    .input(obj({ repoPath: s, filePath: s, content: s }))
+    .mutation(({ input }) => writeResolvedFile(input.repoPath, input.filePath, input.content)),
+  commitFiles: publicProcedure
+    .input(obj({ repoPath: s, message: s }))
+    .mutation(({ input }) => commitFiles(input.repoPath, input.message)),
+  analyzeConflict: publicProcedure
+    .input(obj({ mode: s, filePath: s, base: sn, ours: sn, theirs: sn }))
+    .mutation(async ({ input }): Promise<ConflictAnalysis> => {
+      const prompt = `Analyze this merge conflict for file "${input.filePath}".\n\nBASE (common ancestor):\n\`\`\`\n${input.base ?? '(file did not exist)'}\n\`\`\`\n\nOURS (current branch):\n\`\`\`\n${input.ours ?? '(file did not exist)'}\n\`\`\`\n\nTHEIRS (incoming branch):\n\`\`\`\n${input.theirs ?? '(file did not exist)'}\n\`\`\`\n\nRespond in this exact format (no extra text):\nSUMMARY: <2-3 sentences explaining what each branch changed and why they conflict>\n---RESOLUTION---\n<the complete resolved file content, picking the best combination of both sides>`
+      const result = await runAiCommand(input.mode as 'claude-code' | 'codex', prompt)
+      const sepIdx = result.indexOf('---RESOLUTION---')
+      if (sepIdx === -1) return { summary: result, suggestion: '' }
+      const summary = result
+        .slice(0, sepIdx)
+        .replace(/^SUMMARY:\s*/i, '')
+        .trim()
+      const suggestion = result.slice(sepIdx + '---RESOLUTION---'.length).trim()
+      return { summary, suggestion }
+    }),
+
+  // Rebase
+  isRebaseInProgress: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => isRebaseInProgress(input.path)),
+  getRebaseProgress: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => getRebaseProgress(input.repoPath)),
+  abortRebase: publicProcedure
+    .input(obj({ path: s }))
+    .mutation(({ input }) => abortRebase(input.path)),
+  continueRebase: publicProcedure
+    .input(obj({ path: s }))
+    .mutation(({ input }) => continueRebase(input.path)),
+  skipRebaseCommit: publicProcedure
+    .input(obj({ path: s }))
+    .mutation(({ input }) => skipRebaseCommit(input.path)),
+  getMergeContext: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => getMergeContext(input.repoPath)),
+
+  getRecentCommits: publicProcedure
+    .input(obj({ repoPath: s, count: z.number().optional() }))
+    .query(({ input }) => getRecentCommits(input.repoPath, input.count)),
+  getAheadBehind: publicProcedure
+    .input(obj({ repoPath: s, branch: s, upstream: s }))
+    .query(({ input }) => getAheadBehind(input.repoPath, input.branch, input.upstream)),
+  getStatusSummary: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => getStatusSummary(input.repoPath)),
+  revealInFinder: publicProcedure.input(obj({ path: s })).mutation(async ({ input }) => {
+    const electron = await import('electron')
+    electron.shell.openPath(input.path)
+  }),
+  isDirty: publicProcedure.input(obj({ path: s })).query(async ({ input }) => {
+    const summary = await getStatusSummary(input.path)
+    return summary.staged + summary.unstaged + summary.untracked > 0
+  }),
+  getRemoteUrl: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => getRemoteUrl(input.path)),
+  getAheadBehindUpstream: publicProcedure
+    .input(obj({ path: s, branch: s }))
+    .query(({ input }) => getAheadBehindUpstream(input.path, input.branch)),
+  fetch: publicProcedure.input(obj({ path: s })).mutation(({ input }) => gitFetch(input.path)),
+  push: publicProcedure
+    .input(obj({ path: s, branch: s.optional(), force: z.boolean().optional() }))
+    .mutation(({ input }) => gitPush(input.path, input.branch, input.force)),
+  pull: publicProcedure.input(obj({ path: s })).mutation(({ input }) => gitPull(input.path)),
+
+  // Branch tab
+  getDefaultBranch: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => getDefaultBranch(input.path)),
+  listBranchesDetailed: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => listBranchesDetailed(input.path)),
+  listRemoteBranches: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => listRemoteBranches(input.path)),
+  getMergeBase: publicProcedure
+    .input(obj({ path: s, branch1: s, branch2: s }))
+    .query(({ input }) => getMergeBase(input.path, input.branch1, input.branch2)),
+  getCommitsSince: publicProcedure
+    .input(obj({ path: s, sinceRef: s, branch: s }))
+    .query(({ input }) => getCommitsSince(input.path, input.sinceRef, input.branch)),
+  getCommitsBeforeRef: publicProcedure
+    .input(obj({ path: s, ref: s, count: z.number().optional() }))
+    .query(({ input }) => getCommitsBeforeRef(input.path, input.ref, input.count)),
+  deleteBranch: publicProcedure
+    .input(obj({ path: s, branch: s, force: z.boolean().optional() }))
+    .mutation(({ input }) => deleteBranch(input.path, input.branch, input.force)),
+  pruneRemote: publicProcedure
+    .input(obj({ path: s }))
+    .mutation(({ input }) => pruneRemote(input.path)),
+
+  // Worktree tab
+  rebaseOnto: publicProcedure
+    .input(obj({ path: s, ontoBranch: s }))
+    .mutation(({ input }) => rebaseOnto(input.path, input.ontoBranch)),
+  mergeFrom: publicProcedure
+    .input(obj({ path: s, branch: s }))
+    .mutation(({ input }) => mergeFrom(input.path, input.branch)),
+  getDiffStats: publicProcedure
+    .input(obj({ path: s, ref: s }))
+    .query(({ input }) => getDiffStats(input.path, input.ref)),
+  getWorktreeMetadata: publicProcedure
+    .input(obj({ path: s }))
+    .query(({ input }) => getWorktreeMetadata(input.path)),
+  getCommitDag: publicProcedure
+    .input(obj({ path: s, limit: z.number(), branches: z.array(s).optional() }))
+    .query(({ input }) => getCommitDag(input.path, input.limit, input.branches)),
+  resolveChildBranches: publicProcedure
+    .input(obj({ path: s, baseBranch: s }))
+    .query(({ input }) => resolveChildBranches(input.path, input.baseBranch)),
+  resolveCopyBehavior: publicProcedure
+    .input(obj({ projectId: s.optional() }))
+    .query(({ ctx, input }) => resolveCopyBehavior(ctx.db, input.projectId)),
+  getIgnoredFileTree: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => getIgnoredFileTree(input.repoPath)),
+  copyIgnoredFiles: publicProcedure
+    .input(obj({ repoPath: s, worktreePath: s, paths: z.array(s), mode: z.enum(['all', 'custom']).optional() }))
+    .mutation(({ input }) =>
+      copyIgnoredFiles(
+        input.repoPath,
+        input.worktreePath,
+        input.mode ?? (input.paths.length > 0 ? 'custom' : 'all'),
+        input.paths
+      )
+    ),
+
+  getResolvedCommitDag: publicProcedure
+    .input(obj({ path: s, limit: z.number(), branches: z.array(s).optional(), baseBranch: s }))
+    .query(({ input }) =>
+      getResolvedCommitDag(input.path, input.limit, input.branches, input.baseBranch)
+    ),
+  getResolvedForkGraph: publicProcedure
+    .input(
+      obj({
+        targetPath: s,
+        repoPath: s,
+        activeBranch: s,
+        compareBranch: s,
+        activeBranchLabel: s,
+        compareBranchLabel: s
+      })
+    )
+    .query(({ input }) =>
+      getResolvedForkGraph(
+        input.targetPath,
+        input.repoPath,
+        input.activeBranch,
+        input.compareBranch,
+        input.activeBranchLabel,
+        input.compareBranchLabel
+      )
+    ),
+  getResolvedUpstreamGraph: publicProcedure
+    .input(obj({ repoPath: s, branch: s }))
+    .query(({ input }) => getResolvedUpstreamGraph(input.repoPath, input.branch)),
+  getResolvedRecentCommits: publicProcedure
+    .input(obj({ path: s, count: z.number(), branchName: s }))
+    .query(({ input }) => getResolvedRecentCommits(input.path, input.count, input.branchName)),
+
+  // Stashes
+  listStashes: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => listStashes(input.repoPath)),
+  createStash: publicProcedure
+    .input(obj({ repoPath: s, message: s, includeUntracked: z.boolean(), keepIndex: z.boolean() }))
+    .mutation(({ input }) =>
+      createStash(input.repoPath, input.message, input.includeUntracked, input.keepIndex)
+    ),
+  applyStash: publicProcedure
+    .input(obj({ repoPath: s, index: z.number() }))
+    .mutation(({ input }) => applyStash(input.repoPath, input.index)),
+  popStash: publicProcedure
+    .input(obj({ repoPath: s, index: z.number() }))
+    .mutation(({ input }) => popStash(input.repoPath, input.index)),
+  dropStash: publicProcedure
+    .input(obj({ repoPath: s, index: z.number() }))
+    .mutation(({ input }) => dropStash(input.repoPath, input.index)),
+  branchFromStash: publicProcedure
+    .input(obj({ repoPath: s, index: z.number(), branchName: s }))
+    .mutation(({ input }) => branchFromStash(input.repoPath, input.index, input.branchName)),
+  getStashDiff: publicProcedure
+    .input(obj({ repoPath: s, index: z.number() }))
+    .query(({ input }) => getStashDiff(input.repoPath, input.index)),
+
+  // GitHub CLI
+  checkGhInstalled: publicProcedure.query(() => checkGhInstalled()),
+  hasGithubRemote: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => hasGithubRemote(input.repoPath)),
+  listOpenPrs: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => listOpenPrs(input.repoPath)),
+  getPrByUrl: publicProcedure
+    .input(obj({ repoPath: s, url: s }))
+    .query(({ input }) => getPrByUrl(input.repoPath, input.url)),
+  createPr: publicProcedure
+    .input(z.unknown() as unknown as z.ZodType<CreatePrInput>)
+    .mutation(({ input }) => createPr(input)),
+  getPrComments: publicProcedure
+    .input(obj({ repoPath: s, prNumber: z.number() }))
+    .query(({ input }) => getPrComments(input.repoPath, input.prNumber)),
+  addPrComment: publicProcedure
+    .input(obj({ repoPath: s, prNumber: z.number(), body: s }))
+    .mutation(({ input }) => addPrComment(input.repoPath, input.prNumber, input.body)),
+  mergePr: publicProcedure
+    .input(z.unknown() as unknown as z.ZodType<MergePrInput>)
+    .mutation(({ input }) => mergePr(input)),
+  getPrDiff: publicProcedure
+    .input(obj({ repoPath: s, prNumber: z.number() }))
+    .query(({ input }) => getPrDiff(input.repoPath, input.prNumber)),
+  getGhUser: publicProcedure
+    .input(obj({ repoPath: s }))
+    .query(({ input }) => getGhUser(input.repoPath)),
+  editPrComment: publicProcedure
+    .input(z.unknown() as unknown as z.ZodType<EditPrCommentInput>)
+    .mutation(({ input }) => editPrComment(input)),
+
+  // Subscriptions — git fs-watcher broadcasts (refcounted via watchStart/watchStop).
+  // Mirrors the `git:diff-changed` / `git:diff-watch-failed` IPC broadcasts; the
+  // watcher is a singleton EventEmitter, so `.off` in teardown prevents leaks.
+  onDiffChanged: publicProcedure.subscription(() =>
+    observable<{ worktreePath: string }>((emit) => {
+      const handler = (payload: { worktreePath: string }): void => emit.next(payload)
+      const watcher = getGitWatcher()
+      watcher.on('git:diff-changed', handler)
+      return () => watcher.off('git:diff-changed', handler)
+    })
+  ),
+  onDiffWatchFailed: publicProcedure.subscription(() =>
+    observable<{ worktreePath: string }>((emit) => {
+      const handler = (payload: { worktreePath: string }): void => emit.next(payload)
+      const watcher = getGitWatcher()
+      watcher.on('git:diff-watch-failed', handler)
+      return () => watcher.off('git:diff-watch-failed', handler)
+    })
+  )
+})

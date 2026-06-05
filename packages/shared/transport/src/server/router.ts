@@ -15,6 +15,7 @@ import { artifactsRouter } from './routers/artifacts'
 import { taskTerminalsRouter } from './routers/task-terminals'
 import { testPanelRouter } from './routers/test-panel'
 import { usageAnalyticsRouter } from './routers/usage-analytics'
+import { worktreesRouter } from './routers/worktrees'
 
 export const appRouter = router({
   agentTurns: agentTurnsRouter,
@@ -32,7 +33,8 @@ export const appRouter = router({
   template: templateRouter,
   taskTerminals: taskTerminalsRouter,
   testPanel: testPanelRouter,
-  usageAnalytics: usageAnalyticsRouter
+  usageAnalytics: usageAnalyticsRouter,
+  worktrees: worktreesRouter
 })
 
 export type AppRouter = typeof appRouter
