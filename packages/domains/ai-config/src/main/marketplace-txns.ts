@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import { BUILTIN_SKILLS } from '../shared/skill-marketplace-registry'
-import { normalizeSkillForPersistence } from './skill-normalize'
+import { normalizeSkillForPersistence } from '../server/skill-normalize'
 
 /**
  * Named-transaction adapters for the ai-config marketplace. Both are conditional
