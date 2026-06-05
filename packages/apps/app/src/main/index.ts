@@ -742,6 +742,51 @@ async function requestGithubSignInStart(
   return { redirect: redirectUrl.toString(), verifier }
 }
 
+// System GitHub OAuth sign-in flow. Shared by the `auth:github-system-sign-in`
+// IPC handler and the tRPC `app.auth.githubSystemSignIn` mutation (coexistence
+// until slice 5) — single implementation, both transports delegate here.
+async function githubSystemSignIn(input: { convexUrl: string; redirectTo: string }): Promise<
+  | { ok: false; error: string; verifier?: string }
+  | { ok: true; verifier: string; code: string }
+> {
+  try {
+    if (!input?.convexUrl) {
+      return { ok: false, error: 'Convex URL is required' }
+    }
+    if (input.redirectTo !== OAUTH_DEEP_LINK_REDIRECT_URI) {
+      return { ok: false, error: `Unsupported redirect URI: ${input.redirectTo}` }
+    }
+    if (oauthCallbackWaiters.size > 0) {
+      return { ok: false, error: 'An OAuth sign-in flow is already in progress' }
+    }
+
+    // Ignore stale callbacks from prior sign-in attempts.
+    oauthCallbackQueue.length = 0
+
+    const start = await requestGithubSignInStart(input.convexUrl, input.redirectTo)
+    await shell.openExternal(start.redirect)
+
+    const callback = await waitForOAuthCallback(OAUTH_CALLBACK_TIMEOUT_MS)
+    if (callback.error) {
+      return { ok: false, verifier: start.verifier, error: callback.error }
+    }
+    if (!callback.code) {
+      return {
+        ok: false,
+        verifier: start.verifier,
+        error:
+          'GitHub sign-in failed — no authorization code returned. Try again or use a different browser.'
+      }
+    }
+    return { ok: true, verifier: start.verifier, code: callback.code }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'GitHub sign-in failed'
+    }
+  }
+}
+
 function handleOAuthDeepLink(url: string): void {
   let parsed: URL
   try {
@@ -1742,7 +1787,19 @@ app
             appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
             appIsLoopModeEnabled: () => isLabEnabled('labs_loop_mode'),
             appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
-            appGetProtocolClientStatus: () => protocolClientStatus
+            appGetProtocolClientStatus: () => protocolClientStatus,
+            appGetRendererZoomFactor: () => mainWindow?.webContents.zoomFactor ?? null,
+            appCheckCliInstalled: () => checkCliInstalled(),
+            appInstallCli: () => installCli(getCliSrc()),
+            appAdjustZoom: (command) => applyAppZoom(command),
+            appRestartForUpdate: () => restartForUpdate(),
+            appCheckForUpdates: () => checkForUpdates(),
+            appWindowGetContentBounds: () => mainWindow?.getContentBounds() ?? null,
+            appWindowGetDisplayScaleFactor: () => {
+              if (!mainWindow || mainWindow.isDestroyed()) return null
+              return screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor
+            },
+            authGithubSystemSignIn: (input) => githubSystemSignIn(input)
           })
           // Process-manager lifecycle ops + the dual-emit event stream for the
           // processes router. Same module-singleton ops/emitter the IPC handlers
@@ -2197,50 +2254,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
     ipcMain.handle(
       'auth:github-system-sign-in',
-      async (
-        _event,
-        input: {
-          convexUrl: string
-          redirectTo: string
-        }
-      ) => {
-        try {
-          if (!input?.convexUrl) {
-            return { ok: false, error: 'Convex URL is required' }
-          }
-          if (input.redirectTo !== OAUTH_DEEP_LINK_REDIRECT_URI) {
-            return { ok: false, error: `Unsupported redirect URI: ${input.redirectTo}` }
-          }
-          if (oauthCallbackWaiters.size > 0) {
-            return { ok: false, error: 'An OAuth sign-in flow is already in progress' }
-          }
-
-          // Ignore stale callbacks from prior sign-in attempts.
-          oauthCallbackQueue.length = 0
-
-          const start = await requestGithubSignInStart(input.convexUrl, input.redirectTo)
-          await shell.openExternal(start.redirect)
-
-          const callback = await waitForOAuthCallback(OAUTH_CALLBACK_TIMEOUT_MS)
-          if (callback.error) {
-            return { ok: false, verifier: start.verifier, error: callback.error }
-          }
-          if (!callback.code) {
-            return {
-              ok: false,
-              verifier: start.verifier,
-              error:
-                'GitHub sign-in failed — no authorization code returned. Try again or use a different browser.'
-            }
-          }
-          return { ok: true, verifier: start.verifier, code: callback.code }
-        } catch (error) {
-          return {
-            ok: false,
-            error: error instanceof Error ? error.message : 'GitHub sign-in failed'
-          }
-        }
-      }
+      (_event, input: { convexUrl: string; redirectTo: string }) => githubSystemSignIn(input)
     )
 
     ipcMain.on('app:data-ready', () => {

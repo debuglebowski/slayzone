@@ -9,6 +9,7 @@
 // first chat procedure call.
 
 import type { TypedEmitter } from '@slayzone/platform/events'
+import type { CliInstallResult } from '@slayzone/platform'
 import type {
   createChatOps,
   createChatQueueOps,
@@ -242,6 +243,24 @@ export type AppDeps = {
     registered: boolean
     reason: 'registered' | 'dev-skipped' | 'registration-failed'
   }
+  appGetRendererZoomFactor: () => number | null
+  appCheckCliInstalled: () => { installed: boolean; path?: string }
+  appInstallCli: () => Promise<CliInstallResult>
+  appAdjustZoom: (command: 'in' | 'out' | 'reset') => number
+  appRestartForUpdate: () => Promise<void>
+  appCheckForUpdates: () => Promise<void>
+
+  // window
+  appWindowGetContentBounds: () => {
+    x: number
+    y: number
+    width: number
+    height: number
+  } | null
+  appWindowGetDisplayScaleFactor: () => number | null
+
+  // auth
+  authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>
 }
 
 let appDeps: AppDeps | null = null

@@ -157,6 +157,29 @@ export const appLevelRouter = router({
     getZoomFactor: publicProcedure.query(() => getAppDeps().appGetZoomFactor()),
     getProtocolClientStatus: publicProcedure.query(() =>
       getAppDeps().appGetProtocolClientStatus()
+    ),
+    getRendererZoomFactor: publicProcedure.query(() => getAppDeps().appGetRendererZoomFactor()),
+    checkCliInstalled: publicProcedure.query(() => getAppDeps().appCheckCliInstalled()),
+    installCli: publicProcedure.mutation(() => getAppDeps().appInstallCli()),
+    adjustZoom: publicProcedure
+      .input(z.object({ command: z.enum(['in', 'out', 'reset']) }))
+      .mutation(({ input }) => getAppDeps().appAdjustZoom(input.command)),
+    restartForUpdate: publicProcedure.mutation(() => getAppDeps().appRestartForUpdate()),
+    checkForUpdates: publicProcedure.mutation(() => getAppDeps().appCheckForUpdates())
+  }),
+
+  // Window
+  window: router({
+    getContentBounds: publicProcedure.query(() => getAppDeps().appWindowGetContentBounds()),
+    getDisplayScaleFactor: publicProcedure.query(() =>
+      getAppDeps().appWindowGetDisplayScaleFactor()
     )
+  }),
+
+  // Auth
+  auth: router({
+    githubSystemSignIn: publicProcedure
+      .input(anyInput)
+      .mutation(({ input }) => getAppDeps().authGithubSystemSignIn(input as never))
   })
 })
