@@ -206,6 +206,23 @@ export type AppDeps = {
     }
   ) => void
   shellOpenPath: (absPath: string) => Promise<string>
+
+  // db:feedback (6 ops — pure DB). Threads/messages typed as `unknown` so
+  // transport stays decoupled from @slayzone/feedback (host conforms via casts).
+  feedbackListThreads: () => Promise<unknown>
+  feedbackCreateThread: (input: {
+    id: string
+    title: string
+    discord_thread_id: string | null
+  }) => Promise<void>
+  feedbackGetMessages: (threadId: string) => Promise<unknown>
+  feedbackAddMessage: (input: {
+    id: string
+    thread_id: string
+    content: string
+  }) => Promise<void>
+  feedbackUpdateThreadDiscordId: (threadId: string, discordThreadId: string) => Promise<void>
+  feedbackDeleteThread: (threadId: string) => Promise<void>
 }
 
 let appDeps: AppDeps | null = null

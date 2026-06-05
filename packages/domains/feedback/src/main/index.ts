@@ -1,1 +1,1 @@
-export { registerFeedbackHandlers } from './handlers'
+export { registerFeedbackHandlers, buildFeedbackOps } from './handlers'

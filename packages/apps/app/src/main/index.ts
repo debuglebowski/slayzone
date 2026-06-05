@@ -205,7 +205,7 @@ import {
   taskOps
 } from '@slayzone/task/main'
 import { registerTagHandlers } from '@slayzone/tags/main'
-import { registerFeedbackHandlers } from '@slayzone/feedback/main'
+import { registerFeedbackHandlers, buildFeedbackOps } from '@slayzone/feedback/main'
 import {
   registerSettingsHandlers,
   registerThemeHandlers,
@@ -1695,6 +1695,7 @@ app
           const backupOps = buildBackupOps(db)
           const exportImportOps = buildExportImportOps(db, isPlaywright)
           const usageOps = buildUsageOps(db)
+          const feedbackOps = buildFeedbackOps(db)
           mod.setAppDeps({
             backupList: backupOps.list,
             backupCreate: backupOps.create,
@@ -1728,7 +1729,13 @@ app
                   | { blockDesktopHandoff?: boolean; desktopHandoff?: DesktopHandoffPolicy }
                   | undefined
               ),
-            shellOpenPath
+            shellOpenPath,
+            feedbackListThreads: feedbackOps.listThreads,
+            feedbackCreateThread: feedbackOps.createThread,
+            feedbackGetMessages: feedbackOps.getMessages,
+            feedbackAddMessage: feedbackOps.addMessage,
+            feedbackUpdateThreadDiscordId: feedbackOps.updateThreadDiscordId,
+            feedbackDeleteThread: feedbackOps.deleteThread
           })
           mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()

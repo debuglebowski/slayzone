@@ -124,5 +124,27 @@ export const appLevelRouter = router({
     openPath: publicProcedure
       .input(z.object({ absPath: z.string() }))
       .mutation(({ input }) => getAppDeps().shellOpenPath(input.absPath))
+  }),
+
+  // db:feedback
+  feedback: router({
+    listThreads: publicProcedure.query(() => getAppDeps().feedbackListThreads()),
+    createThread: publicProcedure
+      .input(anyInput)
+      .mutation(({ input }) => getAppDeps().feedbackCreateThread(input as never)),
+    getMessages: publicProcedure
+      .input(z.object({ threadId: z.string() }))
+      .query(({ input }) => getAppDeps().feedbackGetMessages(input.threadId)),
+    addMessage: publicProcedure
+      .input(anyInput)
+      .mutation(({ input }) => getAppDeps().feedbackAddMessage(input as never)),
+    updateThreadDiscordId: publicProcedure
+      .input(z.object({ threadId: z.string(), discordThreadId: z.string() }))
+      .mutation(({ input }) =>
+        getAppDeps().feedbackUpdateThreadDiscordId(input.threadId, input.discordThreadId)
+      ),
+    deleteThread: publicProcedure
+      .input(z.object({ threadId: z.string() }))
+      .mutation(({ input }) => getAppDeps().feedbackDeleteThread(input.threadId))
   })
 })
