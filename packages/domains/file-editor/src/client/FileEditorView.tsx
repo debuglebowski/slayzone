@@ -7,16 +7,7 @@ import {
   useImperativeHandle,
   forwardRef
 } from 'react'
-import {
-  Code,
-  Columns2,
-  Eye,
-  FileCode,
-  Files,
-  RefreshCw,
-  Search,
-  SlidersHorizontal
-} from 'lucide-react'
+import { FileCode, Files, RefreshCw, Search } from 'lucide-react'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import {
   AlertDialog,
@@ -28,27 +19,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
-  Label,
   PulseGrid,
-  Switch,
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-  cn,
   getThemeChrome,
   getChromeStyleOverrides,
   getThemeEditorColors,
   useAppearance
 } from '@slayzone/ui'
-import {
-  MarkdownSettingsPopover,
-  RichTextEditor,
-  getEditorViewDOM,
-  type Editor as MilkdownEditor
-} from '@slayzone/editor'
 import { useTheme } from '@slayzone/settings/client'
-import { toSlzFileUrl, SLZ_FILE_PREFIX } from '@slayzone/platform/slz-file-url'
+import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type {
   EditorOpenFilesState,
   MarkdownViewMode,
@@ -62,54 +44,11 @@ import { MarkdownSplitView } from './MarkdownSplitView'
 import { SearchPanel } from './SearchPanel'
 import { EditorToc } from './EditorToc'
 import type { MarkdownHeading } from './markdown-headings'
-
-const MARKDOWN_FILE_TEXT_EXTENSIONS = new Set([
-  'md',
-  'mdx',
-  'markdown',
-  'txt',
-  'rst',
-  'js',
-  'jsx',
-  'ts',
-  'tsx',
-  'mjs',
-  'cjs',
-  'json',
-  'yaml',
-  'yml',
-  'toml',
-  'xml',
-  'html',
-  'css',
-  'scss',
-  'py',
-  'rb',
-  'go',
-  'rs',
-  'java',
-  'c',
-  'cpp',
-  'h',
-  'hpp',
-  'sh',
-  'env'
-])
-
-function posixDirname(p: string): string {
-  const i = p.lastIndexOf('/')
-  return i < 0 ? '' : p.slice(0, i)
-}
-
-function posixResolve(...parts: string[]): string {
-  const segments: string[] = []
-  for (const part of parts.join('/').split('/')) {
-    if (part === '' || part === '.') continue
-    if (part === '..') segments.pop()
-    else segments.push(part)
-  }
-  return '/' + segments.join('/')
-}
+import { MarkdownFilePane, type MarkdownFilePaneHandle } from './EditorMarkdownPane'
+import { EditorDisplayPopover } from './EditorDisplayPopover'
+import { useFileDropZone } from './useFileDropZone'
+import { useEditorLayoutState } from './useEditorLayoutState'
+import { formatSize } from './FileEditorView.utils'
 
 export interface FileEditorViewHandle {
   openFile: (filePath: string, options?: OpenFileOptions) => void
@@ -121,125 +60,6 @@ interface FileEditorViewProps {
   projectPath: string
   initialEditorState?: EditorOpenFilesState | null
   onEditorStateChange?: (state: EditorOpenFilesState) => void
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${(bytes / 1024).toFixed(0)} KB`
-}
-
-export interface MarkdownFilePaneHandle {
-  scrollToHeadingIndex: (index: number) => void
-  focus: () => void
-}
-
-interface MarkdownFilePaneProps {
-  filePath: string
-  projectPath: string
-  content: string
-  onChange: (content: string) => void
-  onSave: () => void
-  onOpenFile: (filePath: string) => void
-  themeColors: ReturnType<typeof getThemeEditorColors>
-  readability: 'compact' | 'normal'
-  width: 'narrow' | 'wide'
-  fontFamily: 'sans' | 'mono'
-  handleRef?: React.MutableRefObject<MarkdownFilePaneHandle | null>
-}
-
-function MarkdownFilePane({
-  filePath,
-  projectPath,
-  content,
-  onChange,
-  onSave,
-  onOpenFile,
-  themeColors,
-  readability,
-  width,
-  fontFamily,
-  handleRef
-}: MarkdownFilePaneProps) {
-  const editorRef = useRef<MilkdownEditor | null>(null)
-  useEffect(() => {
-    if (!handleRef) return
-    handleRef.current = {
-      scrollToHeadingIndex: (index: number) => {
-        const root = editorRef.current ? getEditorViewDOM(editorRef.current) : null
-        if (!root) return
-        const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6')
-        const target = headings[index] as HTMLElement | undefined
-        target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-      },
-      focus: () => {
-        const root = editorRef.current ? getEditorViewDOM(editorRef.current) : null
-        root?.focus()
-      }
-    }
-    return () => {
-      if (handleRef) handleRef.current = null
-    }
-  }, [handleRef])
-  const fileDirAbs = posixResolve(projectPath, posixDirname(filePath))
-
-  const resolveSrc = useCallback(
-    (src: string): string => {
-      if (src.startsWith('/')) return toSlzFileUrl(src)
-      return toSlzFileUrl(posixResolve(fileDirAbs, src))
-    },
-    [fileDirAbs]
-  )
-
-  const handleLinkClick = useCallback(
-    (resolvedHref: string) => {
-      if (!resolvedHref) return
-      if (resolvedHref.startsWith('#')) {
-        const id = resolvedHref.slice(1)
-        const root = editorRef.current ? getEditorViewDOM(editorRef.current) : null
-        const el = id ? (root ?? document).querySelector(`#${CSS.escape(id)}`) : null
-        el?.scrollIntoView({ block: 'center' })
-        return
-      }
-      if (/^(https?:|mailto:)/i.test(resolvedHref)) {
-        void window.api.shell.openExternal(resolvedHref)
-        return
-      }
-      if (resolvedHref.startsWith(SLZ_FILE_PREFIX)) {
-        const absPath = resolvedHref
-          .slice(SLZ_FILE_PREFIX.length)
-          .replace(/\?.*$/, '')
-          .replace(/#.*$/, '')
-        const projectPrefix = projectPath.endsWith('/') ? projectPath : projectPath + '/'
-        if (absPath.startsWith(projectPrefix)) {
-          const relPath = absPath.slice(projectPrefix.length)
-          const ext = relPath.split('.').pop()?.toLowerCase() ?? ''
-          if (MARKDOWN_FILE_TEXT_EXTENSIONS.has(ext)) {
-            onOpenFile(relPath)
-            return
-          }
-        }
-        void window.api.shell.openPath(absPath)
-      }
-    },
-    [projectPath, onOpenFile]
-  )
-
-  return (
-    <RichTextEditor
-      value={content}
-      onChange={onChange}
-      onSave={onSave}
-      editorRef={editorRef}
-      variant="page"
-      readability={readability}
-      width={width}
-      fontFamily={fontFamily}
-      themeColors={themeColors}
-      frontmatter
-      htmlResolveSrc={resolveSrc}
-      htmlOnLinkClick={handleLinkClick}
-    />
-  )
 }
 
 export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewProps>(
@@ -282,12 +102,21 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       [editorThemeId, contentVariant]
     )
 
-    const [treeWidth, setTreeWidth] = useState(initialEditorState?.treeWidth ?? 250)
-    const [treeVisible, setTreeVisible] = useState(initialEditorState?.treeVisible ?? true)
-    const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
-      () => new Set(initialEditorState?.expandedFolders ?? [])
-    )
-    const isDragging = useRef(false)
+    const {
+      treeWidth,
+      treeVisible,
+      setTreeVisible,
+      expandedFolders,
+      setExpandedFolders,
+      sidebarMode,
+      setSidebarMode,
+      tocWidth,
+      setTocWidth,
+      treeReady,
+      setTreeReady,
+      handleResizeStart
+    } = useEditorLayoutState(initialEditorState)
+
     const treeRef = useRef<EditorFileTreeHandle>(null)
     const [confirmClose, setConfirmClose] = useState<string | null>(null)
     const [confirmCloseAll, setConfirmCloseAll] = useState(false)
@@ -302,8 +131,6 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       editorMinimapEnabled,
       editorTocEnabled
     } = useAppearance()
-    const [displayOpen, setDisplayOpen] = useState(false)
-    const [tocWidth, setTocWidth] = useState(initialEditorState?.tocWidth ?? 220)
     const cmViewRef = useRef<CMEditorView | null>(null)
     const richPaneRef = useRef<MarkdownFilePaneHandle | null>(null)
 
@@ -329,14 +156,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       },
       [activeFilePath]
     )
-    const writeAppearance = useCallback((key: string, value: string) => {
-      void window.api.settings.set(key, value)
-      window.dispatchEvent(new Event('sz:settings-changed'))
-    }, [])
-    const [sidebarMode, setSidebarMode] = useState<'tree' | 'search'>('tree')
-    const [isFileDragOver, setIsFileDragOver] = useState(false)
-    const [treeReady, setTreeReady] = useState(false)
-    const dragCounter = useRef(0)
+    const { isFileDragOver, dropHandlers } = useFileDropZone(projectPath, openFile)
     const showLoading = isRestoring || (treeVisible && !treeReady)
 
     // --- Emit state changes to parent for persistence ---
@@ -389,7 +209,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
         })
       }
       requestAnimationFrame(() => treeRef.current?.scrollToPath(activeFilePath))
-    }, [activeFilePath, isRestoring])
+    }, [activeFilePath, isRestoring, setExpandedFolders])
 
     const isMarkdown = useMemo(() => {
       const ext = activeFilePath?.split('.').pop()?.toLowerCase()
@@ -435,30 +255,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
           })
         }
       }),
-      [openFile, activeFilePath, closeFile, treeVisible]
-    )
-
-    const handleResizeStart = useCallback(
-      (e: React.MouseEvent) => {
-        e.preventDefault()
-        isDragging.current = true
-        const startX = e.clientX
-        const startWidth = treeWidth
-
-        const onMove = (e: MouseEvent) => {
-          if (!isDragging.current) return
-          const delta = e.clientX - startX
-          setTreeWidth(Math.max(180, Math.min(500, startWidth + delta)))
-        }
-        const onUp = () => {
-          isDragging.current = false
-          document.removeEventListener('mousemove', onMove)
-          document.removeEventListener('mouseup', onUp)
-        }
-        document.addEventListener('mousemove', onMove)
-        document.addEventListener('mouseup', onUp)
-      },
-      [treeWidth]
+      [openFile, activeFilePath, closeFile, treeVisible, setSidebarMode, setTreeVisible]
     )
 
     const handleCloseFile = useCallback(
@@ -510,72 +307,11 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       [projectPath]
     )
 
-    const handleFileDragOver = useCallback((e: React.DragEvent) => {
-      // Skip internal tree drags — let the tree handle them
-      if (e.dataTransfer.types.includes('application/x-slayzone-tree')) return
-      e.preventDefault()
-      e.stopPropagation()
-    }, [])
-
-    const handleFileDragEnter = useCallback((e: React.DragEvent) => {
-      if (e.dataTransfer.types.includes('application/x-slayzone-tree')) return
-      e.preventDefault()
-      e.stopPropagation()
-      dragCounter.current++
-      if (e.dataTransfer.types.includes('Files')) {
-        setIsFileDragOver(true)
-      }
-    }, [])
-
-    const handleFileDragLeave = useCallback((e: React.DragEvent) => {
-      if (e.dataTransfer.types.includes('application/x-slayzone-tree')) return
-      e.preventDefault()
-      e.stopPropagation()
-      dragCounter.current--
-      if (dragCounter.current === 0) {
-        setIsFileDragOver(false)
-      }
-    }, [])
-
-    const handleFileDrop = useCallback(
-      async (e: React.DragEvent) => {
-        if (e.dataTransfer.types.includes('application/x-slayzone-tree')) return
-        e.preventDefault()
-        e.stopPropagation()
-        dragCounter.current = 0
-        setIsFileDragOver(false)
-
-        // Paths extracted by preload's capture-phase drop listener
-        // (contextBridge proxies File objects, so webUtils must run in preload)
-        const paths = window.api.files.getDropPaths()
-        if (!paths.length) return
-
-        const normalizedRoot = projectPath.replace(/\/+$/, '') + '/'
-        for (const absPath of paths) {
-          if (absPath.startsWith(normalizedRoot)) {
-            openFile(absPath.slice(normalizedRoot.length))
-          } else {
-            // External file — copy into project root
-            try {
-              const relPath = await window.api.fs.copyIn(projectPath, absPath)
-              openFile(relPath)
-            } catch {
-              // Copy failed (e.g. directory, permission error)
-            }
-          }
-        }
-      },
-      [projectPath, openFile]
-    )
-
     return (
       <div
         className="h-full flex bg-surface-0 relative"
         style={editorPanelStyle as React.CSSProperties | undefined}
-        onDragOver={handleFileDragOver}
-        onDragEnter={handleFileDragEnter}
-        onDragLeave={handleFileDragLeave}
-        onDrop={handleFileDrop}
+        {...dropHandlers}
       >
         {/* Sidebar: header tabs + file tree or search */}
         {treeVisible && (
@@ -671,124 +407,15 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
                 onToggleTree={() => setTreeVisible((v) => !v)}
               />
               {isMarkdown && activeFile?.content != null && !activeFile?.deleted && (
-                <MarkdownSettingsPopover
-                  open={displayOpen}
-                  onOpenChange={setDisplayOpen}
-                  trigger={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 gap-1.5 px-2 mr-2 text-xs font-medium text-muted-foreground"
-                    >
-                      <SlidersHorizontal className="size-3.5" />
-                      Display
-                    </Button>
-                  }
-                >
-                  <div className="grid grid-cols-3 rounded-md border border-border/50 p-0.5 gap-0.5">
-                    {[
-                      { mode: 'rich' as const, icon: Eye, label: 'Rich' },
-                      { mode: 'split' as const, icon: Columns2, label: 'Split' },
-                      { mode: 'code' as const, icon: Code, label: 'Code' }
-                    ].map(({ mode, icon: Icon, label }) => {
-                      const active = viewMode === mode
-                      return (
-                        <button
-                          key={mode}
-                          className={cn(
-                            'flex flex-col items-center justify-center gap-1 py-3 text-[10px] font-medium rounded transition-colors',
-                            active
-                              ? 'bg-foreground text-background'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                          )}
-                          onClick={() => setViewModeForFile(mode)}
-                        >
-                          <Icon className="size-5" />
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  <div className="space-y-3">
-                    <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-3 block">
-                      Editor
-                    </span>
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="md-toc" className="text-sm cursor-pointer">
-                        Outline
-                      </Label>
-                      <Switch
-                        id="md-toc"
-                        checked={editorTocEnabled}
-                        onCheckedChange={(v) =>
-                          writeAppearance('editor_toc_enabled', v ? '1' : '0')
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <Label
-                        htmlFor="md-minimap"
-                        className={cn(
-                          'text-sm cursor-pointer',
-                          viewMode === 'rich' && 'text-muted-foreground/50'
-                        )}
-                      >
-                        Minimap{viewMode === 'rich' ? ' (not in rich mode)' : ''}
-                      </Label>
-                      <Switch
-                        id="md-minimap"
-                        checked={editorMinimapEnabled && viewMode !== 'rich'}
-                        disabled={viewMode === 'rich'}
-                        onCheckedChange={(v) =>
-                          writeAppearance('editor_minimap_enabled', v ? '1' : '0')
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-3 block">
-                      Layout
-                    </span>
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="md-compact" className="text-sm cursor-pointer">
-                        Compact
-                      </Label>
-                      <Switch
-                        id="md-compact"
-                        checked={notesReadability === 'compact'}
-                        onCheckedChange={(v) =>
-                          writeAppearance('notes_readability', v ? 'compact' : 'normal')
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="md-wide" className="text-sm cursor-pointer">
-                        Wide
-                      </Label>
-                      <Switch
-                        id="md-wide"
-                        checked={notesWidth === 'wide'}
-                        onCheckedChange={(v) =>
-                          writeAppearance('notes_width', v ? 'wide' : 'narrow')
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="md-mono" className="text-sm cursor-pointer">
-                        Use mono font
-                      </Label>
-                      <Switch
-                        id="md-mono"
-                        checked={notesFontFamily === 'mono'}
-                        onCheckedChange={(v) =>
-                          writeAppearance('notes_font_family', v ? 'mono' : 'sans')
-                        }
-                      />
-                    </div>
-                  </div>
-                </MarkdownSettingsPopover>
+                <EditorDisplayPopover
+                  viewMode={viewMode}
+                  onViewModeChange={setViewModeForFile}
+                  editorTocEnabled={editorTocEnabled}
+                  editorMinimapEnabled={editorMinimapEnabled}
+                  notesReadability={notesReadability}
+                  notesWidth={notesWidth}
+                  notesFontFamily={notesFontFamily}
+                />
               )}
             </div>
           </TooltipProvider>
