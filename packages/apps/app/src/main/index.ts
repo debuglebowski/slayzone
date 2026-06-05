@@ -322,6 +322,7 @@ import {
 } from './process-manager'
 import { createStatsPoller } from './pid-stats'
 import { registerExportImportHandlers } from './export-import'
+import { notifyEvents } from './notify-renderer'
 import { registerLeaderboardHandlers } from './leaderboard'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
@@ -1464,7 +1465,8 @@ app
 
     // Register domain handlers (inject ipcMain and db)
     const notifyTasksChanged = (): void => {
-      mainWindow?.webContents.send('tasks:changed')
+      notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
+      mainWindow?.webContents.send('tasks:changed') // legacy IPC (slice 5 drops)
     }
 
     // Self-heal a stale/phantom Claude conversation id before a resume builds
@@ -1675,6 +1677,10 @@ app
           // artifacts/template stores are electron-free + imported directly). Same ops
           // the IPC handlers call — one implementation, both transports.
           mod.setTaskDeps({ ops: taskOps })
+          // Cross-domain notify bus — same instance `notifyRenderer()` + the
+          // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
+          // (renderer cutover is slice 5).
+          mod.setNotifyEvents(notifyEvents)
           mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
           logBoot('trpc server started')

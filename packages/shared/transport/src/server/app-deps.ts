@@ -93,3 +93,29 @@ export function getTaskOps(): TaskOps {
     throw new Error('taskOps not initialized — call setTaskDeps() in main host first')
   return taskOps
 }
+
+// Notify event bus — the cross-domain `tasks-changed` / `settings-changed`
+// signals that back the `notify.*` subscriptions. The emitter is owned by the
+// Electron-main host (`notify-renderer.ts`, which also drives the legacy IPC
+// broadcast), injected here so the `notifyRouter` and the still-live
+// `webContents.send` broadcast share one instance (coexistence until slice 5).
+// `NotifyEventMap` lives transport-side because transport cannot import from
+// `apps/app` (apps depend on packages, not vice-versa); the host conforms to it.
+export type NotifyEventMap = {
+  /** Any task data mutation — renderer refetches the board. No payload. */
+  'tasks-changed': []
+  /** Settings changed — renderer refetches affected config. No payload. */
+  'settings-changed': []
+}
+
+let notifyEvents: TypedEmitter<NotifyEventMap> | null = null
+
+export function setNotifyEvents(ev: TypedEmitter<NotifyEventMap>): void {
+  notifyEvents = ev
+}
+
+export function getNotifyEvents(): TypedEmitter<NotifyEventMap> {
+  if (!notifyEvents)
+    throw new Error('notifyEvents not initialized — call setNotifyEvents() in main host first')
+  return notifyEvents
+}

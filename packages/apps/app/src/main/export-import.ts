@@ -7,6 +7,7 @@ import type {
   SetTaskParentTxnParams,
   SlayExportData
 } from './export-import-txns'
+import { notifyEvents } from './notify-renderer'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -241,7 +242,8 @@ async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
 
     // Notify renderer to refresh
     const mainWin = BrowserWindow.getAllWindows()[0]
-    if (mainWin) mainWin.webContents.send('tasks:changed')
+    notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
+    if (mainWin) mainWin.webContents.send('tasks:changed') // legacy IPC (slice 5 drops)
 
     return result
   } catch (e) {
@@ -294,7 +296,8 @@ export function registerExportImportHandlers(
         }
         const result = await importBundle(db, bundle)
         const mainWin = BrowserWindow.getAllWindows()[0]
-        if (mainWin) mainWin.webContents.send('tasks:changed')
+        notifyEvents.emit('tasks-changed') // tRPC notify.onTasksChanged source
+        if (mainWin) mainWin.webContents.send('tasks:changed') // legacy IPC (slice 5 drops)
         return result
       } catch (e) {
         return { success: false, error: String(e) }
