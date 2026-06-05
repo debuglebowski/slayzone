@@ -7,6 +7,8 @@ import { createStatsPoller } from './pid-stats'
 import { extractOscTitle } from '@slayzone/terminal/shared'
 import { getEnrichedPath } from '@slayzone/terminal/main'
 import { buildShellInvocation } from '@slayzone/platform'
+import { TypedEmitter } from '@slayzone/platform/events'
+import type { ProcessEventMap } from '@slayzone/types'
 
 export type ProcessStatus = 'running' | 'stopped' | 'completed' | 'error'
 
@@ -74,6 +76,11 @@ let win: BrowserWindow | null = null
 let db: SlayzoneDb | null = null
 let isShuttingDown = false
 const processes = new Map<string, ManagedProcess>()
+
+// Streaming bus for the tRPC `processes` subscriptions. Dual-emit: every event
+// is also still pushed over the legacy `win.webContents.send(...)` IPC channel
+// below, so both transports stay live until the renderer cutover (slice 5).
+export const processEvents = new TypedEmitter<ProcessEventMap>()
 const logSubscribers = new Map<string, Set<(line: string) => void>>()
 
 export function subscribeToProcessLogs(id: string, cb: (line: string) => void): () => void {
@@ -136,18 +143,21 @@ function pushLog(proc: ManagedProcess, line: string): void {
   proc.logBuffer.push(line)
   if (proc.logBuffer.length > LOG_BUFFER_MAX) proc.logBuffer.shift()
   win?.webContents.send('processes:log', proc.id, line)
+  processEvents.emit('log', proc.id, line)
   logSubscribers.get(proc.id)?.forEach((cb) => cb(line))
 }
 
 function setStatus(proc: ManagedProcess, status: ProcessStatus): void {
   proc.status = status
   win?.webContents.send('processes:status', proc.id, status)
+  processEvents.emit('status', proc.id, status)
 }
 
 function emitTitle(proc: ManagedProcess, title: string): void {
   if (title === proc.processTitle) return
   proc.processTitle = title
   win?.webContents.send('processes:title', proc.id, title)
+  processEvents.emit('title', proc.id, title)
 }
 
 function pollProcessTitle(proc: ManagedProcess): void {
@@ -220,6 +230,7 @@ function doSpawn(proc: ManagedProcess): void {
     proc.processTitle = null
     proc.oscTitleSet = false
     win?.webContents.send('processes:title', proc.id, null)
+    processEvents.emit('title', proc.id, null)
     if (proc.autoRestart && processes.has(proc.id)) {
       proc.restartCount++
       pushLog(proc, `[exited with code ${code ?? '?'}, restarting in 1s...]`)
@@ -415,6 +426,7 @@ const statsPoller = createStatsPoller(
   },
   (stats) => {
     win?.webContents.send('processes:stats', stats)
+    processEvents.emit('stats', stats)
   }
 )
 

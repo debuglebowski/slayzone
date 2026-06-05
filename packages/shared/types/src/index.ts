@@ -6,7 +6,7 @@ export type {
   ClientErrorEventInput,
   UpdateStatus
 } from './api'
-export type { ProcessStatus, ProcessInfo, ProcessStats } from './api'
+export type { ProcessStatus, ProcessInfo, ProcessStats, ProcessEventMap } from './api'
 export type { ExecutionContext } from './api'
 export type { LocalLeaderboardDay, LocalLeaderboardStats } from './api'
 export type { BackupInfo, BackupSettings } from './api'

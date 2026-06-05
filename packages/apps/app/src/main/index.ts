@@ -324,7 +324,8 @@ import {
   listAllProcesses,
   killTaskProcesses,
   killAllProcesses,
-  shutdownAllProcesses
+  shutdownAllProcesses,
+  processEvents
 } from './process-manager'
 import { createStatsPoller } from './pid-stats'
 import { registerExportImportHandlers, buildExportImportOps } from './export-import'
@@ -1736,6 +1737,21 @@ app
             feedbackAddMessage: feedbackOps.addMessage,
             feedbackUpdateThreadDiscordId: feedbackOps.updateThreadDiscordId,
             feedbackDeleteThread: feedbackOps.deleteThread
+          })
+          // Process-manager lifecycle ops + the dual-emit event stream for the
+          // processes router. Same module-singleton ops/emitter the IPC handlers
+          // delegate to → one implementation, both transports (slice 5 cutover).
+          mod.setProcessesDeps({
+            create: createProcess,
+            spawn: spawnProcess,
+            update: updateProcess,
+            stop: stopProcess,
+            kill: killProcess,
+            restart: restartProcess,
+            listForTask,
+            listAll: listAllProcesses,
+            killTask: killTaskProcesses,
+            events: processEvents
           })
           mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
