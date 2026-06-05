@@ -203,6 +203,13 @@ export interface TerminalHandle {
   clearBuffer: () => Promise<void>
 }
 
+// Reopen respawns the CLI with --resume; it re-streams the transcript over the
+// next few seconds, during which the terminal would otherwise sit blank (the
+// init overlay + 'starting' state both clear in a microtask). We hold a loading
+// overlay until the first live output arrives, capped so a no-output resume
+// can't hang it.
+const RESUME_OVERLAY_CAP_MS = 10_000
+
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
   {
     sessionId,
@@ -248,6 +255,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [searchFocusToken, setSearchFocusToken] = useState(0)
   const [isInitializing, setIsInitializing] = useState(true)
   const [isReplaying, setIsReplaying] = useState(false)
+  // True from a hibernated-session reopen until the resumed CLI's first live
+  // output arrives (or the cap fires). Keeps the loading overlay up instead of
+  // flashing a blank terminal during the resume boot gap.
+  const [isResuming, setIsResuming] = useState(false)
+  const isResumingRef = useRef(false)
+  const resumeCapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (resumeCapTimerRef.current) clearTimeout(resumeCapTimerRef.current)
+    }
+  }, [])
   const [initError, setInitError] = useState<string | null>(null)
   const [deadExitCode, setDeadExitCode] = useState<number | null>(null)
   const [deadCrashOutput, setDeadCrashOutput] = useState<string | null>(null)
@@ -991,6 +1009,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             setPtyState('error')
             return
           }
+
+          // Reopen-after-hibernate: the CLI re-streams the transcript over the
+          // next few seconds. Hold the loading overlay until the first live
+          // output arrives (cleared in the data subscription) so the terminal
+          // shows a spinner, not a blank screen. Cap as a no-output safety net.
+          if (effectiveExistingConversationId) {
+            isResumingRef.current = true
+            setIsResuming(true)
+            if (resumeCapTimerRef.current) clearTimeout(resumeCapTimerRef.current)
+            resumeCapTimerRef.current = setTimeout(() => {
+              isResumingRef.current = false
+              setIsResuming(false)
+            }, RESUME_OVERLAY_CAP_MS)
+          }
         }
 
         // Handle terminal input - pass through to PTY.
@@ -1238,6 +1270,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // we just wrote — re-writing here would duplicate output.
       if (seq <= lastRenderedSeqRef.current) return
       if (!terminalRef.current) return
+      // First live output of a resume → the boot gap is over; drop the overlay.
+      if (isResumingRef.current) {
+        isResumingRef.current = false
+        if (resumeCapTimerRef.current) {
+          clearTimeout(resumeCapTimerRef.current)
+          resumeCapTimerRef.current = null
+        }
+        setIsResuming(false)
+      }
       lastActivityTimeRef.current = performance.now()
       pendingChunks.push(data)
       pendingSeq = seq
@@ -1247,6 +1288,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     })
 
     const unsubExit = subscribeExit(sessionId, (exitCode, reason) => {
+      // Resume died before any output — stop the overlay so the dead overlay shows.
+      if (isResumingRef.current) {
+        isResumingRef.current = false
+        if (resumeCapTimerRef.current) {
+          clearTimeout(resumeCapTimerRef.current)
+          resumeCapTimerRef.current = null
+        }
+        setIsResuming(false)
+      }
       terminalRef.current?.writeln(`\r\n\x1b[90mProcess exited with code ${exitCode}\x1b[0m`)
       // Capture crash output before cleanupTask deletes context state
       const raw = getCrashOutput(sessionId)
@@ -1906,7 +1956,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
   }, [sessionId])
 
-  const isLoading = !initError && (isInitializing || isReplaying || ptyState === 'starting')
+  const isLoading =
+    !initError && (isInitializing || isReplaying || isResuming || ptyState === 'starting')
 
   const handleSearchClose = useCallback(() => {
     setSearchOpen(false)
