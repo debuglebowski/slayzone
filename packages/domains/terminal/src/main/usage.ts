@@ -537,94 +537,101 @@ function fetchProvider(
 
 // ── Handler ──────────────────────────────────────────────────────────
 
+async function fetchUsage(db: SlayzoneDb, force?: boolean): Promise<ProviderUsage[]> {
+  const now = Date.now()
+
+  // Hard floor: never refetch within 10s (blocks spam-clicking)
+  if (now - lastFetchAt < MIN_INTERVAL_MS && cache.size > 0) {
+    return [...cache.values()].map((e) => e.result)
+  }
+
+  // Auto-poll uses longer cache TTL
+  if (!force && now - lastFetchAt < DEFAULT_TTL_MS && cache.size > 0) {
+    return [...cache.values()].map((e) => e.result)
+  }
+
+  // Deduplicate concurrent requests
+  if (inflight) return inflight
+
+  // Gather custom providers from DB
+  const customRows = (await db.all(
+    `SELECT id, label, usage_config FROM terminal_modes WHERE usage_config IS NOT NULL AND enabled = 1`
+  )) as { id: string; label: string; usage_config: string }[]
+
+  // Check enabled status for built-in providers
+  const builtinEnabled = new Map(
+    (
+      (await db.all(
+        `SELECT id, enabled FROM terminal_modes WHERE id IN ('claude-code', 'codex')`
+      )) as { id: string; enabled: number }[]
+    ).map((r) => [r.id, r.enabled === 1])
+  )
+
+  const fetchers: Promise<ProviderUsage>[] = []
+
+  if (builtinEnabled.get('claude-code') !== false) {
+    const claudeToken = await getClaudeToken()
+    if (claudeToken) {
+      fetchers.push(fetchProvider(CLAUDE, () => fetchClaudeUsageWithToken(claudeToken), claudeToken))
+    } else {
+      fetchers.push(
+        Promise.resolve(usageError(CLAUDE, `Not logged in — run \`${CLAUDE.cli}\` to authenticate`))
+      )
+    }
+  }
+
+  if (builtinEnabled.get('codex') !== false) {
+    const codexAuth = await getCodexAuth()
+    if (codexAuth) {
+      fetchers.push(
+        fetchProvider(CODEX, () => fetchCodexUsageWithToken(codexAuth), codexAuth.accessToken)
+      )
+    } else {
+      fetchers.push(
+        Promise.resolve(usageError(CODEX, `Not logged in — run \`${CODEX.cli}\` to authenticate`))
+      )
+    }
+  }
+
+  for (const row of customRows) {
+    if (BUILTIN_USAGE_IDS.has(row.id)) continue
+    try {
+      const config: UsageProviderConfig = JSON.parse(row.usage_config)
+      if (!config.enabled) continue
+      const meta: ProviderMeta = { id: row.id, label: row.label, cli: row.id, vendor: row.label }
+      fetchers.push(fetchProvider(meta, () => fetchCustomUsage(row.id, row.label, config)))
+    } catch {
+      /* skip corrupt config */
+    }
+  }
+
+  inflight = Promise.all(fetchers)
+    .then((results) => {
+      lastFetchAt = Date.now()
+      inflight = null
+      return results
+    })
+    .catch((e) => {
+      inflight = null
+      throw e
+    })
+
+  return inflight
+}
+
+// Pure op surface shared by the IPC handlers (below) and the tRPC `app.usage`
+// router (via setAppDeps). Both transports delegate here (coexistence til slice 5).
+export function buildUsageOps(db: SlayzoneDb) {
+  return {
+    fetch: (force?: boolean): Promise<ProviderUsage[]> => fetchUsage(db, force),
+    test: (
+      config: UsageProviderConfig
+    ): Promise<{ ok: boolean; windows?: UsageWindow[]; error?: string }> => testUsageConfig(config)
+  }
+}
+
 export function registerUsageHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
-  ipcMain.handle('usage:fetch', async (_e, force?: boolean): Promise<ProviderUsage[]> => {
-    const now = Date.now()
-
-    // Hard floor: never refetch within 10s (blocks spam-clicking)
-    if (now - lastFetchAt < MIN_INTERVAL_MS && cache.size > 0) {
-      return [...cache.values()].map((e) => e.result)
-    }
-
-    // Auto-poll uses longer cache TTL
-    if (!force && now - lastFetchAt < DEFAULT_TTL_MS && cache.size > 0) {
-      return [...cache.values()].map((e) => e.result)
-    }
-
-    // Deduplicate concurrent requests
-    if (inflight) return inflight
-
-    // Gather custom providers from DB
-    const customRows = (await db.all(
-      `SELECT id, label, usage_config FROM terminal_modes WHERE usage_config IS NOT NULL AND enabled = 1`
-    )) as { id: string; label: string; usage_config: string }[]
-
-    // Check enabled status for built-in providers
-    const builtinEnabled = new Map(
-      (
-        (await db.all(
-          `SELECT id, enabled FROM terminal_modes WHERE id IN ('claude-code', 'codex')`
-        )) as { id: string; enabled: number }[]
-      ).map((r) => [r.id, r.enabled === 1])
-    )
-
-    const fetchers: Promise<ProviderUsage>[] = []
-
-    if (builtinEnabled.get('claude-code') !== false) {
-      const claudeToken = await getClaudeToken()
-      if (claudeToken) {
-        fetchers.push(
-          fetchProvider(CLAUDE, () => fetchClaudeUsageWithToken(claudeToken), claudeToken)
-        )
-      } else {
-        fetchers.push(
-          Promise.resolve(
-            usageError(CLAUDE, `Not logged in — run \`${CLAUDE.cli}\` to authenticate`)
-          )
-        )
-      }
-    }
-
-    if (builtinEnabled.get('codex') !== false) {
-      const codexAuth = await getCodexAuth()
-      if (codexAuth) {
-        fetchers.push(
-          fetchProvider(CODEX, () => fetchCodexUsageWithToken(codexAuth), codexAuth.accessToken)
-        )
-      } else {
-        fetchers.push(
-          Promise.resolve(usageError(CODEX, `Not logged in — run \`${CODEX.cli}\` to authenticate`))
-        )
-      }
-    }
-
-    for (const row of customRows) {
-      if (BUILTIN_USAGE_IDS.has(row.id)) continue
-      try {
-        const config: UsageProviderConfig = JSON.parse(row.usage_config)
-        if (!config.enabled) continue
-        const meta: ProviderMeta = { id: row.id, label: row.label, cli: row.id, vendor: row.label }
-        fetchers.push(fetchProvider(meta, () => fetchCustomUsage(row.id, row.label, config)))
-      } catch {
-        /* skip corrupt config */
-      }
-    }
-
-    inflight = Promise.all(fetchers)
-      .then((results) => {
-        lastFetchAt = Date.now()
-        inflight = null
-        return results
-      })
-      .catch((e) => {
-        inflight = null
-        throw e
-      })
-
-    return inflight
-  })
-
-  ipcMain.handle('usage:test', async (_e, config: UsageProviderConfig) => {
-    return testUsageConfig(config)
-  })
+  const ops = buildUsageOps(db)
+  ipcMain.handle('usage:fetch', (_e, force?: boolean) => ops.fetch(force))
+  ipcMain.handle('usage:test', (_e, config: UsageProviderConfig) => ops.test(config))
 }

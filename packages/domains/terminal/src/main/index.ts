@@ -1,6 +1,6 @@
 export { registerPtyHandlers, getPtyHandlerChannels } from './handlers'
 export { createPtyOps, type PtyCreateOpts } from './pty-store'
-export { registerUsageHandlers } from './usage'
+export { registerUsageHandlers, buildUsageOps } from './usage'
 export {
   initWarmProcessManager,
   teardownAllWarm,

@@ -230,40 +230,40 @@ export function stopAutoBackup(): void {
   }
 }
 
-export function registerBackupHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+// Pure op surface shared by the IPC handlers (below) and the tRPC `app.backup`
+// router (via setAppDeps). Single source of truth — both transports delegate
+// here, coexisting until the renderer drops IPC (slice 5).
+export function buildBackupOps(db: SlayzoneDb) {
   _db = db
+  return {
+    list: (): Promise<BackupInfo[]> => listBackups(),
+    create: (name?: string): Promise<BackupInfo> => createBackup(db, 'manual', name),
+    rename: (filename: string, name: string): Promise<void> => setBackupName(filename, name),
+    delete: (filename: string): Promise<void> => deleteBackup(filename),
+    restore: (filename: string): Promise<void> => restoreBackup(filename),
+    getSettings: (): Promise<BackupSettings> => getBackupSettings(db),
+    setSettings: async (partial: Partial<BackupSettings>): Promise<BackupSettings> => {
+      const updated = await setBackupSettings(db, partial)
+      await startAutoBackup(db)
+      return updated
+    },
+    revealInFinder: (): void => {
+      shell.openPath(getBackupsDir())
+    }
+  }
+}
 
-  ipcMain.handle('backup:list', () => {
-    return listBackups()
-  })
+export function registerBackupHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+  const ops = buildBackupOps(db)
 
-  ipcMain.handle('backup:create', async (_, name?: string) => {
-    return createBackup(db, 'manual', name)
-  })
-
-  ipcMain.handle('backup:rename', (_, filename: string, name: string) => {
-    return setBackupName(filename, name)
-  })
-
-  ipcMain.handle('backup:delete', (_, filename: string) => {
-    return deleteBackup(filename)
-  })
-
-  ipcMain.handle('backup:restore', (_, filename: string) => {
-    return restoreBackup(filename)
-  })
-
-  ipcMain.handle('backup:getSettings', () => {
-    return getBackupSettings(db)
-  })
-
-  ipcMain.handle('backup:setSettings', async (_, partial: Partial<BackupSettings>) => {
-    const updated = await setBackupSettings(db, partial)
-    await startAutoBackup(db)
-    return updated
-  })
-
-  ipcMain.handle('backup:revealInFinder', () => {
-    shell.openPath(getBackupsDir())
-  })
+  ipcMain.handle('backup:list', () => ops.list())
+  ipcMain.handle('backup:create', (_, name?: string) => ops.create(name))
+  ipcMain.handle('backup:rename', (_, filename: string, name: string) => ops.rename(filename, name))
+  ipcMain.handle('backup:delete', (_, filename: string) => ops.delete(filename))
+  ipcMain.handle('backup:restore', (_, filename: string) => ops.restore(filename))
+  ipcMain.handle('backup:getSettings', () => ops.getSettings())
+  ipcMain.handle('backup:setSettings', (_, partial: Partial<BackupSettings>) =>
+    ops.setSettings(partial)
+  )
+  ipcMain.handle('backup:revealInFinder', () => ops.revealInFinder())
 }

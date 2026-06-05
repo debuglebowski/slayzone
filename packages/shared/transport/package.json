@@ -30,6 +30,7 @@
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
+    "@slayzone/types": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
     "@tanstack/react-query": "^5.100.9",

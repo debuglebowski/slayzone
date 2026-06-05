@@ -34,24 +34,28 @@ async function getTodayCompletedTasks(db: SlayzoneDb): Promise<number> {
   )
 }
 
+// Pure op shared by the IPC handler (below) and the tRPC `app.leaderboard`
+// router (via setAppDeps). Both transports delegate here (coexistence til slice 5).
+export async function getLocalLeaderboardStats(db: SlayzoneDb): Promise<LocalLeaderboardStats> {
+  const today = new Date().toISOString().slice(0, 10)
+  const todayCompletedTasks = await getTodayCompletedTasks(db)
+  const tokenDays = await getDailyTokens(db)
+
+  const days = tokenDays
+    .map((d) => ({
+      date: d.date,
+      totalTokens: d.totalTokens,
+      totalCompletedTasks: d.date === today ? todayCompletedTasks : 0
+    }))
+    .filter((d) => d.date === today || d.totalTokens > 0)
+
+  if (!days.find((d) => d.date === today)) {
+    days.push({ date: today, totalTokens: 0, totalCompletedTasks: todayCompletedTasks })
+  }
+
+  return { days }
+}
+
 export function registerLeaderboardHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
-  ipcMain.handle('leaderboard:get-local-stats', async (): Promise<LocalLeaderboardStats> => {
-    const today = new Date().toISOString().slice(0, 10)
-    const todayCompletedTasks = await getTodayCompletedTasks(db)
-    const tokenDays = await getDailyTokens(db)
-
-    const days = tokenDays
-      .map((d) => ({
-        date: d.date,
-        totalTokens: d.totalTokens,
-        totalCompletedTasks: d.date === today ? todayCompletedTasks : 0
-      }))
-      .filter((d) => d.date === today || d.totalTokens > 0)
-
-    if (!days.find((d) => d.date === today)) {
-      days.push({ date: today, totalTokens: 0, totalCompletedTasks: todayCompletedTasks })
-    }
-
-    return { days }
-  })
+  ipcMain.handle('leaderboard:get-local-stats', () => getLocalLeaderboardStats(db))
 }

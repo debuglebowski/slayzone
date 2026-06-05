@@ -1,4 +1,5 @@
 import { router } from './trpc'
+import { appLevelRouter } from './routers/app'
 import { aiConfigRouter } from './routers/ai-config'
 import { agentTurnsRouter } from './routers/agent-turns'
 import { automationsRouter } from './routers/automations'
@@ -21,6 +22,7 @@ import { usageAnalyticsRouter } from './routers/usage-analytics'
 import { worktreesRouter } from './routers/worktrees'
 
 export const appRouter = router({
+  app: appLevelRouter,
   aiConfig: aiConfigRouter,
   agentTurns: agentTurnsRouter,
   automations: automationsRouter,

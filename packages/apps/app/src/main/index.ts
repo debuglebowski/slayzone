@@ -192,7 +192,7 @@ import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
 import { initDatabases, closeDatabase, getDatabasePath, closeDiagnosticsDatabase } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
-import { registerBackupHandlers, startAutoBackup, stopAutoBackup } from './backup'
+import { registerBackupHandlers, buildBackupOps, startAutoBackup, stopAutoBackup } from './backup'
 // Domain handlers
 import { registerProjectHandlers, handleTerminalStateChange } from '@slayzone/projects/main'
 import {
@@ -216,6 +216,7 @@ import {
   registerPtyHandlers,
   getPtyHandlerChannels,
   registerUsageHandlers,
+  buildUsageOps,
   killAllPtys,
   shutdownAllPtys,
   killPtysByTaskId,
@@ -302,8 +303,13 @@ import { registerHistoryHandlers } from '@slayzone/history/main'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/main'
 import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/main'
 import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/main'
-import { registerScreenshotHandlers } from './screenshot'
-import { registerClipboardHandlers } from './clipboard-handlers'
+import { registerScreenshotHandlers, captureBrowserViewScreenshot } from './screenshot'
+import {
+  registerClipboardHandlers,
+  writeFilePaths,
+  readFilePaths,
+  hasFilePaths
+} from './clipboard-handlers'
 import { registerConversationHealer } from './conversation-healer'
 import {
   setProcessManagerWindow,
@@ -321,9 +327,9 @@ import {
   shutdownAllProcesses
 } from './process-manager'
 import { createStatsPoller } from './pid-stats'
-import { registerExportImportHandlers } from './export-import'
+import { registerExportImportHandlers, buildExportImportOps } from './export-import'
 import { notifyEvents } from './notify-renderer'
-import { registerLeaderboardHandlers } from './leaderboard'
+import { registerLeaderboardHandlers, getLocalLeaderboardStats } from './leaderboard'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
 
@@ -1681,6 +1687,38 @@ app
           // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
           // (renderer cutover is slice 5).
           mod.setNotifyEvents(notifyEvents)
+          // App-level ops (backup/clipboard/screenshot/leaderboard/export-import/usage).
+          // Built from the SAME impls the IPC handlers (registerBackupHandlers,
+          // registerClipboardHandlers, … above) delegate to → one implementation,
+          // both transports coexist (renderer cutover is slice 5).
+          const backupOps = buildBackupOps(db)
+          const exportImportOps = buildExportImportOps(db, isPlaywright)
+          const usageOps = buildUsageOps(db)
+          mod.setAppDeps({
+            backupList: backupOps.list,
+            backupCreate: backupOps.create,
+            backupRename: backupOps.rename,
+            backupDelete: backupOps.delete,
+            backupRestore: backupOps.restore,
+            backupGetSettings: backupOps.getSettings,
+            backupSetSettings: backupOps.setSettings,
+            backupRevealInFinder: backupOps.revealInFinder,
+            clipboardWriteFilePaths: writeFilePaths,
+            clipboardReadFilePaths: readFilePaths,
+            clipboardHasFiles: hasFilePaths,
+            screenshotCaptureView: (viewId: string) =>
+              captureBrowserViewScreenshot(browserViewManager, viewId),
+            leaderboardGetLocalStats: () => getLocalLeaderboardStats(db),
+            exportAll: exportImportOps.exportAll,
+            exportProject: exportImportOps.exportProject,
+            importBundle: exportImportOps.importBundle,
+            testExportAllToPath: exportImportOps.testExportAllToPath,
+            testExportProjectToPath: exportImportOps.testExportProjectToPath,
+            testImportFromPath: exportImportOps.testImportFromPath,
+            testSetTaskParent: exportImportOps.testSetTaskParent,
+            usageFetch: usageOps.fetch,
+            usageTest: usageOps.test
+          })
           mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
           logBoot('trpc server started')

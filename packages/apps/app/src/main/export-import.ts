@@ -251,20 +251,33 @@ async function handleImport(db: SlayzoneDb): Promise<ImportResult> {
   }
 }
 
-export function registerExportImportHandlers(
-  ipcMain: IpcMain,
-  db: SlayzoneDb,
-  isTest = false
-): void {
-  ipcMain.handle('export-import:export-all', () => handleExportAll(db))
-  ipcMain.handle('export-import:export-project', (_, projectId: string) =>
-    handleExportProject(db, projectId)
-  )
-  ipcMain.handle('export-import:import', () => handleImport(db))
+// Pure op surface shared by the IPC handlers (below) and the tRPC
+// `app.exportImport` router (via setAppDeps). Test-only ops bypass native
+// dialogs and are present only when `isTest` (e2e); the router guards on their
+// presence. Both transports delegate here (coexistence until slice 5).
+export type ExportImportOps = {
+  exportAll: () => Promise<ExportResult>
+  exportProject: (projectId: string) => Promise<ExportResult>
+  importBundle: () => Promise<ImportResult>
+  testExportAllToPath?: (filePath: string) => Promise<ExportResult>
+  testExportProjectToPath?: (projectId: string, filePath: string) => Promise<ExportResult>
+  testImportFromPath?: (filePath: string) => Promise<ImportResult>
+  testSetTaskParent?: (
+    taskId: string,
+    parentId: string | null
+  ) => Promise<{ success: boolean; error?: string }>
+}
 
-  // Test-only handlers that bypass native file dialogs
+export function buildExportImportOps(db: SlayzoneDb, isTest = false): ExportImportOps {
+  const ops: ExportImportOps = {
+    exportAll: () => handleExportAll(db),
+    exportProject: (projectId: string) => handleExportProject(db, projectId),
+    importBundle: () => handleImport(db)
+  }
+
+  // Test-only ops that bypass native file dialogs
   if (isTest) {
-    ipcMain.handle('export-import:test:export-all-to-path', async (_, filePath: string) => {
+    ops.testExportAllToPath = async (filePath: string) => {
       try {
         const bundle = await exportAll(db)
         fs.writeFileSync(filePath, JSON.stringify(bundle, null, 2), 'utf8')
@@ -272,22 +285,19 @@ export function registerExportImportHandlers(
       } catch (e) {
         return { success: false, error: String(e) }
       }
-    })
+    }
 
-    ipcMain.handle(
-      'export-import:test:export-project-to-path',
-      async (_, projectId: string, filePath: string) => {
-        try {
-          const bundle = await exportProject(db, projectId)
-          fs.writeFileSync(filePath, JSON.stringify(bundle, null, 2), 'utf8')
-          return { success: true, path: filePath }
-        } catch (e) {
-          return { success: false, error: String(e) }
-        }
+    ops.testExportProjectToPath = async (projectId: string, filePath: string) => {
+      try {
+        const bundle = await exportProject(db, projectId)
+        fs.writeFileSync(filePath, JSON.stringify(bundle, null, 2), 'utf8')
+        return { success: true, path: filePath }
+      } catch (e) {
+        return { success: false, error: String(e) }
       }
-    )
+    }
 
-    ipcMain.handle('export-import:test:import-from-path', async (_, filePath: string) => {
+    ops.testImportFromPath = async (filePath: string) => {
       try {
         const raw = fs.readFileSync(filePath, 'utf8')
         const bundle = JSON.parse(raw) as SlayExportBundle
@@ -302,26 +312,63 @@ export function registerExportImportHandlers(
       } catch (e) {
         return { success: false, error: String(e) }
       }
-    })
+    }
 
     // Test-only: set parent_id directly. Allows tests to simulate stale
     // (orphan) FKs by temporarily disabling FK checks for this single
     // statement. Must not be exposed outside isTest mode. The PRAGMA toggle +
     // UPDATE runs inside the worker via a named txn (the async proxy has no
     // `pragma()`).
+    ops.testSetTaskParent = async (taskId: string, parentId: string | null) => {
+      try {
+        await db.namedTxn('export-import:set-task-parent', {
+          taskId,
+          parentId
+        } satisfies SetTaskParentTxnParams)
+        return { success: true }
+      } catch (e) {
+        return { success: false, error: String(e) }
+      }
+    }
+  }
+
+  return ops
+}
+
+export function registerExportImportHandlers(
+  ipcMain: IpcMain,
+  db: SlayzoneDb,
+  isTest = false
+): void {
+  const ops = buildExportImportOps(db, isTest)
+
+  ipcMain.handle('export-import:export-all', () => ops.exportAll())
+  ipcMain.handle('export-import:export-project', (_, projectId: string) =>
+    ops.exportProject(projectId)
+  )
+  ipcMain.handle('export-import:import', () => ops.importBundle())
+
+  // Test-only handlers that bypass native file dialogs
+  if (ops.testExportAllToPath) {
+    ipcMain.handle('export-import:test:export-all-to-path', (_, filePath: string) =>
+      ops.testExportAllToPath!(filePath)
+    )
+  }
+  if (ops.testExportProjectToPath) {
+    ipcMain.handle(
+      'export-import:test:export-project-to-path',
+      (_, projectId: string, filePath: string) => ops.testExportProjectToPath!(projectId, filePath)
+    )
+  }
+  if (ops.testImportFromPath) {
+    ipcMain.handle('export-import:test:import-from-path', (_, filePath: string) =>
+      ops.testImportFromPath!(filePath)
+    )
+  }
+  if (ops.testSetTaskParent) {
     ipcMain.handle(
       'export-import:test:set-task-parent',
-      async (_, taskId: string, parentId: string | null) => {
-        try {
-          await db.namedTxn('export-import:set-task-parent', {
-            taskId,
-            parentId
-          } satisfies SetTaskParentTxnParams)
-          return { success: true }
-        } catch (e) {
-          return { success: false, error: String(e) }
-        }
-      }
+      (_, taskId: string, parentId: string | null) => ops.testSetTaskParent!(taskId, parentId)
     )
   }
 }

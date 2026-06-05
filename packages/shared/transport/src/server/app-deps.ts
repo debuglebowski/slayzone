@@ -19,6 +19,8 @@ import type {
 } from '@slayzone/terminal/main'
 import type { IntegrationOps } from '@slayzone/integrations/main'
 import type { TaskOps } from '@slayzone/task/main'
+import type { BackupInfo, BackupSettings, LocalLeaderboardStats } from '@slayzone/types'
+import type { ProviderUsage, UsageProviderConfig, UsageWindow } from '@slayzone/terminal/shared'
 
 // Chat deps — ops + queue ops + the two streaming emitters the subscriptions
 // subscribe to. Same instances back the IPC handlers (coexistence until slice 5).
@@ -118,4 +120,84 @@ export function getNotifyEvents(): TypedEmitter<NotifyEventMap> {
   if (!notifyEvents)
     throw new Error('notifyEvents not initialized — call setNotifyEvents() in main host first')
   return notifyEvents
+}
+
+// App-level ops — the grab-bag of main-process capabilities (backup, clipboard,
+// screenshot, leaderboard, export/import, usage, …) that the `app` router wraps.
+// Each is electron- or DB-coupled, so `import type` only here; the Electron-main
+// host injects concrete impls via `setAppDeps()`. Same impls back the still-live
+// IPC handlers (coexistence until slice 5). Signatures are Promise-typed because
+// main's `SlayzoneDb` is async (worker_thread). A standalone server without these
+// wired throws on the first app procedure call.
+export type AppDeps = {
+  // backup
+  backupList: () => Promise<BackupInfo[]>
+  backupCreate: (name?: string) => Promise<BackupInfo>
+  backupRename: (filename: string, name: string) => Promise<void>
+  backupDelete: (filename: string) => Promise<void>
+  backupRestore: (filename: string) => Promise<void>
+  backupGetSettings: () => Promise<BackupSettings>
+  backupSetSettings: (partial: Partial<BackupSettings>) => Promise<BackupSettings>
+  backupRevealInFinder: () => void
+
+  // clipboard
+  clipboardWriteFilePaths: (paths: string[]) => void
+  clipboardReadFilePaths: () => string[]
+  clipboardHasFiles: () => boolean
+
+  // screenshot
+  screenshotCaptureView: (viewId: string) => Promise<{ success: boolean; path?: string }>
+
+  // leaderboard
+  leaderboardGetLocalStats: () => Promise<LocalLeaderboardStats>
+
+  // export-import
+  exportAll: () => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>
+  exportProject: (
+    projectId: string
+  ) => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>
+  importBundle: () => Promise<{
+    success: boolean
+    canceled?: boolean
+    projectCount?: number
+    taskCount?: number
+    importedProjects?: Array<{ id: string; name: string }>
+    error?: string
+  }>
+  testExportAllToPath?: (
+    filePath: string
+  ) => Promise<{ success: boolean; path?: string; error?: string }>
+  testExportProjectToPath?: (
+    projectId: string,
+    filePath: string
+  ) => Promise<{ success: boolean; path?: string; error?: string }>
+  testImportFromPath?: (filePath: string) => Promise<{
+    success: boolean
+    canceled?: boolean
+    projectCount?: number
+    taskCount?: number
+    importedProjects?: Array<{ id: string; name: string }>
+    error?: string
+  }>
+  testSetTaskParent?: (
+    taskId: string,
+    parentId: string | null
+  ) => Promise<{ success: boolean; error?: string }>
+
+  // usage
+  usageFetch: (force?: boolean) => Promise<ProviderUsage[]>
+  usageTest: (
+    config: UsageProviderConfig
+  ) => Promise<{ ok: boolean; windows?: UsageWindow[]; error?: string }>
+}
+
+let appDeps: AppDeps | null = null
+
+export function setAppDeps(deps: AppDeps): void {
+  appDeps = deps
+}
+
+export function getAppDeps(): AppDeps {
+  if (!appDeps) throw new Error('appDeps not initialized — call setAppDeps() in main host first')
+  return appDeps
 }
