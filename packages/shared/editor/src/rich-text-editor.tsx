@@ -1,185 +1,17 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  useCallback,
-  type CSSProperties,
-  type MutableRefObject,
-  type ReactNode,
-  type ButtonHTMLAttributes
-} from 'react'
-import { Editor, rootCtx, defaultValueCtx, editorViewCtx, commandsCtx } from '@milkdown/core'
-import {
-  commonmark,
-  toggleStrongCommand,
-  toggleEmphasisCommand,
-  wrapInBulletListCommand,
-  wrapInOrderedListCommand
-} from '@milkdown/preset-commonmark'
-import { gfm } from '@milkdown/preset-gfm'
-import { history } from '@milkdown/plugin-history'
-import { indent } from '@milkdown/plugin-indent'
-import { listener, listenerCtx } from '@milkdown/plugin-listener'
-import { callCommand, replaceAll, $prose, $command } from '@milkdown/utils'
-import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state'
+import { useCallback } from 'react'
+import { editorViewCtx } from '@milkdown/core'
+import { callCommand } from '@milkdown/utils'
 import { cn } from '@slayzone/ui'
-import type { EditorThemeColors } from './editor-themes'
-import { createPlaceholderPlugin } from './milkdown-placeholder'
-import { listItemMovePlugin } from './milkdown-list-move'
-import { escapeBlurPlugin } from './milkdown-escape-blur'
-import { taskListPlugin } from './milkdown-task-list'
-import { htmlRenderPlugin } from './milkdown-html-render'
-import { mermaidRenderPlugin } from './milkdown-mermaid-render'
-import { remarkFrontmatterPlugin, frontmatterSchema, frontmatterView } from './milkdown-frontmatter'
-import {
-  createArtifactLinkPlugin,
-  insertArtifactLinkAtCursor,
-  type ArtifactMentionState
-} from './milkdown-artifact-link'
-import { extractImageFilesFromDataTransfer } from './use-image-paste-drop'
-import {
-  createSearchHighlightPlugin,
-  setSearch as setMilkdownSearch
-} from './milkdown-search-highlight'
-import { ArtifactPicker, type ArtifactPickerItem } from './ArtifactPicker'
+import type { RichTextEditorProps } from './rich-text-editor.types'
+import { buildEditorThemeStyle } from './rich-text-editor.utils'
+import { useEditorSetup } from './use-editor-setup'
+import { useClickToFocus } from './use-click-to-focus'
+import { useEditorSearch } from './use-editor-search'
+import { EditorToolbar } from './EditorToolbar'
+import { ArtifactPicker } from './ArtifactPicker'
 
-export type { Editor }
-
-/** Get the editor's root DOM node (for scoped queries like in-doc anchor lookups). */
-export function getEditorViewDOM(editor: Editor): HTMLElement | null {
-  try {
-    return editor.ctx.get(editorViewCtx).dom as HTMLElement
-  } catch {
-    return null
-  }
-}
-
-interface FormatState {
-  bold: boolean
-  italic: boolean
-  bulletList: boolean
-  orderedList: boolean
-  taskList: boolean
-}
-
-const emptyFormatState: FormatState = {
-  bold: false,
-  italic: false,
-  bulletList: false,
-  orderedList: false,
-  taskList: false
-}
-
-function readFormatState(state: import('@milkdown/prose/state').EditorState): FormatState {
-  const { $from, from, to, empty } = state.selection
-  const strong = state.schema.marks.strong
-  const emphasis = state.schema.marks.emphasis
-  const boldActive = strong
-    ? empty
-      ? !!strong.isInSet(state.storedMarks || $from.marks())
-      : state.doc.rangeHasMark(from, to, strong)
-    : false
-  const italicActive = emphasis
-    ? empty
-      ? !!emphasis.isInSet(state.storedMarks || $from.marks())
-      : state.doc.rangeHasMark(from, to, emphasis)
-    : false
-
-  let bulletList = false
-  let orderedList = false
-  let taskList = false
-  for (let d = $from.depth; d > 0; d--) {
-    const node = $from.node(d)
-    if (node.type.name === 'bullet_list') bulletList = true
-    if (node.type.name === 'ordered_list') orderedList = true
-    if (node.type.name === 'list_item' && node.attrs.checked != null) taskList = true
-  }
-  return { bold: boldActive, italic: italicActive, bulletList, orderedList, taskList }
-}
-
-// Toggle task list: if in list item, toggle checked attr; otherwise wrap in bullet list
-const toggleTaskListCommand = $command('ToggleTaskList', (ctx) => {
-  return () => (state, dispatch) => {
-    const { $from } = state.selection
-    for (let d = $from.depth; d > 0; d--) {
-      const node = $from.node(d)
-      if (node.type.name === 'list_item') {
-        if (dispatch) {
-          const pos = $from.before(d)
-          const checked = node.attrs.checked != null ? null : false
-          dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, checked }))
-        }
-        return true
-      }
-    }
-    // Not in a list — wrap in bullet list as fallback
-    const commands = ctx.get(commandsCtx)
-    const wrapped = commands.call(wrapInBulletListCommand.key)
-    if (wrapped) {
-      // Now set checked on the newly created list item
-      const view = ctx.get(editorViewCtx)
-      const newState = view.state
-      const { $from: $newFrom } = newState.selection
-      for (let d = $newFrom.depth; d > 0; d--) {
-        if ($newFrom.node(d).type.name === 'list_item') {
-          const pos = $newFrom.before(d)
-          view.dispatch(
-            newState.tr.setNodeMarkup(pos, undefined, { ...$newFrom.node(d).attrs, checked: false })
-          )
-          break
-        }
-      }
-    }
-    return wrapped
-  }
-})
-
-interface RichTextEditorProps {
-  value: string
-  onChange: (markdown: string) => void
-  onBlur?: () => void
-  placeholder?: string
-  className?: string
-  minHeight?: string
-  maxHeight?: string
-  testId?: string
-  autoFocus?: boolean
-  editorRef?: MutableRefObject<Editor | null>
-  onReady?: (editor: Editor) => void
-  /** Chrome preset. 'page' = Notion-like page (default). 'inline' = constrained sidebar chrome. */
-  variant?: 'page' | 'inline'
-  /** Y-axis density (text size, line height, vertical padding). */
-  readability?: 'compact' | 'normal'
-  /** X-axis width (column max-width, horizontal padding). */
-  width?: 'narrow' | 'wide'
-  fontFamily?: 'sans' | 'mono'
-  checkedHighlight?: boolean
-  showToolbar?: boolean
-  spellcheck?: boolean
-  themeColors?: EditorThemeColors
-  artifacts?: ArtifactPickerItem[]
-  onArtifactClick?: (artifactId: string) => void
-  /** In-editor search query. Non-empty values highlight matches. */
-  searchQuery?: string
-  /** Index of the active match (used to scroll into view and paint the active color). */
-  searchActiveIndex?: number
-  /** Treat the query as case-sensitive. */
-  searchMatchCase?: boolean
-  /** Treat the query as a regular expression. */
-  searchRegex?: boolean
-  /** Called when the number of matches changes. */
-  onSearchMatchCountChange?: (count: number) => void
-  /** Called when image files are pasted/dropped. Return inserted artifact refs in order. */
-  onUploadImages?: (files: File[]) => Promise<Array<{ id: string; title: string }>>
-  /** Enable YAML frontmatter parsing/rendering (`--- ... ---` blocks at top of doc). */
-  frontmatter?: boolean
-  /** Resolve relative `src`/`href` of inline HTML to absolute URLs (e.g. `slz-file://...`). */
-  htmlResolveSrc?: (src: string) => string
-  /** Click handler for inline HTML links + images. Receives the resolved href. */
-  htmlOnLinkClick?: (resolvedHref: string) => void
-  /** Cmd+S / Ctrl+S handler installed on the editor DOM. */
-  onSave?: () => void
-}
+export type { Editor } from '@milkdown/core'
+export { getEditorViewDOM } from './rich-text-editor.utils'
 
 export function RichTextEditor({
   value,
@@ -214,297 +46,53 @@ export function RichTextEditor({
   htmlOnLinkClick,
   onSave
 }: RichTextEditorProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const editorInstanceRef = useRef<Editor | null>(null)
-  const onChangeRef = useRef(onChange)
-  const onBlurRef = useRef(onBlur)
-  const onReadyRef = useRef(onReady)
-  const contentRef = useRef(value)
-  const suppressOnChange = useRef(false)
-  const [formatState, setFormatState] = useState<FormatState>(emptyFormatState)
-  const [editorReady, setEditorReady] = useState(false)
-  const [mentionState, setMentionState] = useState<ArtifactMentionState | null>(null)
-  const onArtifactClickRef = useRef(onArtifactClick)
-  const artifactsRef = useRef(artifacts)
-  const onSearchMatchCountChangeRef = useRef(onSearchMatchCountChange)
-  onSearchMatchCountChangeRef.current = onSearchMatchCountChange
-  const onUploadImagesRef = useRef(onUploadImages)
-  onUploadImagesRef.current = onUploadImages
-  const insertArtifactLinkRef = useRef<
-    | ((
-        view: import('@milkdown/prose/view').EditorView,
-        artifactId: string,
-        artifactTitle: string
-      ) => void)
-    | null
-  >(null)
-  onArtifactClickRef.current = onArtifactClick
-  artifactsRef.current = artifacts
+  const {
+    containerRef,
+    editorInstanceRef,
+    editorReady,
+    formatState,
+    mentionState,
+    setMentionState,
+    insertArtifactLinkRef,
+    artifactsRef
+  } = useEditorSetup({
+    value,
+    placeholder,
+    autoFocus,
+    frontmatter,
+    editorRef: externalEditorRef,
+    onChange,
+    onBlur,
+    onReady,
+    onSave,
+    htmlResolveSrc,
+    htmlOnLinkClick,
+    onArtifactClick,
+    artifacts,
+    onSearchMatchCountChange,
+    onUploadImages
+  })
 
-  const onSaveRef = useRef(onSave)
-  const htmlResolveSrcRef = useRef(htmlResolveSrc)
-  const htmlOnLinkClickRef = useRef(htmlOnLinkClick)
-  onSaveRef.current = onSave
-  htmlResolveSrcRef.current = htmlResolveSrc
-  htmlOnLinkClickRef.current = htmlOnLinkClick
+  const rootRef = useClickToFocus(editorInstanceRef, editorReady)
 
-  onChangeRef.current = onChange
-  onBlurRef.current = onBlur
-  onReadyRef.current = onReady
-
-  // Create editor
-  useEffect(() => {
-    if (!containerRef.current) return
-
-    let prevFormats = emptyFormatState
-    const formatStatePlugin = $prose(
-      () =>
-        new Plugin({
-          key: new PluginKey('formatState'),
-          view: () => ({
-            update: (view) => {
-              const next = readFormatState(view.state)
-              if (
-                next.bold !== prevFormats.bold ||
-                next.italic !== prevFormats.italic ||
-                next.bulletList !== prevFormats.bulletList ||
-                next.orderedList !== prevFormats.orderedList ||
-                next.taskList !== prevFormats.taskList
-              ) {
-                prevFormats = next
-                setFormatState(next)
-              }
-            }
-          })
-        })
-    )
-
-    const blurHandlerPlugin = $prose(
-      () =>
-        new Plugin({
-          key: new PluginKey('blurHandler'),
-          props: {
-            handleDOMEvents: {
-              blur: () => {
-                onBlurRef.current?.()
-                return false
-              }
-            }
-          }
-        })
-    )
-
-    const placeholderPlugin = createPlaceholderPlugin(placeholder)
-
-    // Artifact link plugins (only when artifacts prop is provided)
-    const artifactPlugins = createArtifactLinkPlugin(
-      (artifactId) => onArtifactClickRef.current?.(artifactId),
-      (state) => setMentionState(state)
-    )
-    insertArtifactLinkRef.current = artifactPlugins.insertArtifactLink
-
-    const searchPlugin = createSearchHighlightPlugin({
-      onMatchCountChange: (n) => onSearchMatchCountChangeRef.current?.(n)
-    })
-
-    const imagePastePlugin = $prose(
-      () =>
-        new Plugin({
-          key: new PluginKey('imagePasteDrop'),
-          props: {
-            handlePaste: (view, event) => {
-              const upload = onUploadImagesRef.current
-              if (!upload) return false
-              const files = extractImageFilesFromDataTransfer(event.clipboardData)
-              if (files.length === 0) return false
-              event.preventDefault()
-              void upload(files).then((results) => {
-                for (const r of results) insertArtifactLinkAtCursor(view, r.id, r.title)
-              })
-              return true
-            },
-            handleDrop: (view, event) => {
-              const upload = onUploadImagesRef.current
-              if (!upload) return false
-              const files = extractImageFilesFromDataTransfer(event.dataTransfer)
-              if (files.length === 0) return false
-              event.preventDefault()
-              void upload(files).then((results) => {
-                for (const r of results) insertArtifactLinkAtCursor(view, r.id, r.title)
-              })
-              return true
-            }
-          }
-        })
-    )
-
-    const htmlOpts =
-      htmlResolveSrcRef.current || htmlOnLinkClickRef.current
-        ? {
-            ...(htmlResolveSrcRef.current
-              ? { resolveSrc: (src: string) => htmlResolveSrcRef.current!(src) }
-              : {}),
-            ...(htmlOnLinkClickRef.current
-              ? { onLinkClick: (href: string) => htmlOnLinkClickRef.current!(href) }
-              : {})
-          }
-        : undefined
-
-    let editor = Editor.make()
-      .config((ctx) => {
-        ctx.set(rootCtx, containerRef.current!)
-        ctx.set(defaultValueCtx, contentRef.current)
-      })
-      .config((ctx) => {
-        ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, prevMarkdown) => {
-          if (suppressOnChange.current) return
-          if (markdown === prevMarkdown) return
-          contentRef.current = markdown
-          onChangeRef.current(markdown)
-        })
-      })
-      .use(commonmark)
-      .use(gfm)
-      .use(htmlRenderPlugin(htmlOpts))
-      .use(history)
-      .use(indent)
-      .use(listener)
-      .use(placeholderPlugin)
-      .use(listItemMovePlugin)
-      .use(escapeBlurPlugin)
-      .use(taskListPlugin)
-      .use(mermaidRenderPlugin)
-      .use(toggleTaskListCommand)
-      .use(formatStatePlugin)
-      .use(blurHandlerPlugin)
-      .use(artifactPlugins.artifactLinkDecoPlugin)
-      .use(artifactPlugins.artifactMentionPlugin)
-      .use(searchPlugin)
-      .use(imagePastePlugin)
-
-    if (frontmatter) {
-      editor = editor.use(remarkFrontmatterPlugin).use(frontmatterSchema).use(frontmatterView)
-    }
-
-    let saveKeydownTeardown: (() => void) | null = null
-
-    editor
-      .create()
-      .then((e) => {
-        editorInstanceRef.current = e
-        if (externalEditorRef) externalEditorRef.current = e
-
-        setEditorReady(true)
-
-        if (autoFocus) {
-          const view = e.ctx.get(editorViewCtx)
-          view.focus()
-        }
-
-        // Cmd+S / Ctrl+S — install on editor DOM only when host opts in
-        if (onSaveRef.current) {
-          const view = e.ctx.get(editorViewCtx)
-          const handler = (event: KeyboardEvent) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === 's') {
-              event.preventDefault()
-              onSaveRef.current?.()
-            }
-          }
-          view.dom.addEventListener('keydown', handler)
-          saveKeydownTeardown = () => view.dom.removeEventListener('keydown', handler)
-        }
-
-        onReadyRef.current?.(e)
-      })
-      .catch((err) => {
-        console.error('[RichTextEditor] Failed to create editor:', err)
-      })
-
-    return () => {
-      saveKeydownTeardown?.()
-      editor.destroy().catch(() => {})
-      editorInstanceRef.current = null
-      if (externalEditorRef) externalEditorRef.current = null
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Click anywhere within .mk-doc → focus editor + place caret near click coords.
-  // Skips clicks on text descendants of .ProseMirror (PM handles natively) and on buttons.
-  // Capture phase + native listener bypasses any React delegation timing or PM stopPropagation.
-  useEffect(() => {
-    const node = rootRef.current
-    if (!node || !editorReady) return
-    const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      const pm = target.closest('.ProseMirror')
-      if (pm && pm !== target) return
-      if (target.closest('button, [role="button"]')) return
-      if (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return
-      const editor = editorInstanceRef.current
-      if (!editor) return
-      e.preventDefault()
-      try {
-        const view = editor.ctx.get(editorViewCtx)
-        const result = view.posAtCoords({ left: e.clientX, top: e.clientY })
-        const selection = result
-          ? TextSelection.near(view.state.doc.resolve(result.pos))
-          : TextSelection.atEnd(view.state.doc)
-        view.dispatch(view.state.tr.setSelection(selection))
-        view.focus()
-      } catch {
-        /* editor not ready */
-      }
-    }
-    node.addEventListener('mousedown', handler, true)
-    return () => node.removeEventListener('mousedown', handler, true)
-  }, [editorReady])
-
-  // Sync external value changes
-  useEffect(() => {
-    const editor = editorInstanceRef.current
-    if (!editor || contentRef.current === value) return
-    contentRef.current = value
-    suppressOnChange.current = true
-    try {
-      editor.action(replaceAll(value, true))
-    } catch {
-      // Editor may not be ready yet
-    }
-    suppressOnChange.current = false
-  }, [value])
-
-  // Push search state into the editor's search plugin
-  useEffect(() => {
-    const editor = editorInstanceRef.current
-    if (!editor || !editorReady) return
-    try {
-      const view = editor.ctx.get(editorViewCtx)
-      setMilkdownSearch(view, searchQuery, searchActiveIndex, searchMatchCase, searchRegex)
-    } catch {
-      /* editor not ready */
-    }
-  }, [searchQuery, searchActiveIndex, searchMatchCase, searchRegex, editorReady])
+  useEditorSearch(
+    editorInstanceRef,
+    editorReady,
+    searchQuery,
+    searchActiveIndex,
+    searchMatchCase,
+    searchRegex
+  )
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleCommand = useCallback((cmdKey: any) => {
-    editorInstanceRef.current?.action(callCommand(cmdKey))
-  }, [])
+  const handleCommand = useCallback(
+    (cmdKey: any) => {
+      editorInstanceRef.current?.action(callCommand(cmdKey))
+    },
+    [editorInstanceRef]
+  )
 
-  const themeStyle = themeColors
-    ? ({
-        '--mk-bg': themeColors.background,
-        '--mk-fg': themeColors.foreground,
-        '--mk-heading': themeColors.heading,
-        '--mk-link': themeColors.link,
-        '--mk-code-fg': themeColors.keyword,
-        '--mk-code-bg': themeColors.selection,
-        '--mk-quote-border': themeColors.comment,
-        '--mk-hr-color': themeColors.comment,
-        minHeight,
-        maxHeight
-      } as CSSProperties)
-    : { minHeight, maxHeight }
+  const themeStyle = buildEditorThemeStyle(themeColors, minHeight, maxHeight)
 
   return (
     <div
@@ -543,121 +131,5 @@ export function RichTextEditor({
           />
         )}
     </div>
-  )
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function EditorToolbar({
-  formatState,
-  onCommand
-}: {
-  formatState: FormatState
-  onCommand: (cmd: any) => void
-}) {
-  return (
-    <div className="flex items-center gap-0.5 border-b border-border/50 px-1 py-1 shrink-0">
-      <ToolbarButton
-        active={formatState.bold}
-        onClick={() => onCommand(toggleStrongCommand.key)}
-        aria-label="Bold"
-        title="Bold"
-      >
-        B
-      </ToolbarButton>
-      <ToolbarButton
-        active={formatState.italic}
-        onClick={() => onCommand(toggleEmphasisCommand.key)}
-        aria-label="Italic"
-        title="Italic"
-      >
-        <span className="italic">I</span>
-      </ToolbarButton>
-      <div className="mx-1 h-4 w-px bg-border/50" />
-      <ToolbarButton
-        active={formatState.bulletList}
-        onClick={() => onCommand(wrapInBulletListCommand.key)}
-        aria-label="Bullet list"
-        title="Bullet list"
-      >
-        <svg className="size-3.5" viewBox="0 0 16 16" fill="currentColor">
-          <circle cx="3" cy="4" r="1.5" />
-          <circle cx="3" cy="8" r="1.5" />
-          <circle cx="3" cy="12" r="1.5" />
-          <rect x="6" y="3" width="9" height="2" rx="0.5" />
-          <rect x="6" y="7" width="9" height="2" rx="0.5" />
-          <rect x="6" y="11" width="9" height="2" rx="0.5" />
-        </svg>
-      </ToolbarButton>
-      <ToolbarButton
-        active={formatState.orderedList}
-        onClick={() => onCommand(wrapInOrderedListCommand.key)}
-        aria-label="Ordered list"
-        title="Ordered list"
-      >
-        <svg className="size-3.5" viewBox="0 0 16 16" fill="currentColor">
-          <text x="1" y="5.5" fontSize="5" fontFamily="sans-serif">
-            1
-          </text>
-          <text x="1" y="9.5" fontSize="5" fontFamily="sans-serif">
-            2
-          </text>
-          <text x="1" y="13.5" fontSize="5" fontFamily="sans-serif">
-            3
-          </text>
-          <rect x="6" y="3" width="9" height="2" rx="0.5" />
-          <rect x="6" y="7" width="9" height="2" rx="0.5" />
-          <rect x="6" y="11" width="9" height="2" rx="0.5" />
-        </svg>
-      </ToolbarButton>
-      <ToolbarButton
-        active={formatState.taskList}
-        onClick={() => onCommand(toggleTaskListCommand.key)}
-        aria-label="Checkbox list"
-        title="Checkbox list"
-      >
-        <svg
-          className="size-3.5"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-        >
-          <rect x="1" y="2" width="4" height="4" rx="0.75" />
-          <rect x="1" y="6" width="4" height="4" rx="0.75" />
-          <rect x="1" y="10" width="4" height="4" rx="0.75" />
-          <path d="M2 8.5 3 9.5 4.5 7.5" strokeLinecap="round" strokeLinejoin="round" />
-          <line x1="7" y1="4" x2="15" y2="4" />
-          <line x1="7" y1="8" x2="15" y2="8" />
-          <line x1="7" y1="12" x2="15" y2="12" />
-        </svg>
-      </ToolbarButton>
-    </div>
-  )
-}
-
-function ToolbarButton({
-  active,
-  onClick,
-  children,
-  ...props
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-} & ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex items-center justify-center size-7 rounded text-xs font-semibold transition-colors',
-        active
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-      )}
-      {...props}
-    >
-      {children}
-    </button>
   )
 }
