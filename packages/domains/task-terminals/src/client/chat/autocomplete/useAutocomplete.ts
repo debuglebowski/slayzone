@@ -84,7 +84,9 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
 
   // Fetch items per source once (cwd-scoped). Sources are stable refs.
   const cwdRef = useRef(fetchCtx.cwd)
-  cwdRef.current = fetchCtx.cwd
+  useEffect(() => {
+    cwdRef.current = fetchCtx.cwd
+  })
   useEffect(() => {
     let cancelled = false
     void Promise.all(

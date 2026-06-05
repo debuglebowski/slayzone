@@ -34,7 +34,9 @@ const INITIAL_STATE: BrowserViewState = {
 export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
   const [state, setState] = useState<BrowserViewState>(INITIAL_STATE)
   const viewIdRef = useRef(viewId)
-  viewIdRef.current = viewId
+  useEffect(() => {
+    viewIdRef.current = viewId
+  })
 
   useEffect(() => {
     if (!viewId) {

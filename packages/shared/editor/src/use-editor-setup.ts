@@ -96,25 +96,45 @@ export function useEditorSetup({
   const [editorReady, setEditorReady] = useState(false)
   const [mentionState, setMentionState] = useState<ArtifactMentionState | null>(null)
   const onArtifactClickRef = useRef(onArtifactClick)
+  useEffect(() => {
+    onArtifactClickRef.current = onArtifactClick
+  })
   const artifactsRef = useRef(artifacts)
+  useEffect(() => {
+    artifactsRef.current = artifacts
+  })
   const onSearchMatchCountChangeRef = useRef(onSearchMatchCountChange)
-  onSearchMatchCountChangeRef.current = onSearchMatchCountChange
+  useEffect(() => {
+    onSearchMatchCountChangeRef.current = onSearchMatchCountChange
+  })
   const onUploadImagesRef = useRef(onUploadImages)
-  onUploadImagesRef.current = onUploadImages
+  useEffect(() => {
+    onUploadImagesRef.current = onUploadImages
+  })
   const insertArtifactLinkRef = useRef<InsertArtifactLink | null>(null)
-  onArtifactClickRef.current = onArtifactClick
-  artifactsRef.current = artifacts
 
   const onSaveRef = useRef(onSave)
+  useEffect(() => {
+    onSaveRef.current = onSave
+  })
   const htmlResolveSrcRef = useRef(htmlResolveSrc)
+  useEffect(() => {
+    htmlResolveSrcRef.current = htmlResolveSrc
+  })
   const htmlOnLinkClickRef = useRef(htmlOnLinkClick)
-  onSaveRef.current = onSave
-  htmlResolveSrcRef.current = htmlResolveSrc
-  htmlOnLinkClickRef.current = htmlOnLinkClick
+  useEffect(() => {
+    htmlOnLinkClickRef.current = htmlOnLinkClick
+  })
 
-  onChangeRef.current = onChange
-  onBlurRef.current = onBlur
-  onReadyRef.current = onReady
+  useEffect(() => {
+    onChangeRef.current = onChange
+  })
+  useEffect(() => {
+    onBlurRef.current = onBlur
+  })
+  useEffect(() => {
+    onReadyRef.current = onReady
+  })
 
   // Create editor
   useEffect(() => {

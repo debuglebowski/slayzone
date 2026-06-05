@@ -38,7 +38,9 @@ export function useChatQueue(
   }, [tabId, refetch])
 
   const onDrainedRef = useRef(onDrained)
-  onDrainedRef.current = onDrained
+  useEffect(() => {
+    onDrainedRef.current = onDrained
+  })
   useEffect(() => {
     const off = window.api.chatQueue.onDrained((drainedTabId, original) => {
       if (drainedTabId === tabId) onDrainedRef.current?.(original)

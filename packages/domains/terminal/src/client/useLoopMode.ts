@@ -25,7 +25,9 @@ export function useLoopMode({ sessionId, onConfigChange }: UseLoopModeOptions) {
 
   const controllerRef = useRef<ReturnType<typeof makeLoopController<number>> | null>(null)
   const onConfigChangeRef = useRef(onConfigChange)
-  onConfigChangeRef.current = onConfigChange
+  useEffect(() => {
+    onConfigChangeRef.current = onConfigChange
+  })
 
   useEffect(() => {
     if (!sessionId) return

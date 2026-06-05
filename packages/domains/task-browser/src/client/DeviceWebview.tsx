@@ -179,7 +179,9 @@ export function DeviceWebview({
   const leftOffset = containerSize ? Math.max(0, (containerSize.width - scaledWidth) / 2) : 0
 
   const onLayoutRef = useRef(onLayout)
-  onLayoutRef.current = onLayout
+  useEffect(() => {
+    onLayoutRef.current = onLayout
+  })
   const containerW = containerSize?.width ?? 0
   useEffect(() => {
     if (containerW) onLayoutRef.current?.({ topOffset, scaledHeight, width: containerW })

@@ -15,7 +15,9 @@ export function LoadingScreen({ onDone }: { onDone?: () => void }): React.JSX.El
   const [version, setVersion] = useState('')
   const [text, setText] = useState('')
   const onDoneRef = useRef(onDone)
-  onDoneRef.current = onDone
+  useEffect(() => {
+    onDoneRef.current = onDone
+  })
 
   useEffect(() => {
     window.api.app.getVersion().then(setVersion)

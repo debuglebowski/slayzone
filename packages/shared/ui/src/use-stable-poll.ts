@@ -42,7 +42,9 @@ export function useStablePoll<T = unknown>(
   const maxDelay = options.maxDelayMs ?? 60_000
 
   const fetchRef = useRef(fetchFn)
-  fetchRef.current = fetchFn
+  useEffect(() => {
+    fetchRef.current = fetchFn
+  })
   const refetchRef = useRef<() => void>(() => {})
 
   useEffect(() => {

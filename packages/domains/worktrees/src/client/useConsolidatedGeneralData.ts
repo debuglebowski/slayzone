@@ -121,7 +121,9 @@ export function useConsolidatedGeneralData(
     pendingSourceBranch: null
   })
   const copyFilesDialogRef = useRef(copyFilesDialog)
-  copyFilesDialogRef.current = copyFilesDialog
+  useEffect(() => {
+    copyFilesDialogRef.current = copyFilesDialog
+  })
 
   // Branch state
   const [forkPoint, setForkPoint] = useState<string | null>(null)

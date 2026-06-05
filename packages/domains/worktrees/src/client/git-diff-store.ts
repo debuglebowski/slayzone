@@ -25,7 +25,7 @@
  *   unsubscribe state inside a single React primitive — no effect-ordering
  *   races with getSnapshot returning stale EMPTY_STATE.
  */
-import { useMemo, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { GitDiffSnapshot } from '../shared/types'
 
 export type GitDiffContextLines = '0' | '3' | '5' | 'all'
@@ -529,7 +529,9 @@ export function useGitDiffSnapshot(
   // Stable refresh — reads current key from a ref so identity doesn't change
   // per render (downstream useImperativeHandle depends on stable refresh).
   const keyRef = useRef(key)
-  keyRef.current = key
+  useEffect(() => {
+    keyRef.current = key
+  })
   const refreshRef = useRef<() => void>(() => {
     const k = keyRef.current
     if (!k) return

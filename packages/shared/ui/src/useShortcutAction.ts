@@ -27,7 +27,9 @@ export function useShortcutAction(
   options?: Options
 ): void {
   const handlerRef = useRef(handler)
-  handlerRef.current = handler
+  useEffect(() => {
+    handlerRef.current = handler
+  })
 
   const enabled = options?.enabled ?? true
 

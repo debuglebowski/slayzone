@@ -91,7 +91,9 @@ export function useBrowserView(opts: UseBrowserViewOpts) {
 
   // Handle web-panel:popup-request events
   const onPopupRouteRef = useRef(onPopupRoute)
-  onPopupRouteRef.current = onPopupRoute
+  useEffect(() => {
+    onPopupRouteRef.current = onPopupRoute
+  })
   useEffect(() => {
     if (!viewId || !onPopupRouteRef.current) return
     const unsub = window.api.browser.onEvent((event) => {

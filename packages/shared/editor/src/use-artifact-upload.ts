@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 export interface ArtifactRef {
   id: string
@@ -54,9 +54,13 @@ export function useArtifactUpload(
   options?: UseArtifactUploadOptions
 ): UseArtifactUploadReturn {
   const taskIdRef = useRef(taskId)
-  taskIdRef.current = taskId
+  useEffect(() => {
+    taskIdRef.current = taskId
+  })
   const folderNameRef = useRef(options?.folderName)
-  folderNameRef.current = options?.folderName
+  useEffect(() => {
+    folderNameRef.current = options?.folderName
+  })
 
   const uploadFiles = useCallback(async (files: File[]): Promise<ArtifactRef[]> => {
     const tid = taskIdRef.current

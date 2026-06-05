@@ -43,9 +43,15 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   const originalContentRef = useRef(originalContent)
   const dirty = content !== originalContent
   const dirtyRef = useRef(dirty)
-  contentRef.current = content
-  originalContentRef.current = originalContent
-  dirtyRef.current = dirty
+  useEffect(() => {
+    contentRef.current = content
+  })
+  useEffect(() => {
+    originalContentRef.current = originalContent
+  })
+  useEffect(() => {
+    dirtyRef.current = dirty
+  })
 
   // Track in-flight save to dedupe strict-mode double cleanup
   const savingRef = useRef<string | null>(null)
@@ -53,8 +59,12 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   // Stable refs for callbacks so effects can depend on [projectPath, relPath] only
   const readRef = useRef(read)
   const saveRef = useRef(save)
-  readRef.current = read
-  saveRef.current = save
+  useEffect(() => {
+    readRef.current = read
+  })
+  useEffect(() => {
+    saveRef.current = save
+  })
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -79,7 +89,9 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
 
   // Track whether the hook currently has a target — flushNow/onBlur no-op when null.
   const hasTargetRef = useRef(false)
-  hasTargetRef.current = !!projectPath && !!relPath
+  useEffect(() => {
+    hasTargetRef.current = !!projectPath && !!relPath
+  })
 
   const flushNow = useCallback(async (): Promise<void> => {
     if (debounceTimer.current) {
@@ -166,7 +178,9 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   // File watcher: dirty-aware disk-change handling. Keyed on projectPath only
   // to avoid re-subscribing on every relPath swap — relPath compared via ref.
   const relPathRef = useRef(relPath)
-  relPathRef.current = relPath
+  useEffect(() => {
+    relPathRef.current = relPath
+  })
 
   useEffect(() => {
     if (!projectPath) return
