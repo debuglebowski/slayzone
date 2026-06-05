@@ -16,7 +16,6 @@ import {
   Plus,
   X,
   Info,
-  Check,
   CheckCircle2,
   XCircle,
   Stethoscope,
