@@ -1736,7 +1736,13 @@ app
             feedbackGetMessages: feedbackOps.getMessages,
             feedbackAddMessage: feedbackOps.addMessage,
             feedbackUpdateThreadDiscordId: feedbackOps.updateThreadDiscordId,
-            feedbackDeleteThread: feedbackOps.deleteThread
+            feedbackDeleteThread: feedbackOps.deleteThread,
+            appGetVersion: () => app.getVersion(),
+            appGetTrpcPort: () => awaitTrpcPort(),
+            appIsTestsPanelEnabled: () => isLabEnabled('labs_tests_panel'),
+            appIsLoopModeEnabled: () => isLabEnabled('labs_loop_mode'),
+            appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
+            appGetProtocolClientStatus: () => protocolClientStatus
           })
           // Process-manager lifecycle ops + the dual-emit event stream for the
           // processes router. Same module-singleton ops/emitter the IPC handlers

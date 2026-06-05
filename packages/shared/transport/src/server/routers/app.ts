@@ -146,5 +146,17 @@ export const appLevelRouter = router({
     deleteThread: publicProcedure
       .input(z.object({ threadId: z.string() }))
       .mutation(({ input }) => getAppDeps().feedbackDeleteThread(input.threadId))
+  }),
+
+  // App metadata
+  meta: router({
+    getVersion: publicProcedure.query(() => getAppDeps().appGetVersion()),
+    getTrpcPort: publicProcedure.query(() => getAppDeps().appGetTrpcPort()),
+    isTestsPanelEnabled: publicProcedure.query(() => getAppDeps().appIsTestsPanelEnabled()),
+    isLoopModeEnabled: publicProcedure.query(() => getAppDeps().appIsLoopModeEnabled()),
+    getZoomFactor: publicProcedure.query(() => getAppDeps().appGetZoomFactor()),
+    getProtocolClientStatus: publicProcedure.query(() =>
+      getAppDeps().appGetProtocolClientStatus()
+    )
   })
 })

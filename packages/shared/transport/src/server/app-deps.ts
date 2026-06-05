@@ -229,6 +229,19 @@ export type AppDeps = {
   }) => Promise<void>
   feedbackUpdateThreadDiscordId: (threadId: string, discordThreadId: string) => Promise<void>
   feedbackDeleteThread: (threadId: string) => Promise<void>
+
+  // app metadata (read-only)
+  appGetVersion: () => string
+  appGetTrpcPort: () => Promise<number>
+  appIsTestsPanelEnabled: () => boolean
+  appIsLoopModeEnabled: () => boolean
+  appGetZoomFactor: () => number
+  appGetProtocolClientStatus: () => {
+    scheme: string
+    attempted: boolean
+    registered: boolean
+    reason: 'registered' | 'dev-skipped' | 'registration-failed'
+  }
 }
 
 let appDeps: AppDeps | null = null
