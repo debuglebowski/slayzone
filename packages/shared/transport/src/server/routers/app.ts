@@ -97,5 +97,32 @@ export const appLevelRouter = router({
     test: publicProcedure
       .input(anyInput)
       .mutation(({ input }) => getAppDeps().usageTest(input as never))
+  }),
+
+  // Files
+  files: router({
+    pathExists: publicProcedure
+      .input(z.object({ filePath: z.string() }))
+      .query(({ input }) => getAppDeps().filesPathExists(input.filePath)),
+    saveTempImage: publicProcedure
+      .input(z.object({ base64: z.string(), mimeType: z.string() }))
+      .mutation(({ input }) => getAppDeps().filesSaveTempImage(input.base64, input.mimeType))
+  }),
+
+  // Shell
+  shell: router({
+    openExternal: publicProcedure.input(anyInput).mutation(({ input }) => {
+      const i = input as {
+        url: string
+        options?: {
+          blockDesktopHandoff?: boolean
+          desktopHandoff?: { protocol?: string; hostScope?: string }
+        }
+      }
+      return getAppDeps().shellOpenExternal(i.url, i.options)
+    }),
+    openPath: publicProcedure
+      .input(z.object({ absPath: z.string() }))
+      .mutation(({ input }) => getAppDeps().shellOpenPath(input.absPath))
   })
 })

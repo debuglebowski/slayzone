@@ -38,8 +38,6 @@ import { BrowserViewManager, type CreateViewOpts, type ViewBounds } from './brow
 import { attachRendererCsp } from './renderer-csp'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
-  inferHostScopeFromUrl,
-  inferProtocolFromUrl,
   isBlockedExternalProtocolUrl,
   isEncodedDesktopHandoffUrl,
   isLoopbackHost,
@@ -200,6 +198,8 @@ import {
   registerTaskHandlers,
   registerTaskTemplateHandlers,
   registerFilesHandlers,
+  pathExists,
+  saveTempImage,
   closeArtifactWatcher,
   handleAttentionTransition,
   taskOps
@@ -330,6 +330,7 @@ import { createStatsPoller } from './pid-stats'
 import { registerExportImportHandlers, buildExportImportOps } from './export-import'
 import { notifyEvents } from './notify-renderer'
 import { registerLeaderboardHandlers, getLocalLeaderboardStats } from './leaderboard'
+import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
 import { WEBVIEW_DESKTOP_HANDOFF_SCRIPT } from '../shared/webview-desktop-handoff-script'
 
@@ -1717,7 +1718,17 @@ app
             testImportFromPath: exportImportOps.testImportFromPath,
             testSetTaskParent: exportImportOps.testSetTaskParent,
             usageFetch: usageOps.fetch,
-            usageTest: usageOps.test
+            usageTest: usageOps.test,
+            filesPathExists: pathExists,
+            filesSaveTempImage: saveTempImage,
+            shellOpenExternal: (url, options) =>
+              shellOpenExternal(
+                url,
+                options as
+                  | { blockDesktopHandoff?: boolean; desktopHandoff?: DesktopHandoffPolicy }
+                  | undefined
+              ),
+            shellOpenPath
           })
           mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
@@ -2139,7 +2150,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // IPC test
     ipcMain.on('ping', () => console.log('pong'))
 
-    // Shell: open external URLs (restrict to safe schemes)
+    // Shell: open external URLs (restrict to safe schemes) — logic lives in
+    // ./shell-open, shared with the tRPC app.shell router (coexistence til slice 5)
     ipcMain.handle(
       'shell:open-external',
       (
@@ -2149,40 +2161,10 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           blockDesktopHandoff?: boolean
           desktopHandoff?: DesktopHandoffPolicy
         }
-      ) => {
-        if (!/^https?:\/\//i.test(url) && !url.startsWith('mailto:')) {
-          throw new Error('Only http, https, and mailto URLs are allowed')
-        }
-        const desktopHandoffPolicy =
-          options?.desktopHandoff ??
-          (() => {
-            if (!options?.blockDesktopHandoff) return null
-            const protocol = normalizeDesktopProtocol(inferProtocolFromUrl(url))
-            if (!protocol) return null
-            const hostScope = normalizeDesktopHostScope(inferHostScopeFromUrl(url))
-            return hostScope ? { protocol, hostScope } : { protocol }
-          })()
-        const shouldBlockLoopbackDesktopHandoff =
-          desktopHandoffPolicy !== null &&
-          isLoopbackUrl(url) &&
-          !isLoopbackHost(normalizeDesktopHostScope(desktopHandoffPolicy.hostScope))
-        if (
-          desktopHandoffPolicy &&
-          (isEncodedDesktopHandoffUrl(url, desktopHandoffPolicy) ||
-            shouldBlockLoopbackDesktopHandoff)
-        ) {
-          throw new Error('Blocked external app handoff URL')
-        }
-        shell.openExternal(url)
-      }
+      ) => shellOpenExternal(url, options)
     )
 
-    ipcMain.handle('shell:open-path', async (_event, absPath: string): Promise<string> => {
-      if (typeof absPath !== 'string' || !absPath.startsWith('/')) {
-        throw new Error('absolute path required')
-      }
-      return shell.openPath(absPath)
-    })
+    ipcMain.handle('shell:open-path', (_event, absPath: string) => shellOpenPath(absPath))
 
     ipcMain.handle(
       'auth:github-system-sign-in',

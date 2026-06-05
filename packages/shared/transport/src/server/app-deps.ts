@@ -189,6 +189,23 @@ export type AppDeps = {
   usageTest: (
     config: UsageProviderConfig
   ) => Promise<{ ok: boolean; windows?: UsageWindow[]; error?: string }>
+
+  // files
+  filesPathExists: (filePath: string) => Promise<boolean>
+  filesSaveTempImage: (
+    base64: string,
+    mimeType: string
+  ) => Promise<{ success: boolean; path?: string; error?: string }>
+
+  // shell
+  shellOpenExternal: (
+    url: string,
+    options?: {
+      blockDesktopHandoff?: boolean
+      desktopHandoff?: { protocol?: string; hostScope?: string }
+    }
+  ) => void
+  shellOpenPath: (absPath: string) => Promise<string>
 }
 
 let appDeps: AppDeps | null = null
