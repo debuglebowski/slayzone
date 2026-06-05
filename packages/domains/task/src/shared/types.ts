@@ -40,7 +40,31 @@ export interface ProviderConfig {
     // terminal status). Used by the revive path to decide whether to resume the
     // prior conversation (hot) or start a fresh one (cold — see COLD_RESPAWN_MS).
     lastPtyKilledAt?: number | null
+    // Most-recent-last list of CONFIRMED conversation ids (each was reported by the
+    // agent's real SessionStart hook, so it provably existed on disk). Lets a task
+    // self-heal to a prior real conversation if its current `conversationId` ever
+    // goes missing, WITHOUT guessing — these ids are known to belong to this task.
+    // Appended by the SessionStart persist path; capped at CONVERSATION_HISTORY_CAP.
+    // See plans/conv-id-robustness-v2.md.
+    conversationHistory?: string[]
   }
+}
+
+/** Max confirmed conversation ids retained per mode for the self-heal fallback. */
+export const CONVERSATION_HISTORY_CAP = 10
+
+/** Append a CONFIRMED conversation id to the per-mode history (most-recent last),
+ *  deduped (an existing id moves to the end) and capped at CONVERSATION_HISTORY_CAP.
+ *  Returns a new ProviderConfig; preserves all other fields of the mode entry.
+ *  Caller must pass a non-empty id (a real SessionStart session_id). */
+export function appendProviderConversationId(
+  cfg: ProviderConfig | undefined | null,
+  mode: string,
+  id: string
+): ProviderConfig {
+  const prev = cfg?.[mode]?.conversationHistory ?? []
+  const next = [...prev.filter((x) => x !== id), id].slice(-CONVERSATION_HISTORY_CAP)
+  return { ...cfg, [mode]: { ...cfg?.[mode], conversationHistory: next } }
 }
 
 export function getProviderConversationId(
@@ -83,6 +107,18 @@ export function setProviderLastKilledAt(
   val: number | null
 ): ProviderConfig {
   return { ...cfg, [mode]: { ...cfg?.[mode], lastPtyKilledAt: val } }
+}
+
+/** Parse a SQLite `datetime('now')` string ('YYYY-MM-DD HH:MM:SS', UTC, no `Z`)
+ *  to epoch-ms. `new Date('YYYY-MM-DD HH:MM:SS')` parses as LOCAL time, so a naive
+ *  compare against ISO-8601-`Z` transcript timestamps is off by the host's UTC
+ *  offset — the bug this avoids. Returns NaN for unparseable input. */
+export function parseSqliteUtc(s: string | null | undefined): number {
+  if (!s) return NaN
+  // Already ISO with an explicit zone? Trust it. Otherwise treat space-separated
+  // SQLite form as UTC by normalizing to 'YYYY-MM-DDTHH:MM:SSZ'.
+  const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(' ', 'T') + 'Z'
+  return Date.parse(iso)
 }
 
 /** Threshold past which a revive should start a fresh AI conversation rather than

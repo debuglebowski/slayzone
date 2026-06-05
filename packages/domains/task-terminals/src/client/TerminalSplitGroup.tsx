@@ -34,7 +34,6 @@ interface PaneProps {
   permissionNotice?: string | null
   /** Owning task is temporary — gates auto-start off (regular-task-only). */
   isTemporary?: boolean
-  onConversationCreated?: (conversationId: string) => void
   onStartFresh?: () => void
   onReady?: (api: {
     sendInput: (text: string) => Promise<void>
@@ -201,7 +200,6 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           executionContext={pane.executionContext}
           isActive={isActive}
           onAttached={onAttached}
-          onConversationCreated={pane.onConversationCreated}
           onStartFresh={pane.onStartFresh}
           onReady={pane.onReady}
           onFirstInput={pane.onFirstInput}

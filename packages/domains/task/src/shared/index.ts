@@ -1,4 +1,5 @@
 export * from './types'
+export * from './conversation-heal'
 export * from './schemas'
 export * from './handoff'
 export * from './panel-config'

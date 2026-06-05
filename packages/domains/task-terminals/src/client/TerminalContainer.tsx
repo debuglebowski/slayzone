@@ -41,7 +41,6 @@ interface TerminalContainerProps {
   /** Owns keyboard shortcuts (Cmd+D, Cmd+T). Defaults to `isActive`. In explode mode, only the focused cell has this true. */
   hasShortcutFocus?: boolean
   focusRequestId?: number
-  onConversationCreated?: (conversationId: string) => void
   onStartFresh?: () => void
   onReady?: (api: {
     sendInput: (text: string) => Promise<void>
@@ -78,7 +77,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       isActive = true,
       hasShortcutFocus,
       focusRequestId = 0,
-      onConversationCreated,
       onStartFresh,
       onReady,
       onFirstInput,
@@ -215,14 +213,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       window.addEventListener('keydown', handleKeyDown)
       return () => window.removeEventListener('keydown', handleKeyDown)
     }, [shortcutActive, activeGroup, createTab, splitTab, getSessionId])
-
-    // Handle conversation created - only for main tab
-    const handleConversationCreated = useCallback(
-      (convId: string) => {
-        onConversationCreated?.(convId)
-      },
-      [onConversationCreated]
-    )
 
     // Split the active group — add a new pane
     const handleSplitGroup = useCallback(
@@ -381,7 +371,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           providerFlags: tab.isMain ? providerFlags : undefined,
           executionContext,
           isTemporary,
-          onConversationCreated: tab.isMain ? handleConversationCreated : undefined,
           onStartFresh: tab.isMain ? onStartFresh : undefined,
           onReady: tab.isMain ? handleTerminalReady : undefined,
           onFirstInput: tab.isMain ? onFirstInput : undefined,
@@ -417,7 +406,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       providerFlags,
       executionContext,
       isTemporary,
-      handleConversationCreated,
       onStartFresh,
       handleTerminalReady,
       onFirstInput,

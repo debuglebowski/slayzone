@@ -302,6 +302,7 @@ import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automati
 import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/main'
 import { registerScreenshotHandlers } from './screenshot'
 import { registerClipboardHandlers } from './clipboard-handlers'
+import { registerConversationHealer } from './conversation-healer'
 import {
   setProcessManagerWindow,
   initProcessManager,
@@ -1463,6 +1464,12 @@ app
     const notifyTasksChanged = (): void => {
       mainWindow?.webContents.send('tasks:changed')
     }
+
+    // Self-heal a stale/phantom Claude conversation id before a resume builds
+    // `--resume` — repoints to the task's real conversation (recorded history, or a
+    // near-certain orphan transcript) so a healthy session never shows a false
+    // "session expired". See plans/conv-id-robustness-v2.md.
+    registerConversationHealer(db, notifyTasksChanged)
     registerProjectHandlers(ipcMain, db)
     registerTaskHandlers(ipcMain, db, notifyTasksChanged, ensureDataRoot())
     registerTaskTemplateHandlers(ipcMain, db)

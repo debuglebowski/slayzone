@@ -12,7 +12,7 @@ import {
   isHookDrivenMode
 } from '@slayzone/terminal/main'
 import { updateTask, getTaskOp } from '@slayzone/task/main'
-import { getProviderConversationId } from '@slayzone/task/shared'
+import { getProviderConversationId, appendProviderConversationId } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { broadcastToWindows } from '../broadcast-to-windows'
 import type { RestApiDeps } from './types'
@@ -287,11 +287,20 @@ const PayloadSchema = z.object({
 /**
  * Persist a CLI's session_id (carried by its `SessionStart` hook) to the task's
  * `provider_config[agentId].conversationId` so the session can be resumed
- * deterministically by id.
+ * deterministically by id, AND append it to `conversationHistory`.
  *
- * Applies to the agents in `CONVERSATION_ID_CAPTURE_AGENTS` (codex, antigravity)
- * — their SessionStart hook carries the id directly. Codex additionally has
- * `/status` + disk-scan detection (`codex-adapter.ts`) as untouched fallbacks.
+ * Applies to the agents in `CONVERSATION_ID_CAPTURE_EVENT` (claude-code, codex,
+ * antigravity) — their SessionStart hook carries the id directly. Codex
+ * additionally has `/status` + disk-scan detection (`codex-adapter.ts`) as
+ * untouched fallbacks.
+ *
+ * This is the SINGLE authority for "a conversation exists" for claude-code: the
+ * id is committed here — only after the agent's real SessionStart proves the
+ * conversation was created — never eagerly on the client. That closes the
+ * phantom-id path that produced false "session expired" overlays (the old
+ * client-side eager commit wrote an unconfirmed minted UUID; a session dying
+ * before SessionStart left a pointer to a transcript Claude never wrote). See
+ * plans/conv-id-robustness-v2.md.
  *
  * The CLI session_id is a UUID — distinct from the SlayZone PTY session id
  * resolved via `bridge.findSession`. `agentId` doubles as the `provider_config`
@@ -303,8 +312,8 @@ const PayloadSchema = z.object({
  * `updateTaskOp` emits `db:tasks:update:done`, which triggers a GitHub/Linear
  * push — wrong for a machine-written conversation id. `notifyRenderer()` still
  * refreshes the renderer via `tasks:changed`. The per-mode deep-merge inside
- * `updateTask` preserves existing `flags`/`lastPtyKilledAt`. Always overwrites:
- * the CLI mints a fresh id on resume, so the latest id is always the right one.
+ * `updateTask` preserves existing `flags`/`lastPtyKilledAt`. Always overwrites
+ * `conversationId`: the CLI mints a fresh id on resume, so the latest is right.
  *
  * Best-effort — on any failure the adapter detection fallbacks still capture
  * the id.
@@ -318,11 +327,22 @@ async function persistConversationId(
   try {
     const task = await getTaskOp(deps.db, taskId)
     if (!task) return
-    // Already current — skip the redundant write + tasks:changed broadcast.
-    if (getProviderConversationId(task.provider_config, agentId) === sessionId) return
+    const cfg = task.provider_config
+    const alreadyCurrent = getProviderConversationId(cfg, agentId) === sessionId
+    const alreadyInHistory = (cfg?.[agentId]?.conversationHistory ?? []).includes(sessionId)
+    // Nothing to change — skip the redundant write + tasks:changed broadcast.
+    // (When the id is current but missing from history — e.g. a legacy task whose
+    // id predates the history field — we still write to backfill it.)
+    if (alreadyCurrent && alreadyInHistory) return
+    const withHistory = appendProviderConversationId(cfg, agentId, sessionId)
     updateTask(deps.db, {
       id: taskId,
-      providerConfig: { [agentId]: { conversationId: sessionId } }
+      providerConfig: {
+        [agentId]: {
+          conversationId: sessionId,
+          conversationHistory: withHistory[agentId]?.conversationHistory
+        }
+      }
     })
     deps.notifyRenderer()
   } catch {

@@ -170,7 +170,6 @@ export interface TerminalProps {
   executionContext?: import('@slayzone/terminal/shared').ExecutionContext | null
   isActive?: boolean
   onAttached?: (api: { sessionId: string; focus: () => void }) => void
-  onConversationCreated?: (conversationId: string) => void
   /** Start a brand-new session: clear the stored conversation id + remount.
    *  Wired to the dead overlay's "Start fresh" action for a stale (auto-cleaned)
    *  session — see issue #90. */
@@ -217,7 +216,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     executionContext,
     isActive = true,
     onAttached,
-    onConversationCreated,
     onStartFresh,
     onReady,
     onFirstInput,
@@ -261,12 +259,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   >(null)
   const [doctorLoading, setDoctorLoading] = useState(false)
 
-  // Refs for callbacks to prevent initTerminal dependency churn.
-  // When onConversationCreated fires (saving conversation ID), it updates task state
-  // in the parent, which recreates callback refs, which would abort+restart initTerminal
-  // mid-initialization — causing a data loss window where PTY output is silently dropped.
-  const onConversationCreatedRef = useRef(onConversationCreated)
-  onConversationCreatedRef.current = onConversationCreated
+  // Refs for callbacks to prevent initTerminal dependency churn. A callback that
+  // updates task state in the parent recreates callback refs, which would
+  // abort+restart initTerminal mid-initialization — causing a data loss window
+  // where PTY output is silently dropped. Reading through refs breaks that cycle.
   const onStartFreshRef = useRef(onStartFresh)
   onStartFreshRef.current = onStartFresh
   const onReadyRef = useRef(onReady)
@@ -947,6 +943,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Generate conversation ID for AI modes whose initialCommand uses {id}.
           // Providers without {id} (e.g. codex, gemini) generate their own session
           // IDs internally — storing a client UUID would be bogus.
+          //
+          // The minted UUID is passed to the CLI as `--session-id {id}` ONLY. We do
+          // NOT persist it here: an eager client-side commit (the old
+          // onConversationCreated call) wrote the id to the task BEFORE Claude
+          // confirmed it, so a session that died before its SessionStart hook left
+          // a "phantom" id pointing at a transcript Claude never wrote → reopen
+          // resumed nothing → false "session expired". The conversation id is now
+          // persisted exclusively by Claude's real SessionStart hook
+          // (rest-api/agent-hook.ts persistConversationId), so only confirmed ids
+          // are ever stored. See plans/conv-id-robustness-v2.md.
           let newConversationId = conversationIdRef.current
           if (
             mode !== 'terminal' &&
@@ -955,7 +961,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             !existingConversationIdRef.current
           ) {
             newConversationId = crypto.randomUUID()
-            onConversationCreatedRef.current?.(newConversationId)
           }
 
           // Create PTY — plain terminal mode doesn't use conversation IDs

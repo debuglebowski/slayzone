@@ -29,6 +29,9 @@ export {
   onPtyInputSubmit,
   redirectSessionWindow,
   setOnHostKillHandler,
+  setConversationHealer,
+  type ConversationHealer,
+  type ConversationHealRequest,
   broadcastRespawnRequest,
   requestEnsureAlive,
   type EnsureAliveResult,
@@ -71,6 +74,15 @@ export {
   chatEvents,
   type ChatEventMap
 } from './chat-transport-manager'
+export {
+  encodeClaudeProjectDir,
+  claudeProjectDir,
+  claudeTranscriptPath,
+  claudeTranscriptExists,
+  readClaudeTranscriptMeta,
+  listClaudeTranscriptIds,
+  type ClaudeTranscriptMeta
+} from './claude-transcripts'
 export { beginTerminalShutdown } from './shutdown'
 export { listSessions, getSessionState } from './session-registry'
 export { getAutoModeEligibility, type AutoModeEligibility } from './auto-mode-eligibility'

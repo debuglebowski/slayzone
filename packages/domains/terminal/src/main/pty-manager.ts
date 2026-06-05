@@ -476,6 +476,31 @@ export function setOnHostKillHandler(handler: ((taskId: string) => void) | null)
   onHostKillHandler = handler
 }
 
+/** App-provided self-heal for a stored conversation id whose on-disk transcript
+ *  may be gone (a phantom from the old eager commit, or retention pruning).
+ *  Invoked just before a resume builds `--resume <id>`; returns the id to actually
+ *  resume — repointed to the task's real conversation (recorded history, or a
+ *  near-certain orphan transcript) — or the original id when nothing safe is
+ *  found (→ the honest "session expired" overlay). Registered from the app
+ *  (apps/app) because the decision needs task-DB access, and the package
+ *  dependency runs task → terminal (so terminal/main must not import task/main).
+ *  No-op when unset. See plans/conv-id-robustness-v2.md. */
+export interface ConversationHealRequest {
+  taskId: string
+  mode: TerminalMode
+  cwd: string
+  storedId: string
+}
+export type ConversationHealer = (
+  req: ConversationHealRequest
+) => Promise<{ id: string | null; healed: boolean }>
+
+let conversationHealer: ConversationHealer | null = null
+
+export function setConversationHealer(handler: ConversationHealer | null): void {
+  conversationHealer = handler
+}
+
 function taskIdFromSessionId(sessionId: string): string {
   return sessionId.split(':')[0] || sessionId
 }
@@ -1085,8 +1110,26 @@ export async function createPty(
       type,
       patterns: { working: patternWorking, error: patternError }
     })
-    const resuming = !!existingConversationId
-    const effectiveConversationId = existingConversationId || conversationId
+    // Self-heal a stale/phantom stored conversation id before building --resume.
+    // No-op for healthy ids; for a missing one it repoints to the task's real
+    // conversation (recorded history, or a near-certain orphan). Best-effort — on
+    // any failure we keep the original id and let the stale-resume overlay surface.
+    let resolvedExistingId = existingConversationId
+    if (resolvedExistingId && conversationHealer) {
+      try {
+        const healed = await conversationHealer({
+          taskId,
+          mode: terminalMode,
+          cwd,
+          storedId: resolvedExistingId
+        })
+        if (healed?.id && healed.id !== resolvedExistingId) resolvedExistingId = healed.id
+      } catch {
+        // keep resolvedExistingId as-is
+      }
+    }
+    const resuming = !!resolvedExistingId
+    const effectiveConversationId = resolvedExistingId || conversationId
 
     // Pick template: resume if resuming and resume_command exists, otherwise initial
     const template = resuming && resumeCommand ? resumeCommand : initialCommand || undefined

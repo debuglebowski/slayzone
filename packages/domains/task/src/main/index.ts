@@ -8,7 +8,9 @@ export {
   getTaskOp,
   restoreTaskOp,
   unarchiveTaskOp,
-  updateTaskOp
+  updateTaskOp,
+  collectReferencedConversationIds,
+  casRepointConversationId
 } from './ops'
 export type { CreateImportedTaskInput } from './ops'
 export { taskEvents } from './events'
