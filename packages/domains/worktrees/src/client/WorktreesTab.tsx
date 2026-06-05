@@ -50,7 +50,7 @@ import { resolveColumns } from '@slayzone/projects/shared'
 import type { Task } from '@slayzone/task/shared'
 import type { DetectedWorktree } from '../shared/types'
 import { CreateWorktreeDialog } from './CreateWorktreeDialog'
-import { useGitPanelContext } from './UnifiedGitPanel'
+import { useGitPanelContext } from './git-panel-context'
 
 interface WorktreesTabProps {
   visible: boolean
