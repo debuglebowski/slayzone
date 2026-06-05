@@ -82,17 +82,19 @@ test('task router: create fires taskEvents (backs the onChanged subscription)', 
 // Contract the migration ADDED: these procedures throw NOT_FOUND on a missing id
 // (the IPC handlers returned null). Surfaces what IPC hid; the renderer must handle
 // the throw at cutover (slice 5).
-test('task router: missing id throws (NOT_FOUND, not silent null)', async () => {
-  const throws = async (fn: () => Promise<unknown>): Promise<boolean> => {
+test('task router: missing id throws TRPCError NOT_FOUND (not silent null)', async () => {
+  // Assert the SPECIFIC code, not just "threw" — locks the contract + catches
+  // error-type drift (a raw DB error leaking, or the wrong TRPCError code).
+  const errCode = async (fn: () => Promise<unknown>): Promise<string | null> => {
     try {
       await fn()
-      return false
-    } catch {
-      return true
+      return null
+    } catch (e) {
+      return (e as { code?: string }).code ?? 'threw-without-code'
     }
   }
-  expect(await throws(() => caller.update({ id: 'nope', title: 'x' } as unknown as UpdateTaskInput))).toBeTruthy()
-  expect(await throws(() => caller.archive({ id: 'nope' }))).toBeTruthy()
-  expect(await throws(() => caller.restore({ id: 'nope' }))).toBeTruthy()
-  expect(await throws(() => caller.unarchive({ id: 'nope' }))).toBeTruthy()
+  expect(await errCode(() => caller.update({ id: 'nope', title: 'x' } as unknown as UpdateTaskInput))).toBe('NOT_FOUND')
+  expect(await errCode(() => caller.archive({ id: 'nope' }))).toBe('NOT_FOUND')
+  expect(await errCode(() => caller.restore({ id: 'nope' }))).toBe('NOT_FOUND')
+  expect(await errCode(() => caller.unarchive({ id: 'nope' }))).toBe('NOT_FOUND')
 })
