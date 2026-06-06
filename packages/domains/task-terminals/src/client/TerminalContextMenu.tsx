@@ -8,7 +8,8 @@ import {
   ContextMenuTrigger,
   useShortcutDisplay,
   useAppearance,
-  appearanceDefaults
+  appearanceDefaults,
+  detectPlatform
 } from '@slayzone/ui'
 import {
   Copy,
@@ -60,6 +61,12 @@ export function TerminalContextMenu({
   const [hasSelection, setHasSelection] = useState(false)
   const { terminalFontSize } = useAppearance()
 
+  // Copy/Paste aren't registry shortcuts: macOS uses Cmd+C/V via xterm natively,
+  // while Windows/Linux use Ctrl+Shift+C/V (Terminal's DOM keydown listener), since
+  // plain Ctrl+C is reserved for SIGINT in a terminal.
+  const isMac = detectPlatform() === 'mac'
+  const copyShortcut = isMac ? '⌘C' : 'Ctrl+Shift+C'
+  const pasteShortcut = isMac ? '⌘V' : 'Ctrl+Shift+V'
   const searchShortcut = useShortcutDisplay('terminal-search')
   const clearShortcut = useShortcutDisplay('terminal-clear')
   const splitShortcut = useShortcutDisplay('terminal-split')
@@ -123,12 +130,12 @@ export function TerminalContextMenu({
         <ContextMenuItem disabled={!hasSelection} onSelect={handleCopy}>
           <Copy className="size-4" />
           Copy
-          <ContextMenuShortcut>⌘C</ContextMenuShortcut>
+          <ContextMenuShortcut>{copyShortcut}</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem onSelect={handlePaste}>
           <ClipboardPaste className="size-4" />
           Paste
-          <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+          <ContextMenuShortcut>{pasteShortcut}</ContextMenuShortcut>
         </ContextMenuItem>
 
         <ContextMenuSeparator />

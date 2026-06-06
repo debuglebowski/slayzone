@@ -9,6 +9,8 @@ export {
   withShortcut,
   toElectronAccelerator,
   matchesShortcut,
+  isPrimaryModifier,
+  detectPlatform,
   SCOPE_PRIORITY,
   registry,
   scopeTracker,

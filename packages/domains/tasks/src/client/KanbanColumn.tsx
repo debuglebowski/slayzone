@@ -20,7 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@slayzone/ui'
-import { cn, getColumnStatusStyle } from '@slayzone/ui'
+import { cn, getColumnStatusStyle, isPrimaryModifier } from '@slayzone/ui'
 
 interface SortableKanbanCardProps {
   task: Task
@@ -123,7 +123,7 @@ function SortableKanbanCard({
         isFocused={isFocused}
         isSelected={isSelected}
         isMultiDragGhost={isMultiDragGhost}
-        onClick={(e) => onTaskClick?.(task, e)}
+        onClick={(e) => onTaskClick?.(task, { metaKey: isPrimaryModifier(e), shiftKey: e.shiftKey })}
         isBlocked={isBlocked}
         subTaskCount={subTaskCount}
         cardProperties={cardProperties}
