@@ -25,7 +25,8 @@ const MODE_LEGACY_COL: Record<string, string> = {
   opencode: 'opencode'
 }
 
-const TTL_PENDING_MS = 10 * 60 * 1000 // 10 minutes
+const TTL_PENDING_MS = 10 * 60 * 1000 // 10 minutes — pending rows with a pre-minted expected sessionId.
+const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000 // 30 seconds — null-expected rows accept any first observation, so the window is kept tight to limit the temporal-proximity exposure for providers without `--session-id` support.
 const FIND_PENDING_RETRY_MS = 100
 
 /**
@@ -239,7 +240,14 @@ export async function findPendingSpawn(
   usedResume: boolean
   spawnedAt: number
 } | null> {
-  const cutoff = Date.now() - TTL_PENDING_MS
+  // Two TTL windows depending on whether the pending row pre-minted a sessionId:
+  //   - explicit expected id → wide window (10 min), since binary match is safe
+  //     regardless of timing
+  //   - null-expected (fresh, provider mints internally) → tight 30 s window,
+  //     since the row accepts any first observation and we want to limit the
+  //     temporal-proximity exposure
+  const cutoffExpected = Date.now() - TTL_PENDING_MS
+  const cutoffNull = Date.now() - TTL_PENDING_NULL_EXPECTED_MS
   const query = async (): Promise<{
     conversation_id: string | null
     pending_meta: string | null
@@ -248,10 +256,13 @@ export async function findPendingSpawn(
       `SELECT conversation_id, pending_meta
          FROM task_conversations
          WHERE task_id = ? AND mode = ? AND origin = 'pending-spawn'
-           AND created_at >= ?
+           AND (
+             (conversation_id IS NOT NULL AND created_at >= ?)
+             OR (conversation_id IS NULL AND created_at >= ?)
+           )
          ORDER BY created_at DESC
          LIMIT 1`,
-      [taskId, mode, cutoff]
+      [taskId, mode, cutoffExpected, cutoffNull]
     )) ?? null
 
   let row = await query()

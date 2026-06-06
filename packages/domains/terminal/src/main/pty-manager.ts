@@ -1,11 +1,17 @@
 import * as pty from 'node-pty'
 import { accessSync, constants as fsConstants, existsSync, writeSync } from 'fs'
 import { execFile } from 'child_process'
+import { randomUUID } from 'node:crypto'
 import { BrowserWindow, nativeTheme, ipcMain } from 'electron'
 import { homedir, platform, userInfo } from 'os'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
-import { DEV_SERVER_URL_PATTERN, extractOscTitle, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
+import {
+  DEV_SERVER_URL_PATTERN,
+  extractOscTitle,
+  SESSION_ID_UNAVAILABLE,
+  supportsFreshPreMint
+} from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { recordPendingSpawn, prunePendingSpawns } from '@slayzone/task/main'
@@ -1162,7 +1168,20 @@ export async function createPty(
       }
     }
     const resuming = !!resolvedExistingId
-    const effectiveConversationId = resolvedExistingId || conversationId
+    // Fresh-spawn pre-mint: when the provider's `initialCommand` has the
+    // literal `{id}` placeholder (today: claude-code, qwen-code), slay mints
+    // a UUID at spawn time and threads it through the template. That gives
+    // the agent's SessionStart hook a sessionId slay already knows — binary
+    // match-or-foreign provenance, structurally identical to the resume path.
+    // For providers whose `initialCommand` has no `{id}` (codex, antigravity,
+    // cursor-agent, opencode), the agent mints internally and slay still
+    // falls back to the temporal-proximity gate via `pending-spawn` rows
+    // (`expectedSessionId=null`).
+    const mintedFreshId =
+      !resuming && !conversationId && supportsFreshPreMint(initialCommand)
+        ? randomUUID()
+        : null
+    const effectiveConversationId = resolvedExistingId || conversationId || mintedFreshId
 
     // Pick template: resume if resuming and resume_command exists, otherwise initial
     const template = resuming && resumeCommand ? resumeCommand : initialCommand || undefined

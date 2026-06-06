@@ -177,6 +177,44 @@ async function main(): Promise<void> {
   assert(p2?.expectedSessionId === 'EXPECTED', 'expected id round-tripped')
   assert(p2?.usedResume === true, 'usedResume true preserved')
 
+  // 7b. Phase 2: TTL window for null-expected pending rows is much tighter
+  //     (30 s) than for explicit-expected (10 min). Simulate by inserting a
+  //     synthetic null-expected row 60 s in the past — findPendingSpawn must
+  //     not return it. An explicit-expected row at the same age must still be
+  //     returned (10-min window).
+  const past60s = Date.now() - 60_000
+  raw
+    .prepare(
+      `INSERT INTO task_conversations
+         (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
+       VALUES (?, 't1', 'qwen-code', NULL, 'pending-spawn', ?, ?)`
+    )
+    .run(
+      'stale-null-expected',
+      JSON.stringify({ usedResume: false, spawnedAt: past60s }),
+      past60s
+    )
+  assert(
+    (await findPendingSpawn(db, 't1', 'qwen-code')) === null,
+    '60s-old null-expected pending must be outside the tight TTL window'
+  )
+  raw
+    .prepare(
+      `INSERT INTO task_conversations
+         (id, task_id, mode, conversation_id, origin, pending_meta, created_at)
+       VALUES (?, 't1', 'qwen-code', 'KEEP', 'pending-spawn', ?, ?)`
+    )
+    .run(
+      'fresh-explicit-expected',
+      JSON.stringify({ usedResume: false, spawnedAt: past60s }),
+      past60s
+    )
+  const p3 = await findPendingSpawn(db, 't1', 'qwen-code')
+  assert(
+    p3?.expectedSessionId === 'KEEP',
+    '60s-old explicit-expected pending must still be inside the 10-min window'
+  )
+
   // 8. prunePendingSpawns by scope removes pending rows for that (task, mode).
   const pruned = await prunePendingSpawns(db, { taskId: 't1', mode: 'codex' })
   assert(pruned === 1, `expected 1 pruned row, got ${pruned}`)

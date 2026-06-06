@@ -156,11 +156,62 @@ export async function attachWorktreeColors(db: SlayzoneDb, tasks: Task[]): Promi
   })
 }
 
+/**
+ * Populate `currentConversationByMode` from the append-only
+ * `task_conversations` ledger. The renderer reads this field instead of
+ * `provider_config.{mode}.conversationId` so manual-reset and provenance
+ * gating are honored on every read. Single query per task per call (cheap;
+ * indexed). Modes with no rows at all are simply absent from the record.
+ */
+async function attachCurrentConversationByMode(
+  db: SlayzoneDb,
+  tasks: Task[]
+): Promise<Task[]> {
+  if (tasks.length === 0) return tasks
+  const placeholders = tasks.map(() => '?').join(',')
+  const ids = tasks.map((t) => t.id)
+  const rows = await db.all<{
+    task_id: string
+    mode: string
+    conversation_id: string | null
+  }>(
+    `WITH reset AS (
+       SELECT task_id, mode, max(created_at) AS at
+       FROM task_conversations
+       WHERE task_id IN (${placeholders}) AND origin = 'manual-reset'
+       GROUP BY task_id, mode
+     )
+     SELECT tc.task_id, tc.mode, tc.conversation_id
+       FROM task_conversations tc
+       LEFT JOIN reset r ON r.task_id = tc.task_id AND r.mode = tc.mode
+       WHERE tc.task_id IN (${placeholders})
+         AND tc.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
+         AND tc.created_at > coalesce(r.at, 0)
+       GROUP BY tc.task_id, tc.mode
+       HAVING tc.created_at = max(tc.created_at)`,
+    [...ids, ...ids]
+  )
+  const byTask = new Map<string, Record<string, string | null>>()
+  for (const r of rows) {
+    let entry = byTask.get(r.task_id)
+    if (!entry) {
+      entry = {}
+      byTask.set(r.task_id, entry)
+    }
+    entry[r.mode] = r.conversation_id
+  }
+  return tasks.map((t) => ({
+    ...t,
+    currentConversationByMode: byTask.get(t.id) ?? {}
+  }))
+}
+
 export async function parseAndColorTasks(
   db: SlayzoneDb,
   rows: Record<string, unknown>[]
 ): Promise<Task[]> {
-  return attachWorktreeColors(db, parseTasks(rows))
+  const colored = await attachWorktreeColors(db, parseTasks(rows))
+  return attachCurrentConversationByMode(db, colored)
 }
 
 export async function parseAndColorTask(
@@ -170,7 +221,8 @@ export async function parseAndColorTask(
   const task = parseTask(row)
   if (!task) return null
   const [colored] = await attachWorktreeColors(db, [task])
-  return colored
+  const [withConv] = await attachCurrentConversationByMode(db, [colored])
+  return withConv
 }
 
 export async function colorOne<T extends Task | null | undefined>(

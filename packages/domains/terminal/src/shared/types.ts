@@ -60,6 +60,21 @@ export interface TerminalModeInfo {
   usageConfig?: UsageProviderConfig | null
 }
 
+/**
+ * Whether a provider's `initialCommand` template lets slay pre-mint the
+ * session id. True iff the template contains the literal `{id}` placeholder —
+ * the same slot `resumeCommand` uses for `--resume {id}`. For these providers
+ * slay generates a UUID at spawn time and passes it through, so the agent's
+ * SessionStart hook reports back an id slay already knows → binary
+ * match-or-foreign provenance.
+ *
+ * Derived from the template itself so an `initialCommand` edit can never
+ * silently drop a provider's pre-mint support. No side-table to drift.
+ */
+export function supportsFreshPreMint(initialCommand: string | null | undefined): boolean {
+  return typeof initialCommand === 'string' && initialCommand.includes('{id}')
+}
+
 export interface CreateTerminalModeInput {
   id: string
   label: string

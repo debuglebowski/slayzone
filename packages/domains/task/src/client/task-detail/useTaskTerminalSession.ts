@@ -1,11 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import type { Task } from '@slayzone/task/shared'
-import {
-  getProviderConversationId,
-  setProviderConversationId,
-  getProviderLastKilledAt,
-  decideReviveMode
-} from '@slayzone/task/shared'
+import { getProviderLastKilledAt, decideReviveMode } from '@slayzone/task/shared'
+
+/**
+ * Renderer-side conversation id read. Reads the server-computed
+ * `currentConversationByMode` field which goes through the append-only
+ * `task_conversations` ledger (honors manual-reset cutoff + provenance gate).
+ *
+ * Direct access to `provider_config.{mode}.conversationId` from the renderer
+ * is rejected by the `lint:server-boundary` guard — that path bypasses the
+ * provenance check and would re-introduce the clobber bug class.
+ */
+function readCurrentConversationId(
+  task: Task | null | undefined,
+  mode: string | undefined
+): string | null {
+  if (!task || !mode) return null
+  return task.currentConversationByMode?.[mode] ?? null
+}
 import { SESSION_ID_COMMANDS, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import { markSkipCache } from '@slayzone/terminal'
 
@@ -56,7 +68,7 @@ export function useTaskTerminalSession({
   const showSessionBanner =
     !!sessionIdCommand &&
     !!task &&
-    !getProviderConversationId(task.provider_config, task.terminal_mode) &&
+    !readCurrentConversationId(task, task.terminal_mode) &&
     !detectedSessionId
 
   // Providers where session ID detection is not possible
@@ -66,7 +78,7 @@ export function useTaskTerminalSession({
   )
   const showUnavailableBanner =
     sessionIdUnavailable &&
-    !getProviderConversationId(task?.provider_config, task?.terminal_mode ?? '') &&
+    !readCurrentConversationId(task, task?.terminal_mode) &&
     sessionUnavailableDismissed !== task?.id
 
   const handleDetectSessionId = useCallback(async () => {
@@ -78,7 +90,7 @@ export function useTaskTerminalSession({
   }, [task, sessionIdCommand, getMainSessionId])
 
   const getConversationIdForMode = useCallback((t: Task): string | null => {
-    return getProviderConversationId(t.provider_config, t.terminal_mode)
+    return readCurrentConversationId(t, t.terminal_mode)
   }, [])
 
   // Subscribe to session detected events
@@ -97,11 +109,7 @@ export function useTaskTerminalSession({
     if (!task || !detectedSessionId) return
     const updated = await window.api.db.updateTask({
       id: task.id,
-      providerConfig: setProviderConversationId(
-        task.provider_config,
-        task.terminal_mode,
-        detectedSessionId
-      )
+      providerConfig: { [task.terminal_mode]: { conversationId: detectedSessionId } }
     })
     onTaskUpdated(updated)
     setDetectedSessionId(null)
@@ -132,11 +140,7 @@ export function useTaskTerminalSession({
     void (async () => {
       const updated = await window.api.db.updateTask({
         id: task.id,
-        providerConfig: setProviderConversationId(
-          task.provider_config,
-          task.terminal_mode,
-          detectedSessionId
-        )
+        providerConfig: { [task.terminal_mode]: { conversationId: detectedSessionId } }
       })
       if (cancelled) return
       onTaskUpdated(updated)
@@ -176,7 +180,7 @@ export function useTaskTerminalSession({
     // Clear session ID so new session starts fresh
     const updated = await window.api.db.updateTask({
       id: task.id,
-      providerConfig: setProviderConversationId(task.provider_config, task.terminal_mode, null)
+      providerConfig: { [task.terminal_mode]: { conversationId: null } }
     })
     onTaskUpdated(updated)
     await new Promise((r) => setTimeout(r, 100))

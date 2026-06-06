@@ -728,6 +728,19 @@ export interface Task {
   terminal_mode: TerminalMode
   provider_config: ProviderConfig
   terminal_shell: string | null
+  /**
+   * Server-computed: for each provider mode the task has touched, the current
+   * honored conversation id from `task_conversations` (resolved through the
+   * SQL cutoff so manual-reset rows hide every earlier row).
+   *
+   * This is the ONLY conversation-id shape the renderer should read. Direct
+   * access to `provider_config.{mode}.conversationId` /
+   * `provider_config.{mode}.chatConversationId` / `*_conversation_id` columns
+   * bypasses the append-only ledger and is rejected by the
+   * `lint:server-boundary` guard. Optional on the type so older code paths
+   * that build Task objects without server hydration don't break.
+   */
+  currentConversationByMode?: Record<string, string | null>
   // @deprecated — use provider_config[mode].conversationId
   claude_conversation_id: string | null
   codex_conversation_id: string | null
