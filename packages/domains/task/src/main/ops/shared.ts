@@ -2,6 +2,7 @@ import { app } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
+import { recordConversation } from './task-conversations.js'
 import type { ColumnConfig } from '@slayzone/projects/shared'
 import {
   getDefaultStatus,
@@ -170,6 +171,10 @@ async function attachCurrentConversationByMode(
   if (tasks.length === 0) return tasks
   const placeholders = tasks.map(() => '?').join(',')
   const ids = tasks.map((t) => t.id)
+  // ROW_NUMBER window: deterministically picks the latest honored row per
+  // (task_id, mode) strictly after any manual-reset cutoff. SQLite's `GROUP BY
+  // + HAVING max(created_at)` does NOT guarantee which row's column values are
+  // returned for the group — the window form is correct by spec.
   const rows = await db.all<{
     task_id: string
     mode: string
@@ -180,15 +185,23 @@ async function attachCurrentConversationByMode(
        FROM task_conversations
        WHERE task_id IN (${placeholders}) AND origin = 'manual-reset'
        GROUP BY task_id, mode
-     )
-     SELECT tc.task_id, tc.mode, tc.conversation_id
+     ),
+     ranked AS (
+       SELECT
+         tc.task_id,
+         tc.mode,
+         tc.conversation_id,
+         ROW_NUMBER() OVER (
+           PARTITION BY tc.task_id, tc.mode
+           ORDER BY tc.created_at DESC
+         ) AS rn
        FROM task_conversations tc
        LEFT JOIN reset r ON r.task_id = tc.task_id AND r.mode = tc.mode
        WHERE tc.task_id IN (${placeholders})
          AND tc.origin IN ('slay-spawned-fresh','slay-spawned-resume','cas-repoint-heal','legacy-migration')
          AND tc.created_at > coalesce(r.at, 0)
-       GROUP BY tc.task_id, tc.mode
-       HAVING tc.created_at = max(tc.created_at)`,
+     )
+     SELECT task_id, mode, conversation_id FROM ranked WHERE rn = 1`,
     [...ids, ...ids]
   )
   const byTask = new Map<string, Record<string, string | null>>()
@@ -539,6 +552,16 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
 
   const fields: string[] = []
   const values: unknown[] = []
+  /**
+   * Conversation-id mutations the merge produced. Recorded into the
+   * append-only `task_conversations` ledger after the UPDATE commits so the
+   * renderer's `currentConversationByMode` view (computed from the ledger)
+   * tracks every legacy-field write. Origin tag:
+   *   - newId === null  → `manual-reset` (clear)
+   *   - newId !== null  → `slay-spawned-fresh` (the agent in slay's PTY
+   *     reports/asserts this is its session)
+   */
+  const convIdChanges: Array<{ mode: string; newId: string | null }> = []
 
   if (data.title !== undefined) {
     fields.push('title = ?')
@@ -741,6 +764,25 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
         }
       }
 
+      // Track every conversation-id change so we can append a row to the
+      // append-only `task_conversations` ledger AFTER the legacy UPDATE
+      // commits. This is the funnel that makes any updateTask write — Detect
+      // banner, Reset Terminal, slay-internal — flow through the ledger,
+      // matching what hook-driven + chat-mode paths already do. Without this
+      // funnel the renderer's `currentConversationByMode` (computed from the
+      // ledger) goes stale after Detect/Reset writes, surfacing as the
+      // session-id banner re-appearing post-Update.
+      const modesToCompare = new Set<string>([
+        ...Object.keys(current),
+        ...Object.keys(merged)
+      ])
+      for (const m of modesToCompare) {
+        const oldId = current[m]?.conversationId ?? null
+        const newId = merged[m]?.conversationId ?? null
+        if (oldId === newId) continue
+        convIdChanges.push({ mode: m, newId })
+      }
+
       fields.push('provider_config = ?')
       values.push(JSON.stringify(merged))
 
@@ -921,6 +963,27 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   values.push(data.id)
 
   await db.run(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, values)
+
+  // Funnel: every conversation-id mutation from updateTask flows into the
+  // append-only ledger so the renderer's currentConversationByMode reflects
+  // every write. recordConversation itself dual-writes to the legacy field
+  // for HONORED origins — the legacy UPDATE just ran with the same target
+  // value, so the re-write is idempotent (matching value). For manual-reset,
+  // recordConversation also clears the legacy field — also idempotent vs
+  // the UPDATE we just ran. Best-effort: a ledger write failure must not
+  // fail the parent updateTask (e.g. callers that update unrelated fields).
+  for (const change of convIdChanges) {
+    try {
+      await recordConversation(db, {
+        taskId: data.id,
+        mode: change.mode,
+        conversationId: change.newId,
+        origin: change.newId === null ? 'manual-reset' : 'slay-spawned-fresh'
+      })
+    } catch {
+      /* ledger write is best-effort; legacy write already committed */
+    }
+  }
 
   const effectiveStatus = normalizedStatusForWrite
   const reachedTerminal =
