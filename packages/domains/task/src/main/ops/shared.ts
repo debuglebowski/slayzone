@@ -972,6 +972,21 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   // recordConversation also clears the legacy field — also idempotent vs
   // the UPDATE we just ran. Best-effort: a ledger write failure must not
   // fail the parent updateTask (e.g. callers that update unrelated fields).
+  //
+  // CAUTION — provenance boundary: this funnel records every conv-id change
+  // here as HONORED (`slay-spawned-fresh` for non-null, `manual-reset` for
+  // null). Today's callers are trusted by convention:
+  //   - renderer Detect → parses /status from slay's own PTY (the agent's
+  //     real sessionId)
+  //   - renderer Reset Terminal → writes null
+  //   - server-internal terminal-mode / worktree paths → don't carry foreign
+  //     conv-ids
+  // If you add an `updateTask` caller that takes a user-controlled or
+  // network-supplied conversation id and threads it through `providerConfig`,
+  // DO NOT route it through here. Add a dedicated IPC with provenance
+  // verification (e.g. matching against /status output of a live slay PTY),
+  // or introduce a new non-honored origin (e.g. `external-update`). Otherwise
+  // you reintroduce an UPDATE-based eager-persist clobber.
   for (const change of convIdChanges) {
     try {
       await recordConversation(db, {
