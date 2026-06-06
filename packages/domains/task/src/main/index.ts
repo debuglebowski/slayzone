@@ -10,7 +10,13 @@ export {
   unarchiveTaskOp,
   updateTaskOp,
   collectReferencedConversationIds,
-  casRepointConversationId
+  casRepointConversationId,
+  recordConversation,
+  getCurrentConversationId,
+  listConversationHistory,
+  recordPendingSpawn,
+  findPendingSpawn,
+  prunePendingSpawns
 } from './ops'
 export type { CreateImportedTaskInput } from './ops'
 export { taskEvents } from './events'

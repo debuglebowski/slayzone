@@ -11,8 +11,8 @@ import {
   setSessionAwaitingInput,
   isHookDrivenMode
 } from '@slayzone/terminal/main'
-import { updateTask, getTaskOp } from '@slayzone/task/main'
-import { getProviderConversationId, appendProviderConversationId } from '@slayzone/task/shared'
+import { recordConversation, findPendingSpawn } from '@slayzone/task/main'
+import type { ConversationOrigin } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { broadcastToWindows } from '../broadcast-to-windows'
 import type { RestApiDeps } from './types'
@@ -325,26 +325,39 @@ async function persistConversationId(
   sessionId: string
 ): Promise<void> {
   try {
-    const task = await getTaskOp(deps.db, taskId)
-    if (!task) return
-    const cfg = task.provider_config
-    const alreadyCurrent = getProviderConversationId(cfg, agentId) === sessionId
-    const alreadyInHistory = (cfg?.[agentId]?.conversationHistory ?? []).includes(sessionId)
-    // Nothing to change — skip the redundant write + tasks:changed broadcast.
-    // (When the id is current but missing from history — e.g. a legacy task whose
-    // id predates the history field — we still write to backfill it.)
-    if (alreadyCurrent && alreadyInHistory) return
-    const withHistory = appendProviderConversationId(cfg, agentId, sessionId)
-    updateTask(deps.db, {
-      id: taskId,
-      providerConfig: {
-        [agentId]: {
-          conversationId: sessionId,
-          conversationHistory: withHistory[agentId]?.conversationHistory
-        }
-      }
+    // Provenance gate: look up the `pending-spawn` row slay wrote when it
+    // launched the agent. If the CLI session id matches that row's expected
+    // id, record it as honored (`slay-spawned-*`). If it doesn't — or no
+    // pending row exists — record as `foreign-observed` (audit only, never
+    // honored on read). This closes the RC1 eager-persist clobber: a manual
+    // `claude --resume <foreign>` inside a slay PTY can no longer bind the
+    // foreign session to the task.
+    const pending = await findPendingSpawn(deps.db, taskId, agentId)
+    // No pending → no spawn-intent record: definitely foreign.
+    // Pending w/ expectedSessionId === null → fresh PTY spawn where slay did
+    // NOT pre-mint a UUID; accept the first observed id as fresh (temporal-
+    // proximity gate only — Claude mints its own).
+    // Pending w/ exact match → honored.
+    // Pending w/ mismatch → foreign (e.g. user typed `claude --resume X`).
+    const origin: ConversationOrigin = !pending
+      ? 'foreign-observed'
+      : pending.expectedSessionId === null
+        ? 'slay-spawned-fresh'
+        : sessionId === pending.expectedSessionId
+          ? pending.usedResume
+            ? 'slay-spawned-resume'
+            : 'slay-spawned-fresh'
+          : 'foreign-observed'
+    await recordConversation(deps.db, {
+      taskId,
+      mode: agentId,
+      conversationId: sessionId,
+      origin
     })
-    deps.notifyRenderer()
+    // Pending row stays — repeated SessionStart payloads on the same spawn
+    // are idempotent (we just append another row with the same origin).
+    // The row is pruned by the PTY-exit hook OR the periodic TTL sweep.
+    if (origin !== 'foreign-observed') deps.notifyRenderer()
   } catch {
     // Best-effort — adapter `/status` + disk-scan fallbacks still cover capture.
   }

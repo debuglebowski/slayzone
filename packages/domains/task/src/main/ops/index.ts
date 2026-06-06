@@ -51,3 +51,11 @@ export {
   collectReferencedConversationIds,
   casRepointConversationId
 } from './conversation-id-heal.js'
+export {
+  recordConversation,
+  getCurrentConversationId,
+  listConversationHistory,
+  recordPendingSpawn,
+  findPendingSpawn,
+  prunePendingSpawns
+} from './task-conversations.js'

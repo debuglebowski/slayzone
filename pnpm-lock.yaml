@@ -1247,6 +1247,9 @@ importers:
       '@slayzone/settings':
         specifier: workspace:*
         version: link:../settings
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry

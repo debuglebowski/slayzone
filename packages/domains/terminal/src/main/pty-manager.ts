@@ -8,6 +8,7 @@ import { TypedEmitter } from '@slayzone/platform/events'
 import { DEV_SERVER_URL_PATTERN, extractOscTitle, SESSION_ID_UNAVAILABLE } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordPendingSpawn, prunePendingSpawns } from '@slayzone/task/main'
 import { RingBuffer, type BufferChunk } from './ring-buffer'
 import {
   getAdapter,
@@ -1297,6 +1298,27 @@ export async function createPty(
     let usedArgs = [...initialArgs]
     let usedFallback = false
     let usedShellFallback = false
+    // Record slay's spawn intent BEFORE the PTY starts so the agent's
+    // SessionStart hook can verify provenance (`task_conversations`,
+    // origin='pending-spawn'). `effectiveConversationId` is the id slay is
+    // about to ask the agent to resume; `null` means "fresh PTY spawn — agent
+    // will mint its own id, accept the first observation as fresh". Awaited
+    // so the row is durable before the child process can race ahead. Drops
+    // on PTY exit via `prunePendingSpawns` below, and a periodic 10-min TTL
+    // sweep belt-and-suspenders.
+    if (db) {
+      try {
+        await recordPendingSpawn(db, {
+          taskId,
+          mode: terminalMode,
+          expectedSessionId: effectiveConversationId || null,
+          usedResume: resuming
+        })
+      } catch {
+        // Best-effort — a failed pending row falls back to "no pending" in the
+        // hook handler, which records as foreign-observed for that one session.
+      }
+    }
     const spawnStartTs = Date.now()
     let ptyProcess: pty.IPty
     // Non-transport spawns get wrapped in `/bin/sh -c 'ulimit -n 65535; exec
@@ -1424,6 +1446,16 @@ export async function createPty(
     const finalizeSessionExit = (exitCode: number): void => {
       if (finalized) return
       finalized = true
+      // Drop the pending-spawn provenance row for this (task, mode). A row that
+      // isn't pruned here gets swept by the periodic 10-min TTL anyway, but
+      // explicit pruning here keeps the table small and avoids stale rows
+      // matching a fast restart on the same task/mode.
+      if (db) {
+        void prunePendingSpawns(db, { taskId, mode: terminalMode }).catch(() => {
+          // Best-effort — failure leaks at most one pending row per spawn,
+          // which the periodic sweep collects within 10 min.
+        })
+      }
       // Clear the warm flag — UNLESS we're in app shutdown, in which case
       // we deliberately preserve was_spawned so the next boot auto-restarts.
       if (!isShuttingDown) {

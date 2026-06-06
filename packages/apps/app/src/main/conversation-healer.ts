@@ -10,7 +10,7 @@ import {
 import {
   getTaskOp,
   collectReferencedConversationIds,
-  casRepointConversationId
+  recordConversation
 } from '@slayzone/task/main'
 import { decideConversationHeal, parseSqliteUtc, type HealTranscriptMeta } from '@slayzone/task/shared'
 import { getCurrentBranch } from '@slayzone/worktrees/main'
@@ -110,17 +110,19 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
         return { id: storedId, healed: false }
       }
 
-      // history | orphan → atomic compare-and-swap repoint (only if still the phantom).
-      const ok = await casRepointConversationId(db, {
-        id: taskId,
+      // history | orphan → append a `cas-repoint-heal` row to task_conversations.
+      // Under append-only semantics there is no CAS to fail: getCurrentConversationId
+      // picks up the newest honored row on the next read. The previous CAS guarded
+      // a mutable field against concurrent writes; with the field replaced by an
+      // append-only ledger this race is gone — the latest decision wins by being
+      // the latest row. The legacy `casRepointConversationId` also dual-wrote the
+      // legacy column; `recordConversation` does the same for honored origins.
+      await recordConversation(db, {
+        taskId,
         mode,
-        expected: storedId,
-        next: decision.id
+        conversationId: decision.id,
+        origin: 'cas-repoint-heal'
       })
-      if (!ok) {
-        // A concurrent write changed the stored id — don't fight it; resume as-is.
-        return { id: storedId, healed: false }
-      }
       notifyRenderer()
       recordDiagnosticEvent({
         level: 'info',

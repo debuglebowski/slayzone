@@ -43,6 +43,7 @@ run_test packages/domains/projects/src/main/task-automation.test.ts
 # Strict+electron: better-sqlite3 native ABI matches Electron's node only.
 run_test_electron_strict_loader packages/domains/projects/src/main/project-groups-txns.test.ts
 run_test_electron_strict_loader packages/domains/task/src/main/ops/conversation-id-heal.test.ts
+run_test_electron_strict_loader packages/domains/task/src/main/ops/task-conversations.test.ts
 run_test packages/domains/task-terminals/src/main/handlers.test.ts
 run_test packages/domains/task/src/shared/revive-decision.test.ts
 run_test packages/domains/task/src/shared/provider-config-history.test.ts

@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import { spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
   parseSkillFrontmatter,
   renderSkillFrontmatter,
@@ -2931,6 +2932,105 @@ export const migrations: Migration[] = [
         );
         ALTER TABLE projects ADD COLUMN group_id TEXT DEFAULT NULL;
       `)
+    }
+  },
+  {
+    version: 145,
+    up: (db) => {
+      // Append-only ledger of conversation IDs per task per provider. Replaces
+      // the mutable `provider_config.{mode}.conversationId` singleton (which
+      // gets clobbered when slay observes a sessionId without verifying its
+      // provenance — see conversation-id-robustness.md).
+      //
+      // Rows are NEVER updated. "Current" is the latest honored row for a
+      // (task_id, mode) pair, strictly after any `manual-reset` cutoff.
+      //   - slay-spawned-{fresh,resume}: sessionId observed matched what slay
+      //     spawned. Honored.
+      //   - cas-repoint-heal: conversation-healer re-pointed at resume time.
+      //     Honored.
+      //   - legacy-migration: one-time backfill from existing provider_config.
+      //     Honored.
+      //   - foreign-observed: sessionId did NOT match the one slay spawned
+      //     (a manual `--resume X` in the PTY). Recorded for audit, NEVER
+      //     honored on read.
+      //   - manual-reset: user-issued sentinel; conversation_id is NULL.
+      //     Cutoff — every earlier row is irrelevant on read.
+      //   - pending-spawn: hook-driven providers store the expected sessionId
+      //     here at spawn so the REST hook can verify provenance without an
+      //     in-memory map. Pruned by TTL.
+      db.exec(`
+        CREATE TABLE task_conversations (
+          id              TEXT PRIMARY KEY,
+          task_id         TEXT NOT NULL,
+          mode            TEXT NOT NULL,
+          conversation_id TEXT,
+          origin          TEXT NOT NULL,
+          pending_meta    TEXT,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          CHECK (origin IN (
+            'slay-spawned-fresh',
+            'slay-spawned-resume',
+            'cas-repoint-heal',
+            'legacy-migration',
+            'foreign-observed',
+            'manual-reset',
+            'pending-spawn'
+          ))
+        );
+        CREATE INDEX task_conversations_lookup
+          ON task_conversations (task_id, mode, created_at DESC);
+        CREATE INDEX task_conversations_pending
+          ON task_conversations (task_id, mode, conversation_id)
+          WHERE origin = 'pending-spawn';
+      `)
+
+      // Backfill from existing provider_config.{mode}.conversationId +
+      // conversationHistory[]. created_at is derived from the task's own
+      // created_at when available so backfill ordering matches historical
+      // sequence; the history index offsets per-entry so order is preserved.
+      const tasks = db
+        .prepare(
+          `SELECT id, provider_config, created_at FROM tasks WHERE provider_config IS NOT NULL`
+        )
+        .all() as Array<{ id: string; provider_config: string; created_at: string | null }>
+      const insert = db.prepare(
+        `INSERT INTO task_conversations (id, task_id, mode, conversation_id, origin, pending_meta, created_at) VALUES (?, ?, ?, ?, 'legacy-migration', NULL, ?)`
+      )
+      for (const task of tasks) {
+        let cfg: Record<string, unknown>
+        try {
+          cfg = JSON.parse(task.provider_config) as Record<string, unknown>
+        } catch {
+          continue
+        }
+        const baseMs = task.created_at ? Date.parse(task.created_at) : Date.now()
+        const baseValid = Number.isFinite(baseMs) ? baseMs : Date.now()
+        for (const [mode, raw] of Object.entries(cfg)) {
+          if (!raw || typeof raw !== 'object') continue
+          const entry = raw as { conversationId?: unknown; conversationHistory?: unknown }
+          const history = Array.isArray(entry.conversationHistory)
+            ? entry.conversationHistory.filter((v): v is string => typeof v === 'string')
+            : []
+          // Insert history oldest-first; current id last so it wins on read.
+          history.forEach((cid, i) => {
+            insert.run(randomUUID(), task.id, mode, cid, baseValid + i)
+          })
+          if (typeof entry.conversationId === 'string' && entry.conversationId) {
+            // Only insert current if it's not already the most-recent history entry,
+            // to avoid an exact-duplicate row at the same conversation_id.
+            if (history[history.length - 1] !== entry.conversationId) {
+              insert.run(
+                randomUUID(),
+                task.id,
+                mode,
+                entry.conversationId,
+                baseValid + history.length
+              )
+            }
+          }
+        }
+      }
     }
   }
 ]

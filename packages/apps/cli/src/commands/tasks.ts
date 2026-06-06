@@ -4,6 +4,7 @@ import { listAction } from './tasks/list'
 import { createAction } from './tasks/create'
 import { viewAction } from './tasks/view'
 import { doneAction } from './tasks/done'
+import { resetConversationAction } from './tasks/reset-conversation'
 import { updateAction } from './tasks/update'
 import { progressAction } from './tasks/progress'
 import { archiveAction } from './tasks/archive'
@@ -67,6 +68,19 @@ export function tasksCommand(): Command {
     .description('Mark a task as done (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
     .option('--close', 'Also close the task tab in the app')
     .action(doneAction)
+
+  // slay tasks reset-conversation
+  cmd
+    .command('reset-conversation [id]')
+    .description(
+      'Clear the stored conversation IDs for a task — the next agent spawn starts fresh. ' +
+        'Appends a `manual-reset` row to task_conversations (append-only; never deletes).'
+    )
+    .option(
+      '--mode <mode>',
+      'Limit to one terminal mode (e.g. claude-code, codex). Default: every mode with a row for this task.'
+    )
+    .action(resetConversationAction)
 
   // slay tasks update
   cmd

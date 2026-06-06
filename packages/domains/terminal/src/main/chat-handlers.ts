@@ -32,6 +32,7 @@ import {
   getNextSeqForTab,
   clearChatEventsForTab
 } from './chat-events-store'
+import { recordConversation } from '@slayzone/task/main'
 import { registerChatQueueHandlers, createChatQueueOps } from './chat-queue-handlers'
 import { clearChatQueue } from './chat-queue-store'
 import { notifyGlobalStateListeners } from './pty-manager'
@@ -159,29 +160,10 @@ async function readProviderConfig(
   }
 }
 
-async function writeChatConversationId(
-  db: SlayzoneDb,
-  taskId: string,
-  mode: string,
-  id: string
-): Promise<void> {
-  const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
-    | { provider_config: string | null }
-    | undefined
-  let cfg: Record<string, ProviderConfigEntry> = {}
-  if (row?.provider_config) {
-    try {
-      cfg = JSON.parse(row.provider_config) as Record<string, ProviderConfigEntry>
-    } catch {
-      cfg = {}
-    }
-  }
-  const existing = cfg[mode] ?? {}
-  cfg[mode] = { ...existing, chatConversationId: id }
-  await db
-    .prepare('UPDATE tasks SET provider_config = ? WHERE id = ?')
-    .run(JSON.stringify(cfg), taskId)
-}
+// (writeChatConversationId removed — replaced by recordConversation w/
+//  legacyJsonField:'chatConversationId' in task-conversations.ts. The dual-write
+//  to provider_config.{mode}.chatConversationId still happens, but provenance
+//  is checked first.)
 
 async function writeChatModel(
   db: SlayzoneDb,
@@ -563,11 +545,20 @@ async function buildHydrateOpts(
     chatEffort: resolvedChatEffort,
     chatCollaboration: resolvedChatCollaboration,
     chatFastMode: resolvedChatFastMode,
-    onPersistSessionId: (id) => {
-      // Fire-and-forget DB write — the transport invokes this without awaiting
-      // (same as before the async-DB lift; the write was already a void side
-      // effect). Errors surface via the persist path's own logging.
-      void writeChatConversationId(db, opts.taskId, opts.mode, id)
+    onPersistSessionId: ({ conversationId, origin }) => {
+      // Fire-and-forget DB append — the transport invokes this without awaiting
+      // (same as before the async-DB lift). The transport already classified
+      // the observation: `slay-spawned-*` when the discovered id matches what
+      // we spawned, `foreign-observed` when it doesn't (manual --resume in PTY).
+      // Foreign rows are stored for audit but never honored by
+      // getCurrentConversationId, so the bug class is closed structurally.
+      void recordConversation(db, {
+        taskId: opts.taskId,
+        mode: opts.mode,
+        conversationId,
+        origin,
+        legacyJsonField: 'chatConversationId'
+      })
     },
     onInvalidResume: () => {
       void clearChatConversationId(db, opts.taskId, opts.mode)

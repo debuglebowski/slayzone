@@ -13,6 +13,7 @@ import { getBackend } from './agents/registry'
 import { whichBinary as realWhichBinary } from './shell-env'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
 import { TypedEmitter } from '@slayzone/platform/events'
+import type { ConversationOrigin } from '@slayzone/task/shared'
 import type { BufferedEvent } from './chat-events-store'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
@@ -279,7 +280,7 @@ interface Session {
   chatCollaboration: ChatCollaborationMode | null
   /** Whether Codex Fast Mode was enabled for this session's spawn. */
   chatFastMode: boolean
-  onPersistSessionId?: (id: string) => void
+  onPersistSessionId?: (arg: { conversationId: string; origin: ConversationOrigin }) => void
   onInvalidResume?: () => void
   /**
    * Tentative-resume staging buffer. While `usedResume && !sawHealthyTurn`,
@@ -641,9 +642,19 @@ function commitEvent(session: Session, event: AgentEvent): void {
   }
 
   // Surface discovered session id for persistence (resume-on-reopen).
+  // Provenance gate: the persisted id is only honored on next read when it
+  // matches what slay actually spawned. A foreign id (e.g. user manually typed
+  // `claude --resume X` in the PTY) is recorded as `foreign-observed` — audit
+  // trail only, never the resume target. See conversation-id-robustness plan.
   const extracted = session.driver?.extractSessionId(event) ?? null
   if (extracted && session.onPersistSessionId) {
-    session.onPersistSessionId(extracted)
+    const origin =
+      extracted === session.sessionId
+        ? session.usedResume
+          ? 'slay-spawned-resume'
+          : 'slay-spawned-fresh'
+        : 'foreign-observed'
+    session.onPersistSessionId({ conversationId: extracted, origin })
   }
 }
 
@@ -792,8 +803,14 @@ export interface CreateChatOpts {
   providerFlags: string[]
   /** Extra env overrides (PATH enrichment already applied by caller or inherited). */
   env?: NodeJS.ProcessEnv
-  /** Callback when adapter discovers a session_id in the stream. Persist via setProviderConversationId. */
-  onPersistSessionId?: (id: string) => void
+  /**
+   * Callback when adapter discovers a session_id in the stream. The transport
+   * tags it with a provenance `origin` — `slay-spawned-*` when the discovered
+   * id matches the one slay sent/minted, `foreign-observed` when it doesn't
+   * (e.g. user typed `claude --resume <other>` in the PTY). The caller
+   * persists via `recordConversation` in task_conversations.
+   */
+  onPersistSessionId?: (arg: { conversationId: string; origin: ConversationOrigin }) => void
   /** Called when --resume was attempted but the stored session id is invalid. Clear it. */
   onInvalidResume?: () => void
   /**
