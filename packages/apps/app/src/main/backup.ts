@@ -253,7 +253,7 @@ export function buildBackupOps(db: SlayzoneDb) {
   }
 }
 
-export function registerBackupHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+export function registerBackupHandlers(ipcMain: IpcMain, db: SlayzoneDb): ReturnType<typeof buildBackupOps> {
   const ops = buildBackupOps(db)
 
   ipcMain.handle('backup:list', () => ops.list())
@@ -266,4 +266,8 @@ export function registerBackupHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
     ops.setSettings(partial)
   )
   ipcMain.handle('backup:revealInFinder', () => ops.revealInFinder())
+
+  // Return the ops so the host shares ONE instance with setAppDeps (matches the
+  // chat/pty pattern — IPC + tRPC back the same implementation).
+  return ops
 }

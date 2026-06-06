@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto'
 
 // Pure ops shared by the IPC handlers (below) and the tRPC `app.files` router
 // (via setAppDeps). Both transports delegate here (coexistence until slice 5).
-export async function pathExists(filePath: string): Promise<boolean> {
+export async function filesPathExists(filePath: string): Promise<boolean> {
   try {
     await access(filePath)
     return true
@@ -15,7 +15,7 @@ export async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-export async function saveTempImage(
+export async function filesSaveTempImage(
   base64: string,
   mimeType: string
 ): Promise<{ success: boolean; path?: string; error?: string }> {
@@ -37,8 +37,8 @@ export async function saveTempImage(
 }
 
 export function registerFilesHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('files:pathExists', (_, filePath: string) => pathExists(filePath))
+  ipcMain.handle('files:pathExists', (_, filePath: string) => filesPathExists(filePath))
   ipcMain.handle('files:saveTempImage', (_, base64: string, mimeType: string) =>
-    saveTempImage(base64, mimeType)
+    filesSaveTempImage(base64, mimeType)
   )
 }

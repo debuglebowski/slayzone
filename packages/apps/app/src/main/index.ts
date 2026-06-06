@@ -190,7 +190,7 @@ import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
 import { initDatabases, closeDatabase, getDatabasePath, closeDiagnosticsDatabase } from './db'
 import { migrateV127DiskDir } from './db/v127-disk-migration'
-import { registerBackupHandlers, buildBackupOps, startAutoBackup, stopAutoBackup } from './backup'
+import { registerBackupHandlers, startAutoBackup, stopAutoBackup } from './backup'
 // Domain handlers
 import { registerProjectHandlers, handleTerminalStateChange } from '@slayzone/projects/main'
 import {
@@ -198,14 +198,14 @@ import {
   registerTaskHandlers,
   registerTaskTemplateHandlers,
   registerFilesHandlers,
-  pathExists,
-  saveTempImage,
+  filesPathExists,
+  filesSaveTempImage,
   closeArtifactWatcher,
   handleAttentionTransition,
   taskOps
 } from '@slayzone/task/main'
 import { registerTagHandlers } from '@slayzone/tags/main'
-import { registerFeedbackHandlers, buildFeedbackOps } from '@slayzone/feedback/main'
+import { registerFeedbackHandlers } from '@slayzone/feedback/main'
 import {
   registerSettingsHandlers,
   registerThemeHandlers,
@@ -216,7 +216,6 @@ import {
   registerPtyHandlers,
   getPtyHandlerChannels,
   registerUsageHandlers,
-  buildUsageOps,
   killAllPtys,
   shutdownAllPtys,
   killPtysByTaskId,
@@ -328,7 +327,7 @@ import {
   processEvents
 } from './process-manager'
 import { createStatsPoller } from './pid-stats'
-import { registerExportImportHandlers, buildExportImportOps } from './export-import'
+import { registerExportImportHandlers } from './export-import'
 import { notifyEvents } from './notify-renderer'
 import { registerLeaderboardHandlers, getLocalLeaderboardStats } from './leaderboard'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
@@ -1533,7 +1532,9 @@ app
     registerTagHandlers(ipcMain, db)
     registerHistoryHandlers(ipcMain, db)
     registerSettingsHandlers(ipcMain, settings)
-    registerFeedbackHandlers(ipcMain, db)
+    // Build ops ONCE here; share the same instance with the tRPC router via
+    // setAppDeps below (matches the chat/pty pattern — one impl, both transports).
+    const feedbackOps = registerFeedbackHandlers(ipcMain, db)
     logBoot('core domain handlers registered')
 
     // Single OS→app theme listener. Both the tRPC `settings.onThemeChanged`
@@ -1541,7 +1542,7 @@ app
     // derive from this one bus. Permanent — survives the slice-5 IPC removal.
     wireNativeThemeBridge()
     registerThemeHandlers(ipcMain, db)
-    registerUsageHandlers(ipcMain, db)
+    const usageOps = registerUsageHandlers(ipcMain, db)
     registerPtyHandlers(ipcMain, db)
     logBoot('pty handlers registered')
 
@@ -1672,7 +1673,7 @@ app
     registerFileEditorHandlers(ipcMain)
     registerClipboardHandlers(ipcMain)
     registerScreenshotHandlers(browserViewManager)
-    registerExportImportHandlers(ipcMain, db, isPlaywright)
+    const exportImportOps = registerExportImportHandlers(ipcMain, db, isPlaywright)
     registerLeaderboardHandlers(ipcMain, db)
     registerTestPanelHandlers(ipcMain, db)
     logBoot('misc handlers registered (file-editor/clipboard/screenshot/export/leaderboard/tests)')
@@ -1685,7 +1686,7 @@ app
     automationEngine.start(ipcMain)
     powerMonitor.on('resume', () => automationEngine.runCatchup())
     registerUsageAnalyticsHandlers(ipcMain, db)
-    registerBackupHandlers(ipcMain, db)
+    const backupOps = registerBackupHandlers(ipcMain, db)
     startAutoBackup(db)
     logBoot('domain IPC handlers registered')
 
@@ -1734,14 +1735,9 @@ app
           // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
           // (renderer cutover is slice 5).
           mod.setNotifyEvents(notifyEvents)
-          // App-level ops (backup/clipboard/screenshot/leaderboard/export-import/usage).
-          // Built from the SAME impls the IPC handlers (registerBackupHandlers,
-          // registerClipboardHandlers, … above) delegate to → one implementation,
-          // both transports coexist (renderer cutover is slice 5).
-          const backupOps = buildBackupOps(db)
-          const exportImportOps = buildExportImportOps(db, isPlaywright)
-          const usageOps = buildUsageOps(db)
-          const feedbackOps = buildFeedbackOps(db)
+          // App-level ops — the SAME single instances the IPC handlers built and
+          // returned above (backupOps/exportImportOps/usageOps/feedbackOps). One
+          // implementation, both transports coexist (renderer cutover is slice 5).
           mod.setAppDeps({
             backupList: backupOps.list,
             backupCreate: backupOps.create,
@@ -1766,8 +1762,8 @@ app
             testSetTaskParent: exportImportOps.testSetTaskParent,
             usageFetch: usageOps.fetch,
             usageTest: usageOps.test,
-            filesPathExists: pathExists,
-            filesSaveTempImage: saveTempImage,
+            filesPathExists,
+            filesSaveTempImage,
             shellOpenExternal: (url, options) =>
               shellOpenExternal(
                 url,

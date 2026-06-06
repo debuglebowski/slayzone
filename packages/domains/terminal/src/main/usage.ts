@@ -630,8 +630,13 @@ export function buildUsageOps(db: SlayzoneDb) {
   }
 }
 
-export function registerUsageHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
+export function registerUsageHandlers(
+  ipcMain: IpcMain,
+  db: SlayzoneDb
+): ReturnType<typeof buildUsageOps> {
   const ops = buildUsageOps(db)
   ipcMain.handle('usage:fetch', (_e, force?: boolean) => ops.fetch(force))
   ipcMain.handle('usage:test', (_e, config: UsageProviderConfig) => ops.test(config))
+  // Return the ops so the host shares ONE instance with setAppDeps.
+  return ops
 }

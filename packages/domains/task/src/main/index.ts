@@ -19,7 +19,7 @@ export type { OpDeps } from './ops/shared'
 export { taskOps } from './task-ops-bundle'
 export type { TaskOps } from './task-ops-bundle'
 export { registerTaskTemplateHandlers } from './template-handlers'
-export { registerFilesHandlers, pathExists, saveTempImage } from './files'
+export { registerFilesHandlers, filesPathExists, filesSaveTempImage } from './files'
 export {
   buildPdfHtml,
   buildMermaidPdfHtml,

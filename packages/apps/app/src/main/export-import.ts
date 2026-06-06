@@ -339,7 +339,7 @@ export function registerExportImportHandlers(
   ipcMain: IpcMain,
   db: SlayzoneDb,
   isTest = false
-): void {
+): ExportImportOps {
   const ops = buildExportImportOps(db, isTest)
 
   ipcMain.handle('export-import:export-all', () => ops.exportAll())
@@ -371,4 +371,7 @@ export function registerExportImportHandlers(
       (_, taskId: string, parentId: string | null) => ops.testSetTaskParent!(taskId, parentId)
     )
   }
+
+  // Return the ops so the host shares ONE instance with setAppDeps.
+  return ops
 }
