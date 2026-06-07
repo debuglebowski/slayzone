@@ -86,6 +86,7 @@ import {
   useAuthFailureBanner,
   useAppShortcuts,
   useAppIpcListeners,
+  useIdlePreload,
   COMMUNITY_DISCORD_URL,
   COMMUNITY_X_URL
 } from './app-shell'
@@ -235,6 +236,9 @@ function App(): React.JSX.Element {
   const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
   const { updateVersion, updateDownloadPercent, updateToastDismissed, setUpdateToastDismissed } =
     useAppUpdates()
+
+  // Warm keystroke-triggered lazy chunks (Cmd+K palette) on idle → no blank gap on first open.
+  useIdlePreload()
 
   // Home panel state (extracted — owns its own state fully)
   const homePanel = useHomePanel(selectedProjectId, panelSizes, homePanelConfig, orderedHomeIds)
