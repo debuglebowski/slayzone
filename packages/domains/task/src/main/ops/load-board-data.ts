@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task/shared'
 import { parseProject } from '@slayzone/projects/main'
-import { parseTasks } from './shared.js'
+import { parseAndColorTasks } from './shared.js'
 
 export interface BoardData {
   tasks: Task[]
@@ -41,8 +41,15 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
       SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL`
   )
 
+  // parseAndColorTasks (not bare parseTasks) so every task carries
+  // `currentConversationByMode` from the ledger. Without it the boot board store
+  // ships null conversation ids → auto-respawned terminals mint fresh sessions
+  // that shadow real conversations (the restart-clobber bug). Same query cost as
+  // getAllTasksOp, which already hydrates on every getTasks().
+  const tasks = await parseAndColorTasks(db, taskRows)
+
   return {
-    tasks: parseTasks(taskRows),
+    tasks,
     projects: projectRows.map((row) => parseProject(row)!),
     tags: tagRows,
     taskTags: taskTagMap,

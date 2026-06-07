@@ -309,7 +309,7 @@ import {
   readFilePaths,
   hasFilePaths
 } from './clipboard-handlers'
-import { registerConversationHealer } from './conversation-healer'
+import { registerConversationHealer, registerConversationResolver } from './conversation-healer'
 import {
   setProcessManagerWindow,
   initProcessManager,
@@ -1526,6 +1526,10 @@ app
     // near-certain orphan transcript) so a healthy session never shows a false
     // "session expired". See plans/conv-id-robustness-v2.md.
     registerConversationHealer(db, notifyTasksChanged)
+    // MAIN-authoritative conversation resolution: createPty resolves a missing
+    // renderer hint from the ledger so a null hint can't mint over a known
+    // conversation (the restart-clobber fix).
+    registerConversationResolver(db)
     registerProjectHandlers(ipcMain, db)
     registerTaskHandlers(ipcMain, db, notifyTasksChanged, ensureDataRoot())
     registerTaskTemplateHandlers(ipcMain, db)

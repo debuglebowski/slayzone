@@ -2162,6 +2162,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           defaultMode={task.terminal_mode}
                           conversationId={getConversationIdForMode(task) || undefined}
                           existingConversationId={getConversationIdForMode(task) || undefined}
+                          // Hydration gate: `currentConversationByMode` is set only by
+                          // parseAndColorTasks; `undefined` = task not yet hydrated (boot
+                          // window). Tells TerminalStarter to hold auto-spawn so the main
+                          // tab never spawns with a null hint and clobbers its conversation.
+                          conversationHydrated={task.currentConversationByMode !== undefined}
                           supportsSessionId={
                             modes
                               .find((m) => m.id === task.terminal_mode)

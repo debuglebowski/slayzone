@@ -32,6 +32,14 @@ export interface TerminalStarterProps extends TerminalProps {
    * a live PTY and warm-set restore (`wasSpawned`) still bypass the gate.
    */
   isTemporary?: boolean
+  /**
+   * Hydration gate for the `wasSpawned` auto-spawn. `false` → the task's
+   * conversation id isn't loaded yet (boot window, before parseAndColorTasks);
+   * hold auto-spawn so we don't spawn with a null hint and clobber the real
+   * conversation. `true`/`undefined` → spawn normally. Bounded by a 5s fallback
+   * so a task that never hydrates still starts (main resolver is the backstop).
+   */
+  conversationHydrated?: boolean
 }
 
 // Lazy-spawn wrapper: hold off mounting <Terminal> (and thus PTY creation)
@@ -41,8 +49,15 @@ export interface TerminalStarterProps extends TerminalProps {
 // (after crash or quit) brings the agent back without user action.
 export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
   function TerminalStarter(props, ref) {
-    const { sessionId, mode = 'claude-code', wasSpawned, hibernated, isTemporary, ...terminalProps } =
-      props
+    const {
+      sessionId,
+      mode = 'claude-code',
+      wasSpawned,
+      hibernated,
+      isTemporary,
+      conversationHydrated,
+      ...terminalProps
+    } = props
     const [started, setStarted] = useState(false)
     const [existsChecked, setExistsChecked] = useState(false)
     const [dontShowAgain, setDontShowAgain] = useState(false)
@@ -69,6 +84,24 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         }
       }
       if (wasSpawned) {
+        // Hydration gate: hold auto-spawn while the conversation id is still
+        // un-hydrated (boot window). Spawning now would pass a null hint and, if
+        // the main-side ledger resolver also misses, mint a fresh session that
+        // clobbers the real conversation (the restart bug). The effect re-runs
+        // when `conversationHydrated` flips true (deps), spawning with the now-
+        // known id. Bounded by a 5s fallback so a never-hydrating task still
+        // starts — the main resolver remains the backstop.
+        if (conversationHydrated === false) {
+          const fallback = setTimeout(() => {
+            if (cancelled) return
+            setStarted(true)
+            setExistsChecked(true)
+          }, 5000)
+          return () => {
+            cancelled = true
+            clearTimeout(fallback)
+          }
+        }
         setStarted(true)
         setExistsChecked(true)
         return () => {
@@ -89,7 +122,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
       return () => {
         cancelled = true
       }
-    }, [sessionId, wasSpawned, hibernated, isTemporary])
+    }, [sessionId, wasSpawned, hibernated, isTemporary, conversationHydrated])
 
     // Idle-close (hibernation) signals from main. `warn` arms a visual
     // countdown; `cancelled` aborts it; `hibernated` means main killed the PTY

@@ -1,6 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   setConversationHealer,
+  setConversationResolver,
   claudeTranscriptExists,
   claudeTranscriptPath,
   listClaudeTranscriptIds,
@@ -10,7 +11,8 @@ import {
 import {
   getTaskOp,
   collectReferencedConversationIds,
-  recordConversation
+  recordConversation,
+  getCurrentConversationId
 } from '@slayzone/task/main'
 import { decideConversationHeal, parseSqliteUtc, type HealTranscriptMeta } from '@slayzone/task/shared'
 import { getCurrentBranch } from '@slayzone/worktrees/main'
@@ -136,6 +138,28 @@ export function registerConversationHealer(db: SlayzoneDb, notifyRenderer: () =>
     } catch {
       // Best-effort — on any failure resume the original id (→ overlay if stale).
       return { id: storedId, healed: false }
+    }
+  })
+}
+
+/**
+ * Register the authoritative conversation-id resolver invoked by `createPty`
+ * when the renderer passes no `existingConversationId`. Reads the latest honored
+ * id from the append-only ledger (`getCurrentConversationId` — manual-reset
+ * cutoff + provenance gate enforced in SQL). Lives in the app for the same
+ * task → terminal dependency reason as the healer.
+ *
+ * This is the structural fix for the restart-clobber: previously a boot-time
+ * null hint from the renderer made every auto-respawned tab spawn fresh and
+ * durably shadow its real conversation. With main resolving from the ledger,
+ * a missing hint resumes the known conversation instead of minting over it.
+ */
+export function registerConversationResolver(db: SlayzoneDb): void {
+  setConversationResolver(async ({ taskId, mode }) => {
+    try {
+      return await getCurrentConversationId(db, taskId, mode)
+    } catch {
+      return null
     }
   })
 }

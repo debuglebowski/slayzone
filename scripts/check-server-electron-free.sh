@@ -54,6 +54,27 @@ if [ -n "$client_hits" ]; then
   fail=1
 fi
 
+# (4) Task ops that feed the renderer's task store MUST hydrate the conversation
+#     ledger field (currentConversationByMode) via parseAndColorTask(s) — never
+#     bare parseTask(s). A bare parse ships tasks with no conversation id, so on
+#     boot every auto-respawned terminal reads null and mints a FRESH session
+#     that durably shadows the real conversation (the restart-clobber regression).
+#     The 4 get-ops already comply; this keeps load-board-data + any future list
+#     op honest.
+BOARD_OPS="packages/domains/task/src/main/ops/load-board-data.ts \
+  packages/domains/task/src/main/ops/get-all.ts \
+  packages/domains/task/src/main/ops/get-by-project.ts \
+  packages/domains/task/src/main/ops/get-subtasks.ts \
+  packages/domains/task/src/main/ops/get.ts"
+for f in $BOARD_OPS; do
+  [ -f "$f" ] || continue
+  if ! grep -q "parseAndColorTask" "$f"; then
+    echo "Task op feeds the renderer store but does not hydrate currentConversationByMode:"
+    echo "  $f — use parseAndColorTask(s) (see attachCurrentConversationByMode), not bare parseTask(s)."
+    fail=1
+  fi
+done
+
 if [ "$fail" -eq 0 ]; then
   echo "Server boundary guards passed."
 else

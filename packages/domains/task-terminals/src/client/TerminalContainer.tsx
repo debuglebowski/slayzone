@@ -31,6 +31,11 @@ interface TerminalContainerProps {
   defaultMode: TerminalMode
   conversationId?: string | null
   existingConversationId?: string | null
+  /** True once the task's conversation id is hydrated (currentConversationByMode
+   *  set by parseAndColorTasks). When explicitly false, the main tab holds
+   *  auto-spawn until hydration so it never spawns with a null hint. Undefined =
+   *  no gate (preserves behavior for non-gated callers). */
+  conversationHydrated?: boolean
   supportsSessionId?: boolean
   initialPrompt?: string | null
   providerFlags?: string
@@ -71,6 +76,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       defaultMode,
       conversationId,
       existingConversationId,
+      conversationHydrated,
       supportsSessionId,
       initialPrompt,
       providerFlags,
@@ -369,6 +375,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           cwd,
           conversationId: tab.isMain ? conversationId : undefined,
           existingConversationId: tab.isMain ? existingConversationId : undefined,
+          // Gate only the main tab; splits/extra panes spawn fresh by design.
+          conversationHydrated: tab.isMain ? conversationHydrated : true,
           supportsSessionId: tab.isMain ? supportsSessionId : undefined,
           initialPrompt: tab.isMain ? initialPrompt : undefined,
           providerFlags: tab.isMain ? providerFlags : undefined,
@@ -404,6 +412,7 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       taskId,
       conversationId,
       existingConversationId,
+      conversationHydrated,
       supportsSessionId,
       initialPrompt,
       providerFlags,

@@ -48,6 +48,7 @@ import { shouldShellFallback, buildRecoveryMessage } from './pty-exit-strategy'
 import { computeSyncQueryResponse, type TerminalTheme } from './sync-query-response'
 import { filterBufferData } from './filter-buffer-data'
 import { shouldHonorDetectedError } from './session-error-gate'
+import { resolveSpawnConversation } from './spawn-conversation'
 import { buildMcpEnv } from './mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
 import { markSessionUserInput, clearSessionUserInputMark } from './user-input-tracker'
@@ -533,6 +534,25 @@ let conversationHealer: ConversationHealer | null = null
 
 export function setConversationHealer(handler: ConversationHealer | null): void {
   conversationHealer = handler
+}
+
+/** Resolve the authoritative conversation id for a (task, mode) from the
+ *  append-only `task_conversations` ledger. `createPty` calls this when the
+ *  renderer passed no `existingConversationId`, so MAIN — not a possibly-stale
+ *  or boot-time-null renderer hint — is the authority for the fresh-vs-resume
+ *  decision. Without it, a missing hint silently mints a fresh session that
+ *  durably shadows a conversation main already knew about (the restart-clobber
+ *  bug). Registered from the app (apps/app) for the same task → terminal
+ *  dependency reason as the healer. No-op when unset. */
+export type ConversationResolver = (req: {
+  taskId: string
+  mode: TerminalMode
+}) => Promise<string | null>
+
+let conversationResolver: ConversationResolver | null = null
+
+export function setConversationResolver(handler: ConversationResolver | null): void {
+  conversationResolver = handler
 }
 
 function taskIdFromSessionId(sessionId: string): string {
@@ -1149,11 +1169,62 @@ export async function createPty(
       type,
       patterns: { working: patternWorking, error: patternError }
     })
+    // MAIN is authoritative: when the renderer gave no hint (e.g. the boot board
+    // load hadn't hydrated `currentConversationByMode` yet), resolve the id from
+    // the ledger BEFORE deciding fresh-vs-resume. A null/stale hint must never
+    // cause a destructive fresh-mint over a conversation main already knows.
+    // Best-effort — on any failure keep null and fall through to a fresh spawn.
+    // Honors the ledger's manual-reset cutoff + provenance gate (a deliberate
+    // reset resolves to null here, so a reset is never silently undone).
+    let ledgerConversationId: string | null = null
+    if (!existingConversationId && conversationResolver) {
+      // Resolve the authoritative id from the ledger, RETRYING on null. During
+      // early boot the async db worker can momentarily return null for a query
+      // that has a real answer — the first-spawn race that re-clobbered the
+      // active tab on restart. Minting a fresh session over a real conversation
+      // is destructive, so a single null is not taken at face value here; a real
+      // id (no rows) costs at most ~300ms of retry on the cold spawn path.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          ledgerConversationId = await conversationResolver({ taskId, mode: terminalMode })
+        } catch {
+          ledgerConversationId = null
+        }
+        if (ledgerConversationId) break
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 150))
+      }
+    }
+    // Pure fresh-vs-resume decision — see resolveSpawnConversation. The invariant
+    // (known id ⇒ resume, never mint over it) lives there + is unit-tested.
+    const decision = resolveSpawnConversation({
+      existingConversationId,
+      ledgerConversationId,
+      conversationId,
+      supportsFreshPreMint: supportsFreshPreMint(initialCommand)
+    })
+    // Canary: surface every spawn decision so a fresh-mint-over-a-task (the
+    // restart-clobber signature) is visible in diagnostics. `ledgerResolved` +
+    // `resolverReady` pinpoint a resolver gap if a clobber ever recurs.
+    recordDiagnosticEvent({
+      level: decision.shouldMintFresh ? 'warn' : 'info',
+      source: 'pty',
+      event: 'conv_id.spawn_decision',
+      sessionId,
+      taskId,
+      payload: {
+        hasExisting: Boolean(existingConversationId),
+        hasConversationId: Boolean(conversationId),
+        resolverReady: Boolean(conversationResolver),
+        ledgerResolved: ledgerConversationId,
+        resuming: Boolean(decision.resolvedExistingId),
+        shouldMintFresh: decision.shouldMintFresh
+      }
+    })
     // Self-heal a stale/phantom stored conversation id before building --resume.
     // No-op for healthy ids; for a missing one it repoints to the task's real
     // conversation (recorded history, or a near-certain orphan). Best-effort — on
     // any failure we keep the original id and let the stale-resume overlay surface.
-    let resolvedExistingId = existingConversationId
+    let resolvedExistingId = decision.resolvedExistingId
     if (resolvedExistingId && conversationHealer) {
       try {
         const healed = await conversationHealer({
@@ -1168,19 +1239,16 @@ export async function createPty(
       }
     }
     const resuming = !!resolvedExistingId
-    // Fresh-spawn pre-mint: when the provider's `initialCommand` has the
-    // literal `{id}` placeholder (today: claude-code, qwen-code), slay mints
-    // a UUID at spawn time and threads it through the template. That gives
-    // the agent's SessionStart hook a sessionId slay already knows — binary
-    // match-or-foreign provenance, structurally identical to the resume path.
-    // For providers whose `initialCommand` has no `{id}` (codex, antigravity,
-    // cursor-agent, opencode), the agent mints internally and slay still
-    // falls back to the temporal-proximity gate via `pending-spawn` rows
-    // (`expectedSessionId=null`).
-    const mintedFreshId =
-      !resuming && !conversationId && supportsFreshPreMint(initialCommand)
-        ? randomUUID()
-        : null
+    // Fresh-spawn pre-mint (decision.shouldMintFresh): when the provider's
+    // `initialCommand` has the literal `{id}` placeholder (today: claude-code,
+    // qwen-code) and nothing is known, slay mints a UUID at spawn time and
+    // threads it through the template. That gives the agent's SessionStart hook
+    // a sessionId slay already knows — binary match-or-foreign provenance,
+    // structurally identical to the resume path. For providers whose
+    // `initialCommand` has no `{id}` (codex, antigravity, cursor-agent,
+    // opencode), the agent mints internally and slay falls back to the
+    // temporal-proximity gate via `pending-spawn` rows (`expectedSessionId=null`).
+    const mintedFreshId = decision.shouldMintFresh ? randomUUID() : null
     const effectiveConversationId = resolvedExistingId || conversationId || mintedFreshId
 
     // Pick template: resume if resuming and resume_command exists, otherwise initial

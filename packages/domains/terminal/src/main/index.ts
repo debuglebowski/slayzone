@@ -33,6 +33,8 @@ export {
   setConversationHealer,
   type ConversationHealer,
   type ConversationHealRequest,
+  setConversationResolver,
+  type ConversationResolver,
   broadcastRespawnRequest,
   requestEnsureAlive,
   type EnsureAliveResult,

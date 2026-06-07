@@ -91,6 +91,8 @@ run_test packages/domains/terminal/src/client/webgl-loader.test.ts
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
 run_test packages/domains/terminal/src/main/state-machine.test.ts
 run_test packages/domains/terminal/src/main/session-error-gate.test.ts
+# Terminal — fresh-vs-resume decision (restart-clobber invariant: known id ⇒ resume)
+run_test packages/domains/terminal/src/main/spawn-conversation.test.ts
 run_test packages/domains/terminal/src/main/claude-transcripts.test.ts
 run_test packages/domains/terminal/src/main/adapters/claude-adapter.test.ts
 run_test packages/domains/terminal/src/main/adapters/antigravity-adapter.test.ts
@@ -109,6 +111,8 @@ run_test packages/domains/terminal/src/main/chat-transport-manager.test.ts
 run_test_electron_strict_loader packages/domains/terminal/src/main/warm-process-manager.test.ts
 # Terminal — createPty warm-shell adoption branch (fake pty/win/db, no real spawn).
 run_test_electron_strict_loader packages/domains/terminal/src/main/adopt-pty.test.ts
+# Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
+run_test_electron_strict_loader packages/domains/terminal/src/main/createpty-resolver.test.ts
 
 run_test_no_loader() {
   echo ""

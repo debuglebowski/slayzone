@@ -1,4 +1,12 @@
-import { useState, useCallback, useRef, forwardRef, useImperativeHandle, lazy, Suspense } from 'react'
+import {
+  useState,
+  useCallback,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  lazy,
+  Suspense
+} from 'react'
 import { Terminal, type TerminalHandle } from '@slayzone/terminal/client/LazyTerminal'
 import type { TerminalTab } from '../shared/types'
 import { isChatSupported } from '../shared/chat-modes'
@@ -27,6 +35,8 @@ interface PaneProps {
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
+  /** True once the conversation id is hydrated; gates the main tab's auto-spawn. */
+  conversationHydrated?: boolean
   supportsSessionId?: boolean
   initialPrompt?: string | null
   providerFlags?: string
@@ -213,7 +223,8 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
             ? {
                 wasSpawned: pane.tab.wasSpawned,
                 hibernated: pane.tab.hibernated,
-                isTemporary: pane.isTemporary
+                isTemporary: pane.isTemporary,
+                conversationHydrated: pane.conversationHydrated
               }
             : {})}
         />
