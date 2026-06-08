@@ -8,6 +8,7 @@
 // `setChatDeps()`. A standalone server without these wired would throw on the
 // first chat procedure call.
 
+import type { EventEmitter } from 'node:events'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { CliInstallResult } from '@slayzone/platform'
 import type {
@@ -315,6 +316,28 @@ export type AppDeps = {
     discoverBrowserExtensions: () => unknown
     importExtension: (extPath: string) => unknown
     reparentToCurrentWindow: (viewId: string) => unknown
+  }
+
+  // Floating global agent panel — ops + the 3 streaming emitters the
+  // floatingAgent subscriptions consume. Same instances back the
+  // `floating-global-agent-panel:*` IPC handlers (coexistence until slice 5).
+  floatingAgent: {
+    setEnabled: (enabled: boolean) => unknown
+    setSessionId: (sessionId: string | null) => unknown
+    setPanelOpen: (isOpen: boolean) => unknown
+    toggleCollapse: () => unknown
+    resetSize: () => unknown
+    detach: () => unknown
+    reattach: () => unknown
+    getState: () => unknown
+    getSession: () => unknown
+    getConfig: () => unknown
+    events: EventEmitter & {
+      on(event: 'state', listener: (payload: unknown) => void): EventEmitter
+      on(event: 'session-changed', listener: () => void): EventEmitter
+      on(event: 'collapse-changed', listener: (collapsed: boolean) => void): EventEmitter
+      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+    }
   }
 }
 

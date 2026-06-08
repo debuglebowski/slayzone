@@ -252,7 +252,9 @@ import {
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import {
   attachFloatingGlobalAgentPanel,
-  setupFloatingGlobalAgentPanel
+  setupFloatingGlobalAgentPanel,
+  floatingGlobalAgentPanelOps,
+  floatingGlobalAgentPanelEvents
 } from './floating-global-agent-panel'
 import { attachTaskWindows, setupTaskWindows } from './task-windows'
 import {
@@ -1858,6 +1860,10 @@ app
                 const win = BrowserWindow.getFocusedWindow() ?? mainWindow
                 if (win) browserViewManager.reparentView(viewId, win)
               }
+            },
+            floatingAgent: {
+              ...floatingGlobalAgentPanelOps,
+              events: floatingGlobalAgentPanelEvents
             }
           })
           // Process-manager lifecycle ops + the dual-emit event stream for the

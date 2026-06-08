@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain, screen, globalShortcut, app } from 'electron'
+import { EventEmitter } from 'node:events'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/main'
@@ -64,6 +65,17 @@ let userHasResized = false
 // macOS — this flag distinguishes them.
 let userResizeInFlight = false
 
+// tRPC event stream — dual-emitted alongside the legacy `floating-global-agent-
+// panel:*` webContents.send broadcasts below, so the `app.floatingAgent`
+// subscriptions work while the renderer still consumes IPC (coexistence until
+// slice 5; the sends drop then).
+export const floatingGlobalAgentPanelEvents = new EventEmitter() as EventEmitter & {
+  on(event: 'state', listener: (payload: unknown) => void): EventEmitter
+  on(event: 'session-changed', listener: () => void): EventEmitter
+  on(event: 'collapse-changed', listener: (collapsed: boolean) => void): EventEmitter
+  off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+}
+
 function dispatch(event: FsmEvent): void {
   const result = reduce(state, event, ctx)
   if (result.state !== state) {
@@ -109,8 +121,9 @@ function executeAction(action: Action): void {
             ) {
               floatingGlobalAgentPanelWindow.webContents.send(
                 'floating-global-agent-panel:session-changed'
-              )
+              ) // legacy IPC (slice 5 drops)
             }
+            floatingGlobalAgentPanelEvents.emit('session-changed') // tRPC app.floatingAgent.onSessionChanged source
           })
         }
       }
@@ -184,8 +197,9 @@ function executeAction(action: Action): void {
         floatingGlobalAgentPanelWindow.webContents.send(
           'floating-global-agent-panel:collapse-changed',
           action.collapsed
-        )
+        ) // legacy IPC (slice 5 drops)
       }
+      floatingGlobalAgentPanelEvents.emit('collapse-changed', action.collapsed) // tRPC app.floatingAgent.onCollapseChanged source
       return
 
     case 'set-collapsed':
@@ -229,11 +243,12 @@ function broadcastState(): void {
     hasCustomSize: userHasResized
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('floating-global-agent-panel:state', payload)
+    mainWindow.webContents.send('floating-global-agent-panel:state', payload) // legacy IPC (slice 5 drops)
   }
   if (floatingGlobalAgentPanelWindow && !floatingGlobalAgentPanelWindow.isDestroyed()) {
-    floatingGlobalAgentPanelWindow.webContents.send('floating-global-agent-panel:state', payload)
+    floatingGlobalAgentPanelWindow.webContents.send('floating-global-agent-panel:state', payload) // legacy IPC (slice 5 drops)
   }
+  floatingGlobalAgentPanelEvents.emit('state', payload) // tRPC app.floatingAgent.onState source
 }
 
 async function readSessionMeta(
@@ -468,56 +483,81 @@ function createFloatingGlobalAgentPanelWindow(): BrowserWindow {
   return win
 }
 
-// --- IPC Handlers ---
+// --- Public ops ---
 
-function setupFloatingGlobalAgentPanelIpc(): void {
-  ipcMain.handle('floating-global-agent-panel:set-enabled', (_event, enabled: boolean) => {
+// Single impl behind BOTH the `floating-global-agent-panel:*` IPC handlers and
+// the tRPC `app.floatingAgent.*` procedures (coexistence until slice 5).
+export const floatingGlobalAgentPanelOps = {
+  setEnabled: (enabled: boolean) => {
     ctx = { ...ctx, enabled }
     dispatch({ kind: 'user-set-enabled', enabled })
     return { kind: state.kind }
-  })
-
-  ipcMain.handle(
-    'floating-global-agent-panel:set-session-id',
-    (_event, sessionId: string | null) => {
-      const previous = ctx.sessionId
-      ctx = { ...ctx, sessionId }
-      if (previous !== sessionId) {
-        dispatch({ kind: 'session-id-changed', sessionId })
-      }
-      return { kind: state.kind }
+  },
+  setSessionId: (sessionId: string | null) => {
+    const previous = ctx.sessionId
+    ctx = { ...ctx, sessionId }
+    if (previous !== sessionId) {
+      dispatch({ kind: 'session-id-changed', sessionId })
     }
-  )
-
-  ipcMain.handle('floating-global-agent-panel:set-panel-open', (_event, isOpen: boolean) => {
+    return { kind: state.kind }
+  },
+  setPanelOpen: (isOpen: boolean) => {
     ctx = { ...ctx, panelOpen: isOpen }
     dispatch({ kind: 'panel-open-changed', isOpen })
     return { kind: state.kind }
-  })
-
-  ipcMain.handle('floating-global-agent-panel:toggle-collapse', () => {
+  },
+  toggleCollapse: () => {
     dispatch({ kind: 'user-toggle-collapse' })
     return { kind: state.kind, collapsed: ctx.collapsed }
-  })
-
-  ipcMain.handle('floating-global-agent-panel:reset-size', () => {
+  },
+  resetSize: () => {
     dispatch({ kind: 'user-reset-size' })
     return { kind: state.kind }
-  })
-
-  ipcMain.handle('floating-global-agent-panel:detach', () => {
+  },
+  detach: () => {
     dispatch({ kind: 'user-detach' })
     return currentStatePayload()
-  })
-
-  ipcMain.handle('floating-global-agent-panel:reattach', () => {
+  },
+  reattach: () => {
     dispatch({ kind: 'user-reattach' })
     return currentStatePayload()
-  })
+  },
+  getState: () => currentStatePayload(),
+  getSession: () => currentFloatingSession,
+  getConfig: () => currentConfig
+}
 
-  ipcMain.handle('floating-global-agent-panel:get-state', () => currentStatePayload())
-  ipcMain.handle('floating-global-agent-panel:get-session', () => currentFloatingSession)
-  ipcMain.handle('floating-global-agent-panel:get-config', () => currentConfig)
+// --- IPC Handlers (legacy; slice 5 drops — delegate to ops above) ---
+
+function setupFloatingGlobalAgentPanelIpc(): void {
+  ipcMain.handle('floating-global-agent-panel:set-enabled', (_event, enabled: boolean) =>
+    floatingGlobalAgentPanelOps.setEnabled(enabled)
+  )
+  ipcMain.handle('floating-global-agent-panel:set-session-id', (_event, sessionId: string | null) =>
+    floatingGlobalAgentPanelOps.setSessionId(sessionId)
+  )
+  ipcMain.handle('floating-global-agent-panel:set-panel-open', (_event, isOpen: boolean) =>
+    floatingGlobalAgentPanelOps.setPanelOpen(isOpen)
+  )
+  ipcMain.handle('floating-global-agent-panel:toggle-collapse', () =>
+    floatingGlobalAgentPanelOps.toggleCollapse()
+  )
+  ipcMain.handle('floating-global-agent-panel:reset-size', () =>
+    floatingGlobalAgentPanelOps.resetSize()
+  )
+  ipcMain.handle('floating-global-agent-panel:detach', () => floatingGlobalAgentPanelOps.detach())
+  ipcMain.handle('floating-global-agent-panel:reattach', () =>
+    floatingGlobalAgentPanelOps.reattach()
+  )
+  ipcMain.handle('floating-global-agent-panel:get-state', () =>
+    floatingGlobalAgentPanelOps.getState()
+  )
+  ipcMain.handle('floating-global-agent-panel:get-session', () =>
+    floatingGlobalAgentPanelOps.getSession()
+  )
+  ipcMain.handle('floating-global-agent-panel:get-config', () =>
+    floatingGlobalAgentPanelOps.getConfig()
+  )
 }
 
 function currentStatePayload(): {
