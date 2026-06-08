@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Tag } from '@slayzone/tags/shared'
 import { TAG_PRESETS } from '@slayzone/tags/shared'
 import {
@@ -36,6 +38,10 @@ export function CreateTagDialog({
   onCreated,
   onUpdated
 }: CreateTagDialogProps) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const createTagMutation = useMutation(trpc.tags.create.mutationOptions())
+  const updateTagMutation = useMutation(trpc.tags.update.mutationOptions())
   const usedColors = new Set(
     (existingTags ?? [])
       .filter((t) => !tag || t.id !== tag.id) // don't exclude the tag being edited
@@ -60,17 +66,20 @@ export function CreateTagDialog({
   const handleSubmit = async () => {
     if (!name.trim()) return
     if (isEditing) {
-      const updated = await window.api.tags.updateTag({
+      const updated = await updateTagMutation.mutateAsync({
         id: tag.id,
         name: name.trim(),
         color: selected.bg,
         textColor: selected.text
       })
       onUpdated?.(updated)
+      queryClient.invalidateQueries(trpc.tags.list.queryFilter())
+      // Keep firing the legacy CustomEvent: useTasksData/TaskDetailPage still
+      // listen for it (removed once those consumers migrate in P16).
       window.dispatchEvent(new CustomEvent('slayzone:tag-updated', { detail: updated }))
     } else {
       if (!projectId) return
-      const created = await window.api.tags.createTag({
+      const created = await createTagMutation.mutateAsync({
         name: name.trim(),
         color: selected.bg,
         textColor: selected.text,
@@ -78,6 +87,7 @@ export function CreateTagDialog({
       })
       track('tag_created')
       onCreated(created)
+      queryClient.invalidateQueries(trpc.tags.list.queryFilter())
       window.dispatchEvent(new CustomEvent('slayzone:tag-created', { detail: created }))
     }
     onOpenChange(false)

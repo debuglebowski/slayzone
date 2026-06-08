@@ -933,9 +933,15 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       electron:
         specifier: ^41.0.0
         version: 41.0.3
