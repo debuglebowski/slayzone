@@ -1807,6 +1807,8 @@ app
               return screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor
             },
             authGithubSystemSignIn: (input) => githubSystemSignIn(input),
+            dialogShowOpenDialog: (options) =>
+              dialog.showOpenDialog(options as Electron.OpenDialogOptions),
             // Browser view ops — same BrowserViewManager singleton + shared
             // browserExtensionOps the `browser:*` IPC handlers use (coexistence
             // until slice 5). browserExtensionOps is defined below in this

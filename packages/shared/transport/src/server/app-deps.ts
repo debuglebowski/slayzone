@@ -263,6 +263,10 @@ export type AppDeps = {
   // auth
   authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>
 
+  // dialog (native file picker — same electron dialog API backs the
+  // `dialog:showOpenDialog` IPC handler; coexistence until slice 5)
+  dialogShowOpenDialog: (options: unknown) => Promise<{ canceled: boolean; filePaths: string[] }>
+
   // Browser view manager — heavy electron coupling, expose as opaque object
   // and call methods directly from procedures. All return types are unknown
   // since the manager's public surface evolves; callers cast on the renderer.

@@ -184,6 +184,13 @@ export const appLevelRouter = router({
       .mutation(({ input }) => getAppDeps().authGithubSystemSignIn(input as never))
   }),
 
+  // Dialog (native file picker — same impl backs the dialog:showOpenDialog IPC)
+  dialog: router({
+    showOpenDialog: publicProcedure
+      .input(anyInput)
+      .mutation(({ input }) => getAppDeps().dialogShowOpenDialog(input))
+  }),
+
   // Browser view ops — delegate to the BrowserViewManager singleton (same
   // instance backing the still-live `browser:*` IPC handlers; coexistence
   // until the renderer drops IPC in slice 5).
