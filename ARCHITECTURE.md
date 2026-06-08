@@ -145,3 +145,4 @@ To change the app icon:
 | SQLite + better-sqlite3 | Cross-process, sync access |
 | node-pty | Real PTY for Claude Code CLI |
 | Clara philosophy | AI-comprehensible codebase structure |
+| IPC→tRPC transport migration (8 slices) | Transport moving from `ipcMain` to tRPC-over-WebSocket. Per domain, tRPC router + IPC handler coexist during migration — both delegate to the **same domain ops** (single source of truth), IPC/REST cut later (renderer = slice 5, legacy IPC = slice 8). Every channel falls in one bucket: **tRPC-covered** (domain ops, dual-emit) · **REST-for-CLI** (`apps/cli` talks to the app over loopback HTTP — `apps/app/src/main/rest-api/`) · **Electron-only-IPC** (WebContentsView browser, webview, native window/menu, file dialogs, node-pty acks — stay in main) · **app-bootstrap** (port discovery, relaunch). Roadmap + rationale: parent-intent artifact `2e715da6` and `packages/shared/transport/src/server/app-deps.ts`. |
