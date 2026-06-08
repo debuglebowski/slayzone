@@ -1,13 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useCallback, useMemo } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Settings, RefreshCw, ChevronRight } from 'lucide-react'
 import { Button, Card, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@slayzone/ui'
-import type {
-  TestCategory,
-  ScanResult,
-  TestLabel,
-  TestFileLabel,
-  TestFileNote
-} from '../shared/types'
+import type { TestLabel } from '../shared/types'
 import { TestFileRow } from './TestFileRow'
 
 interface TestPanelProps {
@@ -62,13 +58,41 @@ export function TestPanel({
   groupBy,
   onOpenSettings
 }: TestPanelProps): React.JSX.Element {
-  const [categories, setCategories] = useState<TestCategory[]>([])
-  const [scanResult, setScanResult] = useState<ScanResult | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [labels, setLabels] = useState<TestLabel[]>([])
-  const [fileLabels, setFileLabels] = useState<TestFileLabel[]>([])
-  const [fileNotes, setFileNotes] = useState<TestFileNote[]>([])
-  const requestIdRef = useRef(0)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+
+  const hasProject = !!projectId
+  const canScan = !!projectId && !!projectPath
+  // Inputs are only read when the query is enabled; fall back to safe strings
+  // for the disabled (null-project) case so the typed input shape holds.
+  const pid = projectId ?? ''
+  const ppath = projectPath ?? ''
+
+  const categoriesQuery = useQuery(
+    trpc.testPanel.getCategories.queryOptions({ projectId: pid }, { enabled: hasProject })
+  )
+  const scanQuery = useQuery(
+    trpc.testPanel.scanFiles.queryOptions(
+      { projectPath: ppath, projectId: pid },
+      { enabled: canScan }
+    )
+  )
+  const labelsQuery = useQuery(
+    trpc.testPanel.getLabels.queryOptions({ projectId: pid }, { enabled: hasProject })
+  )
+  const fileLabelsQuery = useQuery(
+    trpc.testPanel.getFileLabels.queryOptions({ projectId: pid }, { enabled: hasProject })
+  )
+  const fileNotesQuery = useQuery(
+    trpc.testPanel.getFileNotes.queryOptions({ projectId: pid }, { enabled: hasProject })
+  )
+
+  const categories = categoriesQuery.data ?? []
+  const scanResult = scanQuery.data ?? null
+  const labels = labelsQuery.data ?? []
+  const fileLabels = fileLabelsQuery.data ?? []
+  const fileNotes = fileNotesQuery.data ?? []
+  const loading = scanQuery.isFetching
 
   const fileLabelMap = useMemo(() => {
     const map = new Map<string, Set<string>>()
@@ -85,48 +109,40 @@ export function TestPanel({
     return map
   }, [fileNotes])
 
-  const reloadLabels = useCallback(async () => {
+  const reloadLabels = useCallback(() => {
     if (!projectId) return
-    const id = ++requestIdRef.current
-    const [lbls, fls, fns] = await Promise.all([
-      window.api.testPanel.getLabels(projectId),
-      window.api.testPanel.getFileLabels(projectId),
-      window.api.testPanel.getFileNotes(projectId)
-    ])
-    if (requestIdRef.current === id) {
-      setLabels(lbls)
-      setFileLabels(fls)
-      setFileNotes(fns)
-    }
-  }, [projectId])
+    queryClient.invalidateQueries(trpc.testPanel.getLabels.queryFilter({ projectId }))
+    queryClient.invalidateQueries(trpc.testPanel.getFileLabels.queryFilter({ projectId }))
+    queryClient.invalidateQueries(trpc.testPanel.getFileNotes.queryFilter({ projectId }))
+  }, [projectId, queryClient, trpc])
 
-  const rescanFiles = useCallback(async () => {
+  const rescanFiles = useCallback(() => {
     if (!projectId || !projectPath) return
-    const id = ++requestIdRef.current
-    setLoading(true)
-    try {
-      const [cats, scan, lbls, fls, fns] = await Promise.all([
-        window.api.testPanel.getCategories(projectId),
-        window.api.testPanel.scanFiles(projectPath, projectId),
-        window.api.testPanel.getLabels(projectId),
-        window.api.testPanel.getFileLabels(projectId),
-        window.api.testPanel.getFileNotes(projectId)
-      ])
-      if (requestIdRef.current === id) {
-        setCategories(cats)
-        setScanResult(scan)
-        setLabels(lbls)
-        setFileLabels(fls)
-        setFileNotes(fns)
-      }
-    } finally {
-      if (requestIdRef.current === id) setLoading(false)
-    }
-  }, [projectId, projectPath])
+    categoriesQuery.refetch()
+    scanQuery.refetch()
+    labelsQuery.refetch()
+    fileLabelsQuery.refetch()
+    fileNotesQuery.refetch()
+  }, [
+    projectId,
+    projectPath,
+    categoriesQuery,
+    scanQuery,
+    labelsQuery,
+    fileLabelsQuery,
+    fileNotesQuery
+  ])
 
-  useEffect(() => {
-    rescanFiles()
-  }, [rescanFiles])
+  const toggleFileLabelMutation = useMutation(
+    trpc.testPanel.toggleFileLabel.mutationOptions({
+      onSuccess: () => reloadLabels()
+    })
+  )
+  const setFileNoteMutation = useMutation(
+    trpc.testPanel.setFileNote.mutationOptions({
+      onSuccess: () => reloadLabels()
+    })
+  )
 
   const filesByCategory = new Map<string, string[]>()
   if (scanResult) {
@@ -139,14 +155,12 @@ export function TestPanel({
 
   const handleToggleLabel = async (filePath: string, labelId: string) => {
     if (!projectId) return
-    await window.api.testPanel.toggleFileLabel(projectId, filePath, labelId)
-    reloadLabels()
+    await toggleFileLabelMutation.mutateAsync({ projectId, filePath, labelId })
   }
 
   const handleSetNote = async (filePath: string, note: string) => {
     if (!projectId) return
-    await window.api.testPanel.setFileNote(projectId, filePath, note)
-    reloadLabels()
+    await setFileNoteMutation.mutateAsync({ projectId, filePath, note })
   }
 
   if (!projectId || !projectPath) {

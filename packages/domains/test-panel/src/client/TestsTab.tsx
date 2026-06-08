@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Input,
   Button,
@@ -22,7 +24,7 @@ import {
   PopoverTrigger
 } from '@slayzone/ui'
 import { Plus, Trash2, Save } from 'lucide-react'
-import type { TestCategory, TestProfile, CreateTestCategoryInput, TestLabel } from '../shared/types'
+import type { TestCategory, TestProfile, CreateTestCategoryInput } from '../shared/types'
 
 type GroupBy = 'none' | 'path' | 'label'
 
@@ -64,31 +66,103 @@ export function TestsTab({
   groupBy,
   onGroupByChange
 }: TestsTabProps): React.JSX.Element {
-  const [profiles, setProfiles] = useState<TestProfile[]>([])
-  const [categories, setCategories] = useState<TestCategory[]>([])
-  const [labels, setLabels] = useState<TestLabel[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
 
-  const reload = useCallback(async () => {
-    const [cats, lbls, profs] = await Promise.all([
-      window.api.testPanel.getCategories(projectId),
-      window.api.testPanel.getLabels(projectId),
-      window.api.testPanel.getProfiles()
-    ])
-    setCategories(cats)
-    setLabels(lbls)
-    setProfiles(profs)
-  }, [projectId])
+  const categoriesQuery = useQuery(trpc.testPanel.getCategories.queryOptions({ projectId }))
+  const labelsQuery = useQuery(trpc.testPanel.getLabels.queryOptions({ projectId }))
+  const profilesQuery = useQuery(trpc.testPanel.getProfiles.queryOptions())
 
-  useEffect(() => {
-    reload()
-  }, [reload])
+  const categories = categoriesQuery.data ?? []
+  const labels = labelsQuery.data ?? []
+  const profiles = profilesQuery.data ?? []
+
+  const invalidateCategories = () =>
+    queryClient.invalidateQueries(trpc.testPanel.getCategories.queryFilter({ projectId }))
+  const invalidateLabels = () =>
+    queryClient.invalidateQueries(trpc.testPanel.getLabels.queryFilter({ projectId }))
+  const invalidateProfiles = () =>
+    queryClient.invalidateQueries(trpc.testPanel.getProfiles.queryFilter())
+
+  const applyProfileMutation = useMutation(
+    trpc.testPanel.applyProfile.mutationOptions({
+      onSuccess: () => {
+        invalidateCategories()
+        invalidateLabels()
+        invalidateProfiles()
+      }
+    })
+  )
+  const createCategoryMutation = useMutation(
+    trpc.testPanel.createCategory.mutationOptions({
+      onSuccess: () => {
+        invalidateCategories()
+        invalidateLabels()
+        invalidateProfiles()
+      }
+    })
+  )
+  const updateCategoryMutation = useMutation(
+    trpc.testPanel.updateCategory.mutationOptions({
+      onSuccess: () => {
+        invalidateCategories()
+        invalidateLabels()
+        invalidateProfiles()
+      }
+    })
+  )
+  const deleteCategoryMutation = useMutation(
+    trpc.testPanel.deleteCategory.mutationOptions({
+      onSuccess: () => {
+        invalidateCategories()
+        invalidateLabels()
+        invalidateProfiles()
+      }
+    })
+  )
+  const saveProfileMutation = useMutation(
+    trpc.testPanel.saveProfile.mutationOptions({
+      onSuccess: () => invalidateProfiles()
+    })
+  )
+  const deleteProfileMutation = useMutation(
+    trpc.testPanel.deleteProfile.mutationOptions({
+      onSuccess: () => invalidateProfiles()
+    })
+  )
+  const createLabelMutation = useMutation(
+    trpc.testPanel.createLabel.mutationOptions({
+      onSuccess: () => {
+        invalidateCategories()
+        invalidateLabels()
+        invalidateProfiles()
+      }
+    })
+  )
+  const updateLabelMutation = useMutation(
+    trpc.testPanel.updateLabel.mutationOptions({
+      onSuccess: () => {
+        invalidateCategories()
+        invalidateLabels()
+        invalidateProfiles()
+      }
+    })
+  )
+  const deleteLabelMutation = useMutation(
+    trpc.testPanel.deleteLabel.mutationOptions({
+      onSuccess: () => {
+        invalidateCategories()
+        invalidateLabels()
+        invalidateProfiles()
+      }
+    })
+  )
 
   const selectedProfile = matchProfile(categories, profiles)
 
   const handleProfileChange = async (value: string) => {
     if (value !== CUSTOM_VALUE && value !== '') {
-      await window.api.testPanel.applyProfile(projectId, value)
-      reload()
+      await applyProfileMutation.mutateAsync({ projectId, profileId: value })
     }
   }
 
@@ -98,8 +172,7 @@ export function TestsTab({
       name: 'New Category',
       pattern: '**/*.test.ts'
     }
-    await window.api.testPanel.createCategory(input)
-    reload()
+    await createCategoryMutation.mutateAsync(input)
   }
 
   const categoryIdsRef = useRef(new Set<string>())
@@ -109,13 +182,11 @@ export function TestsTab({
 
   const updateCategory = async (id: string, field: string, value: string | number) => {
     if (!categoryIdsRef.current.has(id)) return
-    await window.api.testPanel.updateCategory({ id, [field]: value })
-    reload()
+    await updateCategoryMutation.mutateAsync({ id, [field]: value })
   }
 
   const deleteCategory = async (id: string) => {
-    await window.api.testPanel.deleteCategory(id)
-    reload()
+    await deleteCategoryMutation.mutateAsync({ id })
   }
 
   const [savePopoverOpen, setSavePopoverOpen] = useState(false)
@@ -127,29 +198,24 @@ export function TestsTab({
       name: name.trim(),
       categories: categories.map((c) => ({ name: c.name, pattern: c.pattern, color: c.color }))
     }
-    await window.api.testPanel.saveProfile(profile)
-    setProfiles(await window.api.testPanel.getProfiles())
+    await saveProfileMutation.mutateAsync(profile)
     setSavePopoverOpen(false)
   }
 
   const deleteProfile = async (id: string) => {
-    await window.api.testPanel.deleteProfile(id)
-    setProfiles(await window.api.testPanel.getProfiles())
+    await deleteProfileMutation.mutateAsync({ id })
   }
 
   const addLabel = async () => {
-    await window.api.testPanel.createLabel({ project_id: projectId, name: 'New Label' })
-    reload()
+    await createLabelMutation.mutateAsync({ project_id: projectId, name: 'New Label' })
   }
 
   const updateLabel = async (id: string, field: string, value: string | number) => {
-    await window.api.testPanel.updateLabel({ id, [field]: value })
-    reload()
+    await updateLabelMutation.mutateAsync({ id, [field]: value })
   }
 
   const deleteLabel = async (id: string) => {
-    await window.api.testPanel.deleteLabel(id)
-    reload()
+    await deleteLabelMutation.mutateAsync({ id })
   }
 
   const builtinProfiles = profiles.filter((p) => p.id.startsWith('builtin:'))

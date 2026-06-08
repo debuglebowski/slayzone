@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@slayzone/ui": "workspace:*",
+    "@slayzone/transport": "workspace:*",
+    "@tanstack/react-query": "^5.100.9",
     "picomatch": "^4.0.0",
     "@slayzone/platform": "workspace:*"
   },
