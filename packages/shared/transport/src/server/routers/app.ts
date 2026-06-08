@@ -366,5 +366,23 @@ export const appLevelRouter = router({
         return () => ev.off('collapse-changed', handler)
       })
     )
+  }),
+
+  // Webview — CLI browser-tab registry (P19i; grown with devtools/shortcuts in
+  // P19k/P19m). Same impls back the `webview:*` IPC handlers (slice 5 cutover).
+  webview: router({
+    registerBrowserTab: publicProcedure
+      .input(z.object({ taskId: z.string(), tabId: z.string(), webContentsId: z.number() }))
+      .mutation(({ input }) =>
+        getAppDeps().webview.registerBrowserTab(input.taskId, input.tabId, input.webContentsId)
+      ),
+    unregisterBrowserTab: publicProcedure
+      .input(z.object({ taskId: z.string(), tabId: z.string() }))
+      .mutation(({ input }) =>
+        getAppDeps().webview.unregisterBrowserTab(input.taskId, input.tabId)
+      ),
+    setActiveBrowserTab: publicProcedure
+      .input(z.object({ taskId: z.string(), tabId: z.string().nullable() }))
+      .mutation(({ input }) => getAppDeps().webview.setActiveBrowserTab(input.taskId, input.tabId))
   })
 })

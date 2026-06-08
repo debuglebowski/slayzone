@@ -1864,6 +1864,11 @@ app
             floatingAgent: {
               ...floatingGlobalAgentPanelOps,
               events: floatingGlobalAgentPanelEvents
+            },
+            webview: {
+              registerBrowserTab,
+              unregisterBrowserTab,
+              setActiveBrowserTab
             }
           })
           // Process-manager lifecycle ops + the dual-emit event stream for the

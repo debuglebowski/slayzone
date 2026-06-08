@@ -339,6 +339,14 @@ export type AppDeps = {
       off(event: string, listener: (...args: unknown[]) => void): EventEmitter
     }
   }
+
+  // Webview — CLI tab registry (P19i) + devtools (P19k) + shortcuts/emulation
+  // (P19m). Same impls back the `webview:*` IPC handlers (coexistence/slice 5).
+  webview: {
+    registerBrowserTab: (taskId: string, tabId: string, webContentsId: number) => void
+    unregisterBrowserTab: (taskId: string, tabId: string) => void
+    setActiveBrowserTab: (taskId: string, tabId: string | null) => void
+  }
 }
 
 let appDeps: AppDeps | null = null
