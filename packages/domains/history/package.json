@@ -8,8 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./main": "./src/main/index.ts",
-    "./recorder": "./src/main/recorder.ts"
+    "./server": "./src/server/index.ts",
+    "./electron": "./src/electron/index.ts",
+    "./recorder": "./src/server/recorder.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

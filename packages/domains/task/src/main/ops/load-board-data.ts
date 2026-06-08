@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task/shared'
-import { parseProject } from '@slayzone/projects/main'
+import { parseProject } from '@slayzone/projects/server'
 import { parseAndColorTasks } from './shared.js'
 
 export interface BoardData {

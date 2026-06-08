@@ -8,9 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./main": "./src/main/index.ts",
     "./server": "./src/server/index.ts",
-    "./db": "./src/main/worker-db.ts",
+    "./electron": "./src/electron/index.ts",
+    "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
     "./client/useDetectedRepos": "./src/client/useDetectedRepos.ts"
   },

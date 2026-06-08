@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { DateRange } from '../shared/types'
-import { refreshUsageData, queryAnalytics, queryTaskCost } from './cache'
+import { refreshUsageData, queryAnalytics, queryTaskCost } from '../server/cache'
 
 export function registerUsageAnalyticsHandlers(ipcMain: IpcMain, db: SlayzoneDb): void {
   ipcMain.handle('usage-analytics:query', async (_, range: DateRange) => {

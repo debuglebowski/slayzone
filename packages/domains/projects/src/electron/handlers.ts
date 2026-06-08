@@ -19,10 +19,6 @@ import {
   parseProject
 } from '@slayzone/projects/server'
 
-// Re-exported for `@slayzone/task/main` (load-board-data), which imports it from
-// `@slayzone/projects/main`. The definition now lives in `../server` (electron-free).
-export { parseProject } from '@slayzone/projects/server'
-
 function getProjectIconsDir(): string {
   return path.join(process.env.SLAYZONE_DB_DIR || app.getPath('userData'), 'project-icons')
 }

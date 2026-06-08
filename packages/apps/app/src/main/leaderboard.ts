@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { LocalLeaderboardStats } from '@slayzone/types'
-import { refreshUsageData, queryDailyTotals } from '@slayzone/usage-analytics/main'
+import { refreshUsageData, queryDailyTotals } from '@slayzone/usage-analytics/server'
 import { isCompletedStatus, parseColumnsConfig } from '@slayzone/projects/shared'
 
 async function getDailyTokens(

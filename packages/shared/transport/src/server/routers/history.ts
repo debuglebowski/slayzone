@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { listActivityEventsForTask, listAutomationActionRuns } from '@slayzone/history/main'
+import { listActivityEventsForTask, listAutomationActionRuns } from '@slayzone/history/server'
 import { router, publicProcedure } from '../trpc'
 
 const cursorInput = z.object({ createdAt: z.string(), id: z.string() })

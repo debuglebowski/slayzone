@@ -55,23 +55,12 @@ async function resolveTabContext(
 }
 
 function broadcastChange(worktreePath: string): void {
-  // tRPC `agentTurns.onChanged` subscription source (fires in every context,
-  // incl. tests). The webContents.send path below stays until the renderer
-  // drops IPC (slice 5).
+  // Pure domain signal — electron-free so this module lives in `server/`. The
+  // tRPC `agentTurns.onChanged` subscription wraps this emitter; the Electron-
+  // only `initAgentTurnsBroadcast()` subscriber (../electron/agent-turns-broadcast.ts)
+  // mirrors each change onto the legacy `agent-turns:changed` + `tasks:changed`
+  // webContents.send channels until the renderer drops IPC (slice 5).
   agentTurnsEvents.emit('agent-turns:changed', worktreePath)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { BrowserWindow } = require('electron') as typeof import('electron')
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (w.isDestroyed()) continue
-      w.webContents.send('agent-turns:changed', worktreePath)
-      // insertTurn bumps tasks.last_interaction_at — refresh so the tree-view
-      // "Last interaction" sort reorders without waiting for unrelated reloads.
-      w.webContents.send('tasks:changed')
-    }
-  } catch {
-    // non-electron context (tests) — no-op
-  }
 }
 
 /**

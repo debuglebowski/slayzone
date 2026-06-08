@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { refreshUsageData, queryAnalytics, queryTaskCost } from '@slayzone/usage-analytics/main'
+import { refreshUsageData, queryAnalytics, queryTaskCost } from '@slayzone/usage-analytics/server'
 import { router, publicProcedure } from '../trpc'
 
 // real validation, mirrors DateRange = '7d'|'30d'|'90d'|'all' (usage-analytics/shared/types.ts)

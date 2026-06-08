@@ -1,4 +1,4 @@
-import type { RecordActivityEventInput } from '@slayzone/history/main'
+import type { RecordActivityEventInput } from '@slayzone/history/server'
 import type { Task } from '../shared/types'
 
 function toTitleCase(value: string): string {

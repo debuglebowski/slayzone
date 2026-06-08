@@ -17,6 +17,21 @@ for p in packages/apps/server/src packages/shared/transport/src packages/shared/
   fi
 done
 
+# Domain server/ entries must stay Electron-free (slice 4 split). Each
+# packages/domains/<d>/src/server/ is the pure-Node half that @slayzone/server
+# bundles; an electron import there breaks the headless build. electron/ glue
+# is exempt — only server/ is guarded.
+for d in packages/domains/*/src/server; do
+  [ -d "$d" ] || continue
+  hit=$(grep -rnE --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.js" \
+    "$ELECTRON" "$d" 2>/dev/null || true)
+  if [ -n "$hit" ]; then
+    echo "Domain server/ must not import electron ($d):"
+    echo "$hit"
+    fail=1
+  fi
+done
+
 SERVER_IMPORT="from ['\"]@slayzone/server"
 hit=$(grep -rnE --include="*.ts" --include="*.tsx" \
   "$SERVER_IMPORT" packages/apps/app/src 2>/dev/null || true)

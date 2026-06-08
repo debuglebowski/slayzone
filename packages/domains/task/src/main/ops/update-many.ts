@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
-import type { RecordActivityEventInput } from '@slayzone/history/main'
+import type { RecordActivityEventInput } from '@slayzone/history/server'
 import { buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { colorOne, parseTask, updateTask, type OpDeps } from './shared.js'

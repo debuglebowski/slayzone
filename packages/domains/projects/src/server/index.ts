@@ -7,3 +7,4 @@ export {
   reorderProjects,
   parseProject
 } from './project-store'
+export { handleTerminalStateChange } from './task-automation'

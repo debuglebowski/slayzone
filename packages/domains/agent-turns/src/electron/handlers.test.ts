@@ -9,7 +9,7 @@ import {
   describe
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerAgentTurnsHandlers } from './handlers.js'
-import { recordTurnBoundary } from './turn-tracker.js'
+import { recordTurnBoundary } from '../server/turn-tracker.js'
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'

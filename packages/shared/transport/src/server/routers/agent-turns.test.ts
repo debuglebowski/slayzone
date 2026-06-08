@@ -10,7 +10,7 @@
  */
 import { test, expect, describe } from '../../../../test-utils/ipc-harness.js'
 import { agentTurnsRouter } from './agent-turns.js'
-import { agentTurnsEvents } from '@slayzone/agent-turns/main'
+import { agentTurnsEvents } from '@slayzone/agent-turns/server'
 
 // onChanged never touches ctx.db, so a stub context is enough.
 const ctx = { db: {} as never, dataRoot: '' }

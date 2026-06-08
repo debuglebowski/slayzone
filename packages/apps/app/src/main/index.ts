@@ -198,7 +198,8 @@ import { initDatabases, closeDatabase, getDatabasePath, closeDiagnosticsDatabase
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { registerBackupHandlers, startAutoBackup, stopAutoBackup } from './backup'
 // Domain handlers
-import { registerProjectHandlers, handleTerminalStateChange } from '@slayzone/projects/main'
+import { registerProjectHandlers } from '@slayzone/projects/electron'
+import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
   configureTaskRuntimeAdapters,
   registerTaskHandlers,
@@ -275,11 +276,8 @@ import {
   markTabHibernated
 } from '@slayzone/task-terminals/main'
 import { registerWorktreeHandlers, closeGitWatcher } from '@slayzone/worktrees/main'
-import {
-  registerAgentTurnsHandlers,
-  initChatTurnSubscriber,
-  initPtyTurnSubscriber
-} from '@slayzone/agent-turns/main'
+import { registerAgentTurnsHandlers, initAgentTurnsBroadcast } from '@slayzone/agent-turns/electron'
+import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
 import {
   registerDiagnosticsHandlers,
   registerProcessDiagnostics,
@@ -311,10 +309,10 @@ import {
   resetSyncFlags
 } from '@slayzone/integrations/main'
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/main'
-import { registerHistoryHandlers } from '@slayzone/history/main'
+import { registerHistoryHandlers } from '@slayzone/history/electron'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/main'
 import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/main'
-import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/main'
+import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/electron'
 import { registerScreenshotHandlers, captureBrowserViewScreenshot } from './screenshot'
 import {
   registerClipboardHandlers,
@@ -1703,6 +1701,9 @@ app
     registerFilesHandlers(ipcMain)
     registerWorktreeHandlers(ipcMain, db)
     registerAgentTurnsHandlers(ipcMain, db)
+    // Legacy IPC bridge for agent-turn changes — pure domain emits on
+    // agentTurnsEvents; this mirrors onto webContents.send until renderer drops IPC.
+    initAgentTurnsBroadcast()
     logBoot('files+worktree+agent-turns registered')
     // xterm-mode turn detection: every Enter press in a PTY = turn boundary.
     onPtyInputSubmit(initPtyTurnSubscriber(db))

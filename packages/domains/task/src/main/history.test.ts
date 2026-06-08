@@ -10,7 +10,7 @@ import {
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerTaskHandlers } from './handlers.js'
 import { registerTagHandlers } from '@slayzone/tags/main'
-import { registerHistoryHandlers } from '@slayzone/history/main'
+import { registerHistoryHandlers } from '@slayzone/history/electron'
 import type { Task } from '../shared/types.js'
 
 const h = await createTestHarness()

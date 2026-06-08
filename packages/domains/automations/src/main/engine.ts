@@ -7,7 +7,7 @@ import type {
   AutomationRow,
   AutomationRun
 } from '@slayzone/automations/shared'
-import { trimOutputTail, type RecordActivityEventInput } from '@slayzone/history/main'
+import { trimOutputTail, type RecordActivityEventInput } from '@slayzone/history/server'
 import { parseAutomationRow } from '@slayzone/automations/shared'
 import {
   buildAiHeadlessCommand,
