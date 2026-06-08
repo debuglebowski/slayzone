@@ -275,7 +275,8 @@ import {
   markTabSpawned,
   markTabHibernated
 } from '@slayzone/task-terminals/electron'
-import { registerWorktreeHandlers, closeGitWatcher } from '@slayzone/worktrees/main'
+import { registerWorktreeHandlers } from '@slayzone/worktrees/electron'
+import { closeGitWatcher } from '@slayzone/worktrees/server'
 import { registerAgentTurnsHandlers, initAgentTurnsBroadcast } from '@slayzone/agent-turns/electron'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
 import {

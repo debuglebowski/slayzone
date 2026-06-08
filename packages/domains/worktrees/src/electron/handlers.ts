@@ -23,7 +23,7 @@ function withResultDedup<A extends unknown[], R>(
 ) {
   return withResultDedupBase(handler, { ...options, sender: senderLifecycle })
 }
-import { getGitWatcher } from './git-watcher'
+import { getGitWatcher } from '../server/git-watcher'
 import {
   isGitRepo,
   removeWorktree,
@@ -89,8 +89,8 @@ import {
   dropStash,
   branchFromStash,
   getStashDiff
-} from './git-worktree'
-import { listProjectRepos } from './list-project-repos'
+} from '../server/git-worktree'
+import { listProjectRepos } from '../server/list-project-repos'
 import {
   detectChildRepos,
   detectWorktreesWithColors,
@@ -98,7 +98,7 @@ import {
   createWorktreeWithSetup,
   mergeWithAI,
   analyzeConflict
-} from './composite-ops'
+} from '../server/composite-ops'
 import {
   checkGhInstalled,
   hasGithubRemote,
@@ -111,7 +111,7 @@ import {
   getPrDiff,
   getGhUser,
   editPrComment
-} from './gh-cli'
+} from '../server/gh-cli'
 import type {
   CreateWorktreeOpts,
   CreatePrInput,

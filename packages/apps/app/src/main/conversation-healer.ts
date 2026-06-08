@@ -15,7 +15,7 @@ import {
   getCurrentConversationId
 } from '@slayzone/task/main'
 import { decideConversationHeal, parseSqliteUtc, type HealTranscriptMeta } from '@slayzone/task/shared'
-import { getCurrentBranch } from '@slayzone/worktrees/main'
+import { getCurrentBranch } from '@slayzone/worktrees/server'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 
 /** Max gap between task creation and the real Claude session's first message,

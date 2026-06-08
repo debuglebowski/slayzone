@@ -24,7 +24,7 @@ import {
   resolveCopyBehavior,
   getWorktreeColor,
   ensureProjectWorktreeColors
-} from '@slayzone/worktrees/main'
+} from '@slayzone/worktrees/server'
 import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
   resolveWorktreeBasePathTemplate

@@ -7,6 +7,7 @@ export {
   createWorktree,
   removeWorktree,
   runWorktreeSetupScript,
+  runWorktreeSetupScriptSync,
   initRepo,
   getCurrentBranch,
   listBranches,
@@ -71,7 +72,7 @@ export {
   dropStash,
   branchFromStash,
   getStashDiff
-} from '../main/git-worktree'
+} from './git-worktree'
 export {
   checkGhInstalled,
   hasGithubRemote,
@@ -84,11 +85,17 @@ export {
   getPrDiff,
   getGhUser,
   editPrComment
-} from '../main/gh-cli'
-export { runAiCommand } from '../main/merge-ai'
-export { listProjectRepos } from '../main/list-project-repos'
-export { ensureColors } from '../main/color-registry'
-export { getGitWatcher } from '../main/git-watcher'
+} from './gh-cli'
+export { runAiCommand } from './merge-ai'
+export { listProjectRepos } from './list-project-repos'
+export {
+  ensureColors,
+  ensureColors as ensureWorktreeColors,
+  getColor as getWorktreeColor,
+  getProjectColors as getProjectWorktreeColors,
+  ensureProjectColors as ensureProjectWorktreeColors
+} from './color-registry'
+export { getGitWatcher, closeGitWatcher } from './git-watcher'
 // Composite orchestrations + behavior resolvers shared with the IPC handlers.
 export {
   detectChildRepos,
@@ -98,4 +105,4 @@ export {
   createWorktreeWithSetup,
   mergeWithAI,
   analyzeConflict
-} from '../main/composite-ops'
+} from './composite-ops'
