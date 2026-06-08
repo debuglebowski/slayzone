@@ -29,6 +29,7 @@ import {
   classifyFocusLoss,
   describeEl,
   getFocusTrail,
+  getLastInput,
   noteTerminalOutput
 } from './focus-loss-diag'
 import { TerminalDeadOverlay } from './TerminalDeadOverlay'
@@ -1470,6 +1471,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     const REPORT_THROTTLE_MS = 3000
     let lastReportAt = 0
+    let lastHealAt = 0
 
     const ownsHelperTextarea = (el: EventTarget | null): boolean =>
       el instanceof Element &&
@@ -1489,6 +1491,48 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       } catch {
         return // capture itself failed — nothing safe to report
       }
+      // FAST self-heal. Clicking non-focusable app chrome (tree status headers,
+      // layout divs, bare icons) clears focus to <body> via Chromium's focus-fixup,
+      // leaving the terminal unfocused until the user clicks back in — the actual
+      // bug behind the reports. Reclaim it on the next task: sub-frame, no
+      // perceptible blur, no lost keystrokes. Gated hard so legitimate moves are
+      // untouched — only when focus went NOWHERE (a move to a real control is
+      // intentional) and the window still has focus (not alt-tab). terminalRef
+      // .focus() no-ops on a hidden/inert/detached textarea, so genuine
+      // "can't refocus" failures still fall through to the 300ms reporter below.
+      window.setTimeout(() => {
+        try {
+          const active = document.activeElement
+          if (ownsHelperTextarea(active)) return // already healed natively
+          if (!document.hasFocus()) return // alt-tab / window blur
+          const wentNowhere =
+            active == null || active === document.body || active === document.documentElement
+          if (!wentNowhere) return // focus moved to a real control — leave it
+          if (!textarea.isConnected) return // torn down — let the reporter classify it
+          const landedBefore = describeEl(active)
+          terminalRef.current?.focus()
+          if (!ownsHelperTextarea(document.activeElement)) return // hidden/inert → real failure
+          const now = performance.now()
+          if (now - lastHealAt < REPORT_THROTTLE_MS) return
+          lastHealAt = now
+          void window.api.diagnostics
+            .recordClientEvent({
+              event: 'terminal.focus_self_healed',
+              level: 'info',
+              sessionId,
+              message: `xterm focus reclaimed after stray blur to <body> (mode=${mode})`,
+              payload: {
+                mode,
+                ptyState: ptyStateRef.current,
+                landedBefore,
+                lastInput: getLastInput()
+              }
+            })
+            .catch(() => {})
+        } catch {
+          /* self-heal must never break the terminal */
+        }
+      }, 0)
       window.setTimeout(() => {
         // Wrap the whole confirm+report path: a capture bug must never throw on
         // a timer (lost signal + noisy console) — degrade to a marker event.

@@ -206,8 +206,16 @@ export type FocusLossCause =
   | 'ancestor-hidden-attr'
   | 'ancestor-aria-hidden'
   | 'element-unfocusable'
+  | 'click-to-nonfocusable'
   | 'programmatic-blur'
   | 'unattributed'
+
+// A click that lands on a non-focusable element (a layout div, a bare icon, a
+// status header) clears focus to <body> within the same task via Chromium's
+// focus-fixup. If a pointerdown fired within a couple frames of the blur AND focus
+// went nowhere (the caller establishes that before classifying), the click IS the
+// cause — empirically the single most common real-world signature.
+const CLICK_BLUR_WINDOW_MS = 64
 
 // Fold the synchronous context into one label. Order matters: a detached
 // textarea is a teardown regardless of anything else; a hidden ancestor is a
@@ -232,11 +240,25 @@ export function classifyFocusLoss(ctx: BlurContext): FocusLossCause {
   // self-heal refocus cannot land. This is the prime suspect for the genuine
   // mid-typing steal and the one the earlier CDP run never checked.
   if (isElementUnfocusable(ctx.focusBlocker)) return 'element-unfocusable'
-  // Frames from our own focus management, React's commit phase, or an explicit
-  // blur()/focus() call mean JS moved focus. A plain user click into another
-  // real control leaves only native dispatch frames (filtered out upstream by
-  // the wentNowhere guard), so app frames here point at programmatic movement.
-  if (/\b(blur|focus|Terminal|useTerminal|commit|HTMLElement)\b/i.test(ctx.blurStack)) {
+  // A pointerdown a couple frames before the blur, with focus now on <body>, means
+  // the user clicked non-focusable chrome and Chromium cleared focus. This — not
+  // terminal output — is what the rich captures actually show.
+  if (ctx.sincePointerMs != null && ctx.sincePointerMs <= CLICK_BLUR_WINDOW_MS) {
+    return 'click-to-nonfocusable'
+  }
+  // App frames moving focus = a programmatic blur()/focus() or a React commit. The
+  // focusout handler itself ALWAYS lives in Terminal.tsx, so its frame must be
+  // stripped first — otherwise every captured stack matches "Terminal" and
+  // EVERYTHING is mislabelled programmatic (the bug this replaces). A native focus
+  // change dispatches focusout from the event loop, leaving no app caller above us.
+  const callerFrames = ctx.blurStack
+    .split('\n')
+    .filter((line) => line.trim() && !/onFocusOut/.test(line))
+  if (
+    callerFrames.some((line) =>
+      /\b(blur|focus|Terminal|useTerminal|commit|HTMLElement)\b/i.test(line)
+    )
+  ) {
     return 'programmatic-blur'
   }
   return 'unattributed'
@@ -317,4 +339,22 @@ export function ensureFocusDiagnostics(): void {
 
 export function getFocusTrail(n = 12): FocusTrailEntry[] {
   return focusTrail.slice(-n)
+}
+
+// Last app-wide key + pointer breadcrumb, with ages relative to now. Lets the
+// self-heal path attribute a reclaimed blur to the click that caused it without
+// the heavy settleBlurContext() DOM walk.
+export function getLastInput(): {
+  key: string | null
+  sinceKeyMs: number | null
+  pointer: string | null
+  sincePointerMs: number | null
+} {
+  const now = performance.now()
+  return {
+    key: lastInput.key,
+    sinceKeyMs: lastInput.keyAt >= 0 ? Math.round(now - lastInput.keyAt) : null,
+    pointer: lastInput.pointer,
+    sincePointerMs: lastInput.pointerAt >= 0 ? Math.round(now - lastInput.pointerAt) : null
+  }
 }

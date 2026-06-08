@@ -176,4 +176,58 @@ test('connected + visible + no app frames → unattributed', () => {
   )
 })
 
+// Regression: the focusout handler ALWAYS lives in Terminal.tsx, so a native
+// click-blur captures a single `onFocusOut (Terminal.tsx)` frame. The old regex
+// matched "Terminal" on that frame and mislabelled every such blur programmatic.
+test('native click-blur (only the onFocusOut handler frame) is NOT programmatic', () => {
+  expect(
+    classifyFocusLoss(
+      ctx({
+        blurStack:
+          '    at HTMLDivElement.onFocusOut (http://localhost:5173/@fs/x/Terminal.tsx?t=1:1004:16)'
+      })
+    )
+  ).toBe('unattributed')
+})
+
+test('recent pointerdown + focus on body → click-to-nonfocusable', () => {
+  expect(
+    classifyFocusLoss(
+      ctx({
+        sincePointerMs: 1,
+        lastPointerTarget: 'DIV#tree-status-group',
+        blurStack: '    at HTMLDivElement.onFocusOut (http://localhost:5173/x/Terminal.tsx:1004:16)'
+      })
+    )
+  ).toBe('click-to-nonfocusable')
+})
+
+test('stale pointerdown (outside the click window) is NOT click-to-nonfocusable', () => {
+  expect(
+    classifyFocusLoss(
+      ctx({
+        sincePointerMs: 5000,
+        blurStack: '    at HTMLDivElement.onFocusOut (Terminal.tsx:1004)'
+      })
+    )
+  ).toBe('unattributed')
+})
+
+test('element-unfocusable wins over a recent click', () => {
+  expect(
+    classifyFocusLoss(ctx({ focusBlocker: { ...NO_BLOCKER, inert: true }, sincePointerMs: 1 }))
+  ).toBe('element-unfocusable')
+})
+
+test('real programmatic blur() above the handler frame → programmatic-blur', () => {
+  expect(
+    classifyFocusLoss(
+      ctx({
+        blurStack:
+          '    at HTMLDivElement.onFocusOut (Terminal.tsx:1004)\n    at HTMLTextAreaElement.blur\n    at stealFocus (other.ts:9)'
+      })
+    )
+  ).toBe('programmatic-blur')
+})
+
 console.log('all classifyFocusLoss tests passed')
