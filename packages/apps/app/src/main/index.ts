@@ -192,6 +192,16 @@ if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   app.setPath('userData', process.env.SLAYZONE_USER_DATA_DIR)
 }
 
+// tRPC server data root. Mirrors the app/IPC icon+DB convention
+// (SLAYZONE_DB_DIR || userData) so every router's ctx.dataRoot resolves
+// project-icons/artifacts to the same dir the renderer reads — otherwise, under
+// e2e (SLAYZONE_DB_DIR set, SLAYZONE_STORE_DIR unset) the tRPC server would use
+// ensureDataRoot()=getStateDir() (the real dev dir) and uploaded icons "disappear".
+// SLAYZONE_STORE_DIR still wins when explicitly set (headless @slayzone/server).
+function getTrpcDataRoot(): string {
+  return process.env.SLAYZONE_STORE_DIR || process.env.SLAYZONE_DB_DIR || app.getPath('userData')
+}
+
 import icon from '../../resources/icon.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
 import { initDatabases, closeDatabase, getDatabasePath, closeDiagnosticsDatabase } from './db'
@@ -1968,7 +1978,7 @@ app
             killTask: killTaskProcesses,
             events: processEvents
           })
-          mod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
+          mod.startTrpcServer({ db, dataRoot: getTrpcDataRoot(), automationEngine })
           trpcCleanup = () => mod.stopTrpcServer()
           logBoot('trpc server started')
         })
@@ -3065,7 +3075,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         mcpMod.startMcpServer(db, { automationEngine })
         mcpCleanup = () => mcpMod.stopMcpServer()
         const trpcMod = await import('@slayzone/transport/server')
-        trpcMod.startTrpcServer({ db, dataRoot: ensureDataRoot(), automationEngine })
+        trpcMod.startTrpcServer({ db, dataRoot: getTrpcDataRoot(), automationEngine })
         trpcCleanup = () => trpcMod.stopTrpcServer()
         // Wait for both servers to be listening
         await new Promise<void>((resolve) => {

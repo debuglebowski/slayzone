@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { ThemeProvider, tabStoreReady, useTabStore } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
-import { TrpcProvider } from '@slayzone/transport/client'
+import { TrpcProvider, createTrpcWsClient } from '@slayzone/transport/client'
 import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
@@ -77,6 +77,17 @@ if (isFloatingGlobalAgentPanel) {
     }
 
     const trpcUrl = `ws://127.0.0.1:${trpcPort}/trpc`
+    // E2E: expose a lazy vanilla tRPC client so specs can call
+    // page.evaluate(() => window.getTrpcVanillaClient().task.getAll.query()).
+    // Reuses the discovered port; connects only on first use.
+    if (window.api.app.isPlaywright) {
+      let cached: ReturnType<typeof createTrpcWsClient>['client'] | null = null
+      ;(
+        window as typeof window & {
+          getTrpcVanillaClient?: () => ReturnType<typeof createTrpcWsClient>['client']
+        }
+      ).getTrpcVanillaClient = () => (cached ??= createTrpcWsClient({ url: trpcUrl }).client)
+    }
     performance.mark('sz:reactMount')
     window.api.app.bootMark?.('reactMount')
     createRoot(document.getElementById('root')!).render(

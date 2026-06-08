@@ -1,25 +1,31 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createWSClient, wsLink } from '@trpc/client'
-import superjson from 'superjson'
-import { trpc } from './trpc'
+import { TRPCProvider, createTrpcWsClient } from './trpc'
 
 export type TrpcProviderProps = {
   url: string
   children: ReactNode
 }
 
-export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
-  const [queryClient] = useState(() => new QueryClient())
-  const [{ wsClient, trpcClient }] = useState(() => {
-    const ws = createWSClient({ url })
-    return {
-      wsClient: ws,
-      trpcClient: trpc.createClient({
-        links: [wsLink({ client: ws, transformer: superjson })]
-      })
+function makeQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        // Baseline dedup window (replaces the old IPC dedup hashFn). Heavy reads
+        // (worktree/git) override per-query; mutations invalidate explicitly.
+        staleTime: 5_000,
+        // Keep focus refetch ON — reproduces the legacy useVisibleInterval
+        // catch-up tick that pollers relied on. Do NOT disable globally.
+        refetchOnWindowFocus: true,
+        retry: false
+      }
     }
   })
+}
+
+export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
+  const [queryClient] = useState(makeQueryClient)
+  const [{ wsClient, client }] = useState(() => createTrpcWsClient({ url }))
 
   useEffect(() => {
     return () => {
@@ -28,8 +34,10 @@ export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
   }, [wsClient])
 
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </trpc.Provider>
+    <QueryClientProvider client={queryClient}>
+      <TRPCProvider trpcClient={client} queryClient={queryClient}>
+        {children}
+      </TRPCProvider>
+    </QueryClientProvider>
   )
 }
