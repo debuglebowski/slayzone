@@ -13,9 +13,9 @@ import {
   registerCleanup,
   startSuiteTimeout,
   runScopedDiscovery
-} from './integration-test-helpers'
+} from '../server/integration-test-helpers'
 import * as linearClient from './linear-client'
-import { pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders } from './sync'
+import { pushNewTaskToProviders, pushArchiveToProviders, pushUnarchiveToProviders } from '../server/sync'
 import type { ProviderStatus } from '../shared'
 
 process.env.SLAYZONE_ALLOW_PLAINTEXT_CREDENTIALS = '1'

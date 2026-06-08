@@ -21,3 +21,6 @@ export {
   markSessionUserInput,
   clearSessionUserInputMark
 } from './user-input-tracker'
+// Cross-domain seam: server-side callers (integrations sync) invoke the no-op
+// default; the Electron host injects the real pty-killing impl at boot.
+export { onTaskReachedTerminal, setOnTaskReachedTerminalHandler } from './task-events'

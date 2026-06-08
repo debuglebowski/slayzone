@@ -1,13 +1,25 @@
-import electron from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 
-type SafeStorageApi = {
+/**
+ * OS secure-credential cipher seam — electron-free so this store lives in server/.
+ * The Electron host injects a safeStorage-backed cipher at boot via
+ * `setCredentialCipher` (../electron/credentials-cipher); the standalone server
+ * pkg can inject its own (slice 6). Until injected, `cipher` is null → the
+ * plaintext fallback applies (test/dev only, gated by allowPlaintextFallback).
+ * The interface mirrors Electron's `safeStorage` so the host injects it directly.
+ */
+export interface CredentialCipher {
   isEncryptionAvailable: () => boolean
   encryptString: (secret: string) => Buffer
   decryptString: (encrypted: Buffer) => string
 }
 
-const safeStorage = (electron as unknown as { safeStorage?: SafeStorageApi }).safeStorage
+let cipher: CredentialCipher | null = null
+
+export function setCredentialCipher(c: CredentialCipher | null): void {
+  cipher = c
+}
+
 const PLAINTEXT_PREFIX = 'plain:'
 
 function allowPlaintextFallback(): boolean {
@@ -19,11 +31,11 @@ function toSettingKey(ref: string): string {
 }
 
 export async function storeCredential(db: SlayzoneDb, ref: string, secret: string): Promise<void> {
-  if (!safeStorage) {
+  if (!cipher) {
     if (!allowPlaintextFallback()) {
       throw new Error('OS secure credential storage is unavailable on this machine')
     }
-    // Node-only test runtime fallback (no Electron safeStorage export).
+    // Node-only / pre-injection fallback (no cipher wired).
     await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
       toSettingKey(ref),
       `${PLAINTEXT_PREFIX}${secret}`
@@ -31,10 +43,10 @@ export async function storeCredential(db: SlayzoneDb, ref: string, secret: strin
     return
   }
 
-  if (!safeStorage.isEncryptionAvailable()) {
+  if (!cipher.isEncryptionAvailable()) {
     throw new Error('OS secure credential storage is unavailable on this machine')
   }
-  const encrypted = safeStorage.encryptString(secret)
+  const encrypted = cipher.encryptString(secret)
   await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(
     toSettingKey(ref),
     encrypted.toString('base64')
@@ -56,12 +68,12 @@ export async function readCredential(db: SlayzoneDb, ref: string): Promise<strin
     return row.value.slice(PLAINTEXT_PREFIX.length)
   }
 
-  if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+  if (!cipher || !cipher.isEncryptionAvailable()) {
     throw new Error('OS secure credential storage is unavailable on this machine')
   }
 
   const encrypted = Buffer.from(row.value, 'base64')
-  return safeStorage.decryptString(encrypted)
+  return cipher.decryptString(encrypted)
 }
 
 export async function deleteCredential(db: SlayzoneDb, ref: string): Promise<void> {

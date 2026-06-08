@@ -258,6 +258,7 @@ import {
   createPtyOps,
   ptyEvents
 } from '@slayzone/terminal/electron'
+import { setOnTaskReachedTerminalHandler } from '@slayzone/terminal/server'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import {
   attachFloatingGlobalAgentPanel,
@@ -301,16 +302,17 @@ import {
 } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
 import { registerAiConfigHandlers } from '@slayzone/ai-config/electron'
+import { registerIntegrationHandlers, getSafeStorageCipher } from '@slayzone/integrations/electron'
 import {
-  registerIntegrationHandlers,
   startSyncPoller,
   pushTaskAfterEdit,
   pushNewTaskToProviders,
   pushArchiveToProviders,
   pushUnarchiveToProviders,
   startDiscoveryPoller,
-  resetSyncFlags
-} from '@slayzone/integrations/main'
+  resetSyncFlags,
+  setCredentialCipher
+} from '@slayzone/integrations/server'
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/main'
 import { registerHistoryHandlers } from '@slayzone/history/electron'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/electron'
@@ -1527,6 +1529,9 @@ app
       // Electron data-root seam so task ops/ stays server-pure (env override wins).
       getDataRoot: () => app.getPath('userData')
     })
+    // Wire the cross-domain terminal seam so server-pure callers (integrations
+    // sync) reach the real pty-killing impl.
+    setOnTaskReachedTerminalHandler(onTaskReachedTerminal)
     logBoot('task runtime adapters configured')
 
     // Persist the host-kill timestamp into provider_config so the revive flow can
@@ -1714,6 +1719,8 @@ app
     onPtyInputSubmit(initPtyTurnSubscriber(db))
     registerAiConfigHandlers(ipcMain, db)
     logBoot('ai-config handlers registered')
+    // Inject the Electron safeStorage cipher into the electron-free credential store.
+    setCredentialCipher(getSafeStorageCipher())
     const integrationHandles = await registerIntegrationHandlers(ipcMain, db, {
       enableTestChannels: isPlaywright
     })

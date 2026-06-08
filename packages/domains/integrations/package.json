@@ -8,8 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./main": "./src/main/index.ts",
-    "./db": "./src/main/worker-db.ts",
+    "./server": "./src/server/index.ts",
+    "./electron": "./src/electron/index.ts",
+    "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {

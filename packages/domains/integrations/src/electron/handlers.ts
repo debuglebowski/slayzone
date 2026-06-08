@@ -27,9 +27,9 @@ import type {
   GithubRepositorySummary,
   GithubIssueSummary
 } from '../shared'
-import { createIntegrationOps, ensureIntegrationSchema, type IntegrationOps } from './handlers-store'
+import { createIntegrationOps, ensureIntegrationSchema, type IntegrationOps } from '../server/handlers-store'
 
-export { ensureIntegrationSchema } from './handlers-store'
+export { ensureIntegrationSchema } from '../server/handlers-store'
 
 export interface IntegrationHandles {
   pushGithubTask: (taskId: string) => Promise<void>

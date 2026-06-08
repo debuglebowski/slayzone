@@ -7,7 +7,7 @@
 import { createTestHarness, expect } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerIntegrationHandlers } from './handlers'
 import { _mock } from '../../../../shared/test-utils/mock-linear-client.js'
-import { storeCredential } from './credentials'
+import { storeCredential } from '../server/credentials'
 import type { LinearIssueSummary } from '../shared'
 import { execSync } from 'node:child_process'
 import * as fs from 'node:fs'

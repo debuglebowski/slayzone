@@ -19,7 +19,7 @@ import type {
   createPtyOps,
   PtyEventMap
 } from '@slayzone/terminal/electron'
-import type { IntegrationOps } from '@slayzone/integrations/main'
+import type { IntegrationOps } from '@slayzone/integrations/server'
 import type { TaskOps } from '@slayzone/task/server'
 import type {
   BackupInfo,
@@ -72,7 +72,7 @@ export function getPtyDeps(): PtyDeps {
   return ptyDeps
 }
 
-// Integration ops — the electron-coupled domain ops (`@slayzone/integrations/main`
+// Integration ops — the electron-coupled domain ops (`@slayzone/integrations/server`
 // pulls electron + node clients), injected by the host so the `integrationsRouter`
 // and the still-live IPC handlers share one instance (coexistence until slice 5).
 let integrationOps: IntegrationOps | null = null
