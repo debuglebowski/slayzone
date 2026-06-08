@@ -18,6 +18,10 @@ export type TrpcServerDeps = {
 
 export type TrpcContext = TrpcServerDeps & {
   req?: IncomingMessage
+  /** Per-WebSocket-connection window id, parsed from `?windowId=N` query.
+   *  Used by task-windows panel ownership + primary-active tracking. May be
+   *  null on standalone server connections (CLI, agents). */
+  windowId?: number | null
 }
 
 export type TrpcContextFactory = (req?: IncomingMessage) => TrpcContext

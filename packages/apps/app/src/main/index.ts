@@ -256,7 +256,12 @@ import {
   floatingGlobalAgentPanelOps,
   floatingGlobalAgentPanelEvents
 } from './floating-global-agent-panel'
-import { attachTaskWindows, setupTaskWindows } from './task-windows'
+import {
+  attachTaskWindows,
+  setupTaskWindows,
+  taskWindowsOps,
+  taskWindowsEvents
+} from './task-windows'
 import {
   registerTerminalTabsHandlers,
   createPtyEnricher,
@@ -1869,6 +1874,10 @@ app
               registerBrowserTab,
               unregisterBrowserTab,
               setActiveBrowserTab
+            },
+            taskWindows: {
+              ...taskWindowsOps,
+              events: taskWindowsEvents
             }
           })
           // Process-manager lifecycle ops + the dual-emit event stream for the

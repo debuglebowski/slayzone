@@ -1,4 +1,5 @@
-import { BrowserWindow, ipcMain, app, screen } from 'electron'
+import { BrowserWindow, ipcMain, app, screen, webContents } from 'electron'
+import { EventEmitter } from 'node:events'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/main'
@@ -15,6 +16,38 @@ function ownershipKey(taskId: string, panelId: string): string {
 const ownership = new Map<string, number>() // key → owner webContents.id
 const taskWindows = new Map<number, { window: BrowserWindow; taskId: string }>() // webContents.id → entry
 let primaryWindow: BrowserWindow | null = null
+// Primary's active task tracker (lifted to module scope so taskWindowsOps reads
+// it). Secondaries follow this for "Follow current tab" mode.
+let primaryActiveTaskId: string | null = null
+
+// tRPC event stream — dual-emitted alongside the legacy `task-window:*` /
+// `panels:*` webContents.send broadcasts below, so the `app.taskWindows`
+// subscriptions work while the renderer still consumes IPC (coexistence until
+// slice 5; the sends drop then). `panels-close-request` carries the target
+// windowId so the matching tRPC connection can filter (per-window delivery).
+export const taskWindowsEvents = new EventEmitter() as EventEmitter & {
+  on(event: 'list-changed', listener: (taskIds: string[]) => void): EventEmitter
+  on(event: 'primary-active-changed', listener: (taskId: string | null) => void): EventEmitter
+  on(
+    event: 'ownership-changed',
+    listener: (payload: {
+      taskId: string
+      ownership: Array<{ panelId: string; ownerWindowId: number }>
+    }) => void
+  ): EventEmitter
+  on(
+    event: 'panels-released-on-close',
+    listener: (payload: {
+      closedWindowId: number
+      released: Array<{ taskId: string; panelId: string }>
+    }) => void
+  ): EventEmitter
+  on(
+    event: 'panels-close-request',
+    listener: (targetWindowId: number, payload: { taskId: string; panelId: string }) => void
+  ): EventEmitter
+  off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+}
 
 export function attachTaskWindows(win: BrowserWindow): void {
   primaryWindow = win
@@ -51,7 +84,9 @@ function ownershipSnapshotForTask(
 }
 
 function broadcastOwnership(taskId: string): void {
-  broadcast('panels:ownership-changed', { taskId, ownership: ownershipSnapshotForTask(taskId) })
+  const ownership = ownershipSnapshotForTask(taskId)
+  broadcast('panels:ownership-changed', { taskId, ownership }) // legacy IPC (slice 5 drops)
+  taskWindowsEvents.emit('ownership-changed', { taskId, ownership }) // tRPC app.taskWindows.onOwnershipChanged
 }
 
 function openTaskIds(): string[] {
@@ -63,7 +98,9 @@ function openTaskIds(): string[] {
 }
 
 function broadcastTaskWindowList(): void {
-  broadcast('task-window:list-changed', openTaskIds())
+  const taskIds = openTaskIds()
+  broadcast('task-window:list-changed', taskIds) // legacy IPC (slice 5 drops)
+  taskWindowsEvents.emit('list-changed', taskIds) // tRPC app.taskWindows.onListChanged
 }
 
 function createSecondaryTaskWindow(taskId: string): BrowserWindow {
@@ -116,15 +153,23 @@ function createSecondaryTaskWindow(taskId: string): BrowserWindow {
     }
     for (const taskId of releasedTasks) broadcastOwnership(taskId)
     if (releasedKeys.length > 0) {
-      broadcast('panels:released-on-close', { closedWindowId: closedWcId, released: releasedKeys })
+      broadcast('panels:released-on-close', { closedWindowId: closedWcId, released: releasedKeys }) // legacy IPC (slice 5 drops)
+      taskWindowsEvents.emit('panels-released-on-close', {
+        closedWindowId: closedWcId,
+        released: releasedKeys
+      }) // tRPC app.taskWindows.onPanelsReleasedOnClose
     }
   })
 
   return win
 }
 
-export function setupTaskWindows(): void {
-  ipcMain.handle('task-window:open', (_e, taskId: string) => {
+// Single impl behind BOTH the `task-window:*` / `panels:*` / `pty:claim-session`
+// IPC handlers and the tRPC `app.taskWindows.*` procedures (coexistence until
+// slice 5). The caller's window id is passed explicitly — IPC supplies
+// `event.sender.id`, tRPC supplies `ctx.windowId` (same value: webContents.id).
+export const taskWindowsOps = {
+  open: (taskId: string) => {
     if (!taskId) return { ok: false }
     // If a secondary already exists for this task, focus it instead of spawning another
     for (const entry of taskWindows.values()) {
@@ -136,9 +181,8 @@ export function setupTaskWindows(): void {
     createSecondaryTaskWindow(taskId)
     broadcastTaskWindowList()
     return { ok: true }
-  })
-
-  ipcMain.handle('task-window:close', (_e, taskId: string) => {
+  },
+  close: (taskId: string) => {
     let closed = 0
     for (const entry of Array.from(taskWindows.values())) {
       if (entry.taskId === taskId && !entry.window.isDestroyed()) {
@@ -147,75 +191,61 @@ export function setupTaskWindows(): void {
       }
     }
     return { ok: true, closed }
-  })
-
-  ipcMain.handle('task-window:list', () => openTaskIds())
-
-  // Primary's active task tracker. Broadcast to all secondaries so "Follow current tab"
-  // mode in secondary can swap to whatever task primary is showing.
-  let primaryActiveTaskId: string | null = null
-  ipcMain.handle('task-window:set-primary-active', (event, taskId: string | null) => {
-    if (event.sender !== primaryWindow?.webContents) return { ok: false } // primary only
+  },
+  list: () => openTaskIds(),
+  // Primary-only: secondaries calling this are silently ignored.
+  setPrimaryActive: (taskId: string | null, callerWindowId: number | null) => {
+    if (callerWindowId == null || primaryWindow?.webContents.id !== callerWindowId) {
+      return { ok: false }
+    }
     primaryActiveTaskId = taskId
-    broadcast('task-window:primary-active-changed', taskId)
+    broadcast('task-window:primary-active-changed', taskId) // legacy IPC (slice 5 drops)
+    taskWindowsEvents.emit('primary-active-changed', taskId) // tRPC app.taskWindows.onPrimaryActiveChanged
     return { ok: true }
-  })
-  ipcMain.handle('task-window:get-primary-active', () => primaryActiveTaskId)
-
-  ipcMain.handle('panels:claim', (event, taskId: string, panelId: string) => {
-    const ownerWindowId = event.sender.id
+  },
+  getPrimaryActive: () => primaryActiveTaskId,
+  claimPanel: (taskId: string, panelId: string, ownerWindowId: number) => {
     const key = ownershipKey(taskId, panelId)
     const prev = ownership.get(key)
     if (prev === ownerWindowId) return { ok: true, unchanged: true }
     ownership.set(key, ownerWindowId)
     broadcastOwnership(taskId)
     return { ok: true }
-  })
-
-  ipcMain.handle('panels:release', (event, taskId: string, panelId: string) => {
+  },
+  releasePanel: (taskId: string, panelId: string, callerWindowId: number) => {
     const key = ownershipKey(taskId, panelId)
     const prev = ownership.get(key)
     if (prev === undefined) return { ok: true, unchanged: true }
-    if (prev !== event.sender.id) return { ok: false, reason: 'not-owner' }
+    if (prev !== callerWindowId) return { ok: false, reason: 'not-owner' }
     ownership.delete(key)
     broadcastOwnership(taskId)
     return { ok: true }
-  })
-
-  // Release all panels owned by sender for the given task. Used when secondary's
+  },
+  // Release all panels owned by caller for the given task. Used when secondary's
   // TaskDetailPage unmounts (Follow-current-tab swap) — prevents stale ownership.
-  ipcMain.handle('panels:release-all-for-task', (event, taskId: string) => {
-    const senderId = event.sender.id
+  releaseAllForTask: (taskId: string, callerWindowId: number) => {
     const prefix = `${taskId}::`
     let released = 0
     for (const [key, ownerId] of Array.from(ownership.entries())) {
-      if (ownerId === senderId && key.startsWith(prefix)) {
+      if (ownerId === callerWindowId && key.startsWith(prefix)) {
         ownership.delete(key)
         released++
       }
     }
     if (released > 0) broadcastOwnership(taskId)
     return { ok: true, released }
-  })
-
-  ipcMain.handle('panels:get-ownership', (_e, taskId: string) => {
-    return ownershipSnapshotForTask(taskId)
-  })
-
-  ipcMain.handle('panels:get-window-id', (event) => {
-    return event.sender.id
-  })
-
+  },
+  getOwnership: (taskId: string) => ownershipSnapshotForTask(taskId),
+  getWindowId: (callerWindowId: number) => callerWindowId,
   // "Take over and close": claim panel + send close-request to previous owner
   // so its renderer flips local panelVisibility[id]=false (no DB write).
-  ipcMain.handle('panels:claim-and-close-other', (event, taskId: string, panelId: string) => {
-    const ownerWindowId = event.sender.id
+  claimAndCloseOther: (taskId: string, panelId: string, ownerWindowId: number) => {
     const key = ownershipKey(taskId, panelId)
     const prevOwnerId = ownership.get(key)
     ownership.set(key, ownerWindowId)
     broadcastOwnership(taskId)
     if (prevOwnerId !== undefined && prevOwnerId !== ownerWindowId) {
-      // Send close-request to prev owner only
+      // Send close-request to prev owner only (legacy IPC + targeted tRPC emit)
       const targets: BrowserWindow[] = []
       if (
         primaryWindow &&
@@ -229,19 +259,20 @@ export function setupTaskWindows(): void {
       }
       for (const w of targets) {
         try {
-          w.webContents.send('panels:close-request', { taskId, panelId })
+          w.webContents.send('panels:close-request', { taskId, panelId }) // legacy IPC (slice 5 drops)
         } catch {
           /* ignore */
         }
       }
+      taskWindowsEvents.emit('panels-close-request', prevOwnerId, { taskId, panelId }) // tRPC app.taskWindows.onPanelCloseRequest (filtered by windowId)
     }
     return { ok: true }
-  })
-
+  },
   // Multi-window PTY claim: redirects PTY output to claiming window + replays buffer.
   // Used by AgentSidePanel (and future shared sessions) to follow active window.
-  ipcMain.handle('pty:claim-session', (event, sessionId: string) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  claimSession: (sessionId: string, callerWindowId: number) => {
+    const wc = webContents.fromId(callerWindowId)
+    const win = wc ? BrowserWindow.fromWebContents(wc) : null
     if (!win || win.isDestroyed()) return { ok: false }
     const ok = redirectSessionWindow(sessionId, win)
     if (!ok) return { ok: false }
@@ -256,7 +287,37 @@ export function setupTaskWindows(): void {
       }
     }
     return { ok: true }
-  })
+  }
+}
+
+export function setupTaskWindows(): void {
+  // Legacy IPC handlers — delegate to taskWindowsOps (slice 5 drops these).
+  ipcMain.handle('task-window:open', (_e, taskId: string) => taskWindowsOps.open(taskId))
+  ipcMain.handle('task-window:close', (_e, taskId: string) => taskWindowsOps.close(taskId))
+  ipcMain.handle('task-window:list', () => taskWindowsOps.list())
+  ipcMain.handle('task-window:set-primary-active', (event, taskId: string | null) =>
+    taskWindowsOps.setPrimaryActive(taskId, event.sender.id)
+  )
+  ipcMain.handle('task-window:get-primary-active', () => taskWindowsOps.getPrimaryActive())
+  ipcMain.handle('panels:claim', (event, taskId: string, panelId: string) =>
+    taskWindowsOps.claimPanel(taskId, panelId, event.sender.id)
+  )
+  ipcMain.handle('panels:release', (event, taskId: string, panelId: string) =>
+    taskWindowsOps.releasePanel(taskId, panelId, event.sender.id)
+  )
+  ipcMain.handle('panels:release-all-for-task', (event, taskId: string) =>
+    taskWindowsOps.releaseAllForTask(taskId, event.sender.id)
+  )
+  ipcMain.handle('panels:get-ownership', (_e, taskId: string) =>
+    taskWindowsOps.getOwnership(taskId)
+  )
+  ipcMain.handle('panels:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
+  ipcMain.handle('panels:claim-and-close-other', (event, taskId: string, panelId: string) =>
+    taskWindowsOps.claimAndCloseOther(taskId, panelId, event.sender.id)
+  )
+  ipcMain.handle('pty:claim-session', (event, sessionId: string) =>
+    taskWindowsOps.claimSession(sessionId, event.sender.id)
+  )
 
   app.on('before-quit', () => {
     for (const entry of taskWindows.values()) {

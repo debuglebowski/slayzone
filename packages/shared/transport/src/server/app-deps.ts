@@ -347,6 +347,47 @@ export type AppDeps = {
     unregisterBrowserTab: (taskId: string, tabId: string) => void
     setActiveBrowserTab: (taskId: string, tabId: string | null) => void
   }
+
+  // Task windows + panel ownership. Window-scoped ops take the caller's window
+  // id (tRPC: ctx.windowId; IPC: event.sender.id). Same impls back the
+  // `task-window:*` / `panels:*` IPC handlers (coexistence until slice 5).
+  taskWindows: {
+    open: (taskId: string) => unknown
+    close: (taskId: string) => unknown
+    list: () => unknown
+    setPrimaryActive: (taskId: string | null, callerWindowId: number | null) => unknown
+    getPrimaryActive: () => unknown
+    claimPanel: (taskId: string, panelId: string, ownerWindowId: number) => unknown
+    releasePanel: (taskId: string, panelId: string, callerWindowId: number) => unknown
+    releaseAllForTask: (taskId: string, callerWindowId: number) => unknown
+    getOwnership: (taskId: string) => unknown
+    getWindowId: (callerWindowId: number) => unknown
+    claimAndCloseOther: (taskId: string, panelId: string, ownerWindowId: number) => unknown
+    claimSession: (sessionId: string, callerWindowId: number) => unknown
+    events: EventEmitter & {
+      on(event: 'list-changed', listener: (taskIds: string[]) => void): EventEmitter
+      on(event: 'primary-active-changed', listener: (taskId: string | null) => void): EventEmitter
+      on(
+        event: 'ownership-changed',
+        listener: (payload: {
+          taskId: string
+          ownership: Array<{ panelId: string; ownerWindowId: number }>
+        }) => void
+      ): EventEmitter
+      on(
+        event: 'panels-released-on-close',
+        listener: (payload: {
+          closedWindowId: number
+          released: Array<{ taskId: string; panelId: string }>
+        }) => void
+      ): EventEmitter
+      on(
+        event: 'panels-close-request',
+        listener: (targetWindowId: number, payload: { taskId: string; panelId: string }) => void
+      ): EventEmitter
+      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+    }
+  }
 }
 
 let appDeps: AppDeps | null = null

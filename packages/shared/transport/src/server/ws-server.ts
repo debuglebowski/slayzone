@@ -49,7 +49,22 @@ export async function startTrpcServer(opts: StartTrpcServerOpts): Promise<void> 
     wssHandler = applyWSSHandler({
       wss,
       router: appRouter,
-      createContext: ({ req }) => ({ ...baseContext, req })
+      createContext: ({ req }) => {
+        // Parse windowId from query string (?windowId=N). Renderer passes its
+        // unique window-bound id at WS connect time; null = standalone client.
+        let windowId: number | null = null
+        try {
+          const url = new URL(req.url ?? '/', 'http://localhost')
+          const wid = url.searchParams.get('windowId')
+          if (wid != null) {
+            const n = Number(wid)
+            if (Number.isFinite(n)) windowId = n
+          }
+        } catch {
+          /* malformed URL — leave null */
+        }
+        return { ...baseContext, req, windowId }
+      }
     })
 
     httpServer.on('listening', () => {
