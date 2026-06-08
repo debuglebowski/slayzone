@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
 import { Plus, Zap } from 'lucide-react'
 import type {
@@ -15,48 +17,70 @@ interface AutomationsPanelProps {
 }
 
 export function AutomationsPanel({ projectId }: AutomationsPanelProps) {
-  const [automations, setAutomations] = useState<Automation[]>([])
-  const [tags, setTags] = useState<Tag[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Automation | null>(null)
 
-  const loadData = useCallback(() => {
+  const automationsQuery = useQuery(
+    trpc.automations.getByProject.queryOptions({ projectId }, { enabled: !!projectId })
+  )
+  const automations = automationsQuery.data ?? []
+
+  const tagsQuery = useQuery(trpc.tags.list.queryOptions())
+  const tags = (tagsQuery.data ?? []).filter((t: Tag) => t.project_id === projectId)
+
+  // The automation engine still emits the legacy `automations:changed` IPC
+  // event (sent from the main process) — no tRPC subscription exists for it, so
+  // keep listening over IPC and translate it into a cache invalidation.
+  useEffect(() => {
     if (!projectId) return
-    window.api.automations.getByProject(projectId).then(setAutomations)
-    window.api.tags
-      .getTags()
-      .then((all) => setTags(all.filter((t: Tag) => t.project_id === projectId)))
-  }, [projectId])
+    return window.api.automations.onChanged(() => {
+      queryClient.invalidateQueries(
+        trpc.automations.getByProject.queryFilter({ projectId })
+      )
+      queryClient.invalidateQueries(trpc.tags.list.queryFilter())
+    })
+  }, [projectId, queryClient, trpc])
 
-  useEffect(() => {
-    loadData()
-  }, [loadData])
+  const invalidateAutomations = (): void => {
+    queryClient.invalidateQueries(trpc.automations.getByProject.queryFilter({ projectId }))
+  }
 
-  useEffect(() => {
-    return window.api.automations.onChanged(loadData)
-  }, [loadData])
+  const createMutation = useMutation(
+    trpc.automations.create.mutationOptions({ onSuccess: invalidateAutomations })
+  )
+  const updateMutation = useMutation(
+    trpc.automations.update.mutationOptions({ onSuccess: invalidateAutomations })
+  )
+  const toggleMutation = useMutation(
+    trpc.automations.toggle.mutationOptions({ onSuccess: invalidateAutomations })
+  )
+  const deleteMutation = useMutation(
+    trpc.automations.delete.mutationOptions({ onSuccess: invalidateAutomations })
+  )
+  const runManualMutation = useMutation(
+    trpc.automations.runManual.mutationOptions({ onSuccess: invalidateAutomations })
+  )
 
   const handleSave = async (data: CreateAutomationInput | UpdateAutomationInput) => {
     if ('id' in data) {
-      await window.api.automations.update(data)
+      await updateMutation.mutateAsync(data)
     } else {
-      await window.api.automations.create(data)
+      await createMutation.mutateAsync(data)
     }
-    loadData()
   }
 
   const handleToggle = async (id: string, enabled: boolean) => {
-    await window.api.automations.toggle(id, enabled)
-    loadData()
+    await toggleMutation.mutateAsync({ id, enabled })
   }
 
   const handleDelete = async (id: string) => {
-    await window.api.automations.delete(id)
-    loadData()
+    await deleteMutation.mutateAsync({ id })
   }
 
   const handleDuplicate = async (automation: Automation) => {
-    await window.api.automations.create({
+    await createMutation.mutateAsync({
       project_id: automation.project_id,
       name: `${automation.name} (copy)`,
       description: automation.description ?? undefined,
@@ -64,16 +88,16 @@ export function AutomationsPanel({ projectId }: AutomationsPanelProps) {
       conditions: automation.conditions,
       actions: automation.actions
     })
-    loadData()
   }
 
   const handleRunManual = async (id: string) => {
-    await window.api.automations.runManual(id)
-    loadData()
+    await runManualMutation.mutateAsync({ id })
   }
 
   const handleLoadRuns = (automationId: string) => {
-    return window.api.automations.getRuns(automationId, 10)
+    return queryClient.fetchQuery(
+      trpc.automations.getRuns.queryOptions({ automationId, limit: 10 })
+    )
   }
 
   const handleEdit = (automation: Automation) => {

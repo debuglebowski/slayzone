@@ -2,8 +2,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { AutomationCard } from './AutomationCard'
 import type { Automation } from '@slayzone/automations/shared'
+
+// AutomationCard loads per-run action details over tRPC
+// (`queryClient.fetchQuery(trpc.history.getAutomationActionRuns.queryOptions(...))`).
+// Stub the transport proxy + the react-query client so the render stays a
+// pure component test: `queryOptions` carries the input into `queryFn`, and
+// `fetchQuery` just runs it. `getActionRunsMock` is the swappable data source
+// (the old `window.api.history.getAutomationActionRuns` mock).
+const getActionRunsMock = vi.fn()
+
+vi.mock('@slayzone/transport/client', () => ({
+  useTRPC: () => ({
+    history: {
+      getAutomationActionRuns: {
+        queryOptions: (input: { runId: string }) => ({
+          queryKey: ['history', 'getAutomationActionRuns', input],
+          queryFn: () => getActionRunsMock(input.runId)
+        })
+      }
+    }
+  })
+}))
+
+vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({
+    fetchQuery: (opts: { queryFn: () => unknown }) => opts.queryFn()
+  })
+}))
+
+import { AutomationCard } from './AutomationCard'
 
 afterEach(cleanup)
 
@@ -27,28 +55,25 @@ const automation: Automation = {
 }
 
 beforeEach(() => {
-  window.api = {
-    history: {
-      getAutomationActionRuns: vi.fn().mockResolvedValue([
-        {
-          id: 'step-1',
-          runId: 'run-1',
-          automationId: automation.id,
-          taskId: 'task-1',
-          projectId: automation.project_id,
-          actionIndex: 0,
-          actionType: 'run_command',
-          command: 'printf close',
-          status: 'success',
-          outputTail: 'close',
-          error: null,
-          startedAt: '2026-03-31T11:00:00.000Z',
-          completedAt: '2026-03-31T11:00:01.000Z',
-          durationMs: 1000
-        }
-      ])
+  getActionRunsMock.mockReset()
+  getActionRunsMock.mockResolvedValue([
+    {
+      id: 'step-1',
+      runId: 'run-1',
+      automationId: automation.id,
+      taskId: 'task-1',
+      projectId: automation.project_id,
+      actionIndex: 0,
+      actionType: 'run_command',
+      command: 'printf close',
+      status: 'success',
+      outputTail: 'close',
+      error: null,
+      startedAt: '2026-03-31T11:00:00.000Z',
+      completedAt: '2026-03-31T11:00:01.000Z',
+      durationMs: 1000
     }
-  } as any
+  ])
 })
 
 describe('AutomationCard', () => {

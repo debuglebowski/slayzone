@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Dialog,
   DialogContent,
@@ -31,50 +33,31 @@ export function AutomationDialog({
   tags,
   onSave
 }: AutomationDialogProps) {
+  const trpc = useTRPC()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [trigger, setTrigger] = useState<TriggerConfig>(EMPTY_TRIGGER)
   const [conditions, setConditions] = useState<ConditionConfig[]>([])
   const [actions, setActions] = useState<ActionConfig[]>([{ ...EMPTY_RUN_COMMAND }])
   const [catchupOnStart, setCatchupOnStart] = useState(true)
-  const [providers, setProviders] = useState<AiProviderOption[]>([])
-  const [providersLoaded, setProvidersLoaded] = useState(false)
 
-  useEffect(() => {
-    if (!open) return
-    setProvidersLoaded(false)
-    window.api.terminalModes
-      .list()
-      .then(
-        (
-          modes: {
-            id: string
-            label: string
-            type: string
-            enabled: boolean
-            defaultFlags?: string | null
-            headlessCommand?: string | null
-          }[]
-        ) => {
-          setProviders(
-            modes
-              .filter((m) => m.enabled && !!m.headlessCommand?.trim())
-              .map((m) => ({
-                id: m.id,
-                label: m.label,
-                type: m.type,
-                defaultFlags: m.defaultFlags ?? '',
-                headlessCommand: m.headlessCommand ?? ''
-              }))
-          )
-          setProvidersLoaded(true)
-        }
-      )
-      .catch(() => {
-        setProviders([])
-        setProvidersLoaded(true)
-      })
-  }, [open])
+  // Provider list — only fetched while the dialog is open (mirrors the old
+  // open-gated load). `providersLoaded` flips true once the query settles, and
+  // on error we fall back to an empty list (same as the old `.catch`).
+  const modesQuery = useQuery(trpc.pty.modesList.queryOptions(undefined, { enabled: open }))
+  const providers = useMemo<AiProviderOption[]>(() => {
+    if (modesQuery.isError) return []
+    return (modesQuery.data ?? [])
+      .filter((m) => m.enabled && !!m.headlessCommand?.trim())
+      .map((m) => ({
+        id: m.id,
+        label: m.label,
+        type: m.type,
+        defaultFlags: m.defaultFlags ?? '',
+        headlessCommand: m.headlessCommand ?? ''
+      }))
+  }, [modesQuery.data, modesQuery.isError])
+  const providersLoaded = open && (modesQuery.isSuccess || modesQuery.isError)
 
   useEffect(() => {
     if (automation) {

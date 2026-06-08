@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { formatDistanceToNowStrict, parseISO } from 'date-fns'
 import {
   cn,
@@ -222,6 +224,8 @@ export function AutomationCard({
   onRunManual,
   onLoadRuns
 }: AutomationCardProps) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(false)
   const [runs, setRuns] = useState<AutomationRun[]>([])
   const [runsLoaded, setRunsLoaded] = useState(false)
@@ -258,7 +262,9 @@ export function AutomationCard({
 
     setLoadingRunIds((prev) => ({ ...prev, [runId]: true }))
     try {
-      const actionRuns = await window.api.history.getAutomationActionRuns(runId)
+      const actionRuns = await queryClient.fetchQuery(
+        trpc.history.getAutomationActionRuns.queryOptions({ runId })
+      )
       setActionRunsByRunId((prev) => ({ ...prev, [runId]: actionRuns }))
     } finally {
       setLoadingRunIds((prev) => ({ ...prev, [runId]: false }))
