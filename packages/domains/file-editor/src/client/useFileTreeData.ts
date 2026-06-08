@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { DirEntry, GitFileStatus } from '../shared'
 import { STATUS_PRIORITY, compactChildren } from './EditorFileTree.utils'
 
@@ -24,6 +26,8 @@ export function useFileTreeData({
   onExpandedFoldersChange,
   onReady
 }: UseFileTreeDataArgs) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   // Map of dirPath -> children entries (lazy loaded)
   const [dirContents, setDirContents] = useState<Map<string, DirEntry[]>>(new Map())
   const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set())
@@ -49,19 +53,24 @@ export function useFileTreeData({
   // --- Git status ---
   const [gitStatus, setGitStatus] = useState<Map<string, GitFileStatus>>(new Map())
 
+  const gitStatusQuery = useQuery(
+    trpc.fileEditor.gitStatus.queryOptions({ rootPath: projectPath })
+  )
+
+  // External retrigger: refetch when refreshKey changes identity. react-query
+  // dedups against the in-flight mount fetch, so the initial run is a no-op.
   useEffect(() => {
-    let cancelled = false
-    window.api.fs
-      .gitStatus(projectPath)
-      .then((result) => {
-        if (cancelled || !result.isGitRepo) return
-        setGitStatus(new Map(Object.entries(result.files)))
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [projectPath, refreshKey])
+    void gitStatusQuery.refetch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
+
+  // Sync query result into the gitStatus Map, gated on isGitRepo (preserves the
+  // old effect's "only set when a repo" + swallow-error semantics).
+  useEffect(() => {
+    const result = gitStatusQuery.data
+    if (!result || !result.isGitRepo) return
+    setGitStatus(new Map(Object.entries(result.files)))
+  }, [gitStatusQuery.data])
 
   const dirGitStatus = useMemo(() => {
     const dirs = new Map<string, GitFileStatus>()
@@ -100,7 +109,9 @@ export function useFileTreeData({
 
   const loadDir = useCallback(
     async (dirPath: string) => {
-      const items = await window.api.fs.readDir(projectPath, dirPath)
+      const items = await queryClient.fetchQuery(
+        trpc.fileEditor.readDir.queryOptions({ rootPath: projectPath, dirPath })
+      )
       setDirContents((prev) => {
         const next = new Map(prev)
         next.set(dirPath, items)
@@ -108,7 +119,7 @@ export function useFileTreeData({
       })
       return items
     },
-    [projectPath]
+    [projectPath, queryClient, trpc]
   )
 
   // Load root + persisted expanded folders on mount

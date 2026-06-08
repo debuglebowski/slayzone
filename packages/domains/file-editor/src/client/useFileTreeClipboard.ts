@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import type { DirEntry } from '../shared'
 import { uniqueName, duplicateName } from '../shared'
@@ -21,22 +23,29 @@ export function useFileTreeClipboard({
   dirContents,
   onFileRenamed
 }: UseFileTreeClipboardArgs) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const copyMutation = useMutation(trpc.fileEditor.copy.mutationOptions())
+  const renameMutation = useMutation(trpc.fileEditor.rename.mutationOptions())
+  const copyInMutation = useMutation(trpc.fileEditor.copyIn.mutationOptions())
+  const showInFinderMutation = useMutation(trpc.fileEditor.showInFinder.mutationOptions())
+  const writeFilePathsMutation = useMutation(trpc.app.clipboard.writeFilePaths.mutationOptions())
   // --- Internal clipboard for copy/cut ---
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
   const [osHasFiles, setOsHasFiles] = useState(false)
   const refreshOsClipboard = useCallback(() => {
-    window.api.clipboard
-      .hasFiles()
+    queryClient
+      .fetchQuery(trpc.app.clipboard.hasFiles.queryOptions())
       .then(setOsHasFiles)
       .catch(() => setOsHasFiles(false))
-  }, [])
+  }, [queryClient, trpc])
 
   const writeOsClipboard = useCallback(
     (relPaths: string[]) => {
       const absolute = relPaths.map((p) => `${projectPath}/${p}`)
-      void window.api.clipboard.writeFilePaths(absolute)
+      void writeFilePathsMutation.mutateAsync({ paths: absolute })
     },
-    [projectPath]
+    [projectPath, writeFilePathsMutation]
   )
 
   const handleCopy = useCallback(
@@ -78,7 +87,9 @@ export function useFileTreeClipboard({
       let internalUsed = false
       if (clipboard) {
         // Verify OS clipboard still matches our internal state (cut paths weren't overwritten externally).
-        const osPaths = await window.api.clipboard.readFilePaths()
+        const osPaths = await queryClient.fetchQuery(
+          trpc.app.clipboard.readFilePaths.queryOptions()
+        )
         const osRelative = osPaths
           .filter((p) => p === projectPath || p.startsWith(projectPrefix))
           .map((p) => (p === projectPath ? '' : p.slice(projectPrefix.length)))
@@ -97,9 +108,13 @@ export function useFileTreeClipboard({
             const destPath = resolveCollisionPath(rawDest, targetDir)
             try {
               if (clipboard.mode === 'copy') {
-                await window.api.fs.copy(projectPath, srcPath, destPath)
+                await copyMutation.mutateAsync({ rootPath: projectPath, srcPath, destPath })
               } else {
-                await window.api.fs.rename(projectPath, srcPath, destPath)
+                await renameMutation.mutateAsync({
+                  rootPath: projectPath,
+                  oldPath: srcPath,
+                  newPath: destPath
+                })
                 onFileRenamed?.(srcPath, destPath)
                 const srcParent = srcPath.includes('/')
                   ? srcPath.slice(0, srcPath.lastIndexOf('/'))
@@ -115,7 +130,9 @@ export function useFileTreeClipboard({
       }
 
       if (!internalUsed) {
-        const osPaths = await window.api.clipboard.readFilePaths()
+        const osPaths = await queryClient.fetchQuery(
+          trpc.app.clipboard.readFilePaths.queryOptions()
+        )
         for (const abs of osPaths) {
           try {
             if (abs === projectPath || abs.startsWith(projectPrefix)) {
@@ -126,9 +143,13 @@ export function useFileTreeClipboard({
                 : srcRel
               const rawDest = targetDir ? `${targetDir}/${name}` : name
               const destPath = resolveCollisionPath(rawDest, targetDir)
-              await window.api.fs.copy(projectPath, srcRel, destPath)
+              await copyMutation.mutateAsync({ rootPath: projectPath, srcPath: srcRel, destPath })
             } else {
-              await window.api.fs.copyIn(projectPath, abs, targetDir)
+              await copyInMutation.mutateAsync({
+                rootPath: projectPath,
+                absoluteSrc: abs,
+                targetDir
+              })
             }
           } catch (err) {
             console.error('External paste failed:', err)
@@ -139,7 +160,19 @@ export function useFileTreeClipboard({
       track('file_pasted')
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [clipboard, projectPath, loadDir, resolveCollisionPath, onFileRenamed, dirContents]
+    [
+      clipboard,
+      projectPath,
+      loadDir,
+      resolveCollisionPath,
+      onFileRenamed,
+      dirContents,
+      copyMutation,
+      renameMutation,
+      copyInMutation,
+      queryClient,
+      trpc
+    ]
   )
 
   const handleDuplicate = useCallback(
@@ -154,7 +187,7 @@ export function useFileTreeClipboard({
         const destName = duplicateName(entry.name, names)
         const destPath = parentDir ? `${parentDir}/${destName}` : destName
         try {
-          await window.api.fs.copy(projectPath, entry.path, destPath)
+          await copyMutation.mutateAsync({ rootPath: projectPath, srcPath: entry.path, destPath })
           dirsToReload.add(parentDir)
         } catch (err) {
           console.error('Duplicate failed:', err)
@@ -163,7 +196,7 @@ export function useFileTreeClipboard({
       track('file_duplicated')
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, dirContents, loadDir]
+    [projectPath, dirContents, loadDir, copyMutation]
   )
 
   const handleCopyPath = useCallback(
@@ -177,10 +210,10 @@ export function useFileTreeClipboard({
 
   const handleRevealInFinder = useCallback(
     (entry: DirEntry) => {
-      window.api.fs.showInFinder(projectPath, entry.path)
+      void showInFinderMutation.mutateAsync({ rootPath: projectPath, targetPath: entry.path })
       track('reveal_in_finder')
     },
-    [projectPath]
+    [projectPath, showInFinderMutation]
   )
 
   return {

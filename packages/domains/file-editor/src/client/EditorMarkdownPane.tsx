@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { getThemeEditorColors } from '@slayzone/ui'
 import {
   RichTextEditor,
@@ -44,6 +46,9 @@ export function MarkdownFilePane({
   fontFamily,
   handleRef
 }: MarkdownFilePaneProps) {
+  const trpc = useTRPC()
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
+  const openPathMutation = useMutation(trpc.app.shell.openPath.mutationOptions())
   const editorRef = useRef<MilkdownEditor | null>(null)
   useEffect(() => {
     if (!handleRef) return
@@ -85,7 +90,7 @@ export function MarkdownFilePane({
         return
       }
       if (/^(https?:|mailto:)/i.test(resolvedHref)) {
-        void window.api.shell.openExternal(resolvedHref)
+        void openExternalMutation.mutateAsync({ url: resolvedHref })
         return
       }
       if (resolvedHref.startsWith(SLZ_FILE_PREFIX)) {
@@ -102,10 +107,10 @@ export function MarkdownFilePane({
             return
           }
         }
-        void window.api.shell.openPath(absPath)
+        void openPathMutation.mutateAsync({ absPath })
       }
     },
-    [projectPath, onOpenFile]
+    [projectPath, onOpenFile, openExternalMutation, openPathMutation]
   )
 
   return (

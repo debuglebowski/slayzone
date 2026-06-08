@@ -1,4 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { DirEntry } from '../shared'
 
 interface UseFileTreeDragDropArgs {
@@ -16,6 +18,8 @@ export function useFileTreeDragDrop({
   onFileRenamed,
   selectedPaths
 }: UseFileTreeDragDropArgs) {
+  const trpc = useTRPC()
+  const renameMutation = useMutation(trpc.fileEditor.rename.mutationOptions())
   // --- Drag and drop state ---
   const dragPathRef = useRef<string | null>(null)
   const dragTypeRef = useRef<'file' | 'directory' | null>(null)
@@ -113,7 +117,7 @@ export function useFileTreeDragDrop({
       const srcParent = srcPath.includes('/') ? srcPath.slice(0, srcPath.lastIndexOf('/')) : ''
 
       try {
-        await window.api.fs.rename(projectPath, srcPath, newPath)
+        await renameMutation.mutateAsync({ rootPath: projectPath, oldPath: srcPath, newPath })
         onFileRenamed?.(srcPath, newPath)
 
         const srcPrefix = srcPath + '/'
@@ -143,7 +147,7 @@ export function useFileTreeDragDrop({
         console.error('Move failed:', err)
       }
     },
-    [projectPath, loadDir, isValidDropTarget, onFileRenamed, setExpandedFolders]
+    [projectPath, loadDir, isValidDropTarget, onFileRenamed, setExpandedFolders, renameMutation]
   )
 
   return {

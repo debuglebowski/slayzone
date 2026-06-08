@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Code, Columns2, Eye, SlidersHorizontal } from 'lucide-react'
 import { Button, Label, Switch, cn } from '@slayzone/ui'
 import { MarkdownSettingsPopover } from '@slayzone/editor'
@@ -24,10 +26,15 @@ export function EditorDisplayPopover({
   notesFontFamily
 }: EditorDisplayPopoverProps) {
   const [displayOpen, setDisplayOpen] = useState(false)
-  const writeAppearance = useCallback((key: string, value: string) => {
-    void window.api.settings.set(key, value)
-    window.dispatchEvent(new Event('sz:settings-changed'))
-  }, [])
+  const trpc = useTRPC()
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const writeAppearance = useCallback(
+    (key: string, value: string) => {
+      void setSettingMutation.mutateAsync({ key, value })
+      window.dispatchEvent(new Event('sz:settings-changed'))
+    },
+    [setSettingMutation]
+  )
 
   return (
     <MarkdownSettingsPopover

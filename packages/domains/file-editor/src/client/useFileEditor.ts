@@ -1,4 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useSubscription } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import type { EditorOpenFilesState, OpenFileOptions } from '@slayzone/file-editor/shared'
 
@@ -38,6 +40,9 @@ export function useFileEditor(
   projectPath: string,
   initialEditorState?: EditorOpenFilesState | null
 ) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const writeFileMutation = useMutation(trpc.fileEditor.writeFile.mutationOptions())
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   // One-shot signal bumped whenever openFile activates a file. Lets the view
@@ -74,7 +79,9 @@ export function useFileEditor(
             })
             continue
           }
-          const result = await window.api.fs.readFile(projectPath, filePath)
+          const result = await queryClient.fetchQuery(
+            trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath })
+          )
           if (result.tooLarge) {
             setOpenFiles((prev) => {
               if (prev.some((f) => f.path === filePath)) return prev
@@ -109,14 +116,6 @@ export function useFileEditor(
     })()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps -- mount only
 
-  // --- File watcher ---
-  useEffect(() => {
-    window.api.fs.watch(projectPath)
-    return () => {
-      window.api.fs.unwatch(projectPath)
-    }
-  }, [projectPath])
-
   const reloadFile = useCallback(
     async (filePath: string) => {
       try {
@@ -130,7 +129,9 @@ export function useFileEditor(
           return
         }
 
-        const result = await window.api.fs.readFile(projectPath, filePath)
+        const result = await queryClient.fetchQuery(
+          trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath })
+        )
         if (result.tooLarge || result.content == null) return
         setOpenFiles((prev) =>
           prev.map((f) =>
@@ -154,7 +155,7 @@ export function useFileEditor(
         // File may have been deleted
       }
     },
-    [projectPath]
+    [projectPath, queryClient, trpc]
   )
 
   const projectPathRef = useRef(projectPath)
@@ -163,99 +164,110 @@ export function useFileEditor(
   const openFilesRef = useRef(openFiles)
   openFilesRef.current = openFiles
 
-  useEffect(() => {
-    const unsubscribe = window.api.fs.onFileDeleted((rootPath, relPath) => {
-      const normalize = (p: string) => p.replace(/\/+$/, '')
-      if (normalize(rootPath) !== normalize(projectPathRef.current)) return
+  const reloadFileRef = useRef(reloadFile)
+  reloadFileRef.current = reloadFile
 
-      const prefix = relPath + '/'
-      const isMatch = (p: string) => p === relPath || p.startsWith(prefix)
+  // Single file-watcher subscription. The unified `watch` procedure emits both
+  // 'deleted' and 'changed' events (replacing the old onFileDeleted +
+  // onFileChanged IPC listener pair). Dispatch by event.type.
+  useSubscription(
+    trpc.fileEditor.watch.subscriptionOptions(
+      { rootPath: projectPath },
+      {
+        onData: (event) => {
+          const rootPath = event.root
+          const relPath = event.relPath
+          const normalize = (p: string) => p.replace(/\/+$/, '')
+          if (normalize(rootPath) !== normalize(projectPathRef.current)) return
 
-      const current = openFilesRef.current
-      const matching = current.filter((f) => isMatch(f.path))
-      if (matching.length === 0) return
+          if (event.type === 'deleted') {
+            const prefix = relPath + '/'
+            const isMatch = (p: string) => p === relPath || p.startsWith(prefix)
 
-      // Dirty files stay open (marked deleted); clean files close.
-      const nextFiles: OpenFile[] = []
-      const closedPaths = new Set<string>()
-      for (const f of current) {
-        if (!isMatch(f.path)) {
-          nextFiles.push(f)
-          continue
-        }
-        const dirty = f.content !== f.originalContent
-        if (dirty) {
-          nextFiles.push({ ...f, deleted: true, diskChanged: true })
-        } else {
-          closedPaths.add(f.path)
-        }
-      }
-      setOpenFiles(nextFiles)
+            const current = openFilesRef.current
+            const matching = current.filter((f) => isMatch(f.path))
+            if (matching.length === 0) return
 
-      if (closedPaths.size > 0) {
-        setActiveFilePath((curActive) => {
-          if (!curActive || !closedPaths.has(curActive)) return curActive
-          return nextFiles.length > 0 ? nextFiles[nextFiles.length - 1].path : null
-        })
-        setFileVersions((prev) => {
-          let changed = false
-          const next = new Map<string, number>()
-          for (const [k, v] of prev) {
-            if (closedPaths.has(k)) {
-              changed = true
-              continue
+            // Dirty files stay open (marked deleted); clean files close.
+            const nextFiles: OpenFile[] = []
+            const closedPaths = new Set<string>()
+            for (const f of current) {
+              if (!isMatch(f.path)) {
+                nextFiles.push(f)
+                continue
+              }
+              const dirty = f.content !== f.originalContent
+              if (dirty) {
+                nextFiles.push({ ...f, deleted: true, diskChanged: true })
+              } else {
+                closedPaths.add(f.path)
+              }
             }
-            next.set(k, v)
+            setOpenFiles(nextFiles)
+
+            if (closedPaths.size > 0) {
+              setActiveFilePath((curActive) => {
+                if (!curActive || !closedPaths.has(curActive)) return curActive
+                return nextFiles.length > 0 ? nextFiles[nextFiles.length - 1].path : null
+              })
+              setFileVersions((prev) => {
+                let changed = false
+                const next = new Map<string, number>()
+                for (const [k, v] of prev) {
+                  if (closedPaths.has(k)) {
+                    changed = true
+                    continue
+                  }
+                  next.set(k, v)
+                }
+                return changed ? next : prev
+              })
+            }
+
+            if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
+            treeRefreshTimer.current = setTimeout(() => {
+              setTreeRefreshKey((k) => k + 1)
+            }, 500)
+            return
           }
-          return changed ? next : prev
-        })
-      }
 
-      if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
-      treeRefreshTimer.current = setTimeout(() => {
-        setTreeRefreshKey((k) => k + 1)
-      }, 500)
-    })
-    return unsubscribe
-  }, [])
+          // event.type === 'changed'
+          // Schedule tree refresh (debounced 500ms)
+          if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
+          treeRefreshTimer.current = setTimeout(() => {
+            setTreeRefreshKey((k) => k + 1)
+          }, 500)
 
-  useEffect(() => {
-    const unsubscribe = window.api.fs.onFileChanged((rootPath, relPath) => {
-      // Filter: only process events for this editor's project
-      const normalize = (p: string) => p.replace(/\/+$/, '')
-      if (normalize(rootPath) !== normalize(projectPathRef.current)) return
+          setOpenFiles((prev) => {
+            const fileIdx = prev.findIndex((f) => f.path === relPath)
+            if (fileIdx === -1) return prev
 
-      // Schedule tree refresh (debounced 500ms)
-      if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
-      treeRefreshTimer.current = setTimeout(() => {
-        setTreeRefreshKey((k) => k + 1)
-      }, 500)
+            const file = prev[fileIdx]
+            const isDirty = file.content !== file.originalContent
 
-      setOpenFiles((prev) => {
-        const fileIdx = prev.findIndex((f) => f.path === relPath)
-        if (fileIdx === -1) return prev
+            if (isDirty) {
+              // Mark as disk-changed, don't auto-reload
+              const next = [...prev]
+              next[fileIdx] = { ...file, diskChanged: true, deleted: false }
+              return next
+            }
 
-        const file = prev[fileIdx]
-        const isDirty = file.content !== file.originalContent
-
-        if (isDirty) {
-          // Mark as disk-changed, don't auto-reload
-          const next = [...prev]
-          next[fileIdx] = { ...file, diskChanged: true, deleted: false }
-          return next
+            // Not dirty — schedule silent reload (async, outside setState)
+            reloadFileRef.current(relPath)
+            return prev
+          })
         }
+      }
+    )
+  )
 
-        // Not dirty — schedule silent reload (async, outside setState)
-        reloadFile(relPath)
-        return prev
-      })
-    })
-
+  // Cleanup the shared debounce timer on unmount (the file-watch subscription
+  // owned this previously).
+  useEffect(() => {
     return () => {
-      unsubscribe()
       if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current)
     }
-  }, [reloadFile])
+  }, [])
 
   // --- Open / close / save ---
   const openFile = useCallback(
@@ -290,7 +302,9 @@ export function useFileEditor(
           return
         }
 
-        const result = await window.api.fs.readFile(projectPath, filePath)
+        const result = await queryClient.fetchQuery(
+          trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath })
+        )
         if (result.tooLarge) {
           setOpenFiles((prev) => {
             if (prev.some((f) => f.path === filePath)) return prev
@@ -322,13 +336,15 @@ export function useFileEditor(
         pendingOpen.current = null
       }
     },
-    [projectPath, openFiles]
+    [projectPath, openFiles, queryClient, trpc]
   )
 
   const openFileForced = useCallback(
     async (filePath: string) => {
       try {
-        const result = await window.api.fs.readFile(projectPath, filePath, true)
+        const result = await queryClient.fetchQuery(
+          trpc.fileEditor.readFile.queryOptions({ rootPath: projectPath, filePath, force: true })
+        )
         if (result.content == null) return
         setOpenFiles((prev) =>
           prev.map((f) =>
@@ -347,7 +363,7 @@ export function useFileEditor(
         // File read failed
       }
     },
-    [projectPath]
+    [projectPath, queryClient, trpc]
   )
 
   const updateContent = useCallback((filePath: string, content: string) => {
@@ -358,7 +374,11 @@ export function useFileEditor(
     async (filePath: string) => {
       const file = openFiles.find((f) => f.path === filePath)
       if (!file || file.content == null || file.content === file.originalContent) return
-      await window.api.fs.writeFile(projectPath, filePath, file.content)
+      await writeFileMutation.mutateAsync({
+        rootPath: projectPath,
+        filePath,
+        content: file.content
+      })
       setOpenFiles((prev) =>
         prev.map((f) =>
           f.path === filePath
@@ -367,7 +387,7 @@ export function useFileEditor(
         )
       )
     },
-    [projectPath, openFiles]
+    [projectPath, openFiles, writeFileMutation]
   )
 
   const closeFile = useCallback(

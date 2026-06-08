@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import type { DirEntry } from '../shared'
 
@@ -28,6 +30,11 @@ export function useFileTreeCrud({
   selectedPaths,
   setSelectedPaths
 }: UseFileTreeCrudArgs) {
+  const trpc = useTRPC()
+  const createFileMutation = useMutation(trpc.fileEditor.createFile.mutationOptions())
+  const createDirMutation = useMutation(trpc.fileEditor.createDir.mutationOptions())
+  const renameMutation = useMutation(trpc.fileEditor.rename.mutationOptions())
+  const deleteMutation = useMutation(trpc.fileEditor.delete.mutationOptions())
   const [creating, setCreating] = useState<CreatingState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -55,10 +62,10 @@ export function useFileTreeCrud({
       const newPath = creating.parentPath ? `${creating.parentPath}/${name.trim()}` : name.trim()
       try {
         if (creating.type === 'file') {
-          await window.api.fs.createFile(projectPath, newPath)
+          await createFileMutation.mutateAsync({ rootPath: projectPath, filePath: newPath })
           track('file_created')
         } else {
-          await window.api.fs.createDir(projectPath, newPath)
+          await createDirMutation.mutateAsync({ rootPath: projectPath, dirPath: newPath })
           track('folder_created')
         }
         await loadDir(creating.parentPath)
@@ -70,7 +77,7 @@ export function useFileTreeCrud({
       }
       setCreating(null)
     },
-    [creating, projectPath, loadDir, onOpenFile]
+    [creating, projectPath, loadDir, onOpenFile, createFileMutation, createDirMutation]
   )
 
   const handleRename = useCallback(
@@ -82,7 +89,7 @@ export function useFileTreeCrud({
       const parentDir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : ''
       const newPath = parentDir ? `${parentDir}/${newName.trim()}` : newName.trim()
       try {
-        await window.api.fs.rename(projectPath, oldPath, newPath)
+        await renameMutation.mutateAsync({ rootPath: projectPath, oldPath, newPath })
         track('file_renamed')
         onFileRenamed?.(oldPath, newPath)
         const srcPrefix = oldPath + '/'
@@ -108,7 +115,7 @@ export function useFileTreeCrud({
       }
       setRenaming(null)
     },
-    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders]
+    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders, renameMutation]
   )
 
   const executeDelete = useCallback(
@@ -116,7 +123,7 @@ export function useFileTreeCrud({
       const dirsToReload = new Set<string>()
       for (const p of paths) {
         try {
-          await window.api.fs.delete(projectPath, p)
+          await deleteMutation.mutateAsync({ rootPath: projectPath, targetPath: p })
           track('file_deleted')
           dirsToReload.add(p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
         } catch (err) {
@@ -126,7 +133,7 @@ export function useFileTreeCrud({
       setSelectedPaths(new Set())
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, loadDir, setSelectedPaths]
+    [projectPath, loadDir, setSelectedPaths, deleteMutation]
   )
 
   const handleDeleteSelected = useCallback(

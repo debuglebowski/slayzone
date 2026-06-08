@@ -1,46 +1,74 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, cleanup } from '@testing-library/react'
-import { useWatchedFile } from './useWatchedFile'
 
-type FileChangedCallback = (rootPath: string, relPath: string) => void
+type FileWatchEvent = { type: 'changed' | 'deleted'; root: string; relPath: string }
+type WatchOnData = (event: FileWatchEvent) => void
 
-interface FsStub {
-  watch: ReturnType<typeof vi.fn>
-  unwatch: ReturnType<typeof vi.fn>
-  onFileChanged: ReturnType<typeof vi.fn>
-  emit: (root: string, rel: string) => void
+// Captures every active fileEditor.watch subscription so the test can drive the
+// file-watcher path (formerly window.api.fs.onFileChanged) through tRPC.
+interface WatchController {
+  /** onData callbacks for currently-enabled subscriptions */
+  active: Set<WatchOnData>
+  /** true once at least one subscription was registered with enabled !== false */
+  everEnabled: boolean
+  emit: (root: string, rel: string, type?: FileWatchEvent['type']) => void
+  reset: () => void
 }
 
-function installFsStub(): FsStub {
-  const listeners = new Set<FileChangedCallback>()
-  const stub: FsStub = {
-    watch: vi.fn(async () => undefined),
-    unwatch: vi.fn(async () => undefined),
-    onFileChanged: vi.fn((cb: FileChangedCallback) => {
-      listeners.add(cb)
-      return () => listeners.delete(cb)
-    }),
-    emit: (root, rel) => {
-      for (const cb of listeners) cb(root, rel)
-    }
+const watchController: WatchController = {
+  active: new Set<WatchOnData>(),
+  everEnabled: false,
+  emit: (root, rel, type = 'changed') => {
+    for (const cb of watchController.active) cb({ type, root, relPath: rel })
+  },
+  reset: () => {
+    watchController.active.clear()
+    watchController.everEnabled = false
   }
-  ;(globalThis as unknown as { window: { api: { fs: unknown } } }).window = { api: { fs: stub } }
-  return stub
 }
+
+vi.mock('@slayzone/transport/client', () => {
+  // trpc.fileEditor.watch.subscriptionOptions(input, opts) → opaque payload that
+  // the mocked useSubscription consumes.
+  const useTRPC = () => ({
+    fileEditor: {
+      watch: {
+        subscriptionOptions: (
+          input: { rootPath: string },
+          opts: { enabled?: boolean; onData: WatchOnData }
+        ) => ({ input, opts })
+      }
+    }
+  })
+  const useSubscription = (sub: {
+    opts: { enabled?: boolean; onData: WatchOnData }
+  }): void => {
+    const enabled = sub.opts.enabled !== false
+    if (!enabled) return
+    watchController.everEnabled = true
+    // Register the onData callback for the life of this render's subscription.
+    // React Testing Library re-runs on each render; we keep the latest callback
+    // registered and drop it on cleanup via a side-effect-free Set membership.
+    watchController.active.add(sub.opts.onData)
+  }
+  return { useTRPC, useSubscription }
+})
+
+// Imported AFTER vi.mock so the hook picks up the mocked transport.
+const { useWatchedFile } = await import('./useWatchedFile')
 
 const ROOT = '/tmp/proj'
 const REL = 'CLAUDE.md'
 
-let fsStub: FsStub
-
 beforeEach(() => {
-  fsStub = installFsStub()
+  watchController.reset()
   vi.useFakeTimers()
 })
 
 afterEach(() => {
   cleanup()
+  watchController.reset()
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
@@ -126,7 +154,7 @@ describe('useWatchedFile', () => {
 
     diskContent = 'v2'
     act(() => {
-      fsStub.emit(ROOT, REL)
+      watchController.emit(ROOT, REL)
     })
     await flushPromises()
 
@@ -149,7 +177,7 @@ describe('useWatchedFile', () => {
     })
     diskContent = 'external edit'
     act(() => {
-      fsStub.emit(ROOT, REL)
+      watchController.emit(ROOT, REL)
     })
     await flushPromises()
 
@@ -173,7 +201,7 @@ describe('useWatchedFile', () => {
     })
     diskContent = 'v2'
     act(() => {
-      fsStub.emit(ROOT, REL)
+      watchController.emit(ROOT, REL)
     })
     await flushPromises()
     expect(result.current.diskChanged).toBe(true)
@@ -370,7 +398,7 @@ describe('useWatchedFile', () => {
     await flushPromises()
 
     expect(read).not.toHaveBeenCalled()
-    expect(fsStub.watch).not.toHaveBeenCalled()
+    expect(watchController.everEnabled).toBe(false)
     expect(result.current.content).toBe('')
 
     // setContent on null-target: still dirty internally but no save ever fires
@@ -387,7 +415,7 @@ describe('useWatchedFile', () => {
     rerender({ rel: REL })
     await flushPromises()
     expect(read).not.toHaveBeenCalled()
-    expect(fsStub.watch).not.toHaveBeenCalled()
+    expect(watchController.everEnabled).toBe(false)
   })
 
   it('own save does not trigger diskChanged banner', async () => {
@@ -409,7 +437,7 @@ describe('useWatchedFile', () => {
     })
     // Watcher echoes while savingRef is still set
     act(() => {
-      fsStub.emit(ROOT, REL)
+      watchController.emit(ROOT, REL)
     })
     await flushPromises()
 

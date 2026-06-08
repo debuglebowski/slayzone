@@ -29,6 +29,8 @@ import {
   getThemeEditorColors,
   useAppearance
 } from '@slayzone/ui'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { useTheme } from '@slayzone/settings/client'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type {
@@ -64,6 +66,8 @@ interface FileEditorViewProps {
 
 export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewProps>(
   function FileEditorView({ projectPath, initialEditorState, onEditorStateChange }, ref) {
+    const trpc = useTRPC()
+    const showInFinderMutation = useMutation(trpc.fileEditor.showInFinder.mutationOptions())
     const {
       openFiles,
       activeFile,
@@ -302,9 +306,9 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
 
     const handleRevealInFinder = useCallback(
       (filePath: string) => {
-        void window.api.fs.showInFinder(projectPath, filePath)
+        void showInFinderMutation.mutateAsync({ rootPath: projectPath, targetPath: filePath })
       },
-      [projectPath]
+      [projectPath, showInFinderMutation]
     )
 
     return (

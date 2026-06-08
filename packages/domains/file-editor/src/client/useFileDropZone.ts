@@ -1,4 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 export interface FileDropZoneHandlers {
   onDragOver: (e: React.DragEvent) => void
@@ -16,6 +18,8 @@ export function useFileDropZone(
   projectPath: string,
   openFile: (filePath: string) => void
 ): UseFileDropZoneResult {
+  const trpc = useTRPC()
+  const copyInMutation = useMutation(trpc.fileEditor.copyIn.mutationOptions())
   const [isFileDragOver, setIsFileDragOver] = useState(false)
   const dragCounter = useRef(0)
 
@@ -66,7 +70,10 @@ export function useFileDropZone(
         } else {
           // External file — copy into project root
           try {
-            const relPath = await window.api.fs.copyIn(projectPath, absPath)
+            const relPath = await copyInMutation.mutateAsync({
+              rootPath: projectPath,
+              absoluteSrc: absPath
+            })
             openFile(relPath)
           } catch {
             // Copy failed (e.g. directory, permission error)
@@ -74,7 +81,7 @@ export function useFileDropZone(
         }
       }
     },
-    [projectPath, openFile]
+    [projectPath, openFile, copyInMutation]
   )
 
   return {

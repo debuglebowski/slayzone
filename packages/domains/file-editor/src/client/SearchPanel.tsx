@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { track } from '@slayzone/telemetry/client'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
 import type { FileSearchResult, OpenFileOptions } from '../shared'
@@ -10,6 +12,8 @@ interface SearchPanelProps {
 }
 
 export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
   const [matchCase, setMatchCase] = useState(false)
@@ -35,10 +39,13 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
     setSearching(true)
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await window.api.fs.searchFiles(projectPath, query, {
-          matchCase,
-          regex: useRegex
-        })
+        const res = await queryClient.fetchQuery(
+          trpc.fileEditor.searchFiles.queryOptions({
+            rootPath: projectPath,
+            query,
+            options: { matchCase, regex: useRegex }
+          })
+        )
         setResults(res)
         setCollapsed(new Set())
         track('file_search_used', { had_results: res.length > 0 })
@@ -51,7 +58,7 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, matchCase, useRegex, projectPath])
+  }, [query, matchCase, useRegex, projectPath, queryClient, trpc])
 
   const totalMatches = results.reduce((n, r) => n + r.matches.length, 0)
 

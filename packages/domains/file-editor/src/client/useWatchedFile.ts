@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTRPC, useSubscription } from '@slayzone/transport/client'
 
 export interface UseWatchedFileOptions {
   projectPath: string | null
@@ -34,6 +35,7 @@ export interface UseWatchedFileResult {
  */
 export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileResult {
   const { projectPath, relPath, read, save, debounceMs = 500 } = options
+  const trpc = useTRPC()
 
   const [content, setContentState] = useState('')
   const [originalContent, setOriginalContent] = useState('')
@@ -182,30 +184,38 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
     relPathRef.current = relPath
   })
 
+  // Keep a stable handle to reloadFromDisk so the subscription's onData closure
+  // never goes stale without re-subscribing.
+  const reloadFromDiskRef = useRef(reloadFromDisk)
   useEffect(() => {
-    if (!projectPath) return
+    reloadFromDiskRef.current = reloadFromDisk
+  })
 
-    void window.api.fs.watch(projectPath)
-    const unsubscribe = window.api.fs.onFileChanged((changedRoot, changedRel) => {
-      const normalize = (p: string) => p.replace(/\/+$/, '')
-      if (normalize(changedRoot) !== normalize(projectPath)) return
-      if (changedRel !== relPathRef.current) return
+  useSubscription(
+    trpc.fileEditor.watch.subscriptionOptions(
+      { rootPath: projectPath ?? '' },
+      {
+        enabled: !!projectPath,
+        onData: (event) => {
+          if (event.type !== 'changed') return
+          const changedRoot = event.root
+          const changedRel = event.relPath
+          const normalize = (p: string) => p.replace(/\/+$/, '')
+          if (!projectPath || normalize(changedRoot) !== normalize(projectPath)) return
+          if (changedRel !== relPathRef.current) return
 
-      // Ignore echoes from our own in-flight save
-      if (savingRef.current !== null) return
+          // Ignore echoes from our own in-flight save
+          if (savingRef.current !== null) return
 
-      if (dirtyRef.current) {
-        setDiskChanged(true)
-        return
+          if (dirtyRef.current) {
+            setDiskChanged(true)
+            return
+          }
+          void reloadFromDiskRef.current()
+        }
       }
-      void reloadFromDisk()
-    })
-
-    return () => {
-      unsubscribe()
-      void window.api.fs.unwatch(projectPath)
-    }
-  }, [projectPath, reloadFromDisk])
+    )
+  )
 
   const setContent = useCallback((next: string) => {
     contentRef.current = next
