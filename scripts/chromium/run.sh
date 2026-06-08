@@ -76,10 +76,10 @@ if [[ -z "${SLAYZONE_WEBUI_BUNDLE_DIR:-}" ]]; then
 fi
 
 # Default the shell bundle dir so chrome://slayzone-shell/ resolves to the
-# Vite-built bundle at packages/apps/shell/dist/. Override via env or pass
-# --slayzone-shell-bundle-dir=… directly.
+# Vite-built bundle at packages/apps/chromium-shell/dist/. Override via env or
+# pass --slayzone-shell-bundle-dir=… directly.
 if [[ -z "${SLAYZONE_SHELL_BUNDLE_DIR:-}" ]]; then
-  SLAYZONE_SHELL_BUNDLE_DIR="$REPO_ROOT/packages/apps/shell"
+  SLAYZONE_SHELL_BUNDLE_DIR="$REPO_ROOT/packages/apps/chromium-shell"
   export SLAYZONE_SHELL_BUNDLE_DIR
 fi
 

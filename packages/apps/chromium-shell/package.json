@@ -1,5 +1,5 @@
 {
-  "name": "@slayzone/shell",
+  "name": "@slayzone/chromium-shell",
   "version": "0.0.0",
   "private": true,
   "type": "module",
