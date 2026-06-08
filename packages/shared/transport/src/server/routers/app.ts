@@ -399,7 +399,45 @@ export const appLevelRouter = router({
       .query(({ input }) => getAppDeps().webview.isDevToolsOpened(input.webviewId)),
     disableDeviceEmulation: publicProcedure
       .input(z.object({ webviewId: z.number() }))
-      .mutation(({ input }) => getAppDeps().webview.disableDeviceEmulation(input.webviewId))
+      .mutation(({ input }) => getAppDeps().webview.disableDeviceEmulation(input.webviewId)),
+    registerShortcuts: publicProcedure
+      .input(z.object({ webviewId: z.number() }))
+      .mutation(({ input }) => getAppDeps().webview.registerShortcuts(input.webviewId)),
+    setKeyboardPassthrough: publicProcedure
+      .input(z.object({ webviewId: z.number(), enabled: z.boolean() }))
+      .mutation(({ input }) =>
+        getAppDeps().webview.setKeyboardPassthrough(input.webviewId, input.enabled)
+      ),
+    setDesktopHandoffPolicy: publicProcedure
+      .input(z.object({ webviewId: z.number(), policy: anyInput }))
+      .mutation(({ input }) =>
+        getAppDeps().webview.setDesktopHandoffPolicy(input.webviewId, input.policy)
+      ),
+    openDevToolsBottom: publicProcedure
+      .input(z.object({ webviewId: z.number(), options: anyInput.optional() }))
+      .mutation(({ input }) =>
+        getAppDeps().webview.openDevToolsBottom(
+          input.webviewId,
+          input.options as { probe?: boolean } | undefined
+        )
+      ),
+    openDevToolsDetached: publicProcedure
+      .input(z.object({ webviewId: z.number() }))
+      .mutation(({ input }) => getAppDeps().webview.openDevToolsDetached(input.webviewId)),
+    enableDeviceEmulation: publicProcedure
+      .input(z.object({ webviewId: z.number(), params: anyInput }))
+      .mutation(({ input }) =>
+        getAppDeps().webview.enableDeviceEmulation(input.webviewId, input.params as never)
+      ),
+    onShortcut: publicProcedure.subscription(() =>
+      observable<{ webviewId: number; key: string; shift: boolean }>((emit) => {
+        const handler = (payload: { webviewId: number; key: string; shift: boolean }): void =>
+          emit.next(payload)
+        const ev = getAppDeps().webview.events
+        ev.on('shortcut', handler)
+        return () => ev.off('shortcut', handler)
+      })
+    )
   }),
 
   // Task windows + panel ownership — window-scoped via ctx.windowId (parsed from

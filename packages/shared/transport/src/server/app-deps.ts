@@ -353,6 +353,28 @@ export type AppDeps = {
     closeDevTools: (webviewId: number) => unknown
     isDevToolsOpened: (webviewId: number) => unknown
     disableDeviceEmulation: (webviewId: number) => unknown
+    registerShortcuts: (webviewId: number) => unknown
+    setKeyboardPassthrough: (webviewId: number, enabled: boolean) => unknown
+    setDesktopHandoffPolicy: (webviewId: number, policy: unknown) => unknown
+    openDevToolsBottom: (webviewId: number, options?: { probe?: boolean }) => unknown
+    openDevToolsDetached: (webviewId: number) => unknown
+    enableDeviceEmulation: (
+      webviewId: number,
+      params: {
+        screenSize: { width: number; height: number }
+        viewSize: { width: number; height: number }
+        deviceScaleFactor: number
+        screenPosition: 'mobile' | 'desktop'
+        userAgent?: string
+      }
+    ) => unknown
+    events: EventEmitter & {
+      on(
+        event: 'shortcut',
+        listener: (payload: { webviewId: number; key: string; shift: boolean }) => void
+      ): EventEmitter
+      off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+    }
   }
 
   // Task windows + panel ownership. Window-scoped ops take the caller's window
