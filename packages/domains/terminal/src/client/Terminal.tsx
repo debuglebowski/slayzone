@@ -22,6 +22,15 @@ import {
 } from './scramble-telemetry'
 import { diag } from './terminal-webgl-diag'
 import { trimSelectionTrailingSpaces, waitForDimensions } from './Terminal.utils'
+import {
+  ensureFocusDiagnostics,
+  captureBlurSync,
+  settleBlurContext,
+  classifyFocusLoss,
+  describeEl,
+  getFocusTrail,
+  noteTerminalOutput
+} from './focus-loss-diag'
 import { TerminalDeadOverlay } from './TerminalDeadOverlay'
 import '@xterm/xterm/css/xterm.css'
 
@@ -960,6 +969,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
 
       terminalRef.current.write(joined)
+      noteTerminalOutput() // breadcrumb for the focus-loss output-correlation field
       lastRenderedSeqRef.current = pendingSeq
       pendingChunks = []
       pendingSeq = -1
@@ -1454,6 +1464,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const container = containerRef.current
     if (!container) return
 
+    // App-wide focus trail + last-input breadcrumb (install-once). Powers the
+    // root-cause attribution attached to the report below.
+    ensureFocusDiagnostics()
+
     const REPORT_THROTTLE_MS = 3000
     let lastReportAt = 0
 
@@ -1462,62 +1476,110 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       el.classList.contains('xterm-helper-textarea') &&
       !!terminalRef.current?.element?.contains(el)
 
-    const describe = (el: Element | null): Record<string, unknown> => {
-      if (!el) return { tag: null }
-      const panel = el.closest('[data-testid],[data-panel],[role="dialog"]')
-      return {
-        tag: el.tagName,
-        cls: (el.className?.toString?.() ?? '').slice(0, 80),
-        id: el.id || null,
-        testid: el.getAttribute('data-testid'),
-        nearestPanel:
-          panel?.getAttribute('data-testid') ??
-          panel?.getAttribute('data-panel') ??
-          panel?.getAttribute('role') ??
-          null
-      }
-    }
-
     const onFocusOut = (e: FocusEvent): void => {
       if (!ownsHelperTextarea(e.target)) return
+      const textarea = e.target as Element
       const immediate = e.relatedTarget as Element | null
+      // Cheap synchronous capture (stack + isConnected only). Runs on every
+      // blur, so it does no layout work and self-guards. The 300ms gate then
+      // decides if this blur was actually the failure worth the heavy walk.
+      let sync
+      try {
+        sync = captureBlurSync(textarea)
+      } catch {
+        return // capture itself failed — nothing safe to report
+      }
       window.setTimeout(() => {
-        const active = document.activeElement
-        if (ownsHelperTextarea(active)) return // self-healed → not a failure
-        if (!document.hasFocus()) return // alt-tab / window blur → not in-app
-        // Only the observed failure signature: focus went NOWHERE (body/root) →
-        // the user "must click again". Intentional moves to another control
-        // (editor, sidebar, dialog input) land on a real focusable and are NOT
-        // this bug — skip them to keep the signal clean.
-        const wentNowhere =
-          active == null ||
-          active === document.body ||
-          active === document.documentElement
-        if (!wentNowhere) return
-        const now = performance.now()
-        if (now - lastReportAt < REPORT_THROTTLE_MS) return
-        lastReportAt = now
-        void window.api.diagnostics
-          .recordClientEvent({
-            event: 'terminal.focus_lost_no_refocus',
-            level: 'warn',
-            sessionId,
-            message: `xterm lost focus and did not refocus within 300ms (mode=${mode})`,
-            payload: {
-              mode,
-              ptyState: ptyStateRef.current,
-              landedOn: describe(active),
-              immediateRelated: describe(immediate),
-              visibility: document.visibilityState,
-              // hibernate-warn countdown overlay (Moon icon) lives in the
-              // TerminalStarter wrapper (sibling of <Terminal>), so look up to
-              // the nearest positioned ancestor, not inside our own container.
-              countdownVisible: !!(container.closest('div.relative') ?? container.parentElement)?.querySelector(
-                '.animate-pulse'
-              )
-            }
-          })
-          .catch(() => {})
+        // Wrap the whole confirm+report path: a capture bug must never throw on
+        // a timer (lost signal + noisy console) — degrade to a marker event.
+        try {
+          const active = document.activeElement
+          if (ownsHelperTextarea(active)) return // self-healed → not a failure
+          if (!document.hasFocus()) return // alt-tab / window blur → not in-app
+          // Only the observed failure signature: focus went NOWHERE (body/root)
+          // → the user "must click again". Intentional moves to another control
+          // (editor, sidebar, dialog input) land on a real focusable and are NOT
+          // this bug — skip them to keep the signal clean.
+          const wentNowhere =
+            active == null ||
+            active === document.body ||
+            active === document.documentElement
+          if (!wentNowhere) return
+          const now = performance.now()
+          if (now - lastReportAt < REPORT_THROTTLE_MS) return
+          lastReportAt = now
+          // Heavy DOM walk happens HERE — only for confirmed failures.
+          const ctx = settleBlurContext(textarea, terminalRef.current?.element, container, sync)
+          const cause = classifyFocusLoss(ctx)
+          void window.api.diagnostics
+            .recordClientEvent({
+              event: 'terminal.focus_lost_no_refocus',
+              level: 'warn',
+              sessionId,
+              message: `xterm lost focus and did not refocus within 300ms (mode=${mode}, cause=${cause})`,
+              payload: {
+                mode,
+                ptyState: ptyStateRef.current,
+                // Automatic root-cause classification + the evidence behind it.
+                cause,
+                blurStack: ctx.blurStack,
+                // Connectivity at the blur instant (cheap, blur-time signal).
+                domAtBlur: { textareaConnected: ctx.textareaConnectedAtBlur },
+                // Settled DOM state at +300ms — what decides "why couldn't it
+                // refocus": teardown / tab-hide / inert-or-disabled / in-place.
+                dom: {
+                  textareaConnected: ctx.textareaConnected,
+                  terminalConnected: ctx.terminalConnected,
+                  containerConnected: ctx.containerConnected,
+                  hiddenAncestor: ctx.hiddenAncestor,
+                  focusBlocker: ctx.focusBlocker
+                },
+                // How recently the terminal painted — confirms/refutes the
+                // output-correlation the earlier CDP run observed.
+                sinceOutputMs: ctx.sinceOutputMs,
+                // Was a real user action close before the steal? No recent input
+                // → spurious/programmatic navigation, not the user leaving.
+                lastInput: {
+                  key: ctx.lastKey,
+                  sinceKeyMs: ctx.sinceKeyMs,
+                  pointerTarget: ctx.lastPointerTarget,
+                  sincePointerMs: ctx.sincePointerMs
+                },
+                focusTrail: getFocusTrail(),
+                landedOn: describeEl(active),
+                immediateRelated: describeEl(immediate),
+                visibility: document.visibilityState,
+                // hibernate-warn countdown overlay (Moon icon) lives in the
+                // TerminalStarter wrapper (sibling of <Terminal>), so look up to
+                // the nearest positioned ancestor, not inside our own container.
+                countdownVisible: !!(container.closest('div.relative') ?? container.parentElement)?.querySelector(
+                  '.animate-pulse'
+                )
+              }
+            })
+            .catch(() => {})
+        } catch (err) {
+          // Never lose the signal to a capture bug — emit a minimal marker so
+          // the failure itself is visible in the diagnostics stream.
+          try {
+            void window.api.diagnostics
+              .recordClientEvent({
+                event: 'terminal.focus_lost_no_refocus',
+                level: 'warn',
+                sessionId,
+                message: `focus-loss capture failed (mode=${mode})`,
+                payload: {
+                  mode,
+                  cause: 'capture-error',
+                  captureError: String((err as Error)?.message ?? err),
+                  blurStack: sync.blurStack
+                }
+              })
+              .catch(() => {})
+          } catch {
+            /* give up silently — diagnostics must never break the terminal */
+          }
+        }
       }, 300)
     }
 
