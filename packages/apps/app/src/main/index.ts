@@ -342,6 +342,7 @@ import {
 import { createStatsPoller } from './pid-stats'
 import { registerExportImportHandlers } from './export-import'
 import { notifyEvents } from './notify-renderer'
+import { menuEvents } from './menu-events'
 import { registerLeaderboardHandlers, getLocalLeaderboardStats } from './leaderboard'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
@@ -627,7 +628,8 @@ function applyAppZoom(command: AppZoomCommand): number {
 
   wc.zoomLevel = nextLevel
   const zoomFactor = wc.zoomFactor
-  wc.send('app:zoom-factor-changed', zoomFactor)
+  menuEvents.emit('zoom-factor-changed', zoomFactor)
+  wc.send('app:zoom-factor-changed', zoomFactor) // slice 5: drop legacy send
   return zoomFactor
 }
 
@@ -814,7 +816,8 @@ function handleOAuthDeepLink(url: string): void {
   // slayzone://task/<id> — open task in app
   if (parsed.hostname === 'task' && normalizedPath.length > 1) {
     const taskId = normalizedPath.slice(1)
-    mainWindow?.webContents.send('app:open-task', taskId)
+    menuEvents.emit('open-task', { taskId })
+    mainWindow?.webContents.send('app:open-task', taskId) // slice 5: drop legacy send
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.show()
@@ -882,15 +885,18 @@ app.on('open-url', (event, url) => {
 })
 
 function emitOpenSettings(): void {
-  mainWindow?.webContents.send('app:open-settings')
+  menuEvents.emit('open-settings')
+  mainWindow?.webContents.send('app:open-settings') // slice 5: drop legacy send
 }
 
 function emitOpenProjectSettings(): void {
-  mainWindow?.webContents.send('app:open-project-settings')
+  menuEvents.emit('open-project-settings')
+  mainWindow?.webContents.send('app:open-project-settings') // slice 5: drop legacy send
 }
 
 function emitNewTemporaryTask(): void {
-  mainWindow?.webContents.send('app:new-temporary-task')
+  menuEvents.emit('new-temporary-task')
+  mainWindow?.webContents.send('app:new-temporary-task') // slice 5: drop legacy send
 }
 
 function getCliSrc(): string {
@@ -1068,7 +1074,8 @@ function createMainWindow(): void {
 
     if (matchesElectronInput(ei, getEffectiveKeys('go-home', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:go-home')
+      menuEvents.emit('go-home')
+      mainWindow?.webContents.send('app:go-home') // slice 5: drop legacy send
       return
     }
 
@@ -1087,27 +1094,32 @@ function createMainWindow(): void {
 
     if (matchesElectronInput(ei, getEffectiveKeys('terminal-screenshot', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:screenshot-trigger')
+      menuEvents.emit('screenshot-trigger')
+      mainWindow?.webContents.send('app:screenshot-trigger') // slice 5: drop legacy send
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('reload-browser', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:reload-browser')
+      menuEvents.emit('reload-browser')
+      mainWindow?.webContents.send('app:reload-browser') // slice 5: drop legacy send
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('reload-app', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:reload-app')
+      menuEvents.emit('reload-app')
+      mainWindow?.webContents.send('app:reload-app') // slice 5: drop legacy send
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('global-agent-panel', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:toggle-global-agent-panel')
+      menuEvents.emit('toggle-global-agent-panel')
+      mainWindow?.webContents.send('app:toggle-global-agent-panel') // slice 5: drop legacy send
     }
 
     if (matchesElectronInput(ei, getEffectiveKeys('agent-status-panel', currentOverrides))) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:toggle-agent-status-panel')
+      menuEvents.emit('toggle-agent-status-panel')
+      mainWindow?.webContents.send('app:toggle-agent-status-panel') // slice 5: drop legacy send
     }
   })
 
@@ -1375,7 +1387,10 @@ app
             {
               label: 'Sync Detected Session ID',
               accelerator: getMenuAccelerator('sync-session-id', overrides),
-              click: () => mainWindow?.webContents.send('app:sync-session-id')
+              click: () => {
+                menuEvents.emit('sync-session-id')
+                mainWindow?.webContents.send('app:sync-session-id') // slice 5: drop legacy send
+              }
             }
           ]
         },
@@ -1400,13 +1415,19 @@ app
               label: 'Reload Browser',
               accelerator: 'CmdOrCtrl+R',
               registerAccelerator: false,
-              click: () => mainWindow?.webContents.send('app:reload-browser')
+              click: () => {
+                menuEvents.emit('reload-browser')
+                mainWindow?.webContents.send('app:reload-browser') // slice 5: drop legacy send
+              }
             },
             {
               label: 'Reload App',
               accelerator: 'CmdOrCtrl+Shift+R',
               registerAccelerator: false,
-              click: () => mainWindow?.webContents.send('app:reload-app')
+              click: () => {
+                menuEvents.emit('reload-app')
+                mainWindow?.webContents.send('app:reload-app') // slice 5: drop legacy send
+              }
             },
             { role: 'toggleDevTools' },
             { type: 'separator' },
@@ -1447,13 +1468,17 @@ app
                   focused.close()
                   return
                 }
-                mainWindow?.webContents.send('app:close-current-focus')
+                menuEvents.emit('close-current-focus')
+                mainWindow?.webContents.send('app:close-current-focus') // slice 5: drop legacy send
               }
             },
             {
               label: 'Close Task',
               accelerator: getMenuAccelerator('close-task', overrides),
-              click: () => mainWindow?.webContents.send('app:close-active-task')
+              click: () => {
+                menuEvents.emit('close-active-task')
+                mainWindow?.webContents.send('app:close-active-task') // slice 5: drop legacy send
+              }
             },
             { type: 'separator' },
             { role: 'front' },
@@ -1752,6 +1777,11 @@ app
           // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
           // (renderer cutover is slice 5).
           mod.setNotifyEvents(notifyEvents)
+          // Menu / app-shortcut bus — same instance the native menus, the
+          // before-input-event accelerator handler, the auto-updater, and the
+          // REST/MCP task-open routes dual-emit on (alongside the legacy `app:*`
+          // broadcasts), so `menu.*` subs and IPC coexist (renderer cutover is slice 5).
+          mod.setMenuEvents(menuEvents)
           // App-level ops — the SAME single instances the IPC handlers built and
           // returned above (backupOps/exportImportOps/usageOps/feedbackOps). One
           // implementation, both transports coexist (renderer cutover is slice 5).
@@ -2997,7 +3027,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         browserViewManager.reset()
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.zoomLevel = 0
-          mainWindow.webContents.send('app:zoom-factor-changed', mainWindow.webContents.zoomFactor)
+          menuEvents.emit('zoom-factor-changed', mainWindow.webContents.zoomFactor)
+          mainWindow.webContents.send('app:zoom-factor-changed', mainWindow.webContents.zoomFactor) // slice 5: drop legacy send
         }
 
         // 6. Clear oauth state

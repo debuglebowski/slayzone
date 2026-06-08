@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import { ALLOWED_NAVIGATE_SCHEMES } from './shared'
 import { broadcastToWindows } from '../../broadcast-to-windows'
+import { menuEvents } from '../../menu-events'
 import { waitForBrowserRegistration } from '../../browser-registry'
 import type { RestApiDeps } from '../types'
 
@@ -56,10 +57,12 @@ export function registerBrowserNewTabRoute(app: Express, deps: RestApiDeps): voi
 
     if (panel === 'visible') {
       // Open panel first (no-op if already open), then dispatch tab creation.
-      broadcastToWindows('browser:ensure-panel-open', taskId)
+      menuEvents.emit('browser-ensure-panel-open', { taskId })
+      broadcastToWindows('browser:ensure-panel-open', taskId) // slice 5: drop legacy send
     }
 
-    broadcastToWindows('browser:create-tab', { taskId, tabId, url, background })
+    menuEvents.emit('browser-create-tab', { taskId, tabId, url, background })
+    broadcastToWindows('browser:create-tab', { taskId, tabId, url, background }) // slice 5: drop legacy send
 
     try {
       await waitForBrowserRegistration(taskId, { tabId, timeoutMs: 10_000 })

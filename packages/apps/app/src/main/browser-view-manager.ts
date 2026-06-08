@@ -1,12 +1,14 @@
 import { clipboard, Menu, shell, WebContentsView, session, type BrowserWindow } from 'electron'
 import { join } from 'path'
 import { EventEmitter } from 'node:events'
+import { menuEvents } from './menu-events'
 
 // tRPC event stream — dual-emitted alongside the legacy `browser:*` /
 // `browser-view:*` webContents.send broadcasts below, so the
 // `app.browser.on*` subscriptions work while the renderer still consumes IPC
 // (coexistence until slice 5; the sends drop then). The `app:*` shortcut
-// broadcasts are NOT migrated here — they belong to the menu router slice.
+// broadcasts below are also dual-emitted onto `menuEvents` for the `menu.*`
+// subs (P21 menu router slice) — same coexistence.
 export const browserViewEvents = new EventEmitter() as EventEmitter & {
   on(event: 'event', listener: (e: unknown) => void): EventEmitter
   on(event: 'shortcut', listener: (payload: unknown) => void): EventEmitter
@@ -1144,23 +1146,28 @@ export class BrowserViewManager {
       }
       // Cmd+Shift+R: reload the app (renderer)
       if (key === 'r' && input.meta && input.shift && !input.alt) {
-        win.webContents.send('app:reload-app')
+        menuEvents.emit('reload-app')
+        win.webContents.send('app:reload-app') // slice 5: drop legacy send
         return
       }
       if (key === ',' && input.meta && input.shift) {
-        win.webContents.send('app:open-project-settings')
+        menuEvents.emit('open-project-settings')
+        win.webContents.send('app:open-project-settings') // slice 5: drop legacy send
         return
       }
       if (key === ',' && input.meta) {
-        win.webContents.send('app:open-settings')
+        menuEvents.emit('open-settings')
+        win.webContents.send('app:open-settings') // slice 5: drop legacy send
         return
       }
       if (key === 's' && input.meta && input.shift) {
-        win.webContents.send('app:screenshot-trigger')
+        menuEvents.emit('screenshot-trigger')
+        win.webContents.send('app:screenshot-trigger') // slice 5: drop legacy send
         return
       }
       if (input.key === '§' && input.meta) {
-        win.webContents.send('app:go-home')
+        menuEvents.emit('go-home')
+        win.webContents.send('app:go-home') // slice 5: drop legacy send
         return
       }
 

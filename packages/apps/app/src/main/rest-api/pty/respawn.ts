@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import { requestEnsureAlive } from '@slayzone/terminal/main'
 import { broadcastToWindows } from '../../broadcast-to-windows'
+import { menuEvents } from '../../menu-events'
 import type { RestApiDeps } from '../types'
 
 const FORCE_RESPAWN_TIMEOUT_MS = 3_000
@@ -20,7 +21,8 @@ export function registerPtyRespawnRoute(app: Express, deps: RestApiDeps): void {
     // Open the task tab so its TaskDetailPage mounts and attaches the
     // onEnsureAlive listener. requestEnsureAlive retries until acked or
     // times out, so race with mount is handled.
-    broadcastToWindows('app:open-task', taskId)
+    menuEvents.emit('open-task', { taskId })
+    broadcastToWindows('app:open-task', taskId) // slice 5: drop legacy send
     const result = await requestEnsureAlive(taskId, {
       force: true,
       timeoutMs: FORCE_RESPAWN_TIMEOUT_MS

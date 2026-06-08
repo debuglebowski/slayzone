@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { updateTaskOp } from '@slayzone/task/main'
 import { isKnownStatus } from '@slayzone/projects/shared'
 import { broadcastToWindows } from '../broadcast-to-windows'
+import { menuEvents } from '../menu-events'
 import { getProjectColumns, getAllowedStatusesText } from './shared'
 import type { McpToolsDeps } from './types'
 
@@ -73,7 +74,8 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
       }
       deps.notifyRenderer()
       if (close) {
-        broadcastToWindows('app:close-task', task_id)
+        menuEvents.emit('close-task', task_id)
+        broadcastToWindows('app:close-task', task_id) // slice 5: drop legacy send
       }
       return {
         content: [

@@ -2,6 +2,7 @@ import { requestEnsureAlive, hasPty, type EnsureAliveResult } from '@slayzone/te
 import { markTabSpawned, ensureMainTab } from '@slayzone/task-terminals/main'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 import { broadcastToWindows } from '../../broadcast-to-windows'
+import { menuEvents } from '../../menu-events'
 import type { RestApiDeps } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 5_000
@@ -67,7 +68,8 @@ export async function startMainPty(
   // Dual-emit: legacy IPC broadcast + tRPC tabsEvents (subscribers in slice 5).
   broadcastToWindows('tabs:changed', { taskId })
   tabsEvents.emit('tabs:changed', { taskId })
-  broadcastToWindows('app:open-task', taskId)
+  menuEvents.emit('open-task', { taskId })
+  broadcastToWindows('app:open-task', taskId) // slice 5: drop legacy send
 
   const result = await requestEnsureAlive(taskId, {
     force: false,

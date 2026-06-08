@@ -1,5 +1,6 @@
 import type { Express } from 'express'
 import { broadcastToWindows } from '../../broadcast-to-windows'
+import { menuEvents } from '../../menu-events'
 import type { RestApiDeps } from '../types'
 
 export function registerOpenArtifactRoute(app: Express, deps: RestApiDeps): void {
@@ -14,7 +15,8 @@ export function registerOpenArtifactRoute(app: Express, deps: RestApiDeps): void
     }
     const taskId = row.task_id
     deps.notifyRenderer()
-    broadcastToWindows('app:open-artifact', { taskId, artifactId })
+    menuEvents.emit('open-artifact', { taskId, artifactId })
+    broadcastToWindows('app:open-artifact', { taskId, artifactId }) // slice 5: drop legacy send
     res.json({ ok: true })
   })
 }
