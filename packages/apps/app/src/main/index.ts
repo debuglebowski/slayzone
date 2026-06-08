@@ -218,9 +218,9 @@ import { registerFeedbackHandlers } from '@slayzone/feedback/electron'
 import {
   registerSettingsHandlers,
   registerThemeHandlers,
-  wireNativeThemeBridge,
-  SettingsService
-} from '@slayzone/settings/main'
+  wireNativeThemeBridge
+} from '@slayzone/settings/electron'
+import { SettingsService } from '@slayzone/settings/server'
 import {
   registerPtyHandlers,
   getPtyHandlerChannels,
@@ -313,7 +313,7 @@ import {
   resetSyncFlags,
   setCredentialCipher
 } from '@slayzone/integrations/server'
-import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/main'
+import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/electron'
 import { registerHistoryHandlers } from '@slayzone/history/electron'
 import { registerTestPanelHandlers } from '@slayzone/test-panel/electron'
 import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/electron'

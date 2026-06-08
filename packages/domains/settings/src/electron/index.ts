@@ -6,4 +6,3 @@ export {
   setTheme,
   wireNativeThemeBridge
 } from './theme-core'
-export { SettingsService, type ThemePreference } from '../server/service'
