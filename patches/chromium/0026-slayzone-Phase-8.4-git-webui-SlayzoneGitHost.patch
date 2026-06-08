@@ -1,0 +1,544 @@
+From 65fddab0dba27e16bc5e8ab87c95ac7585a59d40 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sun, 19 Apr 2026 21:25:43 +0200
+Subject: [slayzone] slayzone: Phase 8.4 git webui + SlayzoneGitHost
+
+Fourth + final Phase 8 home-panel port. Read-only in 8.4: checkout /
+create-worktree / drop-stash RPCs wire up in Phase 8.5; NewWorktree +
+CreateBranch dialogs land in Phase 10. Full diff viewer deferred to
+Phase 17 polish.
+
+- chrome/browser/slayzone/mojom/git.mojom: GitHost with
+  GetSnapshot() => (GitSnapshot). GitWorktree / GitBranch / GitStash
+  structs carry the fields the Electron UnifiedGitPanel needs:
+  ahead/behind counters, dirty file counts, upstream tracking, stash
+  messages + file counts.
+- slayzone_git_host.{h,cc}: per-SlayzoneBrowserView Mojo impl with
+  separate WorktreeFromDict/BranchFromDict/StashFromDict helpers for
+  readability. GetSnapshot forwards to git:get-snapshot.
+  base::ListValue throughout (0022 hotfix).
+- slayzone_git_ui.{h,cc}: chrome://slayzone-git/ WebUIController using
+  slayzone::ConfigureBundleSource helper.
+- SlayzoneBrowserView: owns a SlayzoneGitHost + git_host() accessor.
+- ChromeURLHosts() + webui_url_constants + registry + binder updated.
+- BUILD.gn: new .cc/.h files wired into browser + ui targets;
+  mojom/BUILD.gn adds git.mojom.
+---
+ chrome/browser/BUILD.gn                       |   2 +
+ ...r_interface_binders_webui_parts_desktop.cc |   7 ++
+ chrome/browser/slayzone/mojom/BUILD.gn        |   1 +
+ chrome/browser/slayzone/mojom/git.mojom       |  44 +++++++
+ chrome/browser/slayzone/slayzone_git_host.cc  | 115 ++++++++++++++++++
+ chrome/browser/slayzone/slayzone_git_host.h   |  38 ++++++
+ chrome/browser/ui/BUILD.gn                    |   2 +
+ .../ui/views/frame/slayzone_browser_view.cc   |   4 +-
+ .../ui/views/frame/slayzone_browser_view.h    |   5 +
+ .../ui/webui/slayzone/slayzone_git_ui.cc      |  63 ++++++++++
+ .../ui/webui/slayzone/slayzone_git_ui.h       |  37 ++++++
+ .../webui/slayzone/slayzone_webui_registry.cc |   2 +
+ chrome/common/webui_url_constants.cc          |   1 +
+ chrome/common/webui_url_constants.h           |   2 +
+ 14 files changed, 322 insertions(+), 1 deletion(-)
+ create mode 100644 chrome/browser/slayzone/mojom/git.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_git_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_git_host.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_git_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_git_ui.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 5c55a874025df..28c8b38886eb8 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -982,6 +982,8 @@ static_library("browser") {
+     "slayzone/sidecar_client.h",
+     "slayzone/slayzone_automations_host.cc",
+     "slayzone/slayzone_automations_host.h",
++    "slayzone/slayzone_git_host.cc",
++    "slayzone/slayzone_git_host.h",
+     "slayzone/slayzone_layout_host.cc",
+     "slayzone/slayzone_layout_host.h",
+     "slayzone/slayzone_processes_host.cc",
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index a41d6a8159a88..aafa9d8001b77 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -87,6 +87,7 @@
+ #include "chrome/browser/ui/webui/suggest_internals/suggest_internals_ui.h"
+ #include "chrome/browser/ui/webui/tab_search/tab_search.mojom.h"
+ #include "chrome/browser/slayzone/mojom/automations.mojom.h"
++#include "chrome/browser/slayzone/mojom/git.mojom.h"
+ #include "chrome/browser/slayzone/mojom/processes.mojom.h"
+ #include "chrome/browser/slayzone/mojom/projects.mojom.h"
+ #include "chrome/browser/slayzone/mojom/sidebar.mojom.h"
+@@ -98,6 +99,7 @@
+ #include "chrome/browser/slayzone/mojom/tools.mojom.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_automations_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_git_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+@@ -710,6 +712,11 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // settings dialog wire up in 8.5 / Phase 10).
+   registry.ForWebUI<SlayzoneTestUI>()
+       .Add<slayzone::test::mojom::TestHost>();
++  // Phase 8.4 — chrome://slayzone-git/ binds to the per-BrowserView
++  // SlayzoneGitHost for worktree / branch / stash snapshots. Read-only
++  // in 8.4; mutations wire up in 8.5 / Phase 10.
++  registry.ForWebUI<SlayzoneGitUI>()
++      .Add<slayzone::git::mojom::GitHost>();
+   // Phase 7.4 — chrome://slayzone-tasklist/ binds to the per-BrowserView
+   // SlayzoneTasklistHost for kanban column snapshots.
+   registry.ForWebUI<SlayzoneTasklistUI>()
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+index 5d98fa91f02d4..2da68e3ab71cc 100644
+--- a/chrome/browser/slayzone/mojom/BUILD.gn
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -7,6 +7,7 @@ import("//mojo/public/tools/bindings/mojom.gni")
+ mojom("mojom") {
+   sources = [
+     "automations.mojom",
++    "git.mojom",
+     "layout.mojom",
+     "processes.mojom",
+     "projects.mojom",
+diff --git a/chrome/browser/slayzone/mojom/git.mojom b/chrome/browser/slayzone/mojom/git.mojom
+new file mode 100644
+index 0000000000000..c4ca9c7a50493
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/git.mojom
+@@ -0,0 +1,44 @@
++// Phase 8.4 git region data contract (in-tree mirror).
++// Source of truth: packages/shared/mojo-bindings/mojom/git.mojom.
++// Keep diff-identical below the module line.
++
++module slayzone.git.mojom;
++
++struct GitWorktree {
++  string id;
++  string path;
++  string branch;
++  bool is_current;
++  int32 ahead;
++  int32 behind;
++  int32 dirty_file_count;
++};
++
++struct GitBranch {
++  string name;
++  bool is_current;
++  string upstream;
++  int32 ahead;
++  int32 behind;
++  string last_commit_at;
++};
++
++struct GitStash {
++  string id;
++  string message;
++  string created_at;
++  int32 file_count;
++};
++
++struct GitSnapshot {
++  string active_project_id;
++  string repo_path;
++  string active_tab;
++  array<GitWorktree> worktrees;
++  array<GitBranch> branches;
++  array<GitStash> stashes;
++};
++
++interface GitHost {
++  GetSnapshot() => (GitSnapshot snapshot);
++};
+diff --git a/chrome/browser/slayzone/slayzone_git_host.cc b/chrome/browser/slayzone/slayzone_git_host.cc
+new file mode 100644
+index 0000000000000..79142ae707fc9
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_git_host.cc
+@@ -0,0 +1,115 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_git_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++git::mojom::GitWorktreePtr WorktreeFromDict(const base::DictValue& w) {
++  auto wt = git::mojom::GitWorktree::New();
++  if (const std::string* id = w.FindString("id")) wt->id = *id;
++  if (const std::string* path = w.FindString("path")) wt->path = *path;
++  if (const std::string* branch = w.FindString("branch")) wt->branch = *branch;
++  wt->is_current = w.FindBool("isCurrent").value_or(false);
++  wt->ahead = w.FindInt("ahead").value_or(0);
++  wt->behind = w.FindInt("behind").value_or(0);
++  wt->dirty_file_count = w.FindInt("dirtyFileCount").value_or(0);
++  return wt;
++}
++
++git::mojom::GitBranchPtr BranchFromDict(const base::DictValue& b) {
++  auto br = git::mojom::GitBranch::New();
++  if (const std::string* name = b.FindString("name")) br->name = *name;
++  br->is_current = b.FindBool("isCurrent").value_or(false);
++  if (const std::string* up = b.FindString("upstream")) br->upstream = *up;
++  br->ahead = b.FindInt("ahead").value_or(0);
++  br->behind = b.FindInt("behind").value_or(0);
++  if (const std::string* last = b.FindString("lastCommitAt")) {
++    br->last_commit_at = *last;
++  }
++  return br;
++}
++
++git::mojom::GitStashPtr StashFromDict(const base::DictValue& s) {
++  auto st = git::mojom::GitStash::New();
++  if (const std::string* id = s.FindString("id")) st->id = *id;
++  if (const std::string* msg = s.FindString("message")) st->message = *msg;
++  if (const std::string* created = s.FindString("createdAt")) {
++    st->created_at = *created;
++  }
++  st->file_count = s.FindInt("fileCount").value_or(0);
++  return st;
++}
++
++git::mojom::GitSnapshotPtr FromDict(const base::DictValue& response) {
++  auto snapshot = git::mojom::GitSnapshot::New();
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    return snapshot;
++  }
++
++  if (const std::string* active = dict->FindString("activeProjectId")) {
++    snapshot->active_project_id = *active;
++  }
++  if (const std::string* repo = dict->FindString("repoPath")) {
++    snapshot->repo_path = *repo;
++  }
++  if (const std::string* tab = dict->FindString("activeTab")) {
++    snapshot->active_tab = *tab;
++  }
++
++  if (const base::ListValue* worktrees = dict->FindList("worktrees")) {
++    for (const base::Value& entry : *worktrees) {
++      if (!entry.is_dict()) continue;
++      snapshot->worktrees.push_back(WorktreeFromDict(entry.GetDict()));
++    }
++  }
++  if (const base::ListValue* branches = dict->FindList("branches")) {
++    for (const base::Value& entry : *branches) {
++      if (!entry.is_dict()) continue;
++      snapshot->branches.push_back(BranchFromDict(entry.GetDict()));
++    }
++  }
++  if (const base::ListValue* stashes = dict->FindList("stashes")) {
++    for (const base::Value& entry : *stashes) {
++      if (!entry.is_dict()) continue;
++      snapshot->stashes.push_back(StashFromDict(entry.GetDict()));
++    }
++  }
++
++  return snapshot;
++}
++
++}  // namespace
++
++SlayzoneGitHost::SlayzoneGitHost() = default;
++SlayzoneGitHost::~SlayzoneGitHost() = default;
++
++void SlayzoneGitHost::Bind(
++    mojo::PendingReceiver<git::mojom::GitHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneGitHost::GetSnapshot(GetSnapshotCallback callback) {
++  SidecarClient::GetInstance()->Call(
++      "git:get-snapshot", base::DictValue(),
++      base::BindOnce(
++          [](GetSnapshotCallback cb, base::DictValue response) {
++            std::move(cb).Run(FromDict(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_git_host.h b/chrome/browser/slayzone/slayzone_git_host.h
+new file mode 100644
+index 0000000000000..111163a30cf60
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_git_host.h
+@@ -0,0 +1,38 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_GIT_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_GIT_HOST_H_
++
++#include "chrome/browser/slayzone/mojom/git.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 8.4 — browser-side implementation of
++// `slayzone::git::mojom::GitHost`. One instance per `SlayzoneBrowserView`.
++// Forwards to the process-wide `SidecarClient` via JSON-RPC method
++// `git:get-snapshot`. Read-only in 8.4; mutations (checkout, stash drop,
++// worktree create) land alongside Phase 8.5 / Phase 10.
++class SlayzoneGitHost : public slayzone::git::mojom::GitHost {
++ public:
++  SlayzoneGitHost();
++  SlayzoneGitHost(const SlayzoneGitHost&) = delete;
++  SlayzoneGitHost& operator=(const SlayzoneGitHost&) = delete;
++  ~SlayzoneGitHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::git::mojom::GitHost> receiver);
++
++  // slayzone::git::mojom::GitHost:
++  void GetSnapshot(GetSnapshotCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::git::mojom::GitHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_GIT_HOST_H_
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 7828e354f90ae..e97d1a81f0967 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -192,6 +192,8 @@ static_library("ui") {
+     "webui/slayzone/slayzone_automations_ui.h",
+     "webui/slayzone/slayzone_browserchrome_ui.cc",
+     "webui/slayzone/slayzone_browserchrome_ui.h",
++    "webui/slayzone/slayzone_git_ui.cc",
++    "webui/slayzone/slayzone_git_ui.h",
+     "webui/slayzone/slayzone_processes_ui.cc",
+     "webui/slayzone/slayzone_processes_ui.h",
+     "webui/slayzone/slayzone_projects_ui.cc",
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index baf44f089f924..9274f3b38d4cc 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -9,6 +9,7 @@
+ 
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_automations_host.h"
++#include "chrome/browser/slayzone/slayzone_git_host.h"
+ #include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/slayzone/slayzone_processes_host.h"
+ #include "chrome/browser/slayzone/slayzone_projects_host.h"
+@@ -71,7 +72,8 @@ SlayzoneBrowserView::SlayzoneBrowserView(Browser* browser)
+           std::make_unique<slayzone::SlayzoneAutomationsHost>()),
+       processes_host_(
+           std::make_unique<slayzone::SlayzoneProcessesHost>()),
+-      test_host_(std::make_unique<slayzone::SlayzoneTestHost>()) {}
++      test_host_(std::make_unique<slayzone::SlayzoneTestHost>()),
++      git_host_(std::make_unique<slayzone::SlayzoneGitHost>()) {}
+ 
+ SlayzoneBrowserView::~SlayzoneBrowserView() = default;
+ 
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 922dbda59b027..b24412e40947e 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -20,6 +20,7 @@ class SlayzoneTabsHost;
+ 
+ namespace slayzone {
+ class SlayzoneAutomationsHost;
++class SlayzoneGitHost;
+ class SlayzoneProcessesHost;
+ class SlayzoneProjectsHost;
+ class SlayzoneSidebarHost;
+@@ -87,6 +88,9 @@ class SlayzoneBrowserView : public BrowserView {
+   slayzone::SlayzoneTestHost* test_host() {
+     return test_host_.get();
+   }
++  slayzone::SlayzoneGitHost* git_host() {
++    return git_host_.get();
++  }
+ 
+   // Phase 6.3 — returns the SlayzoneBrowserView that owns `wc` as a region
+   // WebView's WebContents (e.g. chrome://slayzone-tabbar/ or
+@@ -128,6 +132,7 @@ class SlayzoneBrowserView : public BrowserView {
+   std::unique_ptr<slayzone::SlayzoneAutomationsHost> automations_host_;
+   std::unique_ptr<slayzone::SlayzoneProcessesHost> processes_host_;
+   std::unique_ptr<slayzone::SlayzoneTestHost> test_host_;
++  std::unique_ptr<slayzone::SlayzoneGitHost> git_host_;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_git_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_git_ui.cc
+new file mode 100644
+index 0000000000000..ced0d20a94f5d
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_git_ui.cc
+@@ -0,0 +1,63 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_git_ui.h"
++
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_git_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kGitMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · git</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 10px;
++      background: #3a1a1a; color: #fca5a5;
++      border-left: 1px solid #6b2020;
++    }
++  </style>
++</head>
++<body>
++  <span>git: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneGitUI::SlayzoneGitUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneGitHost);
++  slayzone::ConfigureBundleSource(source, "git", kGitMissingBundleHtml);
++}
++
++SlayzoneGitUI::~SlayzoneGitUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneGitUI)
++
++void SlayzoneGitUI::BindInterface(
++    mojo::PendingReceiver<slayzone::git::mojom::GitHost> receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->git_host()) {
++    return;
++  }
++  view->git_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_git_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_git_ui.h
+new file mode 100644
+index 0000000000000..077d9c1dd41a3
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_git_ui.h
+@@ -0,0 +1,37 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_GIT_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_GIT_UI_H_
++
++#include "chrome/browser/slayzone/mojom/git.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++class SlayzoneGitUI : public content::WebUIController {
++ public:
++  explicit SlayzoneGitUI(content::WebUI* web_ui);
++  SlayzoneGitUI(const SlayzoneGitUI&) = delete;
++  SlayzoneGitUI& operator=(const SlayzoneGitUI&) = delete;
++  ~SlayzoneGitUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::git::mojom::GitHost> receiver);
++
++ private:
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneGitUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneGitUI> {
++ public:
++  SlayzoneGitUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneGitHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_GIT_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+index e314f7dfede7f..d8eb3567a4979 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -14,6 +14,7 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_automations_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_git_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+@@ -164,6 +165,7 @@ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+   map.AddWebUIConfig(std::make_unique<PlaceholderUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneAutomationsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneBrowserchromeUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneGitUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneProcessesUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneProjectsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneSidebarUIConfig>());
+diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
+index e061a410c4d0a..3d15eca86f7ee 100644
+--- a/chrome/common/webui_url_constants.cc
++++ b/chrome/common/webui_url_constants.cc
+@@ -176,6 +176,7 @@ base::span<const base::cstring_view> ChromeURLHosts() {
+       kChromeUISkillsHost,
+       kChromeUISlayzoneAutomationsHost,
+       kChromeUISlayzoneBrowserchromeHost,
++      kChromeUISlayzoneGitHost,
+       kChromeUISlayzonePlaceholderHost,
+       kChromeUISlayzoneProcessesHost,
+       kChromeUISlayzoneProjectsHost,
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+index 139d120a52bdb..cc8629e5e0404 100644
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -182,6 +182,8 @@ inline constexpr char kChromeUISlayzoneAutomationsHost[] =
+     "slayzone-automations";
+ inline constexpr char kChromeUISlayzoneAutomationsURL[] =
+     "chrome://slayzone-automations/";
++inline constexpr char kChromeUISlayzoneGitHost[] = "slayzone-git";
++inline constexpr char kChromeUISlayzoneGitURL[] = "chrome://slayzone-git/";
+ inline constexpr char kChromeUISlayzonePlaceholderHost[] =
+     "slayzone-placeholder";
+ inline constexpr char kChromeUISlayzoneProcessesHost[] = "slayzone-processes";
+-- 
+2.52.0
+

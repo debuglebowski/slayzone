@@ -1,0 +1,51 @@
+{
+  "runtime": "bun",
+  "version": "1.3.6",
+  "platform": "darwin-arm64",
+  "generatedAt": "2026-04-18T05:37:52.803Z",
+  "results": [
+    {
+      "module": "better-sqlite3",
+      "status": "blocked",
+      "step": "exercise",
+      "error": "Error: 'better-sqlite3' is not yet supported in Bun.\nTrack the status in https://github.com/oven-sh/bun/issues/4290\nIn the meantime, you could try bun:sqlite which has a similar API.",
+      "durationMs": 8,
+      "notes": "prepared statements + runtime-loaded native binding"
+    },
+    {
+      "module": "node-pty",
+      "status": "ok",
+      "step": "exercise",
+      "durationMs": 5,
+      "notes": "spawn + write + read"
+    },
+    {
+      "module": "convex",
+      "status": "ok",
+      "step": "exercise",
+      "durationMs": 24,
+      "notes": "module + basic client shape"
+    },
+    {
+      "module": "express",
+      "status": "ok",
+      "step": "exercise",
+      "durationMs": 47,
+      "notes": "listen + fetch round-trip"
+    },
+    {
+      "module": "ws",
+      "status": "ok",
+      "step": "exercise",
+      "durationMs": 5,
+      "notes": "server + client round-trip"
+    },
+    {
+      "module": "msgpackr",
+      "status": "skipped",
+      "step": "exercise",
+      "durationMs": 0,
+      "notes": "package not installed in workspace"
+    }
+  ]
+}

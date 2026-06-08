@@ -1,0 +1,728 @@
+From 534c3613861a833f548243b50a2c5b0b5975841e Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 10:41:44 +0200
+Subject: [slayzone] =?UTF-8?q?slayzone:=20Phase=207.7=20terminal=20?=
+ =?UTF-8?q?=E2=80=94=20in-tree=20WebUI=20+=20host?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+terminal.mojom defines TerminalHost (Start/Write/Resize/Subscribe) +
+TerminalObserver (OnOutput/OnExit). SlayzoneTerminalHost is per-frame:
+one pty per chrome://slayzone-terminal/ frame. SlayzoneTerminalUI owns
+the host via std::unique_ptr, following the Phase 9 overlay pattern
+(vs the per-BrowserView singleton pattern used in 7.1-7.6).
+
+SidecarClient gets RegisterNotificationHandler(method, callback) so
+terminal.output / terminal.exit JSON-RPC notifications emitted by the
+sidecar's broadcaster reach the right host. A per-process TerminalRouter
+(in slayzone_terminal_host.cc) owns a weak_ptr map id→host and
+registers once on first use.
+
+URL constants, binder, webui registry, and region_container all wired
+for "terminal" region → chrome://slayzone-terminal/.
+---
+ chrome/browser/BUILD.gn                       |   2 +
+ ...r_interface_binders_webui_parts_desktop.cc |   6 +
+ chrome/browser/slayzone/mojom/BUILD.gn        |   1 +
+ chrome/browser/slayzone/mojom/terminal.mojom  |  47 ++++
+ chrome/browser/slayzone/sidecar_client.cc     |  51 +++-
+ chrome/browser/slayzone/sidecar_client.h      |  10 +
+ .../slayzone/slayzone_terminal_host.cc        | 225 ++++++++++++++++++
+ .../browser/slayzone/slayzone_terminal_host.h |  66 +++++
+ chrome/browser/ui/BUILD.gn                    |   2 +
+ .../views/frame/slayzone_region_container.cc  |   4 +
+ .../ui/webui/slayzone/slayzone_terminal_ui.cc |  58 +++++
+ .../ui/webui/slayzone/slayzone_terminal_ui.h  |  49 ++++
+ .../webui/slayzone/slayzone_webui_registry.cc |   2 +
+ 13 files changed, 518 insertions(+), 5 deletions(-)
+ create mode 100644 chrome/browser/slayzone/mojom/terminal.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_terminal_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_terminal_host.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 0fcd9ac90efac..b5ef32efc76c8 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1012,6 +1012,8 @@ static_library("browser") {
+     "slayzone/slayzone_taskheader_host.h",
+     "slayzone/slayzone_tasklist_host.cc",
+     "slayzone/slayzone_tasklist_host.h",
++    "slayzone/slayzone_terminal_host.cc",
++    "slayzone/slayzone_terminal_host.h",
+     "slayzone/slayzone_test_host.cc",
+     "slayzone/slayzone_test_host.h",
+     "slayzone/slayzone_tools_host.cc",
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index 4bd59bad25cd0..47f5678238aa6 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -99,6 +99,7 @@
+ #include "chrome/browser/slayzone/mojom/tabs.mojom.h"
+ #include "chrome/browser/slayzone/mojom/taskheader.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
++#include "chrome/browser/slayzone/mojom/terminal.mojom.h"
+ #include "chrome/browser/slayzone/mojom/test.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tools.mojom.h"
+ #include "chrome/browser/slayzone/mojom/usage.mojom.h"
+@@ -116,6 +117,7 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_test_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h"
+@@ -762,6 +764,10 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // overlay; singleton sidecar calls suffice.
+   registry.ForWebUI<SlayzoneSettingsUI>()
+       .Add<slayzone::settings::mojom::SettingsHost>();
++  // Phase 7.7 — chrome://slayzone-terminal/ binds to a per-frame
++  // SlayzoneTerminalHost owned by the UI controller (one pty per frame).
++  registry.ForWebUI<SlayzoneTerminalUI>()
++      .Add<slayzone::terminal::mojom::TerminalHost>();
+ 
+   if (base::FeatureList::IsEnabled(ntp_features::kNtpFooter)) {
+     registry.ForWebUI<NewTabFooterUI>()
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+index f822298e81c7b..e0fde68836098 100644
+--- a/chrome/browser/slayzone/mojom/BUILD.gn
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -20,6 +20,7 @@ mojom("mojom") {
+     "tabs.mojom",
+     "taskheader.mojom",
+     "tasklist.mojom",
++    "terminal.mojom",
+     "test.mojom",
+     "tools.mojom",
+     "usage.mojom",
+diff --git a/chrome/browser/slayzone/mojom/terminal.mojom b/chrome/browser/slayzone/mojom/terminal.mojom
+new file mode 100644
+index 0000000000000..a56e64532a86c
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/terminal.mojom
+@@ -0,0 +1,47 @@
++// Phase 7.7 terminal region data contract.
++//
++// Scope note: this .mojom lives in packages/shared/mojo-bindings/ (Phase 4.3
++// territory) as a coordinated exception, following the Phase 5.6 / 6.1 / 7.x
++// pattern. The in-tree copy at chrome/browser/slayzone/mojom/terminal.mojom
++// is what Chromium's mojom() target compiles to C++; scripts/generate.ts
++// regenerates TS bindings from this outer file. The two must stay
++// diff-identical below the module line.
++//
++// Phase 7.7 is a spike: one pty per WebUI instance, no multiplexing. The
++// host's Start() call asks the sidecar to spawn `$SHELL` in the given cwd
++// and returns the sidecar-side id. Output arrives as JSON-RPC notifications
++// (`terminal.output`) on the sidecar socket; the host fans them out to the
++// subscribed observer. Full terminal-mode catalog + exit-strategy handling
++// lives in packages/domains/terminal/ (Electron baseline) and will land in
++// the fork incrementally as needed.
++
++module slayzone.terminal.mojom;
++
++// Stream of output bytes for a single pty. The sidecar emits UTF-8
++// substrings; consumers hand them directly to xterm.js. `exit_code` is
++// delivered once, then the observer disconnects.
++interface TerminalObserver {
++  OnOutput(string data);
++  OnExit(int32 exit_code);
++};
++
++// Browser-side driver for a single sidecar-backed pty. One remote per
++// chrome://slayzone-terminal/ WebUI frame. The host keeps a single pty id
++// for the lifetime of the remote; teardown on disconnect.
++interface TerminalHost {
++  // Spawn the shell under the given cwd at the given geometry. Empty
++  // `cwd` resolves to $HOME on the sidecar side. Returns `ok == false`
++  // when the sidecar is unreachable or spawn() failed.
++  Start(string cwd, uint32 cols, uint32 rows) => (bool ok);
++
++  // Write raw bytes to the pty's stdin. No-op when Start hasn't resolved.
++  Write(string data);
++
++  // Update the pty geometry. No-op when Start hasn't resolved.
++  Resize(uint32 cols, uint32 rows);
++
++  // Register the single per-frame observer. Subsequent calls replace the
++  // previous observer. The browser does NOT push a backlog — xterm in the
++  // JS layer holds the scrollback.
++  Subscribe(pending_remote<TerminalObserver> observer);
++};
+diff --git a/chrome/browser/slayzone/sidecar_client.cc b/chrome/browser/slayzone/sidecar_client.cc
+index 83bb514b6c6ab..c1f8be5e051c9 100644
+--- a/chrome/browser/slayzone/sidecar_client.cc
++++ b/chrome/browser/slayzone/sidecar_client.cc
+@@ -229,6 +229,24 @@ class SidecarClient::IOState {
+     WriteAll(FrameMessage(request));
+   }
+ 
++  void RegisterNotificationHandler(std::string method,
++                                   NotificationCallback callback) {
++    if (owning_task_runner_ &&
++        !owning_task_runner_->RunsTasksInCurrentSequence()) {
++      owning_task_runner_->PostTask(
++          FROM_HERE,
++          base::BindOnce(&IOState::RegisterNotificationHandler,
++                         base::Unretained(this), std::move(method),
++                         std::move(callback)));
++      return;
++    }
++    if (callback.is_null()) {
++      notification_handlers_.erase(method);
++    } else {
++      notification_handlers_[method] = std::move(callback);
++    }
++  }
++
+  private:
+   void ScheduleConnect(base::TimeDelta delay) {
+     if (stopped_) {
+@@ -350,11 +368,19 @@ class SidecarClient::IOState {
+   void DispatchMessage(base::DictValue msg) {
+     const base::Value* id_val = msg.Find("id");
+     if (!id_val) {
+-      // Notification (no id). Phase 3 wires notifications into a dispatcher;
+-      // Phase 2 just logs.
+-      const std::string* method = msg.FindString("method");
+-      LOG(INFO) << kLogTag << " notification "
+-                << (method ? *method : "<unknown>");
++      // Phase 7.7 — route server-initiated notifications to registered
++      // handlers (terminal.output / terminal.exit, …). Unknown methods log
++      // at INFO so misconfigured streams still surface.
++      const std::string* method_ptr = msg.FindString("method");
++      const std::string method = method_ptr ? *method_ptr : std::string();
++      const base::Value* params = msg.Find("params");
++      auto handler_it = notification_handlers_.find(method);
++      if (handler_it != notification_handlers_.end() && params) {
++        handler_it->second.Run(*params);
++      } else {
++        LOG(INFO) << kLogTag << " notification "
++                  << (method.empty() ? "<unknown>" : method);
++      }
+       return;
+     }
+     int64_t id = 0;
+@@ -428,6 +454,9 @@ class SidecarClient::IOState {
+   int socket_fd_ = -1;
+   std::string recv_buffer_;
+   base::flat_map<int64_t, ResponseCallback> pending_;
++  // Phase 7.7 — method name → notification handler. Notifications with
++  // methods not in this map log-and-drop (see DispatchMessage).
++  base::flat_map<std::string, NotificationCallback> notification_handlers_;
+   int64_t next_id_ = 0;
+   base::TimeDelta backoff_ = kInitialBackoff;
+   base::OneShotTimer reconnect_timer_;
+@@ -491,4 +520,16 @@ void SidecarClient::Call(std::string_view method,
+                      std::move(callback)));
+ }
+ 
++void SidecarClient::RegisterNotificationHandler(std::string_view method,
++                                                NotificationCallback callback) {
++  if (!io_thread_ || !io_state_) {
++    return;
++  }
++  io_thread_->task_runner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&IOState::RegisterNotificationHandler,
++                     base::Unretained(io_state_.get()), std::string(method),
++                     std::move(callback)));
++}
++
+ }  // namespace slayzone
+diff --git a/chrome/browser/slayzone/sidecar_client.h b/chrome/browser/slayzone/sidecar_client.h
+index 02e5c014e9e73..fc20b8bd0af8b 100644
+--- a/chrome/browser/slayzone/sidecar_client.h
++++ b/chrome/browser/slayzone/sidecar_client.h
+@@ -62,6 +62,16 @@ class SidecarClient {
+             base::DictValue params,
+             ResponseCallback callback);
+ 
++  // Phase 7.7 — register a handler for server-initiated JSON-RPC
++  // notifications whose `method` matches. Only one handler per method is
++  // retained (subsequent registrations replace). Pass a null callback to
++  // unregister. The sidecar's `server.broadcast(method, params)` fans out
++  // to every connected socket; this client side dispatches by method name.
++  using NotificationCallback =
++      base::RepeatingCallback<void(const base::Value& params)>;
++  void RegisterNotificationHandler(std::string_view method,
++                                   NotificationCallback callback);
++
+  private:
+   friend class base::NoDestructor<SidecarClient>;
+ 
+diff --git a/chrome/browser/slayzone/slayzone_terminal_host.cc b/chrome/browser/slayzone/slayzone_terminal_host.cc
+new file mode 100644
+index 0000000000000..6d55a74d951e9
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_terminal_host.cc
+@@ -0,0 +1,225 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_terminal_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/containers/flat_map.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/no_destructor.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++// Routes `terminal.output` / `terminal.exit` broadcast notifications to the
++// per-frame SlayzoneTerminalHost that owns the matching pty id. One
++// subscription per method is shared across the whole process; each
++// SlayzoneTerminalHost adds itself to the router's weak-ptr map on Start()
++// and removes itself on destruction. A held weak_ptr that is invalidated
++// (frame teardown mid-flight) is skipped silently.
++class TerminalRouter {
++ public:
++  static TerminalRouter* Get() {
++    static base::NoDestructor<TerminalRouter> router;
++    return router.get();
++  }
++
++  TerminalRouter() = default;
++  TerminalRouter(const TerminalRouter&) = delete;
++  TerminalRouter& operator=(const TerminalRouter&) = delete;
++
++  void Register(const std::string& id,
++                base::WeakPtr<SlayzoneTerminalHost> host) {
++    EnsureSubscribed();
++    hosts_[id] = std::move(host);
++  }
++
++  void Unregister(const std::string& id) { hosts_.erase(id); }
++
++  void DispatchOutput(const base::Value& params) {
++    const base::DictValue* payload = ExtractPayload(params);
++    if (!payload) {
++      return;
++    }
++    const std::string* id = payload->FindString("id");
++    const std::string* data = payload->FindString("data");
++    if (!id || !data) {
++      return;
++    }
++    auto it = hosts_.find(*id);
++    if (it == hosts_.end() || !it->second) {
++      return;
++    }
++    it->second->OnOutput(*data);
++  }
++
++  void DispatchExit(const base::Value& params) {
++    const base::DictValue* payload = ExtractPayload(params);
++    if (!payload) {
++      return;
++    }
++    const std::string* id = payload->FindString("id");
++    if (!id) {
++      return;
++    }
++    const int code = payload->FindInt("code").value_or(0);
++    auto it = hosts_.find(*id);
++    if (it == hosts_.end() || !it->second) {
++      return;
++    }
++    it->second->OnExit(code);
++    hosts_.erase(it);
++  }
++
++ private:
++  void EnsureSubscribed() {
++    if (subscribed_) {
++      return;
++    }
++    subscribed_ = true;
++    SidecarClient::GetInstance()->RegisterNotificationHandler(
++        "terminal.output",
++        base::BindRepeating(&TerminalRouter::DispatchOutput,
++                            base::Unretained(this)));
++    SidecarClient::GetInstance()->RegisterNotificationHandler(
++        "terminal.exit",
++        base::BindRepeating(&TerminalRouter::DispatchExit,
++                            base::Unretained(this)));
++  }
++
++  // The sidecar's `server.broadcast(method, params)` ships params as an
++  // array whose first entry is the handler's payload dict (see
++  // RpcEventMessage in packages/shared/rpc-types/src/protocol.ts). Accept
++  // a bare dict too so future single-object broadcasts just work.
++  static const base::DictValue* ExtractPayload(const base::Value& params) {
++    if (params.is_list() && !params.GetList().empty()) {
++      const base::Value& first = params.GetList().front();
++      if (first.is_dict()) {
++        return &first.GetDict();
++      }
++    }
++    if (params.is_dict()) {
++      return &params.GetDict();
++    }
++    return nullptr;
++  }
++
++  bool subscribed_ = false;
++  base::flat_map<std::string, base::WeakPtr<SlayzoneTerminalHost>> hosts_;
++};
++
++}  // namespace
++
++SlayzoneTerminalHost::SlayzoneTerminalHost() = default;
++
++SlayzoneTerminalHost::~SlayzoneTerminalHost() {
++  if (!pty_id_.empty()) {
++    TerminalRouter::Get()->Unregister(pty_id_);
++    // Best-effort kill — fire-and-forget; sidecar handles dead ids silently.
++    base::DictValue params;
++    params.Set("id", pty_id_);
++    SidecarClient::GetInstance()->Call(
++        "terminal:kill", std::move(params),
++        base::BindOnce([](base::DictValue) {}));
++  }
++}
++
++void SlayzoneTerminalHost::Bind(
++    mojo::PendingReceiver<terminal::mojom::TerminalHost> receiver) {
++  receiver_.Bind(std::move(receiver));
++}
++
++void SlayzoneTerminalHost::Start(const std::string& cwd,
++                                  uint32_t cols,
++                                  uint32_t rows,
++                                  StartCallback callback) {
++  if (!pty_id_.empty()) {
++    // Already started — treat as idempotent success.
++    std::move(callback).Run(true);
++    return;
++  }
++  base::DictValue params;
++  params.Set("cwd", cwd);
++  params.Set("cols", static_cast<int>(cols));
++  params.Set("rows", static_cast<int>(rows));
++  SidecarClient::GetInstance()->Call(
++      "terminal:start", std::move(params),
++      base::BindOnce(
++          [](base::WeakPtr<SlayzoneTerminalHost> self, StartCallback cb,
++             base::DictValue response) {
++            if (!self) {
++              std::move(cb).Run(false);
++              return;
++            }
++            const base::Value* result = response.Find("result");
++            const base::DictValue* dict =
++                (result && result->is_dict()) ? &result->GetDict() : nullptr;
++            if (!dict) {
++              std::move(cb).Run(false);
++              return;
++            }
++            const std::string* id = dict->FindString("id");
++            if (!id || id->empty()) {
++              std::move(cb).Run(false);
++              return;
++            }
++            self->pty_id_ = *id;
++            TerminalRouter::Get()->Register(self->pty_id_,
++                                             self->weak_factory_.GetWeakPtr());
++            std::move(cb).Run(true);
++          },
++          weak_factory_.GetWeakPtr(), std::move(callback)));
++}
++
++void SlayzoneTerminalHost::Write(const std::string& data) {
++  if (pty_id_.empty()) {
++    return;
++  }
++  base::DictValue params;
++  params.Set("id", pty_id_);
++  params.Set("data", data);
++  SidecarClient::GetInstance()->Call(
++      "terminal:write", std::move(params),
++      base::BindOnce([](base::DictValue) {}));
++}
++
++void SlayzoneTerminalHost::Resize(uint32_t cols, uint32_t rows) {
++  if (pty_id_.empty()) {
++    return;
++  }
++  base::DictValue params;
++  params.Set("id", pty_id_);
++  params.Set("cols", static_cast<int>(cols));
++  params.Set("rows", static_cast<int>(rows));
++  SidecarClient::GetInstance()->Call(
++      "terminal:resize", std::move(params),
++      base::BindOnce([](base::DictValue) {}));
++}
++
++void SlayzoneTerminalHost::Subscribe(
++    mojo::PendingRemote<terminal::mojom::TerminalObserver> observer) {
++  observer_.reset();
++  observer_.Bind(std::move(observer));
++}
++
++void SlayzoneTerminalHost::OnOutput(const std::string& data) {
++  if (observer_) {
++    observer_->OnOutput(data);
++  }
++}
++
++void SlayzoneTerminalHost::OnExit(int code) {
++  if (observer_) {
++    observer_->OnExit(code);
++  }
++  pty_id_.clear();
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_terminal_host.h b/chrome/browser/slayzone/slayzone_terminal_host.h
+new file mode 100644
+index 0000000000000..479d6d57ab253
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_terminal_host.h
+@@ -0,0 +1,66 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_TERMINAL_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_TERMINAL_HOST_H_
++
++#include <string>
++
++#include "base/memory/weak_ptr.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/mojom/terminal.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/pending_remote.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "mojo/public/cpp/bindings/remote.h"
++
++namespace slayzone {
++
++// Phase 7.7 — one-pty-per-frame terminal host. Every new
++// chrome://slayzone-terminal/ WebUI frame binds its own TerminalHost
++// receiver; the host owns a sidecar-assigned pty id and forwards writes /
++// resizes to `terminal:*` JSON-RPC methods. Output arrives as
++// `terminal.output` notifications, which the host fans out to the currently-
++// subscribed observer. Unlike the per-region singleton hosts (ToolsHost,
++// StatusbarHost, …), this host is instantiated per-frame so two terminal
++// regions don't share a pty.
++class SlayzoneTerminalHost : public slayzone::terminal::mojom::TerminalHost {
++ public:
++  SlayzoneTerminalHost();
++  SlayzoneTerminalHost(const SlayzoneTerminalHost&) = delete;
++  SlayzoneTerminalHost& operator=(const SlayzoneTerminalHost&) = delete;
++  ~SlayzoneTerminalHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::terminal::mojom::TerminalHost> receiver);
++
++  // slayzone::terminal::mojom::TerminalHost:
++  void Start(const std::string& cwd,
++             uint32_t cols,
++             uint32_t rows,
++             StartCallback callback) override;
++  void Write(const std::string& data) override;
++  void Resize(uint32_t cols, uint32_t rows) override;
++  void Subscribe(mojo::PendingRemote<slayzone::terminal::mojom::TerminalObserver>
++                     observer) override;
++
++  // Router callbacks — the TerminalRouter (in the .cc) dispatches matching
++  // `terminal.output` / `terminal.exit` notifications into these. Not part
++  // of the Mojo interface; public so the router can reach them via a weak
++  // ptr held in its registration table.
++  void OnOutput(const std::string& data);
++  void OnExit(int code);
++
++ private:
++  mojo::Receiver<slayzone::terminal::mojom::TerminalHost> receiver_{this};
++  mojo::Remote<slayzone::terminal::mojom::TerminalObserver> observer_;
++
++  // Sidecar-assigned pty id. Empty until Start() resolves.
++  std::string pty_id_;
++  base::WeakPtrFactory<SlayzoneTerminalHost> weak_factory_{this};
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_TERMINAL_HOST_H_
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 5ecb556f15972..c325b8811d826 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -216,6 +216,8 @@ static_library("ui") {
+     "webui/slayzone/slayzone_taskheader_ui.h",
+     "webui/slayzone/slayzone_tasklist_ui.cc",
+     "webui/slayzone/slayzone_tasklist_ui.h",
++    "webui/slayzone/slayzone_terminal_ui.cc",
++    "webui/slayzone/slayzone_terminal_ui.h",
+     "webui/slayzone/slayzone_test_ui.cc",
+     "webui/slayzone/slayzone_test_ui.h",
+     "webui/slayzone/slayzone_tools_ui.cc",
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.cc b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+index c9e85a24c0dbf..701f9e37ffafb 100644
+--- a/chrome/browser/ui/views/frame/slayzone_region_container.cc
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+@@ -58,6 +58,10 @@ GURL RegionUrl(std::string_view region_id) {
+   if (region_id == "taskheader") {
+     return GURL(chrome::kChromeUISlayzoneTaskheaderURL);
+   }
++  // Phase 7.7 terminal — xterm.js hosted via chrome://slayzone-terminal/.
++  if (region_id == "terminal") {
++    return GURL(chrome::kChromeUISlayzoneTerminalURL);
++  }
+   return GURL(
+       base::StrCat({chrome::kChromeUISlayzonePlaceholderURL, region_id}));
+ }
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.cc
+new file mode 100644
+index 0000000000000..ebf698c0cfa93
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.cc
+@@ -0,0 +1,58 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.h"
++
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_terminal_host.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kTerminalMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · terminal</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 10px;
++      background: #3a1a1a; color: #fca5a5;
++    }
++  </style>
++</head>
++<body>
++  <span>terminal: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneTerminalUI::SlayzoneTerminalUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui),
++      host_(std::make_unique<slayzone::SlayzoneTerminalHost>()) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneTerminalHost);
++  slayzone::ConfigureBundleSource(source, "terminal",
++                                  kTerminalMissingBundleHtml);
++}
++
++SlayzoneTerminalUI::~SlayzoneTerminalUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneTerminalUI)
++
++void SlayzoneTerminalUI::BindInterface(
++    mojo::PendingReceiver<slayzone::terminal::mojom::TerminalHost> receiver) {
++  host_->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.h
+new file mode 100644
+index 0000000000000..4def799511981
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.h
+@@ -0,0 +1,49 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TERMINAL_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TERMINAL_UI_H_
++
++#include <memory>
++
++#include "chrome/browser/slayzone/mojom/terminal.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++namespace slayzone {
++class SlayzoneTerminalHost;
++}  // namespace slayzone
++
++// Phase 7.7 — `chrome://slayzone-terminal/` WebUI. Serves the Vite-built
++// xterm.js bundle from the outer repo (`packages/webui/terminal/dist`) and
++// binds a fresh `SlayzoneTerminalHost` per frame. The host is owned by the
++// UI controller (one pty per frame is the desired shape; two terminal
++// regions would mean two independent ptys).
++class SlayzoneTerminalUI : public content::WebUIController {
++ public:
++  explicit SlayzoneTerminalUI(content::WebUI* web_ui);
++  SlayzoneTerminalUI(const SlayzoneTerminalUI&) = delete;
++  SlayzoneTerminalUI& operator=(const SlayzoneTerminalUI&) = delete;
++  ~SlayzoneTerminalUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::terminal::mojom::TerminalHost> receiver);
++
++ private:
++  std::unique_ptr<slayzone::SlayzoneTerminalHost> host_;
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneTerminalUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneTerminalUI> {
++ public:
++  SlayzoneTerminalUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneTerminalHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TERMINAL_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+index 02d0513e5eacc..dfd7bee2af794 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -26,6 +26,7 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_terminal_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_test_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h"
+@@ -182,6 +183,7 @@ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+   map.AddWebUIConfig(std::make_unique<SlayzoneTabbarUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneTaskheaderUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneTasklistUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneTerminalUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneTestUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneToolsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneUsageUIConfig>());
+-- 
+2.52.0
+

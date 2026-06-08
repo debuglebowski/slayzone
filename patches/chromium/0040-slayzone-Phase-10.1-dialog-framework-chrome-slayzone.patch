@@ -1,0 +1,454 @@
+From dba90e0d77ab62ddc4fadd5c956c6b7bb191915d Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 10:09:42 +0200
+Subject: [slayzone] =?UTF-8?q?slayzone:=20Phase=2010.1=20dialog=20framewor?=
+ =?UTF-8?q?k=20=E2=80=94=20chrome://slayzone-dialogs/?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Framework for chrome://slayzone-dialogs/<id>?invocation=<uuid>&props=<base64-json>. React bundle routes on URL path to the registered dialog component; DialogHost Mojo interface forwards user choice to sidecar as dialog:resolve / dialog:cancel JSON-RPC methods.
+---
+ chrome/browser/BUILD.gn                       |  2 +
+ ...r_interface_binders_webui_parts_desktop.cc |  7 ++
+ chrome/browser/slayzone/mojom/BUILD.gn        |  1 +
+ chrome/browser/slayzone/mojom/dialog.mojom    | 10 +++
+ .../browser/slayzone/slayzone_dialogs_host.cc | 73 +++++++++++++++++++
+ .../browser/slayzone/slayzone_dialogs_host.h  | 51 +++++++++++++
+ chrome/browser/ui/BUILD.gn                    |  4 +
+ .../ui/webui/slayzone/slayzone_dialogs_ui.cc  | 57 +++++++++++++++
+ .../ui/webui/slayzone/slayzone_dialogs_ui.h   | 49 +++++++++++++
+ .../webui/slayzone/slayzone_webui_registry.cc |  4 +
+ chrome/common/webui_url_constants.cc          |  2 +
+ chrome/common/webui_url_constants.h           |  6 ++
+ 12 files changed, 266 insertions(+)
+ create mode 100644 chrome/browser/slayzone/mojom/dialog.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_dialogs_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_dialogs_host.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index cd5efd74e4780..2f04428acbd6e 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -986,6 +986,8 @@ static_library("browser") {
+     "slayzone/slayzone_automations_host.h",
+     "slayzone/slayzone_context_host.cc",
+     "slayzone/slayzone_context_host.h",
++    "slayzone/slayzone_dialogs_host.cc",
++    "slayzone/slayzone_dialogs_host.h",
+     "slayzone/slayzone_git_host.cc",
+     "slayzone/slayzone_git_host.h",
+     "slayzone/slayzone_layout_host.cc",
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index 9a80a53e098a6..2304f6998ce23 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -88,6 +88,7 @@
+ #include "chrome/browser/ui/webui/tab_search/tab_search.mojom.h"
+ #include "chrome/browser/slayzone/mojom/automations.mojom.h"
+ #include "chrome/browser/slayzone/mojom/context.mojom.h"
++#include "chrome/browser/slayzone/mojom/dialog.mojom.h"
+ #include "chrome/browser/slayzone/mojom/git.mojom.h"
+ #include "chrome/browser/slayzone/mojom/leaderboard.mojom.h"
+ #include "chrome/browser/slayzone/mojom/processes.mojom.h"
+@@ -103,6 +104,7 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_automations_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_context_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_git_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+@@ -748,6 +750,11 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // SlayzoneContextHost (one per WebContents). Overlay surface.
+   registry.ForWebUI<SlayzoneContextUI>()
+       .Add<slayzone::context::mojom::ContextHost>();
++  // Phase 10.1 — chrome://slayzone-dialogs/ binds to a UI-owned
++  // SlayzoneDialogsHost (one per WebContents). The host forwards
++  // Resolve/Cancel to the sidecar; the dialog id routes on the URL path.
++  registry.ForWebUI<SlayzoneDialogsUI>()
++      .Add<slayzone::dialog::mojom::DialogHost>();
+ 
+   if (base::FeatureList::IsEnabled(ntp_features::kNtpFooter)) {
+     registry.ForWebUI<NewTabFooterUI>()
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+index 80aca94bb17f1..7ad9c15248b5b 100644
+--- a/chrome/browser/slayzone/mojom/BUILD.gn
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -8,6 +8,7 @@ mojom("mojom") {
+   sources = [
+     "automations.mojom",
+     "context.mojom",
++    "dialog.mojom",
+     "git.mojom",
+     "layout.mojom",
+     "leaderboard.mojom",
+diff --git a/chrome/browser/slayzone/mojom/dialog.mojom b/chrome/browser/slayzone/mojom/dialog.mojom
+new file mode 100644
+index 0000000000000..ab41c3a05df6b
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/dialog.mojom
+@@ -0,0 +1,10 @@
++// Phase 10.1 dialog framework data contract (in-tree mirror).
++// Source of truth: packages/shared/mojo-bindings/mojom/dialog.mojom.
++// Keep diff-identical below the module line.
++
++module slayzone.dialog.mojom;
++
++interface DialogHost {
++  Resolve(string invocation_id, string result_json) => ();
++  Cancel(string invocation_id) => ();
++};
+diff --git a/chrome/browser/slayzone/slayzone_dialogs_host.cc b/chrome/browser/slayzone/slayzone_dialogs_host.cc
+new file mode 100644
+index 0000000000000..198b77dc07eb5
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_dialogs_host.cc
+@@ -0,0 +1,73 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_dialogs_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++// Parse an opaque result payload into a base::Value that the sidecar can
++// forward through the JSON-RPC pipeline. Non-JSON payloads are forwarded
++// as strings (the sidecar will hand them to the invoker unchanged); the
++// invocation contract is opaque to C++ and agreed by invoker + JS.
++base::Value ParseResultPayload(const std::string& result_json) {
++  if (result_json.empty()) {
++    return base::Value();
++  }
++  std::optional<base::Value> parsed =
++      base::JSONReader::Read(result_json, base::JSON_PARSE_RFC);
++  if (parsed.has_value()) {
++    return std::move(parsed).value();
++  }
++  return base::Value(result_json);
++}
++
++}  // namespace
++
++SlayzoneDialogsHost::SlayzoneDialogsHost() = default;
++SlayzoneDialogsHost::~SlayzoneDialogsHost() = default;
++
++void SlayzoneDialogsHost::Bind(
++    mojo::PendingReceiver<dialog::mojom::DialogHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneDialogsHost::Resolve(const std::string& invocation_id,
++                                  const std::string& result_json,
++                                  ResolveCallback callback) {
++  base::ListValue params;
++  params.Append(invocation_id);
++  params.Append(ParseResultPayload(result_json));
++  base::DictValue request;
++  request.Set("params", std::move(params));
++  SidecarClient::GetInstance()->Call(
++      "dialog:resolve", std::move(request),
++      base::BindOnce(
++          [](ResolveCallback cb, base::DictValue) { std::move(cb).Run(); },
++          std::move(callback)));
++}
++
++void SlayzoneDialogsHost::Cancel(const std::string& invocation_id,
++                                 CancelCallback callback) {
++  base::ListValue params;
++  params.Append(invocation_id);
++  base::DictValue request;
++  request.Set("params", std::move(params));
++  SidecarClient::GetInstance()->Call(
++      "dialog:cancel", std::move(request),
++      base::BindOnce(
++          [](CancelCallback cb, base::DictValue) { std::move(cb).Run(); },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_dialogs_host.h b/chrome/browser/slayzone/slayzone_dialogs_host.h
+new file mode 100644
+index 0000000000000..f30f3caf8bafe
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_dialogs_host.h
+@@ -0,0 +1,51 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_DIALOGS_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_DIALOGS_HOST_H_
++
++#include <string>
++
++#include "chrome/browser/slayzone/mojom/dialog.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 10.1 — browser-side implementation of
++// `slayzone::dialog::mojom::DialogHost`. Lifetime owned by
++// `SlayzoneDialogsUI` (one per WebContents).
++//
++// Dialog JS reports the user's choice here; this class forwards to the
++// sidecar via JSON-RPC (`dialog:resolve` / `dialog:cancel`). The invoker
++// on the C++/native side registered the invocation with the sidecar before
++// opening the WebUI URL and is awaiting the matching completion.
++//
++// Invoker-side wiring (views::Widget modal + focus trap) is deferred to
++// Phase 10.6; the invocation registration channel is a standalone
++// JSON-RPC method on the sidecar and does not require the widget layer.
++class SlayzoneDialogsHost : public slayzone::dialog::mojom::DialogHost {
++ public:
++  SlayzoneDialogsHost();
++  SlayzoneDialogsHost(const SlayzoneDialogsHost&) = delete;
++  SlayzoneDialogsHost& operator=(const SlayzoneDialogsHost&) = delete;
++  ~SlayzoneDialogsHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::dialog::mojom::DialogHost> receiver);
++
++  // slayzone::dialog::mojom::DialogHost:
++  void Resolve(const std::string& invocation_id,
++               const std::string& result_json,
++               ResolveCallback callback) override;
++  void Cancel(const std::string& invocation_id,
++              CancelCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::dialog::mojom::DialogHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_DIALOGS_HOST_H_
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index d0a3524477122..5ecb556f15972 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -194,6 +194,8 @@ static_library("ui") {
+     "webui/slayzone/slayzone_browserchrome_ui.h",
+     "webui/slayzone/slayzone_context_ui.cc",
+     "webui/slayzone/slayzone_context_ui.h",
++    "webui/slayzone/slayzone_dialogs_ui.cc",
++    "webui/slayzone/slayzone_dialogs_ui.h",
+     "webui/slayzone/slayzone_git_ui.cc",
+     "webui/slayzone/slayzone_git_ui.h",
+     "webui/slayzone/slayzone_leaderboard_ui.cc",
+@@ -202,6 +204,8 @@ static_library("ui") {
+     "webui/slayzone/slayzone_processes_ui.h",
+     "webui/slayzone/slayzone_projects_ui.cc",
+     "webui/slayzone/slayzone_projects_ui.h",
++    "webui/slayzone/slayzone_settings_ui.cc",
++    "webui/slayzone/slayzone_settings_ui.h",
+     "webui/slayzone/slayzone_sidebar_ui.cc",
+     "webui/slayzone/slayzone_sidebar_ui.h",
+     "webui/slayzone/slayzone_statusbar_ui.cc",
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.cc
+new file mode 100644
+index 0000000000000..e46a7ed8465ca
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.cc
+@@ -0,0 +1,57 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h"
++
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_dialogs_host.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kDialogsMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · dialog</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; justify-content: center;
++      background: #1a1a2e; color: #c7d2fe;
++      border: 1px solid #3a3a5e;
++    }
++  </style>
++</head>
++<body>
++  <span>dialog: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneDialogsUI::SlayzoneDialogsUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui),
++      host_(std::make_unique<slayzone::SlayzoneDialogsHost>()) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneDialogsHost);
++  slayzone::ConfigureBundleSource(source, "dialogs", kDialogsMissingBundleHtml);
++}
++
++SlayzoneDialogsUI::~SlayzoneDialogsUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneDialogsUI)
++
++void SlayzoneDialogsUI::BindInterface(
++    mojo::PendingReceiver<slayzone::dialog::mojom::DialogHost> receiver) {
++  host_->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h
+new file mode 100644
+index 0000000000000..694f2c0d48807
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h
+@@ -0,0 +1,49 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_DIALOGS_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_DIALOGS_UI_H_
++
++#include <memory>
++
++#include "chrome/browser/slayzone/mojom/dialog.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++namespace slayzone {
++class SlayzoneDialogsHost;
++}
++
++// Phase 10.1 — chrome://slayzone-dialogs/<id> WebUI controller. Hosts the
++// single dialog-host bundle which routes on the path segment to the
++// matching dialog component. Owns a per-WebContents SlayzoneDialogsHost
++// forwarding Resolve/Cancel to the sidecar.
++class SlayzoneDialogsUI : public content::WebUIController {
++ public:
++  explicit SlayzoneDialogsUI(content::WebUI* web_ui);
++  SlayzoneDialogsUI(const SlayzoneDialogsUI&) = delete;
++  SlayzoneDialogsUI& operator=(const SlayzoneDialogsUI&) = delete;
++  ~SlayzoneDialogsUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::dialog::mojom::DialogHost> receiver);
++
++ private:
++  std::unique_ptr<slayzone::SlayzoneDialogsHost> host_;
++
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneDialogsUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneDialogsUI> {
++ public:
++  SlayzoneDialogsUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneDialogsHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_DIALOGS_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+index 1cbbd46651f6e..02d0513e5eacc 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -15,10 +15,12 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_automations_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_context_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_dialogs_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_git_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_statusbar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
+@@ -169,10 +171,12 @@ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+   map.AddWebUIConfig(std::make_unique<SlayzoneAutomationsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneBrowserchromeUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneContextUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneDialogsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneGitUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneLeaderboardUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneProcessesUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneProjectsUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneSettingsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneSidebarUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneStatusbarUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneTabbarUIConfig>());
+diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
+index 404a24b284bb3..229aba3720186 100644
+--- a/chrome/common/webui_url_constants.cc
++++ b/chrome/common/webui_url_constants.cc
+@@ -177,11 +177,13 @@ base::span<const base::cstring_view> ChromeURLHosts() {
+       kChromeUISlayzoneAutomationsHost,
+       kChromeUISlayzoneBrowserchromeHost,
+       kChromeUISlayzoneContextHost,
++      kChromeUISlayzoneDialogsHost,
+       kChromeUISlayzoneGitHost,
+       kChromeUISlayzoneLeaderboardHost,
+       kChromeUISlayzonePlaceholderHost,
+       kChromeUISlayzoneProcessesHost,
+       kChromeUISlayzoneProjectsHost,
++      kChromeUISlayzoneSettingsHost,
+       kChromeUISlayzoneShellHost,
+       kChromeUISlayzoneSidebarHost,
+       kChromeUISlayzoneStatusbarHost,
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+index 7007afe02e522..c7404970bc181 100644
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -185,6 +185,9 @@ inline constexpr char kChromeUISlayzoneAutomationsURL[] =
+ inline constexpr char kChromeUISlayzoneContextHost[] = "slayzone-context";
+ inline constexpr char kChromeUISlayzoneContextURL[] =
+     "chrome://slayzone-context/";
++inline constexpr char kChromeUISlayzoneDialogsHost[] = "slayzone-dialogs";
++inline constexpr char kChromeUISlayzoneDialogsURL[] =
++    "chrome://slayzone-dialogs/";
+ inline constexpr char kChromeUISlayzoneGitHost[] = "slayzone-git";
+ inline constexpr char kChromeUISlayzoneGitURL[] = "chrome://slayzone-git/";
+ inline constexpr char kChromeUISlayzoneLeaderboardHost[] =
+@@ -201,6 +204,9 @@ inline constexpr char kChromeUISlayzonePlaceholderURL[] =
+ inline constexpr char kChromeUISlayzoneProjectsHost[] = "slayzone-projects";
+ inline constexpr char kChromeUISlayzoneProjectsURL[] =
+     "chrome://slayzone-projects/";
++inline constexpr char kChromeUISlayzoneSettingsHost[] = "slayzone-settings";
++inline constexpr char kChromeUISlayzoneSettingsURL[] =
++    "chrome://slayzone-settings/";
+ inline constexpr char kChromeUISlayzoneShellHost[] = "slayzone-shell";
+ inline constexpr char kChromeUISlayzoneShellURL[] = "chrome://slayzone-shell/";
+ inline constexpr char kChromeUISlayzoneSidebarHost[] = "slayzone-sidebar";
+-- 
+2.52.0
+

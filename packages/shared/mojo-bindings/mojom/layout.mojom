@@ -1,0 +1,73 @@
+// Phase 5.6 layout intent API. Regions send hide/show/resize/focus requests;
+// the browser process translates them into `views::View::SetVisible`, layout
+// fraction updates on `SlayzoneSplitView`, and `WebView::RequestFocus`.
+//
+// Scope note: this .mojom lives in packages/shared/mojo-bindings/ (Phase 4.3
+// territory) as a coordinated exception — Phase 5 authors the contract,
+// Phase 4.3 generates the TS client bindings from the same file on its next
+// pipeline run.
+
+module slayzone.layout.mojom;
+
+// Which axis of a region slot a `Resize` call targets. `kMain` is the axis
+// along which the parent SplitView flexes; `kCross` is the perpendicular.
+enum RegionAxis {
+  kMain,
+  kCross,
+};
+
+// Iteration-2 — authoritative layout mode. `kTaskDetail` = full 10-region
+// grid (Phase 5.2 default). `kHome` = kanban full main-area width + rails
+// (structural match with the Electron home tab). `kOverlay` = region grid
+// intact; SlayzoneOverlayManager paints a full-bleed WebView above it.
+enum LayoutMode {
+  kTaskDetail,
+  kHome,
+  kOverlay,
+};
+
+// Owned by the browser process; one remote per region. Regions call these
+// methods to request layout changes; the browser authoritatively applies
+// them (or denies) and the result is observed via native layout.
+interface LayoutHost {
+  // Hide or show a named region slot. When hidden the slot's WebView is
+  // collapsed to zero along the main axis of its parent container.
+  SetRegionVisible(string region_id, bool visible);
+
+  // Resize the named region slot to `px` along `axis`. The browser clamps
+  // to sensible bounds for the containing layout (e.g. min width for
+  // SplitView panes).
+  SetRegionSize(string region_id, uint32 px, RegionAxis axis) => ();
+
+  // Move keyboard focus to the named region slot. Returns once focus has
+  // been transferred (or rejected, e.g. region missing).
+  FocusRegion(string region_id) => (bool ok);
+
+  // Phase 8.5 — swap the browser view into "home-tab mode" showing a single
+  // home-panel WebUI full-bleed, replacing the task-detail region grid. The
+  // panel_id must be one of {"automations", "processes", "test", "git"}
+  // (the Phase 8.1-8.4 ports). An empty panel_id returns to task-detail
+  // mode. Returns `ok=false` for unknown panel ids; the UI stays in its
+  // current mode. Deliberately single-panel swap per the approved plan
+  // deviation (multi-visible side-by-side deferred to Phase 17 polish).
+  ShowHomePanel(string panel_id) => (bool ok);
+
+  // Phase 9.4 — swap the browser view into a full-window overlay showing one
+  // of the Phase 9 overlay WebUIs. The overlay_id must be one of
+  // {"leaderboard", "usage", "context"}. An empty overlay_id closes the
+  // active overlay and returns to whatever mode was visible before. Returns
+  // `ok=false` for unknown overlay ids; the UI stays put. Implemented via
+  // an indirect SlayzoneOverlayManager that parents a views::WebView as a
+  // child of SlayzoneBrowserView without requiring BrowserView edits
+  // (Phase 7 R3 coordination fence).
+  ShowOverlay(string overlay_id) => (bool ok);
+
+  // Iteration-2 — authoritative layout-mode switch. Rebuilds region
+  // visibility to match the target mode (Electron fidelity: kHome hides
+  // sidebar/taskheader/browserchrome/terminal and gives tasklist full
+  // main-area width; kTaskDetail is the Phase 5.2 full grid; kOverlay is
+  // bookkeeping + used by SlayzoneOverlayManager). Callers include the
+  // tabbar JS on tab-type transition and `--slayzone-layout-mode=` CLI
+  // switch for the validation harness.
+  SetLayoutMode(LayoutMode mode) => ();
+};

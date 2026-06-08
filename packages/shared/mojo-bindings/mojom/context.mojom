@@ -1,0 +1,46 @@
+// Phase 9.3 context-manager (AI config) overlay data contract (source of truth).
+// In-tree mirror: chromium/src/chrome/browser/slayzone/mojom/context.mojom.
+// Keep diff-identical below the module line.
+
+module slayzone.context.mojom;
+
+struct ProviderEntry {
+  string id;
+  string label;
+  string status;
+  bool connected;
+};
+
+struct ProfileEntry {
+  string id;
+  string name;
+  string provider_id;
+  bool active;
+};
+
+struct SkillEntry {
+  string id;
+  string name;
+  string source;
+  bool stale;
+};
+
+struct McpServerEntry {
+  string id;
+  string name;
+  string transport;
+  bool connected;
+};
+
+struct ContextSnapshot {
+  string active_project_id;
+  array<ProviderEntry> providers;
+  array<ProfileEntry> profiles;
+  array<SkillEntry> skills;
+  array<McpServerEntry> mcp_servers;
+  string active_profile_id;
+};
+
+interface ContextHost {
+  GetSnapshot(string project_id) => (ContextSnapshot snapshot);
+};

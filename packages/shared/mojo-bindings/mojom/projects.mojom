@@ -1,0 +1,68 @@
+// Phase 7.3 projects region data contract.
+//
+// Scope note: this .mojom lives in packages/shared/mojo-bindings/ (Phase 4.3
+// territory) as a coordinated exception, following the 5.6 layout.mojom and
+// 6.1 tabs.mojom pattern. The in-tree copy at
+// chrome/browser/slayzone/mojom/projects.mojom is what Chromium's mojom()
+// target compiles to C++; Phase 4.3 regenerates TS bindings from this outer
+// file. The two must stay diff-identical below the module line.
+//
+// The projects region is the slim left rail — project icon list plus which
+// one is currently active. Minimal read-only surface following the Phase 7.1
+// recipe; selection is handled by firing a JSON-RPC (`projects:set-active`)
+// through the sidecar rather than a direct Mojo method so the sidecar stays
+// the single source of truth across every region that reads active project
+// id (7.4 tasklist, 7.5 sidebar, 7.6 taskheader).
+//
+// cap-02 adds CreateProject/UpdateProject/DeleteProject write methods. The
+// sidecar's SQLite projects table is the authoritative store; the in-memory
+// snapshot is reshaped from SELECT on every GetSnapshot call.
+
+module slayzone.projects.mojom;
+
+// One project entry — enough to render an icon button. Full metadata comes
+// from task-domain RPCs when a region opens the project.
+struct ProjectEntry {
+  // Stable uuid — matches packages/domains/projects/shared Project.id.
+  string id;
+
+  // User-facing project name. Rendered as tooltip + accessible name.
+  string name;
+
+  // Optional hex color (e.g. "#ff5722"). Empty string when unset — renderer
+  // falls back to an auto-hued badge from `id`.
+  string color;
+};
+
+// Projects rail snapshot. `active_project_id` is empty when no project is
+// selected (fresh install, all projects deleted, etc.).
+struct ProjectsSnapshot {
+  array<ProjectEntry> projects;
+  string active_project_id;
+};
+
+// Result envelope for every write method. `ok`=false with non-empty `error`
+// when the sidecar refuses. On ok, `project` is the freshly-written row; on
+// delete, `project.id` echoes the deleted id, other fields empty.
+struct ProjectWriteResult {
+  bool ok;
+  string error;
+  ProjectEntry project;
+};
+
+// Browser-side projects data provider. One remote per region WebUI that
+// mounts. The browser forwards snapshot queries + writes to the sidecar over
+// the existing Unix-socket JSON-RPC channel.
+interface ProjectsHost {
+  GetSnapshot() => (ProjectsSnapshot snapshot);
+
+  // Create a new project. `color` is a hex string; empty = unset.
+  CreateProject(string name, string color) => (ProjectWriteResult result);
+
+  // Rename / recolor an existing project.
+  UpdateProject(string project_id, string name, string color)
+      => (ProjectWriteResult result);
+
+  // Remove a project. Orphaned tasks cascade-delete (matches Electron shape).
+  DeleteProject(string project_id) => (ProjectWriteResult result);
+};

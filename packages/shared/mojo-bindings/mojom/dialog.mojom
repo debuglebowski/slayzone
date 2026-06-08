@@ -1,0 +1,44 @@
+// Phase 10.1 dialog framework data contract (source of truth).
+// In-tree mirror: chromium/src/chrome/browser/slayzone/mojom/dialog.mojom.
+// Keep diff-identical below the module line.
+//
+// The dialog framework hosts every SlayZone modal at
+// chrome://slayzone-dialogs/<dialog_id>. The JS bundle reads the dialog id
+// from location.pathname and the props (base64-url JSON) + invocation id
+// from location.search, renders the matching React component, and reports
+// the user's choice back via DialogHost.Resolve or Cancel. Both forward to
+// the sidecar (JSON-RPC `dialog:resolve` / `dialog:cancel`) which completes
+// the pending invocation future held by the invoker.
+
+module slayzone.dialog.mojom;
+
+interface DialogHost {
+  // Forward the user's confirmation/result for the current invocation.
+  // `result_json` is opaque to C++; invoker + component agree on shape.
+  Resolve(string invocation_id, string result_json) => ();
+
+  // Forward cancellation (ESC, backdrop click, explicit Cancel button).
+  Cancel(string invocation_id) => ();
+};
+
+// cap-shell-dialog — native OS file/folder picker. Separate from the in-app
+// DialogHost above (which fronts React-rendered modals); this one fronts
+// `ui::SelectFileDialog`. Renderer calls `window.api.dialog.showOpenDialog`
+// in the window-api-shim; that fans out to `NativeDialogHost.ShowOpenDialog`
+// on the browser side. cap-shell-dialog ships only open (+ SELECT_FOLDER);
+// save + message dialogs stay STUB until cap-shell-6 proper.
+struct ShowOpenDialogOptions {
+  array<string> properties;
+  string default_path;
+  string title;
+};
+
+struct ShowOpenDialogResult {
+  bool canceled;
+  array<string> file_paths;
+};
+
+interface NativeDialogHost {
+  ShowOpenDialog(ShowOpenDialogOptions options)
+      => (ShowOpenDialogResult result);
+};

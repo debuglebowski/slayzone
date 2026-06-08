@@ -1,0 +1,39 @@
+// cap-06 tags domain data contract.
+//
+// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory).
+// In-tree mirror at chrome/browser/slayzone/mojom/tags.mojom compiles to C++;
+// Phase 4.3 regenerates TS bindings from this outer file. The two must stay
+// diff-identical below the module line.
+//
+// TagsHost is bound on SlayzoneSidebarUI + SlayzoneTasklistUI (per cap-02
+// deferral plan — no new chrome:// host). Browser-side forwards each method
+// to the sidecar `tags:*` handlers.
+
+module slayzone.tags.mojom;
+
+struct Tag {
+  string id;
+  string name;
+  string color;
+};
+
+struct TagWriteResult {
+  bool ok;
+  string error;
+  Tag tag;
+};
+
+struct TagAttachResult {
+  bool ok;
+  string error;
+};
+
+interface TagsHost {
+  GetTags() => (array<Tag> tags);
+  GetTagsForTask(string task_id) => (array<Tag> tags);
+  CreateTag(string name, string color) => (TagWriteResult result);
+  UpdateTag(string id, string name, string color) => (TagWriteResult result);
+  DeleteTag(string id) => (TagWriteResult result);
+  AttachTag(string task_id, string tag_id) => (TagAttachResult result);
+  DetachTag(string task_id, string tag_id) => (TagAttachResult result);
+};

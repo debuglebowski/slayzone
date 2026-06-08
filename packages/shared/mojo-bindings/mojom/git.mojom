@@ -1,0 +1,63 @@
+// Phase 8.4 git region data contract.
+//
+// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory)
+// as a coordinated exception, following the 5.6 / 6.1 / 7.x / 8.1-3
+// pattern. In-tree mirror at chrome/browser/slayzone/mojom/git.mojom
+// compiles to C++; Phase 4.3 regenerates TS bindings from this outer file.
+// Keep diff-identical below the module line.
+//
+// The git region is the home-tab panel wrapping worktree / branch / stash
+// tabs (the UnifiedGitPanel). Scope simplification for 8.4: render all
+// three tabs read-only with lists — create/delete/checkout/diff actions
+// render disabled until Phase 8.5 (lifecycle RPCs) / Phase 10 (dialogs).
+// Full diff viewer is Phase 17 polish.
+
+module slayzone.git.mojom;
+
+// One detected worktree — Electron's `UnifiedGitPanel > WorktreesTab`.
+struct GitWorktree {
+  string id;
+  string path;
+  string branch;
+  bool is_current;
+  int32 ahead;
+  int32 behind;
+  int32 dirty_file_count;
+};
+
+// One local branch — `BranchesTab`.
+struct GitBranch {
+  string name;
+  bool is_current;
+  string upstream;
+  int32 ahead;
+  int32 behind;
+  string last_commit_at;  // empty when unknown
+};
+
+// One stash entry — `StashTab`.
+struct GitStash {
+  string id;
+  string message;
+  string created_at;
+  int32 file_count;
+};
+
+// Full panel state. `active_tab` is "worktrees" | "branches" | "stash".
+// `repo_path` is the active project's repository root (empty when the
+// active project isn't a git repo).
+struct GitSnapshot {
+  string active_project_id;
+  string repo_path;
+  string active_tab;
+  array<GitWorktree> worktrees;
+  array<GitBranch> branches;
+  array<GitStash> stashes;
+};
+
+// Browser-side git data provider. 8.4 is read-only; mutations are Phase
+// 8.5 (checkout / create-worktree / drop-stash) and Phase 10 (create
+// dialogs).
+interface GitHost {
+  GetSnapshot() => (GitSnapshot snapshot);
+};

@@ -1,0 +1,284 @@
+From 0256e540f41c6252798815c88dc70e80acc95622 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sun, 19 Apr 2026 22:55:46 +0200
+Subject: [slayzone] =?UTF-8?q?slayzone:=20Phase=208.5=20home-mode=20swap?=
+ =?UTF-8?q?=20=E2=80=94=20ShowHomePanel=20+=20home=5Fpanel=5Fwebview=5F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Wires up the Mojo-driven home-tab swap that makes the Phase 8.1-8.4 port
+panels actually reachable in the UI with sidecar data flowing.
+
+layout.mojom:
+- New ShowHomePanel(string panel_id) => (bool ok). Empty id returns to
+  task-detail mode; unknown ids return ok=false (UI stays put).
+
+SlayzoneBrowserView:
+- New Mode enum {kTaskDetail, kHome}; mode_ defaults to kTaskDetail.
+- kHomePanelIds allowlist: {automations, processes, test, git}. Typos
+  reject at the host instead of silently loading a bogus chrome://.
+- home_panel_webview_: lazy-created on first SetHomePanel(known_id);
+  parented as BrowserView child overlaying the region grid. Bounds
+  track GetLocalBounds() on resize.
+- SetHomePanel(panel_id):
+  * empty → hide home WebView, show region grid, mode_=kTaskDetail
+  * known → LoadInitialURL(chrome://slayzone-<id>/), install RegionData
+    on the home WebContents (so SlayzoneAutomationsUI etc. can resolve
+    via FromRegionWebContents and bind the per-BrowserView Mojo host —
+    this is the fix for the 'pipe closed' smoke failure), hide region
+    grid, show home WebView, mode_=kHome
+  * unknown → return false, no state change
+- AddedToWidget parses --slayzone-home-panel=<id> for dev smoke.
+
+SlayzoneLayoutHost::ShowHomePanel:
+- Delegates to view_->SetHomePanel(panel_id), forwards the bool to the
+  Mojo response. Callers (future panel-cycle UI in Phase 17) can render
+  an inline error when ok=false.
+
+Scope fences held — task-detail routing in SlayzoneRegionContainer
+unchanged; per-region hosts + inline_tab_webview_ untouched. Additive
+only.
+
+Deliberate single-panel swap per approved plan Q2 deviation (multi-
+visible side-by-side deferred to Phase 17 polish).
+---
+ chrome/browser/slayzone/mojom/layout.mojom    |  1 +
+ .../browser/slayzone/slayzone_layout_host.cc  | 12 +++
+ .../browser/slayzone/slayzone_layout_host.h   |  2 +
+ .../ui/views/frame/slayzone_browser_view.cc   | 75 +++++++++++++++++++
+ .../ui/views/frame/slayzone_browser_view.h    | 39 ++++++++++
+ 5 files changed, 129 insertions(+)
+
+diff --git a/chrome/browser/slayzone/mojom/layout.mojom b/chrome/browser/slayzone/mojom/layout.mojom
+index d41888c365ca5..6396a5a09d394 100644
+--- a/chrome/browser/slayzone/mojom/layout.mojom
++++ b/chrome/browser/slayzone/mojom/layout.mojom
+@@ -15,4 +15,5 @@ interface LayoutHost {
+   SetRegionVisible(string region_id, bool visible);
+   SetRegionSize(string region_id, uint32 px, RegionAxis axis) => ();
+   FocusRegion(string region_id) => (bool ok);
++  ShowHomePanel(string panel_id) => (bool ok);
+ };
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.cc b/chrome/browser/slayzone/slayzone_layout_host.cc
+index 1c8fc64c96512..5e9c5ecc7f55a 100644
+--- a/chrome/browser/slayzone/slayzone_layout_host.cc
++++ b/chrome/browser/slayzone/slayzone_layout_host.cc
+@@ -58,3 +58,15 @@ void SlayzoneLayoutHost::FocusRegion(const std::string& region_id,
+     std::move(callback).Run(false);
+   }
+ }
++
++void SlayzoneLayoutHost::ShowHomePanel(const std::string& panel_id,
++                                       ShowHomePanelCallback callback) {
++  // Empty panel_id = back to task-detail mode; allowed ids live on
++  // SlayzoneBrowserView::kHomePanelIds. Returning false here leaves the UI
++  // in its current mode so the caller can render an inline error.
++  if (!view_) {
++    std::move(callback).Run(false);
++    return;
++  }
++  std::move(callback).Run(view_->SetHomePanel(panel_id));
++}
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.h b/chrome/browser/slayzone/slayzone_layout_host.h
+index 238d0ec821eeb..72b23990730a4 100644
+--- a/chrome/browser/slayzone/slayzone_layout_host.h
++++ b/chrome/browser/slayzone/slayzone_layout_host.h
+@@ -39,6 +39,8 @@ class SlayzoneLayoutHost : public slayzone::layout::mojom::LayoutHost {
+                      SetRegionSizeCallback callback) override;
+   void FocusRegion(const std::string& region_id,
+                    FocusRegionCallback callback) override;
++  void ShowHomePanel(const std::string& panel_id,
++                     ShowHomePanelCallback callback) override;
+ 
+  private:
+   const raw_ptr<SlayzoneBrowserView> view_;
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 9274f3b38d4cc..73b370766c722 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -4,9 +4,13 @@
+ 
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ 
++#include <algorithm>
+ #include <memory>
+ #include <string>
++#include <string_view>
+ 
++#include "base/command_line.h"
++#include "base/strings/strcat.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_automations_host.h"
+ #include "chrome/browser/slayzone/slayzone_git_host.h"
+@@ -29,10 +33,15 @@
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/events/event_constants.h"
+ #include "ui/events/keycodes/keyboard_codes.h"
++#include "url/gurl.h"
+ #include "ui/views/controls/webview/webview.h"
+ 
+ namespace {
+ 
++// Phase 8.5 — command-line switch for dev smoke. When present,
++// AddedToWidget calls SetHomePanel(value) once the region grid is up.
++constexpr char kSlayzoneHomePanelSwitch[] = "slayzone-home-panel";
++
+ // Back-pointer attached to every region WebView's WebContents so Phase 6.3's
+ // Mojo binders can route TabsHost receivers to the owning SlayzoneBrowserView
+ // from just the WebContents.
+@@ -115,6 +124,69 @@ void SlayzoneBrowserView::AddedToWidget() {
+   // paint since the first tab typically exists by AddedToWidget; subsequent
+   // activations (and any late initial tab) flow through the override.
+   SyncInlineTabWebView();
++
++  // Phase 8.5 — honor `--slayzone-home-panel=<id>` for dev smoke. Invalid
++  // ids are silently ignored; the grid stays up. Used by the verify
++  // harness + docs/chromium/phase-8-smoke.md.
++  const base::CommandLine* cli = base::CommandLine::ForCurrentProcess();
++  if (cli->HasSwitch(kSlayzoneHomePanelSwitch)) {
++    SetHomePanel(cli->GetSwitchValueASCII(kSlayzoneHomePanelSwitch));
++  }
++}
++
++bool SlayzoneBrowserView::SetHomePanel(std::string_view panel_id) {
++  // Empty id = back to task-detail mode.
++  if (panel_id.empty()) {
++    if (home_panel_webview_) {
++      home_panel_webview_->SetVisible(false);
++    }
++    if (region_container_) {
++      region_container_->SetVisible(true);
++    }
++    mode_ = Mode::kTaskDetail;
++    active_home_panel_.clear();
++    return true;
++  }
++
++  // Allowlist — reject unknown ids without changing mode. Explicit list
++  // rather than a "anything goes" policy so a typo doesn't silently yield
++  // a blank region pointing at a bogus chrome:// host.
++  const bool known = std::any_of(
++      kHomePanelIds.begin(), kHomePanelIds.end(),
++      [panel_id](std::string_view known_id) { return known_id == panel_id; });
++  if (!known) {
++    return false;
++  }
++
++  // Lazily create the home WebView. Sized to match the region grid; when
++  // active it covers the grid completely. Owned by the BrowserView view
++  // tree — no separate lifetime management.
++  if (!home_panel_webview_) {
++    auto webview_owned = std::make_unique<views::WebView>(browser()->profile());
++    home_panel_webview_ = AddChildView(std::move(webview_owned));
++    home_panel_webview_->SetBoundsRect(GetLocalBounds());
++    // Phase 8.5 — give the home WebContents a RegionData back-pointer so
++    // the per-BrowserView Mojo binders (SlayzoneAutomationsUI etc.) can
++    // resolve via `FromRegionWebContents` exactly as region WebContents do.
++    // Installed before the first navigation so the BindInterface path
++    // triggered by the initial page load finds the host. Re-installed on
++    // every panel swap below since SetWebContents may cycle contents.
++  }
++
++  const std::string url =
++      base::StrCat({"chrome://slayzone-", panel_id, "/"});
++  home_panel_webview_->LoadInitialURL(GURL(url));
++  if (content::WebContents* contents = home_panel_webview_->GetWebContents()) {
++    RegionData::CreateForWebContents(contents, this);
++  }
++  home_panel_webview_->SetBoundsRect(GetLocalBounds());
++  home_panel_webview_->SetVisible(true);
++  if (region_container_) {
++    region_container_->SetVisible(false);
++  }
++  mode_ = Mode::kHome;
++  active_home_panel_ = std::string(panel_id);
++  return true;
+ }
+ 
+ // static
+@@ -157,6 +229,9 @@ void SlayzoneBrowserView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+   if (region_container_) {
+     region_container_->SetBoundsRect(GetLocalBounds());
+   }
++  if (home_panel_webview_) {
++    home_panel_webview_->SetBoundsRect(GetLocalBounds());
++  }
+ }
+ 
+ void SlayzoneBrowserView::OnTabStripModelChanged(
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index b24412e40947e..4694dbd19f410 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -5,7 +5,10 @@
+ #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+ #define CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+ 
++#include <array>
+ #include <memory>
++#include <string>
++#include <string_view>
+ 
+ #include "base/memory/raw_ptr.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+@@ -13,6 +16,10 @@
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/gfx/geometry/rect.h"
+ 
++namespace views {
++class WebView;
++}  // namespace views
++
+ class Browser;
+ class SlayzoneLayoutHost;
+ class SlayzoneRegionContainer;
+@@ -92,6 +99,28 @@ class SlayzoneBrowserView : public BrowserView {
+     return git_host_.get();
+   }
+ 
++  // Phase 8.5 — home-tab mode. `kTaskDetail` (default) shows the
++  // 10-region grid. `kHome` hides the grid and renders a single home
++  // panel (one of `kHomePanelIds`) full-bleed.
++  enum class Mode {
++    kTaskDetail,
++    kHome,
++  };
++
++  // The panel IDs accepted by `SetHomePanel`. Order is fixed so downstream
++  // UI (e.g. Phase 17 panel rail) can present a stable cycle.
++  static constexpr std::array<std::string_view, 4> kHomePanelIds = {
++      "automations", "processes", "test", "git",
++  };
++
++  Mode mode() const { return mode_; }
++
++  // Phase 8.5 — swap into home mode with the given `panel_id` loaded in the
++  // home WebView. `panel_id` must be in `kHomePanelIds`; empty string
++  // returns to task-detail mode. Returns `true` on successful mode change,
++  // `false` when `panel_id` is unknown (mode unchanged).
++  bool SetHomePanel(std::string_view panel_id);
++
+   // Phase 6.3 — returns the SlayzoneBrowserView that owns `wc` as a region
+   // WebView's WebContents (e.g. chrome://slayzone-tabbar/ or
+   // chrome://slayzone-browserchrome/), or nullptr if `wc` is not a region
+@@ -133,6 +162,16 @@ class SlayzoneBrowserView : public BrowserView {
+   std::unique_ptr<slayzone::SlayzoneProcessesHost> processes_host_;
+   std::unique_ptr<slayzone::SlayzoneTestHost> test_host_;
+   std::unique_ptr<slayzone::SlayzoneGitHost> git_host_;
++
++  // Phase 8.5 — home-tab mode state. `home_panel_webview_` is lazily
++  // created the first time `SetHomePanel()` is called with a known id,
++  // parented as a BrowserView child overlaying the region grid, and
++  // retained for subsequent swaps. When `mode_ == kTaskDetail` the WebView
++  // is hidden (if present) and the region grid is visible; in `kHome` the
++  // inverse.
++  Mode mode_ = Mode::kTaskDetail;
++  raw_ptr<views::WebView> home_panel_webview_ = nullptr;
++  std::string active_home_panel_;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+-- 
+2.52.0
+

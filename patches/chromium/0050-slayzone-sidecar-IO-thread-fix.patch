@@ -1,0 +1,98 @@
+From e0c3a4b3767c7b175500bb6e53c5d21f7635d54d Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 12:40:10 +0200
+Subject: [PATCH] slayzone: sidecar client IO thread fix
+
+Bug #1: blocking recv() starves Call PostTasks on the same IO thread.
+Flip socket to O_NONBLOCK, treat EAGAIN as reschedule-with-delay so
+outgoing RPC writes share the IO thread.
+
+Bug #2: SidecarClient::Call response callback must invoke the Mojo
+responder on the caller's sequence, not the sidecar IO thread.
+Wrap with base::BindPostTaskToCurrentDefault at Call entry.
+
+Together these unblock *:get-snapshot from every region WebUI so
+the fork renders seeded sidecar data instead of empty state.
+---
+ chrome/browser/slayzone/sidecar_client.cc | 33 ++++++++++++++++++++++-
+ 1 file changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/slayzone/sidecar_client.cc b/chrome/browser/slayzone/sidecar_client.cc
+index c1f8be5e051c9..15470e15a295b 100644
+--- a/chrome/browser/slayzone/sidecar_client.cc
++++ b/chrome/browser/slayzone/sidecar_client.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/slayzone/sidecar_client.h"
+ 
+ #include <errno.h>
++#include <fcntl.h>
+ #include <string.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
+@@ -288,6 +289,14 @@ class SidecarClient::IOState {
+       RetryBackoff();
+       return;
+     }
++    // Phase 7+ — the IO thread now services both `Call` PostTasks and the
++    // read loop, so a blocking recv would starve writes. Flip the socket
++    // to non-blocking; ReadLoop treats EAGAIN as "reschedule with a short
++    // delay" so other tasks (outgoing Calls) get their turn.
++    int flags = fcntl(fd, F_GETFL, 0);
++    if (flags != -1) {
++      fcntl(fd, F_SETFL, flags | O_NONBLOCK);
++    }
+     socket_fd_ = fd;
+     backoff_ = kInitialBackoff;
+     LOG(INFO) << kLogTag << " connected fd=" << fd;
+@@ -337,6 +346,15 @@ class SidecarClient::IOState {
+     }
+     char buf[8192];
+     ssize_t n = HANDLE_EINTR(recv(socket_fd_, buf, sizeof(buf), 0));
++    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
++      // Non-blocking socket has nothing right now; re-post with a short
++      // delay so outgoing Call PostTasks on the same thread get a turn.
++      owning_task_runner_->PostDelayedTask(
++          FROM_HERE,
++          base::BindOnce(&IOState::ReadLoop, base::Unretained(this)),
++          base::Milliseconds(10));
++      return;
++    }
+     if (n <= 0) {
+       LOG(INFO) << kLogTag << " disconnected"
+                 << (n == 0 ? " (eof)"
+@@ -412,6 +430,12 @@ class SidecarClient::IOState {
+                                     UNSAFE_TODO(payload.data() + written),
+                                     payload.size() - written, 0));
+       if (n < 0) {
++        if (errno == EAGAIN || errno == EWOULDBLOCK) {
++          // Kernel buffer full — retry after the message pump drains.
++          // Rare for the sidecar protocol (small NDJSON frames); a brief
++          // yield beats a busy loop.
++          continue;
++        }
+         LOG(INFO) << kLogTag << " send failed: " << strerror(errno);
+         OnDisconnected();
+         return;
+@@ -513,11 +537,18 @@ void SidecarClient::Call(std::string_view method,
+     }
+     return;
+   }
++  // Mojo responders (e.g. the Slayzone*Host GetSnapshot callbacks) must
++  // invoke their reply on the sequence that bound the receiver, not on
++  // the sidecar IO thread. Bounce the response back to the caller's
++  // current default runner so Mojo's sequence_checker_ stays happy.
++  ResponseCallback sequenced_callback =
++      callback ? base::BindPostTaskToCurrentDefault(std::move(callback))
++               : ResponseCallback();
+   io_thread_->task_runner()->PostTask(
+       FROM_HERE,
+       base::BindOnce(&IOState::Call, base::Unretained(io_state_.get()),
+                      std::string(method), std::move(params),
+-                     std::move(callback)));
++                     std::move(sequenced_callback)));
+ }
+ 
+ void SidecarClient::RegisterNotificationHandler(std::string_view method,
+-- 
+2.52.0
+

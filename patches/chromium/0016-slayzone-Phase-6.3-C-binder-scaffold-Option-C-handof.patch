@@ -1,0 +1,619 @@
+From 88a949640e9334d664ab98d15cddc2551b2a370c Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sun, 19 Apr 2026 03:14:08 +0200
+Subject: slayzone: Phase 6.3 C++ binder scaffold (Option C handoff to 7.x)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Ships only the C++ side of the URL-bar wiring: chrome://slayzone-browserchrome/
+and chrome://slayzone-tabbar/ WebUIControllers each bind the Phase 6.1
+slayzone::tabs::mojom::TabsHost Mojo interface, forwarding to the owning
+SlayzoneBrowserView's SlayzoneTabsHost. JS URL-bar + tab-strip consumers
+are deferred to Phases 7.8 + 7.2 per orchestrator call — the plan is that
+Phase 6 exit criteria (4 SSO flows, ≥3 extensions, <50ms tab switch) are
+measured end-to-end via CDP + programmatic Mojo drives in 6.4 + 6.5,
+not via user-facing JS yet.
+
+  - chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.{h,cc}
+    new chrome://slayzone-browserchrome/ WebUIController with placeholder
+    HTML body + WEB_UI_CONTROLLER_TYPE_DECL/IMPL. `BindInterface(TabsHost)`
+    looks up the owning SlayzoneBrowserView via a WebContentsUserData
+    back-pointer and forwards the receiver to tabs_host()->Bind().
+
+  - chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.{h,cc}
+    same shape for chrome://slayzone-tabbar/.
+
+  - chrome/common/webui_url_constants.{h,cc}
+    two new host/URL constants; both added to ChromeURLHosts().
+
+  - chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+    registers both configs alongside Shell + Placeholder.
+
+  - chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+    ForWebUI<SlayzoneBrowserchromeUI>().Add<TabsHost>() +
+    ForWebUI<SlayzoneTabbarUI>().Add<TabsHost>() binder entries next to
+    the TabSearchUI binding.
+
+  - chrome/browser/ui/views/frame/slayzone_browser_view.{h,cc}
+    adds `SlayzoneBrowserView::FromRegionWebContents(wc)` static helper
+    backed by a private WebContentsUserData (RegionData in an anonymous
+    namespace) installed for every region WebView's WebContents in
+    AddedToWidget. This is what the WebUIController BindInterface calls
+    consult to route Mojo receivers back to the owning view.
+
+  - chrome/browser/ui/views/frame/slayzone_region_container.cc
+    RegionUrl() routes browserchrome → kChromeUISlayzoneBrowserchromeURL
+    and tabbar → kChromeUISlayzoneTabbarURL; every other slot still points
+    at chrome://slayzone-placeholder/<id>.
+
+  - chrome/browser/ui/BUILD.gn
+    adds the four new .cc/.h files to the ui static_library sources.
+---
+ ...r_interface_binders_webui_parts_desktop.cc | 12 +++
+ chrome/browser/ui/BUILD.gn                    |  4 +
+ .../ui/views/frame/slayzone_browser_view.cc   | 52 +++++++++++
+ .../ui/views/frame/slayzone_browser_view.h    | 11 +++
+ .../views/frame/slayzone_region_container.cc  | 18 +++-
+ .../slayzone/slayzone_browserchrome_ui.cc     | 86 +++++++++++++++++++
+ .../slayzone/slayzone_browserchrome_ui.h      | 49 +++++++++++
+ .../ui/webui/slayzone/slayzone_tabbar_ui.cc   | 78 +++++++++++++++++
+ .../ui/webui/slayzone/slayzone_tabbar_ui.h    | 41 +++++++++
+ .../webui/slayzone/slayzone_webui_registry.cc |  4 +
+ chrome/common/webui_url_constants.cc          |  2 +
+ chrome/common/webui_url_constants.h           |  7 ++
+ 12 files changed, 360 insertions(+), 4 deletions(-)
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h
+
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index 705f0bc66807d..cb1774f96b141 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -86,6 +86,9 @@
+ #include "chrome/browser/ui/webui/suggest_internals/suggest_internals.mojom.h"
+ #include "chrome/browser/ui/webui/suggest_internals/suggest_internals_ui.h"
+ #include "chrome/browser/ui/webui/tab_search/tab_search.mojom.h"
++#include "chrome/browser/slayzone/mojom/tabs.mojom.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
+ #include "chrome/browser/ui/webui/tab_search/tab_search_ui.h"
+ #include "chrome/browser/ui/webui/user_education_internals/user_education_internals.mojom.h"
+ #include "chrome/browser/ui/webui/user_education_internals/user_education_internals_ui.h"
+@@ -655,6 +658,15 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+ 
+   registry.ForWebUI<TabSearchUI>().Add<tab_search::mojom::PageHandlerFactory>();
+ 
++  // Phase 6.3 — chrome://slayzone-browserchrome/ and chrome://slayzone-tabbar/
++  // bind to the per-SlayzoneBrowserView SlayzoneTabsHost. Owning view is
++  // looked up via a WebContentsUserData back-pointer installed by
++  // `SlayzoneBrowserView::AddedToWidget`. JS consumer lands in Phase 7.x.
++  registry.ForWebUI<SlayzoneBrowserchromeUI>()
++      .Add<slayzone::tabs::mojom::TabsHost>();
++  registry.ForWebUI<SlayzoneTabbarUI>()
++      .Add<slayzone::tabs::mojom::TabsHost>();
++
+   if (base::FeatureList::IsEnabled(ntp_features::kNtpFooter)) {
+     registry.ForWebUI<NewTabFooterUI>()
+         .Add<customize_buttons::mojom::CustomizeButtonsHandlerFactory>()
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index db5aa79cf2332..137b0a884dad1 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -188,6 +188,10 @@ static_library("ui") {
+     "webui/segmentation_internals/segmentation_internals_ui.h",
+     "webui/signin_internals_ui.cc",
+     "webui/signin_internals_ui.h",
++    "webui/slayzone/slayzone_browserchrome_ui.cc",
++    "webui/slayzone/slayzone_browserchrome_ui.h",
++    "webui/slayzone/slayzone_tabbar_ui.cc",
++    "webui/slayzone/slayzone_tabbar_ui.h",
+     "webui/slayzone/slayzone_webui_registry.cc",
+     "webui/slayzone/slayzone_webui_registry.h",
+     "webui/sync_internals/chrome_sync_internals_message_handler.cc",
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 36002e416674c..f3421c09ef20f 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -14,12 +14,40 @@
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/frame/slayzone_region_container.h"
+ #include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_user_data.h"
+ #include "ui/base/accelerators/accelerator.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/events/event_constants.h"
+ #include "ui/events/keycodes/keyboard_codes.h"
+ #include "ui/views/controls/webview/webview.h"
+ 
++namespace {
++
++// Back-pointer attached to every region WebView's WebContents so Phase 6.3's
++// Mojo binders can route TabsHost receivers to the owning SlayzoneBrowserView
++// from just the WebContents.
++class RegionData : public content::WebContentsUserData<RegionData> {
++ public:
++  RegionData(const RegionData&) = delete;
++  RegionData& operator=(const RegionData&) = delete;
++  ~RegionData() override = default;
++
++  SlayzoneBrowserView* view() const { return view_; }
++
++ private:
++  friend content::WebContentsUserData<RegionData>;
++  RegionData(content::WebContents* contents, SlayzoneBrowserView* view)
++      : content::WebContentsUserData<RegionData>(*contents), view_(view) {}
++
++  const raw_ptr<SlayzoneBrowserView> view_;
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(RegionData);
++
++}  // namespace
++
+ SlayzoneBrowserView::SlayzoneBrowserView(Browser* browser)
+     : BrowserView(browser),
+       layout_host_(std::make_unique<SlayzoneLayoutHost>(this)),
+@@ -42,6 +70,23 @@ void SlayzoneBrowserView::AddedToWidget() {
+ 
+   RegisterRegionFocusAccelerators();
+ 
++  // Phase 6.3 — install a back-pointer on every region WebView's WebContents
++  // so `SlayzoneBrowserView::FromRegionWebContents` can route Mojo binder
++  // calls (e.g. TabsHost receivers from chrome://slayzone-browserchrome/)
++  // back to `this`. Covers every named region — cheap + uniform, costs one
++  // pointer per region WebContents.
++  for (std::string_view id : SlayzoneRegionContainer::kRegionIds) {
++    views::WebView* wv = region_container_->GetRegion(id);
++    if (!wv) {
++      continue;
++    }
++    content::WebContents* contents = wv->GetWebContents();
++    if (!contents) {
++      continue;
++    }
++    RegionData::CreateForWebContents(contents, this);
++  }
++
+   // Phase 6.2 — BrowserView is already a TabStripModelObserver and already
+   // registered against the strip; we just override OnTabStripModelChanged
+   // below and chain to the base. Sync once synchronously for the initial
+@@ -50,6 +95,13 @@ void SlayzoneBrowserView::AddedToWidget() {
+   SyncInlineTabWebView();
+ }
+ 
++// static
++SlayzoneBrowserView* SlayzoneBrowserView::FromRegionWebContents(
++    content::WebContents* wc) {
++  RegionData* data = wc ? RegionData::FromWebContents(wc) : nullptr;
++  return data ? data->view() : nullptr;
++}
++
+ void SlayzoneBrowserView::RegisterRegionFocusAccelerators() {
+   // Cmd+1 … Cmd+9 focus region slots 0..8 from `kRegionIds` order.
+   // Cmd+0 is left alone — upstream binds it to "reset zoom".
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 7602e1478b71c..9786a7731354d 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -18,6 +18,10 @@ class SlayzoneLayoutHost;
+ class SlayzoneRegionContainer;
+ class SlayzoneTabsHost;
+ 
++namespace content {
++class WebContents;
++}
++
+ // Phase 5 native layout shell. Hosts the SlayZone region grid in place of the
+ // upstream tabbed browser chrome. Gated on `slayzone::kSlayzoneLayoutShell`
+ // via `browser_window_factory.cc`.
+@@ -45,6 +49,13 @@ class SlayzoneBrowserView : public BrowserView {
+   SlayzoneLayoutHost* layout_host() { return layout_host_.get(); }
+   SlayzoneTabsHost* tabs_host() { return tabs_host_.get(); }
+ 
++  // Phase 6.3 — returns the SlayzoneBrowserView that owns `wc` as a region
++  // WebView's WebContents (e.g. chrome://slayzone-tabbar/ or
++  // chrome://slayzone-browserchrome/), or nullptr if `wc` is not a region
++  // WebContents of any SlayzoneBrowserView. Used by the Mojo binder wiring
++  // for per-region TabsHost connections.
++  static SlayzoneBrowserView* FromRegionWebContents(content::WebContents* wc);
++
+   // views::View:
+   void AddedToWidget() override;
+   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.cc b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+index 8360dc3cd0998..37e5d3c629f5f 100644
+--- a/chrome/browser/ui/views/frame/slayzone_region_container.cc
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+@@ -23,7 +23,17 @@
+ 
+ namespace {
+ 
+-GURL PlaceholderUrl(std::string_view region_id) {
++// Returns the URL that a region WebView should load. Phase 6.3 swaps
++// browserchrome + tabbar off the shared placeholder onto their own hosts
++// so they can bind the Phase 6.1 TabsHost Mojo interface; everything else
++// stays on the placeholder until Phase 7.
++GURL RegionUrl(std::string_view region_id) {
++  if (region_id == "browserchrome") {
++    return GURL(chrome::kChromeUISlayzoneBrowserchromeURL);
++  }
++  if (region_id == "tabbar") {
++    return GURL(chrome::kChromeUISlayzoneTabbarURL);
++  }
+   return GURL(
+       base::StrCat({chrome::kChromeUISlayzonePlaceholderURL, region_id}));
+ }
+@@ -39,7 +49,7 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
+                               std::string_view id, int fixed_axis_px,
+                               int flex_weight) -> views::WebView* {
+     auto webview = std::make_unique<views::WebView>(browser_context);
+-    webview->LoadInitialURL(PlaceholderUrl(id));
++    webview->LoadInitialURL(RegionUrl(id));
+     if (fixed_axis_px > 0) {
+       webview->SetPreferredSize(gfx::Size(fixed_axis_px, fixed_axis_px));
+     }
+@@ -82,7 +92,7 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
+   // mid: SlayzoneSplitView — tasklist ⇆ (browserchrome URL strip over
+   // inline tab WebView). Phase 5.4 divider + Phase 6.2 inline tab slot.
+   auto tasklist_wv = std::make_unique<views::WebView>(browser_context);
+-  tasklist_wv->LoadInitialURL(PlaceholderUrl("tasklist"));
++  tasklist_wv->LoadInitialURL(RegionUrl("tasklist"));
+   views::WebView* tasklist_raw = tasklist_wv.get();
+   regions_.emplace("tasklist", tasklist_raw);
+ 
+@@ -94,7 +104,7 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
+       views::BoxLayout::CrossAxisAlignment::kStretch);
+ 
+   auto browserchrome_wv = std::make_unique<views::WebView>(browser_context);
+-  browserchrome_wv->LoadInitialURL(PlaceholderUrl("browserchrome"));
++  browserchrome_wv->LoadInitialURL(RegionUrl("browserchrome"));
+   browserchrome_wv->SetPreferredSize(gfx::Size(/*unused*/ 0, 40));
+   views::WebView* browserchrome_raw = browserchrome_wv.get();
+   regions_.emplace("browserchrome", browserchrome_raw);
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.cc
+new file mode 100644
+index 0000000000000..f7bc97e7bad9b
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.cc
+@@ -0,0 +1,86 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
++
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/memory/ref_counted_memory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_tabs_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++// Phase 6.3 body is intentionally trivial — JS URL bar lands in 7.8.
++// The Mojo binder is reachable regardless so Phase 6 verification can
++// drive TabsHost via CDP / programmatic paths.
++constexpr std::string_view kBrowserchromeHtml = R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · browserchrome</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 12px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 8px;
++      background: color-mix(in oklab, Canvas, CanvasText 4%);
++      color: CanvasText;
++      outline: 1px solid color-mix(in oklab, Canvas, CanvasText 12%);
++      outline-offset: -1px;
++    }
++    .tag { opacity: 0.55; font-size: 11px; }
++  </style>
++</head>
++<body>
++  <span class="tag">browserchrome · Mojo TabsHost bound · UI lands in 7.8</span>
++</body>
++</html>)HTML";
++
++bool ShouldHandleEmptyPath(const std::string& path) {
++  return path.empty();
++}
++
++void HandleRequest(const std::string& path,
++                   content::WebUIDataSource::GotDataCallback callback) {
++  std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
++      std::string(kBrowserchromeHtml)));
++}
++
++}  // namespace
++
++SlayzoneBrowserchromeUI::SlayzoneBrowserchromeUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui),
++      chrome::kChromeUISlayzoneBrowserchromeHost);
++  source->SetRequestFilter(base::BindRepeating(&ShouldHandleEmptyPath),
++                           base::BindRepeating(&HandleRequest));
++}
++
++SlayzoneBrowserchromeUI::~SlayzoneBrowserchromeUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneBrowserchromeUI)
++
++void SlayzoneBrowserchromeUI::BindInterface(
++    mojo::PendingReceiver<slayzone::tabs::mojom::TabsHost> receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->tabs_host()) {
++    // No owning view found — let the receiver close with a disconnect. This
++    // happens if the browserchrome region is hosted outside a
++    // SlayzoneBrowserView (e.g. direct `chrome://slayzone-browserchrome/`
++    // navigation in a regular tab). Callers retry or surface a UI error.
++    return;
++  }
++  view->tabs_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h
+new file mode 100644
+index 0000000000000..c3030c0f1c164
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h
+@@ -0,0 +1,49 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_BROWSERCHROME_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_BROWSERCHROME_UI_H_
++
++#include "chrome/browser/slayzone/mojom/tabs.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++// Phase 6.3 — chrome://slayzone-browserchrome/ WebUI controller.
++//
++// Scope (Option C handoff): ships the C++ side only — host + WebUIConfig +
++// `BindInterface(TabsHost)` that forwards to the owning
++// `SlayzoneBrowserView`'s `SlayzoneTabsHost`. The bundled TS/JS URL bar UI
++// that consumes the binding lands in Phase 7.8 alongside the rest of the
++// surface migration. Until then the served HTML is a trivial placeholder
++// and the Mojo interface is reachable for programmatic / CDP-driven
++// Phase 6 verification (extensions, SSO, tab-switch perf).
++class SlayzoneBrowserchromeUI : public content::WebUIController {
++ public:
++  explicit SlayzoneBrowserchromeUI(content::WebUI* web_ui);
++  SlayzoneBrowserchromeUI(const SlayzoneBrowserchromeUI&) = delete;
++  SlayzoneBrowserchromeUI& operator=(const SlayzoneBrowserchromeUI&) = delete;
++  ~SlayzoneBrowserchromeUI() override;
++
++  // Called by the WebUI binder registry when a frame under this host
++  // requests `slayzone::tabs::mojom::TabsHost`. Forwards the receiver to
++  // the owning `SlayzoneBrowserView`'s `SlayzoneTabsHost`.
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::tabs::mojom::TabsHost> receiver);
++
++ private:
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneBrowserchromeUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneBrowserchromeUI> {
++ public:
++  SlayzoneBrowserchromeUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneBrowserchromeHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_BROWSERCHROME_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
+new file mode 100644
+index 0000000000000..ddb80dbe3a3e4
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
+@@ -0,0 +1,78 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
++
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/memory/ref_counted_memory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_tabs_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kTabbarHtml = R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · tabbar</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 12px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 8px;
++      background: color-mix(in oklab, Canvas, CanvasText 4%);
++      color: CanvasText;
++      outline: 1px solid color-mix(in oklab, Canvas, CanvasText 12%);
++      outline-offset: -1px;
++    }
++    .tag { opacity: 0.55; font-size: 11px; }
++  </style>
++</head>
++<body>
++  <span class="tag">tabbar · Mojo TabsHost bound · UI lands in 7.2</span>
++</body>
++</html>)HTML";
++
++bool ShouldHandleEmptyPath(const std::string& path) {
++  return path.empty();
++}
++
++void HandleRequest(const std::string& path,
++                   content::WebUIDataSource::GotDataCallback callback) {
++  std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
++      std::string(kTabbarHtml)));
++}
++
++}  // namespace
++
++SlayzoneTabbarUI::SlayzoneTabbarUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneTabbarHost);
++  source->SetRequestFilter(base::BindRepeating(&ShouldHandleEmptyPath),
++                           base::BindRepeating(&HandleRequest));
++}
++
++SlayzoneTabbarUI::~SlayzoneTabbarUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneTabbarUI)
++
++void SlayzoneTabbarUI::BindInterface(
++    mojo::PendingReceiver<slayzone::tabs::mojom::TabsHost> receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->tabs_host()) {
++    return;
++  }
++  view->tabs_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h
+new file mode 100644
+index 0000000000000..5cafd17885427
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h
+@@ -0,0 +1,41 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TABBAR_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TABBAR_UI_H_
++
++#include "chrome/browser/slayzone/mojom/tabs.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++// Phase 6.3 — chrome://slayzone-tabbar/ WebUI controller.
++//
++// Same Option C handoff as `SlayzoneBrowserchromeUI`: C++ binder only; the
++// bundled tab-strip UI ships in Phase 7.2.
++class SlayzoneTabbarUI : public content::WebUIController {
++ public:
++  explicit SlayzoneTabbarUI(content::WebUI* web_ui);
++  SlayzoneTabbarUI(const SlayzoneTabbarUI&) = delete;
++  SlayzoneTabbarUI& operator=(const SlayzoneTabbarUI&) = delete;
++  ~SlayzoneTabbarUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::tabs::mojom::TabsHost> receiver);
++
++ private:
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneTabbarUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneTabbarUI> {
++ public:
++  SlayzoneTabbarUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneTabbarHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TABBAR_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+index 043cb45f2d5ca..89ea15f34080d 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -12,6 +12,8 @@
+ #include "base/memory/ref_counted_memory.h"
+ #include "base/strings/strcat.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui.h"
+ #include "content/public/browser/web_ui_controller.h"
+@@ -151,6 +153,8 @@ class PlaceholderUIConfig : public content::DefaultWebUIConfig<PlaceholderUI> {
+ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+   map.AddWebUIConfig(std::make_unique<ShellUIConfig>());
+   map.AddWebUIConfig(std::make_unique<PlaceholderUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneBrowserchromeUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneTabbarUIConfig>());
+ }
+ 
+ }  // namespace slayzone
+diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
+index 52f8066a61588..c9098c729a8df 100644
+--- a/chrome/common/webui_url_constants.cc
++++ b/chrome/common/webui_url_constants.cc
+@@ -174,8 +174,10 @@ base::span<const base::cstring_view> ChromeURLHosts() {
+       kChromeUISignInInternalsHost,
+       kChromeUISiteEngagementHost,
+       kChromeUISkillsHost,
++      kChromeUISlayzoneBrowserchromeHost,
+       kChromeUISlayzonePlaceholderHost,
+       kChromeUISlayzoneShellHost,
++      kChromeUISlayzoneTabbarHost,
+ #if !BUILDFLAG(IS_ANDROID)
+       kChromeUISuggestInternalsHost,
+ #endif
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+index 672c95084071f..48864ecf8d0cf 100644
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -174,12 +174,19 @@ inline constexpr char kChromeUIGlicSelectionOverlayURL[] =
+ inline constexpr char kChromeUIHangUIHost[] = "uithreadhang";
+ inline constexpr char kChromeUIHelpHost[] = "help";
+ inline constexpr char kChromeUIHelpURL[] = "chrome://help/";
++inline constexpr char kChromeUISlayzoneBrowserchromeHost[] =
++    "slayzone-browserchrome";
++inline constexpr char kChromeUISlayzoneBrowserchromeURL[] =
++    "chrome://slayzone-browserchrome/";
+ inline constexpr char kChromeUISlayzonePlaceholderHost[] =
+     "slayzone-placeholder";
+ inline constexpr char kChromeUISlayzonePlaceholderURL[] =
+     "chrome://slayzone-placeholder/";
+ inline constexpr char kChromeUISlayzoneShellHost[] = "slayzone-shell";
+ inline constexpr char kChromeUISlayzoneShellURL[] = "chrome://slayzone-shell/";
++inline constexpr char kChromeUISlayzoneTabbarHost[] = "slayzone-tabbar";
++inline constexpr char kChromeUISlayzoneTabbarURL[] =
++    "chrome://slayzone-tabbar/";
+ inline constexpr char kChromeUIHistoryHost[] = "history";
+ inline constexpr char kChromeUIHistorySyncedTabs[] = "/syncedTabs";
+ inline constexpr char kChromeUIHistoryURL[] = "chrome://history/";
+-- 
+2.52.0
+

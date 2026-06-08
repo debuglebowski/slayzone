@@ -1,0 +1,25 @@
+// Phase 9.1 leaderboard overlay data contract (source of truth).
+// In-tree mirror: chromium/src/chrome/browser/slayzone/mojom/leaderboard.mojom.
+// Keep diff-identical below the module line.
+
+module slayzone.leaderboard.mojom;
+
+struct LeaderboardRow {
+  string id;
+  string name;
+  int32 rank;
+  int32 score;
+  int32 streak_days;
+  string avatar_url;
+  string tier;
+};
+
+struct LeaderboardSnapshot {
+  array<LeaderboardRow> rows;
+  int32 total;
+  string current_user_id;
+};
+
+interface LeaderboardHost {
+  GetSnapshot() => (LeaderboardSnapshot snapshot);
+};

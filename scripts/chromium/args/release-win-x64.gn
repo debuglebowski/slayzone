@@ -1,0 +1,14 @@
+# Stage B draft — windows x64 release args.
+
+is_debug = false
+is_component_build = false
+symbol_level = 1
+dcheck_always_on = false
+
+is_chrome_branded = false
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"
+use_official_google_api_keys = false
+
+target_os = "win"
+target_cpu = "x64"

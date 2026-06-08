@@ -1,0 +1,73 @@
+From f4c047aa800e91e1eff158796b1316c59cbc1e90 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 07:07:15 +0200
+Subject: [slayzone] =?UTF-8?q?slayzone:=20Phase=208.5=20followup=20?=
+ =?UTF-8?q?=E2=80=94=20RegionData=20install=20before=20LoadInitialURL?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Post-smoke: home-panel WebView's RegionData was attached AFTER
+LoadInitialURL, but BindInterface can fire on navigation commit
+(SlayzoneAutomationsUI::BindInterface calls FromRegionWebContents →
+nullptr → binder bails → getSnapshot promise hangs forever).
+
+Fix: attach RegionData immediately after creating the WebView, using
+views::WebView::GetWebContents() which lazy-creates contents when
+none exist (webview.h:97-99). Also re-check post-navigation as
+defense in depth.
+
+Validated via CDP probe: BindInterface now resolves view + host
+non-null; Mojo pipe binds; automations snapshot round-trips via
+sidecar. No functional changes outside SetHomePanel.
+---
+ .../ui/views/frame/slayzone_browser_view.cc   | 27 ++++++++++++++-----
+ 1 file changed, 20 insertions(+), 7 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 73b370766c722..3768e7607f0e9 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -165,19 +165,32 @@ bool SlayzoneBrowserView::SetHomePanel(std::string_view panel_id) {
+     auto webview_owned = std::make_unique<views::WebView>(browser()->profile());
+     home_panel_webview_ = AddChildView(std::move(webview_owned));
+     home_panel_webview_->SetBoundsRect(GetLocalBounds());
+-    // Phase 8.5 — give the home WebContents a RegionData back-pointer so
+-    // the per-BrowserView Mojo binders (SlayzoneAutomationsUI etc.) can
+-    // resolve via `FromRegionWebContents` exactly as region WebContents do.
+-    // Installed before the first navigation so the BindInterface path
+-    // triggered by the initial page load finds the host. Re-installed on
+-    // every panel swap below since SetWebContents may cycle contents.
++  }
++
++  // Phase 8.5 — install RegionData BEFORE navigation. LoadInitialURL
++  // triggers the WebUI BindInterface path which looks up
++  // FromRegionWebContents; if RegionData isn't on the contents by then
++  // the binder bails and the panel's Mojo host never gets a receiver
++  // (symptom: sidecar sees no `<panel>:get-snapshot` traffic, the React
++  // empty-state sticks). `GetWebContents()` on views::WebView lazy-
++  // creates contents, so the ptr is valid after this call.
++  if (content::WebContents* contents = home_panel_webview_->GetWebContents()) {
++    if (!RegionData::FromWebContents(contents)) {
++      RegionData::CreateForWebContents(contents, this);
++    }
+   }
+ 
+   const std::string url =
+       base::StrCat({"chrome://slayzone-", panel_id, "/"});
+   home_panel_webview_->LoadInitialURL(GURL(url));
++  // Re-check RegionData post-navigation in case WebView cycled the
++  // contents pointer during LoadInitialURL (first-load creates contents;
++  // GetWebContents() pre-navigation already triggered creation so this
++  // is mostly defensive).
+   if (content::WebContents* contents = home_panel_webview_->GetWebContents()) {
+-    RegionData::CreateForWebContents(contents, this);
++    if (!RegionData::FromWebContents(contents)) {
++      RegionData::CreateForWebContents(contents, this);
++    }
+   }
+   home_panel_webview_->SetBoundsRect(GetLocalBounds());
+   home_panel_webview_->SetVisible(true);
+-- 
+2.52.0
+

@@ -1,0 +1,21 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
+  "include": [
+    "src/**/*",
+    "src/**/*.tsx",
+    "../../renderer-app/src/env.d.ts",
+    "../../shared/mojo-bindings/src/runtime/bindings-shim.ts"
+  ],
+  "compilerOptions": {
+    "composite": false,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": ["../../renderer-app/src/*"],
+      "convex/_generated/*": ["../../../convex/_generated/*"],
+      "//resources/mojo/mojo/public/js/bindings.js": [
+        "../../shared/mojo-bindings/src/runtime/bindings-shim.ts"
+      ]
+    }
+  }
+}
+

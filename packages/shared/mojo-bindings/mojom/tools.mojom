@@ -1,0 +1,40 @@
+// Phase 7.9 tools region data contract.
+//
+// Scope note: this .mojom lives in packages/shared/mojo-bindings/ (Phase 4.3
+// territory) as a coordinated exception, following the 5.6 layout.mojom and
+// 6.1 tabs.mojom pattern. The in-tree copy at
+// chrome/browser/slayzone/mojom/tools.mojom is what Chromium's mojom()
+// target compiles to C++; Phase 4.3 regenerates TS bindings from this outer
+// file. The two must stay diff-identical below the module line.
+//
+// The tools region is the right-side tool-toggle rail — agent panel,
+// notifications, usage, etc. Each toggle is a distinct UI surface exposed
+// elsewhere; this region only shows the "on/off" state + hands a toggle
+// request back to the sidecar, which mutates shared state that every other
+// region observes.
+
+module slayzone.tools.mojom;
+
+// One toggle pill. `id` is the stable identifier shared with the sidecar's
+// tool registry (`packages/sidecar/src/handlers/tools.ts`); `label` is the
+// user-facing name; `active` reflects the current on/off state.
+struct ToolToggle {
+  string id;
+  string label;
+  bool active;
+};
+
+// Full toggle list for the rail. Order matches the sidecar's declared
+// display order (stable across snapshots so React reconciliation is cheap).
+struct ToolsSnapshot {
+  array<ToolToggle> tools;
+};
+
+// Browser-side tools data provider. One remote per region WebUI that mounts.
+// `ToggleTool` forwards to the sidecar which flips the state and returns the
+// new snapshot; the JS side polls `GetSnapshot` on its own cadence so cross-
+// region toggles (e.g. another surface turning a tool on) are reflected.
+interface ToolsHost {
+  GetSnapshot() => (ToolsSnapshot snapshot);
+  ToggleTool(string id) => (ToolsSnapshot snapshot);
+};

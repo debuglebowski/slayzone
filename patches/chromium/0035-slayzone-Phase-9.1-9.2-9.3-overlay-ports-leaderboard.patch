@@ -1,0 +1,1321 @@
+From 9941c8d10be8708d99f7174597687a68ba773ad3 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 08:51:13 +0200
+Subject: [slayzone] =?UTF-8?q?slayzone:=20Phase=209.1+9.2+9.3=20overlay=20?=
+ =?UTF-8?q?ports=20=E2=80=94=20leaderboard=20+=20usage=20+=20context?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+First Phase 9 batch, following the Phase 7 R2 / Phase 8 recipe with one
+structural deviation: hosts are owned by the per-WebContents WebUI
+controller (std::unique_ptr<SlayzoneXxxHost> host_ member) rather than by
+SlayzoneBrowserView. Overlays are full-window surfaces with no per-
+BrowserView identity requirement — singleton sidecar calls suffice — and
+this intentionally sidesteps editing SlayzoneBrowserView.{h,cc} while the
+Phase 7 R3 terminal-slot work is in flight. Overlay-routing (ShowOverlay
++ overlay_webview_ member + previous-mode restore) is held for patch
+0038 once P7 R3 signals 7.7 done.
+
+Mojom (chrome/browser/slayzone/mojom/{leaderboard,usage,context}.mojom):
+- LeaderboardHost.GetSnapshot() => (LeaderboardSnapshot)
+- UsageHost.GetSnapshot(range_key, provider_filter) => (UsageSnapshot)
+- ContextHost.GetSnapshot(project_id) => (ContextSnapshot)
+All mirror packages/shared/mojo-bindings/mojom/*.mojom.
+
+Hosts (SlayzoneXxxHost): SidecarClient-forwarded GetSnapshot; base::
+ListValue throughout per patch 0022 hotfix. Empty-snapshot fallback on
+missing/malformed response so the overlay renders its frame even when
+the sidecar stubs aren't wired.
+
+WebUI controllers (SlayzoneXxxUI): slayzone::ConfigureBundleSource with
+per-overlay missing-bundle inline HTML. BindInterface routes to the UI-
+owned host_ (std::unique_ptr).
+
+Wire-up: browser/BUILD.gn + ui/BUILD.gn source entries; desktop binders
+register ForWebUI<SlayzoneXxxUI>().Add<XxxHost>() triplet; webui registry
+adds the 3 configs; ChromeURLHosts + url_constants.h constants.
+
+Scope fences held — no SlayzoneBrowserView edits, no overlay_webview_
+member, no Mode::kOverlay enum extension; all defer to 0038. Dialog-bound
+actions (filter, add, edit) render disabled with a Phase 10 tooltip in JS.
+---
+ chrome/browser/BUILD.gn                       |   6 +
+ ...r_interface_binders_webui_parts_desktop.cc |  19 +++
+ chrome/browser/slayzone/mojom/BUILD.gn        |   3 +
+ chrome/browser/slayzone/mojom/context.mojom   |  46 ++++++
+ .../browser/slayzone/mojom/leaderboard.mojom  |  25 ++++
+ chrome/browser/slayzone/mojom/usage.mojom     |  48 ++++++
+ .../browser/slayzone/slayzone_context_host.cc | 122 +++++++++++++++
+ .../browser/slayzone/slayzone_context_host.h  |  40 +++++
+ .../slayzone/slayzone_leaderboard_host.cc     |  83 +++++++++++
+ .../slayzone/slayzone_leaderboard_host.h      |  42 ++++++
+ .../browser/slayzone/slayzone_usage_host.cc   | 141 ++++++++++++++++++
+ chrome/browser/slayzone/slayzone_usage_host.h |  40 +++++
+ chrome/browser/ui/BUILD.gn                    |   6 +
+ .../ui/webui/slayzone/slayzone_context_ui.cc  |  58 +++++++
+ .../ui/webui/slayzone/slayzone_context_ui.h   |  47 ++++++
+ .../webui/slayzone/slayzone_leaderboard_ui.cc |  60 ++++++++
+ .../webui/slayzone/slayzone_leaderboard_ui.h  |  56 +++++++
+ .../ui/webui/slayzone/slayzone_usage_ui.cc    |  58 +++++++
+ .../ui/webui/slayzone/slayzone_usage_ui.h     |  48 ++++++
+ .../webui/slayzone/slayzone_webui_registry.cc |   6 +
+ chrome/common/webui_url_constants.cc          |   4 +
+ chrome/common/webui_url_constants.h           |  12 ++
+ 22 files changed, 970 insertions(+)
+ create mode 100644 chrome/browser/slayzone/mojom/context.mojom
+ create mode 100644 chrome/browser/slayzone/mojom/leaderboard.mojom
+ create mode 100644 chrome/browser/slayzone/mojom/usage.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_context_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_context_host.h
+ create mode 100644 chrome/browser/slayzone/slayzone_leaderboard_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_leaderboard_host.h
+ create mode 100644 chrome/browser/slayzone/slayzone_usage_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_usage_host.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_context_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_context_ui.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_usage_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index fc12f27e36c3b..cd5efd74e4780 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -984,10 +984,14 @@ static_library("browser") {
+     "slayzone/sidecar_client.h",
+     "slayzone/slayzone_automations_host.cc",
+     "slayzone/slayzone_automations_host.h",
++    "slayzone/slayzone_context_host.cc",
++    "slayzone/slayzone_context_host.h",
+     "slayzone/slayzone_git_host.cc",
+     "slayzone/slayzone_git_host.h",
+     "slayzone/slayzone_layout_host.cc",
+     "slayzone/slayzone_layout_host.h",
++    "slayzone/slayzone_leaderboard_host.cc",
++    "slayzone/slayzone_leaderboard_host.h",
+     "slayzone/slayzone_processes_host.cc",
+     "slayzone/slayzone_processes_host.h",
+     "slayzone/slayzone_projects_host.cc",
+@@ -1006,6 +1010,8 @@ static_library("browser") {
+     "slayzone/slayzone_test_host.h",
+     "slayzone/slayzone_tools_host.cc",
+     "slayzone/slayzone_tools_host.h",
++    "slayzone/slayzone_usage_host.cc",
++    "slayzone/slayzone_usage_host.h",
+     "ssl/chrome_security_blocking_page_factory.cc",
+     "ssl/chrome_security_blocking_page_factory.h",
+     "ssl/chrome_security_state_tab_helper.cc",
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index aafa9d8001b77..9a80a53e098a6 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -87,7 +87,9 @@
+ #include "chrome/browser/ui/webui/suggest_internals/suggest_internals_ui.h"
+ #include "chrome/browser/ui/webui/tab_search/tab_search.mojom.h"
+ #include "chrome/browser/slayzone/mojom/automations.mojom.h"
++#include "chrome/browser/slayzone/mojom/context.mojom.h"
+ #include "chrome/browser/slayzone/mojom/git.mojom.h"
++#include "chrome/browser/slayzone/mojom/leaderboard.mojom.h"
+ #include "chrome/browser/slayzone/mojom/processes.mojom.h"
+ #include "chrome/browser/slayzone/mojom/projects.mojom.h"
+ #include "chrome/browser/slayzone/mojom/sidebar.mojom.h"
+@@ -97,9 +99,12 @@
+ #include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
+ #include "chrome/browser/slayzone/mojom/test.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tools.mojom.h"
++#include "chrome/browser/slayzone/mojom/usage.mojom.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_automations_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_context_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_git_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+@@ -109,6 +114,7 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_test_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h"
+ #include "chrome/browser/ui/webui/tab_search/tab_search_ui.h"
+ #include "chrome/browser/ui/webui/user_education_internals/user_education_internals.mojom.h"
+ #include "chrome/browser/ui/webui/user_education_internals/user_education_internals_ui.h"
+@@ -729,6 +735,19 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // SlayzoneTaskheaderHost for task title + status snapshots.
+   registry.ForWebUI<SlayzoneTaskheaderUI>()
+       .Add<slayzone::taskheader::mojom::TaskheaderHost>();
++  // Phase 9.1 — chrome://slayzone-leaderboard/ binds to a UI-owned
++  // SlayzoneLeaderboardHost (one per WebContents). Overlay surface; no
++  // per-BrowserView identity required.
++  registry.ForWebUI<SlayzoneLeaderboardUI>()
++      .Add<slayzone::leaderboard::mojom::LeaderboardHost>();
++  // Phase 9.2 — chrome://slayzone-usage/ binds to a UI-owned
++  // SlayzoneUsageHost (one per WebContents). Overlay surface.
++  registry.ForWebUI<SlayzoneUsageUI>()
++      .Add<slayzone::usage::mojom::UsageHost>();
++  // Phase 9.3 — chrome://slayzone-context/ binds to a UI-owned
++  // SlayzoneContextHost (one per WebContents). Overlay surface.
++  registry.ForWebUI<SlayzoneContextUI>()
++      .Add<slayzone::context::mojom::ContextHost>();
+ 
+   if (base::FeatureList::IsEnabled(ntp_features::kNtpFooter)) {
+     registry.ForWebUI<NewTabFooterUI>()
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+index 2da68e3ab71cc..80aca94bb17f1 100644
+--- a/chrome/browser/slayzone/mojom/BUILD.gn
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -7,8 +7,10 @@ import("//mojo/public/tools/bindings/mojom.gni")
+ mojom("mojom") {
+   sources = [
+     "automations.mojom",
++    "context.mojom",
+     "git.mojom",
+     "layout.mojom",
++    "leaderboard.mojom",
+     "processes.mojom",
+     "projects.mojom",
+     "sidebar.mojom",
+@@ -18,6 +20,7 @@ mojom("mojom") {
+     "tasklist.mojom",
+     "test.mojom",
+     "tools.mojom",
++    "usage.mojom",
+   ]
+   webui_module_path = "/"
+ }
+diff --git a/chrome/browser/slayzone/mojom/context.mojom b/chrome/browser/slayzone/mojom/context.mojom
+new file mode 100644
+index 0000000000000..f79ec5ba1a88b
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/context.mojom
+@@ -0,0 +1,46 @@
++// Phase 9.3 context-manager (AI config) overlay data contract (in-tree mirror).
++// Source of truth: packages/shared/mojo-bindings/mojom/context.mojom.
++// Keep diff-identical below the module line.
++
++module slayzone.context.mojom;
++
++struct ProviderEntry {
++  string id;
++  string label;
++  string status;
++  bool connected;
++};
++
++struct ProfileEntry {
++  string id;
++  string name;
++  string provider_id;
++  bool active;
++};
++
++struct SkillEntry {
++  string id;
++  string name;
++  string source;
++  bool stale;
++};
++
++struct McpServerEntry {
++  string id;
++  string name;
++  string transport;
++  bool connected;
++};
++
++struct ContextSnapshot {
++  string active_project_id;
++  array<ProviderEntry> providers;
++  array<ProfileEntry> profiles;
++  array<SkillEntry> skills;
++  array<McpServerEntry> mcp_servers;
++  string active_profile_id;
++};
++
++interface ContextHost {
++  GetSnapshot(string project_id) => (ContextSnapshot snapshot);
++};
+diff --git a/chrome/browser/slayzone/mojom/leaderboard.mojom b/chrome/browser/slayzone/mojom/leaderboard.mojom
+new file mode 100644
+index 0000000000000..841416d8caa17
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/leaderboard.mojom
+@@ -0,0 +1,25 @@
++// Phase 9.1 leaderboard overlay data contract (in-tree mirror).
++// Source of truth: packages/shared/mojo-bindings/mojom/leaderboard.mojom.
++// Keep diff-identical below the module line.
++
++module slayzone.leaderboard.mojom;
++
++struct LeaderboardRow {
++  string id;
++  string name;
++  int32 rank;
++  int32 score;
++  int32 streak_days;
++  string avatar_url;
++  string tier;
++};
++
++struct LeaderboardSnapshot {
++  array<LeaderboardRow> rows;
++  int32 total;
++  string current_user_id;
++};
++
++interface LeaderboardHost {
++  GetSnapshot() => (LeaderboardSnapshot snapshot);
++};
+diff --git a/chrome/browser/slayzone/mojom/usage.mojom b/chrome/browser/slayzone/mojom/usage.mojom
+new file mode 100644
+index 0000000000000..2fe1c584db143
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/usage.mojom
+@@ -0,0 +1,48 @@
++// Phase 9.2 usage-analytics overlay data contract (in-tree mirror).
++// Source of truth: packages/shared/mojo-bindings/mojom/usage.mojom.
++// Keep diff-identical below the module line.
++
++module slayzone.usage.mojom;
++
++struct DayBucket {
++  string date;
++  int64 input_tokens;
++  int64 output_tokens;
++  int64 cache_read_tokens;
++  int64 cache_write_tokens;
++  double cost_usd;
++};
++
++struct ModelBucket {
++  string model;
++  int64 input_tokens;
++  int64 output_tokens;
++  double cost_usd;
++};
++
++struct TaskBucket {
++  string task_id;
++  string task_title;
++  int64 total_tokens;
++  double cost_usd;
++  int32 message_count;
++};
++
++struct UsageSnapshot {
++  int64 total_input_tokens;
++  int64 total_output_tokens;
++  int64 total_cache_read_tokens;
++  int64 total_cache_write_tokens;
++  double total_cost_usd;
++  int32 total_messages;
++  array<DayBucket> by_day;
++  array<ModelBucket> by_model;
++  array<TaskBucket> by_task;
++  bool provider_supported;
++  string provider_label;
++};
++
++interface UsageHost {
++  GetSnapshot(string range_key, string provider_filter)
++      => (UsageSnapshot snapshot);
++};
+diff --git a/chrome/browser/slayzone/slayzone_context_host.cc b/chrome/browser/slayzone/slayzone_context_host.cc
+new file mode 100644
+index 0000000000000..d88e051d7e123
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_context_host.cc
+@@ -0,0 +1,122 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_context_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++context::mojom::ContextSnapshotPtr FromDict(const base::DictValue& response) {
++  auto snapshot = context::mojom::ContextSnapshot::New();
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    return snapshot;
++  }
++
++  if (const std::string* active = dict->FindString("activeProjectId")) {
++    snapshot->active_project_id = *active;
++  }
++  if (const std::string* active = dict->FindString("activeProfileId")) {
++    snapshot->active_profile_id = *active;
++  }
++
++  if (const base::ListValue* list = dict->FindList("providers")) {
++    for (const base::Value& entry : *list) {
++      if (!entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& e = entry.GetDict();
++      auto p = context::mojom::ProviderEntry::New();
++      if (const std::string* v = e.FindString("id")) p->id = *v;
++      if (const std::string* v = e.FindString("label")) p->label = *v;
++      if (const std::string* v = e.FindString("status")) p->status = *v;
++      p->connected = e.FindBool("connected").value_or(false);
++      snapshot->providers.push_back(std::move(p));
++    }
++  }
++
++  if (const base::ListValue* list = dict->FindList("profiles")) {
++    for (const base::Value& entry : *list) {
++      if (!entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& e = entry.GetDict();
++      auto p = context::mojom::ProfileEntry::New();
++      if (const std::string* v = e.FindString("id")) p->id = *v;
++      if (const std::string* v = e.FindString("name")) p->name = *v;
++      if (const std::string* v = e.FindString("providerId")) p->provider_id = *v;
++      p->active = e.FindBool("active").value_or(false);
++      snapshot->profiles.push_back(std::move(p));
++    }
++  }
++
++  if (const base::ListValue* list = dict->FindList("skills")) {
++    for (const base::Value& entry : *list) {
++      if (!entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& e = entry.GetDict();
++      auto s = context::mojom::SkillEntry::New();
++      if (const std::string* v = e.FindString("id")) s->id = *v;
++      if (const std::string* v = e.FindString("name")) s->name = *v;
++      if (const std::string* v = e.FindString("source")) s->source = *v;
++      s->stale = e.FindBool("stale").value_or(false);
++      snapshot->skills.push_back(std::move(s));
++    }
++  }
++
++  if (const base::ListValue* list = dict->FindList("mcpServers")) {
++    for (const base::Value& entry : *list) {
++      if (!entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& e = entry.GetDict();
++      auto m = context::mojom::McpServerEntry::New();
++      if (const std::string* v = e.FindString("id")) m->id = *v;
++      if (const std::string* v = e.FindString("name")) m->name = *v;
++      if (const std::string* v = e.FindString("transport")) m->transport = *v;
++      m->connected = e.FindBool("connected").value_or(false);
++      snapshot->mcp_servers.push_back(std::move(m));
++    }
++  }
++
++  return snapshot;
++}
++
++}  // namespace
++
++SlayzoneContextHost::SlayzoneContextHost() = default;
++SlayzoneContextHost::~SlayzoneContextHost() = default;
++
++void SlayzoneContextHost::Bind(
++    mojo::PendingReceiver<context::mojom::ContextHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneContextHost::GetSnapshot(const std::string& project_id,
++                                      GetSnapshotCallback callback) {
++  base::ListValue params;
++  params.Append(project_id);
++  base::DictValue request;
++  request.Set("params", std::move(params));
++  SidecarClient::GetInstance()->Call(
++      "context:get-snapshot", std::move(request),
++      base::BindOnce(
++          [](GetSnapshotCallback cb, base::DictValue response) {
++            std::move(cb).Run(FromDict(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_context_host.h b/chrome/browser/slayzone/slayzone_context_host.h
+new file mode 100644
+index 0000000000000..985d8d416c5e3
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_context_host.h
+@@ -0,0 +1,40 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_CONTEXT_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_CONTEXT_HOST_H_
++
++#include <string>
++
++#include "chrome/browser/slayzone/mojom/context.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 9.3 — browser-side implementation of
++// `slayzone::context::mojom::ContextHost`. Lifetime owned by
++// `SlayzoneContextUI` (one per WebContents). Read-only in Phase 9; edits
++// land behind Phase 10 dialogs.
++class SlayzoneContextHost : public slayzone::context::mojom::ContextHost {
++ public:
++  SlayzoneContextHost();
++  SlayzoneContextHost(const SlayzoneContextHost&) = delete;
++  SlayzoneContextHost& operator=(const SlayzoneContextHost&) = delete;
++  ~SlayzoneContextHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::context::mojom::ContextHost> receiver);
++
++  // slayzone::context::mojom::ContextHost:
++  void GetSnapshot(const std::string& project_id,
++                   GetSnapshotCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::context::mojom::ContextHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_CONTEXT_HOST_H_
+diff --git a/chrome/browser/slayzone/slayzone_leaderboard_host.cc b/chrome/browser/slayzone/slayzone_leaderboard_host.cc
+new file mode 100644
+index 0000000000000..b95757d487398
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_leaderboard_host.cc
+@@ -0,0 +1,83 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_leaderboard_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++leaderboard::mojom::LeaderboardSnapshotPtr FromDict(
++    const base::DictValue& response) {
++  auto snapshot = leaderboard::mojom::LeaderboardSnapshot::New();
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    return snapshot;
++  }
++
++  snapshot->total = dict->FindInt("total").value_or(0);
++  if (const std::string* uid = dict->FindString("currentUserId")) {
++    snapshot->current_user_id = *uid;
++  }
++
++  const base::ListValue* list = dict->FindList("rows");
++  if (list) {
++    for (const base::Value& entry : *list) {
++      if (!entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& e = entry.GetDict();
++      auto row = leaderboard::mojom::LeaderboardRow::New();
++      if (const std::string* id = e.FindString("id")) {
++        row->id = *id;
++      }
++      if (const std::string* name = e.FindString("name")) {
++        row->name = *name;
++      }
++      row->rank = e.FindInt("rank").value_or(0);
++      row->score = e.FindInt("score").value_or(0);
++      row->streak_days = e.FindInt("streakDays").value_or(0);
++      if (const std::string* avatar = e.FindString("avatarUrl")) {
++        row->avatar_url = *avatar;
++      }
++      if (const std::string* tier = e.FindString("tier")) {
++        row->tier = *tier;
++      }
++      snapshot->rows.push_back(std::move(row));
++    }
++  }
++
++  return snapshot;
++}
++
++}  // namespace
++
++SlayzoneLeaderboardHost::SlayzoneLeaderboardHost() = default;
++SlayzoneLeaderboardHost::~SlayzoneLeaderboardHost() = default;
++
++void SlayzoneLeaderboardHost::Bind(
++    mojo::PendingReceiver<leaderboard::mojom::LeaderboardHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneLeaderboardHost::GetSnapshot(GetSnapshotCallback callback) {
++  SidecarClient::GetInstance()->Call(
++      "leaderboard:get-snapshot", base::DictValue(),
++      base::BindOnce(
++          [](GetSnapshotCallback cb, base::DictValue response) {
++            std::move(cb).Run(FromDict(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_leaderboard_host.h b/chrome/browser/slayzone/slayzone_leaderboard_host.h
+new file mode 100644
+index 0000000000000..dcdf3c9e17d71
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_leaderboard_host.h
+@@ -0,0 +1,42 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_LEADERBOARD_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_LEADERBOARD_HOST_H_
++
++#include "chrome/browser/slayzone/mojom/leaderboard.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 9.1 — browser-side implementation of
++// `slayzone::leaderboard::mojom::LeaderboardHost`. Lifetime owned by the
++// `SlayzoneLeaderboardUI` WebUIController (one per WebContents hosting
++// chrome://slayzone-leaderboard/). Overlay-scoped data has no per-
++// BrowserView identity requirement — all state lives in the process-wide
++// `SidecarClient`. Intentionally does NOT register with SlayzoneBrowserView
++// so Phase 7 R3's terminal-slot edits stay unblocked.
++class SlayzoneLeaderboardHost
++    : public slayzone::leaderboard::mojom::LeaderboardHost {
++ public:
++  SlayzoneLeaderboardHost();
++  SlayzoneLeaderboardHost(const SlayzoneLeaderboardHost&) = delete;
++  SlayzoneLeaderboardHost& operator=(const SlayzoneLeaderboardHost&) = delete;
++  ~SlayzoneLeaderboardHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::leaderboard::mojom::LeaderboardHost>
++          receiver);
++
++  // slayzone::leaderboard::mojom::LeaderboardHost:
++  void GetSnapshot(GetSnapshotCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::leaderboard::mojom::LeaderboardHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_LEADERBOARD_HOST_H_
+diff --git a/chrome/browser/slayzone/slayzone_usage_host.cc b/chrome/browser/slayzone/slayzone_usage_host.cc
+new file mode 100644
+index 0000000000000..ec2bc5f778fd8
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_usage_host.cc
+@@ -0,0 +1,141 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_usage_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++usage::mojom::UsageSnapshotPtr FromDict(const base::DictValue& response) {
++  auto snapshot = usage::mojom::UsageSnapshot::New();
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    return snapshot;
++  }
++
++  // int64 fields land as doubles over JSON-RPC; read as double then cast.
++  const auto as_int64 = [&](const char* key) -> int64_t {
++    if (auto v = dict->FindDouble(key)) {
++      return static_cast<int64_t>(*v);
++    }
++    return dict->FindInt(key).value_or(0);
++  };
++
++  snapshot->total_input_tokens = as_int64("totalInputTokens");
++  snapshot->total_output_tokens = as_int64("totalOutputTokens");
++  snapshot->total_cache_read_tokens = as_int64("totalCacheReadTokens");
++  snapshot->total_cache_write_tokens = as_int64("totalCacheWriteTokens");
++  snapshot->total_cost_usd = dict->FindDouble("totalCostUsd").value_or(0.0);
++  snapshot->total_messages = dict->FindInt("totalMessages").value_or(0);
++  snapshot->provider_supported =
++      dict->FindBool("providerSupported").value_or(true);
++  if (const std::string* label = dict->FindString("providerLabel")) {
++    snapshot->provider_label = *label;
++  }
++
++  const auto as_entry_int64 = [](const base::DictValue& e,
++                                 const char* key) -> int64_t {
++    if (auto v = e.FindDouble(key)) {
++      return static_cast<int64_t>(*v);
++    }
++    return e.FindInt(key).value_or(0);
++  };
++
++  if (const base::ListValue* list = dict->FindList("byDay")) {
++    for (const base::Value& entry : *list) {
++      if (!entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& e = entry.GetDict();
++      auto b = usage::mojom::DayBucket::New();
++      if (const std::string* d = e.FindString("date")) {
++        b->date = *d;
++      }
++      b->input_tokens = as_entry_int64(e, "inputTokens");
++      b->output_tokens = as_entry_int64(e, "outputTokens");
++      b->cache_read_tokens = as_entry_int64(e, "cacheReadTokens");
++      b->cache_write_tokens = as_entry_int64(e, "cacheWriteTokens");
++      b->cost_usd = e.FindDouble("costUsd").value_or(0.0);
++      snapshot->by_day.push_back(std::move(b));
++    }
++  }
++
++  if (const base::ListValue* list = dict->FindList("byModel")) {
++    for (const base::Value& entry : *list) {
++      if (!entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& e = entry.GetDict();
++      auto b = usage::mojom::ModelBucket::New();
++      if (const std::string* m = e.FindString("model")) {
++        b->model = *m;
++      }
++      b->input_tokens = as_entry_int64(e, "inputTokens");
++      b->output_tokens = as_entry_int64(e, "outputTokens");
++      b->cost_usd = e.FindDouble("costUsd").value_or(0.0);
++      snapshot->by_model.push_back(std::move(b));
++    }
++  }
++
++  if (const base::ListValue* list = dict->FindList("byTask")) {
++    for (const base::Value& entry : *list) {
++      if (!entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& e = entry.GetDict();
++      auto b = usage::mojom::TaskBucket::New();
++      if (const std::string* t = e.FindString("taskId")) {
++        b->task_id = *t;
++      }
++      if (const std::string* t = e.FindString("taskTitle")) {
++        b->task_title = *t;
++      }
++      b->total_tokens = as_entry_int64(e, "totalTokens");
++      b->cost_usd = e.FindDouble("costUsd").value_or(0.0);
++      b->message_count = e.FindInt("messageCount").value_or(0);
++      snapshot->by_task.push_back(std::move(b));
++    }
++  }
++
++  return snapshot;
++}
++
++}  // namespace
++
++SlayzoneUsageHost::SlayzoneUsageHost() = default;
++SlayzoneUsageHost::~SlayzoneUsageHost() = default;
++
++void SlayzoneUsageHost::Bind(
++    mojo::PendingReceiver<usage::mojom::UsageHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneUsageHost::GetSnapshot(const std::string& range_key,
++                                    const std::string& provider_filter,
++                                    GetSnapshotCallback callback) {
++  base::ListValue params;
++  params.Append(range_key);
++  params.Append(provider_filter);
++  base::DictValue request;
++  request.Set("params", std::move(params));
++  SidecarClient::GetInstance()->Call(
++      "usage:get-snapshot", std::move(request),
++      base::BindOnce(
++          [](GetSnapshotCallback cb, base::DictValue response) {
++            std::move(cb).Run(FromDict(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_usage_host.h b/chrome/browser/slayzone/slayzone_usage_host.h
+new file mode 100644
+index 0000000000000..46d1eb1d87c13
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_usage_host.h
+@@ -0,0 +1,40 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_USAGE_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_USAGE_HOST_H_
++
++#include <string>
++
++#include "chrome/browser/slayzone/mojom/usage.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 9.2 — browser-side implementation of
++// `slayzone::usage::mojom::UsageHost`. Lifetime owned by the
++// `SlayzoneUsageUI` WebUIController (one per WebContents hosting
++// chrome://slayzone-usage/). Overlay-scoped.
++class SlayzoneUsageHost : public slayzone::usage::mojom::UsageHost {
++ public:
++  SlayzoneUsageHost();
++  SlayzoneUsageHost(const SlayzoneUsageHost&) = delete;
++  SlayzoneUsageHost& operator=(const SlayzoneUsageHost&) = delete;
++  ~SlayzoneUsageHost() override;
++
++  void Bind(mojo::PendingReceiver<slayzone::usage::mojom::UsageHost> receiver);
++
++  // slayzone::usage::mojom::UsageHost:
++  void GetSnapshot(const std::string& range_key,
++                   const std::string& provider_filter,
++                   GetSnapshotCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::usage::mojom::UsageHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_USAGE_HOST_H_
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index e97d1a81f0967..d0a3524477122 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -192,8 +192,12 @@ static_library("ui") {
+     "webui/slayzone/slayzone_automations_ui.h",
+     "webui/slayzone/slayzone_browserchrome_ui.cc",
+     "webui/slayzone/slayzone_browserchrome_ui.h",
++    "webui/slayzone/slayzone_context_ui.cc",
++    "webui/slayzone/slayzone_context_ui.h",
+     "webui/slayzone/slayzone_git_ui.cc",
+     "webui/slayzone/slayzone_git_ui.h",
++    "webui/slayzone/slayzone_leaderboard_ui.cc",
++    "webui/slayzone/slayzone_leaderboard_ui.h",
+     "webui/slayzone/slayzone_processes_ui.cc",
+     "webui/slayzone/slayzone_processes_ui.h",
+     "webui/slayzone/slayzone_projects_ui.cc",
+@@ -212,6 +216,8 @@ static_library("ui") {
+     "webui/slayzone/slayzone_test_ui.h",
+     "webui/slayzone/slayzone_tools_ui.cc",
+     "webui/slayzone/slayzone_tools_ui.h",
++    "webui/slayzone/slayzone_usage_ui.cc",
++    "webui/slayzone/slayzone_usage_ui.h",
+     "webui/slayzone/slayzone_webui_bundle_source.cc",
+     "webui/slayzone/slayzone_webui_bundle_source.h",
+     "webui/slayzone/slayzone_webui_registry.cc",
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_context_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_context_ui.cc
+new file mode 100644
+index 0000000000000..de1d00ebc501e
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_context_ui.cc
+@@ -0,0 +1,58 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_context_ui.h"
++
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_context_host.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kContextMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · context</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 10px;
++      background: #3a1a1a; color: #fca5a5;
++      border-left: 1px solid #6b2020;
++    }
++  </style>
++</head>
++<body>
++  <span>context: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneContextUI::SlayzoneContextUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui),
++      host_(std::make_unique<slayzone::SlayzoneContextHost>()) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneContextHost);
++  slayzone::ConfigureBundleSource(source, "context", kContextMissingBundleHtml);
++}
++
++SlayzoneContextUI::~SlayzoneContextUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneContextUI)
++
++void SlayzoneContextUI::BindInterface(
++    mojo::PendingReceiver<slayzone::context::mojom::ContextHost> receiver) {
++  host_->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_context_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_context_ui.h
+new file mode 100644
+index 0000000000000..d8db9e0441876
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_context_ui.h
+@@ -0,0 +1,47 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_CONTEXT_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_CONTEXT_UI_H_
++
++#include <memory>
++
++#include "chrome/browser/slayzone/mojom/context.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++namespace slayzone {
++class SlayzoneContextHost;
++}
++
++// Phase 9.3 — chrome://slayzone-context/ WebUI controller. Owns a
++// per-WebContents SlayzoneContextHost.
++class SlayzoneContextUI : public content::WebUIController {
++ public:
++  explicit SlayzoneContextUI(content::WebUI* web_ui);
++  SlayzoneContextUI(const SlayzoneContextUI&) = delete;
++  SlayzoneContextUI& operator=(const SlayzoneContextUI&) = delete;
++  ~SlayzoneContextUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::context::mojom::ContextHost> receiver);
++
++ private:
++  std::unique_ptr<slayzone::SlayzoneContextHost> host_;
++
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneContextUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneContextUI> {
++ public:
++  SlayzoneContextUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneContextHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_CONTEXT_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.cc
+new file mode 100644
+index 0000000000000..0b554b94af198
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.cc
+@@ -0,0 +1,60 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h"
++
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_leaderboard_host.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kLeaderboardMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · leaderboard</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 10px;
++      background: #3a1a1a; color: #fca5a5;
++      border-left: 1px solid #6b2020;
++    }
++  </style>
++</head>
++<body>
++  <span>leaderboard: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneLeaderboardUI::SlayzoneLeaderboardUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui),
++      host_(std::make_unique<slayzone::SlayzoneLeaderboardHost>()) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneLeaderboardHost);
++  slayzone::ConfigureBundleSource(source, "leaderboard",
++                                  kLeaderboardMissingBundleHtml);
++}
++
++SlayzoneLeaderboardUI::~SlayzoneLeaderboardUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneLeaderboardUI)
++
++void SlayzoneLeaderboardUI::BindInterface(
++    mojo::PendingReceiver<slayzone::leaderboard::mojom::LeaderboardHost>
++        receiver) {
++  host_->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h
+new file mode 100644
+index 0000000000000..a8e8511b5d68d
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h
+@@ -0,0 +1,56 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_LEADERBOARD_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_LEADERBOARD_UI_H_
++
++#include <memory>
++
++#include "chrome/browser/slayzone/mojom/leaderboard.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++namespace slayzone {
++class SlayzoneLeaderboardHost;
++}
++
++// Phase 9.1 — chrome://slayzone-leaderboard/ WebUI controller.
++//
++// Serves the @slayzone/webui-leaderboard Vite bundle from the directory
++// named by `--slayzone-webui-bundle-dir`, using the Phase 7 R2
++// `slayzone::ConfigureBundleSource` helper. Owns its own
++// `SlayzoneLeaderboardHost` (one per WebContents) — overlays are process-
++// wide data, no per-BrowserView identity needed. This intentionally skips
++// the `FromRegionWebContents` lookup the Phase 7/8 region hosts use so the
++// Phase 9 surfaces land without touching SlayzoneBrowserView while the
++// Phase 7 R3 terminal-slot edits are in flight.
++class SlayzoneLeaderboardUI : public content::WebUIController {
++ public:
++  explicit SlayzoneLeaderboardUI(content::WebUI* web_ui);
++  SlayzoneLeaderboardUI(const SlayzoneLeaderboardUI&) = delete;
++  SlayzoneLeaderboardUI& operator=(const SlayzoneLeaderboardUI&) = delete;
++  ~SlayzoneLeaderboardUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::leaderboard::mojom::LeaderboardHost>
++          receiver);
++
++ private:
++  std::unique_ptr<slayzone::SlayzoneLeaderboardHost> host_;
++
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneLeaderboardUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneLeaderboardUI> {
++ public:
++  SlayzoneLeaderboardUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneLeaderboardHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_LEADERBOARD_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.cc
+new file mode 100644
+index 0000000000000..4bd3eaa905315
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.cc
+@@ -0,0 +1,58 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h"
++
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_usage_host.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kUsageMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · usage</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 10px;
++      background: #3a1a1a; color: #fca5a5;
++      border-left: 1px solid #6b2020;
++    }
++  </style>
++</head>
++<body>
++  <span>usage: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneUsageUI::SlayzoneUsageUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui),
++      host_(std::make_unique<slayzone::SlayzoneUsageHost>()) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneUsageHost);
++  slayzone::ConfigureBundleSource(source, "usage", kUsageMissingBundleHtml);
++}
++
++SlayzoneUsageUI::~SlayzoneUsageUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneUsageUI)
++
++void SlayzoneUsageUI::BindInterface(
++    mojo::PendingReceiver<slayzone::usage::mojom::UsageHost> receiver) {
++  host_->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h
+new file mode 100644
+index 0000000000000..8b95a85cd90d1
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h
+@@ -0,0 +1,48 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_USAGE_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_USAGE_UI_H_
++
++#include <memory>
++
++#include "chrome/browser/slayzone/mojom/usage.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++namespace slayzone {
++class SlayzoneUsageHost;
++}
++
++// Phase 9.2 — chrome://slayzone-usage/ WebUI controller. Owns a
++// per-WebContents SlayzoneUsageHost (overlay surface; no per-BrowserView
++// identity required).
++class SlayzoneUsageUI : public content::WebUIController {
++ public:
++  explicit SlayzoneUsageUI(content::WebUI* web_ui);
++  SlayzoneUsageUI(const SlayzoneUsageUI&) = delete;
++  SlayzoneUsageUI& operator=(const SlayzoneUsageUI&) = delete;
++  ~SlayzoneUsageUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::usage::mojom::UsageHost> receiver);
++
++ private:
++  std::unique_ptr<slayzone::SlayzoneUsageHost> host_;
++
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneUsageUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneUsageUI> {
++ public:
++  SlayzoneUsageUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneUsageHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_USAGE_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+index d8eb3567a4979..1cbbd46651f6e 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -14,7 +14,9 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_automations_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_context_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_git_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+@@ -24,6 +26,7 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_test_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_usage_ui.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui.h"
+ #include "content/public/browser/web_ui_controller.h"
+@@ -165,7 +168,9 @@ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+   map.AddWebUIConfig(std::make_unique<PlaceholderUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneAutomationsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneBrowserchromeUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneContextUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneGitUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneLeaderboardUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneProcessesUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneProjectsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneSidebarUIConfig>());
+@@ -175,6 +180,7 @@ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+   map.AddWebUIConfig(std::make_unique<SlayzoneTasklistUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneTestUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneToolsUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneUsageUIConfig>());
+ }
+ 
+ }  // namespace slayzone
+diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
+index 3d15eca86f7ee..404a24b284bb3 100644
+--- a/chrome/common/webui_url_constants.cc
++++ b/chrome/common/webui_url_constants.cc
+@@ -176,7 +176,9 @@ base::span<const base::cstring_view> ChromeURLHosts() {
+       kChromeUISkillsHost,
+       kChromeUISlayzoneAutomationsHost,
+       kChromeUISlayzoneBrowserchromeHost,
++      kChromeUISlayzoneContextHost,
+       kChromeUISlayzoneGitHost,
++      kChromeUISlayzoneLeaderboardHost,
+       kChromeUISlayzonePlaceholderHost,
+       kChromeUISlayzoneProcessesHost,
+       kChromeUISlayzoneProjectsHost,
+@@ -186,8 +188,10 @@ base::span<const base::cstring_view> ChromeURLHosts() {
+       kChromeUISlayzoneTabbarHost,
+       kChromeUISlayzoneTaskheaderHost,
+       kChromeUISlayzoneTasklistHost,
++      kChromeUISlayzoneTerminalHost,
+       kChromeUISlayzoneTestHost,
+       kChromeUISlayzoneToolsHost,
++      kChromeUISlayzoneUsageHost,
+ #if !BUILDFLAG(IS_ANDROID)
+       kChromeUISuggestInternalsHost,
+ #endif
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+index cc8629e5e0404..7007afe02e522 100644
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -182,8 +182,15 @@ inline constexpr char kChromeUISlayzoneAutomationsHost[] =
+     "slayzone-automations";
+ inline constexpr char kChromeUISlayzoneAutomationsURL[] =
+     "chrome://slayzone-automations/";
++inline constexpr char kChromeUISlayzoneContextHost[] = "slayzone-context";
++inline constexpr char kChromeUISlayzoneContextURL[] =
++    "chrome://slayzone-context/";
+ inline constexpr char kChromeUISlayzoneGitHost[] = "slayzone-git";
+ inline constexpr char kChromeUISlayzoneGitURL[] = "chrome://slayzone-git/";
++inline constexpr char kChromeUISlayzoneLeaderboardHost[] =
++    "slayzone-leaderboard";
++inline constexpr char kChromeUISlayzoneLeaderboardURL[] =
++    "chrome://slayzone-leaderboard/";
+ inline constexpr char kChromeUISlayzonePlaceholderHost[] =
+     "slayzone-placeholder";
+ inline constexpr char kChromeUISlayzoneProcessesHost[] = "slayzone-processes";
+@@ -212,10 +219,15 @@ inline constexpr char kChromeUISlayzoneTaskheaderURL[] =
+ inline constexpr char kChromeUISlayzoneTasklistHost[] = "slayzone-tasklist";
+ inline constexpr char kChromeUISlayzoneTasklistURL[] =
+     "chrome://slayzone-tasklist/";
++inline constexpr char kChromeUISlayzoneTerminalHost[] = "slayzone-terminal";
++inline constexpr char kChromeUISlayzoneTerminalURL[] =
++    "chrome://slayzone-terminal/";
+ inline constexpr char kChromeUISlayzoneTestHost[] = "slayzone-test";
+ inline constexpr char kChromeUISlayzoneTestURL[] = "chrome://slayzone-test/";
+ inline constexpr char kChromeUISlayzoneToolsHost[] = "slayzone-tools";
+ inline constexpr char kChromeUISlayzoneToolsURL[] = "chrome://slayzone-tools/";
++inline constexpr char kChromeUISlayzoneUsageHost[] = "slayzone-usage";
++inline constexpr char kChromeUISlayzoneUsageURL[] = "chrome://slayzone-usage/";
+ inline constexpr char kChromeUIHistoryHost[] = "history";
+ inline constexpr char kChromeUIHistorySyncedTabs[] = "/syncedTabs";
+ inline constexpr char kChromeUIHistoryURL[] = "chrome://history/";
+-- 
+2.52.0
+

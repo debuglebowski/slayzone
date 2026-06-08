@@ -1,0 +1,82 @@
+// Phase 7.4 tasklist region data contract.
+//
+// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory)
+// as a coordinated exception, following the 5.6 / 6.1 / 7.1 pattern. In-tree
+// mirror at chrome/browser/slayzone/mojom/tasklist.mojom compiles to C++;
+// Phase 4.3 regenerates TS bindings from this outer file. The two must stay
+// diff-identical below the module line.
+//
+// The tasklist region is the kanban board / list view — the biggest surface
+// in Phase 7. The minimal spike surface here is enough to render one column
+// per task status with a title + count, so the region shows real data from
+// the sidecar. Drag-drop + full kanban card contents + filter-bar state come
+// as follow-up work (tracked separately once the parity harness flags the
+// gap visually).
+//
+// cap-02 adds the write surface. Create/Update/Delete/UpdateStatus land here
+// alongside GetSnapshot so callers get one host per region; the sidecar owns
+// the SQLite write-through. MoveTask (reorder within column) is declared but
+// intentionally unimplemented in cap-02 — drains in cap-11 polish.
+
+module slayzone.tasklist.mojom;
+
+// One task row — the bare minimum to render a kanban card.
+struct TaskEntry {
+  string id;
+  string title;
+  string status;
+};
+
+// One column (status lane). `id` is the status key; `title` is the user-
+// facing column header; `tasks` is the tasks currently in that column.
+struct TasklistColumn {
+  string id;
+  string title;
+  array<TaskEntry> tasks;
+};
+
+// Full tasklist snapshot — the columns in display order plus the current
+// filter text (surfaced so the filter-bar region can reflect state).
+struct TasklistSnapshot {
+  array<TasklistColumn> columns;
+  string filter;
+};
+
+// Result envelope for every write method. `ok` is false when the sidecar
+// refused (missing row, unknown column, empty title, etc.); `error` carries
+// a human-readable reason the renderer can surface in the dialog. On ok,
+// `task` is the freshly-written row; on delete, `task.id` is the deleted id
+// and the other fields are empty.
+struct TaskWriteResult {
+  bool ok;
+  string error;
+  TaskEntry task;
+};
+
+// Browser-side tasklist data provider. One remote per region WebUI mount.
+// Forwards snapshot queries + writes to the sidecar JSON-RPC channel.
+interface TasklistHost {
+  GetSnapshot() => (TasklistSnapshot snapshot);
+
+  // Create a new task in `project_id` under column `column_id` with `title`.
+  // Description is created empty; sidebar edit wires up the description set.
+  CreateTask(string project_id, string column_id, string title)
+      => (TaskWriteResult result);
+
+  // Update mutable fields of an existing task. Empty `description` clears it.
+  UpdateTask(string task_id, string title, string description)
+      => (TaskWriteResult result);
+
+  // Remove a task. Persists across relaunch (SQLite row deleted, not hidden).
+  DeleteTask(string task_id) => (TaskWriteResult result);
+
+  // Kanban drag-drop target. Moves the task to `column_id`.
+  UpdateTaskStatus(string task_id, string column_id)
+      => (TaskWriteResult result);
+
+  // Reorder within a column — `index` is the 0-based position. Declared for
+  // wire-shape completeness; the cap-02 sidecar impl returns ok=false with a
+  // "deferred" error until cap-11 polish lands the ordering column.
+  MoveTask(string task_id, string column_id, uint32 index)
+      => (TaskWriteResult result);
+};

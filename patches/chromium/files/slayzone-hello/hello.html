@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>chrome://hello/</title>
+  <link rel="stylesheet" href="chrome://resources/css/text_defaults.css" />
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font: 14px system-ui, -apple-system, sans-serif;
+      max-width: 480px;
+      margin: 48px auto;
+      padding: 0 24px;
+    }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    p  { margin: 0 0 24px; color: color-mix(in srgb, currentColor 70%, transparent); }
+    button {
+      font: inherit;
+      padding: 8px 16px;
+      border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+      border-radius: 6px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+    }
+    button:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+    #counter { margin-left: 12px; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <h1>chrome://hello/</h1>
+  <p>SlayZone Chromium fork — Phase 1 smoke test. Build → sign → launch → custom scheme → JS all green.</p>
+  <button id="tick">Tick</button>
+  <span id="counter" aria-live="polite">0</span>
+  <script src="hello.js"></script>
+</body>
+</html>

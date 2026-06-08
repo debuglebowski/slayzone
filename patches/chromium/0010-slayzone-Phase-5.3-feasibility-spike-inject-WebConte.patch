@@ -1,0 +1,167 @@
+From ea39176a04631f110f88eb9387e21f8a7c5dd6b0 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 18:01:59 +0200
+Subject: =?UTF-8?q?slayzone:=20Phase=205.3=20feasibility=20spike=20?=
+ =?UTF-8?q?=E2=80=94=20inject=20WebContents=20into=20terminal=20slot?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Command-line flag --slayzone-spike-url=<url> (default https://example.com/)
+navigates the active TabStripModel WebContents to the URL and drops it into
+the terminal region slot via views::WebView::SetWebContents. Throwaway
+spike to verify real WebContents renders + resizes + focuses in a layout
+slot before we invest in 5.4 and onward.
+---
+ chrome/browser/slayzone/layout_features.h     |  8 +++
+ .../ui/views/frame/slayzone_browser_view.cc   | 53 +++++++++++++++++++
+ .../ui/views/frame/slayzone_browser_view.h    | 17 ++++--
+ 3 files changed, 73 insertions(+), 5 deletions(-)
+
+diff --git a/chrome/browser/slayzone/layout_features.h b/chrome/browser/slayzone/layout_features.h
+index 527a9dcbcbeba..3af53e7f9fcba 100644
+--- a/chrome/browser/slayzone/layout_features.h
++++ b/chrome/browser/slayzone/layout_features.h
+@@ -16,6 +16,14 @@ BASE_DECLARE_FEATURE(kSlayzoneLayoutShell);
+ 
+ bool IsLayoutShellEnabled();
+ 
++// Phase 5.3 feasibility checkpoint. When present, drops the active
++// TabStripModel WebContents into the terminal region slot after navigating
++// it to the switch value (defaults to https://example.com when empty).
++// Intended as a throwaway spike — removed once 5.3 clears + Phase 6 wires
++// real tab hosting.
++inline constexpr char kSlayzoneSpikeUrlSwitch[] = "slayzone-spike-url";
++inline constexpr char kSlayzoneSpikeDefaultUrl[] = "https://example.com/";
++
+ }  // namespace slayzone
+ 
+ #endif  // CHROME_BROWSER_SLAYZONE_LAYOUT_FEATURES_H_
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 441ff2a0a966e..eb7076bee850f 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -5,11 +5,23 @@
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ 
+ #include <memory>
++#include <string>
+ 
++#include "base/command_line.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/task/sequenced_task_runner.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/layout_features.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/frame/slayzone_region_container.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/web_contents.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/page_transition_types.h"
++#include "ui/views/controls/webview/webview.h"
++#include "url/gurl.h"
+ 
+ SlayzoneBrowserView::SlayzoneBrowserView(Browser* browser)
+     : BrowserView(browser) {}
+@@ -28,6 +40,12 @@ void SlayzoneBrowserView::AddedToWidget() {
+   region_container_ = AddChildView(std::make_unique<SlayzoneRegionContainer>(
+       browser()->profile()));
+   region_container_->SetBoundsRect(GetLocalBounds());
++
++  // Phase 5.3 feasibility spike runs after the initial tab lands in the
++  // TabStripModel.
++  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE, base::BindOnce(&SlayzoneBrowserView::MaybeSpikeTerminalSlot,
++                                weak_factory_.GetWeakPtr()));
+ }
+ 
+ void SlayzoneBrowserView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+@@ -37,5 +55,40 @@ void SlayzoneBrowserView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+   }
+ }
+ 
++void SlayzoneBrowserView::MaybeSpikeTerminalSlot() {
++  const base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
++  if (!cmd->HasSwitch(slayzone::kSlayzoneSpikeUrlSwitch)) {
++    return;
++  }
++  if (!region_container_) {
++    return;
++  }
++  views::WebView* slot = region_container_->GetRegion("terminal");
++  if (!slot) {
++    LOG(WARNING) << "[slayzone] spike: terminal slot missing";
++    return;
++  }
++  TabStripModel* tab_strip = browser()->tab_strip_model();
++  content::WebContents* active = tab_strip->GetActiveWebContents();
++  if (!active) {
++    LOG(WARNING) << "[slayzone] spike: no active WebContents yet";
++    return;
++  }
++  std::string url_str = cmd->GetSwitchValueASCII(slayzone::kSlayzoneSpikeUrlSwitch);
++  if (url_str.empty()) {
++    url_str = slayzone::kSlayzoneSpikeDefaultUrl;
++  }
++  GURL url(url_str);
++  if (!url.is_valid()) {
++    LOG(WARNING) << "[slayzone] spike: invalid URL " << url_str;
++    return;
++  }
++  content::NavigationController::LoadURLParams params(url);
++  params.transition_type = ui::PAGE_TRANSITION_TYPED;
++  active->GetController().LoadURLWithParams(params);
++  slot->SetWebContents(active);
++  LOG(INFO) << "[slayzone] spike: terminal <- " << url.spec();
++}
++
+ BEGIN_METADATA(SlayzoneBrowserView)
+ END_METADATA
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 4a209692b95be..9a7befcf91134 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -6,6 +6,7 @@
+ #define CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+ 
+ #include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/gfx/geometry/rect.h"
+@@ -17,11 +18,10 @@ class SlayzoneRegionContainer;
+ // upstream tabbed browser chrome. Gated on `slayzone::kSlayzoneLayoutShell`
+ // via `browser_window_factory.cc`.
+ //
+-// Phase 5.2 installs the 10-slot placeholder grid. Upstream toolbar/tabstrip/
+-// infobar/side-panel children are collapsed to zero via `SetVisible(false)`;
+-// `BrowserViewLayout` skips invisible children. The region container is
+-// positioned in `OnBoundsChanged` because it is not one of the views
+-// `BrowserViewLayout` knows about.
++// Phase 5.2 installs the 10-slot placeholder grid as a later sibling of the
++// upstream BrowserView children, overlaying the tabstrip/toolbar/contents in
++// paint order. Phase 5.3 wires the feasibility spike that injects a live
++// WebContents into the terminal slot via command-line flag.
+ class SlayzoneBrowserView : public BrowserView {
+   METADATA_HEADER(SlayzoneBrowserView, BrowserView)
+ 
+@@ -40,7 +40,14 @@ class SlayzoneBrowserView : public BrowserView {
+   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+ 
+  private:
++  // Phase 5.3 feasibility spike. If the `--slayzone-spike-url` switch is
++  // present, navigate the active tab's WebContents to the spike URL and drop
++  // it into the terminal region slot. Deferred to a PostTask because the
++  // active tab is not guaranteed to exist at AddedToWidget time.
++  void MaybeSpikeTerminalSlot();
++
+   raw_ptr<SlayzoneRegionContainer> region_container_ = nullptr;
++  base::WeakPtrFactory<SlayzoneBrowserView> weak_factory_{this};
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+-- 
+2.52.0
+

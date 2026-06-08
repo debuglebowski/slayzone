@@ -1,0 +1,338 @@
+From 390a2ee9e21b27cda242bf290bb3e538abd74870 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 10:37:06 +0200
+Subject: [slayzone] slayzone: Phase 9.4 overlay routing
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Mojo-driven overlay swap for the Phase 9 overlay WebUIs. Shell region (or
+any other region) can now call `layoutHost.showOverlay(id)` to cover the
+BrowserView's content area with one of `{"leaderboard", "usage",
+"context"}`; empty id closes the overlay and returns to whatever mode
+was visible before.
+
+layout.mojom:
+- New `ShowOverlay(string overlay_id) => (bool ok)`. Empty id closes;
+  unknown ids return ok=false with no state change (caller can render
+  inline error).
+
+SlayzoneOverlayManager (new):
+- Owns a single lazy `views::WebView* overlay_webview_` parented as a
+  child of SlayzoneBrowserView via the public `views::View::AddChildView`
+  API. NO edits to `slayzone_browser_view.{h,cc}` — Phase 7 R3 terminal-
+  slot work is still in flight in that file per orchestrator directive,
+  and Phase 9.4 must ship without coordinating bounds-tracking into
+  OnBoundsChanged. Instead the manager registers as a `views::ViewObserver`
+  on the BrowserView and updates overlay bounds in OnViewBoundsChanged.
+- `kOverlayIds` allowlist for `{"leaderboard", "usage", "context"}`.
+- `ReorderChildView(overlay_webview_, -1)` on show to keep overlay on top
+  of the region grid / home panel.
+- `OnViewIsDeleting` clears refs so teardown order with LayoutHost doesn't
+  UAF (manager is owned by LayoutHost which is owned by BrowserView).
+
+SlayzoneLayoutHost:
+- Owns `std::unique_ptr<SlayzoneOverlayManager> overlay_manager_`.
+- New `ShowOverlay(overlay_id, callback)` forwards to the manager; returns
+  false when no view is bound.
+
+Scope fences held — ESC-to-close + `--slayzone-overlay=<id>` dev CLI
+switch are deferred; both would touch SlayzoneBrowserView (accelerator
+registration in focus chain + AddedToWidget parse). They land once the
+Phase 7 R3 fence is lifted.
+---
+ chrome/browser/BUILD.gn                       |  2 +
+ chrome/browser/slayzone/mojom/layout.mojom    |  1 +
+ .../browser/slayzone/slayzone_layout_host.cc  | 19 +++-
+ .../browser/slayzone/slayzone_layout_host.h   |  8 ++
+ .../slayzone/slayzone_overlay_manager.cc      | 90 +++++++++++++++++++
+ .../slayzone/slayzone_overlay_manager.h       | 80 +++++++++++++++++
+ 6 files changed, 199 insertions(+), 1 deletion(-)
+ create mode 100644 chrome/browser/slayzone/slayzone_overlay_manager.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_overlay_manager.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 1a140439ebbb7..0fcd9ac90efac 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -994,6 +994,8 @@ static_library("browser") {
+     "slayzone/slayzone_layout_host.h",
+     "slayzone/slayzone_leaderboard_host.cc",
+     "slayzone/slayzone_leaderboard_host.h",
++    "slayzone/slayzone_overlay_manager.cc",
++    "slayzone/slayzone_overlay_manager.h",
+     "slayzone/slayzone_processes_host.cc",
+     "slayzone/slayzone_processes_host.h",
+     "slayzone/slayzone_projects_host.cc",
+diff --git a/chrome/browser/slayzone/mojom/layout.mojom b/chrome/browser/slayzone/mojom/layout.mojom
+index 6396a5a09d394..faadbbc180705 100644
+--- a/chrome/browser/slayzone/mojom/layout.mojom
++++ b/chrome/browser/slayzone/mojom/layout.mojom
+@@ -16,4 +16,5 @@ interface LayoutHost {
+   SetRegionSize(string region_id, uint32 px, RegionAxis axis) => ();
+   FocusRegion(string region_id) => (bool ok);
+   ShowHomePanel(string panel_id) => (bool ok);
++  ShowOverlay(string overlay_id) => (bool ok);
+ };
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.cc b/chrome/browser/slayzone/slayzone_layout_host.cc
+index 5e9c5ecc7f55a..471f03d17b71d 100644
+--- a/chrome/browser/slayzone/slayzone_layout_host.cc
++++ b/chrome/browser/slayzone/slayzone_layout_host.cc
+@@ -4,14 +4,19 @@
+ 
+ #include "chrome/browser/slayzone/slayzone_layout_host.h"
+ 
++#include <utility>
++
+ #include "base/logging.h"
++#include "chrome/browser/slayzone/slayzone_overlay_manager.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ #include "chrome/browser/ui/views/frame/slayzone_region_container.h"
+ #include "ui/views/controls/webview/webview.h"
+ #include "ui/views/view.h"
+ 
+ SlayzoneLayoutHost::SlayzoneLayoutHost(SlayzoneBrowserView* view)
+-    : view_(view) {}
++    : view_(view),
++      overlay_manager_(
++          std::make_unique<slayzone::SlayzoneOverlayManager>(view)) {}
+ 
+ SlayzoneLayoutHost::~SlayzoneLayoutHost() = default;
+ 
+@@ -70,3 +75,15 @@ void SlayzoneLayoutHost::ShowHomePanel(const std::string& panel_id,
+   }
+   std::move(callback).Run(view_->SetHomePanel(panel_id));
+ }
++
++void SlayzoneLayoutHost::ShowOverlay(const std::string& overlay_id,
++                                     ShowOverlayCallback callback) {
++  // Empty overlay_id = close overlay; allowed ids live on
++  // SlayzoneOverlayManager::kOverlayIds. Returning false here leaves the UI
++  // in its current mode so the caller can render an inline error.
++  if (!overlay_manager_) {
++    std::move(callback).Run(false);
++    return;
++  }
++  std::move(callback).Run(overlay_manager_->SetOverlay(overlay_id));
++}
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.h b/chrome/browser/slayzone/slayzone_layout_host.h
+index 72b23990730a4..14ca5ddc6b207 100644
+--- a/chrome/browser/slayzone/slayzone_layout_host.h
++++ b/chrome/browser/slayzone/slayzone_layout_host.h
+@@ -6,6 +6,7 @@
+ #define CHROME_BROWSER_SLAYZONE_SLAYZONE_LAYOUT_HOST_H_
+ 
+ #include <cstdint>
++#include <memory>
+ #include <string>
+ 
+ #include "base/memory/raw_ptr.h"
+@@ -15,6 +16,10 @@
+ 
+ class SlayzoneBrowserView;
+ 
++namespace slayzone {
++class SlayzoneOverlayManager;
++}
++
+ // Phase 5.6 — browser-side implementation of `slayzone::layout::mojom::LayoutHost`.
+ // Owned by `SlayzoneBrowserView`; accepts bindings from region WebUIs and
+ // translates calls into native views::View operations on the region container.
+@@ -41,9 +46,12 @@ class SlayzoneLayoutHost : public slayzone::layout::mojom::LayoutHost {
+                    FocusRegionCallback callback) override;
+   void ShowHomePanel(const std::string& panel_id,
+                      ShowHomePanelCallback callback) override;
++  void ShowOverlay(const std::string& overlay_id,
++                   ShowOverlayCallback callback) override;
+ 
+  private:
+   const raw_ptr<SlayzoneBrowserView> view_;
++  std::unique_ptr<slayzone::SlayzoneOverlayManager> overlay_manager_;
+   mojo::ReceiverSet<slayzone::layout::mojom::LayoutHost> receivers_;
+ };
+ 
+diff --git a/chrome/browser/slayzone/slayzone_overlay_manager.cc b/chrome/browser/slayzone/slayzone_overlay_manager.cc
+new file mode 100644
+index 0000000000000..0540fcb5a6832
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_overlay_manager.cc
+@@ -0,0 +1,90 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_overlay_manager.h"
++
++#include <algorithm>
++#include <memory>
++#include <string>
++#include <utility>
++
++#include "base/strings/strcat.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "ui/views/controls/webview/webview.h"
++#include "ui/views/view.h"
++#include "url/gurl.h"
++
++namespace slayzone {
++
++SlayzoneOverlayManager::SlayzoneOverlayManager(SlayzoneBrowserView* view)
++    : view_(view) {
++  bounds_observer_.Observe(view_);
++}
++
++SlayzoneOverlayManager::~SlayzoneOverlayManager() = default;
++
++bool SlayzoneOverlayManager::SetOverlay(std::string_view overlay_id) {
++  // Empty id = close overlay. Hide the WebView if present; leave the
++  // underlying region grid / home panel alone so whatever was visible
++  // before simply re-emerges.
++  if (overlay_id.empty()) {
++    if (overlay_webview_) {
++      overlay_webview_->SetVisible(false);
++    }
++    active_overlay_.clear();
++    return true;
++  }
++
++  const bool known = std::any_of(
++      kOverlayIds.begin(), kOverlayIds.end(),
++      [overlay_id](std::string_view known_id) {
++        return known_id == overlay_id;
++      });
++  if (!known) {
++    return false;
++  }
++
++  EnsureWebView();
++
++  const std::string url =
++      base::StrCat({"chrome://slayzone-", overlay_id, "/"});
++  overlay_webview_->LoadInitialURL(GURL(url));
++  overlay_webview_->SetBoundsRect(view_->GetContentsBounds());
++  // Keep overlay at the top of the z-order so it paints over the region
++  // grid + any home-panel WebView that may be active underneath.
++  view_->ReorderChildView(overlay_webview_, -1);
++  overlay_webview_->SetVisible(true);
++  active_overlay_ = std::string(overlay_id);
++  return true;
++}
++
++void SlayzoneOverlayManager::OnViewBoundsChanged(views::View* observed_view) {
++  if (observed_view != view_.get() || !overlay_webview_) {
++    return;
++  }
++  overlay_webview_->SetBoundsRect(view_->GetContentsBounds());
++}
++
++void SlayzoneOverlayManager::OnViewIsDeleting(views::View* observed_view) {
++  if (observed_view == view_.get()) {
++    bounds_observer_.Reset();
++    overlay_webview_ = nullptr;
++    view_ = nullptr;
++  }
++}
++
++void SlayzoneOverlayManager::EnsureWebView() {
++  if (overlay_webview_ || !view_) {
++    return;
++  }
++  auto webview_owned =
++      std::make_unique<views::WebView>(view_->browser()->profile());
++  overlay_webview_ = view_->AddChildView(std::move(webview_owned));
++  overlay_webview_->SetBoundsRect(view_->GetContentsBounds());
++  overlay_webview_->SetVisible(false);
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_overlay_manager.h b/chrome/browser/slayzone/slayzone_overlay_manager.h
+new file mode 100644
+index 0000000000000..9f9fb77eb35bd
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_overlay_manager.h
+@@ -0,0 +1,80 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_OVERLAY_MANAGER_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_OVERLAY_MANAGER_H_
++
++#include <array>
++#include <string>
++#include <string_view>
++
++#include "base/memory/raw_ptr.h"
++#include "base/scoped_observation.h"
++#include "ui/views/view_observer.h"
++
++class SlayzoneBrowserView;
++
++namespace views {
++class View;
++class WebView;
++}  // namespace views
++
++namespace slayzone {
++
++// Phase 9.4 — lazily manages a single full-window overlay WebView that
++// covers SlayzoneBrowserView's content area. Owned by SlayzoneLayoutHost
++// and constructed eagerly in its ctor (cheap; the underlying WebView is
++// lazy — not created until the first `SetOverlay(known_id)` call).
++//
++// Architectural note: this class intentionally parents its WebView as a
++// child of `SlayzoneBrowserView` via the public `views::View::AddChildView`
++// API and tracks resize via a `views::ViewObserver` on the BrowserView.
++// There are NO edits to `slayzone_browser_view.{h,cc}` — the Phase 7 R3
++// terminal-slot work is still in flight in that file per orchestrator
++// directive, and Phase 9.4 must ship without coordinating bounds tracking
++// into `OnBoundsChanged`. ESC-to-close + dev --slayzone-overlay=<id> CLI
++// switch are deferred to a follow-up that can touch BrowserView.
++class SlayzoneOverlayManager : public views::ViewObserver {
++ public:
++  // Allowlist — overlay IDs accepted by `SetOverlay`. Typos reject rather
++  // than silently loading a bogus chrome://slayzone-<id>/.
++  static constexpr std::array<std::string_view, 3> kOverlayIds = {
++      "leaderboard",
++      "usage",
++      "context",
++  };
++
++  explicit SlayzoneOverlayManager(SlayzoneBrowserView* view);
++  SlayzoneOverlayManager(const SlayzoneOverlayManager&) = delete;
++  SlayzoneOverlayManager& operator=(const SlayzoneOverlayManager&) = delete;
++  ~SlayzoneOverlayManager() override;
++
++  // Swap into the given overlay. An empty `overlay_id` closes the active
++  // overlay (overlay WebView is hidden; the region grid / home panel
++  // underneath remains visible exactly as before). `overlay_id` must be in
++  // `kOverlayIds`; unknown ids return `false` with no state change.
++  bool SetOverlay(std::string_view overlay_id);
++
++  // Currently active overlay id, empty if none.
++  const std::string& active_overlay() const { return active_overlay_; }
++
++  // views::ViewObserver:
++  void OnViewBoundsChanged(views::View* observed_view) override;
++  void OnViewIsDeleting(views::View* observed_view) override;
++
++ private:
++  // Ensures `overlay_webview_` is created + parented + bounds-tracked.
++  // No-op when already present.
++  void EnsureWebView();
++
++  raw_ptr<SlayzoneBrowserView> view_;
++  raw_ptr<views::WebView> overlay_webview_ = nullptr;
++  std::string active_overlay_;
++  base::ScopedObservation<views::View, views::ViewObserver> bounds_observer_{
++      this};
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_OVERLAY_MANAGER_H_
+-- 
+2.52.0
+

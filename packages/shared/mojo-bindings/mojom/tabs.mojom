@@ -1,0 +1,86 @@
+// Phase 6.1 tabs API. Regions call into the browser's SlayzoneTabsHost to
+// drive TabStripModel (create/close/select tabs, navigate the active tab)
+// and subscribe to tab-list + nav-state snapshots for tab-bar + URL-bar UI.
+//
+// Scope note: this .mojom lives in packages/shared/mojo-bindings/ (Phase 4.3
+// territory) as a coordinated exception, following the 5.6 layout.mojom
+// pattern. The in-tree copy at chrome/browser/slayzone/mojom/tabs.mojom is
+// what Chromium's mojom() target compiles to C++; Phase 4.3 regenerates TS
+// bindings from this outer file. The two must stay diff-identical below the
+// module line.
+
+module slayzone.tabs.mojom;
+
+// cap-03 — derived from the active WebContents URL by SlayzoneTabsHost. Drives
+// SlayzoneBrowserView's LayoutMode on tab activation. Defaults to kTaskDetail
+// so existing readers that ignore the field behave as before.
+enum TabType {
+  kTaskDetail,
+  kHome,
+  kOverlay,
+  kAux,
+};
+
+// Per-tab state pushed to observers. `id` is a tabs::TabHandle raw value
+// (stable for the tab's lifetime, survives WebContents discard/swap). URL is
+// the currently-displayed URL; title falls back to URL when the page has no
+// title yet.
+struct TabSnapshot {
+  int32 id;
+  string title;
+  string url;
+  bool is_loading;
+  bool can_go_back;
+  bool can_go_forward;
+  // cap-03 — classification of the tab's active WebContents, used by the
+  // browser to drive LayoutMode on activation (home tab → kHome, task tab →
+  // kTaskDetail, overlay page → kOverlay, everything else → kAux).
+  TabType tab_type;
+};
+
+// Observer for tab-list + nav-state changes. The browser pushes the full
+// tab list on every relevant TabStripModel or per-tab change — cheap for
+// <50 tabs and lets the UI render purely from the latest snapshot.
+interface TabObserver {
+  // Full tab list + which id is currently active. `active_id` is 0 when
+  // there is no active tab (e.g. mid-teardown).
+  OnTabList(array<TabSnapshot> tabs, int32 active_id);
+};
+
+// Browser-side TabStripModel driver. One remote per region that touches
+// tabs (tabbar, browserchrome). All mutating methods operate on the
+// SlayzoneBrowserView-owned Browser's TabStripModel.
+interface TabsHost {
+  // Open `url` in a new foreground tab and return its stable handle id.
+  // `url` may be empty — the browser substitutes the configured new-tab URL.
+  // Returns 0 if the URL is invalid.
+  CreateTab(string url) => (int32 id);
+
+  // Close the tab with this handle id. No-op if the id is unknown or the
+  // tab has already been removed.
+  CloseTab(int32 id);
+
+  // Make the tab with this handle id the active tab. No-op if unknown.
+  SelectTab(int32 id);
+
+  // Navigation on the currently-active tab. No-op if no active tab. URL
+  // validation mirrors the omnibox — bare hosts autocomplete via fixup.
+  LoadUrl(string url);
+  GoBack();
+  GoForward();
+  Reload();
+  Stop();
+
+  // Register a per-region observer. The browser pushes a snapshot
+  // immediately on subscribe, then again on every change.
+  Subscribe(pending_remote<TabObserver> observer);
+
+  // Phase 7.2 — tab-switch instrumentation for the <50ms benchmark deferred
+  // from Phase 6. Returns the currently active tab's handle id plus the
+  // monotonic timestamp (in microseconds since some arbitrary browser-process
+  // epoch) at which it most recently became active. Tabbar JS subtracts its
+  // own `performance.now()` at the moment it issued `SelectTab` from this
+  // timestamp to derive end-to-end switch latency; the epoch cancels in the
+  // delta so the absolute value is irrelevant.
+  GetActiveTabTiming() => (int32 active_id, int64 activated_at_us);
+};

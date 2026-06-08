@@ -1,0 +1,121 @@
+From f2560b2b71065de1fd7de54ce0132eabcf40ace2 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sun, 19 Apr 2026 20:43:15 +0200
+Subject: [slayzone] =?UTF-8?q?slayzone:=20Phase=207.x=20hotfix=20=E2=80=94?=
+ =?UTF-8?q?=20base::Value::List=20=E2=86=92=20base::ListValue?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+R2 build surfaced a type-name mismatch touching every Phase 7 region
+host that iterates JSON arrays. Chromium pin 148.0.7778.40 exposes
+list-valued dict children as base::ListValue* (see base/values.h:43,
+DictValue::FindList returns ListValue*); the hosts were typed with
+the older base::Value::List* path which no longer exists at this
+pin.
+
+Files touched (R1 + R2 feature patches that shipped before any build
+sanity check):
+  slayzone_projects_host.cc     (patch 0018)
+  slayzone_tools_host.cc        (patch 0019; also fixes a local
+                                 base::Value::List params; → ListValue)
+  slayzone_tasklist_host.cc     (patch 0021)
+  slayzone_sidebar_host.cc      (patch 0021)
+  slayzone_taskheader_host.cc   (patch 0021)
+
+No behaviour change — pure type-spelling fix. Incremental build clean
+after the change (525 targets rebuilt, Framework link ok).
+---
+ chrome/browser/slayzone/slayzone_projects_host.cc   | 2 +-
+ chrome/browser/slayzone/slayzone_sidebar_host.cc    | 2 +-
+ chrome/browser/slayzone/slayzone_taskheader_host.cc | 2 +-
+ chrome/browser/slayzone/slayzone_tasklist_host.cc   | 4 ++--
+ chrome/browser/slayzone/slayzone_tools_host.cc      | 4 ++--
+ 5 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/chrome/browser/slayzone/slayzone_projects_host.cc b/chrome/browser/slayzone/slayzone_projects_host.cc
+index 200aa869457d2..19b4fdc50890e 100644
+--- a/chrome/browser/slayzone/slayzone_projects_host.cc
++++ b/chrome/browser/slayzone/slayzone_projects_host.cc
+@@ -31,7 +31,7 @@ projects::mojom::ProjectsSnapshotPtr FromDict(const base::DictValue& response) {
+     snapshot->active_project_id = *active;
+   }
+ 
+-  const base::Value::List* list = dict->FindList("projects");
++  const base::ListValue* list = dict->FindList("projects");
+   if (list) {
+     for (const base::Value& entry : *list) {
+       if (!entry.is_dict()) {
+diff --git a/chrome/browser/slayzone/slayzone_sidebar_host.cc b/chrome/browser/slayzone/slayzone_sidebar_host.cc
+index 4ecd09f5c6eb7..44c270c7dfcd9 100644
+--- a/chrome/browser/slayzone/slayzone_sidebar_host.cc
++++ b/chrome/browser/slayzone/slayzone_sidebar_host.cc
+@@ -32,7 +32,7 @@ sidebar::mojom::SidebarSnapshotPtr FromDict(const base::DictValue& response) {
+   }
+   snapshot->priority = dict->FindInt("priority").value_or(0);
+ 
+-  const base::Value::List* tags = dict->FindList("tags");
++  const base::ListValue* tags = dict->FindList("tags");
+   if (tags) {
+     for (const base::Value& tag_entry : *tags) {
+       if (!tag_entry.is_dict()) {
+diff --git a/chrome/browser/slayzone/slayzone_taskheader_host.cc b/chrome/browser/slayzone/slayzone_taskheader_host.cc
+index 99a09833fe542..f3e4bf95fc3eb 100644
+--- a/chrome/browser/slayzone/slayzone_taskheader_host.cc
++++ b/chrome/browser/slayzone/slayzone_taskheader_host.cc
+@@ -35,7 +35,7 @@ taskheader::mojom::TaskheaderSnapshotPtr FromDict(
+     snapshot->status = *status;
+   }
+ 
+-  const base::Value::List* options = dict->FindList("statusOptions");
++  const base::ListValue* options = dict->FindList("statusOptions");
+   if (options) {
+     for (const base::Value& opt_entry : *options) {
+       if (!opt_entry.is_dict()) {
+diff --git a/chrome/browser/slayzone/slayzone_tasklist_host.cc b/chrome/browser/slayzone/slayzone_tasklist_host.cc
+index 300fdb0f8e946..234bcb5ae2ecd 100644
+--- a/chrome/browser/slayzone/slayzone_tasklist_host.cc
++++ b/chrome/browser/slayzone/slayzone_tasklist_host.cc
+@@ -28,7 +28,7 @@ tasklist::mojom::TasklistSnapshotPtr FromDict(const base::DictValue& response) {
+     snapshot->filter = *filter;
+   }
+ 
+-  const base::Value::List* columns = dict->FindList("columns");
++  const base::ListValue* columns = dict->FindList("columns");
+   if (columns) {
+     for (const base::Value& col_entry : *columns) {
+       if (!col_entry.is_dict()) {
+@@ -42,7 +42,7 @@ tasklist::mojom::TasklistSnapshotPtr FromDict(const base::DictValue& response) {
+       if (const std::string* title = col.FindString("title")) {
+         column->title = *title;
+       }
+-      const base::Value::List* tasks = col.FindList("tasks");
++      const base::ListValue* tasks = col.FindList("tasks");
+       if (tasks) {
+         for (const base::Value& task_entry : *tasks) {
+           if (!task_entry.is_dict()) {
+diff --git a/chrome/browser/slayzone/slayzone_tools_host.cc b/chrome/browser/slayzone/slayzone_tools_host.cc
+index bfe5bfe462e84..4fa55fe2e90d9 100644
+--- a/chrome/browser/slayzone/slayzone_tools_host.cc
++++ b/chrome/browser/slayzone/slayzone_tools_host.cc
+@@ -27,7 +27,7 @@ tools::mojom::ToolsSnapshotPtr FromDict(const base::DictValue& response) {
+     return snapshot;
+   }
+ 
+-  const base::Value::List* list = dict->FindList("tools");
++  const base::ListValue* list = dict->FindList("tools");
+   if (list) {
+     for (const base::Value& entry : *list) {
+       if (!entry.is_dict()) {
+@@ -72,7 +72,7 @@ void SlayzoneToolsHost::GetSnapshot(GetSnapshotCallback callback) {
+ void SlayzoneToolsHost::ToggleTool(const std::string& id,
+                                    ToggleToolCallback callback) {
+   // JSON-RPC positional params: single string id.
+-  base::Value::List params;
++  base::ListValue params;
+   params.Append(id);
+   base::DictValue request;
+   request.Set("params", std::move(params));
+-- 
+2.52.0
+

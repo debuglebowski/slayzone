@@ -1,0 +1,503 @@
+From 3f2070d551d3defeb8a87e0e867f44580f379460 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sun, 19 Apr 2026 02:33:51 +0200
+Subject: slayzone: Phase 6.1 tabs.mojom + SlayzoneTabsHost
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Mojom contract in chrome/browser/slayzone/mojom/tabs.mojom mirrors the
+shared outer file at packages/shared/mojo-bindings/mojom/tabs.mojom (same
+coordinated-exception pattern as 5.6's layout.mojom — Phase 4.3 generates
+TS bindings from the outer copy; this in-tree copy is what Chromium's
+mojom() target compiles to C++; the two must stay diff-identical).
+
+SlayzoneTabsHost, owned per SlayzoneBrowserView, observes the Browser's
+TabStripModel + per-tab title/URL/load changes and fans out full
+TabSnapshot lists to every subscribed TabObserver remote. Stable tab
+identity uses tabs::TabHandle::raw_value() (survives WebContents
+discard/swap). Navigation methods (Load/Back/Fwd/Reload/Stop) act on the
+active WebContents; Create uses chrome::AddAndReturnTabAt; Close uses
+TabInterface::Close(). Cross-window handles are rejected.
+
+No JS consumer yet — binder registration for the chrome://slayzone-tabbar
+and chrome://slayzone-browserchrome hosts lands in Phase 6.3 alongside
+the dev JS clients. 6.1 is build-only additive.
+---
+ chrome/browser/BUILD.gn                       |   2 +
+ chrome/browser/slayzone/mojom/BUILD.gn        |   5 +-
+ chrome/browser/slayzone/mojom/tabs.mojom      |  32 +++
+ chrome/browser/slayzone/slayzone_tabs_host.cc | 249 ++++++++++++++++++
+ chrome/browser/slayzone/slayzone_tabs_host.h  |  85 ++++++
+ .../ui/views/frame/slayzone_browser_view.cc   |   4 +-
+ .../ui/views/frame/slayzone_browser_view.h    |   3 +
+ 7 files changed, 378 insertions(+), 2 deletions(-)
+ create mode 100644 chrome/browser/slayzone/mojom/tabs.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_tabs_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_tabs_host.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 92af8bbb5edde..dd9dffc7a2022 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -982,6 +982,8 @@ static_library("browser") {
+     "slayzone/sidecar_client.h",
+     "slayzone/slayzone_layout_host.cc",
+     "slayzone/slayzone_layout_host.h",
++    "slayzone/slayzone_tabs_host.cc",
++    "slayzone/slayzone_tabs_host.h",
+     "ssl/chrome_security_blocking_page_factory.cc",
+     "ssl/chrome_security_blocking_page_factory.h",
+     "ssl/chrome_security_state_tab_helper.cc",
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+index ca2666425f25a..d273116f281d1 100644
+--- a/chrome/browser/slayzone/mojom/BUILD.gn
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -5,6 +5,9 @@
+ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+ mojom("mojom") {
+-  sources = [ "layout.mojom" ]
++  sources = [
++    "layout.mojom",
++    "tabs.mojom",
++  ]
+   webui_module_path = "/"
+ }
+diff --git a/chrome/browser/slayzone/mojom/tabs.mojom b/chrome/browser/slayzone/mojom/tabs.mojom
+new file mode 100644
+index 0000000000000..ad2aada804f14
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/tabs.mojom
+@@ -0,0 +1,32 @@
++// Phase 6.1 tabs API (C++ side). Mirrors
++// packages/shared/mojo-bindings/mojom/tabs.mojom — Phase 4.3 regenerates TS
++// bindings from the outer file; this tree-local copy is what Chromium's
++// mojom() target consumes. Keep in sync below the module line (diff is an
++// invariant).
++
++module slayzone.tabs.mojom;
++
++struct TabSnapshot {
++  int32 id;
++  string title;
++  string url;
++  bool is_loading;
++  bool can_go_back;
++  bool can_go_forward;
++};
++
++interface TabObserver {
++  OnTabList(array<TabSnapshot> tabs, int32 active_id);
++};
++
++interface TabsHost {
++  CreateTab(string url) => (int32 id);
++  CloseTab(int32 id);
++  SelectTab(int32 id);
++  LoadUrl(string url);
++  GoBack();
++  GoForward();
++  Reload();
++  Stop();
++  Subscribe(pending_remote<TabObserver> observer);
++};
+diff --git a/chrome/browser/slayzone/slayzone_tabs_host.cc b/chrome/browser/slayzone/slayzone_tabs_host.cc
+new file mode 100644
+index 0000000000000..38e1238451df0
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_tabs_host.cc
+@@ -0,0 +1,249 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_tabs_host.h"
++
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/check.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_tabstrip.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/common/webui_url_constants.h"
++#include "components/tabs/public/tab_interface.h"
++#include "components/url_formatter/url_fixer.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/reload_type.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/page_transition_types.h"
++#include "url/gurl.h"
++
++namespace {
++
++using TabHandle = tabs::SupportsTabHandles::Handle;
++
++slayzone::tabs::mojom::TabSnapshotPtr BuildSnapshot(
++    const tabs::TabInterface* tab) {
++  auto snapshot = slayzone::tabs::mojom::TabSnapshot::New();
++  snapshot->id = tab->GetHandle().raw_value();
++  content::WebContents* contents = tab->GetContents();
++  if (!contents) {
++    // Android may transiently hold tabs without contents. Desktop should not,
++    // but we return a minimal snapshot to avoid a mid-teardown crash.
++    snapshot->title = std::string();
++    snapshot->url = std::string();
++    snapshot->is_loading = false;
++    snapshot->can_go_back = false;
++    snapshot->can_go_forward = false;
++    return snapshot;
++  }
++  snapshot->title = base::UTF16ToUTF8(contents->GetTitle());
++  snapshot->url = contents->GetVisibleURL().spec();
++  snapshot->is_loading = contents->IsLoading();
++  content::NavigationController& controller = contents->GetController();
++  snapshot->can_go_back = controller.CanGoBack();
++  snapshot->can_go_forward = controller.CanGoForward();
++  return snapshot;
++}
++
++}  // namespace
++
++SlayzoneTabsHost::SlayzoneTabsHost(Browser* browser) : browser_(browser) {
++  CHECK(browser_);
++  // `base::ScopedObservation<TabStripModel, TabStripModelObserver>` is
++  // explicitly deleted upstream — TabStripModelObserver tracks its observed
++  // models natively and cleans up in its destructor. We just add + rely on
++  // the base destructor.
++  browser_->tab_strip_model()->AddObserver(this);
++}
++
++SlayzoneTabsHost::~SlayzoneTabsHost() = default;
++
++void SlayzoneTabsHost::Bind(
++    mojo::PendingReceiver<slayzone::tabs::mojom::TabsHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneTabsHost::CreateTab(const std::string& url,
++                                 CreateTabCallback callback) {
++  GURL gurl;
++  if (url.empty()) {
++    gurl = GURL(chrome::kChromeUINewTabURL);
++  } else {
++    gurl = url_formatter::FixupURL(url, std::string());
++  }
++  if (!gurl.is_valid()) {
++    std::move(callback).Run(TabHandle::NullValue);
++    return;
++  }
++  content::WebContents* contents = chrome::AddAndReturnTabAt(
++      browser_, gurl, /*index=*/-1, /*foreground=*/true);
++  if (!contents) {
++    std::move(callback).Run(TabHandle::NullValue);
++    return;
++  }
++  tabs::TabInterface* tab = tabs::TabInterface::MaybeGetFromContents(contents);
++  std::move(callback).Run(tab ? tab->GetHandle().raw_value()
++                              : TabHandle::NullValue);
++}
++
++void SlayzoneTabsHost::CloseTab(int32_t id) {
++  tabs::TabInterface* tab = TabFor(id);
++  if (!tab) {
++    return;
++  }
++  // Route through the tab's own Close() — it picks the right close-type and
++  // respects IsTabClosable.
++  tab->Close();
++}
++
++void SlayzoneTabsHost::SelectTab(int32_t id) {
++  tabs::TabInterface* tab = TabFor(id);
++  if (!tab) {
++    return;
++  }
++  TabStripModel* model = browser_->tab_strip_model();
++  const int index = model->GetIndexOfTab(tab);
++  if (index == TabStripModel::kNoTab) {
++    return;
++  }
++  model->ActivateTabAt(index);
++}
++
++void SlayzoneTabsHost::LoadUrl(const std::string& url) {
++  content::WebContents* active =
++      browser_->tab_strip_model()->GetActiveWebContents();
++  if (!active) {
++    return;
++  }
++  GURL gurl = url_formatter::FixupURL(url, std::string());
++  if (!gurl.is_valid()) {
++    return;
++  }
++  content::NavigationController::LoadURLParams params(gurl);
++  params.transition_type = ui::PAGE_TRANSITION_TYPED;
++  active->GetController().LoadURLWithParams(params);
++}
++
++void SlayzoneTabsHost::GoBack() {
++  content::WebContents* active =
++      browser_->tab_strip_model()->GetActiveWebContents();
++  if (active && active->GetController().CanGoBack()) {
++    active->GetController().GoBack();
++  }
++}
++
++void SlayzoneTabsHost::GoForward() {
++  content::WebContents* active =
++      browser_->tab_strip_model()->GetActiveWebContents();
++  if (active && active->GetController().CanGoForward()) {
++    active->GetController().GoForward();
++  }
++}
++
++void SlayzoneTabsHost::Reload() {
++  content::WebContents* active =
++      browser_->tab_strip_model()->GetActiveWebContents();
++  if (active) {
++    active->GetController().Reload(content::ReloadType::NORMAL,
++                                   /*check_for_repost=*/true);
++  }
++}
++
++void SlayzoneTabsHost::Stop() {
++  content::WebContents* active =
++      browser_->tab_strip_model()->GetActiveWebContents();
++  if (active) {
++    active->Stop();
++  }
++}
++
++void SlayzoneTabsHost::Subscribe(
++    mojo::PendingRemote<slayzone::tabs::mojom::TabObserver> observer) {
++  mojo::RemoteSetElementId id = observers_.Add(std::move(observer));
++  // Seed the new observer with the current snapshot so the UI renders
++  // immediately instead of waiting for the next tab event.
++  auto* remote = observers_.Get(id);
++  if (!remote) {
++    return;
++  }
++  TabStripModel* model = browser_->tab_strip_model();
++  std::vector<slayzone::tabs::mojom::TabSnapshotPtr> tabs;
++  tabs.reserve(model->count());
++  int32_t active_id = TabHandle::NullValue;
++  for (int i = 0; i < model->count(); ++i) {
++    tabs::TabInterface* tab = model->GetTabAtIndex(i);
++    if (!tab) {
++      continue;
++    }
++    auto snapshot = BuildSnapshot(tab);
++    if (i == model->active_index()) {
++      active_id = snapshot->id;
++    }
++    tabs.push_back(std::move(snapshot));
++  }
++  remote->OnTabList(std::move(tabs), active_id);
++}
++
++void SlayzoneTabsHost::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  BroadcastSnapshots();
++}
++
++void SlayzoneTabsHost::OnTabChangedAt(tabs::TabInterface* tab,
++                                     int index,
++                                     TabChangeType change_type) {
++  BroadcastSnapshots();
++}
++
++tabs::TabInterface* SlayzoneTabsHost::TabFor(int32_t id) const {
++  if (id == TabHandle::NullValue) {
++    return nullptr;
++  }
++  tabs::TabInterface* tab = TabHandle(id).Get();
++  if (!tab) {
++    return nullptr;
++  }
++  // Reject cross-window handles: if the tab isn't in our own TabStripModel,
++  // don't touch it — another Browser owns it.
++  if (browser_->tab_strip_model()->GetIndexOfTab(tab) ==
++      TabStripModel::kNoTab) {
++    return nullptr;
++  }
++  return tab;
++}
++
++void SlayzoneTabsHost::BroadcastSnapshots() {
++  if (observers_.empty()) {
++    return;
++  }
++  TabStripModel* model = browser_->tab_strip_model();
++  std::vector<slayzone::tabs::mojom::TabSnapshotPtr> tabs;
++  tabs.reserve(model->count());
++  int32_t active_id = TabHandle::NullValue;
++  for (int i = 0; i < model->count(); ++i) {
++    tabs::TabInterface* tab = model->GetTabAtIndex(i);
++    if (!tab) {
++      continue;
++    }
++    auto snapshot = BuildSnapshot(tab);
++    if (i == model->active_index()) {
++      active_id = snapshot->id;
++    }
++    tabs.push_back(std::move(snapshot));
++  }
++  for (auto& observer : observers_) {
++    std::vector<slayzone::tabs::mojom::TabSnapshotPtr> cloned;
++    cloned.reserve(tabs.size());
++    for (const auto& snap : tabs) {
++      cloned.push_back(snap->Clone());
++    }
++    observer->OnTabList(std::move(cloned), active_id);
++  }
++}
+diff --git a/chrome/browser/slayzone/slayzone_tabs_host.h b/chrome/browser/slayzone/slayzone_tabs_host.h
+new file mode 100644
+index 0000000000000..c97164e3b0e51
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_tabs_host.h
+@@ -0,0 +1,85 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_TABS_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_TABS_HOST_H_
++
++#include <cstdint>
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/slayzone/mojom/tabs.mojom.h"
++#include "chrome/browser/ui/tabs/tab_change_type.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/pending_remote.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++#include "mojo/public/cpp/bindings/remote_set.h"
++
++class Browser;
++
++namespace tabs {
++class TabInterface;
++}  // namespace tabs
++
++// Phase 6.1 — browser-side implementation of
++// `slayzone::tabs::mojom::TabsHost`. One instance per `SlayzoneBrowserView`,
++// mediating every tab-level action (create/close/select + navigate-active)
++// between region WebUIs and the owning Browser's TabStripModel.
++//
++// Observers are pushed the full TabSnapshot list on every change — cheap for
++// the <50-tab working set and lets regions render purely from the latest
++// payload. Stable tab identity comes from `tabs::TabHandle::raw_value()`,
++// which survives WebContents discard/swap.
++//
++// Binder registration from chrome://slayzone-tabbar/ +
++// chrome://slayzone-browserchrome/ to the per-BrowserView host lands in
++// Phase 6.3 alongside the JS clients; 6.1 only builds the impl.
++class SlayzoneTabsHost : public slayzone::tabs::mojom::TabsHost,
++                         public TabStripModelObserver {
++ public:
++  explicit SlayzoneTabsHost(Browser* browser);
++  SlayzoneTabsHost(const SlayzoneTabsHost&) = delete;
++  SlayzoneTabsHost& operator=(const SlayzoneTabsHost&) = delete;
++  ~SlayzoneTabsHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::tabs::mojom::TabsHost> receiver);
++
++  // slayzone::tabs::mojom::TabsHost:
++  void CreateTab(const std::string& url, CreateTabCallback callback) override;
++  void CloseTab(int32_t id) override;
++  void SelectTab(int32_t id) override;
++  void LoadUrl(const std::string& url) override;
++  void GoBack() override;
++  void GoForward() override;
++  void Reload() override;
++  void Stop() override;
++  void Subscribe(mojo::PendingRemote<slayzone::tabs::mojom::TabObserver>
++                     observer) override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      int index,
++                      TabChangeType change_type) override;
++
++ private:
++  // Look up the TabInterface for a handle `id`, or nullptr if unknown or if
++  // the tab has been destroyed. Also returns nullptr if the tab is not in
++  // this host's Browser (cross-window handles are rejected defensively).
++  tabs::TabInterface* TabFor(int32_t id) const;
++
++  // Push the current TabStripModel snapshot to every subscribed observer.
++  void BroadcastSnapshots();
++
++  const raw_ptr<Browser> browser_;
++  mojo::ReceiverSet<slayzone::tabs::mojom::TabsHost> receivers_;
++  mojo::RemoteSet<slayzone::tabs::mojom::TabObserver> observers_;
++};
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_TABS_HOST_H_
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 33a3fb56ae999..869945f282ed0 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -14,6 +14,7 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/layout_features.h"
+ #include "chrome/browser/slayzone/slayzone_layout_host.h"
++#include "chrome/browser/slayzone/slayzone_tabs_host.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/frame/slayzone_region_container.h"
+@@ -29,7 +30,8 @@
+ 
+ SlayzoneBrowserView::SlayzoneBrowserView(Browser* browser)
+     : BrowserView(browser),
+-      layout_host_(std::make_unique<SlayzoneLayoutHost>(this)) {}
++      layout_host_(std::make_unique<SlayzoneLayoutHost>(this)),
++      tabs_host_(std::make_unique<SlayzoneTabsHost>(browser)) {}
+ 
+ SlayzoneBrowserView::~SlayzoneBrowserView() = default;
+ 
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 0b678a9f37c65..e7c486625e1ea 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -16,6 +16,7 @@
+ class Browser;
+ class SlayzoneLayoutHost;
+ class SlayzoneRegionContainer;
++class SlayzoneTabsHost;
+ 
+ // Phase 5 native layout shell. Hosts the SlayZone region grid in place of the
+ // upstream tabbed browser chrome. Gated on `slayzone::kSlayzoneLayoutShell`
+@@ -39,6 +40,7 @@ class SlayzoneBrowserView : public BrowserView {
+   }
+ 
+   SlayzoneLayoutHost* layout_host() { return layout_host_.get(); }
++  SlayzoneTabsHost* tabs_host() { return tabs_host_.get(); }
+ 
+   // views::View:
+   void AddedToWidget() override;
+@@ -59,6 +61,7 @@ class SlayzoneBrowserView : public BrowserView {
+ 
+   raw_ptr<SlayzoneRegionContainer> region_container_ = nullptr;
+   std::unique_ptr<SlayzoneLayoutHost> layout_host_;
++  std::unique_ptr<SlayzoneTabsHost> tabs_host_;
+   base::WeakPtrFactory<SlayzoneBrowserView> weak_factory_{this};
+ };
+ 
+-- 
+2.52.0
+

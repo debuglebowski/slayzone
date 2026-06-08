@@ -1,0 +1,47 @@
+// Phase 7.7 terminal region data contract.
+//
+// Scope note: this .mojom lives in packages/shared/mojo-bindings/ (Phase 4.3
+// territory) as a coordinated exception, following the Phase 5.6 / 6.1 / 7.x
+// pattern. The in-tree copy at chrome/browser/slayzone/mojom/terminal.mojom
+// is what Chromium's mojom() target compiles to C++; scripts/generate.ts
+// regenerates TS bindings from this outer file. The two must stay
+// diff-identical below the module line.
+//
+// Phase 7.7 is a spike: one pty per WebUI instance, no multiplexing. The
+// host's Start() call asks the sidecar to spawn `$SHELL` in the given cwd
+// and returns the sidecar-side id. Output arrives as JSON-RPC notifications
+// (`terminal.output`) on the sidecar socket; the host fans them out to the
+// subscribed observer. Full terminal-mode catalog + exit-strategy handling
+// lives in packages/domains/terminal/ (Electron baseline) and will land in
+// the fork incrementally as needed.
+
+module slayzone.terminal.mojom;
+
+// Stream of output bytes for a single pty. The sidecar emits UTF-8
+// substrings; consumers hand them directly to xterm.js. `exit_code` is
+// delivered once, then the observer disconnects.
+interface TerminalObserver {
+  OnOutput(string data);
+  OnExit(int32 exit_code);
+};
+
+// Browser-side driver for a single sidecar-backed pty. One remote per
+// chrome://slayzone-terminal/ WebUI frame. The host keeps a single pty id
+// for the lifetime of the remote; teardown on disconnect.
+interface TerminalHost {
+  // Spawn the shell under the given cwd at the given geometry. Empty
+  // `cwd` resolves to $HOME on the sidecar side. Returns `ok == false`
+  // when the sidecar is unreachable or spawn() failed.
+  Start(string cwd, uint32 cols, uint32 rows) => (bool ok);
+
+  // Write raw bytes to the pty's stdin. No-op when Start hasn't resolved.
+  Write(string data);
+
+  // Update the pty geometry. No-op when Start hasn't resolved.
+  Resize(uint32 cols, uint32 rows);
+
+  // Register the single per-frame observer. Subsequent calls replace the
+  // previous observer. The browser does NOT push a backlog — xterm in the
+  // JS layer holds the scrollback.
+  Subscribe(pending_remote<TerminalObserver> observer);
+};

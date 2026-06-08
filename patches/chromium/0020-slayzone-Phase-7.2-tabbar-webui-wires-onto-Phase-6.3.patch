@@ -1,0 +1,283 @@
+From edde13359b759e80dd1d1b447be6bcfa650cf35e Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sun, 19 Apr 2026 19:52:32 +0200
+Subject: [slayzone] slayzone: Phase 7.2 tabbar webui (wires onto Phase 6.3
+ host)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Ports the horizontal tab strip onto chrome://slayzone-tabbar/ — the Phase
+6.3 WebUIController already existed as a placeholder; 7.2 swaps its
+static HTML for the @slayzone/webui-tabbar Vite bundle and extends the
+TabsHost Mojo surface with tab-switch instrumentation.
+
+- chrome/browser/slayzone/mojom/tabs.mojom: adds GetActiveTabTiming
+  method returning (active_id, activated_at_us). Tabbar JS correlates
+  its call-site performance.now() against the timestamp to derive the
+  <50ms switch benchmark deferred from Phase 6.
+- slayzone_tabs_host.{h,cc}: implements GetActiveTabTiming + captures
+  last_activation_tick_ in OnTabStripModelChanged when the active-tab
+  changed flag flips.
+- slayzone_tabbar_ui.cc: swaps the Phase 6.3 static placeholder body
+  for the same bundle-serving pattern as Phase 7.1 statusbar — reads
+  --slayzone-webui-bundle-dir/tabbar/dist/ with inline error HTML on
+  missing bundle, CSP identical to statusbar.
+
+No new URL host (reuses Phase 6.3 chrome://slayzone-tabbar/), no
+binder registry change (ForWebUI<SlayzoneTabbarUI>().Add<TabsHost>()
+already registered in Phase 6.3), no SlayzoneBrowserView member
+change (tabs_host() already present).
+---
+ chrome/browser/slayzone/mojom/tabs.mojom      |   9 ++
+ chrome/browser/slayzone/slayzone_tabs_host.cc |  25 +++++
+ chrome/browser/slayzone/slayzone_tabs_host.h  |   9 ++
+ .../ui/webui/slayzone/slayzone_tabbar_ui.cc   | 106 +++++++++++++++---
+ 4 files changed, 132 insertions(+), 17 deletions(-)
+
+diff --git a/chrome/browser/slayzone/mojom/tabs.mojom b/chrome/browser/slayzone/mojom/tabs.mojom
+index ad2aada804f14..9db53b1a0370b 100644
+--- a/chrome/browser/slayzone/mojom/tabs.mojom
++++ b/chrome/browser/slayzone/mojom/tabs.mojom
+@@ -29,4 +29,13 @@ interface TabsHost {
+   Reload();
+   Stop();
+   Subscribe(pending_remote<TabObserver> observer);
++
++  // Phase 7.2 — tab-switch instrumentation for the <50ms benchmark deferred
++  // from Phase 6. Returns the currently active tab's handle id plus the
++  // monotonic timestamp (in microseconds since some arbitrary browser-process
++  // epoch) at which it most recently became active. Tabbar JS subtracts its
++  // own `performance.now()` at the moment it issued `SelectTab` from this
++  // timestamp to derive end-to-end switch latency; the epoch cancels in the
++  // delta so the absolute value is irrelevant.
++  GetActiveTabTiming() => (int32 active_id, int64 activated_at_us);
+ };
+diff --git a/chrome/browser/slayzone/slayzone_tabs_host.cc b/chrome/browser/slayzone/slayzone_tabs_host.cc
+index 38e1238451df0..3d84507c8bb94 100644
+--- a/chrome/browser/slayzone/slayzone_tabs_host.cc
++++ b/chrome/browser/slayzone/slayzone_tabs_host.cc
+@@ -193,9 +193,34 @@ void SlayzoneTabsHost::OnTabStripModelChanged(
+     TabStripModel* tab_strip_model,
+     const TabStripModelChange& change,
+     const TabStripSelectionChange& selection) {
++  // Phase 7.2 — capture the moment an active-tab flip becomes observable.
++  // The tabbar JS correlates its call-site `performance.now()` against this
++  // timestamp (via GetActiveTabTiming) to derive the <50ms switch benchmark.
++  if (selection.active_tab_changed()) {
++    last_activation_tick_ = base::TimeTicks::Now();
++    content::WebContents* active = tab_strip_model->GetActiveWebContents();
++    if (active) {
++      tabs::TabInterface* tab =
++          tabs::TabInterface::MaybeGetFromContents(active);
++      last_active_id_ =
++          tab ? tab->GetHandle().raw_value() : TabHandle::NullValue;
++    } else {
++      last_active_id_ = TabHandle::NullValue;
++    }
++  }
+   BroadcastSnapshots();
+ }
+ 
++void SlayzoneTabsHost::GetActiveTabTiming(GetActiveTabTimingCallback callback) {
++  // Microseconds since TimeTicks' arbitrary epoch. Callers only use this in
++  // deltas against their own sample, so the epoch being arbitrary is fine.
++  const int64_t activated_at_us =
++      last_activation_tick_.is_null()
++          ? 0
++          : (last_activation_tick_ - base::TimeTicks()).InMicroseconds();
++  std::move(callback).Run(last_active_id_, activated_at_us);
++}
++
+ void SlayzoneTabsHost::OnTabChangedAt(tabs::TabInterface* tab,
+                                      int index,
+                                      TabChangeType change_type) {
+diff --git a/chrome/browser/slayzone/slayzone_tabs_host.h b/chrome/browser/slayzone/slayzone_tabs_host.h
+index c97164e3b0e51..313a3c7db4693 100644
+--- a/chrome/browser/slayzone/slayzone_tabs_host.h
++++ b/chrome/browser/slayzone/slayzone_tabs_host.h
+@@ -9,6 +9,7 @@
+ #include <string>
+ 
+ #include "base/memory/raw_ptr.h"
++#include "base/time/time.h"
+ #include "chrome/browser/slayzone/mojom/tabs.mojom.h"
+ #include "chrome/browser/ui/tabs/tab_change_type.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+@@ -58,6 +59,7 @@ class SlayzoneTabsHost : public slayzone::tabs::mojom::TabsHost,
+   void Stop() override;
+   void Subscribe(mojo::PendingRemote<slayzone::tabs::mojom::TabObserver>
+                      observer) override;
++  void GetActiveTabTiming(GetActiveTabTimingCallback callback) override;
+ 
+   // TabStripModelObserver:
+   void OnTabStripModelChanged(
+@@ -80,6 +82,13 @@ class SlayzoneTabsHost : public slayzone::tabs::mojom::TabsHost,
+   const raw_ptr<Browser> browser_;
+   mojo::ReceiverSet<slayzone::tabs::mojom::TabsHost> receivers_;
+   mojo::RemoteSet<slayzone::tabs::mojom::TabObserver> observers_;
++
++  // Phase 7.2 — monotonic timestamp captured whenever the active tab id
++  // flips (observed via `OnTabStripModelChanged` → `BroadcastSnapshots`).
++  // Exposed through `GetActiveTabTiming` so tabbar JS can derive end-to-end
++  // switch latency against its own `performance.now()` at call-site.
++  base::TimeTicks last_activation_tick_;
++  int32_t last_active_id_ = 0;
+ };
+ 
+ #endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_TABS_HOST_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
+index ddb80dbe3a3e4..68293c3b06af4 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.cc
+@@ -8,8 +8,12 @@
+ #include <string_view>
+ #include <utility>
+ 
++#include "base/command_line.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/memory/ref_counted_memory.h"
++#include "base/task/thread_pool.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_tabs_host.h"
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+@@ -17,40 +21,91 @@
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_ui.h"
+ #include "content/public/browser/web_ui_data_source.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
+ 
+ namespace {
+ 
+-constexpr std::string_view kTabbarHtml = R"HTML(<!doctype html>
++// CLI switch pointing at the outer-repo `packages/webui/` root. Set by
++// scripts/chromium/run.sh; when missing the tabbar UI renders an inline
++// error page so the failure mode is visible at a glance.
++constexpr char kSlayzoneWebUIBundleDirSwitch[] = "slayzone-webui-bundle-dir";
++
++// Inline fallback served when the bundle dir is missing or the file read
++// fails. Phase 7.2 — swapped in for the Phase 6.3 placeholder strip now
++// that the bundled tabbar JS ships.
++constexpr std::string_view kTabbarMissingBundleHtml =
++    R"HTML(<!doctype html>
+ <html lang="en">
+ <head>
+   <meta charset="utf-8">
+   <title>SlayZone · tabbar</title>
+   <style>
+     :root { color-scheme: light dark; }
+-    html, body { margin: 0; height: 100%; font: 12px/1.3 system-ui, sans-serif; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
+     body {
+-      display: flex; align-items: center; padding: 0 8px;
+-      background: color-mix(in oklab, Canvas, CanvasText 4%);
+-      color: CanvasText;
+-      outline: 1px solid color-mix(in oklab, Canvas, CanvasText 12%);
+-      outline-offset: -1px;
++      display: flex; align-items: center; padding: 0 10px;
++      background: #3a1a1a; color: #fca5a5;
++      border-bottom: 1px solid #6b2020;
+     }
+-    .tag { opacity: 0.55; font-size: 11px; }
+   </style>
+ </head>
+ <body>
+-  <span class="tag">tabbar · Mojo TabsHost bound · UI lands in 7.2</span>
++  <span>tabbar: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
+ </body>
+ </html>)HTML";
+ 
+-bool ShouldHandleEmptyPath(const std::string& path) {
+-  return path.empty();
++base::FilePath ResolveBundleRoot() {
++  const base::CommandLine* cli = base::CommandLine::ForCurrentProcess();
++  if (!cli->HasSwitch(kSlayzoneWebUIBundleDirSwitch)) {
++    return base::FilePath();
++  }
++  return cli->GetSwitchValuePath(kSlayzoneWebUIBundleDirSwitch);
++}
++
++scoped_refptr<base::RefCountedMemory> ReadBundleFileOnWorker(
++    base::FilePath full_path,
++    bool is_index) {
++  std::string contents;
++  if (base::ReadFileToString(full_path, &contents)) {
++    return base::MakeRefCounted<base::RefCountedString>(std::move(contents));
++  }
++  if (is_index) {
++    return base::MakeRefCounted<base::RefCountedString>(
++        std::string(kTabbarMissingBundleHtml));
++  }
++  return base::MakeRefCounted<base::RefCountedString>(std::string());
++}
++
++bool ShouldHandleAnyPath(const std::string& path) {
++  return true;
+ }
+ 
+-void HandleRequest(const std::string& path,
+-                   content::WebUIDataSource::GotDataCallback callback) {
+-  std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
+-      std::string(kTabbarHtml)));
++void HandleTabbarRequest(const std::string& path,
++                         content::WebUIDataSource::GotDataCallback callback) {
++  base::FilePath bundle_root = ResolveBundleRoot();
++  if (bundle_root.empty()) {
++    std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
++        std::string(kTabbarMissingBundleHtml)));
++    return;
++  }
++
++  std::string rel = path;
++  if (!rel.empty() && rel.front() == '/') {
++    rel.erase(0, 1);
++  }
++  const bool is_index = rel.empty();
++  if (is_index) {
++    rel = "index.html";
++  }
++
++  const base::FilePath full = bundle_root.AppendASCII("tabbar")
++                                   .AppendASCII("dist")
++                                   .AppendASCII(rel);
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ReadBundleFileOnWorker, full, is_index),
++      std::move(callback));
+ }
+ 
+ }  // namespace
+@@ -59,8 +114,25 @@ SlayzoneTabbarUI::SlayzoneTabbarUI(content::WebUI* web_ui)
+     : content::WebUIController(web_ui) {
+   auto* source = content::WebUIDataSource::CreateAndAdd(
+       Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneTabbarHost);
+-  source->SetRequestFilter(base::BindRepeating(&ShouldHandleEmptyPath),
+-                           base::BindRepeating(&HandleRequest));
++  source->SetRequestFilter(base::BindRepeating(&ShouldHandleAnyPath),
++                           base::BindRepeating(&HandleTabbarRequest));
++  // The Vite-built bundle emits a hashed <script> + <link rel=stylesheet>
++  // under /assets/. Allow those from the same chrome:// origin, plus
++  // chrome://resources/ for the Mojo JS runtime that the generated tabs
++  // bindings import at module evaluation time.
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ScriptSrc,
++      "script-src 'self' chrome://resources;");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::StyleSrc,
++      "style-src 'self' 'unsafe-inline';");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::FontSrc,
++      "font-src 'self' data:;");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ImgSrc,
++      "img-src 'self' data:;");
++  source->DisableTrustedTypesCSP();
+ }
+ 
+ SlayzoneTabbarUI::~SlayzoneTabbarUI() = default;
+-- 
+2.52.0
+

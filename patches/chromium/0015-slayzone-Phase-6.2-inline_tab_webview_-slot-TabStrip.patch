@@ -1,0 +1,306 @@
+From 400d0c0b87a8e9d933eaa6d4c5cfe582b5922da1 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sun, 19 Apr 2026 02:38:51 +0200
+Subject: slayzone: Phase 6.2 inline_tab_webview_ slot + TabStripModel wiring
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SlayzoneRegionContainer replaces mid's right pane (previously a single
+50% browserchrome placeholder WebView) with a vertical BoxLayoutView that
+stacks:
+  - browserchrome placeholder (40px URL-bar strip, unchanged routing),
+  - inline_tab_webview_: a native views::WebView with no chrome:// slot
+    of its own, no entry in `regions_`, and no kRegionIds membership.
+
+SlayzoneBrowserView inherits TabStripModelObserver, installs a
+ScopedObservation on the Browser's TabStripModel at AddedToWidget, and
+calls SetWebContents(active) both synchronously at wire-up time (to
+catch the tab that already exists on normal Browser startup) and on
+every non-selection-only change.
+
+Phase 5.3 spike removed: MaybeSpikeTerminalSlot(),
+--slayzone-spike-url, kSlayzoneSpikeDefaultUrl, and the PostTask dance
+that deferred the spike until the first tab landed are all gone. The
+terminal slot is back to its placeholder.
+
+inline_tab_webview_ is a peer views::WebView owned by the view tree —
+this is the final "Electron WebContentsView overlay, eliminated"
+shape promised by Phase 6.
+---
+ chrome/browser/slayzone/layout_features.h     |  8 ---
+ .../ui/views/frame/slayzone_browser_view.cc   | 58 +++++++------------
+ .../ui/views/frame/slayzone_browser_view.h    | 26 +++++----
+ .../views/frame/slayzone_region_container.cc  | 24 +++++++-
+ .../views/frame/slayzone_region_container.h   | 16 ++++-
+ 5 files changed, 71 insertions(+), 61 deletions(-)
+
+diff --git a/chrome/browser/slayzone/layout_features.h b/chrome/browser/slayzone/layout_features.h
+index 3af53e7f9fcba..527a9dcbcbeba 100644
+--- a/chrome/browser/slayzone/layout_features.h
++++ b/chrome/browser/slayzone/layout_features.h
+@@ -16,14 +16,6 @@ BASE_DECLARE_FEATURE(kSlayzoneLayoutShell);
+ 
+ bool IsLayoutShellEnabled();
+ 
+-// Phase 5.3 feasibility checkpoint. When present, drops the active
+-// TabStripModel WebContents into the terminal region slot after navigating
+-// it to the switch value (defaults to https://example.com when empty).
+-// Intended as a throwaway spike — removed once 5.3 clears + Phase 6 wires
+-// real tab hosting.
+-inline constexpr char kSlayzoneSpikeUrlSwitch[] = "slayzone-spike-url";
+-inline constexpr char kSlayzoneSpikeDefaultUrl[] = "https://example.com/";
+-
+ }  // namespace slayzone
+ 
+ #endif  // CHROME_BROWSER_SLAYZONE_LAYOUT_FEATURES_H_
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 869945f282ed0..36002e416674c 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -7,26 +7,18 @@
+ #include <memory>
+ #include <string>
+ 
+-#include "base/command_line.h"
+-#include "base/functional/bind.h"
+-#include "base/logging.h"
+-#include "base/task/sequenced_task_runner.h"
+ #include "chrome/browser/profiles/profile.h"
+-#include "chrome/browser/slayzone/layout_features.h"
+ #include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/slayzone/slayzone_tabs_host.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/frame/slayzone_region_container.h"
+-#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/web_contents.h"
+ #include "ui/base/accelerators/accelerator.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+-#include "ui/base/page_transition_types.h"
+ #include "ui/events/event_constants.h"
+ #include "ui/events/keycodes/keyboard_codes.h"
+ #include "ui/views/controls/webview/webview.h"
+-#include "url/gurl.h"
+ 
+ SlayzoneBrowserView::SlayzoneBrowserView(Browser* browser)
+     : BrowserView(browser),
+@@ -50,11 +42,12 @@ void SlayzoneBrowserView::AddedToWidget() {
+ 
+   RegisterRegionFocusAccelerators();
+ 
+-  // Phase 5.3 feasibility spike runs after the initial tab lands in the
+-  // TabStripModel.
+-  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+-      FROM_HERE, base::BindOnce(&SlayzoneBrowserView::MaybeSpikeTerminalSlot,
+-                                weak_factory_.GetWeakPtr()));
++  // Phase 6.2 — BrowserView is already a TabStripModelObserver and already
++  // registered against the strip; we just override OnTabStripModelChanged
++  // below and chain to the base. Sync once synchronously for the initial
++  // paint since the first tab typically exists by AddedToWidget; subsequent
++  // activations (and any late initial tab) flow through the override.
++  SyncInlineTabWebView();
+ }
+ 
+ void SlayzoneBrowserView::RegisterRegionFocusAccelerators() {
+@@ -92,39 +85,28 @@ void SlayzoneBrowserView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+   }
+ }
+ 
+-void SlayzoneBrowserView::MaybeSpikeTerminalSlot() {
+-  const base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
+-  if (!cmd->HasSwitch(slayzone::kSlayzoneSpikeUrlSwitch)) {
+-    return;
++void SlayzoneBrowserView::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  BrowserView::OnTabStripModelChanged(tab_strip_model, change, selection);
++  if (selection.active_tab_changed() ||
++      change.type() != TabStripModelChange::kSelectionOnly) {
++    SyncInlineTabWebView();
+   }
++}
++
++void SlayzoneBrowserView::SyncInlineTabWebView() {
+   if (!region_container_) {
+     return;
+   }
+-  views::WebView* slot = region_container_->GetRegion("terminal");
++  views::WebView* slot = region_container_->inline_tab_webview();
+   if (!slot) {
+-    LOG(WARNING) << "[slayzone] spike: terminal slot missing";
+-    return;
+-  }
+-  TabStripModel* tab_strip = browser()->tab_strip_model();
+-  content::WebContents* active = tab_strip->GetActiveWebContents();
+-  if (!active) {
+-    LOG(WARNING) << "[slayzone] spike: no active WebContents yet";
+-    return;
+-  }
+-  std::string url_str = cmd->GetSwitchValueASCII(slayzone::kSlayzoneSpikeUrlSwitch);
+-  if (url_str.empty()) {
+-    url_str = slayzone::kSlayzoneSpikeDefaultUrl;
+-  }
+-  GURL url(url_str);
+-  if (!url.is_valid()) {
+-    LOG(WARNING) << "[slayzone] spike: invalid URL " << url_str;
+     return;
+   }
+-  content::NavigationController::LoadURLParams params(url);
+-  params.transition_type = ui::PAGE_TRANSITION_TYPED;
+-  active->GetController().LoadURLWithParams(params);
++  content::WebContents* active =
++      browser()->tab_strip_model()->GetActiveWebContents();
+   slot->SetWebContents(active);
+-  LOG(INFO) << "[slayzone] spike: terminal <- " << url.spec();
+ }
+ 
+ BEGIN_METADATA(SlayzoneBrowserView)
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index e7c486625e1ea..7602e1478b71c 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -8,7 +8,7 @@
+ #include <memory>
+ 
+ #include "base/memory/raw_ptr.h"
+-#include "base/memory/weak_ptr.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/gfx/geometry/rect.h"
+@@ -24,8 +24,11 @@ class SlayzoneTabsHost;
+ //
+ // Phase 5.2 installs the 10-slot placeholder grid as a later sibling of the
+ // upstream BrowserView children, overlaying the tabstrip/toolbar/contents in
+-// paint order. Phase 5.3 wires the feasibility spike that injects a live
+-// WebContents into the terminal slot via command-line flag.
++// paint order. Phase 6.2 adds an `inline_tab_webview_` slot that hosts the
++// Browser's active WebContents; this class overrides
++// `BrowserView::OnTabStripModelChanged` (BrowserView is already the
++// TabStripModelObserver registered against the strip) and flips
++// `SetWebContents()` on activation, replacing the Phase 5.3 spike.
+ class SlayzoneBrowserView : public BrowserView {
+   METADATA_HEADER(SlayzoneBrowserView, BrowserView)
+ 
+@@ -49,20 +52,23 @@ class SlayzoneBrowserView : public BrowserView {
+   // ui::AcceleratorTarget (via BrowserView):
+   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+ 
+- private:
+-  // Phase 5.3 feasibility spike. If the `--slayzone-spike-url` switch is
+-  // present, navigate the active tab's WebContents to the spike URL and drop
+-  // it into the terminal region slot. Deferred to a PostTask because the
+-  // active tab is not guaranteed to exist at AddedToWidget time.
+-  void MaybeSpikeTerminalSlot();
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
+ 
++ private:
+   // Phase 5.5 — register Cmd+1 … Cmd+9 to focus region slots by index.
+   void RegisterRegionFocusAccelerators();
+ 
++  // Point `inline_tab_webview_` at the Browser's currently-active
++  // WebContents (or null if the strip is empty). Idempotent.
++  void SyncInlineTabWebView();
++
+   raw_ptr<SlayzoneRegionContainer> region_container_ = nullptr;
+   std::unique_ptr<SlayzoneLayoutHost> layout_host_;
+   std::unique_ptr<SlayzoneTabsHost> tabs_host_;
+-  base::WeakPtrFactory<SlayzoneBrowserView> weak_factory_{this};
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.cc b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+index 7ba2a51fb59ec..8360dc3cd0998 100644
+--- a/chrome/browser/ui/views/frame/slayzone_region_container.cc
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+@@ -79,20 +79,40 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
+ 
+   add_region(center, "taskheader", /*fixed_axis_px=*/40, /*flex_weight=*/0);
+ 
+-  // mid: SlayzoneSplitView — tasklist ⇆ browserchrome, Phase 5.4 divider.
++  // mid: SlayzoneSplitView — tasklist ⇆ (browserchrome URL strip over
++  // inline tab WebView). Phase 5.4 divider + Phase 6.2 inline tab slot.
+   auto tasklist_wv = std::make_unique<views::WebView>(browser_context);
+   tasklist_wv->LoadInitialURL(PlaceholderUrl("tasklist"));
+   views::WebView* tasklist_raw = tasklist_wv.get();
+   regions_.emplace("tasklist", tasklist_raw);
+ 
++  // Right pane: vertical stack — thin browserchrome URL bar strip + the
++  // inline tab WebView that Phase 6 drives from TabStripModel.
++  auto right_owned = std::make_unique<views::BoxLayoutView>();
++  right_owned->SetOrientation(views::BoxLayout::Orientation::kVertical);
++  right_owned->SetCrossAxisAlignment(
++      views::BoxLayout::CrossAxisAlignment::kStretch);
++
+   auto browserchrome_wv = std::make_unique<views::WebView>(browser_context);
+   browserchrome_wv->LoadInitialURL(PlaceholderUrl("browserchrome"));
++  browserchrome_wv->SetPreferredSize(gfx::Size(/*unused*/ 0, 40));
+   views::WebView* browserchrome_raw = browserchrome_wv.get();
+   regions_.emplace("browserchrome", browserchrome_raw);
++  right_owned->AddChildView(std::move(browserchrome_wv));
++
++  // inline_tab_webview_: native views::WebView with no initial URL and no
++  // entry in `regions_` — it is not a chrome://slayzone-* WebUI slot but a
++  // pure presentation surface for the Browser's active WebContents. Phase
++  // 6.2 (SlayzoneBrowserView) observes TabStripModel and flips SetWebContents
++  // on activation.
++  auto tabview_owned = std::make_unique<views::WebView>(browser_context);
++  inline_tab_webview_ = tabview_owned.get();
++  right_owned->AddChildView(std::move(tabview_owned));
++  right_owned->SetFlexForView(inline_tab_webview_, 1);
+ 
+   auto mid_split = std::make_unique<SlayzoneSplitView>(
+       SlayzoneSplitView::Orientation::kHorizontal, std::move(tasklist_wv),
+-      std::move(browserchrome_wv), /*initial_fraction=*/0.5);
++      std::move(right_owned), /*initial_fraction=*/0.5);
+   views::View* mid = center->AddChildView(std::move(mid_split));
+   center->SetFlexForView(mid, 2);
+ 
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.h b/chrome/browser/ui/views/frame/slayzone_region_container.h
+index 18eded4cc52ad..a0fd77f4bdd82 100644
+--- a/chrome/browser/ui/views/frame/slayzone_region_container.h
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.h
+@@ -23,8 +23,13 @@ class WebView;
+ }
+ 
+ // Phase 5.2 — native layout grid hosting one `views::WebView` per SlayZone
+-// region. Every slot loads `chrome://slayzone-placeholder/?region=<id>` until
++// region. Every named slot loads `chrome://slayzone-placeholder/<id>` until
+ // Phase 7 swaps individual slots for their real WebUIs.
++//
++// Phase 6.2 adds `inline_tab_webview_`: a native `views::WebView` with no
++// chrome:// slot of its own, stacked under the `browserchrome` placeholder
++// in `mid`'s right pane. `SlayzoneBrowserView` drives it via
++// `SetWebContents()` from the Browser's `TabStripModel`.
+ class SlayzoneRegionContainer : public views::BoxLayoutView {
+   METADATA_HEADER(SlayzoneRegionContainer, views::BoxLayoutView)
+ 
+@@ -41,12 +46,17 @@ class SlayzoneRegionContainer : public views::BoxLayoutView {
+   SlayzoneRegionContainer& operator=(const SlayzoneRegionContainer&) = delete;
+   ~SlayzoneRegionContainer() override;
+ 
+-  // Returns the WebView for `region_id`, or nullptr if unknown. Phase 5.3+
+-  // uses this to inject real WebContents into the feasibility slot.
++  // Returns the WebView for `region_id`, or nullptr if unknown.
+   views::WebView* GetRegion(std::string_view region_id);
+ 
++  // The native WebView that hosts the Browser's currently-active WebContents.
++  // Owned by the view tree; `SlayzoneBrowserView` drives `SetWebContents()` on
++  // it as the TabStripModel selection changes.
++  views::WebView* inline_tab_webview() { return inline_tab_webview_; }
++
+  private:
+   base::flat_map<std::string, raw_ptr<views::WebView>> regions_;
++  raw_ptr<views::WebView> inline_tab_webview_ = nullptr;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_REGION_CONTAINER_H_
+-- 
+2.52.0
+

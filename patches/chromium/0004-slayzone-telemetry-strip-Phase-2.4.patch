@@ -1,0 +1,134 @@
+From 94863db1e50e951ce8edbc5e128bed49dec705e3 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 07:41:10 +0200
+Subject: [4/7] slayzone: telemetry strip (Phase 2.4)
+
+Surgical source-level hard-offs for the three Google phone-home
+surfaces we don't ship. Pairs with args.gn flags
+(safe_browsing_mode=0, disable_fieldtrial_testing_config=true,
+use_official_google_api_keys=false) in the slayzone-side release.gn
+that the build scripts emit. The accessor short-circuit is the
+single chokepoint for UMA + Crashpad upload consent; the
+MetricsService + VariationsService patches are defense-in-depth so
+call sites that don't go through the accessor still observe the
+off-state.
+
+- components/variations/service/variations_service.cc:
+  IsFetchingEnabled() -> false unconditionally (unless tests force
+  it via g_should_fetch_for_testing). Kills the periodic seed fetch
+  from variations.googlezip.net; DoActualFetch + the seed fetcher
+  startup both bail via their existing IsFetchingEnabled gate.
+- chrome/browser/metrics/chrome_metrics_service_accessor.cc:
+  IsMetricsAndCrashReportingEnabled(PrefService*) returns false
+  after the testing-override, bypassing the local-state pref read
+  and every policy path below it. Both UMA upload scheduler and
+  Crashpad upload consent ride this gate.
+- components/metrics/metrics_service.cc: EnableRecording() early
+  return before state transition so histograms never start
+  accumulating in the first place. No-op if the accessor gate
+  already refuses consent, but removes the "recording-but-not-
+  uploading" failure mode.
+
+Scope notes: Safe Browsing phone-home is compiled out via
+safe_browsing_mode=0 in args.gn (no source patch needed at this
+Phase 2 slice). Field-trial seed consumption still runs with
+whatever ships embedded; the new patch blocks refetch.
+---
+ .../chrome_metrics_service_accessor.cc        |  6 ++++
+ components/metrics/metrics_service.cc         | 31 ++++---------------
+ .../variations/service/variations_service.cc  | 17 +++-------
+ 3 files changed, 16 insertions(+), 38 deletions(-)
+
+diff --git a/chrome/browser/metrics/chrome_metrics_service_accessor.cc b/chrome/browser/metrics/chrome_metrics_service_accessor.cc
+index 0a3af24345c06..b2961aa7e0431 100644
+--- a/chrome/browser/metrics/chrome_metrics_service_accessor.cc
++++ b/chrome/browser/metrics/chrome_metrics_service_accessor.cc
+@@ -38,6 +38,12 @@ bool ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled(
+   if (g_metrics_consent_for_testing)
+     return *g_metrics_consent_for_testing;
+ 
++  // SlayZone telemetry strip (Phase 2.4): UMA + Crashpad upload are never
++  // consented in our fork. Short-circuit above every downstream check so
++  // the upload scheduler, log store, and crash uploader all observe a
++  // hard "no" regardless of policy / local-state drift.
++  return false;
++
+   // TODO(blundell): Fix the unittests that don't set up the UI thread and
+   // change this to just be DCHECK_CURRENTLY_ON().
+   DCHECK(!content::BrowserThread::IsThreadInitialized(
+diff --git a/components/metrics/metrics_service.cc b/components/metrics/metrics_service.cc
+index 5f29b77f684a7..0b8d42aca53ec 100644
+--- a/components/metrics/metrics_service.cc
++++ b/components/metrics/metrics_service.cc
+@@ -496,31 +496,12 @@ bool MetricsService::WasLastShutdownClean() const {
+ void MetricsService::EnableRecording() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+-  if (recording_state_ == ACTIVE) {
+-    return;
+-  }
+-  recording_state_ = ACTIVE;
+-
+-  state_manager_->ForceClientIdCreation();
+-  client_->SetMetricsClientId(state_manager_->client_id());
+-
+-  if (!current_log_) {
+-    OpenNewLog();
+-  }
+-
+-  delegating_provider_.OnRecordingEnabled();
+-
+-  // Fill in the system profile in the log and persist it (to prefs, .pma
+-  // and crashpad). This includes running the providers so that information
+-  // like field trials and hardware info is provided. If Chrome crashes
+-  // before this log is completed, the .pma file will have this system
+-  // profile.
+-  RecordCurrentEnvironment(current_log_.get(), /*complete=*/false);
+-
+-  base::RemoveActionCallback(action_callback_);
+-  action_callback_ = base::BindRepeating(&MetricsService::OnUserAction,
+-                                         base::Unretained(this));
+-  base::AddActionCallback(action_callback_);
++  // SlayZone telemetry strip (Phase 2.4): never start UMA recording.
++  // Pairs with the hard-`false` in
++  // ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled so
++  // callers that only gate on the consent layer also see no histograms
++  // collected here in the first place. The body of the upstream
++  // implementation is removed so -Wunreachable-code doesn't trip.
+ }
+ 
+ void MetricsService::DisableRecording() {
+diff --git a/components/variations/service/variations_service.cc b/components/variations/service/variations_service.cc
+index 0a91079cefd53..521074c045bcb 100644
+--- a/components/variations/service/variations_service.cc
++++ b/components/variations/service/variations_service.cc
+@@ -221,22 +221,13 @@ bool GetInstanceManipulations(const net::HttpResponseHeaders* headers,
+ 
+ // Variations seed fetching is only enabled in official Chrome builds, if a URL
+ // is specified on the command line, and for testing.
++// SlayZone: variations.googlezip.net is a Google phone-home channel; we never
++// consume the seed, so hard-disable the fetch regardless of branding or
++// command-line switches unless the tests are driving.
+ bool IsFetchingEnabled() {
+-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+-          switches::kDisableVariationsSeedFetch)) {
++  if (!g_should_fetch_for_testing) {
+     return false;
+   }
+-#else
+-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+-          switches::kVariationsServerURL) &&
+-      !g_should_fetch_for_testing) {
+-    DVLOG(1)
+-        << "Not performing repeated fetching in unofficial build without --"
+-        << switches::kVariationsServerURL << " specified.";
+-    return false;
+-  }
+-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+   return true;
+ }
+ 
+-- 
+2.52.0
+

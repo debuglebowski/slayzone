@@ -1,0 +1,97 @@
+// cap-shell-4 inline-task-browser data contract.
+//
+// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory) as
+// the outer source-of-truth; the in-tree copy at
+// chrome/browser/slayzone/mojom/embedded_tab.mojom is what Chromium's mojom()
+// target compiles to C++. scripts/generate.ts regenerates TS bindings from
+// this file. The two must stay diff-identical below the module line.
+//
+// The shell's <TaskBrowserView> drives this surface via window.api.browser.*:
+//   CreateView({taskId, tabId, url, bounds, visible}) -> viewId
+//   SetBounds(viewId, bounds) on every rAF tick while mounted + visible
+//   Navigate / GoBack / GoForward / Reload / Stop / Focus(viewId, …)
+//   DestroyView(viewId) on unmount; DestroyAllForTask(taskId) on task switch
+//
+// Per-task LRU: the host keeps up to 10 WebContents cached across tab-flips
+// so back/forward history survives when the user flips tabs; the currently
+// active view is never evictable. Evicted entries are silently destroyed and
+// the renderer re-creates on next mount.
+//
+// Deviation from orchestrator's initial brief (SetActiveTab/HideActiveTab
+// keyed by task_id): the existing useBrowserViewBounds / useBrowserViewLifecycle
+// hooks in packages/domains/task-browser/ already call createView + setBounds
+// with a browser-assigned viewId. Matching that contract preserves existing
+// renderer behavior (per CLAUDE.md "never drop existing functionality").
+
+module slayzone.embedded_tab.mojom;
+
+// Bounds struct defined inline to keep this outer mojom Chromium-import-free
+// (scripts/generate.ts only roots at packages/shared/mojo-bindings/, so
+// `import "ui/gfx/geometry/mojom/geometry.mojom"` fails to resolve). The C++
+// host converts to gfx::Rect at the edge.
+struct EmbeddedTabBounds {
+  int32 x;
+  int32 y;
+  int32 width;
+  int32 height;
+};
+
+struct CreateViewParams {
+  string task_id;
+  string tab_id;
+  string url;
+  EmbeddedTabBounds bounds;
+  bool visible;
+};
+
+interface EmbeddedTabHost {
+  // Allocate a new embedded tab. Returns browser-assigned view_id; empty
+  // string on failure (unreachable container / bad params). The renderer
+  // keys every subsequent call on view_id.
+  CreateView(CreateViewParams params) => (string view_id);
+
+  // Destroy a single view and free its LRU slot.
+  DestroyView(string view_id);
+
+  // Destroy every view for task_id — task-detail unmount, project switch.
+  DestroyAllForTask(string task_id);
+
+  // Reposition the overlay WebView. Called per-rAF; no-ops if unchanged.
+  SetBounds(string view_id, EmbeddedTabBounds bounds);
+
+  // Show / hide. Hide detaches from the overlay slot; show re-attaches at
+  // the last SetBounds rect.
+  SetVisible(string view_id, bool visible);
+
+  // Navigation — no-ops when view_id is unknown.
+  Navigate(string view_id, string url);
+  GoBack(string view_id);
+  GoForward(string view_id);
+  Reload(string view_id, bool ignore_cache);
+  Stop(string view_id);
+  Focus(string view_id);
+  ToggleDevtools(string view_id);
+
+  // One observer per remote. Later Subscribe calls replace the previous
+  // observer. No event backlog — renderer only receives events for
+  // navigations that happen after Subscribe resolves.
+  Subscribe(pending_remote<EmbeddedTabObserver> observer);
+};
+
+interface EmbeddedTabObserver {
+  // Event-name schema mirrors packages/domains/task-browser/src/client/
+  // useBrowserViewEvents.ts (the Electron baseline the renderer reads). Keep
+  // names 1:1 so the shim can forward without reshaping payloads.
+  OnDidNavigate(string view_id,
+                string url,
+                bool can_go_back,
+                bool can_go_forward);
+  OnPageTitleUpdated(string view_id, string title);
+  OnDidStartLoading(string view_id);
+  OnDidStopLoading(string view_id);
+  OnDomReady(string view_id);
+  OnDidFailLoad(string view_id,
+                int32 error_code,
+                string error_description,
+                string url);
+};

@@ -1,0 +1,92 @@
+From 0c80404ac1fd064295965ff04e55a406b17e2419 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 06:47:04 +0200
+Subject: [slayzone] slayzone: Phase 16.1 slayzone:// deep-link scheme +
+ sidecar routing
+
+Registers slayzone:// in CFBundleURLTypes and intercepts slayzone://
+URLs in AppController's application:openURLs: to forward them to the
+sidecar via auth:deep-link. Everything else flows through the existing
+GURL path.
+
+Momentum assumptions (see Phase 16 plan, task 94394df4):
+- Auth state shared via sidecar broadcast (auth:state-changed), not
+  via a shared cookie domain. Renderers see only a sanitized snapshot;
+  tokens never leave the sidecar process.
+- Sidecar owns session.json on disk (0600). Convex auth handshake is
+  driven by auth:github-sign-in-start which mirrors the existing
+  Electron flow (packages/apps/app/src/main/index.ts:371).
+- Mac-only path; Linux/Windows deep-link routing deferred per pin.
+---
+ chrome/app/app-Info.plist            |  8 ++++++++
+ chrome/browser/app_controller_mac.mm | 16 +++++++++++++++-
+ 2 files changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/app/app-Info.plist b/chrome/app/app-Info.plist
+index 6fada0a2b1a1f..0cb2454180252 100644
+--- a/chrome/app/app-Info.plist
++++ b/chrome/app/app-Info.plist
+@@ -201,6 +201,14 @@
+ 				<string>%DIRECT_LAUNCH_URL_SCHEME%</string>
+ 			</array>
+ 		</dict>
++		<dict>
++			<key>CFBundleURLName</key>
++			<string>SlayZone deep link (Phase 16.1)</string>
++			<key>CFBundleURLSchemes</key>
++			<array>
++				<string>slayzone</string>
++			</array>
++		</dict>
+ 	</array>
+ 	<key>LSEnvironment</key>
+ 	<dict>
+diff --git a/chrome/browser/app_controller_mac.mm b/chrome/browser/app_controller_mac.mm
+index 210308ebaa5de..bbc3198b857a9 100644
+--- a/chrome/browser/app_controller_mac.mm
++++ b/chrome/browser/app_controller_mac.mm
+@@ -21,6 +21,7 @@
+ #include "base/debug/dump_without_crashing.h"
+ #include "base/files/file_path.h"
+ #include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/mac/mac_util.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+@@ -49,6 +50,7 @@
+ #include "chrome/browser/lifetime/browser_shutdown.h"
+ #include "chrome/browser/mac/auth_session_request.h"
+ #include "chrome/browser/mac/key_window_notifier.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
+ #include "chrome/browser/policy/chrome_browser_policy_connector.h"
+ #include "chrome/browser/prefs/incognito_mode_prefs.h"
+ #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+@@ -1914,12 +1916,24 @@ class AppControllerProfileObserver : public ProfileAttributesStorage::Observer,
+ - (void)application:(NSApplication*)sender openURLs:(NSArray<NSURL*>*)urls {
+   std::vector<GURL> gurlVector;
+   for (NSURL* url in urls) {
++    // SlayZone Phase 16.1: slayzone:// is the OAuth deep-link scheme.
++    // Route to the sidecar via auth:deep-link; do not feed it to the tab
++    // machinery. Sidecar owns the OAuth flow + token storage; the renderer
++    // never sees the callback URL.
++    std::string urlString = base::SysNSStringToUTF8([url absoluteString]);
++    if (urlString.compare(0, 11, "slayzone://") == 0) {
++      base::DictValue params;
++      params.Set("url", urlString);
++      slayzone::SidecarClient::GetInstance()->Call(
++          "auth:deep-link", std::move(params),
++          base::DoNothingAs<void(base::DictValue)>());
++      continue;
++    }
+     // Handle the google-chrome:// scheme (and chromium://).
+     // We convert every URL to string here to reuse the shared
+     // StripGoogleChromeScheme logic. While we could check [url scheme] first
+     // for efficiency, this path is user-initiated and low-frequency, so sharing
+     // the stripping logic is preferred.
+-    std::string urlString = base::SysNSStringToUTF8([url absoluteString]);
+     base::FilePath::StringViewType urlStringView = urlString;
+     if (startup::StripGoogleChromeScheme(urlStringView)) {
+       GURL gurl(urlStringView);
+-- 
+2.52.0
+

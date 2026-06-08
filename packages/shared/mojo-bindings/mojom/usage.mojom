@@ -1,0 +1,48 @@
+// Phase 9.2 usage-analytics overlay data contract (source of truth).
+// In-tree mirror: chromium/src/chrome/browser/slayzone/mojom/usage.mojom.
+// Keep diff-identical below the module line.
+
+module slayzone.usage.mojom;
+
+struct DayBucket {
+  string date;
+  int64 input_tokens;
+  int64 output_tokens;
+  int64 cache_read_tokens;
+  int64 cache_write_tokens;
+  double cost_usd;
+};
+
+struct ModelBucket {
+  string model;
+  int64 input_tokens;
+  int64 output_tokens;
+  double cost_usd;
+};
+
+struct TaskBucket {
+  string task_id;
+  string task_title;
+  int64 total_tokens;
+  double cost_usd;
+  int32 message_count;
+};
+
+struct UsageSnapshot {
+  int64 total_input_tokens;
+  int64 total_output_tokens;
+  int64 total_cache_read_tokens;
+  int64 total_cache_write_tokens;
+  double total_cost_usd;
+  int32 total_messages;
+  array<DayBucket> by_day;
+  array<ModelBucket> by_model;
+  array<TaskBucket> by_task;
+  bool provider_supported;
+  string provider_label;
+};
+
+interface UsageHost {
+  GetSnapshot(string range_key, string provider_filter)
+      => (UsageSnapshot snapshot);
+};

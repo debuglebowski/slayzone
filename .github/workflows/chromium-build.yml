@@ -1,0 +1,123 @@
+name: Chromium Build
+
+# Stage B draft. Runners in the matrix are referenced by label only;
+# self-hosted provisioning lands in Stage C (reclient + real runners
+# with ~150 GB disks). Triggered manually for now so CI minutes on
+# hosted runners are never accidentally burned on a 2-hour Chromium build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chromium_version:
+        description: "Chromium tag to build (defaults to chromium/CHROMIUM_VERSION)"
+        required: false
+        type: string
+      build_target:
+        description: "autoninja target"
+        required: false
+        default: "chrome"
+        type: string
+
+concurrency:
+  group: chromium-build-${{ github.ref }}-${{ github.event.inputs.chromium_version }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: "${{ matrix.os }} / ${{ matrix.arch }}"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: mac
+            arch: arm64
+            runner: [self-hosted, chromium, mac, arm64]
+            gn_args_file: scripts/chromium/args/release-mac-arm64.gn
+            artifact: Chromium.app
+          - os: mac
+            arch: x64
+            runner: [self-hosted, chromium, mac, x64]
+            gn_args_file: scripts/chromium/args/release-mac-x64.gn
+            artifact: Chromium.app
+          - os: win
+            arch: x64
+            runner: [self-hosted, chromium, windows, x64]
+            gn_args_file: scripts/chromium/args/release-win-x64.gn
+            artifact: chrome.exe
+          - os: win
+            arch: arm64
+            runner: [self-hosted, chromium, windows, arm64]
+            gn_args_file: scripts/chromium/args/release-win-arm64.gn
+            artifact: chrome.exe
+          - os: linux
+            arch: x64
+            runner: [self-hosted, chromium, linux, x64]
+            gn_args_file: scripts/chromium/args/release-linux-x64.gn
+            artifact: chrome
+          - os: linux
+            arch: arm64
+            runner: [self-hosted, chromium, linux, arm64]
+            gn_args_file: scripts/chromium/args/release-linux-arm64.gn
+            artifact: chrome
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve Chromium version
+        id: version
+        shell: bash
+        run: |
+          v="${{ github.event.inputs.chromium_version }}"
+          if [[ -z "$v" ]]; then v="$(cat chromium/CHROMIUM_VERSION)"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure depot_tools
+        shell: bash
+        run: |
+          if [[ ! -d tools/depot_tools/.git ]]; then
+            git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git tools/depot_tools
+          fi
+          echo "$GITHUB_WORKSPACE/tools/depot_tools" >> "$GITHUB_PATH"
+
+      # Self-hosted runners are expected to keep a warm chromium/src/ checkout
+      # across jobs. The fetch step is idempotent: no-op if already present.
+      - name: Fetch + sync Chromium ${{ steps.version.outputs.version }}
+        shell: bash
+        env:
+          DEPOT_TOOLS_UPDATE: "0"
+          DEPOT_TOOLS_METRICS: "0"
+        run: scripts/chromium/fetch.sh
+
+      - name: Apply SlayZone patches
+        shell: bash
+        run: scripts/chromium/apply-patches.sh
+
+      - name: Build (${{ inputs.build_target }})
+        shell: bash
+        env:
+          DEPOT_TOOLS_UPDATE: "0"
+        run: scripts/chromium/build.sh out/Default ${{ matrix.gn_args_file }}
+
+      - name: Sign (dry-run)
+        shell: bash
+        env:
+          SLAYZONE_SIGN_MODE: dry-run
+        run: tools/release/signing/${{ matrix.os }}.sh out/Default
+
+      - name: Smoke test (chrome://hello/)
+        shell: bash
+        run: scripts/chromium/smoke-hello.sh out/Default
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chromium-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            chromium/src/out/Default/${{ matrix.artifact }}
+            chromium/src/out/Default/*.sig
+            chromium/src/out/Default/smoke-hello.log
+          retention-days: 14
+          if-no-files-found: warn

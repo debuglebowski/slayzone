@@ -1,0 +1,709 @@
+From a258d64dfc054bb37e0fe96a8e5728dfb05b7b41 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 07:38:47 +0200
+Subject: [3/7] slayzone: sidecar client C++ shim (Phase 2.3)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Browser-process client for the Bun sidecar (Phase 3 still WIP).
+Speaks LSP-framed JSON-RPC 2.0 over a Unix domain socket at
+\$SLAYZONE_RUNTIME_DIR/sidecar.sock; platform default is
+~/Library/Application Support/SlayZone/run/sidecar.sock on macOS and
+\$XDG_RUNTIME_DIR/slayzone/sidecar.sock on Linux. Windows (named pipe)
+is not wired in Phase 2 by design.
+
+Design notes:
+- Dedicated Slayzone.Sidecar base::Thread owns the socket. Blocking
+  recv in a PostTask loop; Phase 3 swaps for FileDescriptorWatcher
+  once graceful mid-read shutdown matters.
+- Connect is non-blocking via a one-shot timer that fires the next
+  ScheduleConnect; backoff starts at 500 ms and caps at 30 s.
+- Keepalive sends sidecar.ping every 30 s on an open connection;
+  disconnect detected by recv EOF / send failure drops pending
+  callbacks with an empty dict and enters the reconnect loop.
+- Pending callbacks live in a flat_map<int64_t, ResponseCallback>
+  keyed by the JSON-RPC id; response matches invoke on the IO
+  thread. Phase 3.6 proxy consumers should bind_post_task to return
+  to their own sequence.
+- Startup handshake: slayzone.SidecarClient::Start is called from
+  BrowserProcessImpl::Init() as early as possible. The first thing
+  the thread does is LOG(INFO) the resolved socket path and log
+  each connect attempt — that's the "sidecar handshake logs
+  visible" exit criterion for Phase 2.
+
+- chrome/browser/slayzone/sidecar_client.{h,cc}: new. ~400 LoC.
+- chrome/browser/BUILD.gn: sources wired into the `browser` target.
+- chrome/browser/browser_process_impl.cc: Start in Init(),
+  Stop in StartTearDown(). Guarded by !IS_ANDROID since Phase 2
+  doesn't target mobile.
+---
+ chrome/browser/BUILD.gn                   |   2 +
+ chrome/browser/browser_process_impl.cc    |  17 +
+ chrome/browser/slayzone/sidecar_client.cc | 511 ++++++++++++++++++++++
+ chrome/browser/slayzone/sidecar_client.h  |  80 ++++
+ 4 files changed, 610 insertions(+)
+ create mode 100644 chrome/browser/slayzone/sidecar_client.cc
+ create mode 100644 chrome/browser/slayzone/sidecar_client.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 08482133f0eb7..5fafa6a49f748 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -976,6 +976,8 @@ static_library("browser") {
+     "signin/signin_promo_util.cc",
+     "signin/signin_util.cc",
+     "signin/signin_util.h",
++    "slayzone/sidecar_client.cc",
++    "slayzone/sidecar_client.h",
+     "ssl/chrome_security_blocking_page_factory.cc",
+     "ssl/chrome_security_blocking_page_factory.h",
+     "ssl/chrome_security_state_tab_helper.cc",
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+index 1c3854d02901b..2c45d53b2ff5c 100644
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -247,6 +247,10 @@ void OnLocalStatePrefsLoaded();
+ #include "chrome/browser/sessions/exit_type_service.h"
+ #endif
+ 
++#if !BUILDFLAG(IS_ANDROID)
++#include "chrome/browser/slayzone/sidecar_client.h"
++#endif
++
+ #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+ #include "chrome/browser/first_run/upgrade_util.h"
+ #include "chrome/browser/ui/profiles/profile_picker.h"
+@@ -351,6 +355,15 @@ void BrowserProcessImpl::Init() {
+   features_ = GlobalFeatures::CreateGlobalFeatures();
+   features_->PreBrowserProcessInit();
+ 
++#if !BUILDFLAG(IS_ANDROID)
++  // Start the sidecar client as early as possible so subsequent browser init
++  // code (and Phase 3.6 proxy consumers) can issue RPCs before the first
++  // profile loads. The client fails-open when the sidecar isn't up yet —
++  // requests get an empty-dict response and callers are expected to handle
++  // it as "not connected".
++  slayzone::SidecarClient::GetInstance()->Start();
++#endif
++
+ #if BUILDFLAG(IS_ANDROID)
+   device_parental_controls_->Init();
+ #endif
+@@ -573,6 +586,10 @@ void BrowserProcessImpl::StartTearDown() {
+   tearing_down_ = true;
+   DCHECK(IsShuttingDown());
+ 
++#if !BUILDFLAG(IS_ANDROID)
++  slayzone::SidecarClient::GetInstance()->Stop();
++#endif
++
+   features_->PostMainMessageLoopRun();
+   metrics_services_manager_client_ = nullptr;
+   metrics_services_manager_.reset();
+diff --git a/chrome/browser/slayzone/sidecar_client.cc b/chrome/browser/slayzone/sidecar_client.cc
+new file mode 100644
+index 0000000000000..d830d8b81bf9e
+--- /dev/null
++++ b/chrome/browser/slayzone/sidecar_client.cc
+@@ -0,0 +1,511 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++#include <errno.h>
++#include <string.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#include <algorithm>
++#include <atomic>
++#include <memory>
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "base/compiler_specific.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/logging.h"
++#include "base/no_destructor.h"
++#include "base/rand_util.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/strcat.h"
++#include "base/task/bind_post_task.h"
++#include "base/task/single_thread_task_runner.h"
++#include "base/threading/thread.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#include "base/environment.h"
++#include "base/nix/xdg_util.h"
++#include "base/path_service.h"
++#endif
++
++#if BUILDFLAG(IS_MAC)
++#include "base/apple/foundation_util.h"
++#endif
++
++namespace slayzone {
++
++namespace {
++
++constexpr char kLogTag[] = "[sidecar]";
++constexpr size_t kMaxRecvBuffer = 16 * 1024 * 1024;  // 16 MiB
++constexpr base::TimeDelta kKeepaliveInterval = base::Seconds(30);
++constexpr base::TimeDelta kInitialBackoff = base::Milliseconds(500);
++constexpr base::TimeDelta kMaxBackoff = base::Seconds(30);
++
++// Resolves $SLAYZONE_RUNTIME_DIR/sidecar.sock with platform defaults.
++//   - $SLAYZONE_RUNTIME_DIR if set.
++//   - macOS: $HOME/Library/Application Support/SlayZone/run/
++//   - Linux: $XDG_RUNTIME_DIR/slayzone/ (falls back to /tmp/slayzone-$UID/)
++// Windows uses a named pipe and is not wired in Phase 2.
++base::FilePath ResolveSocketPath() {
++  auto env = base::Environment::Create();
++  std::optional<std::string> override_dir =
++      env->GetVar("SLAYZONE_RUNTIME_DIR");
++  if (override_dir && !override_dir->empty()) {
++    return base::FilePath(*override_dir).Append("sidecar.sock");
++  }
++
++#if BUILDFLAG(IS_MAC)
++  base::FilePath home;
++  if (!base::PathService::Get(base::DIR_HOME, &home)) {
++    return base::FilePath();
++  }
++  return home.Append("Library")
++      .Append("Application Support")
++      .Append("SlayZone")
++      .Append("run")
++      .Append("sidecar.sock");
++#elif BUILDFLAG(IS_LINUX)
++  base::FilePath runtime_dir = base::nix::GetXDGDirectory(
++      env.get(), "XDG_RUNTIME_DIR", nullptr);
++  if (runtime_dir.empty()) {
++    runtime_dir = base::FilePath(
++        base::StrCat({"/tmp/slayzone-", base::NumberToString(getuid())}));
++  } else {
++    runtime_dir = runtime_dir.Append("slayzone");
++  }
++  return runtime_dir.Append("sidecar.sock");
++#else
++  // Phase 2 doesn't wire Windows (named pipes, different transport).
++  return base::FilePath();
++#endif
++}
++
++// Serializes a JSON-RPC request to LSP framing:
++//   Content-Length: N\r\n\r\n{...json...}
++std::string FrameMessage(const base::DictValue& message) {
++  std::string body;
++  base::JSONWriter::Write(message, &body);
++  return base::StrCat({"Content-Length: ", base::NumberToString(body.size()),
++                       "\r\n\r\n", body});
++}
++
++// Parses zero or more LSP-framed messages from a buffer in-place.
++// Appends each parsed message to `out`; returns the number of bytes
++// consumed from the front of `buffer`.
++size_t ConsumeFramedMessages(std::string& buffer,
++                             std::vector<base::DictValue>& out) {
++  size_t consumed = 0;
++  while (true) {
++    std::string_view view(buffer);
++    view.remove_prefix(consumed);
++    size_t header_end = view.find("\r\n\r\n");
++    if (header_end == std::string_view::npos) {
++      break;
++    }
++    std::string_view headers = view.substr(0, header_end);
++    constexpr std::string_view kCL = "Content-Length:";
++    size_t cl_pos = headers.find(kCL);
++    if (cl_pos == std::string_view::npos) {
++      // Malformed frame; skip header block to recover.
++      consumed += header_end + 4;
++      continue;
++    }
++    std::string_view cl_value = headers.substr(cl_pos + kCL.size());
++    while (!cl_value.empty() && (cl_value.front() == ' ' ||
++                                  cl_value.front() == '\t')) {
++      cl_value.remove_prefix(1);
++    }
++    size_t cl_end = cl_value.find_first_of("\r\n");
++    if (cl_end != std::string_view::npos) {
++      cl_value = cl_value.substr(0, cl_end);
++    }
++    size_t body_len = 0;
++    if (!base::StringToSizeT(cl_value, &body_len) ||
++        body_len > kMaxRecvBuffer) {
++      consumed += header_end + 4;
++      continue;
++    }
++    if (view.size() < header_end + 4 + body_len) {
++      break;  // incomplete
++    }
++    std::string_view body = view.substr(header_end + 4, body_len);
++    std::optional<base::DictValue> parsed =
++        base::JSONReader::ReadDict(body, base::JSON_PARSE_RFC);
++    if (parsed) {
++      out.push_back(std::move(*parsed));
++    }
++    consumed += header_end + 4 + body_len;
++  }
++  return consumed;
++}
++
++}  // namespace
++
++// IOState lives on the sidecar IO thread. Owns the socket fd, pending
++// callbacks, and the reconnect/keepalive timers.
++class SidecarClient::IOState {
++ public:
++  IOState() = default;
++  ~IOState() { CloseSocket(); }
++
++  IOState(const IOState&) = delete;
++  IOState& operator=(const IOState&) = delete;
++
++  void Start() {
++    DCHECK(owning_task_runner_ == nullptr ||
++           owning_task_runner_->RunsTasksInCurrentSequence());
++    if (!owning_task_runner_) {
++      owning_task_runner_ = base::SingleThreadTaskRunner::GetCurrentDefault();
++    }
++    if (connect_pending_) {
++      return;
++    }
++    socket_path_ = ResolveSocketPath();
++    if (socket_path_.empty()) {
++      LOG(WARNING) << kLogTag
++                   << " no runtime dir resolved; disabling sidecar client";
++      return;
++    }
++    LOG(INFO) << kLogTag << " runtime socket = " << socket_path_.value();
++    ScheduleConnect(base::TimeDelta());
++  }
++
++  void Stop() {
++    if (owning_task_runner_ &&
++        !owning_task_runner_->RunsTasksInCurrentSequence()) {
++      owning_task_runner_->PostTask(
++          FROM_HERE, base::BindOnce(&IOState::Stop, base::Unretained(this)));
++      return;
++    }
++    stopped_ = true;
++    CloseSocket();
++    keepalive_timer_.Stop();
++    reconnect_timer_.Stop();
++    for (auto& [id, cb] : pending_) {
++      if (cb) {
++        std::move(cb).Run(base::DictValue());
++      }
++    }
++    pending_.clear();
++  }
++
++  void Call(std::string method,
++            base::DictValue params,
++            ResponseCallback callback) {
++    if (!owning_task_runner_) {
++      // Client never started; drop.
++      if (callback) {
++        std::move(callback).Run(base::DictValue());
++      }
++      return;
++    }
++    if (!owning_task_runner_->RunsTasksInCurrentSequence()) {
++      owning_task_runner_->PostTask(
++          FROM_HERE,
++          base::BindOnce(&IOState::Call, base::Unretained(this),
++                         std::move(method), std::move(params),
++                         std::move(callback)));
++      return;
++    }
++    int64_t id = ++next_id_;
++    base::DictValue request;
++    request.Set("jsonrpc", "2.0");
++    request.Set("method", method);
++    request.Set("params", std::move(params));
++    request.Set("id", static_cast<double>(id));
++    if (callback) {
++      pending_[id] = std::move(callback);
++    }
++    if (socket_fd_ < 0) {
++      // Will be replayed once connected? For Phase 2 we fail-fast: Phase 3
++      // sidecar lifecycle owns reliable replay. Drop with empty dict so
++      // callers don't hang.
++      if (auto it = pending_.find(id); it != pending_.end()) {
++        ResponseCallback cb = std::move(it->second);
++        pending_.erase(it);
++        if (cb) {
++          std::move(cb).Run(base::DictValue());
++        }
++      }
++      return;
++    }
++    WriteAll(FrameMessage(request));
++  }
++
++ private:
++  void ScheduleConnect(base::TimeDelta delay) {
++    if (stopped_) {
++      return;
++    }
++    connect_pending_ = true;
++    reconnect_timer_.Start(
++        FROM_HERE, delay,
++        base::BindOnce(&IOState::DoConnect, base::Unretained(this)));
++  }
++
++  void DoConnect() {
++    connect_pending_ = false;
++    if (stopped_) {
++      return;
++    }
++    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
++    if (fd < 0) {
++      LOG(WARNING) << kLogTag << " socket() failed: " << strerror(errno);
++      RetryBackoff();
++      return;
++    }
++    struct sockaddr_un addr = {};
++    addr.sun_family = AF_UNIX;
++    const std::string path = socket_path_.value();
++    if (path.size() >= sizeof(addr.sun_path)) {
++      LOG(ERROR) << kLogTag << " socket path too long: " << path;
++      close(fd);
++      return;  // permanent failure
++    }
++    UNSAFE_TODO(memcpy(addr.sun_path, path.c_str(), path.size()));
++    LOG(INFO) << kLogTag << " connect attempt -> " << path;
++    int rv = HANDLE_EINTR(connect(fd, reinterpret_cast<struct sockaddr*>(&addr),
++                                  sizeof(addr)));
++    if (rv != 0) {
++      LOG(INFO) << kLogTag << " connect failed: " << strerror(errno)
++                << " (will retry)";
++      close(fd);
++      RetryBackoff();
++      return;
++    }
++    socket_fd_ = fd;
++    backoff_ = kInitialBackoff;
++    LOG(INFO) << kLogTag << " connected fd=" << fd;
++    SendHandshake();
++    StartReading();
++    keepalive_timer_.Start(FROM_HERE, kKeepaliveInterval,
++                           base::BindRepeating(&IOState::SendKeepalive,
++                                               base::Unretained(this)));
++  }
++
++  void SendHandshake() {
++    base::DictValue params;
++    params.Set("version", "phase-2");
++    base::DictValue hello;
++    hello.Set("jsonrpc", "2.0");
++    hello.Set("method", "sidecar.hello");
++    hello.Set("params", std::move(params));
++    hello.Set("id", static_cast<double>(++next_id_));
++    WriteAll(FrameMessage(hello));
++  }
++
++  void SendKeepalive() {
++    if (socket_fd_ < 0) {
++      return;
++    }
++    base::DictValue ping;
++    ping.Set("jsonrpc", "2.0");
++    ping.Set("method", "sidecar.ping");
++    ping.Set("params", base::DictValue());
++    ping.Set("id", static_cast<double>(++next_id_));
++    WriteAll(FrameMessage(ping));
++  }
++
++  void StartReading() {
++    // Phase 2: blocking read on the IO thread. The thread has no other
++    // work, so a blocking recv is acceptable. Phase 3 swaps this for
++    // base::FileDescriptorWatcher once the sidecar is real and we need
++    // graceful shutdown mid-read.
++    owning_task_runner_->PostTask(
++        FROM_HERE,
++        base::BindOnce(&IOState::ReadLoop, base::Unretained(this)));
++  }
++
++  void ReadLoop() {
++    if (stopped_ || socket_fd_ < 0) {
++      return;
++    }
++    char buf[8192];
++    ssize_t n = HANDLE_EINTR(recv(socket_fd_, buf, sizeof(buf), 0));
++    if (n <= 0) {
++      LOG(INFO) << kLogTag << " disconnected"
++                << (n == 0 ? " (eof)"
++                           : (std::string(" (") + strerror(errno) + ")"));
++      OnDisconnected();
++      return;
++    }
++    recv_buffer_.append(buf, static_cast<size_t>(n));
++    if (recv_buffer_.size() > kMaxRecvBuffer) {
++      LOG(ERROR) << kLogTag << " recv buffer overflow; resetting";
++      recv_buffer_.clear();
++      OnDisconnected();
++      return;
++    }
++    std::vector<base::DictValue> messages;
++    size_t consumed = ConsumeFramedMessages(recv_buffer_, messages);
++    if (consumed > 0) {
++      recv_buffer_.erase(0, consumed);
++    }
++    for (auto& msg : messages) {
++      DispatchMessage(std::move(msg));
++    }
++    // Continue reading.
++    owning_task_runner_->PostTask(
++        FROM_HERE,
++        base::BindOnce(&IOState::ReadLoop, base::Unretained(this)));
++  }
++
++  void DispatchMessage(base::DictValue msg) {
++    const base::Value* id_val = msg.Find("id");
++    if (!id_val) {
++      // Notification (no id). Phase 3 wires notifications into a dispatcher;
++      // Phase 2 just logs.
++      const std::string* method = msg.FindString("method");
++      LOG(INFO) << kLogTag << " notification "
++                << (method ? *method : "<unknown>");
++      return;
++    }
++    int64_t id = 0;
++    if (id_val->is_int()) {
++      id = id_val->GetInt();
++    } else if (id_val->is_double()) {
++      id = static_cast<int64_t>(id_val->GetDouble());
++    } else {
++      return;
++    }
++    auto it = pending_.find(id);
++    if (it == pending_.end()) {
++      return;  // stale or handshake reply we don't track
++    }
++    ResponseCallback cb = std::move(it->second);
++    pending_.erase(it);
++    if (cb) {
++      std::move(cb).Run(std::move(msg));
++    }
++  }
++
++  void WriteAll(std::string payload) {
++    if (socket_fd_ < 0) {
++      return;
++    }
++    size_t written = 0;
++    while (written < payload.size()) {
++      ssize_t n = HANDLE_EINTR(send(socket_fd_,
++                                    UNSAFE_TODO(payload.data() + written),
++                                    payload.size() - written, 0));
++      if (n < 0) {
++        LOG(INFO) << kLogTag << " send failed: " << strerror(errno);
++        OnDisconnected();
++        return;
++      }
++      written += static_cast<size_t>(n);
++    }
++  }
++
++  void OnDisconnected() {
++    CloseSocket();
++    keepalive_timer_.Stop();
++    recv_buffer_.clear();
++    for (auto& [id, cb] : pending_) {
++      if (cb) {
++        std::move(cb).Run(base::DictValue());
++      }
++    }
++    pending_.clear();
++    RetryBackoff();
++  }
++
++  void RetryBackoff() {
++    if (stopped_) {
++      return;
++    }
++    base::TimeDelta delay = backoff_;
++    backoff_ = std::min(backoff_ * 2, kMaxBackoff);
++    ScheduleConnect(delay);
++  }
++
++  void CloseSocket() {
++    if (socket_fd_ >= 0) {
++      close(socket_fd_);
++      socket_fd_ = -1;
++    }
++  }
++
++  scoped_refptr<base::SingleThreadTaskRunner> owning_task_runner_;
++  base::FilePath socket_path_;
++  int socket_fd_ = -1;
++  std::string recv_buffer_;
++  base::flat_map<int64_t, ResponseCallback> pending_;
++  int64_t next_id_ = 0;
++  base::TimeDelta backoff_ = kInitialBackoff;
++  base::OneShotTimer reconnect_timer_;
++  base::RepeatingTimer keepalive_timer_;
++  bool connect_pending_ = false;
++  bool stopped_ = false;
++};
++
++// static
++SidecarClient* SidecarClient::GetInstance() {
++  static base::NoDestructor<SidecarClient> instance;
++  return instance.get();
++}
++
++SidecarClient::SidecarClient()
++    : io_state_(nullptr, base::OnTaskRunnerDeleter(nullptr)) {}
++
++SidecarClient::~SidecarClient() = default;
++
++void SidecarClient::Start() {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(owner_sequence_);
++  if (io_thread_) {
++    return;
++  }
++  io_thread_ = std::make_unique<base::Thread>("Slayzone.Sidecar");
++  base::Thread::Options options(base::MessagePumpType::DEFAULT, 0);
++  io_thread_->StartWithOptions(std::move(options));
++  io_state_ = std::unique_ptr<IOState, base::OnTaskRunnerDeleter>(
++      new IOState(), base::OnTaskRunnerDeleter(io_thread_->task_runner()));
++  io_thread_->task_runner()->PostTask(
++      FROM_HERE, base::BindOnce(&IOState::Start,
++                                base::Unretained(io_state_.get())));
++}
++
++void SidecarClient::Stop() {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(owner_sequence_);
++  if (!io_thread_) {
++    return;
++  }
++  io_thread_->task_runner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&IOState::Stop, base::Unretained(io_state_.get())));
++  io_thread_->Stop();
++  io_state_.reset();
++  io_thread_.reset();
++}
++
++void SidecarClient::Call(std::string_view method,
++                         base::DictValue params,
++                         ResponseCallback callback) {
++  if (!io_thread_ || !io_state_) {
++    if (callback) {
++      std::move(callback).Run(base::DictValue());
++    }
++    return;
++  }
++  io_thread_->task_runner()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&IOState::Call, base::Unretained(io_state_.get()),
++                     std::string(method), std::move(params),
++                     std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/sidecar_client.h b/chrome/browser/slayzone/sidecar_client.h
+new file mode 100644
+index 0000000000000..02e5c014e9e73
+--- /dev/null
++++ b/chrome/browser/slayzone/sidecar_client.h
+@@ -0,0 +1,80 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SIDECAR_CLIENT_H_
++#define CHROME_BROWSER_SLAYZONE_SIDECAR_CLIENT_H_
++
++#include <cstdint>
++#include <memory>
++#include <string>
++#include <string_view>
++
++#include "base/containers/flat_map.h"
++#include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
++#include "base/no_destructor.h"
++#include "base/sequence_checker.h"
++#include "base/threading/thread.h"
++#include "base/values.h"
++
++namespace slayzone {
++
++// Browser-process client for the Bun sidecar.
++//
++// Connects to `$SLAYZONE_RUNTIME_DIR/sidecar.sock` (Unix domain socket) and
++// speaks LSP-framed JSON-RPC 2.0 (Content-Length header + `\r\n\r\n` + body).
++// Requests get a monotonic id; responses with matching id invoke the paired
++// callback on the caller's sequence. On disconnect the client reconnects
++// with exponential backoff (500 ms -> 30 s cap). A `sidecar.ping` keepalive
++// is sent every 30 s once connected.
++//
++// Phase 2 scope: the sidecar process itself doesn't exist yet (Phase 3
++// lifts it out of Electron main). This client will therefore log connect
++// attempts and retry forever. Once the Bun sidecar is running the hello
++// handshake completes silently and downstream RPC callers (Phase 3.6
++// proxies) start working without further wiring here.
++//
++// Lifetime: singleton owned by BrowserProcessImpl. Created in browser
++// init, shut down in BrowserProcessImpl::StartTearDown().
++class SidecarClient {
++ public:
++  using ResponseCallback = base::OnceCallback<void(base::DictValue)>;
++
++  // Returns the process-wide instance. Safe to call on any thread; the
++  // instance itself is thread-safe via its internal sequence.
++  static SidecarClient* GetInstance();
++
++  SidecarClient(const SidecarClient&) = delete;
++  SidecarClient& operator=(const SidecarClient&) = delete;
++
++  // Starts the IO thread and kicks off the connect loop. Idempotent.
++  void Start();
++
++  // Stops the IO thread, closes the socket, drops pending callbacks.
++  // Idempotent.
++  void Stop();
++
++  // Sends a JSON-RPC request. `callback` runs on the caller's sequence
++  // when the matching response arrives or when the request is dropped
++  // (empty dict) due to disconnect / shutdown.
++  void Call(std::string_view method,
++            base::DictValue params,
++            ResponseCallback callback);
++
++ private:
++  friend class base::NoDestructor<SidecarClient>;
++
++  SidecarClient();
++  ~SidecarClient();
++
++  class IOState;
++
++  std::unique_ptr<base::Thread> io_thread_;
++  std::unique_ptr<IOState, base::OnTaskRunnerDeleter> io_state_;
++  SEQUENCE_CHECKER(owner_sequence_);
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SIDECAR_CLIENT_H_
+-- 
+2.52.0
+

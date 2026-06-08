@@ -1,0 +1,220 @@
+From 2e8f5761830bc430e34caed58caea828aa46a49a Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 22:16:14 +0200
+Subject: =?UTF-8?q?slayzone:=20Phase=205.6=20layout=20intent=20API=20?=
+ =?UTF-8?q?=E2=80=94=20layout.mojom=20+=20SlayzoneLayoutHost?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Mojom contract in chrome/browser/slayzone/mojom/layout.mojom mirrors the
+shared outer file at packages/shared/mojo-bindings/mojom/layout.mojom —
+Phase 4.3 generates TS bindings from the outer copy; this in-tree copy is
+what Chromium's mojom() target compiles to C++. Keep the two in sync
+(diff is an invariant).
+
+SlayzoneLayoutHost owns a ReceiverSet<LayoutHost>; each region WebUI binds
+via Bind(). Methods route to native views: SetRegionVisible →
+WebView::SetVisible, FocusRegion → WebView::RequestFocus, SetRegionSize is
+advisory today (SplitView is authoritative) and wires real resize in
+Phase 7.
+
+Binder registration from chrome://slayzone-* hosts to the per-BrowserView
+SlayzoneLayoutHost lands with Phase 7 when the first region consumes the
+interface.
+---
+ chrome/browser/BUILD.gn                       |  3 +
+ chrome/browser/slayzone/mojom/BUILD.gn        | 10 ++++
+ chrome/browser/slayzone/mojom/layout.mojom    | 18 ++++++
+ .../browser/slayzone/slayzone_layout_host.cc  | 60 +++++++++++++++++++
+ .../browser/slayzone/slayzone_layout_host.h   | 48 +++++++++++++++
+ 5 files changed, 139 insertions(+)
+ create mode 100644 chrome/browser/slayzone/mojom/BUILD.gn
+ create mode 100644 chrome/browser/slayzone/mojom/layout.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_layout_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_layout_host.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 1170b6da63b3c..92af8bbb5edde 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -980,6 +980,8 @@ static_library("browser") {
+     "slayzone/layout_features.h",
+     "slayzone/sidecar_client.cc",
+     "slayzone/sidecar_client.h",
++    "slayzone/slayzone_layout_host.cc",
++    "slayzone/slayzone_layout_host.h",
+     "ssl/chrome_security_blocking_page_factory.cc",
+     "ssl/chrome_security_blocking_page_factory.h",
+     "ssl/chrome_security_state_tab_helper.cc",
+@@ -3981,6 +3983,7 @@ static_library("browser") {
+       "//chrome/browser/ui/webui/new_tab_footer",
+       "//chrome/browser/ui/webui/new_tab_footer:impl",
+       "//chrome/browser/ui/webui/omnibox_popup/mojom",
++      "//chrome/browser/slayzone/mojom",
+       "//chrome/browser/ui/webui/privacy_sandbox:mojo_bindings",
+       "//chrome/browser/ui/webui/privacy_sandbox/related_website_sets:mojo_bindings",
+       "//chrome/browser/ui/webui/private_ai_internals",
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+new file mode 100644
+index 0000000000000..ca2666425f25a
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -0,0 +1,10 @@
++# Copyright 2026 The SlayZone Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//mojo/public/tools/bindings/mojom.gni")
++
++mojom("mojom") {
++  sources = [ "layout.mojom" ]
++  webui_module_path = "/"
++}
+diff --git a/chrome/browser/slayzone/mojom/layout.mojom b/chrome/browser/slayzone/mojom/layout.mojom
+new file mode 100644
+index 0000000000000..d41888c365ca5
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/layout.mojom
+@@ -0,0 +1,18 @@
++// Phase 5.6 layout intent API (C++ side). Mirrors
++// packages/shared/mojo-bindings/mojom/layout.mojom — Phase 4.3 generates TS
++// bindings from the outer file; this tree-local copy is what Chromium's
++// mojom() target consumes. Keep in sync (diff is an invariant).
++
++module slayzone.layout.mojom;
++
++enum RegionAxis {
++  kMain,
++  kCross,
++};
++
++// Owned by the browser process; one remote per region.
++interface LayoutHost {
++  SetRegionVisible(string region_id, bool visible);
++  SetRegionSize(string region_id, uint32 px, RegionAxis axis) => ();
++  FocusRegion(string region_id) => (bool ok);
++};
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.cc b/chrome/browser/slayzone/slayzone_layout_host.cc
+new file mode 100644
+index 0000000000000..1c8fc64c96512
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_layout_host.cc
+@@ -0,0 +1,60 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_layout_host.h"
++
++#include "base/logging.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/browser/ui/views/frame/slayzone_region_container.h"
++#include "ui/views/controls/webview/webview.h"
++#include "ui/views/view.h"
++
++SlayzoneLayoutHost::SlayzoneLayoutHost(SlayzoneBrowserView* view)
++    : view_(view) {}
++
++SlayzoneLayoutHost::~SlayzoneLayoutHost() = default;
++
++void SlayzoneLayoutHost::Bind(
++    mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++views::WebView* Slot(SlayzoneBrowserView* view, const std::string& id) {
++  if (!view || !view->region_container_for_test()) {
++    return nullptr;
++  }
++  return view->region_container_for_test()->GetRegion(id);
++}
++
++void SlayzoneLayoutHost::SetRegionVisible(const std::string& region_id,
++                                          bool visible) {
++  if (auto* slot = Slot(view_, region_id)) {
++    slot->SetVisible(visible);
++  } else {
++    LOG(WARNING) << "[slayzone] SetRegionVisible: unknown region " << region_id;
++  }
++}
++
++void SlayzoneLayoutHost::SetRegionSize(
++    const std::string& region_id,
++    uint32_t px,
++    slayzone::layout::mojom::RegionAxis axis,
++    SetRegionSizeCallback callback) {
++  // Size is advisory — the enclosing SplitView or BoxLayoutView owns the
++  // authoritative size. Phase 7 wires per-container resize hooks here.
++  (void)region_id;
++  (void)px;
++  (void)axis;
++  std::move(callback).Run();
++}
++
++void SlayzoneLayoutHost::FocusRegion(const std::string& region_id,
++                                     FocusRegionCallback callback) {
++  if (auto* slot = Slot(view_, region_id)) {
++    slot->RequestFocus();
++    std::move(callback).Run(true);
++  } else {
++    std::move(callback).Run(false);
++  }
++}
+diff --git a/chrome/browser/slayzone/slayzone_layout_host.h b/chrome/browser/slayzone/slayzone_layout_host.h
+new file mode 100644
+index 0000000000000..238d0ec821eeb
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_layout_host.h
+@@ -0,0 +1,48 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_LAYOUT_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_LAYOUT_HOST_H_
++
++#include <cstdint>
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/slayzone/mojom/layout.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++class SlayzoneBrowserView;
++
++// Phase 5.6 — browser-side implementation of `slayzone::layout::mojom::LayoutHost`.
++// Owned by `SlayzoneBrowserView`; accepts bindings from region WebUIs and
++// translates calls into native views::View operations on the region container.
++// Binder wiring from chrome://slayzone-* hosts lands alongside Phase 7 when
++// the first real region consumes the interface — until then the impl exists
++// but is unreachable from JS.
++class SlayzoneLayoutHost : public slayzone::layout::mojom::LayoutHost {
++ public:
++  explicit SlayzoneLayoutHost(SlayzoneBrowserView* view);
++  SlayzoneLayoutHost(const SlayzoneLayoutHost&) = delete;
++  SlayzoneLayoutHost& operator=(const SlayzoneLayoutHost&) = delete;
++  ~SlayzoneLayoutHost() override;
++
++  void Bind(mojo::PendingReceiver<slayzone::layout::mojom::LayoutHost>
++                receiver);
++
++  // slayzone::layout::mojom::LayoutHost:
++  void SetRegionVisible(const std::string& region_id, bool visible) override;
++  void SetRegionSize(const std::string& region_id,
++                     uint32_t px,
++                     slayzone::layout::mojom::RegionAxis axis,
++                     SetRegionSizeCallback callback) override;
++  void FocusRegion(const std::string& region_id,
++                   FocusRegionCallback callback) override;
++
++ private:
++  const raw_ptr<SlayzoneBrowserView> view_;
++  mojo::ReceiverSet<slayzone::layout::mojom::LayoutHost> receivers_;
++};
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_LAYOUT_HOST_H_
+-- 
+2.52.0
+

@@ -1,0 +1,470 @@
+From e318875e8f5f8a02f3cc551d36328fbea415d90c Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 17:17:38 +0200
+Subject: slayzone: Phase 5.2 10-slot placeholder grid + PlaceholderUI
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds chrome://slayzone-placeholder/<region> WebUI (path-based routing —
+query strings get rejected by the chrome:// router on some builds and the
+default WebUIDataSource CSP blocks inline scripts, so the region id lives
+in the path and HTML is interpolated server-side).
+
+SlayzoneBrowserView hosts a 10-slot BoxLayoutView grid
+(shell/tabbar/projects/tasklist/sidebar/taskheader/browserchrome/terminal/
+tools/statusbar). Each WebView loads chrome://slayzone-placeholder/<id>.
+The region container is added as a later sibling of BrowserView's children
+and sized from OnBoundsChanged — it overlays upstream chrome in paint order,
+which avoids fighting BrowserViewTabbedLayoutImpl invariants that require
+contents_container_ to stay visible + parented.
+
+Placeholder host is listed in ChromeURLHosts() alongside slayzone-shell so
+chrome://chrome-urls/ enumerates it.
+---
+ chrome/browser/ui/BUILD.gn                    |   2 +
+ .../ui/views/frame/slayzone_browser_view.cc   |  26 +++++
+ .../ui/views/frame/slayzone_browser_view.h    |  21 +++-
+ .../views/frame/slayzone_region_container.cc  | 109 ++++++++++++++++++
+ .../views/frame/slayzone_region_container.h   |  52 +++++++++
+ .../webui/slayzone/slayzone_webui_registry.cc |  84 +++++++++++++-
+ chrome/common/webui_url_constants.cc          |   1 +
+ chrome/common/webui_url_constants.h           |   4 +
+ 8 files changed, 295 insertions(+), 4 deletions(-)
+ create mode 100644 chrome/browser/ui/views/frame/slayzone_region_container.cc
+ create mode 100644 chrome/browser/ui/views/frame/slayzone_region_container.h
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index f67a079c7dcb7..3428492b8905b 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -4050,6 +4050,8 @@ static_library("ui") {
+       "views/frame/shadow_overlay_view.h",
+       "views/frame/slayzone_browser_view.cc",
+       "views/frame/slayzone_browser_view.h",
++      "views/frame/slayzone_region_container.cc",
++      "views/frame/slayzone_region_container.h",
+       "views/frame/system_menu_model_builder.cc",
+       "views/frame/system_menu_model_builder.h",
+       "views/frame/system_menu_model_delegate.cc",
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index e3c8112ccd841..441ff2a0a966e 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
+ 
++#include <memory>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/views/frame/slayzone_region_container.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ 
+ SlayzoneBrowserView::SlayzoneBrowserView(Browser* browser)
+@@ -11,5 +16,26 @@ SlayzoneBrowserView::SlayzoneBrowserView(Browser* browser)
+ 
+ SlayzoneBrowserView::~SlayzoneBrowserView() = default;
+ 
++void SlayzoneBrowserView::AddedToWidget() {
++  BrowserView::AddedToWidget();
++
++  // Upstream chrome stays parented + visible — `BrowserViewTabbedLayoutImpl`
++  // CHECKs that `contents_container_` is visible + parented, and similar
++  // invariants apply to the toolbar tree. Our region grid is added as a later
++  // sibling and overlays the whole BrowserView, so the upstream views remain
++  // but are never seen. Phase 5.6 takes them out of the flow properly once
++  // the layout intent API + Mojo channel land.
++  region_container_ = AddChildView(std::make_unique<SlayzoneRegionContainer>(
++      browser()->profile()));
++  region_container_->SetBoundsRect(GetLocalBounds());
++}
++
++void SlayzoneBrowserView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
++  BrowserView::OnBoundsChanged(previous_bounds);
++  if (region_container_) {
++    region_container_->SetBoundsRect(GetLocalBounds());
++  }
++}
++
+ BEGIN_METADATA(SlayzoneBrowserView)
+ END_METADATA
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 9e4de9367fdd3..4a209692b95be 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -5,17 +5,23 @@
+ #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+ #define CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+ 
++#include "base/memory/raw_ptr.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/gfx/geometry/rect.h"
+ 
+ class Browser;
++class SlayzoneRegionContainer;
+ 
+ // Phase 5 native layout shell. Hosts the SlayZone region grid in place of the
+ // upstream tabbed browser chrome. Gated on `slayzone::kSlayzoneLayoutShell`
+ // via `browser_window_factory.cc`.
+ //
+-// Phase 5.1 ships an empty scaffold (no visible change). Phase 5.2 adds the
+-// region container + placeholder WebUIs.
++// Phase 5.2 installs the 10-slot placeholder grid. Upstream toolbar/tabstrip/
++// infobar/side-panel children are collapsed to zero via `SetVisible(false)`;
++// `BrowserViewLayout` skips invisible children. The region container is
++// positioned in `OnBoundsChanged` because it is not one of the views
++// `BrowserViewLayout` knows about.
+ class SlayzoneBrowserView : public BrowserView {
+   METADATA_HEADER(SlayzoneBrowserView, BrowserView)
+ 
+@@ -24,6 +30,17 @@ class SlayzoneBrowserView : public BrowserView {
+   SlayzoneBrowserView(const SlayzoneBrowserView&) = delete;
+   SlayzoneBrowserView& operator=(const SlayzoneBrowserView&) = delete;
+   ~SlayzoneBrowserView() override;
++
++  SlayzoneRegionContainer* region_container_for_test() {
++    return region_container_;
++  }
++
++  // views::View:
++  void AddedToWidget() override;
++  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
++
++ private:
++  raw_ptr<SlayzoneRegionContainer> region_container_ = nullptr;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_BROWSER_VIEW_H_
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.cc b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+new file mode 100644
+index 0000000000000..d7c21c516d611
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+@@ -0,0 +1,109 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/frame/slayzone_region_container.h"
++
++#include <memory>
++#include <string>
++#include <string_view>
++#include <utility>
++
++#include "base/strings/strcat.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/browser_context.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/gfx/geometry/size.h"
++#include "ui/views/controls/webview/webview.h"
++#include "ui/views/layout/box_layout.h"
++#include "ui/views/layout/box_layout_view.h"
++#include "ui/views/view.h"
++#include "url/gurl.h"
++
++namespace {
++
++GURL PlaceholderUrl(std::string_view region_id) {
++  return GURL(
++      base::StrCat({chrome::kChromeUISlayzonePlaceholderURL, region_id}));
++}
++
++}  // namespace
++
++SlayzoneRegionContainer::SlayzoneRegionContainer(
++    content::BrowserContext* browser_context) {
++  // Tracks every WebView we create so the parent BoxLayoutView can flag
++  // individual children as flex.
++  auto add_region =
++      [this, browser_context](views::BoxLayoutView* parent,
++                              std::string_view id, int fixed_axis_px,
++                              int flex_weight) -> views::WebView* {
++    auto webview = std::make_unique<views::WebView>(browser_context);
++    webview->LoadInitialURL(PlaceholderUrl(id));
++    if (fixed_axis_px > 0) {
++      webview->SetPreferredSize(gfx::Size(fixed_axis_px, fixed_axis_px));
++    }
++    views::WebView* raw = webview.get();
++    parent->AddChildView(std::move(webview));
++    if (flex_weight > 0) {
++      parent->SetFlexForView(raw, flex_weight);
++    }
++    regions_.emplace(std::string(id), raw);
++    return raw;
++  };
++
++  // Outer: vertical — shell | tabbar | body | statusbar.
++  SetOrientation(views::BoxLayout::Orientation::kVertical);
++  SetCrossAxisAlignment(views::BoxLayout::CrossAxisAlignment::kStretch);
++
++  add_region(this, "shell", /*fixed_axis_px=*/20, /*flex_weight=*/0);
++  add_region(this, "tabbar", /*fixed_axis_px=*/36, /*flex_weight=*/0);
++
++  // body: horizontal — projects | center | sidebar | tools.
++  auto body_owned = std::make_unique<views::BoxLayoutView>();
++  body_owned->SetOrientation(views::BoxLayout::Orientation::kHorizontal);
++  body_owned->SetCrossAxisAlignment(
++      views::BoxLayout::CrossAxisAlignment::kStretch);
++  views::BoxLayoutView* body = AddChildView(std::move(body_owned));
++  SetFlexForView(body, 1);
++
++  add_region(body, "projects", /*fixed_axis_px=*/56, /*flex_weight=*/0);
++
++  // center: vertical — taskheader | mid | terminal.
++  auto center_owned = std::make_unique<views::BoxLayoutView>();
++  center_owned->SetOrientation(views::BoxLayout::Orientation::kVertical);
++  center_owned->SetCrossAxisAlignment(
++      views::BoxLayout::CrossAxisAlignment::kStretch);
++  views::BoxLayoutView* center = body->AddChildView(std::move(center_owned));
++  body->SetFlexForView(center, 1);
++
++  add_region(center, "taskheader", /*fixed_axis_px=*/40, /*flex_weight=*/0);
++
++  // mid: horizontal — tasklist | browserchrome (each ~50%).
++  auto mid_owned = std::make_unique<views::BoxLayoutView>();
++  mid_owned->SetOrientation(views::BoxLayout::Orientation::kHorizontal);
++  mid_owned->SetCrossAxisAlignment(
++      views::BoxLayout::CrossAxisAlignment::kStretch);
++  views::BoxLayoutView* mid = center->AddChildView(std::move(mid_owned));
++  center->SetFlexForView(mid, 2);
++
++  add_region(mid, "tasklist", /*fixed_axis_px=*/0, /*flex_weight=*/1);
++  add_region(mid, "browserchrome", /*fixed_axis_px=*/0, /*flex_weight=*/1);
++
++  // terminal takes the bottom third of center.
++  add_region(center, "terminal", /*fixed_axis_px=*/0, /*flex_weight=*/1);
++
++  add_region(body, "sidebar", /*fixed_axis_px=*/280, /*flex_weight=*/0);
++  add_region(body, "tools", /*fixed_axis_px=*/48, /*flex_weight=*/0);
++
++  add_region(this, "statusbar", /*fixed_axis_px=*/24, /*flex_weight=*/0);
++}
++
++SlayzoneRegionContainer::~SlayzoneRegionContainer() = default;
++
++views::WebView* SlayzoneRegionContainer::GetRegion(std::string_view region_id) {
++  auto it = regions_.find(std::string(region_id));
++  return it == regions_.end() ? nullptr : it->second.get();
++}
++
++BEGIN_METADATA(SlayzoneRegionContainer)
++END_METADATA
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.h b/chrome/browser/ui/views/frame/slayzone_region_container.h
+new file mode 100644
+index 0000000000000..18eded4cc52ad
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.h
+@@ -0,0 +1,52 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_REGION_CONTAINER_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_REGION_CONTAINER_H_
++
++#include <array>
++#include <string>
++#include <string_view>
++
++#include "base/containers/flat_map.h"
++#include "base/memory/raw_ptr.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/views/layout/box_layout_view.h"
++
++namespace content {
++class BrowserContext;
++}
++
++namespace views {
++class WebView;
++}
++
++// Phase 5.2 — native layout grid hosting one `views::WebView` per SlayZone
++// region. Every slot loads `chrome://slayzone-placeholder/?region=<id>` until
++// Phase 7 swaps individual slots for their real WebUIs.
++class SlayzoneRegionContainer : public views::BoxLayoutView {
++  METADATA_HEADER(SlayzoneRegionContainer, views::BoxLayoutView)
++
++ public:
++  // Region IDs shared with Phase 7 surfaces. Order is layout-agnostic;
++  // the visible grid is wired in the ctor.
++  static constexpr std::array<std::string_view, 10> kRegionIds = {
++      "shell",      "tabbar",        "projects", "tasklist", "sidebar",
++      "taskheader", "browserchrome", "terminal", "tools",    "statusbar",
++  };
++
++  explicit SlayzoneRegionContainer(content::BrowserContext* browser_context);
++  SlayzoneRegionContainer(const SlayzoneRegionContainer&) = delete;
++  SlayzoneRegionContainer& operator=(const SlayzoneRegionContainer&) = delete;
++  ~SlayzoneRegionContainer() override;
++
++  // Returns the WebView for `region_id`, or nullptr if unknown. Phase 5.3+
++  // uses this to inject real WebContents into the feasibility slot.
++  views::WebView* GetRegion(std::string_view region_id);
++
++ private:
++  base::flat_map<std::string, raw_ptr<views::WebView>> regions_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_REGION_CONTAINER_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+index ac7c875de6820..043cb45f2d5ca 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -10,6 +10,7 @@
+ 
+ #include "base/functional/bind.h"
+ #include "base/memory/ref_counted_memory.h"
++#include "base/strings/strcat.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui.h"
+@@ -36,22 +37,78 @@ constexpr std::string_view kShellHtml = R"HTML(<!doctype html>
+ <body></body>
+ </html>)HTML";
+ 
+-bool ShouldHandleShellRequest(const std::string& path) {
++// Phase 5.2 placeholder — renders the region id baked into the URL path:
++// `chrome://slayzone-placeholder/<id>`. Query strings are rejected by the
++// chrome:// scheme router on some builds, and inline script is blocked by
++// default WebUIDataSource CSP; embedding the region server-side sidesteps
++// both. Phase 7 replaces individual slots with their real WebUIs.
++constexpr std::string_view kPlaceholderHtmlPrefix = R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · )HTML";
++
++constexpr std::string_view kPlaceholderHtmlMid = R"HTML(</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 13px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; flex-direction: column; align-items: center;
++      justify-content: center; gap: 4px;
++      background: color-mix(in oklab, Canvas, CanvasText 6%);
++      color: CanvasText;
++      outline: 1px solid color-mix(in oklab, Canvas, CanvasText 14%);
++      outline-offset: -1px;
++    }
++    .region { font-weight: 600; letter-spacing: 0.04em; }
++    .tag { opacity: 0.55; font-size: 11px; }
++  </style>
++</head>
++<body>
++  <div class="region">)HTML";
++
++constexpr std::string_view kPlaceholderHtmlSuffix = R"HTML(</div>
++  <div class="tag">placeholder</div>
++</body>
++</html>)HTML";
++
++bool ShouldHandleEmptyPath(const std::string& path) {
+   return path.empty();
+ }
+ 
++bool ShouldHandleAnyPath(const std::string& path) {
++  return true;
++}
++
+ void HandleShellRequest(const std::string& path,
+                         content::WebUIDataSource::GotDataCallback callback) {
+   std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
+       std::string(kShellHtml)));
+ }
+ 
++void HandlePlaceholderRequest(
++    const std::string& path,
++    content::WebUIDataSource::GotDataCallback callback) {
++  std::string region = path;
++  if (!region.empty() && region.front() == '/') {
++    region.erase(0, 1);
++  }
++  if (region.empty()) {
++    region = "placeholder";
++  }
++  std::string html =
++      base::StrCat({kPlaceholderHtmlPrefix, region, kPlaceholderHtmlMid,
++                    region, kPlaceholderHtmlSuffix});
++  std::move(callback).Run(
++      base::MakeRefCounted<base::RefCountedString>(std::move(html)));
++}
++
+ class ShellUI : public content::WebUIController {
+  public:
+   explicit ShellUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
+     auto* source = content::WebUIDataSource::CreateAndAdd(
+         Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneShellHost);
+-    source->SetRequestFilter(base::BindRepeating(&ShouldHandleShellRequest),
++    source->SetRequestFilter(base::BindRepeating(&ShouldHandleEmptyPath),
+                              base::BindRepeating(&HandleShellRequest));
+   }
+ 
+@@ -67,10 +124,33 @@ class ShellUIConfig : public content::DefaultWebUIConfig<ShellUI> {
+                            chrome::kChromeUISlayzoneShellHost) {}
+ };
+ 
++class PlaceholderUI : public content::WebUIController {
++ public:
++  explicit PlaceholderUI(content::WebUI* web_ui)
++      : content::WebUIController(web_ui) {
++    auto* source = content::WebUIDataSource::CreateAndAdd(
++        Profile::FromWebUI(web_ui), chrome::kChromeUISlayzonePlaceholderHost);
++    source->SetRequestFilter(base::BindRepeating(&ShouldHandleAnyPath),
++                             base::BindRepeating(&HandlePlaceholderRequest));
++  }
++
++  PlaceholderUI(const PlaceholderUI&) = delete;
++  PlaceholderUI& operator=(const PlaceholderUI&) = delete;
++  ~PlaceholderUI() override = default;
++};
++
++class PlaceholderUIConfig : public content::DefaultWebUIConfig<PlaceholderUI> {
++ public:
++  PlaceholderUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzonePlaceholderHost) {}
++};
++
+ }  // namespace
+ 
+ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+   map.AddWebUIConfig(std::make_unique<ShellUIConfig>());
++  map.AddWebUIConfig(std::make_unique<PlaceholderUIConfig>());
+ }
+ 
+ }  // namespace slayzone
+diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
+index e9e486f9e7b33..52f8066a61588 100644
+--- a/chrome/common/webui_url_constants.cc
++++ b/chrome/common/webui_url_constants.cc
+@@ -174,6 +174,7 @@ base::span<const base::cstring_view> ChromeURLHosts() {
+       kChromeUISignInInternalsHost,
+       kChromeUISiteEngagementHost,
+       kChromeUISkillsHost,
++      kChromeUISlayzonePlaceholderHost,
+       kChromeUISlayzoneShellHost,
+ #if !BUILDFLAG(IS_ANDROID)
+       kChromeUISuggestInternalsHost,
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+index 20120428dd166..672c95084071f 100644
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -174,6 +174,10 @@ inline constexpr char kChromeUIGlicSelectionOverlayURL[] =
+ inline constexpr char kChromeUIHangUIHost[] = "uithreadhang";
+ inline constexpr char kChromeUIHelpHost[] = "help";
+ inline constexpr char kChromeUIHelpURL[] = "chrome://help/";
++inline constexpr char kChromeUISlayzonePlaceholderHost[] =
++    "slayzone-placeholder";
++inline constexpr char kChromeUISlayzonePlaceholderURL[] =
++    "chrome://slayzone-placeholder/";
+ inline constexpr char kChromeUISlayzoneShellHost[] = "slayzone-shell";
+ inline constexpr char kChromeUISlayzoneShellURL[] = "chrome://slayzone-shell/";
+ inline constexpr char kChromeUIHistoryHost[] = "history";
+-- 
+2.52.0
+

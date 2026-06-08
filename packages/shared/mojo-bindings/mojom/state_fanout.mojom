@@ -1,0 +1,35 @@
+// Phase 4 toy interface — drives the demo-region state-fanout proof.
+// Real state-transport interfaces land in Phase 5 alongside the layout shell;
+// per-surface interfaces land in Phase 7+.
+//
+// Shape mirrors what Phase 4.4's Zustand+adapter needs:
+// - Publish: region writes a (key, value) pair into the shared bag.
+// - Subscribe: region receives a stream of (key, value) changes.
+
+module slayzone.state.mojom;
+
+// A single key/value pair exchanged between regions. Values are opaque strings
+// because the transport is dumb — it's the state package's job to know what's
+// in them (JSON of Zustand slice state, in practice).
+struct StateEntry {
+  string key;
+  string value;
+};
+
+// Pushed from the browser to each region on every change. Invoked once per
+// published entry. A single batch (multiple entries from one Publish call)
+// arrives as a sequence of OnChange calls.
+interface StateSubscriber {
+  OnChange(StateEntry entry);
+};
+
+// Owned by the browser process; one remote per region.
+interface StateFanout {
+  // Register a per-region subscriber. The browser holds the remote and
+  // fans out every published entry to every registered subscriber.
+  Subscribe(pending_remote<StateSubscriber> subscriber);
+
+  // Publish a single entry. The reply fires after the browser has broadcast
+  // to every registered subscriber — regions use this for write-acks.
+  Publish(StateEntry entry) => ();
+};

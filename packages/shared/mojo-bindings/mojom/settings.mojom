@@ -1,0 +1,26 @@
+// Phase 11.2 settings region data contract (source of truth).
+// In-tree mirror: chromium/src/chrome/browser/slayzone/mojom/settings.mojom.
+// Keep diff-identical below the module line.
+//
+// String-keyed KV store surfacing the sidecar's `settings:get` /
+// `settings:set` handlers. Every settings tab reads and writes keys through
+// this single interface — per-tab domain mojoms are NOT introduced (cf. the
+// decision note in the Phase 11 task card: single settings WebUI with
+// internal tab state, not per-tab WebUIs).
+//
+// Typed tab-specific contracts (e.g. terminal-mode objects, worktree lists)
+// flow through their existing region mojoms (terminal.mojom / etc.); settings
+// mojom handles only the scalar-string settings that the old
+// `window.api.settings.{get,set}` pair wrapped.
+
+module slayzone.settings.mojom;
+
+interface SettingsHost {
+  // Returns "" when the key is unknown — keeps the Mojo signature simple
+  // (no optional<string>) while matching the client-side "no value" path.
+  GetString(string key) => (string value);
+  // Upserts key → value. `ok` is false only when the sidecar explicitly
+  // refuses (empty key, future: read-only schema locks). Transport errors
+  // surface as mojo disconnect, not via `ok`.
+  SetString(string key, string value) => (bool ok);
+};

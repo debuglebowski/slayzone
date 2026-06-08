@@ -45,3 +45,17 @@ working-notes/
 
 # Antigravity CLI local runtime symlinks
 .antigravitycli/
+
+# Chromium fork build tree (local only — binary + source, never committed)
+chromium/src/
+chromium/_gclient_src_*/
+chromium/.gclient
+chromium/.gclient_entries
+chromium/.gclient_previous_sync_commits
+chromium/.gcs_entries
+chromium/.cipd/
+chromium/.git_cache/
+chromium/out/
+
+# depot_tools — fetched via git clone, not vendored (see scripts/chromium/env.sh)
+tools/depot_tools/

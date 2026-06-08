@@ -1,0 +1,1439 @@
+From 2043a7bc8b239332acaebbda3602c92bcd6184b7 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sun, 19 Apr 2026 20:31:18 +0200
+Subject: [slayzone] =?UTF-8?q?slayzone:=20Phase=207.4+7.5+7.6=20R2=20?=
+ =?UTF-8?q?=E2=80=94=20tasklist=20+=20sidebar=20+=20taskheader=20+=20bundl?=
+ =?UTF-8?q?e-source=20helper?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Round 2 of Phase 7 surface migration. Three regions ported per the
+Phase 7.1 StatusBar recipe, bundled into a single chromium patch
+because every region mutates the same shared files (BUILD.gn,
+webui_url_constants, SlayzoneBrowserView, slayzone_region_container,
+slayzone_webui_registry, chrome_browser_interface_binders_*).
+
+NEW: chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.{h,cc}
+recipe-refinement #1 approved by orchestrator after Round 1. Extracts
+the ~100-LoC-per-region bundle-serving + CSP + missing-bundle-fallback
+pattern into a single slayzone::ConfigureBundleSource helper. Regions
+now call:
+
+    auto* source = content::WebUIDataSource::CreateAndAdd(...);
+    slayzone::ConfigureBundleSource(source, "<region>",
+                                     kRegionMissingBundleHtml);
+
+and get: --slayzone-webui-bundle-dir/<region>/dist/<path> file-read on
+a MayBlock worker, plus the standard SlayZone CSP (script-src 'self'
+chrome://resources, style/font/img 'self' data:/inline, TrustedTypes
+disabled). 7.4/7.5/7.6 all use the helper; 7.1/7.2/7.3/7.9 will
+migrate opportunistically in a later rebase. Statusbar keeps its
+inline copy for now so the 7.1 reference implementation stays
+self-contained.
+
+Per-region surface:
+
+**7.4 tasklist** — kanban board. Minimal spike surface: TasklistColumn
+list with TaskEntry rows (id + title + status). Full drag-drop + card
+chrome lands when parity harness flags the gap. tasklist:get-snapshot
+forwards via SlayzoneTasklistHost. Region already had a WebView slot
+in SlayzoneSplitView (Phase 5.4); 7.4 only flips its URL from
+placeholder to chrome://slayzone-tasklist/.
+
+**7.5 sidebar** — task-metadata side panel. description + tags
+(SidebarTag list) + priority (0-3). chrome://slayzone-sidebar/ +
+SlayzoneSidebarHost. sidebar:get-snapshot forwards to sidecar.
+
+**7.6 taskheader** — task title row. title + status + statusOptions
+list. chrome://slayzone-taskheader/ + SlayzoneTaskheaderHost.
+taskheader:get-snapshot forwards to sidecar.
+
+Shared file deltas: each region adds a URL host + ChromeURLHosts entry
++ WebUIConfig registration + ForWebUI<>.Add<>() binder + mojom() input
++ SlayzoneBrowserView unique_ptr member + accessor + RegionUrl
+conditional. Mechanical; matches R1 shape verbatim.
+
+Files added:
+  chrome/browser/slayzone/mojom/{tasklist,sidebar,taskheader}.mojom
+  chrome/browser/slayzone/slayzone_{tasklist,sidebar,taskheader}_host.{h,cc}
+  chrome/browser/ui/webui/slayzone/slayzone_{tasklist,sidebar,taskheader}_ui.{h,cc}
+  chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.{h,cc}
+---
+ chrome/browser/BUILD.gn                       |   6 +
+ ...r_interface_binders_webui_parts_desktop.cc |  18 +++
+ chrome/browser/slayzone/mojom/BUILD.gn        |   3 +
+ chrome/browser/slayzone/mojom/sidebar.mojom   |  39 ++++++
+ .../browser/slayzone/mojom/taskheader.mojom   |  36 +++++
+ chrome/browser/slayzone/mojom/tasklist.mojom  |  44 ++++++
+ .../browser/slayzone/slayzone_sidebar_host.cc |  79 +++++++++++
+ .../browser/slayzone/slayzone_sidebar_host.h  |  37 +++++
+ .../slayzone/slayzone_taskheader_host.cc      |  79 +++++++++++
+ .../slayzone/slayzone_taskheader_host.h       |  39 ++++++
+ .../slayzone/slayzone_tasklist_host.cc        |  94 +++++++++++++
+ .../browser/slayzone/slayzone_tasklist_host.h |  38 +++++
+ chrome/browser/ui/BUILD.gn                    |   8 ++
+ .../ui/views/frame/slayzone_browser_view.cc   |   6 +
+ .../ui/views/frame/slayzone_browser_view.h    |  15 ++
+ .../views/frame/slayzone_region_container.cc  |  12 ++
+ .../ui/webui/slayzone/slayzone_sidebar_ui.cc  |  63 +++++++++
+ .../ui/webui/slayzone/slayzone_sidebar_ui.h   |  37 +++++
+ .../webui/slayzone/slayzone_taskheader_ui.cc  |  65 +++++++++
+ .../webui/slayzone/slayzone_taskheader_ui.h   |  38 +++++
+ .../ui/webui/slayzone/slayzone_tasklist_ui.cc |  63 +++++++++
+ .../ui/webui/slayzone/slayzone_tasklist_ui.h  |  37 +++++
+ .../slayzone/slayzone_webui_bundle_source.cc  | 132 ++++++++++++++++++
+ .../slayzone/slayzone_webui_bundle_source.h   |  40 ++++++
+ .../webui/slayzone/slayzone_webui_registry.cc |   6 +
+ chrome/common/webui_url_constants.cc          |   3 +
+ chrome/common/webui_url_constants.h           |  10 ++
+ 27 files changed, 1047 insertions(+)
+ create mode 100644 chrome/browser/slayzone/mojom/sidebar.mojom
+ create mode 100644 chrome/browser/slayzone/mojom/taskheader.mojom
+ create mode 100644 chrome/browser/slayzone/mojom/tasklist.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_sidebar_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_sidebar_host.h
+ create mode 100644 chrome/browser/slayzone/slayzone_taskheader_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_taskheader_host.h
+ create mode 100644 chrome/browser/slayzone/slayzone_tasklist_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_tasklist_host.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 490990df1a057..1991197589b1b 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -984,10 +984,16 @@ static_library("browser") {
+     "slayzone/slayzone_layout_host.h",
+     "slayzone/slayzone_projects_host.cc",
+     "slayzone/slayzone_projects_host.h",
++    "slayzone/slayzone_sidebar_host.cc",
++    "slayzone/slayzone_sidebar_host.h",
+     "slayzone/slayzone_statusbar_host.cc",
+     "slayzone/slayzone_statusbar_host.h",
+     "slayzone/slayzone_tabs_host.cc",
+     "slayzone/slayzone_tabs_host.h",
++    "slayzone/slayzone_taskheader_host.cc",
++    "slayzone/slayzone_taskheader_host.h",
++    "slayzone/slayzone_tasklist_host.cc",
++    "slayzone/slayzone_tasklist_host.h",
+     "slayzone/slayzone_tools_host.cc",
+     "slayzone/slayzone_tools_host.h",
+     "ssl/chrome_security_blocking_page_factory.cc",
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index 8bdde4595dfa7..92185bd59e25e 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -87,13 +87,19 @@
+ #include "chrome/browser/ui/webui/suggest_internals/suggest_internals_ui.h"
+ #include "chrome/browser/ui/webui/tab_search/tab_search.mojom.h"
+ #include "chrome/browser/slayzone/mojom/projects.mojom.h"
++#include "chrome/browser/slayzone/mojom/sidebar.mojom.h"
+ #include "chrome/browser/slayzone/mojom/statusbar.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tabs.mojom.h"
++#include "chrome/browser/slayzone/mojom/taskheader.mojom.h"
++#include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tools.mojom.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_statusbar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h"
+ #include "chrome/browser/ui/webui/tab_search/tab_search_ui.h"
+ #include "chrome/browser/ui/webui/user_education_internals/user_education_internals.mojom.h"
+@@ -684,6 +690,18 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // SlayzoneToolsHost for tool-toggle snapshot + flip RPCs.
+   registry.ForWebUI<SlayzoneToolsUI>()
+       .Add<slayzone::tools::mojom::ToolsHost>();
++  // Phase 7.4 — chrome://slayzone-tasklist/ binds to the per-BrowserView
++  // SlayzoneTasklistHost for kanban column snapshots.
++  registry.ForWebUI<SlayzoneTasklistUI>()
++      .Add<slayzone::tasklist::mojom::TasklistHost>();
++  // Phase 7.5 — chrome://slayzone-sidebar/ binds to the per-BrowserView
++  // SlayzoneSidebarHost for task-metadata snapshots.
++  registry.ForWebUI<SlayzoneSidebarUI>()
++      .Add<slayzone::sidebar::mojom::SidebarHost>();
++  // Phase 7.6 — chrome://slayzone-taskheader/ binds to the per-BrowserView
++  // SlayzoneTaskheaderHost for task title + status snapshots.
++  registry.ForWebUI<SlayzoneTaskheaderUI>()
++      .Add<slayzone::taskheader::mojom::TaskheaderHost>();
+ 
+   if (base::FeatureList::IsEnabled(ntp_features::kNtpFooter)) {
+     registry.ForWebUI<NewTabFooterUI>()
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+index e0f5d9faa2a4a..7258d3f1dd62a 100644
+--- a/chrome/browser/slayzone/mojom/BUILD.gn
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -8,8 +8,11 @@ mojom("mojom") {
+   sources = [
+     "layout.mojom",
+     "projects.mojom",
++    "sidebar.mojom",
+     "statusbar.mojom",
+     "tabs.mojom",
++    "taskheader.mojom",
++    "tasklist.mojom",
+     "tools.mojom",
+   ]
+   webui_module_path = "/"
+diff --git a/chrome/browser/slayzone/mojom/sidebar.mojom b/chrome/browser/slayzone/mojom/sidebar.mojom
+new file mode 100644
+index 0000000000000..51bc298214c38
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/sidebar.mojom
+@@ -0,0 +1,39 @@
++// Phase 7.5 sidebar region data contract.
++//
++// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory)
++// as a coordinated exception, following the 5.6 / 6.1 / 7.1 pattern. In-tree
++// mirror at chrome/browser/slayzone/mojom/sidebar.mojom compiles to C++;
++// Phase 4.3 regenerates TS bindings from this outer file. The two must stay
++// diff-identical below the module line.
++//
++// The sidebar region is the task-metadata side panel — description, tags,
++// priority, assignee, etc. Minimal spike surface: the active task's
++// description + tag list + priority. Editing flows through sidecar RPC
++// (sidebar:set-description, sidebar:toggle-tag, sidebar:set-priority) rather
++// than direct Mojo so every region sees the authoritative state.
++
++module slayzone.sidebar.mojom;
++
++// One tag entry. `color` is an optional hex string; empty falls back to a
++// hashed badge hue.
++struct SidebarTag {
++  string id;
++  string label;
++  string color;
++};
++
++// Task-metadata snapshot. `active_task_id` is empty when no task is open.
++// Priority is 0-3 (none / low / medium / high) — stays an int for forward
++// compatibility with additional tiers.
++struct SidebarSnapshot {
++  string active_task_id;
++  string description;
++  array<SidebarTag> tags;
++  int32 priority;
++};
++
++// Browser-side sidebar data provider. Forwards snapshot queries to the
++// sidecar (sidebar:get-snapshot).
++interface SidebarHost {
++  GetSnapshot() => (SidebarSnapshot snapshot);
++};
+diff --git a/chrome/browser/slayzone/mojom/taskheader.mojom b/chrome/browser/slayzone/mojom/taskheader.mojom
+new file mode 100644
+index 0000000000000..721f5d016e903
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/taskheader.mojom
+@@ -0,0 +1,36 @@
++// Phase 7.6 taskheader region data contract.
++//
++// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory)
++// as a coordinated exception, following the 5.6 / 6.1 / 7.1 pattern. In-tree
++// mirror at chrome/browser/slayzone/mojom/taskheader.mojom compiles to C++;
++// Phase 4.3 regenerates TS bindings from this outer file. The two must stay
++// diff-identical below the module line.
++//
++// The taskheader region is the task title row above the task-detail body —
++// title + status selector + open-count badge. Minimal spike surface: title
++// string + status + status-options list for the picker. Status changes fire
++// a JSON-RPC (taskheader:set-status) not a Mojo mutation.
++
++module slayzone.taskheader.mojom;
++
++// One selectable status option.
++struct StatusOption {
++  string id;
++  string label;
++};
++
++// Taskheader snapshot. `active_task_id` + `title` come from the currently-
++// open task; `status` is its current status id; `status_options` is the
++// project's configured column list (identical to kanban column keys).
++struct TaskheaderSnapshot {
++  string active_task_id;
++  string title;
++  string status;
++  array<StatusOption> status_options;
++};
++
++// Browser-side taskheader data provider. Forwards snapshot queries to the
++// sidecar (taskheader:get-snapshot).
++interface TaskheaderHost {
++  GetSnapshot() => (TaskheaderSnapshot snapshot);
++};
+diff --git a/chrome/browser/slayzone/mojom/tasklist.mojom b/chrome/browser/slayzone/mojom/tasklist.mojom
+new file mode 100644
+index 0000000000000..68b30d98b65aa
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/tasklist.mojom
+@@ -0,0 +1,44 @@
++// Phase 7.4 tasklist region data contract.
++//
++// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory)
++// as a coordinated exception, following the 5.6 / 6.1 / 7.1 pattern. In-tree
++// mirror at chrome/browser/slayzone/mojom/tasklist.mojom compiles to C++;
++// Phase 4.3 regenerates TS bindings from this outer file. The two must stay
++// diff-identical below the module line.
++//
++// The tasklist region is the kanban board / list view — the biggest surface
++// in Phase 7. The minimal spike surface here is enough to render one column
++// per task status with a title + count, so the region shows real data from
++// the sidecar. Drag-drop + full kanban card contents + filter-bar state come
++// as follow-up work (tracked separately once the parity harness flags the
++// gap visually).
++
++module slayzone.tasklist.mojom;
++
++// One task row — the bare minimum to render a kanban card.
++struct TaskEntry {
++  string id;
++  string title;
++  string status;
++};
++
++// One column (status lane). `id` is the status key; `title` is the user-
++// facing column header; `tasks` is the tasks currently in that column.
++struct TasklistColumn {
++  string id;
++  string title;
++  array<TaskEntry> tasks;
++};
++
++// Full tasklist snapshot — the columns in display order plus the current
++// filter text (surfaced so the filter-bar region can reflect state).
++struct TasklistSnapshot {
++  array<TasklistColumn> columns;
++  string filter;
++};
++
++// Browser-side tasklist data provider. One remote per region WebUI mount.
++// Forwards snapshot queries to the sidecar (tasklist:get-snapshot).
++interface TasklistHost {
++  GetSnapshot() => (TasklistSnapshot snapshot);
++};
+diff --git a/chrome/browser/slayzone/slayzone_sidebar_host.cc b/chrome/browser/slayzone/slayzone_sidebar_host.cc
+new file mode 100644
+index 0000000000000..4ecd09f5c6eb7
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_sidebar_host.cc
+@@ -0,0 +1,79 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_sidebar_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++sidebar::mojom::SidebarSnapshotPtr FromDict(const base::DictValue& response) {
++  auto snapshot = sidebar::mojom::SidebarSnapshot::New();
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    return snapshot;
++  }
++
++  if (const std::string* id = dict->FindString("activeTaskId")) {
++    snapshot->active_task_id = *id;
++  }
++  if (const std::string* desc = dict->FindString("description")) {
++    snapshot->description = *desc;
++  }
++  snapshot->priority = dict->FindInt("priority").value_or(0);
++
++  const base::Value::List* tags = dict->FindList("tags");
++  if (tags) {
++    for (const base::Value& tag_entry : *tags) {
++      if (!tag_entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& t = tag_entry.GetDict();
++      auto tag = sidebar::mojom::SidebarTag::New();
++      if (const std::string* id = t.FindString("id")) {
++        tag->id = *id;
++      }
++      if (const std::string* label = t.FindString("label")) {
++        tag->label = *label;
++      }
++      if (const std::string* color = t.FindString("color")) {
++        tag->color = *color;
++      }
++      snapshot->tags.push_back(std::move(tag));
++    }
++  }
++
++  return snapshot;
++}
++
++}  // namespace
++
++SlayzoneSidebarHost::SlayzoneSidebarHost() = default;
++SlayzoneSidebarHost::~SlayzoneSidebarHost() = default;
++
++void SlayzoneSidebarHost::Bind(
++    mojo::PendingReceiver<sidebar::mojom::SidebarHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneSidebarHost::GetSnapshot(GetSnapshotCallback callback) {
++  SidecarClient::GetInstance()->Call(
++      "sidebar:get-snapshot", base::DictValue(),
++      base::BindOnce(
++          [](GetSnapshotCallback cb, base::DictValue response) {
++            std::move(cb).Run(FromDict(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_sidebar_host.h b/chrome/browser/slayzone/slayzone_sidebar_host.h
+new file mode 100644
+index 0000000000000..b5147eafe4bc1
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_sidebar_host.h
+@@ -0,0 +1,37 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_SIDEBAR_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_SIDEBAR_HOST_H_
++
++#include "chrome/browser/slayzone/mojom/sidebar.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 7.5 — browser-side implementation of
++// `slayzone::sidebar::mojom::SidebarHost`. One per `SlayzoneBrowserView`.
++// `GetSnapshot` forwards to the process-wide `SidecarClient` (Phase 2.3)
++// via JSON-RPC method `sidebar:get-snapshot`.
++class SlayzoneSidebarHost : public slayzone::sidebar::mojom::SidebarHost {
++ public:
++  SlayzoneSidebarHost();
++  SlayzoneSidebarHost(const SlayzoneSidebarHost&) = delete;
++  SlayzoneSidebarHost& operator=(const SlayzoneSidebarHost&) = delete;
++  ~SlayzoneSidebarHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::sidebar::mojom::SidebarHost> receiver);
++
++  // slayzone::sidebar::mojom::SidebarHost:
++  void GetSnapshot(GetSnapshotCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::sidebar::mojom::SidebarHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_SIDEBAR_HOST_H_
+diff --git a/chrome/browser/slayzone/slayzone_taskheader_host.cc b/chrome/browser/slayzone/slayzone_taskheader_host.cc
+new file mode 100644
+index 0000000000000..99a09833fe542
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_taskheader_host.cc
+@@ -0,0 +1,79 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_taskheader_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++taskheader::mojom::TaskheaderSnapshotPtr FromDict(
++    const base::DictValue& response) {
++  auto snapshot = taskheader::mojom::TaskheaderSnapshot::New();
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    return snapshot;
++  }
++
++  if (const std::string* id = dict->FindString("activeTaskId")) {
++    snapshot->active_task_id = *id;
++  }
++  if (const std::string* title = dict->FindString("title")) {
++    snapshot->title = *title;
++  }
++  if (const std::string* status = dict->FindString("status")) {
++    snapshot->status = *status;
++  }
++
++  const base::Value::List* options = dict->FindList("statusOptions");
++  if (options) {
++    for (const base::Value& opt_entry : *options) {
++      if (!opt_entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& o = opt_entry.GetDict();
++      auto opt = taskheader::mojom::StatusOption::New();
++      if (const std::string* id = o.FindString("id")) {
++        opt->id = *id;
++      }
++      if (const std::string* label = o.FindString("label")) {
++        opt->label = *label;
++      }
++      snapshot->status_options.push_back(std::move(opt));
++    }
++  }
++
++  return snapshot;
++}
++
++}  // namespace
++
++SlayzoneTaskheaderHost::SlayzoneTaskheaderHost() = default;
++SlayzoneTaskheaderHost::~SlayzoneTaskheaderHost() = default;
++
++void SlayzoneTaskheaderHost::Bind(
++    mojo::PendingReceiver<taskheader::mojom::TaskheaderHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneTaskheaderHost::GetSnapshot(GetSnapshotCallback callback) {
++  SidecarClient::GetInstance()->Call(
++      "taskheader:get-snapshot", base::DictValue(),
++      base::BindOnce(
++          [](GetSnapshotCallback cb, base::DictValue response) {
++            std::move(cb).Run(FromDict(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_taskheader_host.h b/chrome/browser/slayzone/slayzone_taskheader_host.h
+new file mode 100644
+index 0000000000000..cf0ccdaa6cefc
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_taskheader_host.h
+@@ -0,0 +1,39 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_TASKHEADER_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_TASKHEADER_HOST_H_
++
++#include "chrome/browser/slayzone/mojom/taskheader.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 7.6 — browser-side implementation of
++// `slayzone::taskheader::mojom::TaskheaderHost`. One per `SlayzoneBrowserView`.
++// `GetSnapshot` forwards to the process-wide `SidecarClient` (Phase 2.3)
++// via JSON-RPC method `taskheader:get-snapshot`.
++class SlayzoneTaskheaderHost
++    : public slayzone::taskheader::mojom::TaskheaderHost {
++ public:
++  SlayzoneTaskheaderHost();
++  SlayzoneTaskheaderHost(const SlayzoneTaskheaderHost&) = delete;
++  SlayzoneTaskheaderHost& operator=(const SlayzoneTaskheaderHost&) = delete;
++  ~SlayzoneTaskheaderHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::taskheader::mojom::TaskheaderHost>
++          receiver);
++
++  // slayzone::taskheader::mojom::TaskheaderHost:
++  void GetSnapshot(GetSnapshotCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::taskheader::mojom::TaskheaderHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_TASKHEADER_HOST_H_
+diff --git a/chrome/browser/slayzone/slayzone_tasklist_host.cc b/chrome/browser/slayzone/slayzone_tasklist_host.cc
+new file mode 100644
+index 0000000000000..300fdb0f8e946
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_tasklist_host.cc
+@@ -0,0 +1,94 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_tasklist_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++tasklist::mojom::TasklistSnapshotPtr FromDict(const base::DictValue& response) {
++  auto snapshot = tasklist::mojom::TasklistSnapshot::New();
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    return snapshot;
++  }
++
++  if (const std::string* filter = dict->FindString("filter")) {
++    snapshot->filter = *filter;
++  }
++
++  const base::Value::List* columns = dict->FindList("columns");
++  if (columns) {
++    for (const base::Value& col_entry : *columns) {
++      if (!col_entry.is_dict()) {
++        continue;
++      }
++      const base::DictValue& col = col_entry.GetDict();
++      auto column = tasklist::mojom::TasklistColumn::New();
++      if (const std::string* id = col.FindString("id")) {
++        column->id = *id;
++      }
++      if (const std::string* title = col.FindString("title")) {
++        column->title = *title;
++      }
++      const base::Value::List* tasks = col.FindList("tasks");
++      if (tasks) {
++        for (const base::Value& task_entry : *tasks) {
++          if (!task_entry.is_dict()) {
++            continue;
++          }
++          const base::DictValue& task = task_entry.GetDict();
++          auto task_ptr = tasklist::mojom::TaskEntry::New();
++          if (const std::string* id = task.FindString("id")) {
++            task_ptr->id = *id;
++          }
++          if (const std::string* title = task.FindString("title")) {
++            task_ptr->title = *title;
++          }
++          if (const std::string* status = task.FindString("status")) {
++            task_ptr->status = *status;
++          } else {
++            task_ptr->status = column->id;
++          }
++          column->tasks.push_back(std::move(task_ptr));
++        }
++      }
++      snapshot->columns.push_back(std::move(column));
++    }
++  }
++
++  return snapshot;
++}
++
++}  // namespace
++
++SlayzoneTasklistHost::SlayzoneTasklistHost() = default;
++SlayzoneTasklistHost::~SlayzoneTasklistHost() = default;
++
++void SlayzoneTasklistHost::Bind(
++    mojo::PendingReceiver<tasklist::mojom::TasklistHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneTasklistHost::GetSnapshot(GetSnapshotCallback callback) {
++  SidecarClient::GetInstance()->Call(
++      "tasklist:get-snapshot", base::DictValue(),
++      base::BindOnce(
++          [](GetSnapshotCallback cb, base::DictValue response) {
++            std::move(cb).Run(FromDict(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_tasklist_host.h b/chrome/browser/slayzone/slayzone_tasklist_host.h
+new file mode 100644
+index 0000000000000..25c3308129063
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_tasklist_host.h
+@@ -0,0 +1,38 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_TASKLIST_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_TASKLIST_HOST_H_
++
++#include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 7.4 — browser-side implementation of
++// `slayzone::tasklist::mojom::TasklistHost`. One per `SlayzoneBrowserView`.
++// `GetSnapshot` forwards to the process-wide `SidecarClient` (Phase 2.3)
++// via JSON-RPC method `tasklist:get-snapshot`.
++class SlayzoneTasklistHost
++    : public slayzone::tasklist::mojom::TasklistHost {
++ public:
++  SlayzoneTasklistHost();
++  SlayzoneTasklistHost(const SlayzoneTasklistHost&) = delete;
++  SlayzoneTasklistHost& operator=(const SlayzoneTasklistHost&) = delete;
++  ~SlayzoneTasklistHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::tasklist::mojom::TasklistHost> receiver);
++
++  // slayzone::tasklist::mojom::TasklistHost:
++  void GetSnapshot(GetSnapshotCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::tasklist::mojom::TasklistHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_TASKLIST_HOST_H_
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 544d31d186902..0f0ea6c394b2d 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -192,12 +192,20 @@ static_library("ui") {
+     "webui/slayzone/slayzone_browserchrome_ui.h",
+     "webui/slayzone/slayzone_projects_ui.cc",
+     "webui/slayzone/slayzone_projects_ui.h",
++    "webui/slayzone/slayzone_sidebar_ui.cc",
++    "webui/slayzone/slayzone_sidebar_ui.h",
+     "webui/slayzone/slayzone_statusbar_ui.cc",
+     "webui/slayzone/slayzone_statusbar_ui.h",
+     "webui/slayzone/slayzone_tabbar_ui.cc",
+     "webui/slayzone/slayzone_tabbar_ui.h",
++    "webui/slayzone/slayzone_taskheader_ui.cc",
++    "webui/slayzone/slayzone_taskheader_ui.h",
++    "webui/slayzone/slayzone_tasklist_ui.cc",
++    "webui/slayzone/slayzone_tasklist_ui.h",
+     "webui/slayzone/slayzone_tools_ui.cc",
+     "webui/slayzone/slayzone_tools_ui.h",
++    "webui/slayzone/slayzone_webui_bundle_source.cc",
++    "webui/slayzone/slayzone_webui_bundle_source.h",
+     "webui/slayzone/slayzone_webui_registry.cc",
+     "webui/slayzone/slayzone_webui_registry.h",
+     "webui/sync_internals/chrome_sync_internals_message_handler.cc",
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index 28d85f1d0a353..1796d7c302336 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -10,8 +10,11 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/slayzone/slayzone_layout_host.h"
+ #include "chrome/browser/slayzone/slayzone_projects_host.h"
++#include "chrome/browser/slayzone/slayzone_sidebar_host.h"
+ #include "chrome/browser/slayzone/slayzone_statusbar_host.h"
+ #include "chrome/browser/slayzone/slayzone_tabs_host.h"
++#include "chrome/browser/slayzone/slayzone_taskheader_host.h"
++#include "chrome/browser/slayzone/slayzone_tasklist_host.h"
+ #include "chrome/browser/slayzone/slayzone_tools_host.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+@@ -57,6 +60,9 @@ SlayzoneBrowserView::SlayzoneBrowserView(Browser* browser)
+       tabs_host_(std::make_unique<SlayzoneTabsHost>(browser)),
+       statusbar_host_(std::make_unique<slayzone::SlayzoneStatusbarHost>()),
+       projects_host_(std::make_unique<slayzone::SlayzoneProjectsHost>()),
++      sidebar_host_(std::make_unique<slayzone::SlayzoneSidebarHost>()),
++      taskheader_host_(std::make_unique<slayzone::SlayzoneTaskheaderHost>()),
++      tasklist_host_(std::make_unique<slayzone::SlayzoneTasklistHost>()),
+       tools_host_(std::make_unique<slayzone::SlayzoneToolsHost>()) {}
+ 
+ SlayzoneBrowserView::~SlayzoneBrowserView() = default;
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 26c414257680d..c33cbe535e5e9 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -20,7 +20,10 @@ class SlayzoneTabsHost;
+ 
+ namespace slayzone {
+ class SlayzoneProjectsHost;
++class SlayzoneSidebarHost;
+ class SlayzoneStatusbarHost;
++class SlayzoneTaskheaderHost;
++class SlayzoneTasklistHost;
+ class SlayzoneToolsHost;
+ }  // namespace slayzone
+ 
+@@ -60,6 +63,15 @@ class SlayzoneBrowserView : public BrowserView {
+   slayzone::SlayzoneProjectsHost* projects_host() {
+     return projects_host_.get();
+   }
++  slayzone::SlayzoneSidebarHost* sidebar_host() {
++    return sidebar_host_.get();
++  }
++  slayzone::SlayzoneTaskheaderHost* taskheader_host() {
++    return taskheader_host_.get();
++  }
++  slayzone::SlayzoneTasklistHost* tasklist_host() {
++    return tasklist_host_.get();
++  }
+   slayzone::SlayzoneToolsHost* tools_host() {
+     return tools_host_.get();
+   }
+@@ -97,6 +109,9 @@ class SlayzoneBrowserView : public BrowserView {
+   std::unique_ptr<SlayzoneTabsHost> tabs_host_;
+   std::unique_ptr<slayzone::SlayzoneStatusbarHost> statusbar_host_;
+   std::unique_ptr<slayzone::SlayzoneProjectsHost> projects_host_;
++  std::unique_ptr<slayzone::SlayzoneSidebarHost> sidebar_host_;
++  std::unique_ptr<slayzone::SlayzoneTaskheaderHost> taskheader_host_;
++  std::unique_ptr<slayzone::SlayzoneTasklistHost> tasklist_host_;
+   std::unique_ptr<slayzone::SlayzoneToolsHost> tools_host_;
+ };
+ 
+diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.cc b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+index d6587c27a33f8..c9e85a24c0dbf 100644
+--- a/chrome/browser/ui/views/frame/slayzone_region_container.cc
++++ b/chrome/browser/ui/views/frame/slayzone_region_container.cc
+@@ -46,6 +46,18 @@ GURL RegionUrl(std::string_view region_id) {
+   if (region_id == "tools") {
+     return GURL(chrome::kChromeUISlayzoneToolsURL);
+   }
++  // Phase 7.4 tasklist — kanban board / list view (biggest surface).
++  if (region_id == "tasklist") {
++    return GURL(chrome::kChromeUISlayzoneTasklistURL);
++  }
++  // Phase 7.5 sidebar — task metadata side panel.
++  if (region_id == "sidebar") {
++    return GURL(chrome::kChromeUISlayzoneSidebarURL);
++  }
++  // Phase 7.6 taskheader — task title row.
++  if (region_id == "taskheader") {
++    return GURL(chrome::kChromeUISlayzoneTaskheaderURL);
++  }
+   return GURL(
+       base::StrCat({chrome::kChromeUISlayzonePlaceholderURL, region_id}));
+ }
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.cc
+new file mode 100644
+index 0000000000000..c4aa2ebd95d68
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.cc
+@@ -0,0 +1,63 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
++
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_sidebar_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kSidebarMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · sidebar</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 10px;
++      background: #3a1a1a; color: #fca5a5;
++      border-left: 1px solid #6b2020;
++    }
++  </style>
++</head>
++<body>
++  <span>sidebar: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneSidebarUI::SlayzoneSidebarUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneSidebarHost);
++  slayzone::ConfigureBundleSource(source, "sidebar", kSidebarMissingBundleHtml);
++}
++
++SlayzoneSidebarUI::~SlayzoneSidebarUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneSidebarUI)
++
++void SlayzoneSidebarUI::BindInterface(
++    mojo::PendingReceiver<slayzone::sidebar::mojom::SidebarHost> receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->sidebar_host()) {
++    return;
++  }
++  view->sidebar_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h
+new file mode 100644
+index 0000000000000..92e46e3f85d03
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h
+@@ -0,0 +1,37 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SIDEBAR_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SIDEBAR_UI_H_
++
++#include "chrome/browser/slayzone/mojom/sidebar.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++class SlayzoneSidebarUI : public content::WebUIController {
++ public:
++  explicit SlayzoneSidebarUI(content::WebUI* web_ui);
++  SlayzoneSidebarUI(const SlayzoneSidebarUI&) = delete;
++  SlayzoneSidebarUI& operator=(const SlayzoneSidebarUI&) = delete;
++  ~SlayzoneSidebarUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::sidebar::mojom::SidebarHost> receiver);
++
++ private:
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneSidebarUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneSidebarUI> {
++ public:
++  SlayzoneSidebarUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneSidebarHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SIDEBAR_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.cc
+new file mode 100644
+index 0000000000000..63d4586d8d849
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.cc
+@@ -0,0 +1,65 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h"
++
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_taskheader_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kTaskheaderMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · taskheader</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; padding: 0 10px;
++      background: #3a1a1a; color: #fca5a5;
++      border-bottom: 1px solid #6b2020;
++    }
++  </style>
++</head>
++<body>
++  <span>taskheader: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneTaskheaderUI::SlayzoneTaskheaderUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneTaskheaderHost);
++  slayzone::ConfigureBundleSource(source, "taskheader",
++                                   kTaskheaderMissingBundleHtml);
++}
++
++SlayzoneTaskheaderUI::~SlayzoneTaskheaderUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneTaskheaderUI)
++
++void SlayzoneTaskheaderUI::BindInterface(
++    mojo::PendingReceiver<slayzone::taskheader::mojom::TaskheaderHost>
++        receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->taskheader_host()) {
++    return;
++  }
++  view->taskheader_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h
+new file mode 100644
+index 0000000000000..16df5586f6aec
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h
+@@ -0,0 +1,38 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKHEADER_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKHEADER_UI_H_
++
++#include "chrome/browser/slayzone/mojom/taskheader.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++class SlayzoneTaskheaderUI : public content::WebUIController {
++ public:
++  explicit SlayzoneTaskheaderUI(content::WebUI* web_ui);
++  SlayzoneTaskheaderUI(const SlayzoneTaskheaderUI&) = delete;
++  SlayzoneTaskheaderUI& operator=(const SlayzoneTaskheaderUI&) = delete;
++  ~SlayzoneTaskheaderUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::taskheader::mojom::TaskheaderHost>
++          receiver);
++
++ private:
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneTaskheaderUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneTaskheaderUI> {
++ public:
++  SlayzoneTaskheaderUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneTaskheaderHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKHEADER_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
+new file mode 100644
+index 0000000000000..20520bdea2d83
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.cc
+@@ -0,0 +1,63 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h"
++
++#include <string_view>
++#include <utility>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_tasklist_host.h"
++#include "chrome/browser/ui/views/frame/slayzone_browser_view.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kTasklistMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · tasklist</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 11px/1.3 system-ui, sans-serif; }
++    body {
++      display: flex; align-items: center; justify-content: center;
++      padding: 0 10px; background: #3a1a1a; color: #fca5a5;
++    }
++  </style>
++</head>
++<body>
++  <span>tasklist: bundle missing — pass --slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</span>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneTasklistUI::SlayzoneTasklistUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneTasklistHost);
++  slayzone::ConfigureBundleSource(source, "tasklist",
++                                   kTasklistMissingBundleHtml);
++}
++
++SlayzoneTasklistUI::~SlayzoneTasklistUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneTasklistUI)
++
++void SlayzoneTasklistUI::BindInterface(
++    mojo::PendingReceiver<slayzone::tasklist::mojom::TasklistHost> receiver) {
++  SlayzoneBrowserView* view =
++      SlayzoneBrowserView::FromRegionWebContents(web_ui()->GetWebContents());
++  if (!view || !view->tasklist_host()) {
++    return;
++  }
++  view->tasklist_host()->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
+new file mode 100644
+index 0000000000000..4a75567ae063b
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h
+@@ -0,0 +1,37 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKLIST_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKLIST_UI_H_
++
++#include "chrome/browser/slayzone/mojom/tasklist.mojom.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++class SlayzoneTasklistUI : public content::WebUIController {
++ public:
++  explicit SlayzoneTasklistUI(content::WebUI* web_ui);
++  SlayzoneTasklistUI(const SlayzoneTasklistUI&) = delete;
++  SlayzoneTasklistUI& operator=(const SlayzoneTasklistUI&) = delete;
++  ~SlayzoneTasklistUI() override;
++
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::tasklist::mojom::TasklistHost> receiver);
++
++ private:
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneTasklistUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneTasklistUI> {
++ public:
++  SlayzoneTasklistUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneTasklistHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_TASKLIST_UI_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.cc
+new file mode 100644
+index 0000000000000..593eae94c2f9b
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.cc
+@@ -0,0 +1,132 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++
++#include <string>
++#include <utility>
++
++#include "base/command_line.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/memory/ref_counted_memory.h"
++#include "base/task/thread_pool.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
++
++namespace slayzone {
++
++namespace {
++
++// CLI switch pointing at the outer-repo `packages/webui/` root. Set by
++// scripts/chromium/run.sh; when missing a region renders its inline error
++// page.
++constexpr char kSlayzoneWebUIBundleDirSwitch[] = "slayzone-webui-bundle-dir";
++
++base::FilePath ResolveBundleRoot() {
++  const base::CommandLine* cli = base::CommandLine::ForCurrentProcess();
++  if (!cli->HasSwitch(kSlayzoneWebUIBundleDirSwitch)) {
++    return base::FilePath();
++  }
++  return cli->GetSwitchValuePath(kSlayzoneWebUIBundleDirSwitch);
++}
++
++// Blocking file read — hopped to a MayBlock worker below. Returns the file
++// bytes or the region-specific fallback HTML when the index file is missing.
++// Non-index misses resolve to an empty body; the page already loaded so the
++// asset miss becomes a console error rather than a WebContents failure.
++scoped_refptr<base::RefCountedMemory> ReadBundleFileOnWorker(
++    base::FilePath full_path,
++    bool is_index,
++    std::string missing_bundle_html) {
++  std::string contents;
++  if (base::ReadFileToString(full_path, &contents)) {
++    return base::MakeRefCounted<base::RefCountedString>(std::move(contents));
++  }
++  if (is_index) {
++    return base::MakeRefCounted<base::RefCountedString>(
++        std::move(missing_bundle_html));
++  }
++  return base::MakeRefCounted<base::RefCountedString>(std::string());
++}
++
++bool ShouldHandleAnyPath(const std::string& path) {
++  return true;
++}
++
++struct RegionBundleCtx {
++  std::string region;
++  std::string missing_html;
++};
++
++void HandleRegionRequest(
++    const RegionBundleCtx& ctx,
++    const std::string& path,
++    content::WebUIDataSource::GotDataCallback callback) {
++  base::FilePath bundle_root = ResolveBundleRoot();
++  if (bundle_root.empty()) {
++    std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
++        ctx.missing_html));
++    return;
++  }
++
++  std::string rel = path;
++  if (!rel.empty() && rel.front() == '/') {
++    rel.erase(0, 1);
++  }
++  const bool is_index = rel.empty();
++  if (is_index) {
++    rel = "index.html";
++  }
++
++  const base::FilePath full = bundle_root.AppendASCII(ctx.region)
++                                   .AppendASCII("dist")
++                                   .AppendASCII(rel);
++
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&ReadBundleFileOnWorker, full, is_index, ctx.missing_html),
++      std::move(callback));
++}
++
++}  // namespace
++
++void ConfigureBundleSource(content::WebUIDataSource* source,
++                           std::string_view region,
++                           std::string_view missing_bundle_html) {
++  auto ctx = std::make_shared<RegionBundleCtx>();
++  ctx->region = std::string(region);
++  ctx->missing_html = std::string(missing_bundle_html);
++
++  source->SetRequestFilter(
++      base::BindRepeating(&ShouldHandleAnyPath),
++      base::BindRepeating(
++          [](std::shared_ptr<RegionBundleCtx> bound_ctx,
++             const std::string& path,
++             content::WebUIDataSource::GotDataCallback callback) {
++            HandleRegionRequest(*bound_ctx, path, std::move(callback));
++          },
++          ctx));
++
++  // Vite-built bundle emits a hashed <script> + <link rel=stylesheet> under
++  // /assets/. Allow those from the same chrome:// origin, plus
++  // chrome://resources/ for the Mojo JS runtime that generated bindings
++  // import at module evaluation time. Inline styles are emitted by some
++  // Radix components, so style-src allows 'unsafe-inline'.
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ScriptSrc,
++      "script-src 'self' chrome://resources;");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::StyleSrc,
++      "style-src 'self' 'unsafe-inline';");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::FontSrc,
++      "font-src 'self' data:;");
++  source->OverrideContentSecurityPolicy(
++      network::mojom::CSPDirectiveName::ImgSrc,
++      "img-src 'self' data:;");
++  source->DisableTrustedTypesCSP();
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h b/chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h
+new file mode 100644
+index 0000000000000..3a34427b8cf93
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h
+@@ -0,0 +1,40 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_WEBUI_BUNDLE_SOURCE_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_WEBUI_BUNDLE_SOURCE_H_
++
++#include <string>
++#include <string_view>
++
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace slayzone {
++
++// Phase 7 recipe extraction — every region WebUI mounts a Vite-built bundle
++// from `--slayzone-webui-bundle-dir/<region>/dist/` with the same CSP,
++// missing-bundle fallback, and async file-read plumbing. Instead of
++// duplicating ~100 LoC per region (0017 statusbar + 0018 projects + 0019
++// tools all inlined this), regions now call:
++//
++//     slayzone::ConfigureBundleSource(source, "<region>",
++//                                     kMissingBundleHtml);
++//
++// and the helper installs a request filter that resolves the region's
++// `<bundle-dir>/<region>/dist/<rel>` file on a MayBlock worker, plus the
++// standard SlayZone CSP (script-src 'self' chrome://resources,
++// style-src 'self' 'unsafe-inline', font/img 'self' data:, TrustedTypes
++// disabled for the Mojo JS runtime).
++//
++// `missing_bundle_html` is the region-specific inline body rendered when
++// `--slayzone-webui-bundle-dir` is absent or the file read misses. Kept
++// per-region so each region's error state can match its chrome (border
++// side, color palette, copy).
++void ConfigureBundleSource(content::WebUIDataSource* source,
++                           std::string_view region,
++                           std::string_view missing_bundle_html);
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_WEBUI_BUNDLE_SOURCE_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+index 97426e162d6cb..a75bf245bd85e 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -14,8 +14,11 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_browserchrome_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_statusbar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_taskheader_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_tasklist_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tools_ui.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui.h"
+@@ -158,8 +161,11 @@ void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
+   map.AddWebUIConfig(std::make_unique<PlaceholderUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneBrowserchromeUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneProjectsUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneSidebarUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneStatusbarUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneTabbarUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneTaskheaderUIConfig>());
++  map.AddWebUIConfig(std::make_unique<SlayzoneTasklistUIConfig>());
+   map.AddWebUIConfig(std::make_unique<SlayzoneToolsUIConfig>());
+ }
+ 
+diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
+index 3c23d2db1b93d..f15ef3debb16c 100644
+--- a/chrome/common/webui_url_constants.cc
++++ b/chrome/common/webui_url_constants.cc
+@@ -178,8 +178,11 @@ base::span<const base::cstring_view> ChromeURLHosts() {
+       kChromeUISlayzonePlaceholderHost,
+       kChromeUISlayzoneProjectsHost,
+       kChromeUISlayzoneShellHost,
++      kChromeUISlayzoneSidebarHost,
+       kChromeUISlayzoneStatusbarHost,
+       kChromeUISlayzoneTabbarHost,
++      kChromeUISlayzoneTaskheaderHost,
++      kChromeUISlayzoneTasklistHost,
+       kChromeUISlayzoneToolsHost,
+ #if !BUILDFLAG(IS_ANDROID)
+       kChromeUISuggestInternalsHost,
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+index f3d9b2a58532a..73a3a2bf960bb 100644
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -187,12 +187,22 @@ inline constexpr char kChromeUISlayzoneProjectsURL[] =
+     "chrome://slayzone-projects/";
+ inline constexpr char kChromeUISlayzoneShellHost[] = "slayzone-shell";
+ inline constexpr char kChromeUISlayzoneShellURL[] = "chrome://slayzone-shell/";
++inline constexpr char kChromeUISlayzoneSidebarHost[] = "slayzone-sidebar";
++inline constexpr char kChromeUISlayzoneSidebarURL[] =
++    "chrome://slayzone-sidebar/";
+ inline constexpr char kChromeUISlayzoneStatusbarHost[] = "slayzone-statusbar";
+ inline constexpr char kChromeUISlayzoneStatusbarURL[] =
+     "chrome://slayzone-statusbar/";
+ inline constexpr char kChromeUISlayzoneTabbarHost[] = "slayzone-tabbar";
+ inline constexpr char kChromeUISlayzoneTabbarURL[] =
+     "chrome://slayzone-tabbar/";
++inline constexpr char kChromeUISlayzoneTaskheaderHost[] =
++    "slayzone-taskheader";
++inline constexpr char kChromeUISlayzoneTaskheaderURL[] =
++    "chrome://slayzone-taskheader/";
++inline constexpr char kChromeUISlayzoneTasklistHost[] = "slayzone-tasklist";
++inline constexpr char kChromeUISlayzoneTasklistURL[] =
++    "chrome://slayzone-tasklist/";
+ inline constexpr char kChromeUISlayzoneToolsHost[] = "slayzone-tools";
+ inline constexpr char kChromeUISlayzoneToolsURL[] = "chrome://slayzone-tools/";
+ inline constexpr char kChromeUIHistoryHost[] = "history";
+-- 
+2.52.0
+

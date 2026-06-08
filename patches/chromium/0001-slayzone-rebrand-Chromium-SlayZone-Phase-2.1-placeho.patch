@@ -1,0 +1,72 @@
+From 0277b70999712586ebd4c3ebfb33fea35c691db2 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 07:04:44 +0200
+Subject: [1/7] slayzone: rebrand Chromium -> SlayZone (Phase 2.1 placeholder)
+
+Placeholder text-only rebrand. Real icon / splash / about-page artwork
+swapped in during Phase 19 distribution work (tracked on the parity
+ledger). Everything user-visible that reads from IDS_PRODUCT_NAME or
+the chrome/app/theme/chromium/BRANDING template picks up "SlayZone"
+automatically.
+
+- chrome/app/theme/chromium/BRANDING: COMPANY/PRODUCT/COPYRIGHT =>
+  SlayZone. MAC_BUNDLE_ID zone.slay.SlayZone. MAC_CREATOR_CODE Slay.
+  Installer strings follow.
+- chrome/app/chromium_strings.grd: IDS_PRODUCT_NAME +
+  IDS_SHORT_PRODUCT_NAME "Chromium" -> "SlayZone". Scoped to the
+  is_chrome_for_testing_branded else-branch since our build sets
+  is_chrome_branded = false.
+
+Mac assets (app.icns, product_logo_*.png) remain the upstream
+Chromium placeholder art; they read fine under a text-only rebrand
+and are cheaper to swap once once real assets land than to regenerate
+noise-matching stand-ins now.
+---
+ chrome/app/chromium_strings.grd    |  4 ++--
+ chrome/app/theme/chromium/BRANDING | 18 +++++++++---------
+ 2 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
+index 7ce756fd08a9d..35bfe9bb6f94d 100644
+--- a/chrome/app/chromium_strings.grd
++++ b/chrome/app/chromium_strings.grd
+@@ -294,10 +294,10 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
+         </then>
+         <else>
+           <message name="IDS_PRODUCT_NAME" desc="The Chrome application name" translateable="false">
+-            Chromium
++            SlayZone
+           </message>
+           <message name="IDS_SHORT_PRODUCT_NAME" desc="The Chrome application short name." translateable="false">
+-            Chromium
++            SlayZone
+           </message>
+         </else>
+       </if>
+diff --git a/chrome/app/theme/chromium/BRANDING b/chrome/app/theme/chromium/BRANDING
+index f8363d5b294fe..545b303c603d3 100644
+--- a/chrome/app/theme/chromium/BRANDING
++++ b/chrome/app/theme/chromium/BRANDING
+@@ -1,10 +1,10 @@
+-COMPANY_FULLNAME=The Chromium Authors
+-COMPANY_SHORTNAME=The Chromium Authors
+-PRODUCT_FULLNAME=Chromium
+-PRODUCT_SHORTNAME=Chromium
+-PRODUCT_INSTALLER_FULLNAME=Chromium Installer
+-PRODUCT_INSTALLER_SHORTNAME=Chromium Installer
+-COPYRIGHT=Copyright @LASTCHANGE_YEAR@ The Chromium Authors. All rights reserved.
+-MAC_BUNDLE_ID=org.chromium.Chromium
+-MAC_CREATOR_CODE=Cr24
++COMPANY_FULLNAME=SlayZone
++COMPANY_SHORTNAME=SlayZone
++PRODUCT_FULLNAME=SlayZone
++PRODUCT_SHORTNAME=SlayZone
++PRODUCT_INSTALLER_FULLNAME=SlayZone Installer
++PRODUCT_INSTALLER_SHORTNAME=SlayZone Installer
++COPYRIGHT=Copyright @LASTCHANGE_YEAR@ SlayZone. All rights reserved.
++MAC_BUNDLE_ID=zone.slay.SlayZone
++MAC_CREATOR_CODE=Slay
+ MAC_TEAM_ID=
+-- 
+2.52.0
+

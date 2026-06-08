@@ -1,0 +1,208 @@
+From a0c1f2d04ab978d16e998b3d62c326bd9c46a228 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 07:38:26 +0200
+Subject: [2/7] slayzone: chrome:// scheme handler factory + empty
+ slayzone-shell (Phase 2.2)
+
+Replaces the throwaway Phase-1 chrome://hello/ registration with a
+generic factory that every Phase 5+ region lands its WebUIConfig in.
+The patch also ships the first real SlayZone WebUI: chrome://slayzone-shell/
+as an empty placeholder body. Phase 2.5 points the NTP at it; Phase 7.1
+replaces the inline HTML with the real Shell region.
+
+- chrome/browser/ui/webui/slayzone/slayzone_webui_registry.{h,cc}:
+  new. Exposes RegisterSlayzoneWebUIConfigs(WebUIConfigMap&) as the
+  single entrypoint called from RegisterChromeWebUIConfigs(). Hosts
+  ShellUI + ShellUIConfig inline as the first tenant; future regions
+  land their own *_ui.cc files and get added to the registry here.
+  Serves via SetRequestFilter so Phase 2 stays decoupled from the
+  grit pipeline (Phase 4 migrates every region to generated
+  resources).
+- chrome/browser/ui/BUILD.gn: registry sources wired into the `ui`
+  target next to the other webui/ entries.
+- chrome/browser/ui/webui/chrome_web_ui_configs.cc: include +
+  single RegisterSlayzoneWebUIConfigs(map) call at end.
+- chrome/common/webui_url_constants.{h,cc}: kChromeUISlayzoneShellHost
+  ("slayzone-shell") + URL constant; host added to ChromeURLHosts so
+  it shows up in chrome://chrome-urls next to the built-ins.
+---
+ chrome/browser/ui/BUILD.gn                    |  2 +
+ .../browser/ui/webui/chrome_web_ui_configs.cc |  3 +
+ .../webui/slayzone/slayzone_webui_registry.cc | 76 +++++++++++++++++++
+ .../webui/slayzone/slayzone_webui_registry.h  | 22 ++++++
+ chrome/common/webui_url_constants.cc          |  1 +
+ chrome/common/webui_url_constants.h           |  2 +
+ 6 files changed, 106 insertions(+)
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_webui_registry.h
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 5907498d01115..bc1f9e8c71687 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -188,6 +188,8 @@ static_library("ui") {
+     "webui/segmentation_internals/segmentation_internals_ui.h",
+     "webui/signin_internals_ui.cc",
+     "webui/signin_internals_ui.h",
++    "webui/slayzone/slayzone_webui_registry.cc",
++    "webui/slayzone/slayzone_webui_registry.h",
+     "webui/sync_internals/chrome_sync_internals_message_handler.cc",
+     "webui/sync_internals/chrome_sync_internals_message_handler.h",
+     "webui/sync_internals/sync_internals_ui.cc",
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+index 30dddd61a226f..04bdd21a63137 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -51,6 +51,7 @@
+ #include "chrome/browser/ui/webui/saved_tab_groups_unsupported/saved_tab_groups_unsupported_ui.h"
+ #include "chrome/browser/ui/webui/segmentation_internals/segmentation_internals_ui.h"
+ #include "chrome/browser/ui/webui/signin_internals_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_registry.h"
+ #include "chrome/browser/ui/webui/sync_internals/sync_internals_ui.h"
+ #include "chrome/browser/ui/webui/translate_internals/translate_internals_ui.h"
+ #include "chrome/browser/ui/webui/usb_internals/usb_internals_ui.h"
+@@ -473,4 +474,6 @@ void RegisterChromeWebUIConfigs() {
+   map.AddWebUIConfig(std::make_unique<skills::SkillsUIConfig>());
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+         // BUILDFLAG(IS_CHROMEOS)
++
++  slayzone::RegisterSlayzoneWebUIConfigs(map);
+ }
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+new file mode 100644
+index 0000000000000..ac7c875de6820
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.cc
+@@ -0,0 +1,76 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_registry.h"
++
++#include <memory>
++#include <string>
++#include <string_view>
++
++#include "base/functional/bind.h"
++#include "base/memory/ref_counted_memory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/browser/webui_config_map.h"
++#include "content/public/common/url_constants.h"
++
++namespace slayzone {
++namespace {
++
++// Empty shell WebUI. Phase 2.5 points chrome://newtab/ at this host; later
++// phases replace the inline body with the real Shell region (Phase 7.1).
++// Served via SetRequestFilter so Phase 2 stays decoupled from the grit pipe;
++// Phase 4/7 switches this to generated resources alongside every region.
++constexpr std::string_view kShellHtml = R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone</title>
++  <style>:root { color-scheme: light dark; } body { margin: 0; }</style>
++</head>
++<body></body>
++</html>)HTML";
++
++bool ShouldHandleShellRequest(const std::string& path) {
++  return path.empty();
++}
++
++void HandleShellRequest(const std::string& path,
++                        content::WebUIDataSource::GotDataCallback callback) {
++  std::move(callback).Run(base::MakeRefCounted<base::RefCountedString>(
++      std::string(kShellHtml)));
++}
++
++class ShellUI : public content::WebUIController {
++ public:
++  explicit ShellUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
++    auto* source = content::WebUIDataSource::CreateAndAdd(
++        Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneShellHost);
++    source->SetRequestFilter(base::BindRepeating(&ShouldHandleShellRequest),
++                             base::BindRepeating(&HandleShellRequest));
++  }
++
++  ShellUI(const ShellUI&) = delete;
++  ShellUI& operator=(const ShellUI&) = delete;
++  ~ShellUI() override = default;
++};
++
++class ShellUIConfig : public content::DefaultWebUIConfig<ShellUI> {
++ public:
++  ShellUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneShellHost) {}
++};
++
++}  // namespace
++
++void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map) {
++  map.AddWebUIConfig(std::make_unique<ShellUIConfig>());
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.h b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.h
+new file mode 100644
+index 0000000000000..e117daea2c07f
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_webui_registry.h
+@@ -0,0 +1,22 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_WEBUI_REGISTRY_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_WEBUI_REGISTRY_H_
++
++namespace content {
++class WebUIConfigMap;
++}
++
++namespace slayzone {
++
++// Single entry point that registers every chrome://slayzone-*/ WebUI with the
++// browser's WebUIConfigMap. Called from RegisterChromeWebUIConfigs() once per
++// browser process. Every Phase 5+ region lands a WebUIConfig here; this keeps
++// the Chromium diff surface to a single call in chrome_web_ui_configs.cc.
++void RegisterSlayzoneWebUIConfigs(content::WebUIConfigMap& map);
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_WEBUI_REGISTRY_H_
+diff --git a/chrome/common/webui_url_constants.cc b/chrome/common/webui_url_constants.cc
+index 016104d9a3035..e9e486f9e7b33 100644
+--- a/chrome/common/webui_url_constants.cc
++++ b/chrome/common/webui_url_constants.cc
+@@ -174,6 +174,7 @@ base::span<const base::cstring_view> ChromeURLHosts() {
+       kChromeUISignInInternalsHost,
+       kChromeUISiteEngagementHost,
+       kChromeUISkillsHost,
++      kChromeUISlayzoneShellHost,
+ #if !BUILDFLAG(IS_ANDROID)
+       kChromeUISuggestInternalsHost,
+ #endif
+diff --git a/chrome/common/webui_url_constants.h b/chrome/common/webui_url_constants.h
+index d4f57a6ed3430..20120428dd166 100644
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -174,6 +174,8 @@ inline constexpr char kChromeUIGlicSelectionOverlayURL[] =
+ inline constexpr char kChromeUIHangUIHost[] = "uithreadhang";
+ inline constexpr char kChromeUIHelpHost[] = "help";
+ inline constexpr char kChromeUIHelpURL[] = "chrome://help/";
++inline constexpr char kChromeUISlayzoneShellHost[] = "slayzone-shell";
++inline constexpr char kChromeUISlayzoneShellURL[] = "chrome://slayzone-shell/";
+ inline constexpr char kChromeUIHistoryHost[] = "history";
+ inline constexpr char kChromeUIHistorySyncedTabs[] = "/syncedTabs";
+ inline constexpr char kChromeUIHistoryURL[] = "chrome://history/";
+-- 
+2.52.0
+

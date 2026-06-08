@@ -1,0 +1,76 @@
+From e7e52392bc74af9b64aacd61cd577c59ed6ba254 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 07:42:22 +0200
+Subject: [5/7] slayzone: NTP -> chrome://slayzone-shell/ rewrite (Phase 2.5)
+
+Every path that resolves the new tab page lands on the SlayZone
+shell instead: address-bar `chrome://newtab/` typing, the new-tab
+button, window.open, session restore, and extension-triggered
+new-tab navigations all go through BrowserURLHandler and hit the
+SlayZone handler registered first below. The shell is the empty
+placeholder from Phase 2.2; Phase 7.1 fills it in.
+
+- chrome/browser/chrome_content_browser_client.cc:
+  HandleSlayzoneNewTabRewrite() detects chrome://newtab/ +
+  chrome://new-tab-page/ and rewrites to
+  chrome://slayzone-shell/. Registered as the first handler pair
+  in BrowserURLHandlerCreated, pre-empting the group-policy NTP
+  override, the search-provider rewrite, and any extension NTP
+  override.
+
+Reverse rewrite is intentionally null: the shell URL is what we
+want to display in the address bar; we don't rewind it back to
+chrome://newtab/ when the user copies the URL.
+---
+ .../browser/chrome_content_browser_client.cc  | 28 +++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 47006e612fe55..474faca9591c5 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -826,6 +826,27 @@ GURL ReplaceURLHostAndPath(const GURL& url,
+   return url.ReplaceComponents(replacements);
+ }
+ 
++// SlayZone Phase 2.5: every path that asks for the new tab page
++// (`chrome://newtab/` typed in the address bar, the new-tab button,
++// window.open("about:newtab"), extensions, session restore, etc.)
++// lands on `chrome://slayzone-shell/` instead. Registered first in
++// BrowserURLHandlerCreated so the SlayZone shell takes precedence over
++// the group-policy NTP URL handler, the search-provider rewrite, and
++// extension overrides.
++bool HandleSlayzoneNewTabRewrite(GURL* url,
++                                 content::BrowserContext* browser_context) {
++  if (!url->SchemeIs(content::kChromeUIScheme)) {
++    return false;
++  }
++  const std::string_view host = url->host();
++  if (host != chrome::kChromeUINewTabHost &&
++      host != chrome::kChromeUINewTabPageHost) {
++    return false;
++  }
++  *url = GURL(chrome::kChromeUISlayzoneShellURL);
++  return true;
++}
++
+ // Handles the rewriting of the new tab page URL based on group policy.
+ bool HandleNewTabPageLocationOverride(
+     GURL* url,
+@@ -5034,6 +5055,13 @@ bool ChromeContentBrowserClient::
+ 
+ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
+     BrowserURLHandler* handler) {
++  // SlayZone Phase 2.5: swap chrome://newtab/ -> chrome://slayzone-shell/
++  // before any other NTP-family rewrite runs. Pre-empts the group-policy
++  // handler, the search-provider handler, and extension overrides so the
++  // shell always wins.
++  handler->AddHandlerPair(&HandleSlayzoneNewTabRewrite,
++                          BrowserURLHandler::null_handler());
++
+   // The group policy NTP URL handler must be registered before the other NTP
+   // URL handlers below. Also register it before the "parts" handlers, so the
+   // NTP policy takes precedence over extensions that override the NTP.
+-- 
+2.52.0
+

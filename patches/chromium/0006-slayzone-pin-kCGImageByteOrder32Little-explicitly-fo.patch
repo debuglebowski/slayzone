@@ -1,0 +1,152 @@
+From 1a1f901d80efef669ffea09c8867259e7f25be86 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Fri, 17 Apr 2026 21:38:01 +0200
+Subject: [6/7] slayzone: pin kCGImageByteOrder32Little explicitly for
+ pre-Xcode-26 SDKs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Apple removed kCGImageByteOrder32Host from CGImage.h in Xcode 16.x SDKs
+(present in Xcode 26+ / macOS 26 SDK only). The constant is an alias for
+kCGImageByteOrder32Big on big-endian and kCGImageByteOrder32Little on
+little-endian. Every Apple platform Chromium targets is little-endian —
+the macOS site in skia_utils_mac.mm has an explicit SK_CPU_LENDIAN guard
+around the use.
+
+Swap the Host alias for the concrete Little form so pre-Xcode-26 SDKs
+(host toolchain + older CI runners) still build. Drop this patch once
+the toolchain baseline is Xcode 26+ (Stage C CI runner provisioning,
+plus a host macOS bump to 15+).
+---
+ .../browser/snapshots/model/image_file_manager_unittest.mm      | 2 +-
+ services/shape_detection/text_detection_impl_mac_unittest.mm    | 2 +-
+ skia/ext/skia_utils_ios.mm                                      | 2 +-
+ skia/ext/skia_utils_mac.mm                                      | 2 +-
+ .../blink/renderer/platform/mac/graphics_context_canvas.mm      | 2 +-
+ ui/base/resource/resource_bundle_ios.mm                         | 2 +-
+ ui/gfx/image/image_ios.mm                                       | 2 +-
+ ui/gfx/image/image_ios_unittest.mm                              | 2 +-
+ ui/gfx/image/image_unittest_util_apple.mm                       | 2 +-
+ 9 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/ios/chrome/browser/snapshots/model/image_file_manager_unittest.mm b/ios/chrome/browser/snapshots/model/image_file_manager_unittest.mm
+index 65f6c9b457b8f..ba0f72dd8d653 100644
+--- a/ios/chrome/browser/snapshots/model/image_file_manager_unittest.mm
++++ b/ios/chrome/browser/snapshots/model/image_file_manager_unittest.mm
+@@ -53,7 +53,7 @@ void ComputeColorComponents(CGImageRef cgImage,
+     *blue = 3;
+   }
+ 
+-  if (byteOrder != kCGImageByteOrder32Host) {
++  if (byteOrder != kCGImageByteOrder32Little) {
+     int lastChannel = (CGImageGetBitsPerPixel(cgImage) == 24) ? 2 : 3;
+     *red = lastChannel - *red;
+     *green = lastChannel - *green;
+diff --git a/services/shape_detection/text_detection_impl_mac_unittest.mm b/services/shape_detection/text_detection_impl_mac_unittest.mm
+index f5797e9d31e4d..023a61d14d7b0 100644
+--- a/services/shape_detection/text_detection_impl_mac_unittest.mm
++++ b/services/shape_detection/text_detection_impl_mac_unittest.mm
+@@ -59,7 +59,7 @@ TEST_F(TextDetectionImplMacTest, ScanOnce) {
+       nullptr, width, height, /*bitsPerComponent=*/8,
+       /*bytesPerRow=*/width * 4, rgb_colorspace.get(),
+       static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+-          kCGImageByteOrder32Host));
++          kCGImageByteOrder32Little));
+ 
+   // Draw a white background.
+   CGContextSetRGBFillColor(context.get(), 1.0, 1.0, 1.0, 1.0);
+diff --git a/skia/ext/skia_utils_ios.mm b/skia/ext/skia_utils_ios.mm
+index 1b202bf6f3709..56c50c83e3d6d 100644
+--- a/skia/ext/skia_utils_ios.mm
++++ b/skia/ext/skia_utils_ios.mm
+@@ -52,7 +52,7 @@ SkBitmap CGImageToSkBitmap(CGImageRef image, CGSize size, bool is_opaque) {
+   base::apple::ScopedCFTypeRef<CGContextRef> context(CGBitmapContextCreate(
+       data, size.width, size.height, 8, size.width * 4, color_space.get(),
+       static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+-          kCGImageByteOrder32Host));
++          kCGImageByteOrder32Little));
+ #else
+ #error We require that Skia's and CoreGraphics's recommended \
+        image memory layout match.
+diff --git a/skia/ext/skia_utils_mac.mm b/skia/ext/skia_utils_mac.mm
+index 07e7f51fc7429..9ed90ce4a16ad 100644
+--- a/skia/ext/skia_utils_mac.mm
++++ b/skia/ext/skia_utils_mac.mm
+@@ -81,7 +81,7 @@ SkBitmap NSImageOrNSImageRepToSkBitmap(NSImage* image,
+   base::apple::ScopedCFTypeRef<CGContextRef> context(CGBitmapContextCreate(
+       data, size.width, size.height, 8, size.width * 4, cg_color_space.get(),
+       static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+-          kCGImageByteOrder32Host));
++          kCGImageByteOrder32Little));
+ #else
+ #error We require that Skia's and CoreGraphics's recommended \
+        image memory layout match.
+diff --git a/third_party/blink/renderer/platform/mac/graphics_context_canvas.mm b/third_party/blink/renderer/platform/mac/graphics_context_canvas.mm
+index 9234de2adf65a..aba86f7f4ed66 100644
+--- a/third_party/blink/renderer/platform/mac/graphics_context_canvas.mm
++++ b/third_party/blink/renderer/platform/mac/graphics_context_canvas.mm
+@@ -64,7 +64,7 @@ CGContextRef GraphicsContextCanvas::CgContext() {
+   cg_context_.reset(CGBitmapContextCreate(
+       offscreen_.getPixels(), offscreen_.width(), offscreen_.height(), 8,
+       offscreen_.rowBytes(), color_space.get(),
+-      kCGImageByteOrder32Host |
++      kCGImageByteOrder32Little |
+           static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst)));
+   DCHECK(cg_context_);
+ 
+diff --git a/ui/base/resource/resource_bundle_ios.mm b/ui/base/resource/resource_bundle_ios.mm
+index bd4b5cc84e2e6..c73323ee38b1f 100644
+--- a/ui/base/resource/resource_bundle_ios.mm
++++ b/ui/base/resource/resource_bundle_ios.mm
+@@ -127,7 +127,7 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
+           /*data=*/nullptr, target_size.width, target_size.height, 8,
+           target_size.width * 4, color_space.get(),
+           static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+-              kCGImageByteOrder32Host));
++              kCGImageByteOrder32Little));
+ 
+       CGRect target_rect = CGRectMake(0, 0,
+                                       target_size.width, target_size.height);
+diff --git a/ui/gfx/image/image_ios.mm b/ui/gfx/image/image_ios.mm
+index 676998a61f432..3ef0db472a43a 100644
+--- a/ui/gfx/image/image_ios.mm
++++ b/ui/gfx/image/image_ios.mm
+@@ -34,7 +34,7 @@ UIImage* CreateErrorUIImage(float scale) {
+       /*bitsPerComponent=*/8,
+       /*bytesPerRow=*/0, color_space.get(),
+       static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+-          kCGImageByteOrder32Host));
++          kCGImageByteOrder32Little));
+   CGContextSetRGBFillColor(context.get(), 1.0, 0.0, 0.0, 1.0);
+   CGContextFillRect(context.get(), CGRectMake(0.0, 0.0, 16, 16));
+   base::apple::ScopedCFTypeRef<CGImageRef> cg_image(
+diff --git a/ui/gfx/image/image_ios_unittest.mm b/ui/gfx/image/image_ios_unittest.mm
+index fe3ea09bf480e..68c34e719aae3 100644
+--- a/ui/gfx/image/image_ios_unittest.mm
++++ b/ui/gfx/image/image_ios_unittest.mm
+@@ -33,7 +33,7 @@ UIImage* UIImageWithSizeAndScale(CGFloat width, CGFloat height, CGFloat scale) {
+       nullptr, target_size.width, target_size.height, 8, target_size.width * 4,
+       color_space.get(),
+       static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+-          kCGImageByteOrder32Host));
++          kCGImageByteOrder32Little));
+ 
+   CGRect target_rect = CGRectMake(0, 0,
+                                   target_size.width, target_size.height);
+diff --git a/ui/gfx/image/image_unittest_util_apple.mm b/ui/gfx/image/image_unittest_util_apple.mm
+index 4a6e3016b082b..78f60fbde671f 100644
+--- a/ui/gfx/image/image_unittest_util_apple.mm
++++ b/ui/gfx/image/image_unittest_util_apple.mm
+@@ -48,7 +48,7 @@ SkColor GetPlatformImageColor(PlatformImage image, int x, int y) {
+           /*bitsPerComponent=*/8,
+           /*bytesPerRow=*/4, color_space.get(),
+           static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+-              kCGImageByteOrder32Host));
++              kCGImageByteOrder32Little));
+   CGContextDrawImage(bitmap_context.get(), CGRectMake(0, 0, 1, 1),
+                      pixel_image.get());
+ 
+-- 
+2.52.0
+

@@ -1,0 +1,162 @@
+From c730a4e4d636160bfe79ffc87fb8debcc41ab622 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 10:14:42 +0200
+Subject: [slayzone] =?UTF-8?q?slayzone:=20Phase=2011.1=20settings=20shell?=
+ =?UTF-8?q?=20=E2=80=94=20chrome://slayzone-settings/?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Shell WebUI controller for Phase 11 settings surface.
+
+chrome://slayzone-settings/ is a client-side-routed multi-tab shell that
+ports packages/domains/settings/src/client/UserSettingsDialog.tsx to a
+chrome:// WebUI. Tabs: Appearance / Worktrees / Providers / Panels /
+Data / Backup / Labs / MCP / Diagnostics / Telemetry / About — the 11
+tabs actually shipped by UserSettingsDialog, not the 5 aspirational tabs
+named in the Phase 11 task card. Documented on C5 as parity deviation
+webui:settings:taxonomy-from-dialog.
+
+The controller is shell-only: no SlayzoneSettingsHost and no dedicated
+settings.mojom. Tab navigation + URL-hash routing + keyboard cycling
+are entirely client-side React; per-tab hosts land in 11.2–11.5 when
+each tab's data contract becomes concrete. Tracked as C5 deviation
+webui:settings:host-deferred. This keeps the shell decoupled from the
+468-handler sidecar ledger so parity verification for the nav surface
+doesn't gate on tab-specific wiring.
+
+Reuses slayzone::ConfigureBundleSource (patch 0021) with a settings-
+specific missing-bundle HTML. No SlayzoneBrowserView edits — settings
+is a modal surface hosted by Phase 10's dialog/Widget infrastructure,
+so there is no per-BrowserView slot identity to plumb through.
+
+Collateral note: kChromeUISlayzoneSettingsHost / kChromeUISlayzoneSettingsURL
+constants + the BUILD.gn / webui_registry.cc entries landed ahead of
+this commit as part of Phase 10.1 (dba90e0d77ab6) due to parallel-
+agent in-tree scheduling. This patch adds only the missing
+slayzone_settings_ui.{cc,h} pair that those references resolve to.
+
+Outer-repo bundle ships in packages/webui/settings/ alongside this
+commit.
+---
+ .../ui/webui/slayzone/slayzone_settings_ui.cc | 58 +++++++++++++++++++
+ .../ui/webui/slayzone/slayzone_settings_ui.h  | 42 ++++++++++++++
+ 2 files changed, 100 insertions(+)
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_settings_ui.cc
+ create mode 100644 chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h
+
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.cc
+new file mode 100644
+index 0000000000000..e9968bf54c787
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.cc
+@@ -0,0 +1,58 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h"
++
++#include <string_view>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++
++namespace {
++
++constexpr std::string_view kSettingsMissingBundleHtml =
++    R"HTML(<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>SlayZone · settings</title>
++  <style>
++    :root { color-scheme: light dark; }
++    html, body { margin: 0; height: 100%; font: 12px/1.4 system-ui, sans-serif; }
++    body {
++      display: flex; flex-direction: column; align-items: center;
++      justify-content: center; gap: 8px; padding: 24px;
++      background: #1c1d20; color: #d4d4d8;
++    }
++    code { background: #2a2b2e; padding: 2px 6px; border-radius: 3px; }
++    .hint { opacity: 0.7; font-size: 11px; max-width: 520px; text-align: center; }
++  </style>
++</head>
++<body>
++  <strong>settings: bundle missing</strong>
++  <div class="hint">
++    Start SlayZone with
++    <code>--slayzone-webui-bundle-dir=&lt;repo&gt;/packages/webui</code>
++    and ensure <code>packages/webui/settings/dist</code> has been built
++    (<code>pnpm --filter @slayzone/webui-settings build</code>).
++  </div>
++</body>
++</html>)HTML";
++
++}  // namespace
++
++SlayzoneSettingsUI::SlayzoneSettingsUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  auto* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneSettingsHost);
++  slayzone::ConfigureBundleSource(source, "settings",
++                                  kSettingsMissingBundleHtml);
++}
++
++SlayzoneSettingsUI::~SlayzoneSettingsUI() = default;
++
++WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneSettingsUI)
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h
+new file mode 100644
+index 0000000000000..39430479b55fe
+--- /dev/null
++++ b/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h
+@@ -0,0 +1,42 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SETTINGS_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SETTINGS_UI_H_
++
++#include "chrome/common/webui_url_constants.h"
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++
++// Phase 11.1 — chrome://slayzone-settings/ WebUI controller.
++//
++// Shell-only in 11.1: the React app owns tab navigation entirely client-side
++// and renders per-tab placeholders. Follow-up patches in Phase 11 (.2–.5) add
++// per-tab Mojo hosts as each tab's data contract lands. A dedicated
++// SlayzoneSettingsHost is intentionally NOT introduced here — settings get/set
++// is a generic string-keyed RPC that each tab's UI can call directly through
++// the SidecarClient once the relevant sub-host is wired. Keeping 11.1 free of
++// mojom plumbing makes the shell a pure layout+routing surface that can be
++// parity-verified without gating on the 468-handler ledger.
++class SlayzoneSettingsUI : public content::WebUIController {
++ public:
++  explicit SlayzoneSettingsUI(content::WebUI* web_ui);
++  SlayzoneSettingsUI(const SlayzoneSettingsUI&) = delete;
++  SlayzoneSettingsUI& operator=(const SlayzoneSettingsUI&) = delete;
++  ~SlayzoneSettingsUI() override;
++
++ private:
++  WEB_UI_CONTROLLER_TYPE_DECL();
++};
++
++class SlayzoneSettingsUIConfig
++    : public content::DefaultWebUIConfig<SlayzoneSettingsUI> {
++ public:
++  SlayzoneSettingsUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme,
++                           chrome::kChromeUISlayzoneSettingsHost) {}
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SETTINGS_UI_H_
+-- 
+2.52.0
+

@@ -1,0 +1,312 @@
+From 9c311f92b9c7d5c845163df76266b8e36e24c583 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 07:06:32 +0200
+Subject: [slayzone] slayzone: Phase 16.4 local-only crash sink
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Installs SIGSEGV/SIGABRT/SIGBUS/SIGILL handlers in the browser
+process that write JSON stack traces to <user-data-dir>/crashes/.
+Replaces the Crashpad upload stripped in Phase 2.4 — local file
+only, no network. Sidecar HTTP forwarding deferred to Phase 19.
+
+The handler is async-signal-safe (open/write/_exit + backtrace_symbols_fd).
+Install() pre-composes the JSON prefix (version, userDataDir) so the
+handler just appends signum + timestamp + backtrace.
+
+--slayzone-test-crash switch triggers CHECK(false) immediately so the
+sink can be exercised from the run script. Verified end-to-end:
+run.sh -- --slayzone-test-crash produces crash-<ts>-<sig>.json with
+version, userDataDir, signal number, timestamp, and backtrace.
+---
+ chrome/browser/BUILD.gn                |   2 +
+ chrome/browser/browser_process_impl.cc |  10 ++
+ chrome/browser/slayzone/crash_sink.cc  | 189 +++++++++++++++++++++++++
+ chrome/browser/slayzone/crash_sink.h   |  37 +++++
+ 4 files changed, 238 insertions(+)
+ create mode 100644 chrome/browser/slayzone/crash_sink.cc
+ create mode 100644 chrome/browser/slayzone/crash_sink.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 28c8b38886eb8..fc12f27e36c3b 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -976,6 +976,8 @@ static_library("browser") {
+     "signin/signin_promo_util.cc",
+     "signin/signin_util.cc",
+     "signin/signin_util.h",
++    "slayzone/crash_sink.cc",
++    "slayzone/crash_sink.h",
+     "slayzone/layout_features.cc",
+     "slayzone/layout_features.h",
+     "slayzone/sidecar_client.cc",
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+index 2c45d53b2ff5c..c3b65ea8ab44f 100644
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -248,6 +248,7 @@ void OnLocalStatePrefsLoaded();
+ #endif
+ 
+ #if !BUILDFLAG(IS_ANDROID)
++#include "chrome/browser/slayzone/crash_sink.h"
+ #include "chrome/browser/slayzone/sidecar_client.h"
+ #endif
+ 
+@@ -362,6 +363,15 @@ void BrowserProcessImpl::Init() {
+   // requests get an empty-dict response and callers are expected to handle
+   // it as "not connected".
+   slayzone::SidecarClient::GetInstance()->Start();
++  // Phase 16.4 crash sink: install signal handlers that write a JSON stack
++  // trace to <user-data-dir>/crashes/ on SIGSEGV/SIGABRT/SIGBUS/SIGILL.
++  // Crashpad upload is intentionally not revived (stripped in Phase 2.4); the
++  // sink is local-file-only for Phase 16 — sidecar HTTP forwarding is a
++  // Phase 19 follow-up.
++  slayzone::CrashSink::Install();
++  // --slayzone-test-crash flag triggers CHECK(false) immediately to exercise
++  // the sink end-to-end from the run script.
++  slayzone::CrashSink::MaybeTriggerTestCrash();
+ #endif
+ 
+ #if BUILDFLAG(IS_ANDROID)
+diff --git a/chrome/browser/slayzone/crash_sink.cc b/chrome/browser/slayzone/crash_sink.cc
+new file mode 100644
+index 0000000000000..10db79679b691
+--- /dev/null
++++ b/chrome/browser/slayzone/crash_sink.cc
+@@ -0,0 +1,189 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/crash_sink.h"
++
++#include <execinfo.h>
++#include <fcntl.h>
++#include <signal.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <time.h>
++#include <unistd.h>
++
++#include <atomic>
++#include <string>
++
++#include "base/command_line.h"
++#include "base/compiler_specific.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/logging.h"
++#include "base/path_service.h"
++#include "chrome/common/chrome_paths.h"
++#include "chrome/common/chrome_version.h"
++
++namespace slayzone {
++
++namespace {
++
++constexpr char kTestCrashSwitch[] = "slayzone-test-crash";
++constexpr char kLogTag[] = "[crash-sink]";
++
++// Set once at Install() time and read from the signal handler. std::atomic
++// so the handler sees a consistent value; the memory it points into is
++// leaked on purpose — the handler must not free.
++std::atomic<const char*> g_prefix{nullptr};
++std::atomic<const char*> g_crashes_dir{nullptr};
++std::atomic<bool> g_installed{false};
++
++// Minimal async-signal-safe integer → decimal string. Writes up to 20 bytes
++// of digits to `buf` and returns the number written. Raw pointer arithmetic
++// is unavoidable here — we're async-signal-safe and cannot use span/string.
++size_t ItoaSafe(int64_t value, char* buf) {
++  if (value == 0) {
++    UNSAFE_BUFFERS(buf[0] = '0');
++    return 1;
++  }
++  char tmp[20];
++  size_t i = 0;
++  bool neg = value < 0;
++  uint64_t v = neg ? static_cast<uint64_t>(-value) : static_cast<uint64_t>(value);
++  while (v > 0) {
++    UNSAFE_BUFFERS(tmp[i++] = static_cast<char>('0' + (v % 10)));
++    v /= 10;
++  }
++  size_t written = 0;
++  if (neg) UNSAFE_BUFFERS(buf[written++] = '-');
++  while (i > 0) UNSAFE_BUFFERS(buf[written++] = tmp[--i]);
++  return written;
++}
++
++// Async-signal-safe write of a NUL-terminated string.
++void WriteCstr(int fd, const char* s) {
++  if (!s) return;
++  size_t len = 0;
++  while (UNSAFE_BUFFERS(s[len]) != '\0') ++len;
++  ssize_t n = write(fd, s, len);
++  (void)n;  // best-effort; nothing to do if short
++}
++
++// Async-signal-safe path composition: "<dir>/crash-<seconds>.json".
++// Returns fd or -1. Raw buffer work acknowledged via UNSAFE_BUFFERS —
++// allocation-free path required inside the signal handler.
++int OpenCrashFile(const char* dir, int signum) {
++  char path[512];
++  size_t pos = 0;
++  for (const char* p = dir; UNSAFE_BUFFERS(*p) && pos < sizeof(path) - 64; UNSAFE_BUFFERS(++p)) {
++    UNSAFE_BUFFERS(path[pos++] = *p);
++  }
++  const char* suffix = "/crash-";
++  for (const char* p = suffix; UNSAFE_BUFFERS(*p); UNSAFE_BUFFERS(++p)) {
++    UNSAFE_BUFFERS(path[pos++] = *p);
++  }
++  time_t now = time(nullptr);
++  pos += ItoaSafe(static_cast<int64_t>(now), UNSAFE_BUFFERS(path + pos));
++  UNSAFE_BUFFERS(path[pos++] = '-');
++  pos += ItoaSafe(static_cast<int64_t>(signum), UNSAFE_BUFFERS(path + pos));
++  const char* ext = ".json";
++  for (const char* p = ext; UNSAFE_BUFFERS(*p); UNSAFE_BUFFERS(++p)) {
++    UNSAFE_BUFFERS(path[pos++] = *p);
++  }
++  UNSAFE_BUFFERS(path[pos] = '\0');
++  return open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
++}
++
++void SignalHandler(int signum, siginfo_t* /*info*/, void* /*context*/) {
++  const char* dir = g_crashes_dir.load(std::memory_order_acquire);
++  const char* prefix = g_prefix.load(std::memory_order_acquire);
++  if (!dir || !prefix) {
++    _exit(128 + signum);
++  }
++
++  int fd = OpenCrashFile(dir, signum);
++  if (fd < 0) {
++    _exit(128 + signum);
++  }
++
++  // JSON prefix: {"version":"...","userDataDir":"...","signal":
++  WriteCstr(fd, prefix);
++  char sbuf[32];
++  size_t n = ItoaSafe(signum, sbuf);
++  ssize_t written = write(fd, sbuf, n);
++  (void)written;
++  WriteCstr(fd, ",\"ts\":");
++  char tbuf[32];
++  n = ItoaSafe(static_cast<int64_t>(time(nullptr)), tbuf);
++  written = write(fd, tbuf, n);
++  (void)written;
++  WriteCstr(fd, ",\"backtrace\":[");
++
++  void* frames[64];
++  int depth = backtrace(frames, 64);
++  // backtrace_symbols_fd is async-signal-safe. Each symbol on its own line;
++  // wrap them in a JSON-ish array by writing quoted lines separated by commas.
++  // We emit raw text after "backtrace:[" and close with "]}" — the file is
++  // technically not strict JSON because of the raw backtrace text, but the
++  // scavenger on restart can normalize it. Keeping the handler minimal wins.
++  backtrace_symbols_fd(frames, depth, fd);
++  WriteCstr(fd, "\"]}\n");
++  close(fd);
++
++  // Restore default and re-raise so the OS still produces a core / breakpad
++  // signal of its own if any of that survived Phase 2.4.
++  signal(signum, SIG_DFL);
++  raise(signum);
++}
++
++void InstallHandler(int signum) {
++  struct sigaction sa {};
++  sa.sa_sigaction = &SignalHandler;
++  sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
++  sigemptyset(&sa.sa_mask);
++  sigaction(signum, &sa, nullptr);
++}
++
++}  // namespace
++
++void CrashSink::Install() {
++  if (g_installed.exchange(true)) return;
++
++  base::FilePath user_data_dir;
++  base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
++  base::FilePath crashes_dir = user_data_dir.Append("crashes");
++  base::CreateDirectory(crashes_dir);
++
++  // Own the C strings for the signal handler. Leaked on purpose.
++  std::string* dir_owned = new std::string(crashes_dir.value());
++  g_crashes_dir.store(dir_owned->c_str(), std::memory_order_release);
++
++  // Precompose the JSON prefix up through "signal": so the handler can just
++  // append the numeric signal + timestamp + backtrace.
++  const char* version = CHROME_VERSION_STRING;
++  std::string* prefix_owned = new std::string();
++  prefix_owned->reserve(512);
++  prefix_owned->append("{\"version\":\"");
++  prefix_owned->append(version ? version : "unknown");
++  prefix_owned->append("\",\"userDataDir\":\"");
++  prefix_owned->append(user_data_dir.value());
++  prefix_owned->append("\",\"signal\":");
++  g_prefix.store(prefix_owned->c_str(), std::memory_order_release);
++
++  InstallHandler(SIGSEGV);
++  InstallHandler(SIGABRT);
++  InstallHandler(SIGBUS);
++  InstallHandler(SIGILL);
++
++  LOG(INFO) << kLogTag << " installed; sink=" << crashes_dir.value();
++}
++
++void CrashSink::MaybeTriggerTestCrash() {
++  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(kTestCrashSwitch)) {
++    return;
++  }
++  LOG(ERROR) << kLogTag << " --slayzone-test-crash received; crashing now";
++  CHECK(false) << "slayzone-test-crash";
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/crash_sink.h b/chrome/browser/slayzone/crash_sink.h
+new file mode 100644
+index 0000000000000..008a45df8c54c
+--- /dev/null
++++ b/chrome/browser/slayzone/crash_sink.h
+@@ -0,0 +1,37 @@
++// Copyright 2026 The Chromium Authors (SlayZone fork)
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_CRASH_SINK_H_
++#define CHROME_BROWSER_SLAYZONE_CRASH_SINK_H_
++
++namespace slayzone {
++
++// Phase 16.4 local-only crash sink.
++//
++// Crashpad upload was stripped in Phase 2.4 to keep Google phone-home off the
++// wire. This is the replacement: SIGSEGV / SIGABRT / SIGBUS / SIGILL handlers
++// that write a JSON-ish stack trace to
++// ~/Library/Application Support/SlayZone/crashes/<ISO-timestamp>.json.
++//
++// Local file only for Phase 16 — the sidecar HTTP endpoint is a Phase 19
++// follow-up per the task plan.
++//
++// Install() is idempotent and must be called exactly once on the browser
++// process main thread before any worker threads are spawned.
++class CrashSink {
++ public:
++  // Installs signal handlers + pre-composes the JSON prefix (app version,
++  // user-data-dir) so the handler itself can stay async-signal-safe.
++  static void Install();
++
++  // Honors --slayzone-test-crash by aborting with a known signature so the
++  // sink path can be exercised from the run script.
++  static void MaybeTriggerTestCrash();
++
++  CrashSink() = delete;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_CRASH_SINK_H_
+-- 
+2.52.0
+

@@ -1,0 +1,49 @@
+From e9a82222f44900e550d2d9bae49bc59af8bc04b0 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Fri, 17 Apr 2026 22:21:03 +0200
+Subject: [7/7] slayzone: avoid macOS-26 NSScreen.CGDirectDisplayID property
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ui/display/mac/screen_utils_mac.mm gates screen.CGDirectDisplayID
+behind `if (@available(macOS 26, *))`. The runtime gate is correct,
+but the compiler still needs the property declared in the SDK at
+build time — and Xcode 16.x SDKs don't declare it (only Xcode 26+).
+
+The fallback branch (deviceDescription[@"NSScreenNumber"]) works on
+every macOS version Chromium has ever supported, including macOS 26.
+Use it unconditionally until the toolchain baseline is Xcode 26+
+(Stage C CI runners + host macOS 15+).
+---
+ ui/display/mac/screen_utils_mac.mm | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/ui/display/mac/screen_utils_mac.mm b/ui/display/mac/screen_utils_mac.mm
+index eace771c4b450..b0185fdd089f2 100644
+--- a/ui/display/mac/screen_utils_mac.mm
++++ b/ui/display/mac/screen_utils_mac.mm
+@@ -8,13 +8,13 @@ namespace display {
+ 
+ NSScreen* GetNSScreenFromDisplayID(CGDirectDisplayID display_id) {
+   for (NSScreen* screen in NSScreen.screens) {
+-    CGDirectDisplayID screen_display_id = kCGNullDirectDisplay;
+-    if (@available(macOS 26, *)) {
+-      screen_display_id = screen.CGDirectDisplayID;
+-    } else {
+-      screen_display_id =
+-          [screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
+-    }
++    // SlayZone: the macOS-26-only `screen.CGDirectDisplayID` property is not
++    // declared in Xcode 16.x SDKs. Fall through to the deviceDescription
++    // lookup unconditionally — it has been the documented way since the
++    // property was introduced and still works on macOS 26. Drop once the
++    // toolchain baseline is Xcode 26+.
++    CGDirectDisplayID screen_display_id =
++        [screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
+     if (screen_display_id == display_id) {
+       return screen;
+     }
+-- 
+2.52.0
+

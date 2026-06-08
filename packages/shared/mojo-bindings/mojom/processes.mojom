@@ -1,0 +1,46 @@
+// Phase 8.2 processes region data contract.
+//
+// Scope note: this .mojom lives in packages/shared/mojo-bindings/ (Phase 4.3
+// territory) as a coordinated exception, following the 5.6 / 6.1 / 7.x /
+// 8.1 pattern. The in-tree mirror at
+// chrome/browser/slayzone/mojom/processes.mojom is what Chromium's mojom()
+// target compiles to C++; Phase 4.3 regenerates TS bindings from this outer
+// file. The two must stay diff-identical below the module line.
+//
+// The processes region is the home-tab panel listing running processes for
+// the active task/project — command, status, PID, restart count. Scope
+// simplification: ProcessDialog create/edit is Phase 10 dialog host
+// territory; process start/stop/restart action RPCs wire up in Phase 8.5
+// home-mode. 8.2 renders the list read-only; interactive affordances are
+// disabled with a tooltip.
+
+module slayzone.processes.mojom;
+
+// One running process row. `pid` is -1 when the process isn't started;
+// `exit_code` is -1 when running or never exited. `status` is a string
+// enum shared with the sidecar: "running" | "stopped" | "completed" | "error".
+struct Process {
+  string id;
+  string label;
+  string command;
+  string cwd;
+  string status;
+  int32 pid;
+  int32 exit_code;
+  int32 restart_count;
+  bool auto_restart;
+  string started_at;  // empty when never started
+};
+
+// Full panel state. `active_project_id` is empty when no project selected.
+struct ProcessesSnapshot {
+  string active_project_id;
+  array<Process> processes;
+};
+
+// Browser-side processes data provider. One remote per region WebUI that
+// mounts. 8.2 is read-only; lifecycle control (Start/Stop/Restart/Delete)
+// lands alongside Phase 8.5 when the home-mode mojo plumbing is ready.
+interface ProcessesHost {
+  GetSnapshot() => (ProcessesSnapshot snapshot);
+};

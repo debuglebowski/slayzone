@@ -1,0 +1,16 @@
+# Stage B draft — mac x64 release args.
+
+is_debug = false
+is_component_build = false
+symbol_level = 1
+dcheck_always_on = false
+
+is_chrome_branded = false
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"
+use_official_google_api_keys = false
+
+target_os = "mac"
+target_cpu = "x64"
+# Chromium 147 uses kIOMainPortDefault (macOS 12+). See arm64 note.
+mac_deployment_target = "12.0"

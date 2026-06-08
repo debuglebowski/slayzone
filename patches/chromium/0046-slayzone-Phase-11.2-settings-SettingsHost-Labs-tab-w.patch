@@ -1,0 +1,344 @@
+From 5e41226fef25fef58868d8fd2e30bc2d258ec758 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Mon, 20 Apr 2026 10:35:49 +0200
+Subject: [slayzone] slayzone: Phase 11.2 settings SettingsHost + Labs tab
+ wiring
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+First real data wire for the settings surface.
+
+Adds slayzone.settings.mojom.SettingsHost — a scalar string KV
+interface with GetString(key) => (value) and SetString(key, value) =>
+(ok). Every Phase 11 tab with scalar settings reads / writes through
+this single host.
+
+Browser side: slayzone_settings_host.{cc,h} forwards to sidecar
+settings:get / settings:set. SlayzoneSettingsUI now owns a
+SlayzoneSettingsHost (std::unique_ptr) and implements BindInterface.
+binders_desktop registers ForWebUI<SlayzoneSettingsUI>.Add<
+settings::mojom::SettingsHost>.
+
+Scope fences held — no SlayzoneBrowserView edits. Labs is the first
+tab consuming the host; outer-repo commit ships the sidecar handler +
+React port.
+---
+ chrome/browser/BUILD.gn                       |  2 +
+ ...r_interface_binders_webui_parts_desktop.cc |  7 ++
+ chrome/browser/slayzone/mojom/BUILD.gn        |  1 +
+ chrome/browser/slayzone/mojom/settings.mojom  | 10 +++
+ .../slayzone/slayzone_settings_host.cc        | 85 +++++++++++++++++++
+ .../browser/slayzone/slayzone_settings_host.h | 41 +++++++++
+ .../ui/webui/slayzone/slayzone_settings_ui.cc | 10 ++-
+ .../ui/webui/slayzone/slayzone_settings_ui.h  | 32 +++++--
+ 8 files changed, 178 insertions(+), 10 deletions(-)
+ create mode 100644 chrome/browser/slayzone/mojom/settings.mojom
+ create mode 100644 chrome/browser/slayzone/slayzone_settings_host.cc
+ create mode 100644 chrome/browser/slayzone/slayzone_settings_host.h
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 2f04428acbd6e..1a140439ebbb7 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -998,6 +998,8 @@ static_library("browser") {
+     "slayzone/slayzone_processes_host.h",
+     "slayzone/slayzone_projects_host.cc",
+     "slayzone/slayzone_projects_host.h",
++    "slayzone/slayzone_settings_host.cc",
++    "slayzone/slayzone_settings_host.h",
+     "slayzone/slayzone_sidebar_host.cc",
+     "slayzone/slayzone_sidebar_host.h",
+     "slayzone/slayzone_statusbar_host.cc",
+diff --git a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+index 2304f6998ce23..4bd59bad25cd0 100644
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -93,6 +93,7 @@
+ #include "chrome/browser/slayzone/mojom/leaderboard.mojom.h"
+ #include "chrome/browser/slayzone/mojom/processes.mojom.h"
+ #include "chrome/browser/slayzone/mojom/projects.mojom.h"
++#include "chrome/browser/slayzone/mojom/settings.mojom.h"
+ #include "chrome/browser/slayzone/mojom/sidebar.mojom.h"
+ #include "chrome/browser/slayzone/mojom/statusbar.mojom.h"
+ #include "chrome/browser/slayzone/mojom/tabs.mojom.h"
+@@ -109,6 +110,7 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_leaderboard_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_processes_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_projects_ui.h"
++#include "chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_sidebar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_statusbar_ui.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_tabbar_ui.h"
+@@ -755,6 +757,11 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
+   // Resolve/Cancel to the sidecar; the dialog id routes on the URL path.
+   registry.ForWebUI<SlayzoneDialogsUI>()
+       .Add<slayzone::dialog::mojom::DialogHost>();
++  // Phase 11.2 — chrome://slayzone-settings/ binds to a UI-owned
++  // SlayzoneSettingsHost (one per WebContents). Settings is a modal
++  // overlay; singleton sidecar calls suffice.
++  registry.ForWebUI<SlayzoneSettingsUI>()
++      .Add<slayzone::settings::mojom::SettingsHost>();
+ 
+   if (base::FeatureList::IsEnabled(ntp_features::kNtpFooter)) {
+     registry.ForWebUI<NewTabFooterUI>()
+diff --git a/chrome/browser/slayzone/mojom/BUILD.gn b/chrome/browser/slayzone/mojom/BUILD.gn
+index 7ad9c15248b5b..f822298e81c7b 100644
+--- a/chrome/browser/slayzone/mojom/BUILD.gn
++++ b/chrome/browser/slayzone/mojom/BUILD.gn
+@@ -14,6 +14,7 @@ mojom("mojom") {
+     "leaderboard.mojom",
+     "processes.mojom",
+     "projects.mojom",
++    "settings.mojom",
+     "sidebar.mojom",
+     "statusbar.mojom",
+     "tabs.mojom",
+diff --git a/chrome/browser/slayzone/mojom/settings.mojom b/chrome/browser/slayzone/mojom/settings.mojom
+new file mode 100644
+index 0000000000000..273acab1d4ba2
+--- /dev/null
++++ b/chrome/browser/slayzone/mojom/settings.mojom
+@@ -0,0 +1,10 @@
++// Phase 11.2 settings region data contract (in-tree mirror).
++// Source of truth: packages/shared/mojo-bindings/mojom/settings.mojom.
++// Keep diff-identical below the module line.
++
++module slayzone.settings.mojom;
++
++interface SettingsHost {
++  GetString(string key) => (string value);
++  SetString(string key, string value) => (bool ok);
++};
+diff --git a/chrome/browser/slayzone/slayzone_settings_host.cc b/chrome/browser/slayzone/slayzone_settings_host.cc
+new file mode 100644
+index 0000000000000..8220e7bd1b832
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_settings_host.cc
+@@ -0,0 +1,85 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/slayzone/slayzone_settings_host.h"
++
++#include <string>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/values.h"
++#include "chrome/browser/slayzone/sidecar_client.h"
++
++namespace slayzone {
++
++namespace {
++
++// settings:get returns a bare string under "result" — no wrapping struct.
++// Missing / wrong-type responses collapse to empty string so the JS side
++// renders its "no value" path uniformly.
++std::string StringFromResponse(const base::DictValue& response) {
++  const base::Value* result = response.Find("result");
++  if (!result) {
++    return std::string();
++  }
++  if (const std::string* s = result->GetIfString()) {
++    return *s;
++  }
++  return std::string();
++}
++
++// settings:set returns `{ ok: bool }` under "result".
++bool OkFromResponse(const base::DictValue& response) {
++  const base::Value* result = response.Find("result");
++  const base::DictValue* dict =
++      (result && result->is_dict()) ? &result->GetDict() : nullptr;
++  if (!dict) {
++    return false;
++  }
++  return dict->FindBool("ok").value_or(false);
++}
++
++}  // namespace
++
++SlayzoneSettingsHost::SlayzoneSettingsHost() = default;
++SlayzoneSettingsHost::~SlayzoneSettingsHost() = default;
++
++void SlayzoneSettingsHost::Bind(
++    mojo::PendingReceiver<settings::mojom::SettingsHost> receiver) {
++  receivers_.Add(this, std::move(receiver));
++}
++
++void SlayzoneSettingsHost::GetString(const std::string& key,
++                                     GetStringCallback callback) {
++  base::ListValue params;
++  params.Append(key);
++  base::DictValue request;
++  request.Set("params", std::move(params));
++  SidecarClient::GetInstance()->Call(
++      "settings:get", std::move(request),
++      base::BindOnce(
++          [](GetStringCallback cb, base::DictValue response) {
++            std::move(cb).Run(StringFromResponse(response));
++          },
++          std::move(callback)));
++}
++
++void SlayzoneSettingsHost::SetString(const std::string& key,
++                                     const std::string& value,
++                                     SetStringCallback callback) {
++  base::ListValue params;
++  params.Append(key);
++  params.Append(value);
++  base::DictValue request;
++  request.Set("params", std::move(params));
++  SidecarClient::GetInstance()->Call(
++      "settings:set", std::move(request),
++      base::BindOnce(
++          [](SetStringCallback cb, base::DictValue response) {
++            std::move(cb).Run(OkFromResponse(response));
++          },
++          std::move(callback)));
++}
++
++}  // namespace slayzone
+diff --git a/chrome/browser/slayzone/slayzone_settings_host.h b/chrome/browser/slayzone/slayzone_settings_host.h
+new file mode 100644
+index 0000000000000..9e5bf28fc521b
+--- /dev/null
++++ b/chrome/browser/slayzone/slayzone_settings_host.h
+@@ -0,0 +1,41 @@
++// Copyright 2026 The SlayZone Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_SLAYZONE_SLAYZONE_SETTINGS_HOST_H_
++#define CHROME_BROWSER_SLAYZONE_SLAYZONE_SETTINGS_HOST_H_
++
++#include <string>
++
++#include "chrome/browser/slayzone/mojom/settings.mojom.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++#include "mojo/public/cpp/bindings/receiver_set.h"
++
++namespace slayzone {
++
++// Phase 11.2 — browser-side SettingsHost. Owned by SlayzoneSettingsUI
++// (one per WebContents). Settings is a modal overlay surface with no
++// BrowserView identity requirement; singleton sidecar calls suffice.
++class SlayzoneSettingsHost : public slayzone::settings::mojom::SettingsHost {
++ public:
++  SlayzoneSettingsHost();
++  SlayzoneSettingsHost(const SlayzoneSettingsHost&) = delete;
++  SlayzoneSettingsHost& operator=(const SlayzoneSettingsHost&) = delete;
++  ~SlayzoneSettingsHost() override;
++
++  void Bind(
++      mojo::PendingReceiver<slayzone::settings::mojom::SettingsHost> receiver);
++
++  // slayzone::settings::mojom::SettingsHost:
++  void GetString(const std::string& key, GetStringCallback callback) override;
++  void SetString(const std::string& key,
++                 const std::string& value,
++                 SetStringCallback callback) override;
++
++ private:
++  mojo::ReceiverSet<slayzone::settings::mojom::SettingsHost> receivers_;
++};
++
++}  // namespace slayzone
++
++#endif  // CHROME_BROWSER_SLAYZONE_SLAYZONE_SETTINGS_HOST_H_
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.cc b/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.cc
+index e9968bf54c787..fbb04508eb324 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.cc
++++ b/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.cc
+@@ -5,8 +5,10 @@
+ #include "chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h"
+ 
+ #include <string_view>
++#include <utility>
+ 
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/slayzone/slayzone_settings_host.h"
+ #include "chrome/browser/ui/webui/slayzone/slayzone_webui_bundle_source.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui.h"
+@@ -46,7 +48,8 @@ constexpr std::string_view kSettingsMissingBundleHtml =
+ }  // namespace
+ 
+ SlayzoneSettingsUI::SlayzoneSettingsUI(content::WebUI* web_ui)
+-    : content::WebUIController(web_ui) {
++    : content::WebUIController(web_ui),
++      host_(std::make_unique<slayzone::SlayzoneSettingsHost>()) {
+   auto* source = content::WebUIDataSource::CreateAndAdd(
+       Profile::FromWebUI(web_ui), chrome::kChromeUISlayzoneSettingsHost);
+   slayzone::ConfigureBundleSource(source, "settings",
+@@ -56,3 +59,8 @@ SlayzoneSettingsUI::SlayzoneSettingsUI(content::WebUI* web_ui)
+ SlayzoneSettingsUI::~SlayzoneSettingsUI() = default;
+ 
+ WEB_UI_CONTROLLER_TYPE_IMPL(SlayzoneSettingsUI)
++
++void SlayzoneSettingsUI::BindInterface(
++    mojo::PendingReceiver<slayzone::settings::mojom::SettingsHost> receiver) {
++  host_->Bind(std::move(receiver));
++}
+diff --git a/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h b/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h
+index 39430479b55fe..988771f9443f2 100644
+--- a/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h
++++ b/chrome/browser/ui/webui/slayzone/slayzone_settings_ui.h
+@@ -5,21 +5,30 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SETTINGS_UI_H_
+ #define CHROME_BROWSER_UI_WEBUI_SLAYZONE_SLAYZONE_SETTINGS_UI_H_
+ 
++#include <memory>
++
++#include "chrome/browser/slayzone/mojom/settings.mojom.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "content/public/browser/web_ui_controller.h"
+ #include "content/public/browser/webui_config.h"
+ #include "content/public/common/url_constants.h"
++#include "mojo/public/cpp/bindings/pending_receiver.h"
++
++namespace slayzone {
++class SlayzoneSettingsHost;
++}
+ 
+-// Phase 11.1 — chrome://slayzone-settings/ WebUI controller.
++// Phase 11.1 + 11.2 — chrome://slayzone-settings/ WebUI controller.
++//
++// Owns a per-WebContents SlayzoneSettingsHost (added in 11.2 — the shell
++// version from 11.1 had no host). Settings is a modal overlay, so a
++// per-WebContents host is the right granularity; BrowserView identity is
++// irrelevant.
+ //
+-// Shell-only in 11.1: the React app owns tab navigation entirely client-side
+-// and renders per-tab placeholders. Follow-up patches in Phase 11 (.2–.5) add
+-// per-tab Mojo hosts as each tab's data contract lands. A dedicated
+-// SlayzoneSettingsHost is intentionally NOT introduced here — settings get/set
+-// is a generic string-keyed RPC that each tab's UI can call directly through
+-// the SidecarClient once the relevant sub-host is wired. Keeping 11.1 free of
+-// mojom plumbing makes the shell a pure layout+routing surface that can be
+-// parity-verified without gating on the 468-handler ledger.
++// Per-tab typed contracts (e.g. terminal-mode lists, worktree rows) flow
++// through their existing region mojoms as tabs port in; SettingsHost
++// handles only the scalar string KV that the old
++// `window.api.settings.{get,set}` pair wrapped.
+ class SlayzoneSettingsUI : public content::WebUIController {
+  public:
+   explicit SlayzoneSettingsUI(content::WebUI* web_ui);
+@@ -27,7 +36,12 @@ class SlayzoneSettingsUI : public content::WebUIController {
+   SlayzoneSettingsUI& operator=(const SlayzoneSettingsUI&) = delete;
+   ~SlayzoneSettingsUI() override;
+ 
++  void BindInterface(
++      mojo::PendingReceiver<slayzone::settings::mojom::SettingsHost> receiver);
++
+  private:
++  std::unique_ptr<slayzone::SlayzoneSettingsHost> host_;
++
+   WEB_UI_CONTROLLER_TYPE_DECL();
+ };
+ 
+-- 
+2.52.0
+

@@ -1,0 +1,36 @@
+// Phase 7.6 taskheader region data contract.
+//
+// Scope note: lives in packages/shared/mojo-bindings/ (Phase 4.3 territory)
+// as a coordinated exception, following the 5.6 / 6.1 / 7.1 pattern. In-tree
+// mirror at chrome/browser/slayzone/mojom/taskheader.mojom compiles to C++;
+// Phase 4.3 regenerates TS bindings from this outer file. The two must stay
+// diff-identical below the module line.
+//
+// The taskheader region is the task title row above the task-detail body —
+// title + status selector + open-count badge. Minimal spike surface: title
+// string + status + status-options list for the picker. Status changes fire
+// a JSON-RPC (taskheader:set-status) not a Mojo mutation.
+
+module slayzone.taskheader.mojom;
+
+// One selectable status option.
+struct StatusOption {
+  string id;
+  string label;
+};
+
+// Taskheader snapshot. `active_task_id` + `title` come from the currently-
+// open task; `status` is its current status id; `status_options` is the
+// project's configured column list (identical to kanban column keys).
+struct TaskheaderSnapshot {
+  string active_task_id;
+  string title;
+  string status;
+  array<StatusOption> status_options;
+};
+
+// Browser-side taskheader data provider. Forwards snapshot queries to the
+// sidecar (taskheader:get-snapshot).
+interface TaskheaderHost {
+  GetSnapshot() => (TaskheaderSnapshot snapshot);
+};

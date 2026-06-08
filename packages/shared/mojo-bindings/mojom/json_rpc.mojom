@@ -1,0 +1,29 @@
+// cap-shell-6 generic sidecar passthrough.
+//
+// Lets renderer shims call arbitrary JSON-RPC methods on the sidecar
+// without per-method mojom plumbing. Params + result are JSON strings —
+// the shim serializes inputs and parses outputs. Keeps the browser-side
+// C++ host trivial (forward JSON to SidecarClient) while still letting
+// long-tail domains (fs, feedback, cli-install, changelog, search, ...)
+// reach sidecar handlers from the chrome://slayzone-shell origin.
+//
+// Not a replacement for typed mojoms (projects/tasklist/settings/...) —
+// those stay because they're load-bearing and change rarely. JsonRpcHost
+// is the escape hatch for everything else.
+module slayzone.json_rpc.mojom;
+
+struct JsonRpcResult {
+  // true on success; false means `error` is set + `result_json` is empty.
+  bool ok;
+  // JSON-encoded result on success (may be "null", "[]", object, ...).
+  string result_json;
+  // Human-readable error message on failure ("" on success).
+  string error;
+};
+
+interface JsonRpcHost {
+  // Call `method` with `params_json` (must parse to a JSON object or
+  // array — sidecar dispatcher will reshape as needed). Returns the
+  // result envelope.
+  Call(string method, string params_json) => (JsonRpcResult result);
+};

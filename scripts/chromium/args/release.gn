@@ -1,0 +1,27 @@
+# GN args for a release-style local build on arm64 Mac.
+# Stage A baseline: symbols on, component build off, no RBE.
+# Stage C will add reclient + official_build flags.
+
+is_debug = false
+is_component_build = false
+symbol_level = 1
+dcheck_always_on = false
+
+# Strip Google-proprietary bits we never ship.
+is_chrome_branded = false
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"
+
+# Telemetry strip (Phase 2.4). GN-flag layer; source-level hard-disables
+# live in patches/chromium/000*-slayzone-telemetry-strip.patch.
+use_official_google_api_keys = false
+# safe_browsing_mode = 0 leaves //chrome/browser/feedback:feedback_impl and
+# the test targets with unresolved deps on Chromium 148 — mode=1 keeps the
+# target graph resolvable. Runtime SB is still neutered by the Phase 2.4
+# source-level patches (IsFetchingEnabled/IsMetricsAndCrashReportingEnabled).
+safe_browsing_mode = 1
+disable_fieldtrial_testing_config = true
+
+# Faster local dev.
+blink_symbol_level = 0
+v8_symbol_level = 1

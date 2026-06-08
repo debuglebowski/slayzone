@@ -1,0 +1,37 @@
+// Phase 7.1 statusbar region data contract.
+//
+// Scope note: this .mojom lives in packages/shared/mojo-bindings/ (Phase 4.3
+// territory) as a coordinated exception, following the 5.6 layout.mojom and
+// 6.1 tabs.mojom pattern. The in-tree copy at
+// chrome/browser/slayzone/mojom/statusbar.mojom is what Chromium's mojom()
+// target compiles to C++; Phase 4.3 regenerates TS bindings from this outer
+// file. The two must stay diff-identical below the module line.
+//
+// Minimal surface for the Phase 7.1 spike: a single GetSnapshot() call that
+// returns the statusbar's displayable fields. JS polls at ~750 ms for live
+// updates. An observer-push flavour is deferred until a later region needs
+// it (YAGNI for a read-only strip).
+
+module slayzone.statusbar.mojom;
+
+// One frame of statusbar UI state. Everything the component needs to render
+// in a single flat struct — no cross-table lookups happen on the C++ side.
+struct StatusbarSnapshot {
+  // Title of the currently-active task, or "" when there is no active task.
+  string active_task_title;
+
+  // Number of non-done tasks across all projects. Rendered as a count badge.
+  uint32 open_task_count;
+
+  // Whether the browser's SidecarClient has a live connection to the Bun
+  // sidecar. Drives the statusbar LED.
+  bool sidecar_connected;
+};
+
+// Browser-side statusbar data provider. One remote per region WebUI that
+// mounts. The browser forwards snapshot queries to the sidecar over the
+// existing Unix-socket JSON-RPC channel (statusbar:get-snapshot method).
+interface StatusbarHost {
+  // Returns the current snapshot. Callers poll this at their own cadence.
+  GetSnapshot() => (StatusbarSnapshot snapshot);
+};

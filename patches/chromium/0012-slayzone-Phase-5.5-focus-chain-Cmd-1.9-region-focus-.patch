@@ -1,0 +1,417 @@
+From e24d9129f6a911392eedd50d426b718cc4249399 Mon Sep 17 00:00:00 2001
+From: SlayZone Dev <dev@slayzone.local>
+Date: Sat, 18 Apr 2026 22:12:08 +0200
+Subject: =?UTF-8?q?slayzone:=20Phase=205.5=20focus=20chain=20=E2=80=94=20C?=
+ =?UTF-8?q?md+1..9=20region=20focus=20accelerators?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SlayzoneBrowserView registers Cmd+1 through Cmd+9 as view-level
+accelerators; AcceleratorPressed maps the key to the region slot at that
+index in SlayzoneRegionContainer::kRegionIds and calls RequestFocus on the
+underlying views::WebView. Upstream views::FocusManager already handles
+cross-WebView Tab cycling; this adds the direct index-jump path.
+Region-origin focus requests (region → Mojo → browser → slot) land in 5.6.
+---
+ .../ui/views/frame/slayzone_browser_view.cc   |  33 ++
+ .../ui/views/frame/slayzone_browser_view.h    |   6 +
+ ....4-SlayzoneSplitView-draggable-divid.patch | 302 ++++++++++++++++++
+ 3 files changed, 341 insertions(+)
+ create mode 100644 patches/chromium/0011-slayzone-Phase-5.4-SlayzoneSplitView-draggable-divid.patch
+
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.cc b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+index eb7076bee850f..a7ea7dc4fcd72 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.cc
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.cc
+@@ -18,8 +18,11 @@
+ #include "chrome/browser/ui/views/frame/slayzone_region_container.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/web_contents.h"
++#include "ui/base/accelerators/accelerator.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/base/page_transition_types.h"
++#include "ui/events/event_constants.h"
++#include "ui/events/keycodes/keyboard_codes.h"
+ #include "ui/views/controls/webview/webview.h"
+ #include "url/gurl.h"
+ 
+@@ -41,6 +44,8 @@ void SlayzoneBrowserView::AddedToWidget() {
+       browser()->profile()));
+   region_container_->SetBoundsRect(GetLocalBounds());
+ 
++  RegisterRegionFocusAccelerators();
++
+   // Phase 5.3 feasibility spike runs after the initial tab lands in the
+   // TabStripModel.
+   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+@@ -48,6 +53,34 @@ void SlayzoneBrowserView::AddedToWidget() {
+                                 weak_factory_.GetWeakPtr()));
+ }
+ 
++void SlayzoneBrowserView::RegisterRegionFocusAccelerators() {
++  // Cmd+1 … Cmd+9 focus region slots 0..8 from `kRegionIds` order.
++  // Cmd+0 is left alone — upstream binds it to "reset zoom".
++  for (int i = 0; i < 9; ++i) {
++    ui::Accelerator accel(static_cast<ui::KeyboardCode>(ui::VKEY_1 + i),
++                          ui::EF_COMMAND_DOWN);
++    AddAccelerator(accel);
++  }
++}
++
++bool SlayzoneBrowserView::AcceleratorPressed(
++    const ui::Accelerator& accelerator) {
++  if (accelerator.modifiers() == ui::EF_COMMAND_DOWN &&
++      accelerator.key_code() >= ui::VKEY_1 &&
++      accelerator.key_code() <= ui::VKEY_9 && region_container_) {
++    const int index = accelerator.key_code() - ui::VKEY_1;
++    if (index < static_cast<int>(SlayzoneRegionContainer::kRegionIds.size())) {
++      const std::string_view id =
++          SlayzoneRegionContainer::kRegionIds[index];
++      if (views::WebView* slot = region_container_->GetRegion(id)) {
++        slot->RequestFocus();
++        return true;
++      }
++    }
++  }
++  return BrowserView::AcceleratorPressed(accelerator);
++}
++
+ void SlayzoneBrowserView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+   BrowserView::OnBoundsChanged(previous_bounds);
+   if (region_container_) {
+diff --git a/chrome/browser/ui/views/frame/slayzone_browser_view.h b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+index 9a7befcf91134..fd28861cb8e03 100644
+--- a/chrome/browser/ui/views/frame/slayzone_browser_view.h
++++ b/chrome/browser/ui/views/frame/slayzone_browser_view.h
+@@ -39,6 +39,9 @@ class SlayzoneBrowserView : public BrowserView {
+   void AddedToWidget() override;
+   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+ 
++  // ui::AcceleratorTarget (via BrowserView):
++  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
++
+  private:
+   // Phase 5.3 feasibility spike. If the `--slayzone-spike-url` switch is
+   // present, navigate the active tab's WebContents to the spike URL and drop
+@@ -46,6 +49,9 @@ class SlayzoneBrowserView : public BrowserView {
+   // active tab is not guaranteed to exist at AddedToWidget time.
+   void MaybeSpikeTerminalSlot();
+ 
++  // Phase 5.5 — register Cmd+1 … Cmd+9 to focus region slots by index.
++  void RegisterRegionFocusAccelerators();
++
+   raw_ptr<SlayzoneRegionContainer> region_container_ = nullptr;
+   base::WeakPtrFactory<SlayzoneBrowserView> weak_factory_{this};
+ };
+diff --git a/patches/chromium/0011-slayzone-Phase-5.4-SlayzoneSplitView-draggable-divid.patch b/patches/chromium/0011-slayzone-Phase-5.4-SlayzoneSplitView-draggable-divid.patch
+new file mode 100644
+index 0000000000000..1fe2ff44a2b60
+--- /dev/null
++++ b/patches/chromium/0011-slayzone-Phase-5.4-SlayzoneSplitView-draggable-divid.patch
+@@ -0,0 +1,302 @@
++From c1ede9741c89493bd2c2751d7b9fbfb8f2ac66dd Mon Sep 17 00:00:00 2001
++From: SlayZone Dev <dev@slayzone.local>
++Date: Sat, 18 Apr 2026 21:55:18 +0200
++Subject: =?UTF-8?q?slayzone:=20Phase=205.4=20SlayzoneSplitView=20=E2=80=94?=
++ =?UTF-8?q?=20draggable=20divider=20+=20snap=20+=20keyboard=20resize?=
++MIME-Version: 1.0
++Content-Type: text/plain; charset=UTF-8
++Content-Transfer-Encoding: 8bit
++
++Two-pane split container wrapping views::ResizeArea. Replaces the
++BoxLayoutView that held tasklist+browserchrome so users can drag the
++vertical divider, snap at 0/50/100% on release, and nudge with Alt+Left /
++Alt+Right. Generalizes to vertical-orientation splits for future phases
++(terminal ↔ editor, etc.).
++---
++ chrome/browser/ui/BUILD.gn                    |   2 +
++ .../views/frame/slayzone_region_container.cc  |  25 ++--
++ .../ui/views/frame/slayzone_split_view.cc     | 137 ++++++++++++++++++
++ .../ui/views/frame/slayzone_split_view.h      |  69 +++++++++
++ 4 files changed, 224 insertions(+), 9 deletions(-)
++ create mode 100644 chrome/browser/ui/views/frame/slayzone_split_view.cc
++ create mode 100644 chrome/browser/ui/views/frame/slayzone_split_view.h
++
++diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
++index 3428492b8905b..db5aa79cf2332 100644
++--- a/chrome/browser/ui/BUILD.gn
+++++ b/chrome/browser/ui/BUILD.gn
++@@ -4052,6 +4052,8 @@ static_library("ui") {
++       "views/frame/slayzone_browser_view.h",
++       "views/frame/slayzone_region_container.cc",
++       "views/frame/slayzone_region_container.h",
+++      "views/frame/slayzone_split_view.cc",
+++      "views/frame/slayzone_split_view.h",
++       "views/frame/system_menu_model_builder.cc",
++       "views/frame/system_menu_model_builder.h",
++       "views/frame/system_menu_model_delegate.cc",
++diff --git a/chrome/browser/ui/views/frame/slayzone_region_container.cc b/chrome/browser/ui/views/frame/slayzone_region_container.cc
++index d7c21c516d611..7ba2a51fb59ec 100644
++--- a/chrome/browser/ui/views/frame/slayzone_region_container.cc
+++++ b/chrome/browser/ui/views/frame/slayzone_region_container.cc
++@@ -10,6 +10,7 @@
++ #include <utility>
++ 
++ #include "base/strings/strcat.h"
+++#include "chrome/browser/ui/views/frame/slayzone_split_view.h"
++ #include "chrome/common/webui_url_constants.h"
++ #include "content/public/browser/browser_context.h"
++ #include "ui/base/metadata/metadata_impl_macros.h"
++@@ -78,17 +79,23 @@ SlayzoneRegionContainer::SlayzoneRegionContainer(
++ 
++   add_region(center, "taskheader", /*fixed_axis_px=*/40, /*flex_weight=*/0);
++ 
++-  // mid: horizontal — tasklist | browserchrome (each ~50%).
++-  auto mid_owned = std::make_unique<views::BoxLayoutView>();
++-  mid_owned->SetOrientation(views::BoxLayout::Orientation::kHorizontal);
++-  mid_owned->SetCrossAxisAlignment(
++-      views::BoxLayout::CrossAxisAlignment::kStretch);
++-  views::BoxLayoutView* mid = center->AddChildView(std::move(mid_owned));
+++  // mid: SlayzoneSplitView — tasklist ⇆ browserchrome, Phase 5.4 divider.
+++  auto tasklist_wv = std::make_unique<views::WebView>(browser_context);
+++  tasklist_wv->LoadInitialURL(PlaceholderUrl("tasklist"));
+++  views::WebView* tasklist_raw = tasklist_wv.get();
+++  regions_.emplace("tasklist", tasklist_raw);
+++
+++  auto browserchrome_wv = std::make_unique<views::WebView>(browser_context);
+++  browserchrome_wv->LoadInitialURL(PlaceholderUrl("browserchrome"));
+++  views::WebView* browserchrome_raw = browserchrome_wv.get();
+++  regions_.emplace("browserchrome", browserchrome_raw);
+++
+++  auto mid_split = std::make_unique<SlayzoneSplitView>(
+++      SlayzoneSplitView::Orientation::kHorizontal, std::move(tasklist_wv),
+++      std::move(browserchrome_wv), /*initial_fraction=*/0.5);
+++  views::View* mid = center->AddChildView(std::move(mid_split));
++   center->SetFlexForView(mid, 2);
++ 
++-  add_region(mid, "tasklist", /*fixed_axis_px=*/0, /*flex_weight=*/1);
++-  add_region(mid, "browserchrome", /*fixed_axis_px=*/0, /*flex_weight=*/1);
++-
++   // terminal takes the bottom third of center.
++   add_region(center, "terminal", /*fixed_axis_px=*/0, /*flex_weight=*/1);
++ 
++diff --git a/chrome/browser/ui/views/frame/slayzone_split_view.cc b/chrome/browser/ui/views/frame/slayzone_split_view.cc
++new file mode 100644
++index 0000000000000..acfffa5ee8e5d
++--- /dev/null
+++++ b/chrome/browser/ui/views/frame/slayzone_split_view.cc
++@@ -0,0 +1,137 @@
+++// Copyright 2026 The SlayZone Authors
+++// Use of this source code is governed by a BSD-style license that can be
+++// found in the LICENSE file.
+++
+++#include "chrome/browser/ui/views/frame/slayzone_split_view.h"
+++
+++#include <algorithm>
+++#include <cmath>
+++#include <memory>
+++#include <utility>
+++
+++#include "ui/base/metadata/metadata_impl_macros.h"
+++#include "ui/events/event.h"
+++#include "ui/events/keycodes/keyboard_codes.h"
+++#include "ui/gfx/geometry/rect.h"
+++#include "ui/gfx/geometry/size.h"
+++#include "ui/views/controls/resize_area.h"
+++#include "ui/views/view.h"
+++
+++SlayzoneSplitView::SlayzoneSplitView(Orientation orientation,
+++                                     std::unique_ptr<views::View> first,
+++                                     std::unique_ptr<views::View> second,
+++                                     double initial_fraction)
+++    : orientation_(orientation),
+++      fraction_(std::clamp(initial_fraction, 0.0, 1.0)) {
+++  first_ = AddChildView(std::move(first));
+++  divider_ = AddChildView(std::make_unique<views::ResizeArea>(this));
+++  second_ = AddChildView(std::move(second));
+++  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
+++}
+++
+++SlayzoneSplitView::~SlayzoneSplitView() = default;
+++
+++void SlayzoneSplitView::SetFraction(double fraction) {
+++  fraction = std::clamp(fraction, 0.0, 1.0);
+++  if (fraction == fraction_) {
+++    return;
+++  }
+++  fraction_ = fraction;
+++  InvalidateLayout();
+++}
+++
+++int SlayzoneSplitView::MainAxisLength() const {
+++  return orientation_ == Orientation::kHorizontal ? width() : height();
+++}
+++
+++void SlayzoneSplitView::ApplySnap() {
+++  for (double snap : {0.0, 0.5, 1.0}) {
+++    if (std::abs(fraction_ - snap) < kSnapThreshold) {
+++      fraction_ = snap;
+++      return;
+++    }
+++  }
+++}
+++
+++void SlayzoneSplitView::Layout(PassKey key) {
+++  const gfx::Rect bounds = GetContentsBounds();
+++  if (bounds.IsEmpty()) {
+++    return;
+++  }
+++  const int main = MainAxisLength();
+++  if (main <= kDividerThicknessDip) {
+++    // Not enough space — hand everything to `first_`.
+++    first_->SetBoundsRect(bounds);
+++    divider_->SetBoundsRect(gfx::Rect());
+++    second_->SetBoundsRect(gfx::Rect());
+++    return;
+++  }
+++  const int usable = main - kDividerThicknessDip;
+++  const int first_main = std::clamp<int>(
+++      static_cast<int>(std::round(usable * fraction_)), 0, usable);
+++
+++  if (orientation_ == Orientation::kHorizontal) {
+++    first_->SetBoundsRect(
+++        gfx::Rect(bounds.x(), bounds.y(), first_main, bounds.height()));
+++    divider_->SetBoundsRect(gfx::Rect(bounds.x() + first_main, bounds.y(),
+++                                      kDividerThicknessDip, bounds.height()));
+++    second_->SetBoundsRect(
+++        gfx::Rect(bounds.x() + first_main + kDividerThicknessDip, bounds.y(),
+++                  usable - first_main, bounds.height()));
+++  } else {
+++    first_->SetBoundsRect(
+++        gfx::Rect(bounds.x(), bounds.y(), bounds.width(), first_main));
+++    divider_->SetBoundsRect(gfx::Rect(bounds.x(), bounds.y() + first_main,
+++                                      bounds.width(), kDividerThicknessDip));
+++    second_->SetBoundsRect(
+++        gfx::Rect(bounds.x(), bounds.y() + first_main + kDividerThicknessDip,
+++                  bounds.width(), usable - first_main));
+++  }
+++}
+++
+++bool SlayzoneSplitView::OnKeyPressed(const ui::KeyEvent& event) {
+++  if (!event.IsAltDown()) {
+++    return false;
+++  }
+++  const bool is_horizontal = orientation_ == Orientation::kHorizontal;
+++  const bool decrease = (is_horizontal && event.key_code() == ui::VKEY_LEFT) ||
+++                        (!is_horizontal && event.key_code() == ui::VKEY_UP);
+++  const bool increase =
+++      (is_horizontal && event.key_code() == ui::VKEY_RIGHT) ||
+++      (!is_horizontal && event.key_code() == ui::VKEY_DOWN);
+++  if (!decrease && !increase) {
+++    return false;
+++  }
+++  SetFraction(fraction_ + (decrease ? -kKeyboardStep : kKeyboardStep));
+++  return true;
+++}
+++
+++gfx::Size SlayzoneSplitView::CalculatePreferredSize(
+++    const views::SizeBounds& available_size) const {
+++  // Claim whatever we're given — the parent layout decides final bounds.
+++  if (orientation_ == Orientation::kHorizontal) {
+++    return gfx::Size(kDividerThicknessDip, 0);
+++  }
+++  return gfx::Size(0, kDividerThicknessDip);
+++}
+++
+++void SlayzoneSplitView::OnResize(int resize_amount, bool done_resizing) {
+++  const int main = MainAxisLength();
+++  if (main <= kDividerThicknessDip) {
+++    return;
+++  }
+++  if (!divider_->is_resizing() && !done_resizing) {
+++    // Drag just starting — snapshot the current fraction.
+++    fraction_at_drag_start_ = fraction_;
+++  }
+++  const double delta =
+++      static_cast<double>(resize_amount) / (main - kDividerThicknessDip);
+++  SetFraction(fraction_at_drag_start_ + delta);
+++  if (done_resizing) {
+++    ApplySnap();
+++    InvalidateLayout();
+++  }
+++}
+++
+++BEGIN_METADATA(SlayzoneSplitView)
+++END_METADATA
++diff --git a/chrome/browser/ui/views/frame/slayzone_split_view.h b/chrome/browser/ui/views/frame/slayzone_split_view.h
++new file mode 100644
++index 0000000000000..42bbc2ae01b35
++--- /dev/null
+++++ b/chrome/browser/ui/views/frame/slayzone_split_view.h
++@@ -0,0 +1,69 @@
+++// Copyright 2026 The SlayZone Authors
+++// Use of this source code is governed by a BSD-style license that can be
+++// found in the LICENSE file.
+++
+++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_SPLIT_VIEW_H_
+++#define CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_SPLIT_VIEW_H_
+++
+++#include <memory>
+++
+++#include "base/memory/raw_ptr.h"
+++#include "ui/base/metadata/metadata_header_macros.h"
+++#include "ui/views/controls/resize_area.h"
+++#include "ui/views/controls/resize_area_delegate.h"
+++#include "ui/views/view.h"
+++
+++// Phase 5.4 — two-pane split container with a draggable `views::ResizeArea`
+++// divider, snap points at 0 / 50 / 100 %, and Alt+Arrow keyboard resize.
+++// Hosted inside `SlayzoneRegionContainer` where two region WebViews meet.
+++class SlayzoneSplitView : public views::View,
+++                          public views::ResizeAreaDelegate {
+++  METADATA_HEADER(SlayzoneSplitView, views::View)
+++
+++ public:
+++  enum class Orientation { kHorizontal, kVertical };
+++
+++  // Creates a split view. `first` is laid out to the left / top, `second` to
+++  // the right / bottom. `initial_fraction` is the size of the first pane as a
+++  // fraction of the available main-axis length.
+++  SlayzoneSplitView(Orientation orientation,
+++                    std::unique_ptr<views::View> first,
+++                    std::unique_ptr<views::View> second,
+++                    double initial_fraction = 0.5);
+++
+++  SlayzoneSplitView(const SlayzoneSplitView&) = delete;
+++  SlayzoneSplitView& operator=(const SlayzoneSplitView&) = delete;
+++  ~SlayzoneSplitView() override;
+++
+++  double fraction() const { return fraction_; }
+++  void SetFraction(double fraction);
+++
+++  // views::View:
+++  void Layout(PassKey key) override;
+++  bool OnKeyPressed(const ui::KeyEvent& event) override;
+++  gfx::Size CalculatePreferredSize(
+++      const views::SizeBounds& available_size) const override;
+++
+++  // views::ResizeAreaDelegate:
+++  void OnResize(int resize_amount, bool done_resizing) override;
+++
+++ private:
+++  // Along-axis thickness of the drag handle, in DIP.
+++  static constexpr int kDividerThicknessDip = 6;
+++  // Snap window around 0 / 0.5 / 1.
+++  static constexpr double kSnapThreshold = 0.04;
+++  // Fraction delta per Alt+Arrow tap.
+++  static constexpr double kKeyboardStep = 0.05;
+++
+++  int MainAxisLength() const;
+++  void ApplySnap();
+++
+++  const Orientation orientation_;
+++  double fraction_;
+++  double fraction_at_drag_start_ = 0.0;
+++  raw_ptr<views::View> first_;
+++  raw_ptr<views::ResizeArea> divider_;
+++  raw_ptr<views::View> second_;
+++};
+++
+++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_SLAYZONE_SPLIT_VIEW_H_
++-- 
++2.52.0
++
+-- 
+2.52.0
+
