@@ -51,6 +51,8 @@ import {
   PulseGrid
 } from '@slayzone/ui'
 import { MarkdownSettingsPopover } from '@slayzone/editor'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { RenderMode, TaskArtifact, ArtifactFolder } from '@slayzone/task/shared'
 import {
   getEffectiveRenderMode,
@@ -82,6 +84,9 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     { taskId, isResizing, initialActiveArtifactId, onActiveArtifactIdChange },
     ref
   ) {
+    const trpc = useTRPC()
+    const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+    const showOpenDialogMutation = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
     const {
       artifacts,
       folders,
@@ -314,7 +319,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
     // --- Upload / drop ---
 
     const handleUpload = useCallback(async () => {
-      const result = await window.api.dialog.showOpenDialog({
+      const result = await showOpenDialogMutation.mutateAsync({
         title: 'Upload Artifact',
         properties: ['openFile', 'multiSelections']
       })
@@ -322,7 +327,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       for (const filePath of result.filePaths) {
         await uploadArtifact(filePath)
       }
-    }, [uploadArtifact])
+    }, [uploadArtifact, showOpenDialogMutation])
 
     const handleFileDrop = useCallback(
       async (e: DragEvent) => {
@@ -665,7 +670,10 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                             id="art-toc"
                             checked={editorTocEnabled}
                             onCheckedChange={(v) => {
-                              void window.api.settings.set('editor_toc_enabled', v ? '1' : '0')
+                              void setSettingMutation.mutateAsync({
+                                key: 'editor_toc_enabled',
+                                value: v ? '1' : '0'
+                              })
                               window.dispatchEvent(new Event('sz:settings-changed'))
                             }}
                           />
@@ -685,7 +693,10 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                             checked={editorMinimapEnabled && viewMode !== 'preview'}
                             disabled={viewMode === 'preview'}
                             onCheckedChange={(v) => {
-                              void window.api.settings.set('editor_minimap_enabled', v ? '1' : '0')
+                              void setSettingMutation.mutateAsync({
+                                key: 'editor_minimap_enabled',
+                                value: v ? '1' : '0'
+                              })
                               window.dispatchEvent(new Event('sz:settings-changed'))
                             }}
                           />
@@ -745,7 +756,10 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                             id="art-mono"
                             checked={notesFontFamily === 'mono'}
                             onCheckedChange={(v) => {
-                              void window.api.settings.set('notes_font_family', v ? 'mono' : 'sans')
+                              void setSettingMutation.mutateAsync({
+                                key: 'notes_font_family',
+                                value: v ? 'mono' : 'sans'
+                              })
                               window.dispatchEvent(new Event('sz:settings-changed'))
                             }}
                           />

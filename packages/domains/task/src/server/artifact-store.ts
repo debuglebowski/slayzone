@@ -11,7 +11,12 @@ import type {
   UpdateArtifactFolderInput
 } from '@slayzone/task/shared'
 import { getExtensionFromTitle } from '@slayzone/task/shared'
-import type { VersionRef } from '@slayzone/task-artifacts/shared'
+import type {
+  VersionRef,
+  ArtifactVersion,
+  DiffResult,
+  PruneReport
+} from '@slayzone/task-artifacts/shared'
 
 // Electron-free artifact store. Single implementation behind both the IPC handlers
 // (../main/handlers.ts) and the tRPC `artifacts` router. Disk reads + the worker
@@ -305,57 +310,59 @@ export function createArtifactStore(dataDir: string) {
     listArtifactVersions(
       db: SlayzoneDb,
       data: { artifactId: string; limit?: number; offset?: number }
-    ): Promise<unknown> {
+    ): Promise<ArtifactVersion[]> {
+      // Worker DB boundary erases types (TxnResult registry not merged in this
+      // compilation); assert the known row shape here so consumers stay typed.
       return db.namedTxn('task-artifacts:versions:list', {
         artifactId: data.artifactId,
         limit: data.limit,
         offset: data.offset
-      })
+      }) as Promise<ArtifactVersion[]>
     },
 
     readArtifactVersion(
       db: SlayzoneDb,
       data: { artifactId: string; versionRef: VersionRef }
-    ): Promise<unknown> {
+    ): Promise<string> {
       return db.namedTxn('task-artifacts:versions:read', {
         dataDir,
         artifactId: data.artifactId,
         versionRef: data.versionRef
-      })
+      }) as Promise<string>
     },
 
     createArtifactVersion(
       db: SlayzoneDb,
       data: { artifactId: string; name?: string | null }
-    ): Promise<unknown> {
+    ): Promise<ArtifactVersion> {
       return db.namedTxn('task-artifacts:versions:create', {
         dataDir,
         artifactId: data.artifactId,
         name: data.name ?? null
-      })
+      }) as Promise<ArtifactVersion>
     },
 
     renameArtifactVersion(
       db: SlayzoneDb,
       data: { artifactId: string; versionRef: VersionRef; newName: string | null }
-    ): Promise<unknown> {
+    ): Promise<ArtifactVersion> {
       return db.namedTxn('task-artifacts:versions:rename', {
         artifactId: data.artifactId,
         versionRef: data.versionRef,
         newName: data.newName
-      })
+      }) as Promise<ArtifactVersion>
     },
 
     diffArtifactVersions(
       db: SlayzoneDb,
       data: { artifactId: string; a: VersionRef; b?: VersionRef }
-    ): Promise<unknown> {
+    ): Promise<DiffResult> {
       return db.namedTxn('task-artifacts:versions:diff', {
         dataDir,
         artifactId: data.artifactId,
         a: data.a,
         b: data.b
-      })
+      }) as Promise<DiffResult>
     },
 
     pruneArtifactVersions(
@@ -367,7 +374,7 @@ export function createArtifactStore(dataDir: string) {
         keepCurrent?: boolean
         dryRun?: boolean
       }
-    ): Promise<unknown> {
+    ): Promise<PruneReport> {
       return db.namedTxn('task-artifacts:versions:prune', {
         dataDir,
         artifactId: data.artifactId,
@@ -375,20 +382,20 @@ export function createArtifactStore(dataDir: string) {
         keepNamed: data.keepNamed,
         keepCurrent: data.keepCurrent,
         dryRun: data.dryRun
-      })
+      }) as Promise<PruneReport>
     },
 
     async setCurrentArtifactVersion(
       db: SlayzoneDb,
       data: { artifactId: string; versionRef: VersionRef }
-    ): Promise<unknown> {
+    ): Promise<ArtifactVersion> {
       // The worker switches the current pointer AND flushes the version's bytes back to
       // the artifact's on-disk file; it returns the version row.
-      const result = await db.namedTxn('task-artifacts:versions:setCurrent', {
+      const result = (await db.namedTxn('task-artifacts:versions:setCurrent', {
         dataDir,
         artifactId: data.artifactId,
         versionRef: data.versionRef
-      })
+      })) as { version: ArtifactVersion }
       return result.version
     },
 

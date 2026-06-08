@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useSubscription } from '@slayzone/transport/client'
 import type {
   TaskArtifact,
   RenderMode,
@@ -80,9 +82,10 @@ export function useArtifacts(
   taskId: string | null | undefined,
   initialSelectedId?: string | null
 ): UseArtifactsReturn {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [artifacts, setArtifacts] = useState<TaskArtifact[]>([])
   const [folders, setFolders] = useState<ArtifactFolder[]>([])
-  const [isLoading, setIsLoading] = useState<boolean>(!!taskId)
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
 
   // Re-sync selection when switching tasks
@@ -91,44 +94,67 @@ export function useArtifacts(
     setSelectedId(initialSelectedId ?? null)
   }, [taskId])
 
-  // Fetch artifacts + folders on mount and external changes
+  // Fetch artifacts + folders. The two queries are the source of truth; local
+  // state mirrors them so optimistic mutation updates stay instant and consumers
+  // keep reading synchronous arrays.
+  const artifactsQuery = useQuery(
+    trpc.artifacts.getByTask.queryOptions({ taskId: taskId ?? '' }, { enabled: !!taskId })
+  )
+  const foldersQuery = useQuery(
+    trpc.artifacts.foldersGetByTask.queryOptions({ taskId: taskId ?? '' }, { enabled: !!taskId })
+  )
+
+  useEffect(() => {
+    if (artifactsQuery.data) setArtifacts(artifactsQuery.data)
+  }, [artifactsQuery.data])
+  useEffect(() => {
+    if (foldersQuery.data) setFolders(foldersQuery.data)
+  }, [foldersQuery.data])
+
+  // Clear local state immediately when there is no task (the queries are disabled
+  // and won't emit data to drive the effects above).
   useEffect(() => {
     if (!taskId) {
-      setIsLoading(false)
-      return
-    }
-    setIsLoading(true)
-    let cancelled = false
-    let firstLoad = true
-    const load = (): void => {
-      const p = Promise.all([
-        window.api.artifacts
-          .getByTask(taskId)
-          .then((r) => {
-            if (!cancelled) setArtifacts(r)
-          })
-          .catch(() => {}),
-        window.api.artifactFolders
-          .getByTask(taskId)
-          .then((r) => {
-            if (!cancelled) setFolders(r)
-          })
-          .catch(() => {})
-      ])
-      if (firstLoad) {
-        firstLoad = false
-        p.finally(() => {
-          if (!cancelled) setIsLoading(false)
-        })
-      }
-    }
-    load()
-    const cleanup = window.api?.app?.onTasksChanged?.(load)
-    return () => {
-      cancelled = true
-      cleanup?.()
+      setArtifacts([])
+      setFolders([])
     }
   }, [taskId])
+
+  const isLoading = !!taskId && (artifactsQuery.isPending || foldersQuery.isPending)
+
+  // External changes: refetch both lists when a `tasks-changed` signal fires
+  // (replaces the legacy `app.onTasksChanged` IPC listener).
+  useSubscription(
+    trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
+      enabled: !!taskId,
+      onData: () => {
+        void artifactsQuery.refetch()
+        void foldersQuery.refetch()
+      }
+    })
+  )
+
+  // --- Mutations ---
+  const createMutation = useMutation(trpc.artifacts.create.mutationOptions())
+  const updateMutation = useMutation(trpc.artifacts.update.mutationOptions())
+  const deleteMutation = useMutation(trpc.artifacts.delete.mutationOptions())
+  const uploadMutation = useMutation(trpc.artifacts.upload.mutationOptions())
+  const uploadDirMutation = useMutation(trpc.artifacts.uploadDir.mutationOptions())
+  const downloadFileMutation = useMutation(trpc.artifacts.downloadFile.mutationOptions())
+  const downloadFolderMutation = useMutation(trpc.artifacts.downloadFolder.mutationOptions())
+  const downloadAsPdfMutation = useMutation(trpc.artifacts.downloadAsPdf.mutationOptions())
+  const downloadAsPngMutation = useMutation(trpc.artifacts.downloadAsPng.mutationOptions())
+  const downloadAsHtmlMutation = useMutation(trpc.artifacts.downloadAsHtml.mutationOptions())
+  const downloadAllAsZipMutation = useMutation(trpc.artifacts.downloadAllAsZip.mutationOptions())
+  const versionsCreateMutation = useMutation(trpc.artifacts.versionsCreate.mutationOptions())
+  const versionsRenameMutation = useMutation(trpc.artifacts.versionsRename.mutationOptions())
+  const versionsPruneMutation = useMutation(trpc.artifacts.versionsPrune.mutationOptions())
+  const versionsSetCurrentMutation = useMutation(
+    trpc.artifacts.versionsSetCurrent.mutationOptions()
+  )
+  const foldersCreateMutation = useMutation(trpc.artifacts.foldersCreate.mutationOptions())
+  const foldersUpdateMutation = useMutation(trpc.artifacts.foldersUpdate.mutationOptions())
+  const foldersDeleteMutation = useMutation(trpc.artifacts.foldersDelete.mutationOptions())
 
   // Build folder path lookup: folderId -> slash-separated path
   const folderPathMap = useMemo(() => {
@@ -174,7 +200,7 @@ export function useArtifacts(
     }): Promise<TaskArtifact | null> => {
       if (!taskId) return null
       const data: CreateArtifactInput = { taskId, ...params }
-      const artifact = await window.api.artifacts.create(data)
+      const artifact = await createMutation.mutateAsync(data)
       if (artifact) {
         setArtifacts((prev) => [...prev, artifact])
         setSelectedId(artifact.id)
@@ -182,54 +208,69 @@ export function useArtifacts(
       }
       return artifact
     },
-    [taskId]
+    [taskId, createMutation]
   )
 
-  const updateArtifact = useCallback(async (data: UpdateArtifactInput): Promise<void> => {
-    const updated = await window.api.artifacts.update(data)
-    if (updated) {
-      setArtifacts((prev) => prev.map((a) => (a.id === data.id ? updated : a)))
-    }
-  }, [])
+  const updateArtifact = useCallback(
+    async (data: UpdateArtifactInput): Promise<void> => {
+      const updated = await updateMutation.mutateAsync(data)
+      if (updated) {
+        setArtifacts((prev) => prev.map((a) => (a.id === data.id ? updated : a)))
+      }
+    },
+    [updateMutation]
+  )
 
-  const deleteArtifact = useCallback(async (id: string): Promise<void> => {
-    await window.api.artifacts.delete(id)
-    setArtifacts((prev) => prev.filter((a) => a.id !== id))
-    setSelectedId((prev) => (prev === id ? null : prev))
-    track('asset_deleted')
-  }, [])
+  const deleteArtifact = useCallback(
+    async (id: string): Promise<void> => {
+      await deleteMutation.mutateAsync({ id })
+      setArtifacts((prev) => prev.filter((a) => a.id !== id))
+      setSelectedId((prev) => (prev === id ? null : prev))
+      track('asset_deleted')
+    },
+    [deleteMutation]
+  )
 
-  const renameArtifact = useCallback(async (id: string, newTitle: string): Promise<void> => {
-    const updated = await window.api.artifacts.update({ id, title: newTitle })
-    if (updated) {
-      setArtifacts((prev) => prev.map((a) => (a.id === id ? updated : a)))
-    }
-  }, [])
+  const renameArtifact = useCallback(
+    async (id: string, newTitle: string): Promise<void> => {
+      const updated = await updateMutation.mutateAsync({ id, title: newTitle })
+      if (updated) {
+        setArtifacts((prev) => prev.map((a) => (a.id === id ? updated : a)))
+      }
+    },
+    [updateMutation]
+  )
 
   const moveArtifactToFolder = useCallback(
     async (artifactId: string, folderId: string | null): Promise<void> => {
-      const updated = await window.api.artifacts.update({ id: artifactId, folderId })
+      const updated = await updateMutation.mutateAsync({ id: artifactId, folderId })
       if (updated) {
         setArtifacts((prev) => prev.map((a) => (a.id === artifactId ? updated : a)))
       }
     },
-    []
+    [updateMutation]
   )
 
-  const readContent = useCallback(async (id: string): Promise<string | null> => {
-    return window.api.artifacts.readContent(id)
-  }, [])
+  const readContent = useCallback(
+    async (id: string): Promise<string | null> => {
+      return queryClient.fetchQuery(trpc.artifacts.readContent.queryOptions({ id }))
+    },
+    [queryClient, trpc]
+  )
 
-  const saveContent = useCallback(async (id: string, content: string): Promise<void> => {
-    // UI saves always mutate the latest version in place. The explicit
-    // "Create version" action is the only UI path that creates new versions.
-    await window.api.artifacts.update({ id, content, mutateVersion: true })
-  }, [])
+  const saveContent = useCallback(
+    async (id: string, content: string): Promise<void> => {
+      // UI saves always mutate the latest version in place. The explicit
+      // "Create version" action is the only UI path that creates new versions.
+      await updateMutation.mutateAsync({ id, content, mutateVersion: true })
+    },
+    [updateMutation]
+  )
 
   const uploadArtifact = useCallback(
     async (sourcePath: string, title?: string): Promise<TaskArtifact | null> => {
       if (!taskId) return null
-      const artifact = await window.api.artifacts.upload({ taskId, sourcePath, title })
+      const artifact = await uploadMutation.mutateAsync({ taskId, sourcePath, title })
       if (artifact) {
         setArtifacts((prev) => [...prev, artifact])
         setSelectedId(artifact.id)
@@ -237,55 +278,73 @@ export function useArtifacts(
       }
       return artifact
     },
-    [taskId]
+    [taskId, uploadMutation]
   )
 
-  const getFilePath = useCallback(async (id: string): Promise<string | null> => {
-    return window.api.artifacts.getFilePath(id)
-  }, [])
+  const getFilePath = useCallback(
+    async (id: string): Promise<string | null> => {
+      return queryClient.fetchQuery(trpc.artifacts.getFilePath.queryOptions({ id }))
+    },
+    [queryClient, trpc]
+  )
 
-  const downloadFile = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadFile(id)
-  }, [])
+  const downloadFile = useCallback(
+    async (id: string): Promise<boolean> => {
+      return downloadFileMutation.mutateAsync({ id })
+    },
+    [downloadFileMutation]
+  )
 
-  const downloadFolder = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadFolder(id)
-  }, [])
+  const downloadFolder = useCallback(
+    async (id: string): Promise<boolean> => {
+      return downloadFolderMutation.mutateAsync({ folderId: id })
+    },
+    [downloadFolderMutation]
+  )
 
-  const downloadAsPdf = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadAsPdf(id)
-  }, [])
+  const downloadAsPdf = useCallback(
+    async (id: string): Promise<boolean> => {
+      return downloadAsPdfMutation.mutateAsync({ id })
+    },
+    [downloadAsPdfMutation]
+  )
 
-  const downloadAsPng = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadAsPng(id)
-  }, [])
+  const downloadAsPng = useCallback(
+    async (id: string): Promise<boolean> => {
+      return downloadAsPngMutation.mutateAsync({ id })
+    },
+    [downloadAsPngMutation]
+  )
 
-  const downloadAsHtml = useCallback(async (id: string): Promise<boolean> => {
-    return window.api.artifacts.downloadAsHtml(id)
-  }, [])
+  const downloadAsHtml = useCallback(
+    async (id: string): Promise<boolean> => {
+      return downloadAsHtmlMutation.mutateAsync({ id })
+    },
+    [downloadAsHtmlMutation]
+  )
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false
-    return window.api.artifacts.downloadAllAsZip(taskId)
-  }, [taskId])
+    return downloadAllAsZipMutation.mutateAsync({ taskId })
+  }, [taskId, downloadAllAsZipMutation])
 
   const uploadDir = useCallback(
     async (dirPath: string, parentFolderId?: string | null): Promise<void> => {
       if (!taskId) return
-      await window.api.artifacts.uploadDir({
+      await uploadDirMutation.mutateAsync({
         taskId,
         dirPath,
         parentFolderId: parentFolderId ?? null
       })
       // Reload everything after bulk operation
       const [newArtifacts, newFolders] = await Promise.all([
-        window.api.artifacts.getByTask(taskId),
-        window.api.artifactFolders.getByTask(taskId)
+        queryClient.fetchQuery(trpc.artifacts.getByTask.queryOptions({ taskId })),
+        queryClient.fetchQuery(trpc.artifacts.foldersGetByTask.queryOptions({ taskId }))
       ])
       setArtifacts(newArtifacts)
       setFolders(newFolders)
     },
-    [taskId]
+    [taskId, uploadDirMutation, queryClient, trpc]
   )
 
   // --- Versions ---
@@ -295,23 +354,27 @@ export function useArtifacts(
       artifactId: string,
       opts?: { limit?: number; offset?: number }
     ): Promise<ArtifactVersion[]> => {
-      return window.api.artifacts.versions.list({ artifactId, ...opts })
+      return queryClient.fetchQuery(
+        trpc.artifacts.versionsList.queryOptions({ artifactId, ...opts })
+      )
     },
-    []
+    [queryClient, trpc]
   )
 
   const readVersion = useCallback(
     async (artifactId: string, versionRef: VersionRef): Promise<string> => {
-      return window.api.artifacts.versions.read({ artifactId, versionRef })
+      return queryClient.fetchQuery(
+        trpc.artifacts.versionsRead.queryOptions({ artifactId, versionRef })
+      )
     },
-    []
+    [queryClient, trpc]
   )
 
   const createVersion = useCallback(
     async (artifactId: string, name?: string | null): Promise<ArtifactVersion> => {
-      return window.api.artifacts.versions.create({ artifactId, name })
+      return versionsCreateMutation.mutateAsync({ artifactId, name })
     },
-    []
+    [versionsCreateMutation]
   )
 
   const renameVersion = useCallback(
@@ -320,16 +383,18 @@ export function useArtifacts(
       versionRef: VersionRef,
       newName: string | null
     ): Promise<ArtifactVersion> => {
-      return window.api.artifacts.versions.rename({ artifactId, versionRef, newName })
+      return versionsRenameMutation.mutateAsync({ artifactId, versionRef, newName })
     },
-    []
+    [versionsRenameMutation]
   )
 
   const diffVersions = useCallback(
     async (artifactId: string, a: VersionRef, b?: VersionRef): Promise<DiffResult> => {
-      return window.api.artifacts.versions.diff({ artifactId, a, b })
+      return queryClient.fetchQuery(
+        trpc.artifacts.versionsDiff.queryOptions({ artifactId, a, b })
+      )
     },
-    []
+    [queryClient, trpc]
   )
 
   const pruneVersions = useCallback(
@@ -337,22 +402,24 @@ export function useArtifacts(
       artifactId: string,
       opts: { keepLast?: number; keepNamed?: boolean; keepCurrent?: boolean; dryRun?: boolean }
     ): Promise<PruneReport> => {
-      return window.api.artifacts.versions.prune({ artifactId, ...opts })
+      return versionsPruneMutation.mutateAsync({ artifactId, ...opts })
     },
-    []
+    [versionsPruneMutation]
   )
 
   const setCurrentVersion = useCallback(
     async (artifactId: string, versionRef: VersionRef): Promise<ArtifactVersion> => {
-      const v = await window.api.artifacts.versions.setCurrent({ artifactId, versionRef })
+      const v = await versionsSetCurrentMutation.mutateAsync({ artifactId, versionRef })
       // Refresh artifact rows so current_version_id in local state matches DB.
       if (taskId) {
-        const refreshed = await window.api.artifacts.getByTask(taskId)
+        const refreshed = await queryClient.fetchQuery(
+          trpc.artifacts.getByTask.queryOptions({ taskId })
+        )
         setArtifacts(refreshed)
       }
       return v
     },
-    [taskId]
+    [taskId, versionsSetCurrentMutation, queryClient, trpc]
   )
 
   // --- Folder CRUD ---
@@ -360,35 +427,44 @@ export function useArtifacts(
   const createFolder = useCallback(
     async (params: { name: string; parentId?: string | null }): Promise<ArtifactFolder | null> => {
       if (!taskId) return null
-      const folder = await window.api.artifactFolders.create({ taskId, ...params })
+      const folder = await foldersCreateMutation.mutateAsync({ taskId, ...params })
       if (folder) {
         setFolders((prev) => [...prev, folder])
       }
       return folder
     },
-    [taskId]
+    [taskId, foldersCreateMutation]
   )
 
-  const updateFolder = useCallback(async (data: UpdateArtifactFolderInput): Promise<void> => {
-    const updated = await window.api.artifactFolders.update(data)
-    if (updated) {
-      setFolders((prev) => prev.map((f) => (f.id === data.id ? updated : f)))
-    }
-  }, [])
+  const updateFolder = useCallback(
+    async (data: UpdateArtifactFolderInput): Promise<void> => {
+      const updated = await foldersUpdateMutation.mutateAsync(data)
+      if (updated) {
+        setFolders((prev) => prev.map((f) => (f.id === data.id ? updated : f)))
+      }
+    },
+    [foldersUpdateMutation]
+  )
 
-  const deleteFolder = useCallback(async (id: string): Promise<void> => {
-    await window.api.artifactFolders.delete(id)
-    setFolders((prev) => prev.filter((f) => f.id !== id))
-    // Artifacts in deleted folder get folder_id = NULL (DB handles it), refresh local state
-    setArtifacts((prev) => prev.map((a) => (a.folder_id === id ? { ...a, folder_id: null } : a)))
-  }, [])
+  const deleteFolder = useCallback(
+    async (id: string): Promise<void> => {
+      await foldersDeleteMutation.mutateAsync({ id })
+      setFolders((prev) => prev.filter((f) => f.id !== id))
+      // Artifacts in deleted folder get folder_id = NULL (DB handles it), refresh local state
+      setArtifacts((prev) => prev.map((a) => (a.folder_id === id ? { ...a, folder_id: null } : a)))
+    },
+    [foldersDeleteMutation]
+  )
 
-  const renameFolder = useCallback(async (id: string, newName: string): Promise<void> => {
-    const updated = await window.api.artifactFolders.update({ id, name: newName })
-    if (updated) {
-      setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)))
-    }
-  }, [])
+  const renameFolder = useCallback(
+    async (id: string, newName: string): Promise<void> => {
+      const updated = await foldersUpdateMutation.mutateAsync({ id, name: newName })
+      if (updated) {
+        setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)))
+      }
+    },
+    [foldersUpdateMutation]
+  )
 
   return {
     artifacts,

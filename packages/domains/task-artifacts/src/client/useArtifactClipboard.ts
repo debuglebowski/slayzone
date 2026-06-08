@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { TaskArtifact } from '@slayzone/task/shared'
 
 interface UseArtifactClipboardArgs {
@@ -25,16 +27,20 @@ export function useArtifactClipboard({
   getFilePath,
   flatArtifactIds
 }: UseArtifactClipboardArgs) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const writeFilePathsMutation = useMutation(trpc.app.clipboard.writeFilePaths.mutationOptions())
+  const pasteFilesMutation = useMutation(trpc.artifacts.pasteFiles.mutationOptions())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const lastClickedRef = useRef<string | null>(null)
   const [clipboard, setClipboard] = useState<{ ids: string[]; mode: 'copy' | 'cut' } | null>(null)
   const [osHasFiles, setOsHasFiles] = useState(false)
   const refreshOsClipboard = useCallback(() => {
-    window.api.clipboard
-      .hasFiles()
+    queryClient
+      .fetchQuery(trpc.app.clipboard.hasFiles.queryOptions())
       .then(setOsHasFiles)
       .catch(() => setOsHasFiles(false))
-  }, [])
+  }, [queryClient, trpc])
 
   // Keep multi-select in sync with single-select changes from outside (imperative handle, search panel)
   useEffect(() => {
@@ -88,9 +94,9 @@ export function useArtifactClipboard({
       const paths = (await Promise.all(ids.map((id) => getFilePath(id)))).filter(
         (p): p is string => !!p
       )
-      await window.api.clipboard.writeFilePaths(paths)
+      await writeFilePathsMutation.mutateAsync({ paths })
     },
-    [getFilePath]
+    [getFilePath, writeFilePathsMutation]
   )
 
   const handleArtifactCopy = useCallback(
@@ -112,9 +118,9 @@ export function useArtifactClipboard({
   )
 
   const handleArtifactPaste = async (destFolderId: string | null) => {
-    const osPaths = await window.api.clipboard.readFilePaths()
+    const osPaths = await queryClient.fetchQuery(trpc.app.clipboard.readFilePaths.queryOptions())
     if (!osPaths.length) return
-    const created = await window.api.artifacts.pasteFiles({
+    const created = await pasteFilesMutation.mutateAsync({
       sourcePaths: osPaths,
       destTaskId: taskId,
       destFolderId
@@ -151,13 +157,13 @@ export function useArtifactClipboard({
       if (!paths.length) return
       const sourceArtifact = artifacts.find((a) => a.id === ids[0])
       const destFolderId = sourceArtifact?.folder_id ?? null
-      await window.api.artifacts.pasteFiles({
+      await pasteFilesMutation.mutateAsync({
         sourcePaths: paths,
         destTaskId: taskId,
         destFolderId
       })
     },
-    [getFilePath, artifacts, taskId]
+    [getFilePath, artifacts, taskId, pasteFilesMutation]
   )
 
   const handleDeleteSelected = async (ids: string[]) => {

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useSubscription } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
 import { RichTextEditor } from '@slayzone/editor'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
@@ -111,6 +113,13 @@ export function ArtifactContentEditor({
   searchRegex: boolean
   onSearchMatchCountChange: (count: number) => void
 }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const getMtime = useCallback(
+    (id: string): Promise<number | null> =>
+      queryClient.fetchQuery(trpc.artifacts.getMtime.queryOptions({ id })),
+    [queryClient, trpc]
+  )
   const {
     notesFontFamily,
     notesCheckedHighlight,
@@ -167,23 +176,20 @@ export function ArtifactContentEditor({
 
   // Read file from disk + refresh baseline mtime. Clears dirty + pending flags.
   const loadFromDisk = useCallback(async (): Promise<void> => {
-    const [c, mtime] = await Promise.all([
-      readContent(artifact.id),
-      window.api.artifacts.getMtime(artifact.id)
-    ])
+    const [c, mtime] = await Promise.all([readContent(artifact.id), getMtime(artifact.id)])
     setContent(c ?? '')
     baselineMtimeRef.current = mtime
     setIsDirty(false)
     setExternalChangePending(false)
     setEditorReloadVersion((v) => v + 1)
     setPreviewVersion((v) => v + 1)
-  }, [artifact.id, readContent])
+  }, [artifact.id, readContent, getMtime])
 
   // Load on mount / artifact change. Flush pending save on unmount (with mtime guard).
   useEffect(() => {
     if (isBinary) {
       setLoading(false)
-      window.api.artifacts.getMtime(artifact.id).then((m) => {
+      getMtime(artifact.id).then((m) => {
         baselineMtimeRef.current = m
       })
       setPreviewVersion((v) => v + 1)
@@ -202,22 +208,21 @@ export function ArtifactContentEditor({
         saveContent(artifact.id, contentRef.current)
       }
     }
-  }, [artifact.id, isBinary, loadFromDisk, saveContent])
+  }, [artifact.id, isBinary, loadFromDisk, saveContent, getMtime])
 
   // fs.watch subscription — disk is the single source of truth for content.
-  useEffect(() => {
-    const off = window.api.artifacts.onContentChanged((changedId) => {
-      if (changedId !== artifact.id) return
-      if (isDirtyRef.current) {
-        setExternalChangePending(true)
-      } else {
-        loadFromDisk()
+  useSubscription(
+    trpc.artifacts.onContentChanged.subscriptionOptions(undefined, {
+      onData: (changedId) => {
+        if (changedId !== artifact.id) return
+        if (isDirtyRef.current) {
+          setExternalChangePending(true)
+        } else {
+          loadFromDisk()
+        }
       }
     })
-    return () => {
-      off()
-    }
-  }, [artifact.id, loadFromDisk])
+  )
 
   const handleChange = useCallback(
     (value: string) => {
@@ -226,7 +231,7 @@ export function ArtifactContentEditor({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       saveTimerRef.current = setTimeout(async () => {
         saveTimerRef.current = null
-        const currentMtime = await window.api.artifacts.getMtime(artifact.id)
+        const currentMtime = await getMtime(artifact.id)
         if (
           currentMtime != null &&
           baselineMtimeRef.current != null &&
@@ -238,7 +243,7 @@ export function ArtifactContentEditor({
           return
         }
         await saveContent(artifact.id, value)
-        const newMtime = await window.api.artifacts.getMtime(artifact.id)
+        const newMtime = await getMtime(artifact.id)
         baselineMtimeRef.current = newMtime
         setIsDirty(false)
         // Cache-bust preview iframes only. Editor must NOT see this bump or
@@ -246,7 +251,7 @@ export function ArtifactContentEditor({
         setPreviewVersion((v) => v + 1)
       }, 500)
     },
-    [artifact.id, saveContent]
+    [artifact.id, saveContent, getMtime]
   )
 
   const handleReloadFromDisk = useCallback((): void => {
@@ -264,11 +269,11 @@ export function ArtifactContentEditor({
     }
     if (contentRef.current == null) return
     await saveContent(artifact.id, contentRef.current)
-    const newMtime = await window.api.artifacts.getMtime(artifact.id)
+    const newMtime = await getMtime(artifact.id)
     baselineMtimeRef.current = newMtime
     setIsDirty(false)
     setExternalChangePending(false)
-  }, [artifact.id, saveContent])
+  }, [artifact.id, saveContent, getMtime])
 
   const banner = externalChangePending ? (
     <div
