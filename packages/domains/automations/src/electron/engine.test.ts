@@ -10,7 +10,7 @@ import {
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { AutomationEngine, cronMatches } from './engine.js'
 import type { Automation, AutomationRun } from '@slayzone/automations/shared'
-import { taskEvents } from '@slayzone/task/main'
+import { taskEvents } from '@slayzone/task/server'
 
 const h = await createTestHarness()
 

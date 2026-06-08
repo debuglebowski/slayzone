@@ -9,8 +9,8 @@ import {
   describe
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerTaskHandlers, updateTask, configureTaskRuntimeAdapters } from './handlers.js'
-import { handleAttentionTransition } from './attention.js'
-import { parseTask } from './ops/shared.js'
+import { handleAttentionTransition } from '../server/attention.js'
+import { parseTask } from '../server/ops/shared.js'
 import type { Task, ProviderConfig } from '../shared/types.js'
 
 const h = await createTestHarness()

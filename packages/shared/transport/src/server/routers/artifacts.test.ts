@@ -11,7 +11,7 @@ import crypto from 'node:crypto'
 import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harness.js'
 import type { CreateTaskInput, CreateArtifactInput, CreateArtifactFolderInput } from '@slayzone/task/shared'
 import { artifactsRouter } from './artifacts.js'
-import { taskOps } from '@slayzone/task/main'
+import { taskOps } from '@slayzone/task/server'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-artifacts-')) }

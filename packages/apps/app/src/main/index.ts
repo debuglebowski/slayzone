@@ -201,16 +201,18 @@ import { registerBackupHandlers, startAutoBackup, stopAutoBackup } from './backu
 import { registerProjectHandlers } from '@slayzone/projects/electron'
 import { handleTerminalStateChange } from '@slayzone/projects/server'
 import {
-  configureTaskRuntimeAdapters,
   registerTaskHandlers,
   registerTaskTemplateHandlers,
   registerFilesHandlers,
   filesPathExists,
-  filesSaveTempImage,
+  filesSaveTempImage
+} from '@slayzone/task/electron'
+import {
+  configureTaskRuntimeAdapters,
   closeArtifactWatcher,
   handleAttentionTransition,
   taskOps
-} from '@slayzone/task/main'
+} from '@slayzone/task/server'
 import { registerTagHandlers } from '@slayzone/tags/electron'
 import { registerFeedbackHandlers } from '@slayzone/feedback/electron'
 import {
@@ -1521,7 +1523,9 @@ app
       killTaskProcesses,
       recordDiagnosticEvent,
       requestPtyRespawn: broadcastRespawnRequest,
-      onReachedTerminal: onTaskReachedTerminal
+      onReachedTerminal: onTaskReachedTerminal,
+      // Electron data-root seam so task ops/ stays server-pure (env override wins).
+      getDataRoot: () => app.getPath('userData')
     })
     logBoot('task runtime adapters configured')
 

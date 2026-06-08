@@ -11,7 +11,7 @@ import { createTestHarness, test, expect } from '../../../../test-utils/ipc-harn
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import { taskRouter } from './task.js'
 import { setTaskDeps } from '../app-deps.js'
-import { taskOps } from '@slayzone/task/main'
+import { taskOps } from '@slayzone/task/server'
 import { taskEvents } from '@slayzone/task/server'
 
 const h = await createTestHarness()

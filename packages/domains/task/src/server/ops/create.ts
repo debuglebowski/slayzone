@@ -2,7 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { CreateTaskInput, ProviderConfig, Task } from '@slayzone/task/shared'
 import { getDefaultStatus, isKnownStatus } from '@slayzone/projects/shared'
 import { taskEvents } from '../events.js'
-import { getTemplateForTask } from '../template-handlers.js'
+import { getTemplateForTask } from '../template-store.js'
 import {
   colorOne,
   getEnabledModeDefaults,

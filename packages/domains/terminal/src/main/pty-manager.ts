@@ -14,7 +14,7 @@ import {
 } from '@slayzone/terminal/shared'
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import { recordPendingSpawn, prunePendingSpawns } from '@slayzone/task/main'
+import { recordPendingSpawn, prunePendingSpawns } from '@slayzone/task/server'
 import { RingBuffer, type BufferChunk } from './ring-buffer'
 import {
   getAdapter,

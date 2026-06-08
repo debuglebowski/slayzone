@@ -14,7 +14,7 @@ import {
   __ipcEmitCalls,
   __resetIpcEmitCalls
 } from '../../../../../shared/test-utils/mock-electron.js'
-import { taskEvents } from '@slayzone/task/main'
+import { taskEvents } from '@slayzone/task/server'
 import { registerUnarchiveTaskTool } from './unarchive-task.js'
 
 const h = await createTestHarness()

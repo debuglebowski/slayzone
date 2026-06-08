@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { ipcMain } from 'electron'
-import { archiveTaskOp } from '@slayzone/task/main'
+import { archiveTaskOp } from '@slayzone/task/server'
 import { ArchiveTaskInput } from '@slayzone/task/shared'
 import type { McpToolsDeps } from './types'
 

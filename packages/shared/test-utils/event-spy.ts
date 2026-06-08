@@ -2,7 +2,7 @@
  * Spy on taskEvents emissions during a test. Captures payloads in order.
  *
  * Usage:
- *   import { taskEvents } from '@slayzone/task/main'
+ *   import { taskEvents } from '@slayzone/task/server'
  *   const spy = spyTaskEvents(taskEvents, 'task:created', 'task:archived')
  *   // ... do stuff ...
  *   expect(spy.calls).toEqual([{ event: 'task:created', payload: { ... } }])

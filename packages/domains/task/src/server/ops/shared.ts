@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { validateReparent, reparentErrorMessage, type ReparentTaskRow } from '@slayzone/task/shared'
@@ -53,6 +52,9 @@ export interface TaskRuntimeAdapters {
    *  Wired by the app to terminal/main's onTaskReachedTerminal. Add new side
    *  effects there, not at call sites. */
   onReachedTerminal: (taskId: string) => void
+  /** Resolve the app data root (Electron `app.getPath('userData')`). Electron-free
+   *  seam so ops/ stays server-pure; only reached when `SLAYZONE_DB_DIR` is unset. */
+  getDataRoot: () => string
 }
 
 const defaultRuntimeAdapters: TaskRuntimeAdapters = {
@@ -60,7 +62,12 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   killTaskProcesses: () => {},
   recordDiagnosticEvent: () => {},
   requestPtyRespawn: () => {},
-  onReachedTerminal: () => {}
+  onReachedTerminal: () => {},
+  getDataRoot: () => {
+    throw new Error(
+      'TaskRuntimeAdapters.getDataRoot not configured (set SLAYZONE_DB_DIR or call configureTaskRuntimeAdapters)'
+    )
+  }
 }
 
 let runtimeAdapters: TaskRuntimeAdapters = defaultRuntimeAdapters
@@ -313,7 +320,7 @@ export async function cleanupTaskFull(
   runtimeAdapters.killTaskProcesses(taskId)
   // Clean up artifact files on disk
   const artifactsBaseDir = path.join(
-    process.env.SLAYZONE_DB_DIR || app.getPath('userData'),
+    process.env.SLAYZONE_DB_DIR || runtimeAdapters.getDataRoot(),
     'artifacts',
     taskId
   )
@@ -1036,6 +1043,6 @@ export interface OpDeps {
   /** Optional: the in-process IPC bus used to fan out `db:tasks:*:done` events to
    *  app/main listeners. Absent when ops are called from a tRPC procedure (the task
    *  router injects ops with `{}` deps). Emit sites guard with `?.`. */
-  ipcMain?: import('electron').IpcMain
+  ipcMain?: { emit(channel: string, ...args: unknown[]): boolean }
   onMutation?: () => void
 }

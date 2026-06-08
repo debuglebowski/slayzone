@@ -1,7 +1,7 @@
 import type { Express } from 'express'
 import { ipcMain } from 'electron'
 import { ZodError } from 'zod'
-import { archiveManyTasksOp } from '@slayzone/task/main'
+import { archiveManyTasksOp } from '@slayzone/task/server'
 import { archiveManyInputSchema } from '@slayzone/task/shared'
 import type { RestApiDeps } from '../types'
 

@@ -20,7 +20,7 @@ import type {
   PtyEventMap
 } from '@slayzone/terminal/main'
 import type { IntegrationOps } from '@slayzone/integrations/main'
-import type { TaskOps } from '@slayzone/task/main'
+import type { TaskOps } from '@slayzone/task/server'
 import type {
   BackupInfo,
   BackupSettings,

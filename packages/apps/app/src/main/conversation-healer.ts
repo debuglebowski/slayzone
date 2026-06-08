@@ -13,7 +13,7 @@ import {
   collectReferencedConversationIds,
   recordConversation,
   getCurrentConversationId
-} from '@slayzone/task/main'
+} from '@slayzone/task/server'
 import { decideConversationHeal, parseSqliteUtc, type HealTranscriptMeta } from '@slayzone/task/shared'
 import { getCurrentBranch } from '@slayzone/worktrees/server'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'

@@ -84,7 +84,7 @@ import {
   type WorkflowCategory
 } from '@slayzone/workflow'
 import { onTaskReachedTerminal } from '@slayzone/terminal/main'
-import { createImportedTaskOp } from '@slayzone/task/main'
+import { createImportedTaskOp } from '@slayzone/task/server'
 import { getAdapter, getRegisteredProviders, normalizeGithubIssue } from './adapters'
 import type { NormalizedIssue, ProviderAdapter } from './adapters'
 

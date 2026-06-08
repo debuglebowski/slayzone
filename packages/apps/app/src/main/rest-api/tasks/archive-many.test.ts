@@ -15,7 +15,7 @@ import {
   __ipcEmitCalls,
   __resetIpcEmitCalls
 } from '../../../../../../shared/test-utils/mock-electron.js'
-import { taskEvents } from '@slayzone/task/main'
+import { taskEvents } from '@slayzone/task/server'
 import { registerArchiveManyTaskRoute } from './archive-many.js'
 
 const h = await createTestHarness()

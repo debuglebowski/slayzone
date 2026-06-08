@@ -25,7 +25,7 @@ import {
   describe
 } from '../../../../../shared/test-utils/ipc-harness.js'
 import { mountRestApp } from '../../../../../shared/test-utils/rest-harness.js'
-import { handleAttentionTransition } from '@slayzone/task/main'
+import { handleAttentionTransition } from '@slayzone/task/server'
 import type { TerminalState } from '@slayzone/terminal/shared'
 import { registerAgentHookRoute, type TerminalStateBridge } from './agent-hook.js'
 

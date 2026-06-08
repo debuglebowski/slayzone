@@ -44,7 +44,7 @@ vi.mock('@slayzone/diagnostics/server', () => ({
 // a pure helper — left unmocked so the real short-circuit logic is exercised.
 const updateTaskSpy = vi.fn()
 const getTaskOpSpy = vi.fn<(db: unknown, id: string) => Promise<unknown>>()
-vi.mock('@slayzone/task/main', () => ({
+vi.mock('@slayzone/task/server', () => ({
   updateTask: (...args: unknown[]) => updateTaskSpy(...args),
   getTaskOp: (db: unknown, id: string) => getTaskOpSpy(db, id)
 }))

@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import type { Express } from 'express'
 import { ZodError } from 'zod'
 import { deleteTaskInputSchema } from '@slayzone/task/shared'
-import { deleteTaskOp } from '@slayzone/task/main'
+import { deleteTaskOp } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 
 export function registerDeleteTaskRoute(app: Express, deps: RestApiDeps): void {

@@ -15,7 +15,7 @@ import { router, publicProcedure } from '../trpc'
 // CRUD/version/folder/upload store is electron-free (@slayzone/task/server) and shared
 // with the IPC handlers (coexistence until slice 5). The 6 download procedures need
 // Electron dialogs + export renderers, so they dynamic-import the electron-side
-// `@slayzone/task/main/artifact-downloads` (PRECONDITION_FAILED when absent, e.g. the
+// `@slayzone/task/electron/artifact-downloads` (PRECONDITION_FAILED when absent, e.g. the
 // standalone @slayzone/server host). Complex inputs pass through unchecked — the IPC
 // path validates by TypeScript only.
 const createArtifactInput = z.unknown() as unknown as z.ZodType<CreateArtifactInput>
@@ -56,10 +56,10 @@ const store = (dataRoot: string): ReturnType<typeof createArtifactStore> =>
 // Electron-only download module — resolved lazily so transport stays electron-free for
 // the standalone server build.
 async function loadDownloads(): Promise<
-  typeof import('@slayzone/task/main/artifact-downloads') | null
+  typeof import('@slayzone/task/electron/artifact-downloads') | null
 > {
   try {
-    return await import('@slayzone/task/main/artifact-downloads')
+    return await import('@slayzone/task/electron/artifact-downloads')
   } catch {
     return null
   }

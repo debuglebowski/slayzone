@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { ipcMain } from 'electron'
-import { deleteTaskOp } from '@slayzone/task/main'
+import { deleteTaskOp } from '@slayzone/task/server'
 import { deleteTaskInputSchema } from '@slayzone/task/shared'
 import type { McpToolsDeps } from './types'
 

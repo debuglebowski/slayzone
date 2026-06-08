@@ -14,7 +14,7 @@ import {
   resolveTemplate,
   type TemplateContext
 } from '@slayzone/automations/shared'
-import { taskEvents } from '@slayzone/task/main'
+import { taskEvents } from '@slayzone/task/server'
 import { exec } from 'child_process'
 
 const MAX_DEPTH = 5

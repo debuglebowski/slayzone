@@ -32,7 +32,7 @@ import {
   getNextSeqForTab,
   clearChatEventsForTab
 } from './chat-events-store'
-import { recordConversation } from '@slayzone/task/main'
+import { recordConversation } from '@slayzone/task/server'
 import { registerChatQueueHandlers, createChatQueueOps } from './chat-queue-handlers'
 import { clearChatQueue } from './chat-queue-store'
 import { notifyGlobalStateListeners } from './pty-manager'

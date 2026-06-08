@@ -11,7 +11,7 @@ import {
   setSessionAwaitingInput,
   isHookDrivenMode
 } from '@slayzone/terminal/main'
-import { recordConversation, findPendingSpawn } from '@slayzone/task/main'
+import { recordConversation, findPendingSpawn } from '@slayzone/task/server'
 import type { ConversationOrigin } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { broadcastToWindows } from '../broadcast-to-windows'

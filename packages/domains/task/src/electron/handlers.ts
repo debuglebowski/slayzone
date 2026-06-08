@@ -10,7 +10,8 @@ import type {
   UpdateArtifactFolderInput
 } from '@slayzone/task/shared'
 import path from 'path'
-import { startArtifactWatcher } from './artifact-watcher'
+import { startArtifactWatcher } from '../server/artifact-watcher'
+import { initArtifactWatcherBroadcast } from './artifact-watcher-broadcast'
 import { createArtifactStore } from '../server/artifact-store'
 import {
   downloadArtifactFile,
@@ -46,10 +47,10 @@ import {
   updateManyTasksOp,
   updateTaskOp,
   type UpdateManyTasksInput
-} from './ops/index.js'
+} from '../server/ops/index.js'
 
-export { configureTaskRuntimeAdapters, updateTask } from './ops/shared.js'
-export type { TaskRuntimeAdapters, DiagnosticEventPayload, DiagnosticLevel } from './ops/shared.js'
+export { configureTaskRuntimeAdapters, updateTask } from '../server/ops/shared.js'
+export type { TaskRuntimeAdapters, DiagnosticEventPayload, DiagnosticLevel } from '../server/ops/shared.js'
 
 export function registerTaskHandlers(
   ipcMain: IpcMain,
@@ -189,6 +190,8 @@ export function registerTaskHandlers(
 
   const dataDir = dataRoot ?? (process.env.SLAYZONE_DB_DIR || app.getPath('userData'))
   const artifactsDir = path.join(dataDir, 'artifacts')
+  // Wire the legacy webContents.send bridge before the watcher emits (order-safe).
+  initArtifactWatcherBroadcast()
   startArtifactWatcher(artifactsDir)
   const store = createArtifactStore(dataDir)
 
