@@ -383,7 +383,16 @@ export const appLevelRouter = router({
       ),
     setActiveBrowserTab: publicProcedure
       .input(z.object({ taskId: z.string(), tabId: z.string().nullable() }))
-      .mutation(({ input }) => getAppDeps().webview.setActiveBrowserTab(input.taskId, input.tabId))
+      .mutation(({ input }) => getAppDeps().webview.setActiveBrowserTab(input.taskId, input.tabId)),
+    closeDevTools: publicProcedure
+      .input(z.object({ webviewId: z.number() }))
+      .mutation(({ input }) => getAppDeps().webview.closeDevTools(input.webviewId)),
+    isDevToolsOpened: publicProcedure
+      .input(z.object({ webviewId: z.number() }))
+      .query(({ input }) => getAppDeps().webview.isDevToolsOpened(input.webviewId)),
+    disableDeviceEmulation: publicProcedure
+      .input(z.object({ webviewId: z.number() }))
+      .mutation(({ input }) => getAppDeps().webview.disableDeviceEmulation(input.webviewId))
   }),
 
   // Task windows + panel ownership — window-scoped via ctx.windowId (parsed from

@@ -346,6 +346,9 @@ export type AppDeps = {
     registerBrowserTab: (taskId: string, tabId: string, webContentsId: number) => void
     unregisterBrowserTab: (taskId: string, tabId: string) => void
     setActiveBrowserTab: (taskId: string, tabId: string | null) => void
+    closeDevTools: (webviewId: number) => unknown
+    isDevToolsOpened: (webviewId: number) => unknown
+    disableDeviceEmulation: (webviewId: number) => unknown
   }
 
   // Task windows + panel ownership. Window-scoped ops take the caller's window

@@ -1873,7 +1873,10 @@ app
             webview: {
               registerBrowserTab,
               unregisterBrowserTab,
-              setActiveBrowserTab
+              setActiveBrowserTab,
+              closeDevTools: (webviewId) => webviewOps.closeDevTools(webviewId),
+              isDevToolsOpened: (webviewId) => webviewOps.isDevToolsOpened(webviewId),
+              disableDeviceEmulation: (webviewId) => webviewOps.disableDeviceEmulation(webviewId)
             },
             taskWindows: {
               ...taskWindowsOps,
@@ -2808,16 +2811,10 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
     )
 
-    ipcMain.handle('webview:close-devtools', (_, webviewId: number) => {
-      const wc = webContents.fromId(webviewId)
-      if (!wc || wc.isDestroyed()) {
-        console.warn('[webview:close-devtools] missing/destroyed webContents', { webviewId })
-        return false
-      }
-      if (wc.isDevToolsOpened()) wc.closeDevTools()
-      console.log('[webview:close-devtools]', { webviewId, opened: wc.isDevToolsOpened() })
-      return true
-    })
+    // legacy IPC (slice 5 drops) — delegate to shared webviewOps
+    ipcMain.handle('webview:close-devtools', (_, webviewId: number) =>
+      webviewOps.closeDevTools(webviewId)
+    )
 
     ipcMain.handle('webview:open-devtools-detached', async (_, webviewId: number) => {
       const wc = webContents.fromId(webviewId)
@@ -2865,11 +2862,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
 
     // Inline DevTools IPC handlers removed — DevTools now docked natively via browser-view-manager
 
-    ipcMain.handle('webview:is-devtools-opened', (_, webviewId: number) => {
-      const wc = webContents.fromId(webviewId)
-      if (!wc || wc.isDestroyed()) return false
-      return wc.isDevToolsOpened()
-    })
+    ipcMain.handle('webview:is-devtools-opened', (_, webviewId: number) =>
+      webviewOps.isDevToolsOpened(webviewId)
+    )
 
     // Webview device emulation
     ipcMain.handle(
@@ -2902,13 +2897,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
     )
 
-    ipcMain.handle('webview:disable-device-emulation', (_, webviewId: number) => {
-      const wc = webContents.fromId(webviewId)
-      if (!wc) return false
-      wc.disableDeviceEmulation()
-      wc.setUserAgent(_chromeUa)
-      return true
-    })
+    ipcMain.handle('webview:disable-device-emulation', (_, webviewId: number) =>
+      webviewOps.disableDeviceEmulation(webviewId)
+    )
 
     // --- Browser View Manager (WebContentsView) ---
     // Wire handoff policy mirror so main-process hardening listeners see WCV policies
@@ -3359,6 +3350,31 @@ const _uaPlatformVersion =
 const isBlockedScheme = (url: string) => isBlockedExternalProtocolUrl(url)
 const webviewDesktopHandoffPolicy = new Map<number, DesktopHandoffPolicy>()
 const webviewDesktopHandoffPolicyCleanupRegistered = new Set<number>()
+
+// Shared webview ops — single impl behind BOTH the `webview:*` IPC handlers and
+// the tRPC `app.webview.*` procedures (coexistence until slice 5). Grows across
+// P19k (devtools) + P19m (shortcuts/emulation); captured by the setAppDeps
+// webview closures above (run only after this module-scope init).
+const webviewOps = {
+  closeDevTools: (webviewId: number) => {
+    const wc = webContents.fromId(webviewId)
+    if (!wc || wc.isDestroyed()) return false
+    if (wc.isDevToolsOpened()) wc.closeDevTools()
+    return true
+  },
+  isDevToolsOpened: (webviewId: number) => {
+    const wc = webContents.fromId(webviewId)
+    if (!wc || wc.isDestroyed()) return false
+    return wc.isDevToolsOpened()
+  },
+  disableDeviceEmulation: (webviewId: number) => {
+    const wc = webContents.fromId(webviewId)
+    if (!wc) return false
+    wc.disableDeviceEmulation()
+    wc.setUserAgent(_chromeUa)
+    return true
+  }
+}
 
 // Protocol-blocking script injected into the webview main world.
 // NOTE: session.registerPreloadScript runs in an isolated world and can't override page globals,
