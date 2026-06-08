@@ -174,7 +174,11 @@ export const appLevelRouter = router({
     getContentBounds: publicProcedure.query(() => getAppDeps().appWindowGetContentBounds()),
     getDisplayScaleFactor: publicProcedure.query(() =>
       getAppDeps().appWindowGetDisplayScaleFactor()
-    )
+    ),
+    close: publicProcedure.mutation(({ ctx }) => {
+      if (ctx.windowId == null) throw new Error('windowId required')
+      return getAppDeps().windowClose(ctx.windowId)
+    })
   }),
 
   // Auth

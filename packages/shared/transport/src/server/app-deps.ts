@@ -267,6 +267,10 @@ export type AppDeps = {
   // `dialog:showOpenDialog` IPC handler; coexistence until slice 5)
   dialogShowOpenDialog: (options: unknown) => Promise<{ canceled: boolean; filePaths: string[] }>
 
+  // window.close — closes the window owning the connection (ctx.windowId).
+  // Same effect as the `window:close` IPC (which uses event.sender).
+  windowClose: (windowId: number) => void
+
   // Browser view manager — heavy electron coupling, expose as opaque object
   // and call methods directly from procedures. All return types are unknown
   // since the manager's public surface evolves; callers cast on the renderer.

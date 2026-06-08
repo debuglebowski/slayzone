@@ -1810,6 +1810,11 @@ app
             authGithubSystemSignIn: (input) => githubSystemSignIn(input),
             dialogShowOpenDialog: (options) =>
               dialog.showOpenDialog(options as Electron.OpenDialogOptions),
+            windowClose: (windowId) => {
+              const wc = webContents.fromId(windowId)
+              const win = wc ? BrowserWindow.fromWebContents(wc) : null
+              if (win) win.close()
+            },
             // Browser view ops — same BrowserViewManager singleton + shared
             // browserExtensionOps the `browser:*` IPC handlers use (coexistence
             // until slice 5). browserExtensionOps is defined below in this
