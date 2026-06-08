@@ -8,7 +8,7 @@
 import { readdir, stat as fsStat } from 'fs/promises'
 import path from 'path'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects/shared'
 import {
   isGitRepo,

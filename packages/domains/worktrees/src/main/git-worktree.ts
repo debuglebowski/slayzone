@@ -11,7 +11,7 @@ import {
 } from 'fs'
 import { cp, stat, mkdir } from 'fs/promises'
 import path from 'path'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type {
   ConflictFileContent,
   DetectedWorktree,

@@ -1,5 +1,6 @@
 import { requestEnsureAlive, hasPty, type EnsureAliveResult } from '@slayzone/terminal/main'
-import { markTabSpawned, ensureMainTab } from '@slayzone/task-terminals/main'
+import { markTabSpawned } from '@slayzone/task-terminals/electron'
+import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import { menuEvents } from '../../menu-events'

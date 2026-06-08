@@ -16,7 +16,7 @@ import {
 } from '@slayzone/task/main'
 import { decideConversationHeal, parseSqliteUtc, type HealTranscriptMeta } from '@slayzone/task/shared'
 import { getCurrentBranch } from '@slayzone/worktrees/main'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 
 /** Max gap between task creation and the real Claude session's first message,
  *  used to bound the orphan candidate window. */

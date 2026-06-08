@@ -34,7 +34,7 @@ vi.mock('@slayzone/terminal/main', () => ({
 
 // Diagnostics call from the handler must not blow up under vitest's lack of
 // Electron app — stub it out.
-vi.mock('@slayzone/diagnostics/main', () => ({
+vi.mock('@slayzone/diagnostics/server', () => ({
   recordDiagnosticEvent: () => {}
 }))
 

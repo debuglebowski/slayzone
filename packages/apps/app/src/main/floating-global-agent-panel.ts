@@ -4,7 +4,7 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/main'
 import { toElectronAccelerator, shortcutDefinitions } from '@slayzone/shortcuts'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { getDatabase } from './db'
 import {
   reduce,

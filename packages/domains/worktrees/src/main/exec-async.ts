@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { DiagnosticSource } from '@slayzone/diagnostics/shared'
 
 export function trimOutput(value: unknown, maxLength = 1200): string | null {

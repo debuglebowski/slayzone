@@ -9,8 +9,8 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
-    "./main": "./src/main/index.ts",
-    "./self-heal": "./src/main/self-heal.ts",
+    "./electron": "./src/electron/index.ts",
+    "./self-heal": "./src/server/self-heal.ts",
     "./client": "./src/client/index.ts"
   },
   "scripts": {

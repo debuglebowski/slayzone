@@ -13,7 +13,7 @@ import {
 } from '@slayzone/terminal/main'
 import { recordConversation, findPendingSpawn } from '@slayzone/task/main'
 import type { ConversationOrigin } from '@slayzone/task/shared'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { broadcastToWindows } from '../broadcast-to-windows'
 import type { RestApiDeps } from './types'
 

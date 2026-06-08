@@ -22,7 +22,7 @@ import {
   buildExportBundle,
   CONFIG_KEYS
 } from '../server'
-import { startRetentionScheduler, stopRetentionScheduler } from './retention'
+import { startRetentionScheduler, stopRetentionScheduler } from '../server/retention'
 
 // Electron-coupled glue for diagnostics. The data core (config cache, event
 // write-queue, redaction, export bundle) lives in the electron-free
@@ -30,12 +30,11 @@ import { startRetentionScheduler, stopRetentionScheduler } from './retention'
 // instrumentation, the Electron save-dialog export, and the process crash
 // hooks. The IPC handlers and the tRPC diagnostics router both delegate to the
 // same store singleton, so they share one queue / one cache.
-
-// Re-export the store's data-core API so `@slayzone/diagnostics/main` keeps the
-// surface its ~12 main-process consumers (terminal, worktrees, auto-updater,
-// app/main, agent-hook…) already import.
-export { recordDiagnosticEvent, flushWriteQueue, getDiagnosticsConfig }
-export type { DiagnosticsEventRow } from '../server'
+//
+// The data-core API (recordDiagnosticEvent, flushWriteQueue, getDiagnosticsConfig,
+// DiagnosticsEventRow) is consumed directly from `@slayzone/diagnostics/server`
+// by its ~12 main-process consumers (terminal, worktrees, auto-updater, app/main,
+// agent-hook…) — electron-free, so it stays out of this electron module's surface.
 
 const IPC_PAYLOAD_SKIP_CHANNELS = new Set(['pty:write', 'pty:getBufferSince', 'pty:getBuffer'])
 

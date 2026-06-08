@@ -11,7 +11,7 @@ import type {
 } from './agents/types'
 import { getBackend } from './agents/registry'
 import { whichBinary as realWhichBinary } from './shell-env'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { TypedEmitter } from '@slayzone/platform/events'
 import type { ConversationOrigin } from '@slayzone/task/shared'
 import type { BufferedEvent } from './chat-events-store'

@@ -211,7 +211,7 @@ import {
   handleAttentionTransition,
   taskOps
 } from '@slayzone/task/main'
-import { registerTagHandlers } from '@slayzone/tags/main'
+import { registerTagHandlers } from '@slayzone/tags/electron'
 import { registerFeedbackHandlers } from '@slayzone/feedback/main'
 import {
   registerSettingsHandlers,
@@ -274,17 +274,17 @@ import {
   createPtyEnricher,
   markTabSpawned,
   markTabHibernated
-} from '@slayzone/task-terminals/main'
+} from '@slayzone/task-terminals/electron'
 import { registerWorktreeHandlers, closeGitWatcher } from '@slayzone/worktrees/main'
 import { registerAgentTurnsHandlers, initAgentTurnsBroadcast } from '@slayzone/agent-turns/electron'
 import { initChatTurnSubscriber, initPtyTurnSubscriber } from '@slayzone/agent-turns/server'
 import {
   registerDiagnosticsHandlers,
   registerProcessDiagnostics,
-  recordDiagnosticEvent,
   stopDiagnostics,
   setIpcSuccessHook
-} from '@slayzone/diagnostics/main'
+} from '@slayzone/diagnostics/electron'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import {
   detectPreviousCrash,
   writeBootStub,
@@ -297,7 +297,7 @@ import {
   type LockOutcome
 } from './lifecycle/single-instance'
 import { IPC_TELEMETRY_MAP } from '@slayzone/telemetry/shared'
-import { registerAiConfigHandlers } from '@slayzone/ai-config/main'
+import { registerAiConfigHandlers } from '@slayzone/ai-config/electron'
 import {
   registerIntegrationHandlers,
   startSyncPoller,
@@ -310,8 +310,8 @@ import {
 } from '@slayzone/integrations/main'
 import { registerFileEditorHandlers, closeAllWatchers } from '@slayzone/file-editor/main'
 import { registerHistoryHandlers } from '@slayzone/history/electron'
-import { registerTestPanelHandlers } from '@slayzone/test-panel/main'
-import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/main'
+import { registerTestPanelHandlers } from '@slayzone/test-panel/electron'
+import { registerAutomationHandlers, AutomationEngine } from '@slayzone/automations/electron'
 import { registerUsageAnalyticsHandlers } from '@slayzone/usage-analytics/electron'
 import { registerScreenshotHandlers, captureBrowserViewScreenshot } from './screenshot'
 import {

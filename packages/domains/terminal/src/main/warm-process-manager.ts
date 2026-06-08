@@ -1,7 +1,7 @@
 import { existsSync } from 'fs'
 import type { IPty, IDisposable } from 'node-pty'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { spawnLoginShell } from './pty-manager'
 import { buildMcpEnv } from './mcp-env'
 

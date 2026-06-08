@@ -10,7 +10,7 @@ import { is } from '@electron-toolkit/utils'
 // CJS→ESM interop doesn't detect Object.defineProperty getters as named exports.
 // A default import gives us the raw CJS exports object where the getter works.
 import electronUpdater from 'electron-updater'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/main'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { menuEvents } from './menu-events'
 
 const RENDERER_DRAIN_TIMEOUT_MS = 5_000

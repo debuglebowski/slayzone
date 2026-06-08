@@ -9,7 +9,7 @@ import {
   describe
 } from '../../../../shared/test-utils/ipc-harness.js'
 import { registerTaskHandlers } from './handlers.js'
-import { registerTagHandlers } from '@slayzone/tags/main'
+import { registerTagHandlers } from '@slayzone/tags/electron'
 import { registerHistoryHandlers } from '@slayzone/history/electron'
 import type { Task } from '../shared/types.js'
 
