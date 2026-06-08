@@ -261,6 +261,61 @@ export type AppDeps = {
 
   // auth
   authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>
+
+  // Browser view manager — heavy electron coupling, expose as opaque object
+  // and call methods directly from procedures. All return types are unknown
+  // since the manager's public surface evolves; callers cast on the renderer.
+  browser: {
+    createView: (opts: unknown) => unknown
+    destroyView: (viewId: string) => unknown
+    destroyAllForTask: (taskId: string) => unknown
+    setBounds: (viewId: string, bounds: unknown) => unknown
+    setVisible: (viewId: string, visible: boolean) => unknown
+    hideAll: () => unknown
+    showAll: () => unknown
+    setHandoffPolicy: (viewId: string, policy: unknown) => unknown
+    navigate: (viewId: string, url: string) => unknown
+    goBack: (viewId: string) => unknown
+    goForward: (viewId: string) => unknown
+    reload: (viewId: string, ignoreCache?: boolean) => unknown
+    stop: (viewId: string) => unknown
+    executeJs: (viewId: string, code: string) => unknown
+    insertCss: (viewId: string, css: string) => unknown
+    removeCss: (viewId: string, key: string) => unknown
+    setZoom: (viewId: string, factor: number) => unknown
+    focus: (viewId: string) => unknown
+    findInPage: (viewId: string, text: string, options?: unknown) => unknown
+    stopFindInPage: (
+      viewId: string,
+      action: 'clearSelection' | 'keepSelection' | 'activateSelection'
+    ) => unknown
+    setKeyboardPassthrough: (viewId: string, enabled: boolean) => unknown
+    sendInputEvent: (viewId: string, input: unknown) => unknown
+    openDevTools: (viewId: string, mode: 'bottom' | 'right' | 'undocked' | 'detach') => unknown
+    closeDevTools: (viewId: string) => unknown
+    isDevToolsOpen: (viewId: string) => unknown
+    getUrl: (viewId: string) => unknown
+    getBounds: (viewId: string) => unknown
+    getZoomFactor: (viewId: string) => unknown
+    getActualNativeBounds: (viewId: string) => unknown
+    getViewVisible: (viewId: string) => unknown
+    getViewsForTask: (taskId: string) => unknown
+    getAllViewIds: () => unknown
+    listViews: () => unknown
+    getNativeChildViewCount: () => unknown
+    isAllHidden: () => unknown
+    isFocused: (viewId: string) => unknown
+    isViewNativelyVisible: (viewId: string) => unknown
+    getPartition: (viewId: string) => unknown
+    getWebContentsId: (viewId: string) => unknown
+    activateExtension: (extensionId: string) => unknown
+    getExtensions: () => unknown
+    loadExtension: () => unknown
+    removeExtension: (extensionId: string) => unknown
+    discoverBrowserExtensions: () => unknown
+    importExtension: (extPath: string) => unknown
+    reparentToCurrentWindow: (viewId: string) => unknown
+  }
 }
 
 let appDeps: AppDeps | null = null

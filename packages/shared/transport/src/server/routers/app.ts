@@ -181,5 +181,144 @@ export const appLevelRouter = router({
     githubSystemSignIn: publicProcedure
       .input(anyInput)
       .mutation(({ input }) => getAppDeps().authGithubSystemSignIn(input as never))
+  }),
+
+  // Browser view ops — delegate to the BrowserViewManager singleton (same
+  // instance backing the still-live `browser:*` IPC handlers; coexistence
+  // until the renderer drops IPC in slice 5).
+  browser: router({
+    createView: publicProcedure
+      .input(anyInput)
+      .mutation(({ input }) => getAppDeps().browser.createView(input)),
+    destroyView: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.destroyView(input.viewId)),
+    destroyAllForTask: publicProcedure
+      .input(z.object({ taskId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.destroyAllForTask(input.taskId)),
+    setBounds: publicProcedure
+      .input(z.object({ viewId: z.string(), bounds: anyInput }))
+      .mutation(({ input }) => getAppDeps().browser.setBounds(input.viewId, input.bounds)),
+    setVisible: publicProcedure
+      .input(z.object({ viewId: z.string(), visible: z.boolean() }))
+      .mutation(({ input }) => getAppDeps().browser.setVisible(input.viewId, input.visible)),
+    hideAll: publicProcedure.mutation(() => getAppDeps().browser.hideAll()),
+    showAll: publicProcedure.mutation(() => getAppDeps().browser.showAll()),
+    setHandoffPolicy: publicProcedure
+      .input(z.object({ viewId: z.string(), policy: anyInput }))
+      .mutation(({ input }) => getAppDeps().browser.setHandoffPolicy(input.viewId, input.policy)),
+    navigate: publicProcedure
+      .input(z.object({ viewId: z.string(), url: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.navigate(input.viewId, input.url)),
+    goBack: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.goBack(input.viewId)),
+    goForward: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.goForward(input.viewId)),
+    reload: publicProcedure
+      .input(z.object({ viewId: z.string(), ignoreCache: z.boolean().optional() }))
+      .mutation(({ input }) => getAppDeps().browser.reload(input.viewId, input.ignoreCache)),
+    stop: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.stop(input.viewId)),
+    executeJs: publicProcedure
+      .input(z.object({ viewId: z.string(), code: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.executeJs(input.viewId, input.code)),
+    insertCss: publicProcedure
+      .input(z.object({ viewId: z.string(), css: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.insertCss(input.viewId, input.css)),
+    removeCss: publicProcedure
+      .input(z.object({ viewId: z.string(), key: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.removeCss(input.viewId, input.key)),
+    setZoom: publicProcedure
+      .input(z.object({ viewId: z.string(), factor: z.number() }))
+      .mutation(({ input }) => getAppDeps().browser.setZoom(input.viewId, input.factor)),
+    focus: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.focus(input.viewId)),
+    findInPage: publicProcedure
+      .input(z.object({ viewId: z.string(), text: z.string(), options: anyInput.optional() }))
+      .mutation(({ input }) => getAppDeps().browser.findInPage(input.viewId, input.text, input.options)),
+    stopFindInPage: publicProcedure
+      .input(
+        z.object({
+          viewId: z.string(),
+          action: z.enum(['clearSelection', 'keepSelection', 'activateSelection'])
+        })
+      )
+      .mutation(({ input }) => getAppDeps().browser.stopFindInPage(input.viewId, input.action)),
+    setKeyboardPassthrough: publicProcedure
+      .input(z.object({ viewId: z.string(), enabled: z.boolean() }))
+      .mutation(({ input }) =>
+        getAppDeps().browser.setKeyboardPassthrough(input.viewId, input.enabled)
+      ),
+    sendInputEvent: publicProcedure
+      .input(z.object({ viewId: z.string(), input: anyInput }))
+      .mutation(({ input }) => getAppDeps().browser.sendInputEvent(input.viewId, input.input)),
+    openDevTools: publicProcedure
+      .input(
+        z.object({ viewId: z.string(), mode: z.enum(['bottom', 'right', 'undocked', 'detach']) })
+      )
+      .mutation(({ input }) => getAppDeps().browser.openDevTools(input.viewId, input.mode)),
+    closeDevTools: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.closeDevTools(input.viewId)),
+    isDevToolsOpen: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.isDevToolsOpen(input.viewId)),
+    getUrl: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.getUrl(input.viewId)),
+    getBounds: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.getBounds(input.viewId)),
+    getZoomFactor: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.getZoomFactor(input.viewId)),
+    getActualNativeBounds: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.getActualNativeBounds(input.viewId)),
+    getViewVisible: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.getViewVisible(input.viewId)),
+    getViewsForTask: publicProcedure
+      .input(z.object({ taskId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.getViewsForTask(input.taskId)),
+    getAllViewIds: publicProcedure.query(() => getAppDeps().browser.getAllViewIds()),
+    listViews: publicProcedure.query(() => getAppDeps().browser.listViews()),
+    getNativeChildViewCount: publicProcedure.query(() =>
+      getAppDeps().browser.getNativeChildViewCount()
+    ),
+    isAllHidden: publicProcedure.query(() => getAppDeps().browser.isAllHidden()),
+    isFocused: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.isFocused(input.viewId)),
+    isViewNativelyVisible: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.isViewNativelyVisible(input.viewId)),
+    getPartition: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.getPartition(input.viewId)),
+    getWebContentsId: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .query(({ input }) => getAppDeps().browser.getWebContentsId(input.viewId)),
+    activateExtension: publicProcedure
+      .input(z.object({ extensionId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.activateExtension(input.extensionId)),
+    getExtensions: publicProcedure.query(() => getAppDeps().browser.getExtensions()),
+    loadExtension: publicProcedure.mutation(() => getAppDeps().browser.loadExtension()),
+    removeExtension: publicProcedure
+      .input(z.object({ extensionId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.removeExtension(input.extensionId)),
+    discoverBrowserExtensions: publicProcedure.query(() =>
+      getAppDeps().browser.discoverBrowserExtensions()
+    ),
+    importExtension: publicProcedure
+      .input(z.object({ extPath: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.importExtension(input.extPath)),
+    reparentToCurrentWindow: publicProcedure
+      .input(z.object({ viewId: z.string() }))
+      .mutation(({ input }) => getAppDeps().browser.reparentToCurrentWindow(input.viewId))
   })
 })

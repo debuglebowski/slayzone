@@ -1799,7 +1799,66 @@ app
               if (!mainWindow || mainWindow.isDestroyed()) return null
               return screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor
             },
-            authGithubSystemSignIn: (input) => githubSystemSignIn(input)
+            authGithubSystemSignIn: (input) => githubSystemSignIn(input),
+            // Browser view ops — same BrowserViewManager singleton + shared
+            // browserExtensionOps the `browser:*` IPC handlers use (coexistence
+            // until slice 5). browserExtensionOps is defined below in this
+            // app.whenReady scope; these closures only run after it inits.
+            browser: {
+              createView: (opts) => browserViewManager.createView(opts as never),
+              destroyView: (viewId) => browserViewManager.destroyView(viewId),
+              destroyAllForTask: (taskId) => browserViewManager.destroyAllForTask(taskId),
+              setBounds: (viewId, bounds) => browserViewManager.setBounds(viewId, bounds as never),
+              setVisible: (viewId, visible) => browserViewManager.setVisible(viewId, visible),
+              hideAll: () => browserViewManager.hideAll(),
+              showAll: () => browserViewManager.showAll(),
+              setHandoffPolicy: (viewId, policy) =>
+                browserViewManager.setHandoffPolicy(viewId, policy as never),
+              navigate: (viewId, url) => browserViewManager.navigate(viewId, url),
+              goBack: (viewId) => browserViewManager.goBack(viewId),
+              goForward: (viewId) => browserViewManager.goForward(viewId),
+              reload: (viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
+              stop: (viewId) => browserViewManager.stop(viewId),
+              executeJs: (viewId, code) => browserViewManager.executeJs(viewId, code),
+              insertCss: (viewId, css) => browserViewManager.insertCss(viewId, css),
+              removeCss: (viewId, key) => browserViewManager.removeCss(viewId, key),
+              setZoom: (viewId, factor) => browserViewManager.setZoom(viewId, factor),
+              focus: (viewId) => browserViewManager.focus(viewId),
+              findInPage: (viewId, text, options) =>
+                browserViewManager.findInPage(viewId, text, options as never),
+              stopFindInPage: (viewId, action) => browserViewManager.stopFindInPage(viewId, action),
+              setKeyboardPassthrough: (viewId, enabled) =>
+                browserViewManager.setKeyboardPassthrough(viewId, enabled),
+              sendInputEvent: (viewId, input) =>
+                browserViewManager.sendInputEvent(viewId, input as never),
+              openDevTools: (viewId, mode) => browserViewManager.openDevTools(viewId, mode),
+              closeDevTools: (viewId) => browserViewManager.closeDevTools(viewId),
+              isDevToolsOpen: (viewId) => browserViewManager.isDevToolsOpen(viewId),
+              getUrl: (viewId) => browserViewManager.getUrl(viewId),
+              getBounds: (viewId) => browserViewManager.getBounds(viewId),
+              getZoomFactor: (viewId) => browserViewManager.getZoomFactor(viewId),
+              getActualNativeBounds: (viewId) => browserViewManager.getActualNativeBounds(viewId),
+              getViewVisible: (viewId) => browserViewManager.getViewVisible(viewId),
+              getViewsForTask: (taskId) => browserViewManager.getViewsForTask(taskId),
+              getAllViewIds: () => browserViewManager.getAllViewIds(),
+              listViews: () => browserViewManager.listViews(),
+              getNativeChildViewCount: () => browserViewManager.getNativeChildViewCount(),
+              isAllHidden: () => browserViewManager.isAllHidden(),
+              isFocused: (viewId) => browserViewManager.isFocused(viewId),
+              isViewNativelyVisible: (viewId) => browserViewManager.isViewNativelyVisible(viewId),
+              getPartition: (viewId) => browserViewManager.getPartition(viewId),
+              getWebContentsId: (viewId) => browserViewManager.getWebContentsId(viewId),
+              activateExtension: (extensionId) => browserExtensionOps.activateExtension(extensionId),
+              getExtensions: () => browserExtensionOps.getExtensions(),
+              loadExtension: () => browserExtensionOps.loadExtension(),
+              removeExtension: (extensionId) => browserExtensionOps.removeExtension(extensionId),
+              discoverBrowserExtensions: () => browserExtensionOps.discoverBrowserExtensions(),
+              importExtension: (extPath) => browserExtensionOps.importExtension(extPath),
+              reparentToCurrentWindow: (viewId) => {
+                const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+                if (win) browserViewManager.reparentView(viewId, win)
+              }
+            }
           })
           // Process-manager lifecycle ops + the dual-emit event stream for the
           // processes router. Same module-singleton ops/emitter the IPC handlers
@@ -2214,6 +2273,169 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       }
     }
     void loadSavedExtensions()
+
+    // Shared Chrome-extension ops — single impl behind BOTH the `browser:*` IPC
+    // handlers and the tRPC `app.browser.*` extension procedures (coexistence
+    // until slice 5). Captured by the setAppDeps browser closures above.
+    const browserExtensionOps = {
+      getExtensions: () =>
+        browserSession.getAllExtensions().map((ext) => ({
+          id: ext.id,
+          name: ext.name,
+          version: ext.manifest.version,
+          manifestVersion:
+            typeof ext.manifest.manifest_version === 'number'
+              ? ext.manifest.manifest_version
+              : undefined,
+          icon: ext.manifest.icons
+            ? `crx://extension-icon/${ext.id}/${Object.values(ext.manifest.icons).pop()}`
+            : undefined
+        })),
+      loadExtension: async () => {
+        if (!mainWindow) return null
+        const result = await dialog.showOpenDialog(mainWindow, {
+          properties: ['openDirectory'],
+          title: 'Select Chrome Extension Directory'
+        })
+        if (result.canceled || !result.filePaths[0]) return null
+        try {
+          const ext = await browserSession.loadExtension(result.filePaths[0])
+          saveExtensionPaths()
+          return { id: ext.id, name: ext.name }
+        } catch (err) {
+          return { error: String(err) }
+        }
+      },
+      removeExtension: (extensionId: string) => {
+        browserSession.removeExtension(extensionId)
+        saveExtensionPaths()
+      },
+      discoverBrowserExtensions: async () => {
+        const appSupport = join(homedir(), 'Library', 'Application Support')
+        const knownBrowsers = [
+          { name: 'Chrome', dir: 'Google/Chrome/Default/Extensions' },
+          { name: 'Arc', dir: 'Arc/User Data/Default/Extensions' },
+          { name: 'Brave', dir: 'BraveSoftware/Brave-Browser/Default/Extensions' },
+          { name: 'Edge', dir: 'Microsoft Edge/Default/Extensions' },
+          { name: 'Chromium', dir: 'Chromium/Default/Extensions' },
+          { name: 'Vivaldi', dir: 'Vivaldi/Default/Extensions' }
+        ]
+        const alreadyLoaded = new Set(browserSession.getAllExtensions().map((e) => e.id))
+        const results: {
+          name: string
+          extensions: {
+            id: string
+            name: string
+            version: string
+            path: string
+            alreadyImported: boolean
+            manifestVersion?: number
+          }[]
+        }[] = []
+
+        for (const browser of knownBrowsers) {
+          const extDir = join(appSupport, browser.dir)
+          let entries: string[]
+          try {
+            entries = await fsp.readdir(extDir)
+          } catch {
+            continue
+          }
+
+          const extensions: (typeof results)[0]['extensions'] = []
+          for (const id of entries) {
+            if (id === 'Temp' || id.startsWith('.')) continue
+            const idDir = join(extDir, id)
+            let versions: string[]
+            try {
+              versions = await fsp.readdir(idDir)
+            } catch {
+              continue
+            }
+            const ver = versions.sort().pop()
+            if (!ver) continue
+            const extPath = join(idDir, ver)
+            try {
+              const manifest = JSON.parse(
+                await fsp.readFile(join(extPath, 'manifest.json'), 'utf-8')
+              )
+              let name: string = manifest.name || id
+              if (name.startsWith('__MSG_')) {
+                const key = name.slice(6, -2)
+                for (const lang of ['en', 'en_US', 'en_GB']) {
+                  try {
+                    const msgs = JSON.parse(
+                      await fsp.readFile(join(extPath, '_locales', lang, 'messages.json'), 'utf-8')
+                    )
+                    if (msgs[key]?.message) {
+                      name = msgs[key].message
+                      break
+                    }
+                  } catch {
+                    /* try next lang */
+                  }
+                }
+              }
+              extensions.push({
+                id,
+                name,
+                version: manifest.version || '?',
+                path: extPath,
+                alreadyImported: alreadyLoaded.has(id),
+                manifestVersion:
+                  typeof manifest.manifest_version === 'number'
+                    ? manifest.manifest_version
+                    : undefined
+              })
+            } catch {
+              /* skip unreadable extensions */
+            }
+          }
+          if (extensions.length > 0) {
+            results.push({ name: browser.name, extensions })
+          }
+        }
+        return results
+      },
+      importExtension: async (extPath: string) => {
+        try {
+          const ext = await browserSession.loadExtension(extPath)
+          saveExtensionPaths()
+          return { id: ext.id, name: ext.name }
+        } catch (err) {
+          return { error: String(err) }
+        }
+      },
+      activateExtension: (extensionId: string) => {
+        // Trigger the extension's browser action by accessing the library's internal API.
+        // The public API doesn't expose activate(), so we reach into the context's router.
+        try {
+          const ext = browserSession.getExtension(extensionId)
+          if (!ext) return false
+          const activeWc = browserViewManager.getActiveWebContents()
+          if (!activeWc) return false
+          // Access internal browser action API through the context
+          const api = (chromeExtensions as any).api
+          if (api?.browserAction?.activate) {
+            api.browserAction.activate({ type: 'click' }, { extensionId, tabId: activeWc.id })
+            return true
+          }
+          // Fallback: invoke via the internal handle system
+          const ctx = (chromeExtensions as any).ctx
+          if (ctx?.router) {
+            ctx.router.invoke(activeWc, 'browserAction.activate', {
+              eventType: 'click',
+              extensionId
+            })
+            return true
+          }
+          return false
+        } catch (err) {
+          console.warn('[browser:activate-extension] Failed:', err)
+          return false
+        }
+      }
+    }
     logBoot('extension+session config done')
 
     // Set app user model id for windows
@@ -2794,160 +3016,22 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       browserViewManager.isDevToolsOpen(viewId)
     )
 
-    // Chrome extension management
-    ipcMain.handle('browser:get-extensions', () => {
-      return browserSession.getAllExtensions().map((ext) => ({
-        id: ext.id,
-        name: ext.name,
-        version: ext.manifest.version,
-        manifestVersion:
-          typeof ext.manifest.manifest_version === 'number'
-            ? ext.manifest.manifest_version
-            : undefined,
-        icon: ext.manifest.icons
-          ? `crx://extension-icon/${ext.id}/${Object.values(ext.manifest.icons).pop()}`
-          : undefined
-      }))
-    })
-    ipcMain.handle('browser:load-extension', async () => {
-      if (!mainWindow) return null
-      const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openDirectory'],
-        title: 'Select Chrome Extension Directory'
-      })
-      if (result.canceled || !result.filePaths[0]) return null
-      try {
-        const ext = await browserSession.loadExtension(result.filePaths[0])
-        saveExtensionPaths()
-        return { id: ext.id, name: ext.name }
-      } catch (err) {
-        return { error: String(err) }
-      }
-    })
-    ipcMain.handle('browser:remove-extension', (_, extensionId: string) => {
-      browserSession.removeExtension(extensionId)
-      saveExtensionPaths()
-    })
-    ipcMain.handle('browser:discover-browser-extensions', async () => {
-      const appSupport = join(homedir(), 'Library', 'Application Support')
-      const knownBrowsers = [
-        { name: 'Chrome', dir: 'Google/Chrome/Default/Extensions' },
-        { name: 'Arc', dir: 'Arc/User Data/Default/Extensions' },
-        { name: 'Brave', dir: 'BraveSoftware/Brave-Browser/Default/Extensions' },
-        { name: 'Edge', dir: 'Microsoft Edge/Default/Extensions' },
-        { name: 'Chromium', dir: 'Chromium/Default/Extensions' },
-        { name: 'Vivaldi', dir: 'Vivaldi/Default/Extensions' }
-      ]
-      const alreadyLoaded = new Set(browserSession.getAllExtensions().map((e) => e.id))
-      const results: {
-        name: string
-        extensions: {
-          id: string
-          name: string
-          version: string
-          path: string
-          alreadyImported: boolean
-          manifestVersion?: number
-        }[]
-      }[] = []
-
-      for (const browser of knownBrowsers) {
-        const extDir = join(appSupport, browser.dir)
-        let entries: string[]
-        try {
-          entries = await fsp.readdir(extDir)
-        } catch {
-          continue
-        }
-
-        const extensions: (typeof results)[0]['extensions'] = []
-        for (const id of entries) {
-          if (id === 'Temp' || id.startsWith('.')) continue
-          const idDir = join(extDir, id)
-          let versions: string[]
-          try {
-            versions = await fsp.readdir(idDir)
-          } catch {
-            continue
-          }
-          const ver = versions.sort().pop()
-          if (!ver) continue
-          const extPath = join(idDir, ver)
-          try {
-            const manifest = JSON.parse(await fsp.readFile(join(extPath, 'manifest.json'), 'utf-8'))
-            let name: string = manifest.name || id
-            if (name.startsWith('__MSG_')) {
-              const key = name.slice(6, -2)
-              for (const lang of ['en', 'en_US', 'en_GB']) {
-                try {
-                  const msgs = JSON.parse(
-                    await fsp.readFile(join(extPath, '_locales', lang, 'messages.json'), 'utf-8')
-                  )
-                  if (msgs[key]?.message) {
-                    name = msgs[key].message
-                    break
-                  }
-                } catch {
-                  /* try next lang */
-                }
-              }
-            }
-            extensions.push({
-              id,
-              name,
-              version: manifest.version || '?',
-              path: extPath,
-              alreadyImported: alreadyLoaded.has(id),
-              manifestVersion:
-                typeof manifest.manifest_version === 'number'
-                  ? manifest.manifest_version
-                  : undefined
-            })
-          } catch {
-            /* skip unreadable extensions */
-          }
-        }
-        if (extensions.length > 0) {
-          results.push({ name: browser.name, extensions })
-        }
-      }
-      return results
-    })
-    ipcMain.handle('browser:import-extension', async (_, extPath: string) => {
-      try {
-        const ext = await browserSession.loadExtension(extPath)
-        saveExtensionPaths()
-        return { id: ext.id, name: ext.name }
-      } catch (err) {
-        return { error: String(err) }
-      }
-    })
-    ipcMain.handle('browser:activate-extension', (_, extensionId: string) => {
-      // Trigger the extension's browser action by accessing the library's internal API.
-      // The public API doesn't expose activate(), so we reach into the context's router.
-      try {
-        const ext = browserSession.getExtension(extensionId)
-        if (!ext) return false
-        const activeWc = browserViewManager.getActiveWebContents()
-        if (!activeWc) return false
-        // Access internal browser action API through the context
-        const api = (chromeExtensions as any).api
-        if (api?.browserAction?.activate) {
-          api.browserAction.activate({ type: 'click' }, { extensionId, tabId: activeWc.id })
-          return true
-        }
-        // Fallback: invoke via the internal handle system
-        const ctx = (chromeExtensions as any).ctx
-        if (ctx?.router) {
-          ctx.router.invoke(activeWc, 'browserAction.activate', { eventType: 'click', extensionId })
-          return true
-        }
-        return false
-      } catch (err) {
-        console.warn('[browser:activate-extension] Failed:', err)
-        return false
-      }
-    })
+    // Chrome extension management — delegate to shared browserExtensionOps
+    // (same impl behind tRPC app.browser.*). legacy IPC (slice 5 drops).
+    ipcMain.handle('browser:get-extensions', () => browserExtensionOps.getExtensions())
+    ipcMain.handle('browser:load-extension', () => browserExtensionOps.loadExtension())
+    ipcMain.handle('browser:remove-extension', (_, extensionId: string) =>
+      browserExtensionOps.removeExtension(extensionId)
+    )
+    ipcMain.handle('browser:discover-browser-extensions', () =>
+      browserExtensionOps.discoverBrowserExtensions()
+    )
+    ipcMain.handle('browser:import-extension', (_, extPath: string) =>
+      browserExtensionOps.importExtension(extPath)
+    )
+    ipcMain.handle('browser:activate-extension', (_, extensionId: string) =>
+      browserExtensionOps.activateExtension(extensionId)
+    )
 
     // Non-test handle: needed by CLI browser registry
     ipcMain.handle('browser:get-web-contents-id', (_, viewId: string) =>
