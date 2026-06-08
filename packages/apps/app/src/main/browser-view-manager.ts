@@ -1,5 +1,19 @@
 import { clipboard, Menu, shell, WebContentsView, session, type BrowserWindow } from 'electron'
 import { join } from 'path'
+import { EventEmitter } from 'node:events'
+
+// tRPC event stream — dual-emitted alongside the legacy `browser:*` /
+// `browser-view:*` webContents.send broadcasts below, so the
+// `app.browser.on*` subscriptions work while the renderer still consumes IPC
+// (coexistence until slice 5; the sends drop then). The `app:*` shortcut
+// broadcasts are NOT migrated here — they belong to the menu router slice.
+export const browserViewEvents = new EventEmitter() as EventEmitter & {
+  on(event: 'event', listener: (e: unknown) => void): EventEmitter
+  on(event: 'shortcut', listener: (payload: unknown) => void): EventEmitter
+  on(event: 'focused', listener: (payload: { viewId: string }) => void): EventEmitter
+  on(event: 'create-task-from-link', listener: (intent: unknown) => void): EventEmitter
+  off(event: string, listener: (...args: unknown[]) => void): EventEmitter
+}
 import { fileUrlToSlzFileUrl, slzFileUrlToFileUrl } from '@slayzone/platform'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import type { BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
@@ -761,7 +775,8 @@ export class BrowserViewManager {
       source: payload.source
     }
 
-    this.mainWindow.webContents.send('browser:create-task-from-link', intent)
+    this.mainWindow.webContents.send('browser:create-task-from-link', intent) // legacy IPC (slice 5 drops)
+    browserViewEvents.emit('create-task-from-link', intent) // tRPC app.browser.onCreateTaskFromLink
     return true
   }
 
@@ -784,16 +799,19 @@ export class BrowserViewManager {
           linkText: normalizedInput.linkText || undefined,
           source: 'link-context-menu'
         })
-      case 'open-link-in-new-tab':
+      case 'open-link-in-new-tab': {
         if (!this.mainWindow || this.mainWindow.isDestroyed()) return false
-        this.mainWindow.webContents.send('browser:event', {
+        const newTabEvent = {
           viewId,
-          type: 'new-tab-request',
+          type: 'new-tab-request' as const,
           url: normalizedInput.linkURL,
           background: false,
           taskId: entry.taskId
-        })
+        }
+        this.mainWindow.webContents.send('browser:event', newTabEvent) // legacy IPC (slice 5 drops)
+        browserViewEvents.emit('event', newTabEvent) // tRPC app.browser.onEvent
         return true
+      }
       case 'copy-link':
         clipboard.writeText(normalizedInput.linkURL)
         return true
@@ -997,8 +1015,9 @@ export class BrowserViewManager {
     const send = (event: BrowserViewEvent) => {
       const win = this.windowFor(entry)
       if (win && !win.isDestroyed()) {
-        win.webContents.send('browser:event', event)
+        win.webContents.send('browser:event', event) // legacy IPC (slice 5 drops)
       }
+      browserViewEvents.emit('event', event) // tRPC app.browser.onEvent
     }
 
     if (entry.kind === 'web-panel') {
@@ -1088,18 +1107,20 @@ export class BrowserViewManager {
       // preventDefault — the page should still see Escape natively (exit
       // fullscreen, dismiss native popups, cancel pointer lock).
       if (input.key === 'Escape' && !input.control && !input.meta && !input.alt) {
+        const escapeShortcut = {
+          viewId,
+          key: 'Escape',
+          shift: Boolean(input.shift),
+          alt: false,
+          meta: false,
+          control: false,
+          kind: entry.kind
+        }
         const win = this.mainWindow
         if (win && !win.isDestroyed()) {
-          win.webContents.send('browser-view:shortcut', {
-            viewId,
-            key: 'Escape',
-            shift: Boolean(input.shift),
-            alt: false,
-            meta: false,
-            control: false,
-            kind: entry.kind
-          })
+          win.webContents.send('browser-view:shortcut', escapeShortcut) // legacy IPC (slice 5 drops)
         }
+        browserViewEvents.emit('shortcut', escapeShortcut) // tRPC app.browser.onShortcut
         return
       }
 
@@ -1146,7 +1167,7 @@ export class BrowserViewManager {
       // All other Cmd/Ctrl shortcuts — forward to renderer as synthetic KeyboardEvent.
       // Web panels forward shortcuts too so app-level hotkeys (Cmd+B, etc.) still work,
       // but the renderer's shortcut handler must not create browser tabs from web-panel views.
-      win.webContents.send('browser-view:shortcut', {
+      const cmdShortcut = {
         viewId,
         key: input.key,
         shift: Boolean(input.shift),
@@ -1154,16 +1175,19 @@ export class BrowserViewManager {
         meta: Boolean(input.meta),
         control: Boolean(input.control),
         kind: entry.kind
-      })
+      }
+      win.webContents.send('browser-view:shortcut', cmdShortcut) // legacy IPC (slice 5 drops)
+      browserViewEvents.emit('shortcut', cmdShortcut) // tRPC app.browser.onShortcut
     })
 
     // Notify renderer when WebContentsView gains focus so it can
     // show the glow and update focus tracking (focusin never fires
     // in the renderer DOM when a separate web contents has focus).
     wc.on('focus', () => {
+      browserViewEvents.emit('focused', { viewId }) // tRPC app.browser.onFocused
       const win = this.mainWindow
       if (!win || win.isDestroyed()) return
-      win.webContents.send('browser-view:focused', { viewId })
+      win.webContents.send('browser-view:focused', { viewId }) // legacy IPC (slice 5 drops)
     })
 
     wc.on('did-navigate', (_e, url) => {

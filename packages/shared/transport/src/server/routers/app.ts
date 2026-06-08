@@ -331,7 +331,39 @@ export const appLevelRouter = router({
       .mutation(({ input }) => getAppDeps().browser.importExtension(input.extPath)),
     reparentToCurrentWindow: publicProcedure
       .input(z.object({ viewId: z.string() }))
-      .mutation(({ input }) => getAppDeps().browser.reparentToCurrentWindow(input.viewId))
+      .mutation(({ input }) => getAppDeps().browser.reparentToCurrentWindow(input.viewId)),
+    onEvent: publicProcedure.subscription(() =>
+      observable<unknown>((emit) => {
+        const h = (e: unknown): void => emit.next(e)
+        const ev = getAppDeps().browser.events
+        ev.on('event', h)
+        return () => ev.off('event', h)
+      })
+    ),
+    onShortcut: publicProcedure.subscription(() =>
+      observable<unknown>((emit) => {
+        const h = (p: unknown): void => emit.next(p)
+        const ev = getAppDeps().browser.events
+        ev.on('shortcut', h)
+        return () => ev.off('shortcut', h)
+      })
+    ),
+    onFocused: publicProcedure.subscription(() =>
+      observable<{ viewId: string }>((emit) => {
+        const h = (p: { viewId: string }): void => emit.next(p)
+        const ev = getAppDeps().browser.events
+        ev.on('focused', h)
+        return () => ev.off('focused', h)
+      })
+    ),
+    onCreateTaskFromLink: publicProcedure.subscription(() =>
+      observable<unknown>((emit) => {
+        const h = (i: unknown): void => emit.next(i)
+        const ev = getAppDeps().browser.events
+        ev.on('create-task-from-link', h)
+        return () => ev.off('create-task-from-link', h)
+      })
+    )
   }),
 
   // Floating global agent panel — 10 ops + 3 streaming subs. Same ops/emitter

@@ -35,7 +35,12 @@ import {
   setActiveBrowserTab,
   clearBrowserRegistry
 } from './browser-registry'
-import { BrowserViewManager, type CreateViewOpts, type ViewBounds } from './browser-view-manager'
+import {
+  BrowserViewManager,
+  browserViewEvents,
+  type CreateViewOpts,
+  type ViewBounds
+} from './browser-view-manager'
 import { attachRendererCsp } from './renderer-csp'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
@@ -1872,7 +1877,8 @@ app
               reparentToCurrentWindow: (viewId) => {
                 const win = BrowserWindow.getFocusedWindow() ?? mainWindow
                 if (win) browserViewManager.reparentView(viewId, win)
-              }
+              },
+              events: browserViewEvents
             },
             floatingAgent: {
               ...floatingGlobalAgentPanelOps,
