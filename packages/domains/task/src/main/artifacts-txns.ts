@@ -26,7 +26,7 @@ import {
   pruneVersions,
   diffVersions,
   isVersionError
-} from '@slayzone/task-artifacts/main'
+} from '@slayzone/task-artifacts/server'
 import type { AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
 
 /**
@@ -48,7 +48,7 @@ import type { AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
  * layer does.
  *
  * Pure: imports only better-sqlite3 types, fs/path/crypto and the worker-safe
- * `@slayzone/task-artifacts/main` + `@slayzone/{task,file-editor}/shared`
+ * `@slayzone/task-artifacts/server` + `@slayzone/{task,file-editor}/shared`
  * barrels — safe to pull into the worker bundle.
  *
  * Returns are kept structured-cloneable (raw rows / version objects / scalars):

@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./main": "./src/main/index.ts"
+    "./server": "./src/server/index.ts",
+    "./electron": "./src/electron/index.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

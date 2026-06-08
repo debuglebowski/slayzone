@@ -27,7 +27,7 @@ import {
   pruneVersions,
   nodeSqliteTxn,
   isVersionError
-} from '@slayzone/task-artifacts/main'
+} from '@slayzone/task-artifacts/server'
 import {
   getExtensionFromTitle,
   getEffectiveRenderMode,

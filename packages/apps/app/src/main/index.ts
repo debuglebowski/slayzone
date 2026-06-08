@@ -212,7 +212,7 @@ import {
   taskOps
 } from '@slayzone/task/main'
 import { registerTagHandlers } from '@slayzone/tags/electron'
-import { registerFeedbackHandlers } from '@slayzone/feedback/main'
+import { registerFeedbackHandlers } from '@slayzone/feedback/electron'
 import {
   registerSettingsHandlers,
   registerThemeHandlers,
