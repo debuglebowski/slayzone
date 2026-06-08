@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { AnalyticsSummary, DateRange, ProviderOption } from '../shared/types'
 import { PROVIDER_USAGE_SUPPORT, ALL_PROVIDERS } from '../shared/types'
 
@@ -16,37 +18,66 @@ const EMPTY: AnalyticsSummary = {
 }
 
 export function useUsageAnalytics() {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [range, setRange] = useState<DateRange>('30d')
-  const [rawData, setRawData] = useState<AnalyticsSummary>(EMPTY)
-  const [loading, setLoading] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<string>(ALL_PROVIDERS)
-  const [defaultLoaded, setDefaultLoaded] = useState(false)
-  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([])
+  const [defaultApplied, setDefaultApplied] = useState(false)
 
-  // Load enabled modes + default provider from settings on mount
+  // Enabled modes + persisted default provider.
+  const modesQuery = useQuery(trpc.pty.modesList.queryOptions())
+  const defaultModeQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: 'default_terminal_mode' })
+  )
+  const settingsLoaded = modesQuery.isSuccess && defaultModeQuery.isSuccess
+
+  const providerOptions = useMemo<ProviderOption[]>(() => {
+    return (modesQuery.data ?? [])
+      .filter((m) => m.enabled && m.id !== 'terminal')
+      .map((m) => ({
+        id: m.id,
+        label: m.label,
+        hasUsageData: PROVIDER_USAGE_SUPPORT[m.id]?.supported ?? false
+      }))
+  }, [modesQuery.data])
+
+  // Apply the persisted default provider once, after options + default load.
   useEffect(() => {
-    Promise.all([window.api.settings.get('default_terminal_mode'), window.api.terminalModes.list()])
-      .then(([defaultMode, modes]) => {
-        const options: ProviderOption[] = modes
-          .filter((m) => m.enabled && m.id !== 'terminal')
-          .map((m) => ({
-            id: m.id,
-            label: m.label,
-            hasUsageData: PROVIDER_USAGE_SUPPORT[m.id]?.supported ?? false
-          }))
-        setProviderOptions(options)
-
-        if (defaultMode && options.some((o) => o.id === defaultMode)) {
-          setSelectedProvider(defaultMode)
-        }
-        setDefaultLoaded(true)
-      })
-      .catch(() => setDefaultLoaded(true))
-  }, [])
+    if (defaultApplied || !settingsLoaded) return
+    const defaultMode = defaultModeQuery.data
+    if (defaultMode && providerOptions.some((o) => o.id === defaultMode)) {
+      setSelectedProvider(defaultMode)
+    }
+    setDefaultApplied(true)
+  }, [defaultApplied, settingsLoaded, defaultModeQuery.data, providerOptions])
 
   const providerSupported =
     selectedProvider === ALL_PROVIDERS ||
     (PROVIDER_USAGE_SUPPORT[selectedProvider]?.supported ?? false)
+
+  // Cached analytics — instant display; refetches when range changes.
+  const analyticsQuery = useQuery(
+    trpc.usageAnalytics.query.queryOptions(range, { enabled: settingsLoaded })
+  )
+  const rawData = analyticsQuery.data ?? EMPTY
+
+  // Background refresh — recompute fresh data, write it into the cached query.
+  const refreshMutation = useMutation(
+    trpc.usageAnalytics.refresh.mutationOptions({
+      onSuccess: (fresh) => {
+        queryClient.setQueryData(trpc.usageAnalytics.query.queryKey(range), fresh)
+      }
+    })
+  )
+
+  // Auto background-refresh whenever the range becomes active / changes
+  // (mirrors the old cached-then-fresh load).
+  useEffect(() => {
+    if (settingsLoaded) refreshMutation.mutate(range)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, settingsLoaded])
+
+  const loading = refreshMutation.isPending
 
   // Filtered view
   const data = useMemo(() => {
@@ -81,42 +112,13 @@ export function useUsageAnalytics() {
     }
   }, [rawData, selectedProvider])
 
-  // Show cached data instantly, then refresh in background
-  useEffect(() => {
-    if (!defaultLoaded) return
-    let cancelled = false
-
-    window.api.usageAnalytics.query(range).then((cached) => {
-      if (!cancelled) setRawData(cached)
-    })
-
-    setLoading(true)
-    window.api.usageAnalytics
-      .refresh(range)
-      .then((fresh) => {
-        if (!cancelled) {
-          setRawData(fresh)
-          setLoading(false)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [range, defaultLoaded])
-
   const refresh = useCallback(async () => {
-    setLoading(true)
     try {
-      const result = await window.api.usageAnalytics.refresh(range)
-      setRawData(result)
-    } finally {
-      setLoading(false)
+      await refreshMutation.mutateAsync(range)
+    } catch {
+      /* swallow — matches the old refresh's finally-only handling */
     }
-  }, [range])
+  }, [refreshMutation, range])
 
   return {
     data,

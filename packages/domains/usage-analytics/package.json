@@ -17,7 +17,9 @@
   },
   "dependencies": {
     "@slayzone/types": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@tanstack/react-query": "^5.100.9",
     "lucide-react": "^0.562.0",
     "recharts": "^2.15.3",
     "@slayzone/platform": "workspace:*"
