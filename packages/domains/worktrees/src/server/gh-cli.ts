@@ -1,4 +1,4 @@
-import { whichBinary, resolveUserShell, getShellStartupArgs } from '@slayzone/terminal/main'
+import { whichBinary, resolveUserShell, getShellStartupArgs } from '@slayzone/terminal/server'
 import type {
   GhPullRequest,
   GhPrComment,

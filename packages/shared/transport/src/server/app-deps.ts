@@ -1,6 +1,6 @@
 // App-level dependencies that the router needs but cannot import directly.
 //
-// The chat ops live in `@slayzone/terminal/main`, which lazily `require`s
+// The chat ops live in `@slayzone/terminal/electron`, which lazily `require`s
 // `electron` and pulls in `node-pty` — both forbidden inside the transport
 // package (it must run under plain Node for the standalone `@slayzone/server`
 // host). So we `import type` only (erased at build → zero electron at runtime)
@@ -18,7 +18,7 @@ import type {
   ChatQueueEventMap,
   createPtyOps,
   PtyEventMap
-} from '@slayzone/terminal/main'
+} from '@slayzone/terminal/electron'
 import type { IntegrationOps } from '@slayzone/integrations/main'
 import type { TaskOps } from '@slayzone/task/server'
 import type {
@@ -52,7 +52,7 @@ export function getChatDeps(): ChatDeps {
 }
 
 // Pty deps — ops + the single streaming emitter the pty subscriptions subscribe
-// to. `createPtyOps`/`ptyEvents` live in `@slayzone/terminal/main` (electron +
+// to. `createPtyOps`/`ptyEvents` live in `@slayzone/terminal/electron` (electron +
 // node-pty), so `import type` only here; the Electron-main host injects the
 // concrete instances via `setPtyDeps()`. Same instances back the IPC handlers
 // (coexistence until slice 5).

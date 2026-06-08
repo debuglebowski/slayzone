@@ -9,7 +9,7 @@ import {
   isSessionAwaitingUserInput,
   registerChatQueueDrainer
 } from './chat-transport-manager'
-import { listChatQueue, removeChatQueueItem, clearChatQueue } from './chat-queue-store'
+import { listChatQueue, removeChatQueueItem, clearChatQueue } from '../server/chat-queue-store'
 import type { QueuedChatMessage } from '../shared/types'
 
 /**

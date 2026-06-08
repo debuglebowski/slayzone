@@ -17,7 +17,7 @@ const transitionSpy = vi.fn<(sessionId: string, state: string, event: string) =>
 const markActiveSpy = vi.fn<(sessionId: string) => boolean>()
 const noteConversationIdSpy = vi.fn<(sessionId: string, conversationId: string | null) => void>()
 const noteAwaitingInputSpy = vi.fn<(sessionId: string, awaiting: boolean) => void>()
-vi.mock('@slayzone/terminal/main', () => ({
+vi.mock('@slayzone/terminal/electron', () => ({
   findSessionByTaskIdAndMode: (taskId: string, mode: string) => findSessionSpy(taskId, mode),
   transitionStateFromHook: (sessionId: string, state: string, event: string) =>
     transitionSpy(sessionId, state, event),

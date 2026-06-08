@@ -7,7 +7,7 @@ import {
   listClaudeTranscriptIds,
   readClaudeTranscriptMeta,
   type ConversationHealRequest
-} from '@slayzone/terminal/main'
+} from '@slayzone/terminal/electron'
 import {
   getTaskOp,
   collectReferencedConversationIds,

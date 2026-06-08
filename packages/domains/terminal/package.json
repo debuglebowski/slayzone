@@ -9,12 +9,13 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
-    "./main": "./src/main/index.ts",
-    "./db": "./src/main/worker-db.ts",
+    "./server": "./src/server/index.ts",
+    "./electron": "./src/electron/index.ts",
+    "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
     "./client/Terminal": "./src/client/Terminal.tsx",
     "./client/LazyTerminal": "./src/client/LazyTerminal.tsx",
-    "./agents": "./src/main/agents/index.ts",
+    "./agents": "./src/server/agents/index.ts",
     "./reducer": "./src/client/chat-timeline.ts"
   },
   "scripts": {

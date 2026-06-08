@@ -31,26 +31,26 @@ import {
   loadChatEvents,
   getNextSeqForTab,
   clearChatEventsForTab
-} from './chat-events-store'
+} from '../server/chat-events-store'
 import { recordConversation } from '@slayzone/task/server'
 import { registerChatQueueHandlers, createChatQueueOps } from './chat-queue-handlers'
-import { clearChatQueue } from './chat-queue-store'
+import { clearChatQueue } from '../server/chat-queue-store'
 import { notifyGlobalStateListeners } from './pty-manager'
-import { parseShellArgs } from './adapters/flag-parser'
-import { buildMcpEnv } from './mcp-env'
-import { getEnrichedPath } from './shell-env'
-import { supportsChatMode } from './agents/registry'
-import { getAutoModeEligibility, type AutoModeEligibility } from './auto-mode-eligibility'
-import { resolveAccountDefaultModel } from './account-default-model'
-import { listSkills } from './skills'
-import { listCommands } from './commands'
-import { listAgents } from './agents-registry'
-import { listProjectFiles } from './files-scan'
+import { parseShellArgs } from '../server/adapters/flag-parser'
+import { buildMcpEnv } from '../server/mcp-env'
+import { getEnrichedPath } from '../server/shell-env'
+import { supportsChatMode } from '../server/agents/registry'
+import { getAutoModeEligibility, type AutoModeEligibility } from '../server/auto-mode-eligibility'
+import { resolveAccountDefaultModel } from '../server/account-default-model'
+import { listSkills } from '../server/skills'
+import { listCommands } from '../server/commands'
+import { listAgents } from '../server/agents-registry'
+import { listProjectFiles } from '../server/files-scan'
 import {
   bumpAutocompleteUsage,
   getAutocompleteUsage,
   type UsageMap
-} from './autocomplete-usage-store'
+} from '../server/autocomplete-usage-store'
 import type { SkillInfo, CommandInfo, AgentInfo, FileMatch } from '../shared/types'
 import type { AgentEvent } from '../shared/agent-events'
 import {

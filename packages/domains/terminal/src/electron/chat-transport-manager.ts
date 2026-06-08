@@ -8,13 +8,13 @@ import type {
   ChatDriverContext,
   ChatSessionDriver,
   PermissionDecision
-} from './agents/types'
-import { getBackend } from './agents/registry'
-import { whichBinary as realWhichBinary } from './shell-env'
+} from '../server/agents/types'
+import { getBackend } from '../server/agents/registry'
+import { whichBinary as realWhichBinary } from '../server/shell-env'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { TypedEmitter } from '@slayzone/platform/events'
 import type { ConversationOrigin } from '@slayzone/task/shared'
-import type { BufferedEvent } from './chat-events-store'
+import type { BufferedEvent } from '../server/chat-events-store'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
 // typed `string`. `shared/chat-mode-catalog.ts` owns the per-mode vocabulary.
@@ -23,10 +23,10 @@ import type { BufferedEvent } from './chat-events-store'
 // The provider-aware catalog (`shared/chat-model-catalog.ts`) owns validity.
 import type { ChatEffort } from '../shared/chat-effort'
 import type { ChatCollaborationMode } from '../shared/chat-collaboration'
-import { markSessionUserInput, clearSessionUserInputMark } from './user-input-tracker'
+import { markSessionUserInput, clearSessionUserInputMark } from '../server/user-input-tracker'
 
 export { markSessionUserInput }
-export type { BufferedEvent } from './chat-events-store'
+export type { BufferedEvent } from '../server/chat-events-store'
 
 /**
  * `not-spawned` — session hydrated from persisted history but the OS subprocess

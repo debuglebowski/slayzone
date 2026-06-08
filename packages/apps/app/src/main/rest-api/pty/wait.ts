@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { hasPty, onSessionChange, subscribeToStateChange, getState } from '@slayzone/terminal/main'
+import { hasPty, onSessionChange, subscribeToStateChange, getState } from '@slayzone/terminal/electron'
 import type { RestApiDeps } from '../types'
 
 export function registerPtyWaitRoute(app: Express, _deps: RestApiDeps): void {

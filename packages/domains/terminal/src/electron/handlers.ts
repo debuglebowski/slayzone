@@ -6,7 +6,7 @@ import type {
   CreateTerminalModeInput,
   UpdateTerminalModeInput
 } from '@slayzone/terminal/shared'
-import type { ExecutionContext } from './adapters'
+import type { ExecutionContext } from '../server/adapters'
 import { createPtyOps, type PtyCreateOpts } from './pty-store'
 import { setProjectTabCounts, clearWindowTabCounts } from './warm-process-manager'
 

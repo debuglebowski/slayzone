@@ -10,7 +10,7 @@ import {
   noteSessionConversationId,
   setSessionAwaitingInput,
   isHookDrivenMode
-} from '@slayzone/terminal/main'
+} from '@slayzone/terminal/electron'
 import { recordConversation, findPendingSpawn } from '@slayzone/task/server'
 import type { ConversationOrigin } from '@slayzone/task/shared'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -19,7 +19,7 @@ import type { RestApiDeps } from './types'
 
 /**
  * Pluggable bridge to the PTY state machine. Defaults wire to the live
- * `@slayzone/terminal/main` impl; tests override with stubs to avoid pulling
+ * `@slayzone/terminal/electron` impl; tests override with stubs to avoid pulling
  * node-pty / Electron native modules into the test runner.
  */
 export interface TerminalStateBridge {

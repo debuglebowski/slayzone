@@ -23,7 +23,7 @@ import {
 import { listSessions, getSessionState } from './session-registry'
 import { listChatSessions } from './chat-transport-manager'
 import { claimWarmShell } from './warm-process-manager'
-import { getAdapter, type ExecutionContext } from './adapters'
+import { getAdapter, type ExecutionContext } from '../server/adapters'
 import type {
   TerminalMode,
   TerminalModeInfo,
@@ -31,8 +31,8 @@ import type {
   UpdateTerminalModeInput
 } from '@slayzone/terminal/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
-import { parseShellArgs } from './adapters/flag-parser'
-import { setShellOverride } from './shell-env'
+import { parseShellArgs } from '../server/adapters/flag-parser'
+import { setShellOverride } from '../server/shell-env'
 
 const execFileAsync = promisify(execFile)
 

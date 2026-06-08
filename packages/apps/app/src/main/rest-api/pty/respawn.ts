@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { requestEnsureAlive } from '@slayzone/terminal/main'
+import { requestEnsureAlive } from '@slayzone/terminal/electron'
 import { broadcastToWindows } from '../../broadcast-to-windows'
 import { menuEvents } from '../../menu-events'
 import type { RestApiDeps } from '../types'

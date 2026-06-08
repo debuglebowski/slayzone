@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { getBuffer } from '@slayzone/terminal/main'
+import { getBuffer } from '@slayzone/terminal/electron'
 import type { RestApiDeps } from '../types'
 
 export function registerPtyBufferRoute(app: Express, _deps: RestApiDeps): void {

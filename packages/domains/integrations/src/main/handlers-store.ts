@@ -83,7 +83,7 @@ import {
   type ColumnConfig,
   type WorkflowCategory
 } from '@slayzone/workflow'
-import { onTaskReachedTerminal } from '@slayzone/terminal/main'
+import { onTaskReachedTerminal } from '@slayzone/terminal/electron'
 import { createImportedTaskOp } from '@slayzone/task/server'
 import { getAdapter, getRegisteredProviders, normalizeGithubIssue } from './adapters'
 import type { NormalizedIssue, ProviderAdapter } from './adapters'

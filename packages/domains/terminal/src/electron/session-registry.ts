@@ -1,7 +1,7 @@
 import type { SessionInfo, TerminalState } from '../shared/types'
 import { listPtys, getState as getPtyState } from './pty-manager'
 import { listChatSessions, getChatSessionState } from './chat-transport-manager'
-import { mergeSessions } from './session-merge'
+import { mergeSessions } from '../server/session-merge'
 
 /**
  * Aggregates terminal sessions across all transports (PTY + chat). The

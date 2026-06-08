@@ -50,11 +50,14 @@ export {
   setSessionAwaitingInput,
   findSessionByTaskIdAndMode,
   transitionStateFromHook,
-  markSessionActiveFromHook
+  markSessionActiveFromHook,
+  notifyGlobalStateListeners,
+  ptyEvents,
+  type PtyEventMap
 } from './pty-manager'
-export { resolveUserShell, getShellStartupArgs, whichBinary, getEnrichedPath } from './shell-env'
-export { syncTerminalModes } from './startup-sync'
-export { isHookDrivenMode, HOOK_DRIVEN_MODES } from './adapters'
+export { resolveUserShell, getShellStartupArgs, whichBinary, getEnrichedPath } from '../server/shell-env'
+export { syncTerminalModes } from '../server/startup-sync'
+export { isHookDrivenMode, HOOK_DRIVEN_MODES } from '../server/adapters'
 export {
   registerChatHandlers,
   createChatOps,
@@ -85,14 +88,13 @@ export {
   readClaudeTranscriptMeta,
   listClaudeTranscriptIds,
   type ClaudeTranscriptMeta
-} from './claude-transcripts'
+} from '../server/claude-transcripts'
 export { beginTerminalShutdown } from './shutdown'
 export { listSessions, getSessionState } from './session-registry'
-export { getAutoModeEligibility, type AutoModeEligibility } from './auto-mode-eligibility'
-export { supportsChatMode } from './agents/registry'
+export { getAutoModeEligibility, type AutoModeEligibility } from '../server/auto-mode-eligibility'
+export { supportsChatMode } from '../server/agents/registry'
 export {
   hasSessionUserInput,
   markSessionUserInput,
   clearSessionUserInputMark
-} from './user-input-tracker'
-export { notifyGlobalStateListeners, ptyEvents, type PtyEventMap } from './pty-manager'
+} from '../server/user-input-tracker'

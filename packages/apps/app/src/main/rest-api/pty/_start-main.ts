@@ -1,4 +1,4 @@
-import { requestEnsureAlive, hasPty, type EnsureAliveResult } from '@slayzone/terminal/main'
+import { requestEnsureAlive, hasPty, type EnsureAliveResult } from '@slayzone/terminal/electron'
 import { markTabSpawned } from '@slayzone/task-terminals/electron'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'

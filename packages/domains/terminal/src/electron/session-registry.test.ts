@@ -6,7 +6,7 @@
  * `getSessionState` are thin wrappers around it + electron-bound modules,
  * exercised end-to-end via manual reload verification.
  */
-import { mergeSessions } from './session-merge'
+import { mergeSessions } from '../server/session-merge'
 
 let passed = 0
 let failed = 0

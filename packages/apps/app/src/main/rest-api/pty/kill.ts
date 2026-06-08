@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { killPty } from '@slayzone/terminal/main'
+import { killPty } from '@slayzone/terminal/electron'
 import type { RestApiDeps } from '../types'
 
 export function registerPtyKillRoute(app: Express, _deps: RestApiDeps): void {

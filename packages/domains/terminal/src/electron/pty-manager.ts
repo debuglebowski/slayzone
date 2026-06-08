@@ -15,7 +15,7 @@ import {
 import type { TerminalState, PtyInfo, BufferSinceResult } from '@slayzone/terminal/shared'
 import { getDiagnosticsConfig, recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { recordPendingSpawn, prunePendingSpawns } from '@slayzone/task/server'
-import { RingBuffer, type BufferChunk } from './ring-buffer'
+import { RingBuffer, type BufferChunk } from '../server/ring-buffer'
 import {
   getAdapter,
   type TerminalMode,
@@ -24,9 +24,9 @@ import {
   type ActivityState,
   type ErrorInfo,
   type ExecutionContext
-} from './adapters'
-import { interpolateTemplate } from './adapters/template-interpolation'
-import { parseShellArgs } from './adapters/flag-parser'
+} from '../server/adapters'
+import { interpolateTemplate } from '../server/adapters/template-interpolation'
+import { parseShellArgs } from '../server/adapters/flag-parser'
 import {
   StateMachine,
   activityToTerminalState,
@@ -36,22 +36,22 @@ import {
   shouldHibernate,
   recordWorkingDetection,
   type StateTraceEvent
-} from './state-machine'
+} from '../server/state-machine'
 import {
   quoteForShell,
   buildExecCommand,
   resolveUserShell,
   getShellStartupArgs,
   wrapShellWithUlimit
-} from './shell-env'
-import { shouldShellFallback, buildRecoveryMessage } from './pty-exit-strategy'
-import { computeSyncQueryResponse, type TerminalTheme } from './sync-query-response'
-import { filterBufferData } from './filter-buffer-data'
-import { shouldHonorDetectedError } from './session-error-gate'
-import { resolveSpawnConversation } from './spawn-conversation'
-import { buildMcpEnv } from './mcp-env'
+} from '../server/shell-env'
+import { shouldShellFallback, buildRecoveryMessage } from '../server/pty-exit-strategy'
+import { computeSyncQueryResponse, type TerminalTheme } from '../server/sync-query-response'
+import { filterBufferData } from '../server/filter-buffer-data'
+import { shouldHonorDetectedError } from '../server/session-error-gate'
+import { resolveSpawnConversation } from '../server/spawn-conversation'
+import { buildMcpEnv } from '../server/mcp-env'
 import { killByTaskId as killChatsByTaskId } from './chat-transport-manager'
-import { markSessionUserInput, clearSessionUserInputMark } from './user-input-tracker'
+import { markSessionUserInput, clearSessionUserInputMark } from '../server/user-input-tracker'
 export { filterBufferData }
 
 /**

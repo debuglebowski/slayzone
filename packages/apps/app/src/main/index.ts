@@ -257,7 +257,7 @@ import {
   chatQueueEvents,
   createPtyOps,
   ptyEvents
-} from '@slayzone/terminal/main'
+} from '@slayzone/terminal/electron'
 import { setProviderLastKilledAt, type ProviderConfig } from '@slayzone/task/shared'
 import {
   attachFloatingGlobalAgentPanel,

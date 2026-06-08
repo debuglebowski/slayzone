@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { writePty, hasPty } from '@slayzone/terminal/main'
+import { writePty, hasPty } from '@slayzone/terminal/electron'
 import { startMainPty, extractMainTaskId } from './_start-main'
 import type { RestApiDeps } from '../types'
 

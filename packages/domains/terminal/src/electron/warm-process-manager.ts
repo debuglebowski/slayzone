@@ -3,7 +3,7 @@ import type { IPty, IDisposable } from 'node-pty'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { spawnLoginShell } from './pty-manager'
-import { buildMcpEnv } from './mcp-env'
+import { buildMcpEnv } from '../server/mcp-env'
 
 /**
  * Keeps ONE warm (idle, rc-initialized) login shell ready per project, so the first

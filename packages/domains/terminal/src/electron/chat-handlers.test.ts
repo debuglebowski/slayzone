@@ -17,7 +17,7 @@ import type { ChildProcess } from 'node:child_process'
 import Database from 'better-sqlite3'
 import { registerChatHandlers } from './chat-handlers'
 import * as mgr from './chat-transport-manager'
-import { persistChatEvent } from './chat-events-store'
+import { persistChatEvent } from '../server/chat-events-store'
 
 let passed = 0
 let failed = 0
