@@ -18,6 +18,27 @@ async function sendIPC(electronApp: any, channel: string): Promise<void> {
   )
 }
 
+// Invoke the real menu item from the main process. The renderer consumes
+// close-active-task via the tRPC `menu.onCloseActiveTask` subscription (fed by
+// menuEvents); the legacy `app:close-active-task` webContents broadcast has no
+// renderer consumer post slice-5, so `sendIPC` of it is a no-op.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function clickMenuItem(electronApp: any, labels: string[]): Promise<void> {
+  await electronApp.evaluate(
+    ({ Menu }: { Menu: typeof Electron.CrossProcessExports.Menu }, path: string[]) => {
+      let items = Menu.getApplicationMenu()?.items ?? []
+      let current: Electron.MenuItem | undefined
+      for (const label of path) {
+        current = items.find((item) => item.label === label)
+        if (!current) throw new Error(`Menu item not found: ${label}`)
+        items = current.submenu?.items ?? []
+      }
+      current?.click?.(undefined as never, undefined as never, undefined as never)
+    },
+    labels
+  )
+}
+
 /** Read persisted viewState from settings */
 async function getPersistedViewState(page: Page) {
   const raw = await page.evaluate(() =>
@@ -161,7 +182,7 @@ test.describe('Tab store — persistence, sync, and side effects', () => {
     await goHome(mainWindow)
     await openTaskViaSearch(mainWindow, 'TS temp task')
 
-    await sendIPC(electronApp, 'app:close-active-task')
+    await clickMenuItem(electronApp, ['Window', 'Close Task'])
 
     await expect
       .poll(
