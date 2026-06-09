@@ -106,15 +106,24 @@ export function getIntegrationOps(): IntegrationOps {
 // implementation (coexistence until slice 5). The artifacts/template stores are
 // electron-free and imported directly by their routers — not injected.
 let taskOps: TaskOps | null = null
+// Host-injected post-mutation callback (`notifyTasksChanged`) — the same renderer
+// refresh signal the legacy IPC handlers fire. Threaded into the task router's
+// OpDeps so tRPC mutations broadcast `notify.onTasksChanged` like the IPC path.
+let taskOnMutation: (() => void) | undefined
 
-export function setTaskDeps(deps: { ops: TaskOps }): void {
+export function setTaskDeps(deps: { ops: TaskOps; onMutation?: () => void }): void {
   taskOps = deps.ops
+  taskOnMutation = deps.onMutation
 }
 
 export function getTaskOps(): TaskOps {
   if (!taskOps)
     throw new Error('taskOps not initialized — call setTaskDeps() in main host first')
   return taskOps
+}
+
+export function getTaskOnMutation(): (() => void) | undefined {
+  return taskOnMutation
 }
 
 // Notify event bus — the cross-domain `tasks-changed` / `settings-changed`

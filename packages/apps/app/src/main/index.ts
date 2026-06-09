@@ -1799,7 +1799,7 @@ app
           // Task CRUD/deps/board ops for the task router (electron-coupled → injected;
           // artifacts/template stores are electron-free + imported directly). Same ops
           // the IPC handlers call — one implementation, both transports.
-          mod.setTaskDeps({ ops: taskOps })
+          mod.setTaskDeps({ ops: taskOps, onMutation: notifyTasksChanged })
           // Cross-domain notify bus — same instance `notifyRenderer()` + the
           // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
           // (renderer cutover is slice 5).

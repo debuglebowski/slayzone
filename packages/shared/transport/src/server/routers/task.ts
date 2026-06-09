@@ -4,7 +4,7 @@ import { TRPCError } from '@trpc/server'
 import { taskEvents, type TaskEventMap } from '@slayzone/task/server'
 import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import { router, publicProcedure } from '../trpc'
-import { getTaskOps } from '../app-deps'
+import { getTaskOps, getTaskOnMutation } from '../app-deps'
 
 // Mirrors the 16 `db:tasks:*` + 6 `db:taskDependencies:*` + `db:loadBoardData` IPC
 // handlers (task/src/main/handlers.ts) plus the `taskEvents` broadcast. The ops are
@@ -17,9 +17,12 @@ const updateInput = z.unknown() as unknown as z.ZodType<UpdateTaskInput>
 
 const ops = (): ReturnType<typeof getTaskOps> => getTaskOps()
 
-// Empty OpDeps: tRPC procedures don't have the in-process IPC `:done` bus; ops guard
-// `ipcMain?.emit(...)`. The renderer-facing refresh still flows via the IPC handlers.
-const NO_DEPS = {}
+// Per-call OpDeps for the mutating procedures. No in-process IPC `:done` bus (ops
+// guard `ipcMain?.emit(...)`), but the host injects `onMutation` (notifyTasksChanged)
+// via `setTaskDeps`, so every tRPC mutation fires the same `notify.onTasksChanged`
+// renderer-refresh signal the legacy IPC handlers emit. A given renderer call uses
+// one transport (tRPC OR IPC), so this fires exactly once per mutation.
+const deps = (): { onMutation?: () => void } => ({ onMutation: getTaskOnMutation() })
 
 export const taskRouter = router({
   // --- Task CRUD ---
@@ -34,7 +37,7 @@ export const taskRouter = router({
     .query(({ ctx, input }) => ops().getTaskOp(ctx.db, input.id)),
 
   create: publicProcedure.input(createInput).mutation(async ({ ctx, input }) => {
-    const r = await ops().createTaskOp(ctx.db, input, NO_DEPS)
+    const r = await ops().createTaskOp(ctx.db, input, deps())
     if (!r) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'createTaskOp returned null' })
     return r
   }),
@@ -44,27 +47,27 @@ export const taskRouter = router({
     .query(({ ctx, input }) => ops().getSubTasksOp(ctx.db, input.parentId)),
 
   update: publicProcedure.input(updateInput).mutation(async ({ ctx, input }) => {
-    const r = await ops().updateTaskOp(ctx.db, input, NO_DEPS)
+    const r = await ops().updateTaskOp(ctx.db, input, deps())
     if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
     return r
   }),
 
   updateMany: publicProcedure
     .input(z.unknown())
-    .mutation(({ ctx, input }) => ops().updateManyTasksOp(ctx.db, input as never, NO_DEPS)),
+    .mutation(({ ctx, input }) => ops().updateManyTasksOp(ctx.db, input as never, deps())),
 
   delete: publicProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) => ops().deleteTaskOp(ctx.db, input.id, NO_DEPS)),
+    .mutation(({ ctx, input }) => ops().deleteTaskOp(ctx.db, input.id, deps())),
 
   deleteMany: publicProcedure
     .input(z.object({ ids: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => ops().deleteManyTasksOp(ctx.db, input.ids, NO_DEPS)),
+    .mutation(({ ctx, input }) => ops().deleteManyTasksOp(ctx.db, input.ids, deps())),
 
   restore: publicProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const r = await ops().restoreTaskOp(ctx.db, input.id, NO_DEPS)
+      const r = await ops().restoreTaskOp(ctx.db, input.id, deps())
       if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
       return r
     }),
@@ -72,19 +75,19 @@ export const taskRouter = router({
   archive: publicProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const r = await ops().archiveTaskOp(ctx.db, input.id, NO_DEPS)
+      const r = await ops().archiveTaskOp(ctx.db, input.id, deps())
       if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
       return r
     }),
 
   archiveMany: publicProcedure
     .input(z.object({ ids: z.array(z.string()) }))
-    .mutation(({ ctx, input }) => ops().archiveManyTasksOp(ctx.db, input.ids, NO_DEPS)),
+    .mutation(({ ctx, input }) => ops().archiveManyTasksOp(ctx.db, input.ids, deps())),
 
   unarchive: publicProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const r = await ops().unarchiveTaskOp(ctx.db, input.id, NO_DEPS)
+      const r = await ops().unarchiveTaskOp(ctx.db, input.id, deps())
       if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
       return r
     }),
@@ -100,7 +103,7 @@ export const taskRouter = router({
   setBrowserTabLocked: publicProcedure
     .input(z.object({ taskId: z.string(), tabId: z.string(), locked: z.boolean() }))
     .mutation(({ ctx, input }) =>
-      ops().setBrowserTabLockedOp(ctx.db, input.taskId, input.tabId, input.locked, NO_DEPS)
+      ops().setBrowserTabLockedOp(ctx.db, input.taskId, input.tabId, input.locked, deps())
     ),
 
   // --- Dependencies ---
