@@ -274,6 +274,47 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Main tab session ID format used by TerminalContainer/useTaskTerminals.
   const getMainSessionId = useCallback((id: string) => `${id}:${id}`, [])
 
+  // Idle-close engagement: interacting with ANY in-DOM panel of this task
+  // (editor, notes, the panel-toggle chrome — anything that isn't the terminal,
+  // whose own listener already touches) must keep the main agent's idle clock
+  // fresh, or using a sibling panel hibernates the agent out from under the user.
+  // The browser panel is a separate WebContentsView handled main-side. Hidden
+  // task tabs (display:none) emit no events, so this self-scopes to the one in view.
+  //
+  // Attached via a CALLBACK ref, not useEffect+useRef: the component early-returns
+  // (loading guard) before `#task-detail` mounts, so a `useEffect([], [taskId])`
+  // would fire once with a null ref and never re-run when the real tree appears.
+  // Fire-and-forget through the stable vanilla trpcClient (never a useMutation
+  // object — that would churn the ref every render and could loop the WS).
+  const lastPanelTouchAtRef = useRef(0)
+  const panelEngagementCleanupRef = useRef<(() => void) | null>(null)
+  const taskRootRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      panelEngagementCleanupRef.current?.()
+      panelEngagementCleanupRef.current = null
+      if (!node || !taskId) return
+      const sessionId = `${taskId}:${taskId}`
+      const TOUCH_THROTTLE_MS = 4000
+      const report = (): void => {
+        const now = performance.now()
+        if (now - lastPanelTouchAtRef.current < TOUCH_THROTTLE_MS) return
+        lastPanelTouchAtRef.current = now
+        void trpcClient.pty.touch.mutate({ sessionId })
+      }
+      node.addEventListener('keydown', report, true)
+      node.addEventListener('mousedown', report, true)
+      node.addEventListener('wheel', report, { capture: true, passive: true })
+      node.addEventListener('paste', report, true)
+      panelEngagementCleanupRef.current = () => {
+        node.removeEventListener('keydown', report, true)
+        node.removeEventListener('mousedown', report, true)
+        node.removeEventListener('wheel', report, true)
+        node.removeEventListener('paste', report, true)
+      }
+    },
+    [taskId, trpcClient]
+  )
+
   const [tags, setTags] = useState<Tag[]>(initialData?.tags ?? [])
   useEffect(() => {
     const handleTagUpdated = (e: Event) => {
@@ -1565,7 +1606,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const isTaskCompleted = isCompletedStatus(task.status, project?.columns_config)
 
   return (
-    <div id="task-detail" className={cn('h-full flex flex-col', compact && 'p-0')}>
+    <div
+      id="task-detail"
+      ref={taskRootRef}
+      className={cn('h-full flex flex-col', compact && 'p-0')}
+    >
       {compact && (
         <div className="shrink-0 flex items-center gap-1.5 px-2 h-10 bg-surface-1 border-b border-border min-w-0">
           {!task.is_temporary &&

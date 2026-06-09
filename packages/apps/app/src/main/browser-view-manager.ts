@@ -17,6 +17,8 @@ export const browserViewEvents = new EventEmitter() as EventEmitter & {
   off(event: string, listener: (...args: unknown[]) => void): EventEmitter
 }
 import { fileUrlToSlzFileUrl, slzFileUrlToFileUrl } from '@slayzone/platform'
+import { touchTaskMainSession } from '@slayzone/terminal/electron'
+import { isEngagementInputType, shouldReportEngagement } from '@slayzone/terminal/server'
 import type { ElectronChromeExtensions } from 'electron-chrome-extensions'
 import type { BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import type { DesktopHandoffPolicy } from '@slayzone/task/shared'
@@ -1191,10 +1193,29 @@ export class BrowserViewManager {
     // show the glow and update focus tracking (focusin never fires
     // in the renderer DOM when a separate web contents has focus).
     wc.on('focus', () => {
+      // Idle-close engagement: focusing this view (e.g. opening the browser
+      // panel) is genuine interaction with the task — keep its main agent's
+      // idle clock fresh so it isn't hibernated out from under an active user.
+      touchTaskMainSession(entry.taskId)
       browserViewEvents.emit('focused', { viewId }) // tRPC app.browser.onFocused
       const win = this.mainWindow
       if (!win || win.isDestroyed()) return
       win.webContents.send('browser-view:focused', { viewId }) // legacy IPC (slice 5 drops)
+    })
+
+    // Idle-close engagement (ongoing): typing / clicking / scrolling inside the
+    // WebContentsView never reaches the renderer DOM, so the terminal's own
+    // touch listener can't see it. Translate qualifying main-process input
+    // events into a throttled touch on the task's main agent session, mirroring
+    // the terminal's 4s throttle. Without this, actively using the browser panel
+    // leaves the agent's "user engaged" clock stale → it hibernates while in use.
+    let lastEngagementTouchAt = 0
+    wc.on('input-event', (_e, input) => {
+      if (!isEngagementInputType(input.type)) return
+      const now = Date.now()
+      if (!shouldReportEngagement(lastEngagementTouchAt, now)) return
+      lastEngagementTouchAt = now
+      touchTaskMainSession(entry.taskId)
     })
 
     wc.on('did-navigate', (_e, url) => {

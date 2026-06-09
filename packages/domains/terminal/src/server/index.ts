@@ -3,6 +3,12 @@
 // pty/terminal routers receive their ops + events via deps injection at boot.
 // Slice 6 may extract a remote-pty server from these pure pieces.
 export { resolveUserShell, getShellStartupArgs, whichBinary, getEnrichedPath } from './shell-env'
+export {
+  isEngagementInputType,
+  shouldReportEngagement,
+  ENGAGEMENT_INPUT_TYPES,
+  ENGAGEMENT_TOUCH_THROTTLE_MS
+} from './engagement'
 export { syncTerminalModes } from './startup-sync'
 export { isHookDrivenMode, HOOK_DRIVEN_MODES } from './adapters'
 export {

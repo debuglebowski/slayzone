@@ -91,6 +91,8 @@ run_test packages/domains/terminal/src/client/webgl-loader.test.ts
 
 # Terminal — state machine + hook-driven input-flip gate (stuck-running-after-/status)
 run_test packages/domains/terminal/src/main/state-machine.test.ts
+# Terminal — idle-close engagement (browser/other-panel interaction keeps agent warm)
+run_test packages/domains/terminal/src/server/engagement.test.ts
 run_test packages/domains/terminal/src/main/session-error-gate.test.ts
 # Terminal — fresh-vs-resume decision (restart-clobber invariant: known id ⇒ resume)
 run_test packages/domains/terminal/src/main/spawn-conversation.test.ts

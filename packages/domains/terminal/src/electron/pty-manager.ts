@@ -814,6 +814,22 @@ export function touchPty(sessionId: string): boolean {
   return true
 }
 
+/** Mark engagement on a task's MAIN agent session, given only the bare taskId.
+ *  Used by callers that don't know the session-id convention (e.g. the browser
+ *  WebContentsView in main, whose input never reaches the renderer DOM). The
+ *  main session is registered under `${taskId}:${taskId}` but `session.taskId`
+ *  holds the bare id, so we resolve by that field + `isMainTabSession` rather
+ *  than reconstructing the key — drift-proof if the convention ever changes.
+ *  Returns true if a matching session was touched. */
+export function touchTaskMainSession(taskId: string): boolean {
+  for (const [sessionId, session] of sessions) {
+    if (session.taskId === taskId && isMainTabSession(sessionId)) {
+      return touchPty(sessionId)
+    }
+  }
+  return false
+}
+
 /**
  * User pressed an interrupt key (Esc / Ctrl+C) in the terminal — optimistically
  * flip a *running* session to idle.
