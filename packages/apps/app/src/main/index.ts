@@ -356,6 +356,8 @@ import { createStatsPoller } from './pid-stats'
 import { registerExportImportHandlers } from './export-import'
 import { notifyEvents } from './notify-renderer'
 import { menuEvents } from './menu-events'
+import { automationsEvents } from './automations-events'
+import { telemetryEvents } from './telemetry-events'
 import { registerLeaderboardHandlers, getLocalLeaderboardStats } from './leaderboard'
 import { shellOpenExternal, shellOpenPath } from './shell-open'
 import { initAutoUpdater, checkForUpdates, restartForUpdate } from './auto-updater'
@@ -1526,7 +1528,8 @@ app
       if (!entry) return
       const props = entry.props(args, result)
       if (props === undefined) return
-      mainWindow?.webContents.send('telemetry:ipc-event', entry.event, props)
+      mainWindow?.webContents.send('telemetry:ipc-event', entry.event, props) // legacy IPC (bridge drops)
+      telemetryEvents.emit('ipc-event', entry.event, props) // tRPC telemetry.onIpcEvent source
     })
     logBoot('diagnostics IPC registered')
 
@@ -1743,7 +1746,8 @@ app
     registerTestPanelHandlers(ipcMain, db)
     logBoot('misc handlers registered (file-editor/clipboard/screenshot/export/leaderboard/tests)')
     const notifyAutomationsChanged = (): void => {
-      mainWindow?.webContents.send('automations:changed')
+      mainWindow?.webContents.send('automations:changed') // legacy IPC (bridge drops)
+      automationsEvents.emit('changed') // tRPC automations.onChanged source
       notifyTasksChanged()
     }
     const automationEngine = new AutomationEngine(db, notifyAutomationsChanged)
@@ -1800,6 +1804,12 @@ app
           // legacy IPC broadcast emit on, so `notify.*` subs and IPC coexist
           // (renderer cutover is slice 5).
           mod.setNotifyEvents(notifyEvents)
+          // Automations-changed + telemetry IPC-event buses — same host-owned
+          // emitters the legacy `automations:changed` / `telemetry:ipc-event`
+          // sends dual-emit on, so the `automations.onChanged` /
+          // `telemetry.onIpcEvent` subs and IPC coexist (bridge drops later).
+          mod.setAutomationsEvents(automationsEvents)
+          mod.setTelemetryEvents(telemetryEvents)
           // Menu / app-shortcut bus — same instance the native menus, the
           // before-input-event accelerator handler, the auto-updater, and the
           // REST/MCP task-open routes dual-emit on (alongside the legacy `app:*`

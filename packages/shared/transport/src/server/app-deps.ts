@@ -131,6 +131,50 @@ export function getNotifyEvents(): TypedEmitter<NotifyEventMap> {
   return notifyEvents
 }
 
+// Automations-changed bus — fires when the AutomationEngine mutates automations
+// (manual run, trigger fire, CRUD). Backs the `automations.onChanged` sub. The
+// emitter is owned by the Electron-main host, injected here so the router and the
+// still-live `automations:changed` webContents.send share one instance (dual-emit).
+export type AutomationsEventMap = {
+  /** Any automation data change — renderer invalidates affected queries. No payload. */
+  changed: []
+}
+
+let automationsEvents: TypedEmitter<AutomationsEventMap> | null = null
+
+export function setAutomationsEvents(ev: TypedEmitter<AutomationsEventMap>): void {
+  automationsEvents = ev
+}
+
+export function getAutomationsEvents(): TypedEmitter<AutomationsEventMap> {
+  if (!automationsEvents)
+    throw new Error(
+      'automationsEvents not initialized — call setAutomationsEvents() in main host first'
+    )
+  return automationsEvents
+}
+
+// Telemetry IPC-event bus — the main-side `setIpcSuccessHook` fans instrumented
+// IPC successes here. Backs the `telemetry.onIpcEvent` sub. Host-owned, injected
+// so the router and the still-live `telemetry:ipc-event` send share one instance.
+export type TelemetryEventMap = {
+  'ipc-event': [event: string, props: Record<string, unknown>]
+}
+
+let telemetryEvents: TypedEmitter<TelemetryEventMap> | null = null
+
+export function setTelemetryEvents(ev: TypedEmitter<TelemetryEventMap>): void {
+  telemetryEvents = ev
+}
+
+export function getTelemetryEvents(): TypedEmitter<TelemetryEventMap> {
+  if (!telemetryEvents)
+    throw new Error(
+      'telemetryEvents not initialized — call setTelemetryEvents() in main host first'
+    )
+  return telemetryEvents
+}
+
 // Menu / app-shortcut event bus — the one-way main→renderer `app:*` / `browser:*`
 // broadcasts driven by native menus, the `before-input-event` accelerator handler,
 // the auto-updater, and the REST/MCP task-open routes. The emitter is owned by the

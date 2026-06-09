@@ -1,3 +1,4 @@
+import { getTrpcClient } from '@slayzone/transport/client'
 import type { TelemetryTier, TelemetryEventName, TelemetryEventProps } from '../shared/types'
 
 declare const __POSTHOG_API_KEY__: string
@@ -226,11 +227,21 @@ let ipcCleanup: (() => void) | null = null
 
 export function startIpcTelemetryBridge(): void {
   if (ipcCleanup) return
-  if (typeof window === 'undefined' || !window.api?.telemetry?.onIpcEvent) return
-  ipcCleanup = window.api.telemetry.onIpcEvent((event, props) => {
-    if (!initialized || !ph) return
-    ph.capture(event, props)
-  })
+  if (typeof window === 'undefined') return
+  // Runs from TelemetryProvider's init effect — i.e. after a tRPC query has
+  // already resolved — so the vanilla client is initialized. Guard defensively.
+  try {
+    const sub = getTrpcClient().telemetry.onIpcEvent.subscribe(undefined, {
+      onData: ({ event, props }) => {
+        if (!initialized || !ph) return
+        ph.capture(event, props)
+      }
+    })
+    ipcCleanup = () => sub.unsubscribe()
+  } catch {
+    // tRPC client not yet initialized — bridge stays off (no telemetry loss that
+    // matters: pre-init IPC events predate posthog readiness anyway).
+  }
 }
 
 export function stopIpcTelemetryBridge(): void {

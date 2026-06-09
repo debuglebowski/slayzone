@@ -18,6 +18,7 @@ import { ptyRouter } from './routers/pty'
 import { settingsRouter } from './routers/settings'
 import { tagsRouter } from './routers/tags'
 import { taskRouter } from './routers/task'
+import { telemetryRouter } from './routers/telemetry'
 import { templateRouter } from './routers/template'
 import { artifactsRouter } from './routers/artifacts'
 import { taskTerminalsRouter } from './routers/task-terminals'
@@ -46,6 +47,7 @@ export const appRouter = router({
   settings: settingsRouter,
   tags: tagsRouter,
   task: taskRouter,
+  telemetry: telemetryRouter,
   template: templateRouter,
   taskTerminals: taskTerminalsRouter,
   testPanel: testPanelRouter,

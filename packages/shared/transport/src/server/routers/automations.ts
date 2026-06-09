@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
 import {
   listAutomationsByProject,
@@ -13,6 +14,7 @@ import {
 } from '@slayzone/automations/server'
 import type { CreateAutomationInput, UpdateAutomationInput } from '@slayzone/automations/shared'
 import { router, publicProcedure } from '../trpc'
+import { getAutomationsEvents } from '../app-deps'
 
 // The Create/Update shapes carry nested trigger/condition/action configs; mirror
 // the diagnostics router and pass them through unchecked (the still-live IPC
@@ -72,5 +74,16 @@ export const automationsRouter = router({
 
   clearRuns: publicProcedure
     .input(z.object({ automationId: z.string() }))
-    .mutation(({ ctx, input }) => clearAutomationRuns(ctx.db, input.automationId))
+    .mutation(({ ctx, input }) => clearAutomationRuns(ctx.db, input.automationId)),
+
+  // Fires when the AutomationEngine mutates automations. Mirrors the legacy
+  // `automations:changed` send; renderer translates into cache invalidation.
+  onChanged: publicProcedure.subscription(() =>
+    observable<void>((emit) => {
+      const handler = (): void => emit.next()
+      const ev = getAutomationsEvents()
+      ev.on('changed', handler)
+      return () => ev.off('changed', handler)
+    })
+  )
 })

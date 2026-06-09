@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPC, useSubscription } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
 import { Plus, Zap } from 'lucide-react'
 import type {
@@ -30,18 +30,17 @@ export function AutomationsPanel({ projectId }: AutomationsPanelProps) {
   const tagsQuery = useQuery(trpc.tags.list.queryOptions())
   const tags = (tagsQuery.data ?? []).filter((t: Tag) => t.project_id === projectId)
 
-  // The automation engine still emits the legacy `automations:changed` IPC
-  // event (sent from the main process) — no tRPC subscription exists for it, so
-  // keep listening over IPC and translate it into a cache invalidation.
-  useEffect(() => {
-    if (!projectId) return
-    return window.api.automations.onChanged(() => {
-      queryClient.invalidateQueries(
-        trpc.automations.getByProject.queryFilter({ projectId })
-      )
-      queryClient.invalidateQueries(trpc.tags.list.queryFilter())
+  // AutomationEngine mutations fan out via `automations.onChanged`; translate
+  // each into a cache invalidation (no payload — the queries re-fetch).
+  useSubscription(
+    trpc.automations.onChanged.subscriptionOptions(undefined, {
+      enabled: !!projectId,
+      onData: () => {
+        queryClient.invalidateQueries(trpc.automations.getByProject.queryFilter({ projectId }))
+        queryClient.invalidateQueries(trpc.tags.list.queryFilter())
+      }
     })
-  }, [projectId, queryClient, trpc])
+  )
 
   const invalidateAutomations = (): void => {
     queryClient.invalidateQueries(trpc.automations.getByProject.queryFilter({ projectId }))
