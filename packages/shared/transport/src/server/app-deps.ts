@@ -27,8 +27,20 @@ import type {
   LocalLeaderboardStats,
   ProcessInfo,
   ProcessEventMap,
-  UpdateStatus
+  UpdateStatus,
+  BrowserShortcutPayload,
+  BrowserCreateTaskFromLinkIntent
 } from '@slayzone/types'
+
+// Floating global agent panel state — the payload `getState()` returns and the
+// `state` event emits (mirrors floating-global-agent-panel.ts currentStatePayload).
+// Lives transport-side (transport can't import from apps/app); the host conforms.
+export type FloatingAgentState = {
+  kind: string
+  sessionId: string | null
+  mode: 'auto' | 'manual' | null
+  hasCustomSize: boolean
+}
 import type { ProviderUsage, UsageProviderConfig, UsageWindow } from '@slayzone/terminal/shared'
 
 // Chat deps — ops + queue ops + the two streaming emitters the subscriptions
@@ -424,9 +436,12 @@ export type AppDeps = {
     reparentToCurrentWindow: (viewId: string) => unknown
     events: EventEmitter & {
       on(event: 'event', listener: (e: unknown) => void): EventEmitter
-      on(event: 'shortcut', listener: (payload: unknown) => void): EventEmitter
+      on(event: 'shortcut', listener: (payload: BrowserShortcutPayload) => void): EventEmitter
       on(event: 'focused', listener: (payload: { viewId: string }) => void): EventEmitter
-      on(event: 'create-task-from-link', listener: (intent: unknown) => void): EventEmitter
+      on(
+        event: 'create-task-from-link',
+        listener: (intent: BrowserCreateTaskFromLinkIntent) => void
+      ): EventEmitter
       off(event: string, listener: (...args: unknown[]) => void): EventEmitter
     }
   }
@@ -442,11 +457,11 @@ export type AppDeps = {
     resetSize: () => unknown
     detach: () => unknown
     reattach: () => unknown
-    getState: () => unknown
+    getState: () => FloatingAgentState
     getSession: () => unknown
     getConfig: () => unknown
     events: EventEmitter & {
-      on(event: 'state', listener: (payload: unknown) => void): EventEmitter
+      on(event: 'state', listener: (payload: FloatingAgentState) => void): EventEmitter
       on(event: 'session-changed', listener: () => void): EventEmitter
       on(event: 'collapse-changed', listener: (collapsed: boolean) => void): EventEmitter
       off(event: string, listener: (...args: unknown[]) => void): EventEmitter

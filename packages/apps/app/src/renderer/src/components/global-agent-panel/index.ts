@@ -1,5 +1,5 @@
 export { GlobalAgentPanelButton } from './GlobalAgentPanelButton'
-export { GlobalAgentSidePanel } from './GlobalAgentSidePanel'
+export { GlobalAgentSidePanel, type FloatingStateKind } from './GlobalAgentSidePanel'
 export {
   useGlobalAgentPanelState,
   DEFAULT_GLOBAL_AGENT_PANEL_WIDTH,

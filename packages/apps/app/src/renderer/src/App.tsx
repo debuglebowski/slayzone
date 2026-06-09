@@ -10,7 +10,7 @@ import React, {
 } from 'react'
 import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, BookOpen } from 'lucide-react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
@@ -53,7 +53,7 @@ import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { useChangelogAutoOpen } from '@/components/changelog/useChangelogAutoOpen'
 import { useStaleSkillCount } from '@slayzone/ai-config/client'
 import { TabBar } from '@/components/tabs/TabBar'
-import { useGlobalAgentPanelState } from '@/components/global-agent-panel'
+import { useGlobalAgentPanelState, type FloatingStateKind } from '@/components/global-agent-panel'
 import {
   useIdleTasks,
   useActiveSessionTaskIds,
@@ -799,29 +799,30 @@ function App(): React.JSX.Element {
     })
   }, [globalAgentPanelState.floatingEnabled, trpcClient])
 
-  // Subscribe to floating-global-agent-panel state for menu label + sidebar visibility.
-  // STAYS ON BRIDGE: `floatingAgent.getState()` returns `unknown` and the
-  // `floatingAgent.onState` subscription emits `unknown` server-side, so the
-  // typed `{ kind, mode }` shape this reads is unavailable via tRPC without a
-  // client-side cast. Keep on the IPC bridge until the router types its payload.
+  // Floating-global-agent-panel state for menu label + sidebar visibility.
+  // Initial via getState query; live updates via the onState subscription (both
+  // typed FloatingAgentState now — no client-side cast).
+  // kind is narrowed from the typed payload's `string` to the panel's domain
+  // union at this boundary (the meaningful values the UI branches on).
   const [floatingGlobalAgentPanelState, setFloatingGlobalAgentPanelState] = useState<{
-    kind: 'attached' | 'detached' | 'disabled'
+    kind: FloatingStateKind
     mode: 'auto' | 'manual' | null
   }>({ kind: 'attached', mode: null })
+  const floatingStateQuery = useQuery(trpc.app.floatingAgent.getState.queryOptions())
   useEffect(() => {
-    window.api.floatingGlobalAgentPanel.getState().then((s) => {
+    if (floatingStateQuery.data) {
       setFloatingGlobalAgentPanelState({
-        kind: s.kind as 'attached' | 'detached' | 'disabled',
-        mode: s.mode
+        kind: floatingStateQuery.data.kind as FloatingStateKind,
+        mode: floatingStateQuery.data.mode
       })
+    }
+  }, [floatingStateQuery.data])
+  useSubscription(
+    trpc.app.floatingAgent.onState.subscriptionOptions(undefined, {
+      onData: (s) =>
+        setFloatingGlobalAgentPanelState({ kind: s.kind as FloatingStateKind, mode: s.mode })
     })
-    return window.api.floatingGlobalAgentPanel.onState((s) => {
-      setFloatingGlobalAgentPanelState({
-        kind: s.kind as 'attached' | 'detached' | 'disabled',
-        mode: s.mode
-      })
-    })
-  }, [])
+  )
   // Hide sidebar panel when manually detached (auto mode keeps panel visible to avoid layout flash).
   const hideSidebarPanel =
     floatingGlobalAgentPanelState.kind === 'detached' &&

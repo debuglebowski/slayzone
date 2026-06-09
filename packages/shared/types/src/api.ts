@@ -260,6 +260,19 @@ export interface BrowserCreateTaskFromLinkIntent {
   source: BrowserCreateTaskFromLinkSource
 }
 
+/** A keyboard shortcut forwarded from a WebContentsView back into the renderer
+ *  DOM (the view is a separate web contents, so renderer key handlers never see
+ *  it). `kind` distinguishes browser tabs from web panels (scope routing). */
+export interface BrowserShortcutPayload {
+  viewId: string
+  key: string
+  shift: boolean
+  alt: boolean
+  meta: boolean
+  control: boolean
+  kind?: string
+}
+
 export interface BackupInfo {
   filename: string
   name: string
@@ -1491,17 +1504,7 @@ export interface ElectronAPI {
     ) => Promise<void>
 
     // Events (M→R)
-    onBrowserViewShortcut: (
-      cb: (payload: {
-        viewId: string
-        key: string
-        shift: boolean
-        alt: boolean
-        meta: boolean
-        control: boolean
-        kind?: string
-      }) => void
-    ) => () => void
+    onBrowserViewShortcut: (cb: (payload: BrowserShortcutPayload) => void) => () => void
 
     onBrowserViewFocused: (cb: (payload: { viewId: string }) => void) => () => void
 

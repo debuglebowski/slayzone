@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
+import type { BrowserShortcutPayload, BrowserCreateTaskFromLinkIntent } from '@slayzone/types'
 import { router, publicProcedure } from '../trpc'
-import { getAppDeps } from '../app-deps'
+import { getAppDeps, type FloatingAgentState } from '../app-deps'
 
 const anyInput = z.unknown()
 
@@ -353,8 +354,8 @@ export const appLevelRouter = router({
       })
     ),
     onShortcut: publicProcedure.subscription(() =>
-      observable<unknown>((emit) => {
-        const h = (p: unknown): void => emit.next(p)
+      observable<BrowserShortcutPayload>((emit) => {
+        const h = (p: BrowserShortcutPayload): void => emit.next(p)
         const ev = getAppDeps().browser.events
         ev.on('shortcut', h)
         return () => ev.off('shortcut', h)
@@ -369,8 +370,8 @@ export const appLevelRouter = router({
       })
     ),
     onCreateTaskFromLink: publicProcedure.subscription(() =>
-      observable<unknown>((emit) => {
-        const h = (i: unknown): void => emit.next(i)
+      observable<BrowserCreateTaskFromLinkIntent>((emit) => {
+        const h = (i: BrowserCreateTaskFromLinkIntent): void => emit.next(i)
         const ev = getAppDeps().browser.events
         ev.on('create-task-from-link', h)
         return () => ev.off('create-task-from-link', h)
@@ -398,8 +399,8 @@ export const appLevelRouter = router({
     getSession: publicProcedure.query(() => getAppDeps().floatingAgent.getSession()),
     getConfig: publicProcedure.query(() => getAppDeps().floatingAgent.getConfig()),
     onState: publicProcedure.subscription(() =>
-      observable<unknown>((emit) => {
-        const handler = (payload: unknown): void => emit.next(payload)
+      observable<FloatingAgentState>((emit) => {
+        const handler = (payload: FloatingAgentState): void => emit.next(payload)
         const ev = getAppDeps().floatingAgent.events
         ev.on('state', handler)
         return () => ev.off('state', handler)

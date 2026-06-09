@@ -10,5 +10,9 @@ export type { ProcessStatus, ProcessInfo, ProcessStats, ProcessEventMap } from '
 export type { ExecutionContext } from './api'
 export type { LocalLeaderboardDay, LocalLeaderboardStats } from './api'
 export type { BackupInfo, BackupSettings } from './api'
-export type { BrowserCreateTaskFromLinkIntent, BrowserCreateTaskFromLinkSource } from './api'
+export type {
+  BrowserCreateTaskFromLinkIntent,
+  BrowserCreateTaskFromLinkSource,
+  BrowserShortcutPayload
+} from './api'
 export type { ActivityEvent, AutomationActionRun } from '@slayzone/history/shared'
