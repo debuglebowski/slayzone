@@ -10,8 +10,10 @@ import {
   moveTileBetweenPanes,
   removeTile,
   replaceFractions,
-  setActiveTile
+  setActiveTile,
+  splitPane
 } from './tree-ops'
+import type { PaneEdge } from './tree-ops'
 import { saveTree } from './persistence'
 import type { OcclusionPolicy } from './occlusion'
 import { DEFAULT_OCCLUSION_POLICY, nativeTileVisible } from './occlusion'
@@ -23,6 +25,8 @@ export interface LayoutStore {
   taskId: string | null
   /** Split currently being divider-dragged (null = idle). */
   draggingSplitId: string | null
+  /** Tile currently being drag-rearranged (null = idle). */
+  draggingTileId: string | null
   occlusionPolicy: OcclusionPolicy
 
   /** Adopt a task id + its (already-resolved) initial tree. */
@@ -31,10 +35,13 @@ export interface LayoutStore {
   openTile(targetPaneId: string | null, tile: Tile): void
   closeTile(tileId: string): void
   moveTile(tileId: string, toPaneId: string, toIndex?: number): void
+  /** Drop a tile on a pane edge — creates a nested split (moves the tile if it exists). */
+  splitPaneAt(paneId: string, edge: PaneEdge, tile: Tile): void
   setActiveTab(paneId: string, tileId: string): void
   /** Set a split's fractions (called live during a divider drag). */
   resizeSplit(splitId: string, fractions: number[]): void
   setDraggingSplit(splitId: string | null): void
+  setDraggingTile(tileId: string | null): void
   setOcclusionPolicy(policy: Partial<OcclusionPolicy>): void
   focusNode(nodeId: string): void
   openOverlay(overlay: Overlay): void
@@ -48,6 +55,7 @@ export const useLayoutStore = create<LayoutStore>()(
     focusedNodeId: null,
     taskId: null,
     draggingSplitId: null,
+    draggingTileId: null,
     occlusionPolicy: DEFAULT_OCCLUSION_POLICY,
 
     bindTask: (taskId, tree) => set({ taskId, tree }),
@@ -56,9 +64,11 @@ export const useLayoutStore = create<LayoutStore>()(
     closeTile: (tileId) => set({ tree: removeTile(get().tree, tileId) }),
     moveTile: (tileId, toPaneId, toIndex) =>
       set({ tree: moveTileBetweenPanes(get().tree, tileId, toPaneId, toIndex) }),
+    splitPaneAt: (paneId, edge, tile) => set({ tree: splitPane(get().tree, paneId, edge, tile) }),
     setActiveTab: (paneId, tileId) => set({ tree: setActiveTile(get().tree, paneId, tileId) }),
     resizeSplit: (splitId, fractions) => set({ tree: replaceFractions(get().tree, splitId, fractions) }),
     setDraggingSplit: (splitId) => set({ draggingSplitId: splitId }),
+    setDraggingTile: (tileId) => set({ draggingTileId: tileId }),
     setOcclusionPolicy: (policy) => set((s) => ({ occlusionPolicy: { ...s.occlusionPolicy, ...policy } })),
     focusNode: (nodeId) => set({ focusedNodeId: nodeId }),
     openOverlay: (overlay) =>
@@ -88,7 +98,11 @@ export const useFocusedNodeId = (): string | null => useLayoutStore((s) => s.foc
 export const useDraggingSplitId = (): string | null => useLayoutStore((s) => s.draggingSplitId)
 export const useNativeTilesVisible = (): boolean =>
   useLayoutStore((s) =>
-    nativeTileVisible(s.occlusionPolicy, { overlays: s.overlays, draggingSplitId: s.draggingSplitId })
+    nativeTileVisible(s.occlusionPolicy, {
+      overlays: s.overlays,
+      draggingSplitId: s.draggingSplitId,
+      draggingTileId: s.draggingTileId
+    })
   )
 export const getLayoutStore = (): LayoutStore => useLayoutStore.getState()
 

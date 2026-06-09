@@ -38,4 +38,14 @@ describe('nativeTileVisible', () => {
     expect(nativeTileVisible(policy, { overlays: [], draggingSplitId: 's1' })).toBe(false)
     expect(nativeTileVisible(policy, { overlays: [], draggingSplitId: null })).toBe(true)
   })
+
+  it('hides tiles during a tile drag-rearrange regardless of strategy', () => {
+    expect(
+      nativeTileVisible(DEFAULT_OCCLUSION_POLICY, {
+        overlays: [],
+        draggingSplitId: null,
+        draggingTileId: 't1'
+      })
+    ).toBe(false)
+  })
 })

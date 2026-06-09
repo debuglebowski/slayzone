@@ -6,7 +6,8 @@ import {
   makePane,
   makeSplit,
   removeTile,
-  setActiveTile
+  setActiveTile,
+  splitPane
 } from './tree-ops'
 import { isPane, isSplit } from './types'
 import type { LayoutTree, Tile } from './types'
@@ -73,6 +74,66 @@ describe('removeTile', () => {
       expect(out.root.fractions[0]).toBeCloseTo(0.2 / 0.7)
       expect(out.root.fractions[1]).toBeCloseTo(0.5 / 0.7)
     }
+  })
+})
+
+describe('splitPane', () => {
+  it('splits a root pane east → row split, new pane second', () => {
+    const a = makePane([tile('a')])
+    const out = splitPane({ root: a }, a.id, 'east', tile('b'))
+    expect(out.root && isSplit(out.root)).toBe(true)
+    if (out.root && isSplit(out.root)) {
+      expect(out.root.direction).toBe('row')
+      const [first, second] = out.root.children
+      expect(isPane(first) && first.tiles[0].id).toBe('a')
+      expect(isPane(second) && second.tiles[0].id).toBe('b')
+      expect(out.root.fractions).toEqual([0.5, 0.5])
+    }
+  })
+
+  it('splits north → col split, new pane first', () => {
+    const a = makePane([tile('a')])
+    const out = splitPane({ root: a }, a.id, 'north', tile('b'))
+    if (out.root && isSplit(out.root)) {
+      expect(out.root.direction).toBe('col')
+      const [first] = out.root.children
+      expect(isPane(first) && first.tiles[0].id).toBe('b')
+    }
+  })
+
+  it('nests: splitting a child pane of a row split', () => {
+    const a = makePane([tile('a')])
+    const b = makePane([tile('b')])
+    const root = makeSplit('row', [a, b])
+    const out = splitPane({ root }, b.id, 'south', tile('c'))
+    if (out.root && isSplit(out.root)) {
+      const second = out.root.children[1]
+      expect(isSplit(second) && second.direction).toBe('col')
+      if (isSplit(second)) {
+        expect(isPane(second.children[0]) && (second.children[0] as ReturnType<typeof makePane>).tiles[0].id).toBe('b')
+      }
+    }
+  })
+
+  it('MOVES an existing tile when its id is already in the tree', () => {
+    const a = makePane([tile('a'), tile('x')])
+    const b = makePane([tile('b')])
+    const root = makeSplit('row', [a, b])
+    const moving = a.tiles[1]
+    const out = splitPane({ root }, b.id, 'west', moving)
+    // x removed from pane a, now in a new pane west of b
+    const types = collectTileTypes(out.root)
+    expect(types.has('editor')).toBe(true)
+    expect(findPaneOfTile(out.root, 'x')?.tiles).toHaveLength(1)
+    expect(findPaneOfTile(out.root, 'a')?.tiles.map((t) => t.id)).toEqual(['a'])
+  })
+
+  it("no-ops when dropping a pane's only tile on its own edge", () => {
+    const a = makePane([tile('a')])
+    const b = makePane([tile('b')])
+    const root = makeSplit('row', [a, b])
+    const out = splitPane({ root }, a.id, 'west', a.tiles[0])
+    expect(out).toEqual({ root })
   })
 })
 

@@ -163,6 +163,63 @@ export function moveTileBetweenPanes(
   return { root: appendPaneToRoot(root, makePane([clone(tile)])) }
 }
 
+export type PaneEdge = 'north' | 'south' | 'east' | 'west'
+
+function splitNodeInPlace(root: LayoutNode, paneId: string, edge: PaneEdge, newPane: PaneNode): boolean {
+  // Replace the target pane with a 2-child split (new pane on the given edge).
+  const replace = (node: LayoutNode): LayoutNode | null => {
+    if (node.id === paneId && isPane(node)) {
+      const direction = edge === 'east' || edge === 'west' ? 'row' : 'col'
+      const first = edge === 'west' || edge === 'north' ? newPane : node
+      const second = first === newPane ? node : newPane
+      return makeSplit(direction, [first, second])
+    }
+    return null
+  }
+  const walk = (node: LayoutNode): boolean => {
+    if (!isSplit(node)) return false
+    for (let i = 0; i < node.children.length; i += 1) {
+      const replaced = replace(node.children[i])
+      if (replaced) {
+        node.children[i] = replaced
+        return true
+      }
+      if (walk(node.children[i])) return true
+    }
+    return false
+  }
+  return walk(root)
+}
+
+/**
+ * Split a pane: place `tile` in a new pane on the given edge of `paneId`
+ * (west/north → before, east/south → after; row for east/west, col for
+ * north/south). If `tile.id` already exists in the tree it is MOVED.
+ */
+export function splitPane(tree: LayoutTree, paneId: string, edge: PaneEdge, tile: Tile): LayoutTree {
+  if (!tree.root) return { root: makePane([clone(tile)]) }
+
+  const existing = findTile(tree.root, tile.id)
+  const sourcePane = existing ? findPaneOfTile(tree.root, tile.id) : null
+  // No-op guard: moving a pane's only tile onto one of its own edges.
+  if (sourcePane && sourcePane.id === paneId && sourcePane.tiles.length === 1) return tree
+
+  const base = existing ? removeTile(tree, tile.id) : tree
+  if (!base.root) return { root: makePane([clone(tile)]) }
+  const root = clone(base.root)
+  const newPane = makePane([clone(tile)])
+
+  if (root.id === paneId && isPane(root)) {
+    const direction = edge === 'east' || edge === 'west' ? 'row' : 'col'
+    const first = edge === 'west' || edge === 'north' ? newPane : root
+    const second = first === newPane ? root : newPane
+    return { root: makeSplit(direction, [first, second]) }
+  }
+  if (splitNodeInPlace(root, paneId, edge, newPane)) return { root }
+  // Target pane vanished (e.g. it was the source and collapsed) → append.
+  return { root: appendPaneToRoot(root, newPane) }
+}
+
 /** Replace a split's fractions (resize commit). */
 export function replaceFractions(tree: LayoutTree, splitId: string, fractions: number[]): LayoutTree {
   if (!tree.root) return tree

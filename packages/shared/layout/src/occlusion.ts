@@ -29,11 +29,14 @@ export const DEFAULT_OCCLUSION_POLICY: OcclusionPolicy = {
 export interface OcclusionInputs {
   overlays: Overlay[]
   draggingSplitId: string | null
+  /** A tile drag (rearrange) is in flight — DOM previews/drop zones must paint above. */
+  draggingTileId?: string | null
 }
 
 /** Should a native tile's surface be visible right now? */
 export function nativeTileVisible(policy: OcclusionPolicy, inputs: OcclusionInputs): boolean {
   if (policy.dialogsHideNative && inputs.overlays.some((o) => o.kind === 'dialog')) return false
   if (policy.resizeStrategy === 'hide-during-drag' && inputs.draggingSplitId !== null) return false
+  if (inputs.draggingTileId) return false
   return true
 }

@@ -25,6 +25,7 @@ export { resolveTree, subtreeMin, allocate, normalizeFractions, axisOf } from '.
 export { applySplitResize, resetSplitFractions } from './resize'
 
 // Tree operations + builders
+export type { PaneEdge } from './tree-ops'
 export {
   makePane,
   makeSplit,
@@ -35,6 +36,7 @@ export {
   insertTile,
   removeTile,
   moveTileBetweenPanes,
+  splitPane,
   replaceFractions,
   setActiveTile
 } from './tree-ops'
@@ -74,3 +76,7 @@ export { LayoutRoot } from './LayoutRoot'
 export { OverlayLayer } from './OverlayLayer'
 export { SplitDivider } from './SplitDivider'
 export { NativeAnchor } from './NativeAnchor'
+
+// Drag-rearrange (P5)
+export type { DropZone } from './dnd'
+export { LayoutDndContext, TileDragHandle, PaneDropZones } from './dnd'
