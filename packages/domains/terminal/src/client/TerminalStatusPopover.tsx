@@ -122,12 +122,12 @@ export function TerminalStatusDialog({ tasks, onTaskClick }: TerminalStatusDialo
     })
   )
 
-  // pty:stats (per-process CPU/RSS sampler) has no tRPC router procedure — it is
-  // not part of the pty router surface — so it stays on the IPC bridge.
-  useEffect(() => {
-    const unsub = window.api.pty.onStats((s) => setStats(s))
-    return unsub
-  }, [])
+  // pty:stats (per-process CPU/RSS sampler, host poller) — server fan-out is global.
+  useSubscription(
+    trpc.pty.onStats.subscriptionOptions(undefined, {
+      onData: (s) => setStats(s)
+    })
+  )
 
   useEffect(() => {
     if (open) refreshPtys()

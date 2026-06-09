@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain, screen, globalShortcut, app } from 'electron'
 import { EventEmitter } from 'node:events'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { redirectSessionWindow, getBufferSince } from '@slayzone/terminal/electron'
+import { redirectSessionWindow, getBufferSince, ptyEvents } from '@slayzone/terminal/electron'
 import { toElectronAccelerator, shortcutDefinitions } from '@slayzone/shortcuts'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { getDatabase } from './db'
@@ -148,8 +148,9 @@ function executeAction(action: Action): void {
 
     case 'request-resize-main':
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('pty:resize-needed', action.sessionId)
+        mainWindow.webContents.send('pty:resize-needed', action.sessionId) // legacy IPC (bridge drops)
       }
+      ptyEvents.emit('resize-needed', action.sessionId) // tRPC pty.onResizeNeeded source
       return
 
     case 'show-floating':

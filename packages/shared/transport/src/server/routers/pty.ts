@@ -57,6 +57,13 @@ export const ptyRouter = router({
   interrupt: publicProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(({ input }) => ops().ptyInterrupt(input.sessionId)),
+  // Renderer→main ensure-alive ACK — resolves the pending requestEnsureAlive
+  // waiter by reqId. Mirrors the legacy `pty:ensure-alive:ack` IPC.
+  ackEnsureAlive: publicProcedure
+    .input(
+      z.object({ reqId: z.number(), result: z.enum(['ok', 'already-alive', 'error']) })
+    )
+    .mutation(({ input }) => ops().ptyAckEnsureAlive(input.reqId, input.result)),
   exists: publicProcedure
     .input(z.object({ sessionId: z.string() }))
     .query(({ input }) => ops().ptyExists(input.sessionId)),
@@ -192,6 +199,25 @@ export const ptyRouter = router({
       const ev = getPtyDeps().events
       ev.on('hibernated', handler)
       return () => ev.off('hibernated', handler)
+    })
+  ),
+  // Per-process CPU/RSS sampler (host poller). Mirrors the legacy `pty:stats` send.
+  onStats: publicProcedure.subscription(() =>
+    observable<Record<string, { cpu: number; rss: number }>>((emit) => {
+      const handler = (stats: Record<string, { cpu: number; rss: number }>): void =>
+        emit.next(stats)
+      const ev = getPtyDeps().events
+      ev.on('stats', handler)
+      return () => ev.off('stats', handler)
+    })
+  ),
+  // Renderer re-fit request. Mirrors the legacy `pty:resize-needed` send.
+  onResizeNeeded: publicProcedure.subscription(() =>
+    observable<{ sessionId: string }>((emit) => {
+      const handler = (sessionId: string): void => emit.next({ sessionId })
+      const ev = getPtyDeps().events
+      ev.on('resize-needed', handler)
+      return () => ev.off('resize-needed', handler)
     })
   )
 })

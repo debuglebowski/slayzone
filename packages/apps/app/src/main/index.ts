@@ -3120,7 +3120,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     const ptyStatsPoller = createStatsPoller(
       () => getPtyPids(),
       (stats) => {
-        mainWindow?.webContents.send('pty:stats', stats)
+        mainWindow?.webContents.send('pty:stats', stats) // legacy IPC (bridge drops)
+        ptyEvents.emit('stats', stats) // tRPC pty.onStats source
       }
     )
     onSessionChange(() => ptyStatsPoller.ensureStarted())

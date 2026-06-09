@@ -5,7 +5,7 @@
 // bundle and undo the boot-time split. The package's "./client/Terminal"
 // export exists only for the lazy wrapper itself.
 import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
-import { useTRPCClient } from '@slayzone/transport/client'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { matchesShortcut, useShortcutStore, PulseGrid } from '@slayzone/ui'
@@ -190,6 +190,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   executionContextRef.current = executionContext
 
   const trpcClient = useTRPCClient()
+  const trpc = useTRPC()
   const {
     subscribe,
     subscribeExit,
@@ -1134,23 +1135,24 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     wasActiveRef.current = isActive
   }, [isActive, sessionId, scheduleAtlasCorrection])
 
-  // Re-fit terminal when PTY dimensions need resync (e.g., after floating agent reattach).
-  // `pty:resize-needed` (onResizeNeeded) has NO tRPC router subscription — it is not
-  // part of the pty router surface — so the listener stays on the IPC bridge. The
-  // follow-up resize uses the tRPC mutation.
-  useEffect(() => {
-    return window.api.pty.onResizeNeeded((sid) => {
-      if (sid !== sessionId || !fitAddonRef.current || !terminalRef.current) return
-      fitAddonRef.current.fit()
-      diag(sessionId, 'fit', { site: 'resize-needed', terminal: terminalRef.current })
-      scheduleAtlasCorrection()
-      void trpcClient.pty.resize.mutate({
-        sessionId,
-        cols: terminalRef.current.cols,
-        rows: terminalRef.current.rows
-      })
+  // Re-fit terminal when PTY dimensions need resync (e.g., after floating agent
+  // reattach). Server fan-out is global; filter by sessionId. The follow-up
+  // resize uses the tRPC mutation.
+  useSubscription(
+    trpc.pty.onResizeNeeded.subscriptionOptions(undefined, {
+      onData: ({ sessionId: sid }) => {
+        if (sid !== sessionId || !fitAddonRef.current || !terminalRef.current) return
+        fitAddonRef.current.fit()
+        diag(sessionId, 'fit', { site: 'resize-needed', terminal: terminalRef.current })
+        scheduleAtlasCorrection()
+        void trpcClient.pty.resize.mutate({
+          sessionId,
+          cols: terminalRef.current.cols,
+          rows: terminalRef.current.rows
+        })
+      }
     })
-  }, [sessionId, scheduleAtlasCorrection, trpcClient])
+  )
 
   // Safety net: prevent permanent 'starting' state after init completes.
   // If the backend dies or IPC events are lost, this watchdog transitions

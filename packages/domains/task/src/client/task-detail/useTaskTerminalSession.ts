@@ -238,10 +238,9 @@ export function useTaskTerminalSession({
   const ensureAliveInFlightRef = useRef(false)
   const ensureAlivePendingReqsRef = useRef<Set<number>>(new Set())
   const ensureAliveHandledReqsRef = useRef<number[]>([])
-  // NOTE: `pty.ackEnsureAlive` has no tRPC procedure — it stays on IPC. Both the
-  // tRPC subscription and the IPC ack share the same main-process pty emitter/ops
-  // (dual-emit coexistence), so the reqId received here is the same one main
-  // expects on the ack round-trip.
+  // The `pty.onEnsureAlive` subscription and the `pty.ackEnsureAlive` mutation
+  // share the same main-process pty emitter/ops, so the reqId received here is
+  // the same one main expects on the ack round-trip.
   useSubscription(
     trpc.pty.onEnsureAlive.subscriptionOptions(undefined, {
       enabled: !!task,
@@ -250,7 +249,7 @@ export function useTaskTerminalSession({
         if (taskId !== task.id) return
         // Stale retry for an already-completed reqId — re-ack idempotently.
         if (ensureAliveHandledReqsRef.current.includes(reqId)) {
-          window.api.pty.ackEnsureAlive(reqId, 'ok')
+          void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'ok' })
           return
         }
         // Fast path for non-forced ensure when PTY already alive — no work, no
@@ -261,11 +260,11 @@ export function useTaskTerminalSession({
           try {
             if (await trpcClient.pty.exists.query({ sessionId: sid })) {
               ensureAliveHandledReqsRef.current.push(reqId)
-              window.api.pty.ackEnsureAlive(reqId, 'already-alive')
+              void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'already-alive' })
               return
             }
           } catch {
-            window.api.pty.ackEnsureAlive(reqId, 'error')
+            void trpcClient.pty.ackEnsureAlive.mutate({ reqId, result: 'error' })
             return
           }
         }
@@ -305,7 +304,7 @@ export function useTaskTerminalSession({
           ensureAlivePendingReqsRef.current.clear()
           for (const r of reqs) {
             ensureAliveHandledReqsRef.current.push(r)
-            window.api.pty.ackEnsureAlive(r, result)
+            void trpcClient.pty.ackEnsureAlive.mutate({ reqId: r, result })
           }
           if (ensureAliveHandledReqsRef.current.length > 100) {
             ensureAliveHandledReqsRef.current = ensureAliveHandledReqsRef.current.slice(-50)

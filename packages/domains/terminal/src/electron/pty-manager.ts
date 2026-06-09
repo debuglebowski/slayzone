@@ -76,6 +76,12 @@ export type PtyEventMap = {
   'hibernate-warn': [sessionId: string, graceSecs: number]
   'hibernate-cancelled': [sessionId: string]
   hibernated: [sessionId: string]
+  // Per-process CPU/RSS sampler snapshot, keyed by sessionId. Dual-emitted
+  // alongside the legacy `pty:stats` webContents.send (host poller).
+  stats: [stats: Record<string, { cpu: number; rss: number }>]
+  // PTY dimensions need a renderer-side re-fit (e.g. after floating-agent
+  // reattach). Dual-emitted alongside the legacy `pty:resize-needed` send.
+  'resize-needed': [sessionId: string]
 }
 
 export const ptyEvents = new TypedEmitter<PtyEventMap>()
@@ -2671,14 +2677,22 @@ export function broadcastRespawnRequest(taskId: string): void {
 let nextEnsureAliveReqId = 1
 const pendingEnsureAliveAcks = new Map<number, (result: 'ok' | 'already-alive' | 'error') => void>()
 
+/** Resolve a pending ensure-alive waiter by reqId. Shared by the legacy
+ *  `pty:ensure-alive:ack` IPC and the tRPC `pty.ackEnsureAlive` mutation
+ *  (dual-emit) — both feed the same `pendingEnsureAliveAcks` map. */
+export function ackEnsureAlive(
+  reqId: number,
+  result: 'ok' | 'already-alive' | 'error'
+): void {
+  const resolve = pendingEnsureAliveAcks.get(reqId)
+  if (!resolve) return
+  pendingEnsureAliveAcks.delete(reqId)
+  resolve(result)
+}
+
 ipcMain.on(
   'pty:ensure-alive:ack',
-  (_e, reqId: number, result: 'ok' | 'already-alive' | 'error') => {
-    const resolve = pendingEnsureAliveAcks.get(reqId)
-    if (!resolve) return
-    pendingEnsureAliveAcks.delete(reqId)
-    resolve(result)
-  }
+  (_e, reqId: number, result: 'ok' | 'already-alive' | 'error') => ackEnsureAlive(reqId, result)
 )
 
 const ENSURE_ALIVE_RETRY_MS = 250

@@ -10,6 +10,7 @@ import {
   killPty,
   touchPty,
   interruptPty,
+  ackEnsureAlive,
   hasPty,
   getBuffer,
   clearBuffer,
@@ -351,6 +352,8 @@ export function createPtyOps(db: SlayzoneDb) {
   const ptyKill = (sessionId: string) => killPty(sessionId)
   const ptyTouch = (sessionId: string) => touchPty(sessionId)
   const ptyInterrupt = (sessionId: string) => interruptPty(sessionId)
+  const ptyAckEnsureAlive = (reqId: number, result: 'ok' | 'already-alive' | 'error') =>
+    ackEnsureAlive(reqId, result)
   const ptyExists = (sessionId: string) => hasPty(sessionId)
   const ptyGetBuffer = (sessionId: string) => getBuffer(sessionId)
   const ptyClearBuffer = (sessionId: string) => clearBuffer(sessionId)
@@ -401,6 +404,7 @@ export function createPtyOps(db: SlayzoneDb) {
     ptyKill,
     ptyTouch,
     ptyInterrupt,
+    ptyAckEnsureAlive,
     ptyExists,
     ptyGetBuffer,
     ptyClearBuffer,

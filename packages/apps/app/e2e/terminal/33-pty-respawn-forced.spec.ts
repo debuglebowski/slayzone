@@ -83,9 +83,11 @@ test.describe('Forced PTY respawn via REST', () => {
     // mounted in this signal-only test; we stand in for it.
     await mainWindow.evaluate((id) => {
       ;(window as unknown as { __ensureAliveCalls: string[] }).__ensureAliveCalls = []
-      window.api.pty.onEnsureAlive((t, reqId, _force) => {
-        ;(window as unknown as { __ensureAliveCalls: string[] }).__ensureAliveCalls.push(t)
-        window.api.pty.ackEnsureAlive(reqId, 'ok')
+      window.getTrpcVanillaClient().pty.onEnsureAlive.subscribe(undefined, {
+        onData: ({ taskId, reqId }) => {
+          ;(window as unknown as { __ensureAliveCalls: string[] }).__ensureAliveCalls.push(taskId)
+          void window.getTrpcVanillaClient().pty.ackEnsureAlive.mutate({ reqId, result: 'ok' })
+        }
       })
       return id
     }, task.id)
