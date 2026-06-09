@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Sparkles } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@slayzone/ui'
 import type { AiConfigItem, CliProvider } from '../shared'
 
@@ -19,6 +20,7 @@ export function LibraryItemPicker({
   onLoaded,
   onClose
 }: LibraryItemPickerProps) {
+  const trpcClient = useTRPCClient()
   const [items, setItems] = useState<AiConfigItem[]>([])
   const [enabledProviders, setEnabledProviders] = useState<CliProvider[]>([])
   const [loading, setLoading] = useState(false)
@@ -26,13 +28,13 @@ export function LibraryItemPicker({
   useEffect(() => {
     void (async () => {
       const [skills, providers] = await Promise.all([
-        window.api.aiConfig.listItems({ scope: 'library', type: 'skill' }),
-        window.api.aiConfig.getProjectProviders(projectId)
+        trpcClient.aiConfig.listItems.query({ scope: 'library', type: 'skill' }),
+        trpcClient.aiConfig.getProjectProviders.query({ projectId })
       ])
       setItems(skills)
       setEnabledProviders(providers)
     })()
-  }, [projectId])
+  }, [trpcClient, projectId])
 
   const alreadyLinked = (id: string) => existingLinks.includes(id)
 
@@ -40,7 +42,7 @@ export function LibraryItemPicker({
     if (alreadyLinked(item.id)) return
     setLoading(true)
     try {
-      await window.api.aiConfig.loadLibraryItem({
+      await trpcClient.aiConfig.loadLibraryItem.mutate({
         projectId,
         projectPath,
         itemId: item.id,

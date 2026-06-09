@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Library, Plus, Sparkles } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
 import type { AiConfigItem, AiConfigItemType, CliProvider } from '../shared'
@@ -39,6 +40,7 @@ export function AddItemPicker({
   existingLinks,
   onAdded
 }: AddItemPickerProps) {
+  const trpcClient = useTRPCClient()
   const [step, setStep] = useState<Step>('choose')
   const [libraryItems, setLibraryItems] = useState<AiConfigItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -54,7 +56,7 @@ export function AddItemPicker({
   useEffect(() => {
     if (!open || step !== 'library') return
     void (async () => {
-      const items = await window.api.aiConfig.listItems({ scope: 'library', type })
+      const items = await trpcClient.aiConfig.listItems.query({ scope: 'library', type })
       setLibraryItems(items)
     })()
   }, [open, step, type])
@@ -70,7 +72,7 @@ export function AddItemPicker({
     if (existingLinks.includes(item.id)) return
     setLoading(true)
     try {
-      await window.api.aiConfig.loadLibraryItem({
+      await trpcClient.aiConfig.loadLibraryItem.mutate({
         projectId,
         projectPath,
         itemId: item.id,
@@ -86,14 +88,14 @@ export function AddItemPicker({
   const handleCreateLocal = async () => {
     setLoading(true)
     try {
-      const existingItems = await window.api.aiConfig.listItems({
+      const existingItems = await trpcClient.aiConfig.listItems.query({
         scope: 'project',
         projectId,
         type
       })
       const existingSlugs = new Set(existingItems.map((item) => item.slug))
       const slug = nextAvailableSlug('new-skill', existingSlugs)
-      await window.api.aiConfig.createItem({
+      await trpcClient.aiConfig.createItem.mutate({
         type,
         scope: 'project',
         projectId,

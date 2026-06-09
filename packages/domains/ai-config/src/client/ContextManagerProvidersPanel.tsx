@@ -1,39 +1,37 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import { useTRPC } from '@slayzone/transport/client'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { cn, Switch, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import type { CliProvider, CliProviderInfo } from '../shared'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 
 export function ProvidersPanel() {
-  const [providers, setProviders] = useState<CliProviderInfo[]>([])
-  const [loading, setLoading] = useState(true)
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const providersQuery = useQuery(trpc.aiConfig.listProviders.queryOptions())
+  const toggleProvider = useMutation(
+    trpc.aiConfig.toggleProvider.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries(trpc.aiConfig.listProviders.queryFilter())
+    })
+  )
 
   useEffect(() => {
-    const fetch = async () => {
-      try {
-        const list = await window.api.aiConfig.listProviders()
-        setProviders(list)
-      } finally {
-        setLoading(false)
-      }
-    }
-    void fetch()
     const handler = () => {
-      void fetch()
+      void providersQuery.refetch()
     }
     window.addEventListener('sz:settings-changed', handler)
     return () => window.removeEventListener('sz:settings-changed', handler)
-  }, [])
+  }, [providersQuery])
+
+  const providers = providersQuery.data
 
   const handleToggle = async (provider: CliProviderInfo) => {
     if (provider.isDefault) return
     const newEnabled = !provider.enabled
-    await window.api.aiConfig.toggleProvider(provider.id, newEnabled)
-    setProviders((prev) =>
-      prev.map((p) => (p.id === provider.id ? { ...p, enabled: newEnabled } : p))
-    )
+    await toggleProvider.mutateAsync({ id: provider.id, enabled: newEnabled })
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
+  if (providers === undefined) return <p className="text-sm text-muted-foreground">Loading...</p>
 
   return (
     <div className="space-y-2">

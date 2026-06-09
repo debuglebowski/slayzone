@@ -1,14 +1,24 @@
+import type { useTRPCClient } from '@slayzone/transport/client'
 import type { McpServerConfig, McpTarget } from '../../shared'
 import { getConfigurableMcpTargets } from '../../shared/provider-registry'
 import type { CustomMcpServer } from './types'
 
-export async function loadCustomServers(): Promise<CustomMcpServer[]> {
-  const raw = await window.api.settings.get('mcp_custom_servers')
+/** Vanilla tRPC client shape (`client.<router>.<proc>.query/mutate(input)`). */
+type TrpcClient = ReturnType<typeof useTRPCClient>
+
+export async function loadCustomServers(trpcClient: TrpcClient): Promise<CustomMcpServer[]> {
+  const raw = await trpcClient.settings.get.query({ key: 'mcp_custom_servers' })
   return raw ? (JSON.parse(raw) as CustomMcpServer[]) : []
 }
 
-export async function saveCustomServers(servers: CustomMcpServer[]): Promise<void> {
-  await window.api.settings.set('mcp_custom_servers', JSON.stringify(servers))
+export async function saveCustomServers(
+  trpcClient: TrpcClient,
+  servers: CustomMcpServer[]
+): Promise<void> {
+  await trpcClient.settings.set.mutate({
+    key: 'mcp_custom_servers',
+    value: JSON.stringify(servers)
+  })
 }
 
 export function matchesSearch(query: string, ...fields: (string | undefined)[]) {

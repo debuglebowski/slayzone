@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { ProjectSkillStatus } from '../shared'
 import { AddItemPicker } from './AddItemPicker'
 import { SkillHelpCard } from './SkillHelpCard'
@@ -16,6 +17,7 @@ export function ItemSection({
   onOpenContextManager,
   onChanged
 }: ItemSectionProps) {
+  const trpcClient = useTRPCClient()
   const [showPicker, setShowPicker] = useState(false)
 
   const allItems = [
@@ -34,9 +36,9 @@ export function ItemSection({
 
   const handleRemove = async (itemId: string, isLocal: boolean) => {
     if (isLocal) {
-      await window.api.aiConfig.deleteItem(itemId)
+      await trpcClient.aiConfig.deleteItem.mutate({ id: itemId })
     } else {
-      await window.api.aiConfig.removeProjectSelection(projectId, itemId)
+      await trpcClient.aiConfig.removeProjectSelection.mutate({ projectId, itemId })
     }
     onChanged()
   }

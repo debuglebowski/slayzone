@@ -1,6 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   AddRegistryInput,
+  AiConfigItem,
   InstallSkillInput,
   ListEntriesInput,
   SkillRegistry,
@@ -239,7 +240,7 @@ export function createMarketplaceOps(db: SlayzoneDb) {
         `)
               .get(input.entryId)) as { id: string } | undefined)
       if (existing)
-        return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(existing.id)
+        return (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get()) as AiConfigItem
 
       const slug = entry.slug as string
       const content = entry.content as string
@@ -259,7 +260,7 @@ export function createMarketplaceOps(db: SlayzoneDb) {
               )
               .get(slug)) as { id: string } | undefined)
       if (slugConflict)
-        return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(slugConflict.id)
+        return (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get()) as AiConfigItem
 
       const id = crypto.randomUUID()
 
@@ -300,7 +301,7 @@ export function createMarketplaceOps(db: SlayzoneDb) {
           now
         )
 
-      return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(id)
+      return (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get()) as AiConfigItem
     },
     checkUpdates: async () => {
       const rows = (await db
@@ -351,7 +352,7 @@ export function createMarketplaceOps(db: SlayzoneDb) {
         )
         .run(JSON.stringify(metadata), itemId)
 
-      return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)
+      return (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get()) as AiConfigItem
     },
     updateSkill: async (itemId: string, entryId: string) => {
       const entry = (await db
@@ -388,7 +389,7 @@ export function createMarketplaceOps(db: SlayzoneDb) {
     `)
         .run(persistedContent, JSON.stringify(baseMetadata), now, itemId)
 
-      return await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get(itemId)
+      return (await db.prepare('SELECT * FROM ai_config_items WHERE id = ?').get()) as AiConfigItem
     }
   }
 }

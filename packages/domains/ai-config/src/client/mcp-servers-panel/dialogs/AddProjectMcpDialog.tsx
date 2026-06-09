@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Button,
   Dialog,
@@ -32,6 +33,7 @@ export function AddProjectMcpDialog({
   editTarget,
   editProviders
 }: AddProjectMcpDialogProps) {
+  const trpcClient = useTRPCClient()
   const [serverKey, setServerKey] = useState('')
   const [description, setDescription] = useState('')
   const [command, setCommand] = useState('')
@@ -78,7 +80,7 @@ export function AddProjectMcpDialog({
 
       if (keyChanged && editProviders) {
         for (const provider of editProviders) {
-          await window.api.aiConfig.removeMcpServer({
+          await trpcClient.aiConfig.removeMcpServer.mutate({
             projectPath,
             provider,
             serverKey: editTarget.originalKey
@@ -88,7 +90,7 @@ export function AddProjectMcpDialog({
 
       for (const [provider, enabled] of Object.entries(providers)) {
         if (!enabled) continue
-        await window.api.aiConfig.writeMcpServer({
+        await trpcClient.aiConfig.writeMcpServer.mutate({
           projectPath,
           provider: provider as McpTarget,
           serverKey: serverKey.trim(),
@@ -97,7 +99,7 @@ export function AddProjectMcpDialog({
       }
 
       // Persist metadata (description) to computer custom servers list
-      let existing = await loadCustomServers()
+      let existing = await loadCustomServers(trpcClient)
       if (keyChanged && editTarget) {
         existing = existing.filter((s) => s.id !== editTarget.originalKey)
       }
@@ -107,7 +109,7 @@ export function AddProjectMcpDialog({
         description: description.trim() || undefined,
         config
       }
-      await saveCustomServers([...existing.filter((s) => s.id !== entry.id), entry])
+      await saveCustomServers(trpcClient, [...existing.filter((s) => s.id !== entry.id), entry])
 
       reset()
       onAdded()

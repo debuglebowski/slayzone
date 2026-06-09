@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import { repairSkillFrontmatter } from '../shared'
 import type { AiConfigItem, CliProvider, ProjectSkillStatus } from '../shared'
@@ -24,6 +25,7 @@ export function useSkillItem({
   projectPath: string
   onChanged: () => void
 }) {
+  const trpcClient = useTRPCClient()
   const [slug, setSlugRaw] = useState(item.slug)
   const [content, setContent] = useState(item.content)
   const validation = getSkillValidation({
@@ -66,14 +68,14 @@ export function useSkillItem({
   const saveContent = useCallback(
     async (text: string) => {
       try {
-        await window.api.aiConfig.updateItem({ id: item.id, content: text })
+        await trpcClient.aiConfig.updateItem.mutate({ id: item.id, content: text })
         setExpectedContents({})
         onChanged()
       } catch {
         /* silent */
       }
     },
-    [item.id, onChanged]
+    [trpcClient, item.id, onChanged]
   )
 
   const handleContentChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -93,7 +95,7 @@ export function useSkillItem({
   const handleSlugSave = async () => {
     setSavingSlug(true)
     try {
-      await window.api.aiConfig.updateItem({ id: item.id, slug })
+      await trpcClient.aiConfig.updateItem.mutate({ id: item.id, slug })
       setSlugDirty(false)
       setExpectedContents({})
       onChanged()
@@ -106,7 +108,7 @@ export function useSkillItem({
 
   const handleRevert = async () => {
     try {
-      await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id)
+      await trpcClient.aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id })
       toast.success(`Reverted ${item.slug} to library`)
       onChanged()
     } catch (err) {
@@ -117,13 +119,13 @@ export function useSkillItem({
   const loadDiskAndExpected = useCallback(
     async (provider: CliProvider) => {
       const [disk, expected] = await Promise.all([
-        window.api.aiConfig.readProviderSkill(projectPath, provider, item.id),
-        window.api.aiConfig.getExpectedSkillContent(projectPath, provider, item.id)
+        trpcClient.aiConfig.readProviderSkill.query({ projectPath, provider, itemId: item.id }),
+        trpcClient.aiConfig.getExpectedSkillContent.query({ projectPath, provider, itemId: item.id })
       ])
       setDiskContents((prev) => ({ ...prev, [provider]: disk.exists ? disk.content : '' }))
       setExpectedContents((prev) => ({ ...prev, [provider]: expected }))
     },
-    [projectPath, item.id]
+    [trpcClient, projectPath, item.id]
   )
 
   const toggleExpanded = (provider: CliProvider) => {
@@ -142,7 +144,12 @@ export function useSkillItem({
   const handlePush = async (provider: CliProvider) => {
     setSyncingProvider(provider)
     try {
-      await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id, provider)
+      await trpcClient.aiConfig.syncLinkedFile.mutate({
+        projectId,
+        projectPath,
+        itemId: item.id,
+        provider
+      })
       const expected = expectedContents[provider]
       if (expected !== undefined) {
         setDiskContents((prev) => ({ ...prev, [provider]: expected }))
@@ -156,7 +163,12 @@ export function useSkillItem({
   const handlePull = async (provider: CliProvider) => {
     setPullingProvider(provider)
     try {
-      await window.api.aiConfig.pullProviderSkill(projectId, projectPath, provider, item.id)
+      await trpcClient.aiConfig.pullProviderSkill.mutate({
+        projectId,
+        projectPath,
+        provider,
+        itemId: item.id
+      })
       onChanged()
     } finally {
       setPullingProvider(null)
@@ -166,7 +178,7 @@ export function useSkillItem({
   const handleSyncAll = async () => {
     setSyncingAll(true)
     try {
-      await window.api.aiConfig.syncLinkedFile(projectId, projectPath, item.id)
+      await trpcClient.aiConfig.syncLinkedFile.mutate({ projectId, projectPath, itemId: item.id })
       const updated: Partial<Record<CliProvider, string>> = {}
       for (const { provider } of providerRows) {
         const expected = expectedContents[provider]
@@ -183,7 +195,7 @@ export function useSkillItem({
     const nextContent = repairSkillFrontmatter(item.slug, content)
     setContent(nextContent)
     try {
-      await window.api.aiConfig.updateItem({ id: item.id, content: nextContent })
+      await trpcClient.aiConfig.updateItem.mutate({ id: item.id, content: nextContent })
       setExpectedContents({})
       onChanged()
     } catch {

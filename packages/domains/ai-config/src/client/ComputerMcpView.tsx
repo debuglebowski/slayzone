@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Plus, Trash2, Lock, Server } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Input } from '@slayzone/ui'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 import type { CliProvider, McpConfigFileResult } from '../shared'
 
 export function ComputerMcpView() {
+  const trpcClient = useTRPCClient()
   const [configs, setConfigs] = useState<McpConfigFileResult[]>([])
   const [loading, setLoading] = useState(true)
   const [addingTo, setAddingTo] = useState<CliProvider | null>(null)
@@ -15,11 +17,11 @@ export function ComputerMcpView() {
   const loadConfigs = useCallback(async () => {
     setLoading(true)
     try {
-      setConfigs(await window.api.aiConfig.discoverComputerMcpConfigs())
+      setConfigs(await trpcClient.aiConfig.discoverComputerMcpConfigs.query())
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [trpcClient])
 
   useEffect(() => {
     void loadConfigs()
@@ -28,7 +30,7 @@ export function ComputerMcpView() {
   const handleAddServer = useCallback(
     async (provider: CliProvider) => {
       if (!newServerKey.trim() || !newServerCommand.trim()) return
-      await window.api.aiConfig.writeComputerMcpServer({
+      await trpcClient.aiConfig.writeComputerMcpServer.mutate({
         provider,
         serverKey: newServerKey.trim(),
         config: {
@@ -42,15 +44,15 @@ export function ComputerMcpView() {
       setNewServerArgs('')
       void loadConfigs()
     },
-    [newServerKey, newServerCommand, newServerArgs, loadConfigs]
+    [trpcClient, newServerKey, newServerCommand, newServerArgs, loadConfigs]
   )
 
   const handleRemoveServer = useCallback(
     async (provider: CliProvider, serverKey: string) => {
-      await window.api.aiConfig.removeComputerMcpServer({ provider, serverKey })
+      await trpcClient.aiConfig.removeComputerMcpServer.mutate({ provider, serverKey })
       void loadConfigs()
     },
-    [loadConfigs]
+    [trpcClient, loadConfigs]
   )
 
   if (loading) {

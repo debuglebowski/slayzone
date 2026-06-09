@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { ContextTreeEntry } from '../shared'
 import { useContextManagerStore } from './useContextManagerStore'
 import { collectExpandedFolders } from './ProjectContextTree.utils'
@@ -13,6 +14,7 @@ interface UseProjectContextTreeArgs {
  * The component consuming this stays a thin rendering layer.
  */
 export function useProjectContextTree({ projectPath, projectId }: UseProjectContextTreeArgs) {
+  const trpcClient = useTRPCClient()
   const [entries, setEntries] = useState<ContextTreeEntry[]>([])
   const [loading, setLoading] = useState(false)
   const selectedPath = useContextManagerStore((s) => s.projectSelectedPath)
@@ -45,7 +47,7 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
   const loadTree = useCallback(async () => {
     setLoading(true)
     try {
-      const tree = await window.api.aiConfig.getContextTree(projectPath, projectId)
+      const tree = await trpcClient.aiConfig.getContextTree.query({ projectPath, projectId })
       setEntries(tree)
       // Auto-expand all folders on first load
       const folders = collectExpandedFolders(tree)
@@ -53,7 +55,7 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
     } finally {
       setLoading(false)
     }
-  }, [projectPath, projectId])
+  }, [trpcClient, projectPath, projectId])
 
   useEffect(() => {
     void loadTree()
@@ -70,11 +72,18 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
 
   const openFile = async (entry: ContextTreeEntry) => {
     if (!entry.exists) {
-      await window.api.aiConfig.writeContextFile(entry.path, '', projectPath)
+      await trpcClient.aiConfig.writeContextFile.mutate({
+        filePath: entry.path,
+        content: '',
+        projectPath
+      })
       await loadTree()
     }
     try {
-      const text = await window.api.aiConfig.readContextFile(entry.path, projectPath)
+      const text = await trpcClient.aiConfig.readContextFile.query({
+        filePath: entry.path,
+        projectPath
+      })
       setContent(text)
       setOriginalContent(text)
       setSelectedPath(entry.path)
@@ -89,7 +98,11 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
     setSaving(true)
     setMessage('')
     try {
-      await window.api.aiConfig.writeContextFile(selectedPath, content, projectPath)
+      await trpcClient.aiConfig.writeContextFile.mutate({
+        filePath: selectedPath,
+        content,
+        projectPath
+      })
       setOriginalContent(content)
       setMessage('Saved')
       await loadTree()
@@ -103,14 +116,17 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
   const handleSync = async (entry: ContextTreeEntry) => {
     if (!entry.linkedItemId) return
     try {
-      const updated = await window.api.aiConfig.syncLinkedFile(
+      const updated = await trpcClient.aiConfig.syncLinkedFile.mutate({
         projectId,
         projectPath,
-        entry.linkedItemId
-      )
+        itemId: entry.linkedItemId
+      })
       setEntries((prev) => prev.map((e) => (e.path === updated.path ? updated : e)))
       if (selectedPath === entry.path) {
-        const text = await window.api.aiConfig.readContextFile(entry.path, projectPath)
+        const text = await trpcClient.aiConfig.readContextFile.query({
+          filePath: entry.path,
+          projectPath
+        })
         setContent(text)
         setOriginalContent(text)
       }
@@ -122,7 +138,7 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
 
   const handleUnlink = async (entry: ContextTreeEntry) => {
     if (!entry.linkedItemId) return
-    await window.api.aiConfig.unlinkFile(projectId, entry.linkedItemId)
+    await trpcClient.aiConfig.unlinkFile.mutate({ projectId, itemId: entry.linkedItemId })
     await loadTree()
   }
 
@@ -135,7 +151,11 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
     if (!renamingEntry || !renameValue.trim()) return
     const newPath = renameValue.startsWith('/') ? renameValue : `${projectPath}/${renameValue}`
     try {
-      await window.api.aiConfig.renameContextFile(renamingEntry.path, newPath, projectPath)
+      await trpcClient.aiConfig.renameContextFile.mutate({
+        oldPath: renamingEntry.path,
+        newPath,
+        projectPath
+      })
       if (selectedPath === renamingEntry.path) setSelectedPath(newPath)
       await loadTree()
     } catch (err) {
@@ -147,7 +167,11 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
   }
 
   const handleDelete = async (entry: ContextTreeEntry) => {
-    await window.api.aiConfig.deleteContextFile(entry.path, projectPath, projectId)
+    await trpcClient.aiConfig.deleteContextFile.mutate({
+      filePath: entry.path,
+      projectPath,
+      projectId
+    })
     if (selectedPath === entry.path) {
       setSelectedPath(null)
       setContent('')
@@ -160,7 +184,11 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
     if (!newFilePath.trim()) return
     const filePath = newFilePath.startsWith('/') ? newFilePath : `${projectPath}/${newFilePath}`
     try {
-      await window.api.aiConfig.writeContextFile(filePath, '', projectPath)
+      await trpcClient.aiConfig.writeContextFile.mutate({
+        filePath,
+        content: '',
+        projectPath
+      })
       await loadTree()
       setCreatingFile(false)
       setNewFilePath('')
@@ -178,7 +206,7 @@ export function useProjectContextTree({ projectPath, projectId }: UseProjectCont
     setSyncing(true)
     setMessage('')
     try {
-      const result = await window.api.aiConfig.syncAll({ projectId, projectPath })
+      const result = await trpcClient.aiConfig.syncAll.mutate({ projectId, projectPath })
       const parts: string[] = []
       if (result.written.length) parts.push(`${result.written.length} written`)
       if (result.conflicts.length) parts.push(`${result.conflicts.length} conflicts`)

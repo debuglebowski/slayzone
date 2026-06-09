@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Button,
   Dialog,
@@ -24,6 +25,7 @@ export function AddComputerMcpDialog({
   onAdded,
   editTarget
 }: AddComputerMcpDialogProps) {
+  const trpcClient = useTRPCClient()
   const [serverKey, setServerKey] = useState('')
   const [description, setDescription] = useState('')
   const [command, setCommand] = useState('')
@@ -58,7 +60,7 @@ export function AddComputerMcpDialog({
     if (!serverKey.trim() || !command.trim()) return
     setSaving(true)
     try {
-      let existing = await loadCustomServers()
+      let existing = await loadCustomServers(trpcClient)
       if (editTarget && editTarget.originalKey !== serverKey.trim()) {
         existing = existing.filter((s) => s.id !== editTarget.originalKey)
       }
@@ -68,7 +70,7 @@ export function AddComputerMcpDialog({
         description: description.trim() || undefined,
         config: buildConfig(command, args, envVars)
       }
-      await saveCustomServers([...existing.filter((s) => s.id !== entry.id), entry])
+      await saveCustomServers(trpcClient, [...existing.filter((s) => s.id !== entry.id), entry])
       reset()
       onAdded()
       onOpenChange(false)

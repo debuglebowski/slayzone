@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { CURATED_MCP_SERVERS } from '../../shared/mcp-registry'
 import { loadCustomServers, matchesSearch, saveCustomServers } from './mcp-helpers'
 import type { CustomMcpServer, EditTarget } from './types'
 
 export function useComputerMcpServers() {
+  const trpcClient = useTRPCClient()
   const [favorites, setFavorites] = useState<string[]>([])
   const [customServers, setCustomServers] = useState<CustomMcpServer[]>([])
   const [search, setSearch] = useState('')
@@ -11,26 +13,26 @@ export function useComputerMcpServers() {
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null)
 
   const loadCustom = useCallback(async () => {
-    setCustomServers(await loadCustomServers())
-  }, [])
+    setCustomServers(await loadCustomServers(trpcClient))
+  }, [trpcClient])
 
   useEffect(() => {
-    void window.api.settings.get('mcp_favorites').then((raw) => {
+    void trpcClient.settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
       if (raw) setFavorites(JSON.parse(raw) as string[])
     })
     void loadCustom()
-  }, [loadCustom])
+  }, [trpcClient, loadCustom])
 
   const toggleFavorite = async (id: string) => {
     const next = favorites.includes(id) ? favorites.filter((f) => f !== id) : [...favorites, id]
     setFavorites(next)
-    await window.api.settings.set('mcp_favorites', JSON.stringify(next))
+    await trpcClient.settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
   }
 
   const deleteCustomServer = async (id: string) => {
     const next = customServers.filter((s) => s.id !== id)
     setCustomServers(next)
-    await saveCustomServers(next)
+    await saveCustomServers(trpcClient, next)
   }
 
   const editCustomServer = (server: CustomMcpServer) => {

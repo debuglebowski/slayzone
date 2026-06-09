@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { cn, Switch } from '@slayzone/ui'
 import type { CliProvider, CliProviderInfo } from '../shared'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
@@ -10,24 +11,25 @@ interface ProviderChipsProps {
 }
 
 export function ProviderChips({ projectId, layout = 'panel', onChange }: ProviderChipsProps) {
+  const trpcClient = useTRPCClient()
   const [allProviders, setAllProviders] = useState<CliProviderInfo[]>([])
   const [enabled, setEnabled] = useState<CliProvider[]>([])
 
   useEffect(() => {
     void (async () => {
       const [providers, projectProviders] = await Promise.all([
-        window.api.aiConfig.listProviders(),
-        window.api.aiConfig.getProjectProviders(projectId)
+        trpcClient.aiConfig.listProviders.query(),
+        trpcClient.aiConfig.getProjectProviders.query({ projectId })
       ])
       setAllProviders(providers.filter((p) => p.status === 'active'))
       setEnabled(projectProviders)
     })()
-  }, [projectId])
+  }, [trpcClient, projectId])
 
   const toggle = async (kind: CliProvider) => {
     const next = enabled.includes(kind) ? enabled.filter((p) => p !== kind) : [...enabled, kind]
     setEnabled(next)
-    await window.api.aiConfig.setProjectProviders(projectId, next)
+    await trpcClient.aiConfig.setProjectProviders.mutate({ projectId, providers: next })
     onChange?.()
   }
 

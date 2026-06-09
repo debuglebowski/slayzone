@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
 import { File, FilePlus, Save } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Label, Textarea, cn } from '@slayzone/ui'
 import type { ContextFileInfo } from '../shared'
 
@@ -8,6 +9,7 @@ interface ContextFilesPanelProps {
 }
 
 export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
+  const trpcClient = useTRPCClient()
   const [files, setFiles] = useState<ContextFileInfo[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [content, setContent] = useState('')
@@ -17,9 +19,11 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
   const [message, setMessage] = useState('')
 
   const discover = useCallback(async () => {
-    const discovered = await window.api.aiConfig.discoverContextFiles(projectPath ?? '')
+    const discovered = await trpcClient.aiConfig.discoverContextFiles.query({
+      projectPath: projectPath ?? ''
+    })
     setFiles(discovered)
-  }, [projectPath])
+  }, [trpcClient, projectPath])
 
   useEffect(() => {
     void discover()
@@ -29,7 +33,10 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
     setLoading(true)
     setMessage('')
     try {
-      const text = await window.api.aiConfig.readContextFile(filePath, projectPath ?? '')
+      const text = await trpcClient.aiConfig.readContextFile.query({
+        filePath,
+        projectPath: projectPath ?? ''
+      })
       setContent(text)
       setOriginalContent(text)
       setSelectedPath(filePath)
@@ -43,7 +50,11 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
   const createFile = async (filePath: string) => {
     setMessage('')
     try {
-      await window.api.aiConfig.writeContextFile(filePath, '', projectPath ?? '')
+      await trpcClient.aiConfig.writeContextFile.mutate({
+        filePath,
+        content: '',
+        projectPath: projectPath ?? ''
+      })
       await discover()
       setContent('')
       setOriginalContent('')
@@ -59,7 +70,11 @@ export function ContextFilesPanel({ projectPath }: ContextFilesPanelProps) {
     setSaving(true)
     setMessage('')
     try {
-      await window.api.aiConfig.writeContextFile(selectedPath, content, projectPath ?? '')
+      await trpcClient.aiConfig.writeContextFile.mutate({
+        filePath: selectedPath,
+        content,
+        projectPath: projectPath ?? ''
+      })
       setOriginalContent(content)
       setMessage('Saved')
     } catch (err) {

@@ -22,6 +22,7 @@ import {
   TooltipTrigger,
   cn
 } from '@slayzone/ui'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { useWatchedFile } from '@slayzone/file-editor/client/useWatchedFile'
 import type { AiConfigItem, CliProvider, SyncHealth, SyncReason } from '../shared'
 import { PROVIDER_PATHS, PROVIDER_LABELS } from '../shared/provider-registry'
@@ -81,6 +82,7 @@ function dedupeProviderFiles(
 }
 
 export function ProjectInstructions({ projectId, projectPath }: ProjectInstructionsProps) {
+  const trpcClient = useTRPCClient()
   const [providerHealth, setProviderHealth] = useState<
     Partial<
       Record<
@@ -138,15 +140,18 @@ export function ProjectInstructions({ projectId, projectPath }: ProjectInstructi
     setLoading(true)
     try {
       const [result, variant] = await Promise.all([
-        window.api.aiConfig.getRootInstructions(projectId!, projectPath!),
-        window.api.aiConfig.getProjectInstructionVariant(projectId!)
+        trpcClient.aiConfig.getRootInstructions.query({
+          projectId: projectId!,
+          projectPath: projectPath!
+        }),
+        trpcClient.aiConfig.getProjectInstructionVariant.query({ projectId: projectId! })
       ])
       setProviderHealth(result.providerHealth ?? {})
       setLinkedVariant(variant ?? null)
     } finally {
       setLoading(false)
     }
-  }, [isProject, projectId, projectPath])
+  }, [trpcClient, isProject, projectId, projectPath])
 
   useEffect(() => {
     void load()
@@ -159,49 +164,55 @@ export function ProjectInstructions({ projectId, projectPath }: ProjectInstructi
     relPath: !linkedVariant && selectedFile ? selectedFile.path : null,
     read: useCallback(async () => {
       if (!projectPath || !selectedProvider) return null
-      const r = await window.api.aiConfig.readProviderInstructions(projectPath, selectedProvider)
+      const r = await trpcClient.aiConfig.readProviderInstructions.query({
+        projectPath,
+        provider: selectedProvider
+      })
       return r.content
-    }, [projectPath, selectedProvider]),
+    }, [trpcClient, projectPath, selectedProvider]),
     save: useCallback(
       async (content: string) => {
         if (!projectId || !projectPath || !selectedProvider) return
-        const result = await window.api.aiConfig.pushProviderInstructions(
+        const result = await trpcClient.aiConfig.pushProviderInstructions.mutate({
           projectId,
           projectPath,
-          selectedProvider,
+          provider: selectedProvider,
           content
-        )
+        })
         setProviderHealth(result.providerHealth ?? {})
       },
-      [projectId, projectPath, selectedProvider]
+      [trpcClient, projectId, projectPath, selectedProvider]
     )
   })
 
   const openPicker = useCallback(async () => {
-    const items = await window.api.aiConfig.listInstructionVariants()
+    const items = await trpcClient.aiConfig.listInstructionVariants.query()
     setVariants(items)
     setPickerOpen(true)
-  }, [])
+  }, [trpcClient])
 
   const handleLink = useCallback(
     async (variantId: string) => {
       if (!projectId) return
-      await window.api.aiConfig.setProjectInstructionVariant(
+      await trpcClient.aiConfig.setProjectInstructionVariant.mutate({
         projectId,
-        variantId,
-        projectPath ?? undefined
-      )
+        variantItemId: variantId,
+        projectPath: projectPath ?? undefined
+      })
       setPickerOpen(false)
       void load()
     },
-    [projectId, projectPath, load]
+    [trpcClient, projectId, projectPath, load]
   )
 
   const handleUnlink = useCallback(async () => {
     if (!projectId) return
-    await window.api.aiConfig.setProjectInstructionVariant(projectId, null)
+    await trpcClient.aiConfig.setProjectInstructionVariant.mutate({
+      projectId,
+      variantItemId: null
+    })
     void load()
-  }, [projectId, load])
+  }, [trpcClient, projectId, load])
 
   // Resizable split (custom mode only)
   const [splitWidth, setSplitWidth] = useState(350)

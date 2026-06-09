@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { CliProvider, McpConfigFileResult, McpServerConfig, McpTarget } from '../../shared'
 import { CURATED_MCP_SERVERS } from '../../shared/mcp-registry'
 import { ALL_PROVIDERS, loadCustomServers, matchesSearch } from './mcp-helpers'
 import type { CustomMcpServer, EditTarget, MergedServer } from './types'
 
 export function useProjectMcpServers(projectPath: string, projectId: string) {
+  const trpcClient = useTRPCClient()
   const [enabledProviders, setEnabledProviders] = useState<CliProvider[]>([])
   const [configs, setConfigs] = useState<McpConfigFileResult[]>([])
   const [customServers, setCustomServers] = useState<CustomMcpServer[]>([])
@@ -19,9 +21,9 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
     setLoading(true)
     try {
       const [results, custom, providers] = await Promise.all([
-        window.api.aiConfig.discoverMcpConfigs(projectPath),
-        loadCustomServers(),
-        window.api.aiConfig.getProjectProviders(projectId)
+        trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath }),
+        loadCustomServers(trpcClient),
+        trpcClient.aiConfig.getProjectProviders.query({ projectId })
       ])
       setConfigs(results)
       setCustomServers(custom)
@@ -29,7 +31,7 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
     } finally {
       setLoading(false)
     }
-  }, [projectPath, projectId])
+  }, [trpcClient, projectPath, projectId])
 
   useEffect(() => {
     void loadConfigs()
@@ -41,10 +43,10 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
   )
 
   useEffect(() => {
-    void window.api.settings.get('mcp_favorites').then((raw) => {
+    void trpcClient.settings.get.query({ key: 'mcp_favorites' }).then((raw) => {
       if (raw) setFavorites(JSON.parse(raw) as string[])
     })
-  }, [])
+  }, [trpcClient])
 
   const writableProviders = useMemo(
     () => new Set(configs.filter((cfg) => cfg.writable).map((cfg) => cfg.provider)),
@@ -54,7 +56,7 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
   const toggleFavorite = async (id: string) => {
     const next = favorites.includes(id) ? favorites.filter((f) => f !== id) : [...favorites, id]
     setFavorites(next)
-    await window.api.settings.set('mcp_favorites', JSON.stringify(next))
+    await trpcClient.settings.set.mutate({ key: 'mcp_favorites', value: JSON.stringify(next) })
   }
 
   const isFavorite = (id: string) => favorites.includes(id)
@@ -118,7 +120,7 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
     if (!config) return
     for (const provider of enabledMcpTargets) {
       if (server.providers.includes(provider)) continue
-      await window.api.aiConfig.writeMcpServer({
+      await trpcClient.aiConfig.writeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key,
@@ -131,7 +133,7 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
   const disableServer = async (server: MergedServer) => {
     for (const provider of server.providers) {
       if (!writableProviders.has(provider)) continue
-      await window.api.aiConfig.removeMcpServer({
+      await trpcClient.aiConfig.removeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key

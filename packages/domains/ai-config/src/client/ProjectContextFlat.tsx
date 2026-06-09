@@ -9,6 +9,7 @@ import {
   Sparkles,
   type LucideIcon
 } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Tooltip, TooltipContent, TooltipTrigger, cn, toast } from '@slayzone/ui'
 import type {
   AiConfigItem,
@@ -271,6 +272,7 @@ export function ProjectContextFlat({
   projectPath,
   onOpenContextManager
 }: ProjectContextFlatProps) {
+  const trpcClient = useTRPCClient()
   const [data, setData] = useState<ContextData | null>(null)
   const [version, setVersion] = useState(0)
   const [syncingMode, setSyncingMode] = useState<'sync' | 'reset' | null>(null)
@@ -284,12 +286,12 @@ export function ProjectContextFlat({
       try {
         const [skillsStatus, localItems, enabledProviders, instructions, contextTree, mcpConfigs] =
           await Promise.all([
-            window.api.aiConfig.getProjectSkillsStatus(projectId, projectPath),
-            window.api.aiConfig.listItems({ scope: 'project', projectId }),
-            window.api.aiConfig.getProjectProviders(projectId),
-            window.api.aiConfig.getRootInstructions(projectId, projectPath),
-            window.api.aiConfig.getContextTree(projectPath, projectId),
-            window.api.aiConfig.discoverMcpConfigs(projectPath)
+            trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
+            trpcClient.aiConfig.listItems.query({ scope: 'project', projectId }),
+            trpcClient.aiConfig.getProjectProviders.query({ projectId }),
+            trpcClient.aiConfig.getRootInstructions.query({ projectId, projectPath }),
+            trpcClient.aiConfig.getContextTree.query({ projectPath, projectId }),
+            trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath })
           ])
         if (stale) return
         setData({
@@ -316,7 +318,7 @@ export function ProjectContextFlat({
     if (!data) return
     setSyncingMode('sync')
     try {
-      const result = await window.api.aiConfig.syncAll({
+      const result = await trpcClient.aiConfig.syncAll.mutate({
         projectId,
         projectPath
       })
@@ -336,7 +338,7 @@ export function ProjectContextFlat({
   const handleResetAndSync = async () => {
     setSyncingMode('reset')
     try {
-      const result = await window.api.aiConfig.syncAll({
+      const result = await trpcClient.aiConfig.syncAll.mutate({
         projectId,
         projectPath,
         pruneUnmanaged: true

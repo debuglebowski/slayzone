@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, Check, Circle, File, FilePlus, Link, RefreshCw } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, FileTree, Textarea, cn, fileTreeIndent } from '@slayzone/ui'
 import type { CliProvider, ContextTreeEntry } from '../shared'
 
@@ -60,6 +61,7 @@ function ProviderBadge({ provider }: { provider?: CliProvider }) {
 const getRelativePath = (entry: ContextTreeEntry) => entry.relativePath
 
 export function ProjectContextFilesView({ projectPath, projectId }: ProjectContextFilesViewProps) {
+  const trpcClient = useTRPCClient()
   const [entries, setEntries] = useState<ContextTreeEntry[]>([])
   const [loadingTree, setLoadingTree] = useState(false)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -71,7 +73,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
   const loadTree = useCallback(async () => {
     setLoadingTree(true)
     try {
-      const tree = await window.api.aiConfig.getContextTree(projectPath, projectId)
+      const tree = await trpcClient.aiConfig.getContextTree.query({ projectPath, projectId })
       setEntries(tree)
       const folders = new Set<string>()
       for (const entry of tree) {
@@ -88,7 +90,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
     } finally {
       setLoadingTree(false)
     }
-  }, [projectId, projectPath])
+  }, [trpcClient, projectId, projectPath])
 
   useEffect(() => {
     void loadTree()
@@ -114,7 +116,10 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
       setLoadingFile(true)
       setMessage('')
       try {
-        const content = await window.api.aiConfig.readContextFile(entry.path, projectPath)
+        const content = await trpcClient.aiConfig.readContextFile.query({
+          filePath: entry.path,
+          projectPath
+        })
         setSelectedPath(entry.path)
         setSelectedContent(content)
       } catch {
@@ -123,7 +128,7 @@ export function ProjectContextFilesView({ projectPath, projectId }: ProjectConte
         setLoadingFile(false)
       }
     },
-    [projectPath]
+    [trpcClient, projectPath]
   )
 
   const renderContextFile = useCallback(

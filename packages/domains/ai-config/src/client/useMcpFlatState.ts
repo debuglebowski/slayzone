@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type {
   CliProvider,
   McpConfigFileResult,
@@ -21,6 +22,7 @@ interface UseMcpFlatStateArgs {
 }
 
 export function useMcpFlatState({ projectPath, enabledProviders }: UseMcpFlatStateArgs) {
+  const trpcClient = useTRPCClient()
   const [configs, setConfigs] = useState<McpConfigFileResult[]>([])
   const [computerCustomServerIds, setComputerCustomServerIds] = useState<Set<string>>(new Set())
   const [draftByServerKey, setDraftByServerKey] = useState<Record<string, McpServerConfig>>({})
@@ -52,15 +54,15 @@ export function useMcpFlatState({ projectPath, enabledProviders }: UseMcpFlatSta
     setLoading(true)
     try {
       const [results, customServersRaw] = await Promise.all([
-        window.api.aiConfig.discoverMcpConfigs(projectPath),
-        window.api.settings.get('mcp_custom_servers')
+        trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath }),
+        trpcClient.settings.get.query({ key: 'mcp_custom_servers' })
       ])
       setConfigs(results)
       setComputerCustomServerIds(parseComputerCustomServerIds(customServersRaw))
     } finally {
       setLoading(false)
     }
-  }, [projectPath])
+  }, [trpcClient, projectPath])
 
   useEffect(() => {
     void loadConfigs()

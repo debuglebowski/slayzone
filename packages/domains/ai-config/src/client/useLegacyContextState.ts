@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { buildDefaultSkillContent } from '../shared'
 import type { AiConfigItem, UpdateAiConfigItemInput } from '../shared'
 import type { ContextManagerSection, Section } from './ContextManagerSettings.types'
 import { nextAvailableSlug } from './ContextManagerSettings.utils'
 
 export function useLegacyContextState(initialSection: ContextManagerSection | null) {
+  const trpcClient = useTRPCClient()
   const [section, setSection] = useState<Section | null>(initialSection)
   const [items, setItems] = useState<AiConfigItem[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -18,7 +20,7 @@ export function useLegacyContextState(initialSection: ContextManagerSection | nu
     if (!isItemSection) return
     setLoading(true)
     try {
-      const rows = await window.api.aiConfig.listItems({
+      const rows = await trpcClient.aiConfig.listItems.query({
         scope: 'library',
         type: 'skill'
       })
@@ -26,7 +28,7 @@ export function useLegacyContextState(initialSection: ContextManagerSection | nu
     } finally {
       setLoading(false)
     }
-  }, [section, isItemSection])
+  }, [trpcClient, section, isItemSection])
 
   useEffect(() => {
     void loadItems()
@@ -41,7 +43,7 @@ export function useLegacyContextState(initialSection: ContextManagerSection | nu
     if (!isItemSection) return
     const existingSlugs = new Set(items.map((item) => item.slug))
     const slug = nextAvailableSlug('new-skill', existingSlugs)
-    const created = await window.api.aiConfig.createItem({
+    const created = await trpcClient.aiConfig.createItem.mutate({
       type: 'skill',
       scope: 'library',
       slug,
@@ -52,13 +54,13 @@ export function useLegacyContextState(initialSection: ContextManagerSection | nu
   }
 
   const handleUpdate = async (itemId: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await window.api.aiConfig.updateItem({ id: itemId, ...patch })
+    const updated = await trpcClient.aiConfig.updateItem.mutate({ id: itemId, ...patch })
     if (!updated) return
     setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
   }
 
   const handleDelete = async (itemId: string) => {
-    await window.api.aiConfig.deleteItem(itemId)
+    await trpcClient.aiConfig.deleteItem.mutate({ id: itemId })
     setItems((prev) => prev.filter((item) => item.id !== itemId))
     setEditingId(null)
   }

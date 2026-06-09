@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: string | null }>): {
   counts: Map<string, number>
   refresh: () => void
 } {
+  const trpcClient = useTRPCClient()
   const [counts, setCounts] = useState<Map<string, number>>(() => new Map())
   const reqIdRef = useRef(0)
 
@@ -21,8 +23,8 @@ export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: 
       return
     }
     const reqId = ++reqIdRef.current
-    window.api.aiConfig
-      .getProjectsStaleSkillCounts(pairs)
+    trpcClient.aiConfig.getProjectsStaleSkillCounts
+      .query(pairs)
       .then((rec) => {
         if (reqId !== reqIdRef.current) return
         setCounts(new Map(Object.entries(rec)))
@@ -30,7 +32,7 @@ export function useStaleSkillCounts(projects: ReadonlyArray<{ id: string; path: 
       .catch(() => {
         if (reqId === reqIdRef.current) setCounts(new Map())
       })
-  }, [pairs])
+  }, [trpcClient, pairs])
 
   useEffect(() => {
     refresh()

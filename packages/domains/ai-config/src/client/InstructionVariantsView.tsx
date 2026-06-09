@@ -9,10 +9,12 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Plus, Save, Trash2 } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, Input, Label, Textarea, cn } from '@slayzone/ui'
 import type { AiConfigItem } from '../shared'
 
 export function InstructionVariantsView() {
+  const trpcClient = useTRPCClient()
   const [variants, setVariants] = useState<AiConfigItem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editContent, setEditContent] = useState('')
@@ -32,12 +34,12 @@ export function InstructionVariantsView() {
   const loadVariants = useCallback(async () => {
     setLoading(true)
     try {
-      const items = await window.api.aiConfig.listInstructionVariants()
+      const items = await trpcClient.aiConfig.listInstructionVariants.query()
       setVariants(items)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [trpcClient])
 
   useEffect(() => {
     void loadVariants()
@@ -53,7 +55,7 @@ export function InstructionVariantsView() {
 
   const handleCreate = useCallback(async () => {
     const slug = `variant-${Date.now()}`
-    const created = await window.api.aiConfig.createItem({
+    const created = await trpcClient.aiConfig.createItem.mutate({
       type: 'root_instructions',
       scope: 'library',
       slug,
@@ -61,13 +63,13 @@ export function InstructionVariantsView() {
     })
     setVariants((prev) => [created, ...prev])
     selectVariant(created)
-  }, [])
+  }, [trpcClient])
 
   const handleSave = useCallback(async () => {
     if (!selectedId) return
     setSaving(true)
     try {
-      const updated = await window.api.aiConfig.updateItem({
+      const updated = await trpcClient.aiConfig.updateItem.mutate({
         id: selectedId,
         slug: editName || undefined,
         content: editContent
@@ -80,11 +82,11 @@ export function InstructionVariantsView() {
     } finally {
       setSaving(false)
     }
-  }, [selectedId, editContent, editName])
+  }, [trpcClient, selectedId, editContent, editName])
 
   const handleDelete = useCallback(
     async (id: string) => {
-      await window.api.aiConfig.deleteItem(id)
+      await trpcClient.aiConfig.deleteItem.mutate({ id })
       setVariants((prev) => prev.filter((v) => v.id !== id))
       if (selectedId === id) {
         setSelectedId(null)
@@ -92,7 +94,7 @@ export function InstructionVariantsView() {
         setEditName('')
       }
     },
-    [selectedId]
+    [trpcClient, selectedId]
   )
 
   // Resizable split

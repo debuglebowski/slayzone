@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import {
   ChevronRight,
   Sparkles,
@@ -8,7 +8,9 @@ import {
   Settings2,
   type LucideIcon
 } from 'lucide-react'
-import type { OverviewData, Section } from './ContextManagerSettings.types'
+import { useTRPC } from '@slayzone/transport/client'
+import { useQuery } from '@tanstack/react-query'
+import type { Section } from './ContextManagerSettings.types'
 
 // ---------------------------------------------------------------------------
 // Shared overview card
@@ -56,33 +58,25 @@ export function OverviewPanel({
   onNavigate: (section: Section) => void
   version: number
 }) {
-  const [data, setData] = useState<OverviewData | null>(null)
+  const trpc = useTRPC()
+  const instructionsQuery = useQuery(trpc.aiConfig.getLibraryInstructions.queryOptions(undefined))
+  const skillsQuery = useQuery(
+    trpc.aiConfig.listItems.queryOptions({ scope: 'library', type: 'skill' })
+  )
+  const providersQuery = useQuery(trpc.aiConfig.listProviders.queryOptions())
 
+  // External retrigger: bump `version` re-runs the underlying queries.
   useEffect(() => {
-    let stale = false
-    void (async () => {
-      try {
-        const [instrContent, skills, providers] = await Promise.all([
-          window.api.aiConfig.getLibraryInstructions(),
-          window.api.aiConfig.listItems({ scope: 'library', type: 'skill' }),
-          window.api.aiConfig.listProviders()
-        ])
-        if (stale) return
-        setData({
-          instructions: { content: instrContent },
-          skills,
-          providers
-        })
-      } catch {
-        // silently fail — cards will show loading state
-      }
-    })()
-    return () => {
-      stale = true
-    }
+    void instructionsQuery.refetch()
+    void skillsQuery.refetch()
+    void providersQuery.refetch()
   }, [version])
 
-  if (!data) {
+  const instrContent = instructionsQuery.data
+  const skills = skillsQuery.data
+  const providers = providersQuery.data
+
+  if (instrContent === undefined || skills === undefined || providers === undefined) {
     return (
       <div className="space-y-3">
         {[1, 2, 3, 4].map((i) => (
@@ -92,9 +86,9 @@ export function OverviewPanel({
     )
   }
 
-  const skillCount = data.skills.length
-  const enabledProviders = data.providers.filter((p) => p.enabled)
-  const hasContent = !!data.instructions?.content
+  const skillCount = skills.length
+  const enabledProviders = providers.filter((p) => p.enabled)
+  const hasContent = !!instrContent
 
   return (
     <div className="space-y-2.5">

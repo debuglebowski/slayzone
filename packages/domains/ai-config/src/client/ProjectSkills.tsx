@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, AlertCircle, Circle, Trash2, Sparkles } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { cn } from '@slayzone/ui'
 import { buildDefaultSkillContent } from '../shared'
 import type {
@@ -56,6 +57,7 @@ export function ProjectSkills({
   openCreateTrigger,
   onChanged
 }: ProjectSkillsProps) {
+  const trpcClient = useTRPCClient()
   const [allItems, setAllItems] = useState<ProjectSkillStatus[]>([])
   const [localItems, setLocalItems] = useState<AiConfigItem[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -68,15 +70,15 @@ export function ProjectSkills({
     setLoading(true)
     try {
       const [linked, local] = await Promise.all([
-        window.api.aiConfig.getProjectSkillsStatus(projectId, projectPath),
-        window.api.aiConfig.listItems({ scope: 'project', projectId, type })
+        trpcClient.aiConfig.getProjectSkillsStatus.query({ projectId, projectPath }),
+        trpcClient.aiConfig.listItems.query({ scope: 'project', projectId, type })
       ])
       setAllItems(linked)
       setLocalItems(local)
     } finally {
       setLoading(false)
     }
-  }, [projectId, projectPath, type])
+  }, [trpcClient, projectId, projectPath, type])
 
   useEffect(() => {
     if (openPickerTrigger && openPickerTrigger > 0) setShowPicker(true)
@@ -92,7 +94,7 @@ export function ProjectSkills({
   }, [load])
 
   const handleRemove = async (itemId: string) => {
-    await window.api.aiConfig.removeProjectSelection(projectId, itemId)
+    await trpcClient.aiConfig.removeProjectSelection.mutate({ projectId, itemId })
     await load()
     onChanged?.()
   }
@@ -105,7 +107,7 @@ export function ProjectSkills({
 
   const handleCreate = async () => {
     const slug = 'new-skill'
-    const created = await window.api.aiConfig.createItem({
+    const created = await trpcClient.aiConfig.createItem.mutate({
       type: 'skill',
       scope: 'project',
       projectId,
@@ -118,14 +120,14 @@ export function ProjectSkills({
   }
 
   const handleUpdate = async (itemId: string, patch: Omit<UpdateAiConfigItemInput, 'id'>) => {
-    const updated = await window.api.aiConfig.updateItem({ id: itemId, ...patch })
+    const updated = await trpcClient.aiConfig.updateItem.mutate({ id: itemId, ...patch })
     if (!updated) return
     setLocalItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
     onChanged?.()
   }
 
   const handleDelete = async (itemId: string) => {
-    await window.api.aiConfig.deleteItem(itemId)
+    await trpcClient.aiConfig.deleteItem.mutate({ id: itemId })
     setLocalItems((prev) => prev.filter((item) => item.id !== itemId))
     setEditingId(null)
     onChanged?.()

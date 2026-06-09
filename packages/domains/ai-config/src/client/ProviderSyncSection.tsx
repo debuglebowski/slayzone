@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 import { PROVIDER_LABELS, PROVIDER_CAPABILITIES } from '../shared/provider-registry'
 import type { CliProvider, CliProviderInfo } from '../shared'
@@ -9,17 +10,18 @@ interface ProviderSyncSectionProps {
 }
 
 export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
+  const trpcClient = useTRPCClient()
   const [providers, setProviders] = useState<CliProviderInfo[]>([])
   const [projectProviders, setProjectProviders] = useState<CliProvider[]>([])
 
   const fetchProviders = useCallback(async () => {
-    const list = await window.api.aiConfig.listProviders()
+    const list = await trpcClient.aiConfig.listProviders.query()
     setProviders(list)
     if (projectId) {
-      const pp = await window.api.aiConfig.getProjectProviders(projectId)
+      const pp = await trpcClient.aiConfig.getProjectProviders.query({ projectId })
       setProjectProviders(pp)
     }
-  }, [projectId])
+  }, [trpcClient, projectId])
 
   useEffect(() => {
     let stale = false
@@ -36,10 +38,13 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
     }
   }, [fetchProviders])
 
-  const handleToggleComputer = useCallback(async (id: string, enabled: boolean) => {
-    await window.api.aiConfig.toggleProvider(id, enabled)
-    setProviders((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)))
-  }, [])
+  const handleToggleComputer = useCallback(
+    async (id: string, enabled: boolean) => {
+      await trpcClient.aiConfig.toggleProvider.mutate({ id, enabled })
+      setProviders((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)))
+    },
+    [trpcClient]
+  )
 
   const handleToggleProject = useCallback(
     async (provider: CliProvider) => {
@@ -47,10 +52,10 @@ export function ProviderSyncSection({ projectId }: ProviderSyncSectionProps) {
       const next = projectProviders.includes(provider)
         ? projectProviders.filter((p) => p !== provider)
         : [...projectProviders, provider]
-      await window.api.aiConfig.setProjectProviders(projectId, next)
+      await trpcClient.aiConfig.setProjectProviders.mutate({ projectId, providers: next })
       setProjectProviders(next)
     },
-    [projectId, projectProviders]
+    [trpcClient, projectId, projectProviders]
   )
 
   return (
