@@ -1,25 +1,28 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Button } from '@slayzone/ui'
+import { useTRPC } from '@slayzone/transport/client'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { Terminal } from 'lucide-react'
 import { CLI_FEATURES } from './onboardingConstants'
 
 export function CliInstallStep({ onNext }: { onNext: () => void }): React.JSX.Element {
-  const [installing, setInstalling] = useState(false)
+  const trpc = useTRPC()
   const [message, setMessage] = useState('')
   const [installed, setInstalled] = useState<boolean | null>(null)
 
+  const statusQuery = useQuery(trpc.app.meta.checkCliInstalled.queryOptions())
+  const installMutation = useMutation(trpc.app.meta.installCli.mutationOptions())
+  const installing = installMutation.isPending
+
   useEffect(() => {
-    window.api.app.cliStatus().then((status) => {
-      setInstalled(status.installed)
-    })
-  }, [])
+    if (statusQuery.data) setInstalled(statusQuery.data.installed)
+  }, [statusQuery.data])
 
   const handleInstall = async () => {
-    setInstalling(true)
     setMessage('')
     try {
-      const result = await window.api.app.installCli()
+      const result = await installMutation.mutateAsync()
       if (result.ok) {
         setInstalled(true)
         let msg = 'Installed successfully.'
@@ -36,8 +39,6 @@ export function CliInstallStep({ onNext }: { onNext: () => void }): React.JSX.El
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Install failed.')
-    } finally {
-      setInstalling(false)
     }
   }
 

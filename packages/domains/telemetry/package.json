@@ -11,7 +11,9 @@
     "./client": "./src/client/index.ts"
   },
   "dependencies": {
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@tanstack/react-query": "^5.100.9",
     "@posthog/react": "^1",
     "posthog-js": "^1"
   },

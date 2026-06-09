@@ -4,6 +4,8 @@ import { Dialog, DialogContent } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
 import { useTelemetry, track } from '@slayzone/telemetry/client'
+import { useTRPC } from '@slayzone/transport/client'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { ChevronLeft } from 'lucide-react'
 import { STEP_NAMES, STEP_COUNT } from './onboardingConstants'
 import { WelcomeStep } from './WelcomeStep'
@@ -22,11 +24,17 @@ export function OnboardingDialog({
   externalOpen,
   onExternalClose
 }: OnboardingDialogProps): React.JSX.Element | null {
+  const trpc = useTRPC()
   const [autoOpen, setAutoOpen] = useState(false)
   const [step, setStep] = useState(0)
   const [selectedProvider, setSelectedProvider] = useState('claude-code')
   const [closing, setClosing] = useState(false)
   const { setTier } = useTelemetry()
+
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const onboardingCompletedQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: 'onboarding_completed' })
+  )
 
   const open = autoOpen || (externalOpen ?? false)
 
@@ -35,17 +43,15 @@ export function OnboardingDialog({
   }, [step, open])
 
   useEffect(() => {
-    window.api.settings.get('onboarding_completed').then((value) => {
-      if (value !== 'true') {
-        setAutoOpen(true)
-      }
-    })
-  }, [])
+    if (onboardingCompletedQuery.isSuccess && onboardingCompletedQuery.data !== 'true') {
+      setAutoOpen(true)
+    }
+  }, [onboardingCompletedQuery.isSuccess, onboardingCompletedQuery.data])
 
   const handleNext = (): void => {
     if (step === 2) {
       track('onboarding_provider_selected', { provider: selectedProvider })
-      window.api.settings.set('default_terminal_mode', selectedProvider)
+      setSettingMutation.mutate({ key: 'default_terminal_mode', value: selectedProvider })
     }
     if (step < STEP_COUNT - 1) {
       setStep(step + 1)
@@ -66,19 +72,19 @@ export function OnboardingDialog({
   const finishOnboarding = useCallback(
     (tier?: 'anonymous' | 'opted_in'): void => {
       if (tier) setTier(tier)
-      window.api.settings.set('onboarding_completed', 'true')
+      setSettingMutation.mutate({ key: 'onboarding_completed', value: 'true' })
       setStep(0)
       setClosing(false)
       setAutoOpen(false)
       onExternalClose?.()
     },
-    [setTier, onExternalClose]
+    [setTier, onExternalClose, setSettingMutation]
   )
 
   const handleAnalyticsChoice = (tier: 'anonymous' | 'opted_in'): void => {
     setTier(tier)
     track('onboarding_completed', { provider: selectedProvider, tier })
-    window.api.settings.set('onboarding_completed', 'true')
+    setSettingMutation.mutate({ key: 'onboarding_completed', value: 'true' })
     setStep(4)
   }
 
