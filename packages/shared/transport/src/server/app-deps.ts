@@ -443,6 +443,9 @@ export type AppDeps = {
     discoverBrowserExtensions: () => unknown
     importExtension: (extPath: string) => unknown
     reparentToCurrentWindow: (viewId: string) => unknown
+    /** Event-shaped (`type: 'state-snapshot'`) nav state per live view — replayed
+     * to each new `onEvent` subscriber so late subscribes can't miss load events. */
+    getAllStateSnapshots: () => unknown[]
     events: EventEmitter & {
       on(event: 'event', listener: (e: unknown) => void): EventEmitter
       on(event: 'shortcut', listener: (payload: BrowserShortcutPayload) => void): EventEmitter

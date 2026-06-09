@@ -55,6 +55,26 @@ export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
         if (event.viewId !== viewIdRef.current) return
 
         switch (event.type) {
+          // Authoritative nav-state replay from main, sent once per live view
+          // when the subscription attaches. Heals events missed in the gap
+          // between createView's loadURL and the WS subscription going live
+          // (and after WS reconnects) — without it a fast page load strands
+          // the loading overlay forever. domReady/hasLoadedRealPage are
+          // sticky-OR'd to match their live-event semantics.
+          case 'state-snapshot':
+            setState((prev) => ({
+              url: (event.url as string) || prev.url,
+              title: (event.title as string) || prev.title,
+              favicon: (event.favicon as string | null) ?? prev.favicon,
+              canGoBack: event.canGoBack as boolean,
+              canGoForward: event.canGoForward as boolean,
+              isLoading: event.isLoading as boolean,
+              error: event.error as LoadError | null,
+              domReady: prev.domReady || (event.domReady as boolean),
+              hasLoadedRealPage: prev.hasLoadedRealPage || (event.hasLoadedRealPage as boolean)
+            }))
+            break
+
           case 'did-navigate':
             setState((prev) => ({
               ...prev,

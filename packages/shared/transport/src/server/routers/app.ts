@@ -347,10 +347,15 @@ export const appLevelRouter = router({
       .mutation(({ input }) => getAppDeps().browser.reparentToCurrentWindow(input.viewId)),
     onEvent: publicProcedure.subscription(() =>
       observable<unknown>((emit) => {
+        const browser = getAppDeps().browser
         const h = (e: unknown): void => emit.next(e)
-        const ev = getAppDeps().browser.events
-        ev.on('event', h)
-        return () => ev.off('event', h)
+        browser.events.on('event', h)
+        // Replay per-view nav-state snapshots so a subscriber attaching after
+        // createView's loadURL (the WS round-trip race) doesn't miss
+        // did-navigate/dom-ready and strand the loading overlay. Listener is
+        // attached first; both run in one sync block, so nothing interleaves.
+        for (const s of browser.getAllStateSnapshots()) emit.next(s)
+        return () => browser.events.off('event', h)
       })
     ),
     onShortcut: publicProcedure.subscription(() =>

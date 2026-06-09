@@ -89,6 +89,13 @@ interface ViewEntry {
   locked: boolean
   /** True if the lock attached the debugger itself (so unlock must detach). */
   debuggerAttachedByLock: boolean
+  /** Nav-state mirror for `state-snapshot` replay — late `onEvent` subscribers
+   * (createView's loadURL races the WS round-trip) resync from these instead of
+   * missing did-navigate/dom-ready and stranding the loading overlay. */
+  domReady: boolean
+  hasLoadedRealPage: boolean
+  favicon: string | null
+  lastError: { code: number; description: string; url: string } | null
 }
 
 interface BrowserViewEvent {
@@ -205,7 +212,11 @@ export class BrowserViewManager {
       desktopHandoffPolicy: initialPolicy,
       currentWindow: null,
       locked: false,
-      debuggerAttachedByLock: false
+      debuggerAttachedByLock: false,
+      domReady: false,
+      hasLoadedRealPage: false,
+      favicon: null,
+      lastError: null
     }
 
     this.views.set(viewId, entry)
@@ -546,6 +557,39 @@ export class BrowserViewManager {
   isDevToolsOpen(viewId: string): boolean {
     const wc = this.getWebContents(viewId)
     return wc?.isDevToolsOpened() ?? false
+  }
+
+  /** Event-shaped nav-state snapshot (`type: 'state-snapshot'`) for one view.
+   * Replayed to new `onEvent` subscribers — a renderer subscribing after
+   * createView's loadURL (WS round-trip race) resyncs from this instead of
+   * missing did-navigate/dom-ready and stranding its loading overlay. */
+  getStateSnapshot(viewId: string): BrowserViewEvent | null {
+    const entry = this.views.get(viewId)
+    if (!entry) return null
+    const wc = entry.view.webContents
+    if (wc.isDestroyed()) return null
+    return {
+      viewId,
+      type: 'state-snapshot',
+      url: slzFileUrlToFileUrl(wc.getURL()),
+      title: wc.getTitle(),
+      favicon: entry.favicon,
+      canGoBack: wc.navigationHistory.canGoBack(),
+      canGoForward: wc.navigationHistory.canGoForward(),
+      isLoading: wc.isLoading(),
+      domReady: entry.domReady,
+      hasLoadedRealPage: entry.hasLoadedRealPage,
+      error: entry.lastError
+    }
+  }
+
+  getAllStateSnapshots(): BrowserViewEvent[] {
+    const snapshots: BrowserViewEvent[] = []
+    for (const viewId of this.views.keys()) {
+      const s = this.getStateSnapshot(viewId)
+      if (s) snapshots.push(s)
+    }
+    return snapshots
   }
 
   // --- Test-only methods (registered when PLAYWRIGHT) ---
@@ -1219,6 +1263,7 @@ export class BrowserViewManager {
     })
 
     wc.on('did-navigate', (_e, url) => {
+      entry.lastError = null
       send({
         viewId,
         type: 'did-navigate',
@@ -1254,10 +1299,14 @@ export class BrowserViewManager {
     })
 
     wc.on('page-favicon-updated', (_e, favicons) => {
+      entry.favicon = favicons[0] ?? entry.favicon
       send({ viewId, type: 'page-favicon-updated', favicons })
     })
 
     wc.on('dom-ready', () => {
+      entry.domReady = true
+      const currentUrl = wc.getURL()
+      if (currentUrl && currentUrl !== 'about:blank') entry.hasLoadedRealPage = true
       send({ viewId, type: 'dom-ready' })
       // Reinstall the page-side capture listener on each new document. This stays
       // separate from the before-input-event fallback above on purpose.
@@ -1272,6 +1321,7 @@ export class BrowserViewManager {
       // hovercard widget inside Docs/Drive intermittently hits ERR_BLOCKED_BY_RESPONSE
       // when gapi sends a stale parent origin.
       if (!isMainFrame) return
+      entry.lastError = { code: errorCode, description: errorDescription, url: validatedURL }
       send({
         viewId,
         type: 'did-fail-load',
@@ -1285,6 +1335,7 @@ export class BrowserViewManager {
       // The CDP session died with the renderer; mark the bookkeeping flag so a
       // future syncLockState re-attaches cleanly when the process recovers.
       entry.debuggerAttachedByLock = false
+      entry.lastError = { code: -1, description: 'Renderer process crashed', url: '' }
       send({ viewId, type: 'crashed' })
     })
 

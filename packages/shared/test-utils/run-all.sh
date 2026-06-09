@@ -79,6 +79,8 @@ run_test_electron_strict_loader packages/shared/transport/src/server/routers/cha
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/task.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/template.test.ts
 run_test_electron_strict_loader packages/shared/transport/src/server/routers/artifacts.test.ts
+# Browser onEvent snapshot replay (stuck-loading race fix) — no DB, plain tsx
+run_test packages/shared/transport/src/server/routers/app.browser-events.test.ts
 run_test packages/domains/integrations/src/main/handlers.api.test.ts
 run_test packages/domains/integrations/src/main/handlers.analyze.test.ts
 run_test packages/domains/automations/src/shared/templates.test.ts
@@ -199,7 +201,8 @@ if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '*
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
-  packages/domains/task/src/client/taskDetailCache.test.ts; then
+  packages/domains/task/src/client/taskDetailCache.test.ts \
+  packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
