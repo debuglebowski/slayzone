@@ -1168,10 +1168,8 @@ function App(): React.JSX.Element {
   //   TabBar (default x=10 sits near the rail's icon center at ~36px).
   useEffect(() => {
     const pos = sidebarView === 'tree' ? { x: 22, y: 20 } : { x: 9, y: 15 }
-    // STAYS ON BRIDGE: no `app.window.setTrafficLightPosition` tRPC proc exists
-    // (app.window router only has getContentBounds/getDisplayScaleFactor/close).
-    window.api.window.setTrafficLightPosition(pos)
-  }, [sidebarView])
+    void trpcClient.app.window.setTrafficLightPosition.mutate({ pos })
+  }, [sidebarView, trpcClient])
   const activePtyCount = usePtyStatus().size
   const tabBarRightContent = (
     <div className="flex items-center gap-1">

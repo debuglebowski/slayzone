@@ -178,7 +178,19 @@ export const appLevelRouter = router({
     close: publicProcedure.mutation(({ ctx }) => {
       if (ctx.windowId == null) throw new Error('windowId required')
       return getAppDeps().windowClose(ctx.windowId)
-    })
+    }),
+    // Cosmetic, fire-and-forget — no windowId guard (graceful no-op if the
+    // window can't be resolved) so the renderer's useEffect calls never reject.
+    setTrafficLightPosition: publicProcedure
+      .input(z.object({ pos: z.object({ x: z.number(), y: z.number() }).nullable() }))
+      .mutation(({ ctx, input }) =>
+        getAppDeps().appWindowSetTrafficLightPosition(ctx.windowId ?? null, input.pos)
+      ),
+    setWindowButtonVisibility: publicProcedure
+      .input(z.object({ visible: z.boolean() }))
+      .mutation(({ ctx, input }) =>
+        getAppDeps().appWindowSetWindowButtonVisibility(ctx.windowId ?? null, input.visible)
+      )
   }),
 
   // Auth

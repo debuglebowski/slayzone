@@ -348,6 +348,15 @@ export type AppDeps = {
     height: number
   } | null
   appWindowGetDisplayScaleFactor: () => number | null
+  // macOS traffic-light controls — windowId resolves the target window (tRPC:
+  // ctx.windowId; IPC: event.sender). No-op off darwin / when the window can't be
+  // resolved. Same impl backs `window:set-traffic-light-position` /
+  // `window:set-window-button-visibility` IPC (coexistence until the bridge drops).
+  appWindowSetTrafficLightPosition: (
+    windowId: number | null,
+    pos: { x: number; y: number } | null
+  ) => void
+  appWindowSetWindowButtonVisibility: (windowId: number | null, visible: boolean) => void
 
   // auth
   authGithubSystemSignIn: (input: { convexUrl: string; redirectTo: string }) => Promise<unknown>

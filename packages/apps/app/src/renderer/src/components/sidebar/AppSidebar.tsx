@@ -9,6 +9,7 @@ import {
   cn
 } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/settings'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { ReactNode } from 'react'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ProjectGroup, ColumnConfig, TopLevelEntryRef } from '@slayzone/projects/shared'
@@ -178,6 +179,7 @@ export function AppSidebar({
   const setSidebarWidth = useTabStore((s) => s.setSidebarWidth)
   const sidebarAutoHide = useTabStore((s) => s.sidebarAutoHide)
   const setSidebarAutoHide = useTabStore((s) => s.setSidebarAutoHide)
+  const trpcClient = useTRPCClient()
   const view = getView(sidebarView)
 
   const [hoverRevealed, setHoverRevealed] = useState(false)
@@ -217,8 +219,8 @@ export function AppSidebar({
   const autoHideActive = sidebarAutoHide && !zenMode
   const buttonsVisible = !zenMode && (!autoHideActive || hoverRevealed)
   useEffect(() => {
-    window.api.window.setWindowButtonVisibility(buttonsVisible)
-  }, [buttonsVisible])
+    void trpcClient.app.window.setWindowButtonVisibility.mutate({ visible: buttonsVisible })
+  }, [buttonsVisible, trpcClient])
   const isResizable = !zenMode && !!view.resizable
   const effectiveWidth = isResizable ? (sidebarWidth ?? view.defaultWidth ?? 288) : null
 

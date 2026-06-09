@@ -1883,6 +1883,18 @@ app
               const win = wc ? BrowserWindow.fromWebContents(wc) : null
               if (win) win.close()
             },
+            appWindowSetTrafficLightPosition: (windowId, pos) => {
+              if (process.platform !== 'darwin' || windowId == null) return
+              const wc = webContents.fromId(windowId)
+              const win = wc ? BrowserWindow.fromWebContents(wc) : null
+              if (win) win.setWindowButtonPosition(pos ?? { x: 10, y: 12 })
+            },
+            appWindowSetWindowButtonVisibility: (windowId, visible) => {
+              if (process.platform !== 'darwin' || windowId == null) return
+              const wc = webContents.fromId(windowId)
+              const win = wc ? BrowserWindow.fromWebContents(wc) : null
+              if (win) win.setWindowButtonVisibility(visible)
+            },
             // Browser view ops — same BrowserViewManager singleton + shared
             // browserExtensionOps the `browser:*` IPC handlers use (coexistence
             // until slice 5). browserExtensionOps is defined below in this
