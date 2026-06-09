@@ -1331,7 +1331,7 @@ export function TreeView({
               </Collapsible.Trigger>
               <button
                 type="button"
-                onClick={() => onSelectProject(project.id)}
+                onClick={() => onSelectProject(project.id, { home: true })}
                 aria-label={`Open ${project.name} home`}
                 className={cn(
                   'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[color,background-color]',

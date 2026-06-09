@@ -131,7 +131,9 @@ interface TabState {
   setActiveTabIndex: (index: number) => void
   setActiveView: (view: ActiveView) => void
   setSelectedProjectId: (id: string) => void
-  selectProject: (projectId: string) => void
+  // `opts.home` forces the project's home/kanban tab (used by the Home icon),
+  // bypassing the restore-last-active-tab behavior used by rail/folder/search.
+  selectProject: (projectId: string, opts?: { home?: boolean }) => void
   setProjectScopedTabs: (enabled: boolean) => void
   toggleProjectScopedTabs: () => void
   setSidebarView: (id: string) => void
@@ -277,10 +279,12 @@ export const useTabStore = create<TabState>()(
 
     setSelectedProjectId: (id) => set({ selectedProjectId: id }),
 
-    selectProject: (projectId) => {
+    selectProject: (projectId, opts) => {
       const { selectedProjectId, projectLastActiveTab, tabs } = get()
-      if (selectedProjectId === projectId) {
-        set({ activeTabIndex: 0, activeView: 'tabs' })
+      // Home icon (opts.home) always lands on the home/kanban tab, even when
+      // switching from another project. Same-project clicks also reset to home.
+      if (opts?.home || selectedProjectId === projectId) {
+        set({ selectedProjectId: projectId, activeTabIndex: 0, activeView: 'tabs' })
         return
       }
       const last = projectLastActiveTab[projectId]

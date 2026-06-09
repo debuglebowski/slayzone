@@ -23,7 +23,7 @@ interface AppSidebarProps {
   projectGroups: ProjectGroup[]
   tasks: Task[]
   selectedProjectId: string
-  onSelectProject: (id: string) => void
+  onSelectProject: (id: string, opts?: { home?: boolean }) => void
   onProjectSettings: (project: Project) => void
   onSettings: () => void
   onUsageAnalytics: () => void

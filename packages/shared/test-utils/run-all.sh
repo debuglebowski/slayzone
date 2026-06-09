@@ -51,6 +51,8 @@ run_test packages/domains/task/src/shared/conversation-heal.test.ts
 run_test packages/domains/task/src/main/handlers.test.ts
 run_test packages/domains/task/src/main/template-handlers.test.ts
 run_test packages/domains/task/src/client/card-water-fill.test.ts
+# Tab store — Home-icon nav forces home/kanban tab across project switch.
+run_test packages/domains/settings/src/client/useTabStore.test.ts
 run_test packages/domains/terminal/src/client/focus-loss-diag.test.ts
 run_test packages/apps/app/src/renderer/src/components/sidebar/views/projectGrouping.test.ts
 run_test packages/apps/app/src/renderer/src/components/sidebar/views/projectDrop.test.ts

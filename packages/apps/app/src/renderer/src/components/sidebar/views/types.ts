@@ -9,7 +9,8 @@ export interface SidebarViewContext {
   projectGroups: ProjectGroup[]
   tasks: Task[]
   selectedProjectId: string
-  onSelectProject: (id: string) => void
+  /** `opts.home` forces the project's home/kanban tab (Home icon); omitted = restore last tab. */
+  onSelectProject: (id: string, opts?: { home?: boolean }) => void
   onProjectSettings: (project: Project) => void
   onTaskClick?: (taskId: string) => void
   /** Close a task tab by id (handles temporary task DB cleanup). */

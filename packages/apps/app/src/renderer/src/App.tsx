@@ -1130,9 +1130,9 @@ function App(): React.JSX.Element {
       useDialogStore.getState().closeDeleteProject()
     }
   }
-  const handleSidebarSelectProject = (projectId: string): void => {
+  const handleSidebarSelectProject = (projectId: string, opts?: { home?: boolean }): void => {
     track('project_switched')
-    useTabStore.getState().selectProject(projectId)
+    useTabStore.getState().selectProject(projectId, opts)
   }
   const handleOpenSettings = (): void => {
     setSettingsInitialTab('appearance')
