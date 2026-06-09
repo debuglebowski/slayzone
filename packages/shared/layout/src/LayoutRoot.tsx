@@ -96,6 +96,7 @@ export function LayoutRoot({ registry, host }: LayoutRootProps) {
             return (
               <SplitDivider
                 key={`${d.splitId}:${d.index}`}
+                splitId={d.splitId}
                 index={d.index}
                 rect={d.rect}
                 direction={d.direction}
@@ -103,6 +104,7 @@ export function LayoutRoot({ registry, host }: LayoutRootProps) {
                 totalContentPx={totalContentPx}
                 getFractions={() => findSplit(getLayoutStore().tree.root, d.splitId)?.fractions ?? []}
                 onResize={(fractions) => getLayoutStore().resizeSplit(d.splitId, fractions)}
+                onDragChange={(id) => getLayoutStore().setDraggingSplit(id)}
               />
             )
           })}
@@ -164,10 +166,12 @@ function PaneView(props: { pane: PaneNode; rect: Rect; registry: PanelRegistry; 
 
 function TileBody(props: { tile: Tile; registry: PanelRegistry; host: NativeSurfaceHost }) {
   const { tile, registry, host } = props
-  if (tile.renderKind === 'native') {
-    return <NativeAnchor tileId={tile.id} host={host} label={`${tile.title} (native pane)`} />
-  }
   const Comp = resolvePanel(registry, tile.type)
+  if (tile.renderKind === 'native') {
+    const anchor = <NativeAnchor tileId={tile.id} host={host} label={`${tile.title} (native pane)`} />
+    if (Comp) return <Comp tile={tile} anchor={anchor} />
+    return anchor
+  }
   if (Comp) return <Comp tile={tile} />
   return (
     <div

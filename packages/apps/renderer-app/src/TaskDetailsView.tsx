@@ -8,7 +8,6 @@ import {
   COLORS,
   LayoutRoot,
   collectTileTypes,
-  createNoopNativeHost,
   isPane,
   isSplit,
   loadTree,
@@ -19,8 +18,11 @@ import {
   useLayoutTree
 } from '@slayzone/layout'
 import type { LayoutNode, LayoutTree, PanelProps, PanelRegistry, Tile, TileType } from '@slayzone/layout'
+import { createEmbeddedTabHost } from './embedded-tab-host'
+import { makeBrowserPanel } from './BrowserPanel'
 
 const TASK_ID = 'sample-task'
+const DEFAULT_BROWSER_URL = 'https://example.com'
 
 interface PanelDef {
   type: TileType
@@ -90,8 +92,14 @@ function Placeholder({ tile }: PanelProps) {
   )
 }
 
+// Native surface host: real embedded-tab views over window.api.browser (mojo).
+// Inert when the transport is absent (plain-browser dev), so this is safe as
+// the single host for all contexts.
+const EMBEDDED_HOST = createEmbeddedTabHost(TASK_ID, DEFAULT_BROWSER_URL)
+
 const REGISTRY: PanelRegistry = {
   terminal: Placeholder,
+  browser: makeBrowserPanel(EMBEDDED_HOST),
   editor: Placeholder,
   artifacts: Placeholder,
   git: Placeholder,
@@ -144,7 +152,6 @@ function PanelToggle({ active, onToggle }: { active: Set<string>; onToggle: (typ
 }
 
 export function TaskDetailsView() {
-  const host = useMemo(() => createNoopNativeHost(), [])
   const tree = useLayoutTree()
   const activeTypes = useMemo(() => collectTileTypes(tree.root), [tree])
 
@@ -215,7 +222,7 @@ export function TaskDetailsView() {
 
       <div id="task-panels" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <div style={{ position: 'absolute', inset: 16 }}>
-          <LayoutRoot registry={REGISTRY} host={host} />
+          <LayoutRoot registry={REGISTRY} host={EMBEDDED_HOST} />
         </div>
       </div>
     </div>

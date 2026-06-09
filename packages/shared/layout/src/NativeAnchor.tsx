@@ -1,9 +1,14 @@
 // A native-kind tile's body: an empty positioned div whose live screen rect is
 // measured and published to the NativeSurfaceHost. The native surface (when one
-// exists) is composited on top at that rect. v1 also paints a placeholder fill
-// so the slot is visible in screenshots while the host is a no-op.
+// exists) is composited on top at that rect. The placeholder fill doubles as
+// the backdrop while the surface is loading or policy-hidden.
+//
+// Visibility is engine-derived (occlusion policy): dialog overlays / divider
+// drags hide the surface via host.setVisible — centralized here so no panel
+// reimplements it.
 import { useEffect, useRef } from 'react'
 import type { NativeSurfaceHost } from './NativeSurfaceHost'
+import { useNativeTilesVisible } from './store'
 import { COLORS } from './colors'
 
 interface NativeAnchorProps {
@@ -14,6 +19,7 @@ interface NativeAnchorProps {
 
 export function NativeAnchor({ tileId, host, label }: NativeAnchorProps) {
   const ref = useRef<HTMLDivElement | null>(null)
+  const visible = useNativeTilesVisible()
 
   useEffect(() => {
     const el = ref.current
@@ -23,9 +29,11 @@ export function NativeAnchor({ tileId, host, label }: NativeAnchorProps) {
       raf = 0
       const r = el.getBoundingClientRect()
       const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+      // CSS px — shell page is full-bleed at the container origin, so these map
+      // 1:1 to view DIPs; the native side owns device scaling.
       host.place({
         tileId,
-        rect: { x: r.x * dpr, y: r.y * dpr, w: r.width * dpr, h: r.height * dpr },
+        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
         devicePixelRatio: dpr
       })
     }
@@ -46,6 +54,20 @@ export function NativeAnchor({ tileId, host, label }: NativeAnchorProps) {
     }
   }, [tileId, host])
 
+  // Engine-derived visibility → native surface. On reveal, re-publish the rect
+  // (it may have moved while hidden, e.g. hide-during-drag).
+  useEffect(() => {
+    host.setVisible(tileId, visible)
+    if (visible) {
+      const el = ref.current
+      if (el) {
+        const r = el.getBoundingClientRect()
+        const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+        host.place({ tileId, rect: { x: r.x, y: r.y, w: r.width, h: r.height }, devicePixelRatio: dpr })
+      }
+    }
+  }, [visible, tileId, host])
+
   return (
     <div
       ref={ref}
@@ -61,7 +83,7 @@ export function NativeAnchor({ tileId, host, label }: NativeAnchorProps) {
         fontSize: 12
       }}
     >
-      {label ?? 'native pane'}
+      {visible ? (label ?? 'native pane') : `${label ?? 'native pane'} — paused`}
     </div>
   )
 }
