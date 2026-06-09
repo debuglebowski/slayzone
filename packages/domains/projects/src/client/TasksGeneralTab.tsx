@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Button,
   Label,
@@ -18,6 +20,8 @@ interface TasksGeneralTabProps {
 }
 
 export function TasksGeneralTab({ project, onUpdated }: TasksGeneralTabProps) {
+  const trpc = useTRPC()
+  const updateProject = useMutation(trpc.projects.update.mutationOptions())
   const columns = resolveColumns(project.columns_config)
   const [onActive, setOnActive] = useState<string>(
     () => project.task_automation_config?.on_terminal_active ?? 'none'
@@ -42,7 +46,7 @@ export function TasksGeneralTab({ project, onUpdated }: TasksGeneralTabProps) {
         on_terminal_idle: onIdle === 'none' ? null : onIdle
       }
       const hasValue = config.on_terminal_active || config.on_terminal_idle
-      const updated = await window.api.db.updateProject({
+      const updated = await updateProject.mutateAsync({
         id: project.id,
         taskAutomationConfig: hasValue ? config : null
       })

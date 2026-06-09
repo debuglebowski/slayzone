@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { ExternalGroup, ExternalScope } from '@slayzone/integrations/shared'
 
 export interface UseProviderDataResult {
@@ -16,7 +18,7 @@ export interface UseProviderDataResult {
 
 /**
  * Generic hook for loading provider groups (teams/repos/projects) and
- * scopes (Linear projects, GitHub ProjectV2, etc.) via adapter-dispatched IPC.
+ * scopes (Linear projects, GitHub ProjectV2, etc.) via adapter-dispatched tRPC.
  *
  * Replaces per-provider useState + useEffect pairs for group/scope loading.
  */
@@ -29,100 +31,101 @@ export function useProviderData(
     initialScopeId?: string | null
   }
 ): UseProviderDataResult {
-  const [groups, setGroups] = useState<ExternalGroup[]>([])
-  const [scopes, setScopes] = useState<ExternalScope[]>([])
-  const [loadingGroups, setLoadingGroups] = useState(false)
-  const [loadingScopes, setLoadingScopes] = useState(false)
+  const trpc = useTRPC()
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(
     options?.initialGroupId ?? null
   )
   const [selectedScopeId, setSelectedScopeId] = useState<string | null>(
     options?.initialScopeId ?? null
   )
-  const [error, setError] = useState<string | null>(null)
-  const [reloadCounter, setReloadCounter] = useState(0)
 
-  const reload = useCallback(() => setReloadCounter((c) => c + 1), [])
+  // Groups for the active connection.
+  const groupsQuery = useQuery(
+    trpc.integrations.listProviderGroups.queryOptions(
+      { connectionId: connectionId ?? '' },
+      { enabled: !!connectionId }
+    )
+  )
 
-  // Load groups when connection changes
+  // Scopes for the active connection + selected group.
+  const scopesQuery = useQuery(
+    trpc.integrations.listProviderScopes.queryOptions(
+      { connectionId: connectionId ?? '', groupId: selectedGroupId ?? '' },
+      { enabled: !!connectionId && !!selectedGroupId }
+    )
+  )
+
+  const groups = (connectionId ? groupsQuery.data : undefined) ?? []
+  const scopes =
+    connectionId && selectedGroupId ? (scopesQuery.data ?? []) : []
+
+  // Reset selections when the connection clears.
   useEffect(() => {
     if (!connectionId) {
-      setGroups([])
-      setScopes([])
       setSelectedGroupId(null)
       setSelectedScopeId(null)
-      return
     }
+  }, [connectionId])
 
-    let cancelled = false
-    setLoadingGroups(true)
-    setError(null)
-
-    window.api.integrations.listProviderGroups(connectionId).then(
-      (result) => {
-        if (cancelled) return
-        setGroups(result)
-        setLoadingGroups(false)
-        // Auto-select initial group if available
-        if (options?.initialGroupId && result.some((g) => g.id === options.initialGroupId)) {
-          setSelectedGroupId(options.initialGroupId)
-        } else if (!selectedGroupId || !result.some((g) => g.id === selectedGroupId)) {
-          setSelectedGroupId(result[0]?.id ?? null)
-        }
-      },
-      (err) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-        setLoadingGroups(false)
-      }
-    )
-
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, reloadCounter])
-
-  // Load scopes when group changes
+  // Auto-select a group once groups load (mirrors the old fetch callback).
   useEffect(() => {
-    if (!connectionId || !selectedGroupId) {
-      setScopes([])
-      setSelectedScopeId(null)
-      return
-    }
-
-    let cancelled = false
-    setLoadingScopes(true)
-
-    window.api.integrations.listProviderScopes(connectionId, selectedGroupId).then(
-      (result) => {
-        if (cancelled) return
-        setScopes(result)
-        setLoadingScopes(false)
-        if (options?.initialScopeId && result.some((s) => s.id === options.initialScopeId)) {
-          setSelectedScopeId(options.initialScopeId)
-        } else if (!selectedScopeId || !result.some((s) => s.id === selectedScopeId)) {
-          setSelectedScopeId(result[0]?.id ?? null)
-        }
-      },
-      (err) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-        setLoadingScopes(false)
+    if (!connectionId || !groupsQuery.isSuccess) return
+    const result = groupsQuery.data ?? []
+    setSelectedGroupId((current) => {
+      if (options?.initialGroupId && result.some((g) => g.id === options.initialGroupId)) {
+        return options.initialGroupId
       }
-    )
-
-    return () => {
-      cancelled = true
-    }
+      if (!current || !result.some((g) => g.id === current)) {
+        return result[0]?.id ?? null
+      }
+      return current
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, selectedGroupId, reloadCounter])
+  }, [connectionId, groupsQuery.isSuccess, groupsQuery.data])
+
+  // Clear scope selection when group clears (mirrors old effect's early-return).
+  useEffect(() => {
+    if (!connectionId || !selectedGroupId) setSelectedScopeId(null)
+  }, [connectionId, selectedGroupId])
+
+  // Auto-select a scope once scopes load.
+  useEffect(() => {
+    if (!connectionId || !selectedGroupId || !scopesQuery.isSuccess) return
+    const result = scopesQuery.data ?? []
+    setSelectedScopeId((current) => {
+      if (options?.initialScopeId && result.some((s) => s.id === options.initialScopeId)) {
+        return options.initialScopeId
+      }
+      if (!current || !result.some((s) => s.id === current)) {
+        return result[0]?.id ?? null
+      }
+      return current
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionId, selectedGroupId, scopesQuery.isSuccess, scopesQuery.data])
+
+  const reload = useCallback(() => {
+    void groupsQuery.refetch()
+    void scopesQuery.refetch()
+  }, [groupsQuery, scopesQuery])
+
+  const groupsError = groupsQuery.error
+  const scopesError = scopesQuery.error
+  const error = groupsError
+    ? groupsError instanceof Error
+      ? groupsError.message
+      : String(groupsError)
+    : scopesError
+      ? scopesError instanceof Error
+        ? scopesError.message
+        : String(scopesError)
+      : null
 
   return {
     groups,
     scopes,
-    loadingGroups,
-    loadingScopes,
+    loadingGroups: !!connectionId && groupsQuery.isFetching,
+    loadingScopes: !!connectionId && !!selectedGroupId && scopesQuery.isFetching,
     selectedGroupId,
     selectedScopeId,
     setSelectedGroupId,

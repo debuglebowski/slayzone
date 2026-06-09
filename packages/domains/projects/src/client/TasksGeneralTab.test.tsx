@@ -5,8 +5,24 @@ import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-libra
 
 const mockResolveColumns = vi.fn()
 
+// Shared spy backing the projects.update mutation — retargets the old
+// window.api.db.updateProject spy onto the tRPC mutation hook.
+const updateProjectSpy = vi.fn()
+
 vi.mock('@slayzone/workflow', () => ({
   resolveColumns: (...args: unknown[]) => mockResolveColumns(...args)
+}))
+
+// tRPC tanstack layer: useTRPC returns proxy objects whose `mutationOptions`
+// are inert; useMutation surfaces `updateProjectSpy` as `mutateAsync`.
+vi.mock('@slayzone/transport/client', () => ({
+  useTRPC: () => ({
+    projects: { update: { mutationOptions: () => ({}) } }
+  })
+}))
+
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: () => ({ mutateAsync: updateProjectSpy })
 }))
 
 vi.mock('@slayzone/ui', () => {
@@ -77,11 +93,8 @@ function makeProject(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mockResolveColumns.mockReturnValue(TEST_COLUMNS)
-  ;(window as any).api = {
-    db: {
-      updateProject: vi.fn().mockResolvedValue(makeProject())
-    }
-  }
+  updateProjectSpy.mockReset()
+  updateProjectSpy.mockResolvedValue(makeProject())
 })
 
 afterEach(cleanup)
@@ -138,7 +151,7 @@ describe('TasksGeneralTab', () => {
       fireEvent.submit(screen.getByRole('button', { name: /save/i }).closest('form')!)
     })
 
-    expect(window.api.db.updateProject).toHaveBeenCalledWith({
+    expect(updateProjectSpy).toHaveBeenCalledWith({
       id: 'proj-1',
       taskAutomationConfig: { on_terminal_active: 'in_progress', on_terminal_idle: 'done' }
     })
@@ -152,7 +165,7 @@ describe('TasksGeneralTab', () => {
       fireEvent.submit(screen.getByRole('button', { name: /save/i }).closest('form')!)
     })
 
-    expect(window.api.db.updateProject).toHaveBeenCalledWith({
+    expect(updateProjectSpy).toHaveBeenCalledWith({
       id: 'proj-1',
       taskAutomationConfig: null
     })
@@ -160,7 +173,7 @@ describe('TasksGeneralTab', () => {
 
   it('calls onUpdated with returned project after save', async () => {
     const returned = makeProject({ name: 'Updated' })
-    ;(window.api.db.updateProject as any).mockResolvedValue(returned)
+    updateProjectSpy.mockResolvedValue(returned)
     const onUpdated = vi.fn()
     render(<TasksGeneralTab project={makeProject()} onUpdated={onUpdated} />)
 

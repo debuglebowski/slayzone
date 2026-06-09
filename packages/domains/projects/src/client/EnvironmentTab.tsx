@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Button } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import { Label } from '@slayzone/ui'
@@ -14,6 +16,9 @@ interface EnvironmentTabProps {
 }
 
 export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabProps) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const updateProject = useMutation(trpc.projects.update.mutationOptions())
   const [execType, setExecType] = useState<'host' | 'docker' | 'ssh'>('host')
   const [execContainer, setExecContainer] = useState('')
   const [execSshTarget, setExecSshTarget] = useState('')
@@ -71,7 +76,7 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
               }
             : null
 
-      const updated = await window.api.db.updateProject({
+      const updated = await updateProject.mutateAsync({
         id: project.id,
         executionContext
       })
@@ -162,8 +167,13 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
                 onClick={async () => {
                   setTestingConnection(true)
                   setTestResult(null)
-                  const result = await window.api.pty
-                    .testExecutionContext({ type: 'docker', container: execContainer.trim() })
+                  const result = await queryClient
+                    .fetchQuery(
+                      trpc.pty.testExecutionContext.queryOptions({
+                        type: 'docker',
+                        container: execContainer.trim()
+                      })
+                    )
                     .catch((e: unknown) => ({
                       success: false as const,
                       error: e instanceof Error ? e.message : String(e)
@@ -229,8 +239,13 @@ export function EnvironmentTab({ project, onUpdated, onClose }: EnvironmentTabPr
                 onClick={async () => {
                   setTestingConnection(true)
                   setTestResult(null)
-                  const result = await window.api.pty
-                    .testExecutionContext({ type: 'ssh', target: execSshTarget.trim() })
+                  const result = await queryClient
+                    .fetchQuery(
+                      trpc.pty.testExecutionContext.queryOptions({
+                        type: 'ssh',
+                        target: execSshTarget.trim()
+                      })
+                    )
                     .catch((e: unknown) => ({
                       success: false as const,
                       error: e instanceof Error ? e.message : String(e)

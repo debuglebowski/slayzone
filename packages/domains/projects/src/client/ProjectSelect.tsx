@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { Project } from '@slayzone/projects/shared'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 
 interface ProjectSelectProps {
@@ -13,11 +13,8 @@ export function ProjectSelect({
   onChange,
   disabled
 }: ProjectSelectProps): React.JSX.Element {
-  const [projects, setProjects] = useState<Project[]>([])
-
-  useEffect(() => {
-    window.api.db.getProjects().then(setProjects)
-  }, [])
+  const trpc = useTRPC()
+  const projects = useQuery(trpc.projects.list.queryOptions()).data ?? []
 
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>

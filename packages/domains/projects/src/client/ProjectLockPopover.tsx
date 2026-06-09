@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Lock, LockOpen, Timer, Clock, AlertTriangle } from 'lucide-react'
 import {
   Button,
@@ -46,6 +48,8 @@ const WINDOW_OPTIONS = [
 ]
 
 export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverProps) {
+  const trpc = useTRPC()
+  const updateProject = useMutation(trpc.projects.update.mutationOptions())
   const config = project.lock_config
   const hasAnyLock = !!(config?.locked_until || config?.rate_limit || config?.schedule)
 
@@ -144,7 +148,7 @@ export function ProjectLockPopover({ project, onUpdated }: ProjectLockPopoverPro
           : null,
       disable_unlock_early: disableUnlockEarly
     }
-    const updated = await window.api.db.updateProject({ id: project.id, lockConfig })
+    const updated = await updateProject.mutateAsync({ id: project.id, lockConfig })
     onUpdated(updated as unknown as Project)
     setOpen(false)
   }

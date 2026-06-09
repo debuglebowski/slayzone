@@ -1,3 +1,5 @@
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { FolderGit2, Star } from 'lucide-react'
 import { cn } from '@slayzone/ui'
 import type { Project, DetectedRepo } from '@slayzone/projects/shared'
@@ -10,10 +12,12 @@ interface ReposTabProps {
 }
 
 export function ReposTab({ project, repos, onUpdated }: ReposTabProps) {
+  const trpc = useTRPC()
+  const updateProject = useMutation(trpc.projects.update.mutationOptions())
   const defaultRepo = project.selected_repo ?? repos[0]?.name ?? null
 
   const handleSetDefault = async (repoName: string) => {
-    const updated = await window.api.db.updateProject({
+    const updated = await updateProject.mutateAsync({
       id: project.id,
       selectedRepo: repoName
     })

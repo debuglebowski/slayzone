@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { IntegrationProvider } from '@slayzone/integrations/shared'
 import { Button, Dialog, DialogContent, DialogHeader, DialogTitle, Input } from '@slayzone/ui'
 
@@ -76,6 +78,14 @@ export function ProjectIntegrationConnectionModal({
   connectionId,
   onConnectionsChanged
 }: ProjectIntegrationConnectionModalProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const connectGithub = useMutation(trpc.integrations.connectGithub.mutationOptions())
+  const connectJira = useMutation(trpc.integrations.connectJira.mutationOptions())
+  const connectLinear = useMutation(trpc.integrations.connectLinear.mutationOptions())
+  const setProjectConnection = useMutation(
+    trpc.integrations.setProjectConnection.mutationOptions()
+  )
+  const updateConnection = useMutation(trpc.integrations.updateConnection.mutationOptions())
   const [credential, setCredential] = useState('')
   const [jiraDomain, setJiraDomain] = useState('')
   const [jiraEmail, setJiraEmail] = useState('')
@@ -110,25 +120,25 @@ export function ProjectIntegrationConnectionModal({
       if (mode === 'connect') {
         let nextConnection
         if (provider === 'github') {
-          nextConnection = await window.api.integrations.connectGithub({
+          nextConnection = await connectGithub.mutateAsync({
             token: credential.trim(),
             projectId
           })
         } else if (provider === 'jira') {
-          nextConnection = await window.api.integrations.connectJira({
+          nextConnection = await connectJira.mutateAsync({
             cloudDomain: jiraDomain.trim(),
             email: jiraEmail.trim(),
             apiToken: credential.trim(),
             projectId
           })
         } else {
-          nextConnection = await window.api.integrations.connectLinear({
+          nextConnection = await connectLinear.mutateAsync({
             apiKey: credential.trim(),
             projectId
           })
         }
 
-        await window.api.integrations.setProjectConnection({
+        await setProjectConnection.mutateAsync({
           projectId,
           provider,
           connectionId: nextConnection.id
@@ -137,7 +147,7 @@ export function ProjectIntegrationConnectionModal({
         if (!connectionId) {
           throw new Error('No connection to edit')
         }
-        await window.api.integrations.updateConnection({
+        await updateConnection.mutateAsync({
           connectionId,
           credential: credential.trim()
         })

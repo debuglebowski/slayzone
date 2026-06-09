@@ -1,3 +1,5 @@
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,9 +25,11 @@ export function DeleteProjectDialog({
   onOpenChange,
   onDeleted
 }: DeleteProjectDialogProps) {
+  const trpc = useTRPC()
+  const deleteProject = useMutation(trpc.projects.delete.mutationOptions())
   const handleDelete = async () => {
     if (!project) return
-    await window.api.db.deleteProject(project.id)
+    await deleteProject.mutateAsync({ id: project.id })
     onDeleted()
   }
 

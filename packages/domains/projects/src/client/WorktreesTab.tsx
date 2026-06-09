@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { AlertTriangle } from 'lucide-react'
 import {
   Button,
@@ -27,6 +29,8 @@ interface WorktreesTabProps {
 }
 
 export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps) {
+  const trpc = useTRPC()
+  const updateProject = useMutation(trpc.projects.update.mutationOptions())
   const [autoCreateOverride, setAutoCreateOverride] = useState<'inherit' | 'on' | 'off'>('inherit')
   const [sourceBranch, setSourceBranch] = useState('')
   const [copyOverride, setCopyOverride] = useState<CopyOverride>('inherit')
@@ -57,7 +61,7 @@ export function WorktreesTab({ project, onUpdated, onClose }: WorktreesTabProps)
     e.preventDefault()
     setLoading(true)
     try {
-      const updated = await window.api.db.updateProject({
+      const updated = await updateProject.mutateAsync({
         id: project.id,
         autoCreateWorktreeOnTaskCreate:
           autoCreateOverride === 'inherit' ? null : autoCreateOverride === 'on',

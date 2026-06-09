@@ -1,3 +1,5 @@
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Check, ExternalLink as ExternalLinkIcon, Info, Loader2, Pencil } from 'lucide-react'
 import {
   Button,
@@ -22,6 +24,8 @@ import type { IntegrationSyncMode } from '@slayzone/integrations/shared'
 import type { IntegrationsTabModel } from './useIntegrationsTab'
 
 export function IntegrationContinuousSyncSection({ vm }: { vm: IntegrationsTabModel }) {
+  const trpc = useTRPC()
+  const openExternal = useMutation(trpc.app.shell.openExternal.mutationOptions())
   const {
     checkingSync,
     githubConnected,
@@ -614,7 +618,7 @@ export function IntegrationContinuousSyncSection({ vm }: { vm: IntegrationsTabMo
             <button
               type="button"
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              onClick={() => window.api.shell.openExternal(syncExternalUrl)}
+              onClick={() => openExternal.mutate({ url: syncExternalUrl })}
             >
               <ExternalLinkIcon className="size-3" />
               Open in {syncSetupProvider === 'linear' ? 'Linear' : 'GitHub'}

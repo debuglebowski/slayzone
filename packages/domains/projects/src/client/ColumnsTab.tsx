@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react'
 import { Button, IconButton } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
@@ -27,6 +29,8 @@ interface ColumnsTabProps {
 }
 
 export function ColumnsTab({ project, onUpdated, lockedByProvider }: ColumnsTabProps) {
+  const trpc = useTRPC()
+  const updateProject = useMutation(trpc.projects.update.mutationOptions())
   const [columnsDraft, setColumnsDraft] = useState<ColumnConfig[]>(() =>
     resolveColumns(project.columns_config)
   )
@@ -110,7 +114,7 @@ export function ColumnsTab({ project, onUpdated, lockedByProvider }: ColumnsTabP
       return
     }
 
-    const updated = await window.api.db.updateProject({
+    const updated = await updateProject.mutateAsync({
       id: project.id,
       columnsConfig: normalized
     })

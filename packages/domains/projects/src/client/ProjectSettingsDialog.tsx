@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { SettingsLayout } from '@slayzone/ui'
 import type { Project } from '@slayzone/projects/shared'
@@ -69,18 +71,32 @@ export function ProjectSettingsDialog({
     | 'ai-config'
     | 'tests'
   >('general')
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const detectedRepos = useDetectedRepos(open ? (project?.path ?? null) : null)
   const [lockedByProvider, setLockedByProvider] = useState<string | null>(null)
 
   const checkIntegrationLock = useCallback(async () => {
+    // `window.api.app.isPlaywright` is a synchronous preload flag (no tRPC proc) —
+    // leave it as-is.
     if (!project || window.api.app.isPlaywright) {
       setLockedByProvider(null)
       return
     }
     try {
       const [linear, github] = await Promise.all([
-        window.api.integrations.getProjectMapping(project.id, 'linear'),
-        window.api.integrations.getProjectMapping(project.id, 'github')
+        queryClient.fetchQuery(
+          trpc.integrations.getProjectMapping.queryOptions({
+            projectId: project.id,
+            provider: 'linear'
+          })
+        ),
+        queryClient.fetchQuery(
+          trpc.integrations.getProjectMapping.queryOptions({
+            projectId: project.id,
+            provider: 'github'
+          })
+        )
       ])
       if (linear?.status_setup_complete) setLockedByProvider('Linear')
       else if (github?.status_setup_complete) setLockedByProvider('GitHub')
@@ -88,7 +104,7 @@ export function ProjectSettingsDialog({
     } catch {
       setLockedByProvider(null)
     }
-  }, [project])
+  }, [project, queryClient, trpc])
 
   useEffect(() => {
     if (open) void checkIntegrationLock()

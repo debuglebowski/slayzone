@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { Project } from '@slayzone/projects/shared'
 import { getIntegrationOps } from '../app-deps'
 import { router, publicProcedure } from '../trpc'
 
@@ -129,8 +130,10 @@ export const integrationsRouter = router({
   fetchProviderStatuses: publicProcedure.input(anyInput).mutation(({ input }) =>
     getIntegrationOps().fetchProviderStatuses(input as never)
   ),
-  applyStatusSync: publicProcedure.input(anyInput).mutation(({ input }) =>
-    getIntegrationOps().applyStatusSync(input as never)
+  applyStatusSync: publicProcedure.input(anyInput).mutation(
+    // Returns the updated project; the ops impl reads it via the worker DB
+    // (.get() → unknown), so assert the row shape at this API boundary.
+    ({ input }) => getIntegrationOps().applyStatusSync(input as never) as Promise<Project>
   ),
   resyncProviderStatuses: publicProcedure.input(anyInput).mutation(({ input }) =>
     getIntegrationOps().resyncProviderStatuses(input as never)

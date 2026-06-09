@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
@@ -43,6 +45,9 @@ const START_OPTIONS: Array<{
 ]
 
 export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreateProjectDialogProps) {
+  const trpc = useTRPC()
+  const showOpenDialog = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
+  const createProject = useMutation(trpc.projects.create.mutationOptions())
   const [name, setName] = useState('')
   const [color, setColor] = useState(
     () => DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)]
@@ -53,7 +58,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
   const visibleStartOptions = START_OPTIONS
 
   const handleBrowse = async () => {
-    const result = await window.api.dialog.showOpenDialog({
+    const result = await showOpenDialog.mutateAsync({
       title: 'Select Project Directory',
       properties: ['openDirectory', 'createDirectory', 'promptToCreate']
     })
@@ -73,7 +78,7 @@ export function CreateProjectDialog({ open, onOpenChange, onCreated }: CreatePro
 
     setLoading(true)
     try {
-      const project = await window.api.db.createProject({
+      const project = await createProject.mutateAsync({
         name: name.trim(),
         color,
         path: path || undefined
