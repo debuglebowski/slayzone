@@ -44,7 +44,19 @@ export { serialize, deserialize, loadTree, saveTree } from './persistence'
 
 // Store + selector hooks
 export type { LayoutStore } from './store'
-export { useLayoutStore, useLayoutTree, useOverlays, useFocusedNodeId, getLayoutStore } from './store'
+export {
+  useLayoutStore,
+  useLayoutTree,
+  useOverlays,
+  useFocusedNodeId,
+  useDraggingSplitId,
+  useNativeTilesVisible,
+  getLayoutStore
+} from './store'
+
+// Occlusion policy (pure)
+export type { OcclusionPolicy, OcclusionInputs, ResizeStrategy } from './occlusion'
+export { DEFAULT_OCCLUSION_POLICY, nativeTileVisible } from './occlusion'
 
 // Theming tokens
 export { COLORS } from './colors'

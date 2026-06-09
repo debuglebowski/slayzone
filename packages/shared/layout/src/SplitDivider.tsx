@@ -8,6 +8,7 @@ import { applySplitResize, resetSplitFractions } from './resize'
 import { COLORS } from './colors'
 
 interface SplitDividerProps {
+  splitId: string
   index: number
   rect: Rect
   direction: SplitDirection
@@ -16,10 +17,13 @@ interface SplitDividerProps {
   /** Read the split's current fractions (captured live at mousedown). */
   getFractions: () => number[]
   onResize: (fractions: number[]) => void
+  /** Drag lifecycle — feeds the engine's occlusion policy. */
+  onDragChange?: (splitId: string | null) => void
 }
 
 export function SplitDivider(props: SplitDividerProps) {
-  const { index, rect, direction, childMinsPx, totalContentPx, getFractions, onResize } = props
+  const { splitId, index, rect, direction, childMinsPx, totalContentPx, getFractions, onResize, onDragChange } =
+    props
   const horizontal = direction === 'row'
   const dragRef = useRef<{ pos: number; fractions: number[] } | null>(null)
   const moveRef = useRef<((e: MouseEvent) => void) | null>(null)
@@ -32,6 +36,11 @@ export function SplitDivider(props: SplitDividerProps) {
     if (upRef.current) document.removeEventListener('mouseup', upRef.current)
     moveRef.current = null
     upRef.current = null
+    if (dragRef.current) {
+      // unmounted mid-drag — don't leave the engine's drag flag stuck
+      dragRef.current = null
+      onDragChange?.(null)
+    }
   }
   useEffect(() => cleanup, [])
 
@@ -39,6 +48,7 @@ export function SplitDivider(props: SplitDividerProps) {
     e.preventDefault()
     dragRef.current = { pos: horizontal ? e.clientX : e.clientY, fractions: getFractions() }
     setActive(true)
+    onDragChange?.(splitId)
     const onMove = (ev: MouseEvent): void => {
       const d = dragRef.current
       if (!d) return
@@ -48,6 +58,7 @@ export function SplitDivider(props: SplitDividerProps) {
     const onUp = (): void => {
       dragRef.current = null
       setActive(false)
+      onDragChange?.(null)
       cleanup()
     }
     moveRef.current = onMove

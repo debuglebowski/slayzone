@@ -13,12 +13,17 @@ import {
   setActiveTile
 } from './tree-ops'
 import { saveTree } from './persistence'
+import type { OcclusionPolicy } from './occlusion'
+import { DEFAULT_OCCLUSION_POLICY, nativeTileVisible } from './occlusion'
 
 export interface LayoutStore {
   tree: LayoutTree
   overlays: Overlay[]
   focusedNodeId: string | null
   taskId: string | null
+  /** Split currently being divider-dragged (null = idle). */
+  draggingSplitId: string | null
+  occlusionPolicy: OcclusionPolicy
 
   /** Adopt a task id + its (already-resolved) initial tree. */
   bindTask(taskId: string, tree: LayoutTree): void
@@ -29,6 +34,8 @@ export interface LayoutStore {
   setActiveTab(paneId: string, tileId: string): void
   /** Set a split's fractions (called live during a divider drag). */
   resizeSplit(splitId: string, fractions: number[]): void
+  setDraggingSplit(splitId: string | null): void
+  setOcclusionPolicy(policy: Partial<OcclusionPolicy>): void
   focusNode(nodeId: string): void
   openOverlay(overlay: Overlay): void
   closeOverlay(id: string): void
@@ -40,6 +47,8 @@ export const useLayoutStore = create<LayoutStore>()(
     overlays: [],
     focusedNodeId: null,
     taskId: null,
+    draggingSplitId: null,
+    occlusionPolicy: DEFAULT_OCCLUSION_POLICY,
 
     bindTask: (taskId, tree) => set({ taskId, tree }),
     setTree: (tree) => set({ tree }),
@@ -49,6 +58,8 @@ export const useLayoutStore = create<LayoutStore>()(
       set({ tree: moveTileBetweenPanes(get().tree, tileId, toPaneId, toIndex) }),
     setActiveTab: (paneId, tileId) => set({ tree: setActiveTile(get().tree, paneId, tileId) }),
     resizeSplit: (splitId, fractions) => set({ tree: replaceFractions(get().tree, splitId, fractions) }),
+    setDraggingSplit: (splitId) => set({ draggingSplitId: splitId }),
+    setOcclusionPolicy: (policy) => set((s) => ({ occlusionPolicy: { ...s.occlusionPolicy, ...policy } })),
     focusNode: (nodeId) => set({ focusedNodeId: nodeId }),
     openOverlay: (overlay) =>
       set((s) => ({ overlays: [...s.overlays.filter((o) => o.id !== overlay.id), overlay] })),
@@ -74,6 +85,11 @@ useLayoutStore.subscribe(
 export const useLayoutTree = (): LayoutTree => useLayoutStore((s) => s.tree)
 export const useOverlays = (): Overlay[] => useLayoutStore((s) => s.overlays)
 export const useFocusedNodeId = (): string | null => useLayoutStore((s) => s.focusedNodeId)
+export const useDraggingSplitId = (): string | null => useLayoutStore((s) => s.draggingSplitId)
+export const useNativeTilesVisible = (): boolean =>
+  useLayoutStore((s) =>
+    nativeTileVisible(s.occlusionPolicy, { overlays: s.overlays, draggingSplitId: s.draggingSplitId })
+  )
 export const getLayoutStore = (): LayoutStore => useLayoutStore.getState()
 
 // Debug/e2e handle (mirrors window.__slayzone_terminalStateStore).
