@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import type { ChatTimelineState } from '@slayzone/terminal/client'
 import { resetChat } from './autocomplete/chat-actions'
@@ -47,6 +48,7 @@ export function useChatLifecycle({
   setDraft,
   clearQueue
 }: UseChatLifecycleOpts) {
+  const trpcClient = useTRPCClient()
   const [resetting, setResetting] = useState(false)
   const [restarting, setRestarting] = useState(false)
   // Suppress "Session ended" UI during a reset/restart — process-exit fires between kill and
@@ -146,40 +148,28 @@ export function useChatLifecycle({
     prevInFlightRef.current = inFlight
     if (prev === inFlight) return
     try {
-      const api = (
-        window as unknown as {
-          api?: {
-            diagnostics?: {
-              recordClientEvent?: (e: {
-                event: string
-                level: 'info' | 'warn'
-                message: string
-                taskId?: string
-                sessionId?: string | null
-                payload: unknown
-              }) => void
-            }
+      void trpcClient.diagnostics.recordClientEvent
+        .mutate({
+          event: 'renderer.chat.inFlight.flip',
+          level: 'info',
+          message: `inFlight ${prev ?? 'init'}→${inFlight}`,
+          taskId,
+          sessionId: state.sessionId,
+          payload: {
+            tabId,
+            mode,
+            from: prev,
+            to: inFlight,
+            userMessagesSent: state.userMessagesSent,
+            resultCount: state.resultCount,
+            sessionEnded: state.sessionEnded,
+            timelineLen: state.timeline.length,
+            lastEventKinds: state.timeline.slice(-5).map((it) => it.kind)
           }
-        }
-      ).api
-      api?.diagnostics?.recordClientEvent?.({
-        event: 'renderer.chat.inFlight.flip',
-        level: 'info',
-        message: `inFlight ${prev ?? 'init'}→${inFlight}`,
-        taskId,
-        sessionId: state.sessionId,
-        payload: {
-          tabId,
-          mode,
-          from: prev,
-          to: inFlight,
-          userMessagesSent: state.userMessagesSent,
-          resultCount: state.resultCount,
-          sessionEnded: state.sessionEnded,
-          timelineLen: state.timeline.length,
-          lastEventKinds: state.timeline.slice(-5).map((it) => it.kind)
-        }
-      })
+        })
+        .catch(() => {
+          /* diagnostics never escalate */
+        })
     } catch {
       /* diagnostics never escalate */
     }
@@ -193,7 +183,8 @@ export function useChatLifecycle({
     state.userMessagesSent,
     state.resultCount,
     state.sessionEnded,
-    state.timeline
+    state.timeline,
+    trpcClient
   ])
 
   return { resetting, restarting, displaySessionEnded, handleReset, handleRestart }

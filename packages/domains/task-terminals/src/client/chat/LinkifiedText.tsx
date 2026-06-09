@@ -1,4 +1,5 @@
 import React from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { findLinksInString } from '@slayzone/terminal/shared'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@slayzone/ui'
 
@@ -6,22 +7,8 @@ interface LinkifiedTextProps {
   text: string
   /** Cmd/Ctrl+click on a URL → in-app slay browser. Falls back to external when undefined. */
   onOpenUrl?: (url: string) => void
-  /** Cmd/Ctrl+click on a file path → open in editor pane. Defaults to `window.api.shell.openPath`. */
+  /** Cmd/Ctrl+click on a file path → open in editor pane. Defaults to `app.shell.openPath`. */
   onOpenFile?: (path: string, line?: number, col?: number) => void
-}
-
-function openExternal(url: string): void {
-  const api = (
-    window as unknown as { api?: { shell?: { openExternal: (u: string) => Promise<unknown> } } }
-  ).api
-  void api?.shell?.openExternal(url)
-}
-
-function defaultOpenFile(path: string): void {
-  const api = (
-    window as unknown as { api?: { shell?: { openPath: (p: string) => Promise<string> } } }
-  ).api
-  void api?.shell?.openPath(path)
 }
 
 /**
@@ -36,6 +23,13 @@ function defaultOpenFile(path: string): void {
  *   - Bare click → no-op (lets text selection through)
  */
 export function LinkifiedText({ text, onOpenUrl, onOpenFile }: LinkifiedTextProps) {
+  const trpcClient = useTRPCClient()
+  const openExternal = (url: string): void => {
+    void trpcClient.app.shell.openExternal.mutate({ url })
+  }
+  const defaultOpenFile = (path: string): void => {
+    void trpcClient.app.shell.openPath.mutate({ absPath: path })
+  }
   const matches = findLinksInString(text)
   if (matches.length === 0) return <>{text}</>
 

@@ -1,10 +1,10 @@
 import type { SkillInfo } from '@slayzone/terminal/shared'
-import type { AutocompleteSource } from '../types'
+import type { AutocompleteSource, ChatListApi } from '../types'
 import { filterSkills } from '../../skill-filter'
 import { spliceReplace } from '../useAutocomplete'
 import { renderSkillItem } from './render-skill'
 
-export function createSkillsSource(): AutocompleteSource<SkillInfo> {
+export function createSkillsSource(listApi?: ChatListApi): AutocompleteSource<SkillInfo> {
   return {
     id: 'skills',
     detect(draft, cursorPos) {
@@ -14,14 +14,8 @@ export function createSkillsSource(): AutocompleteSource<SkillInfo> {
       return { query: rest, tokenStart: 0, tokenEnd: cursorPos }
     },
     async fetch({ cwd }) {
-      const api = (
-        window as unknown as {
-          api?: { chat?: { listSkills?: (cwd: string) => Promise<SkillInfo[]> } }
-        }
-      ).api
-      const fn = api?.chat?.listSkills
-      if (!fn) return []
-      return fn(cwd)
+      if (!listApi) return []
+      return listApi.listSkills(cwd)
     },
     filter: filterSkills,
     getKey: (s) => `${s.source}:${s.name}`,

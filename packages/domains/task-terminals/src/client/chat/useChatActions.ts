@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { ChatActions, NavigateActions } from './autocomplete/types'
 
 export interface UseChatActionsResult {
@@ -7,70 +8,32 @@ export interface UseChatActionsResult {
 }
 
 /**
- * Builds the two stable `window.api` facades the chat panel + autocomplete need:
+ * Builds the two stable tRPC-backed facades the chat panel + autocomplete need:
  *
  *   - `chatApi` (ChatActions): kill / remove / reset / hydrate / start / send /
- *     interrupt. Each method null-guards the optional `window.api.chat` bridge so
- *     the panel never throws when the preload surface is missing (tests / boot).
+ *     interrupt — thin wrappers over the `chat.*` tRPC procedures.
  *   - `navigate` (NavigateActions): openSettings / openExternal / openFile — thin
- *     wrappers over `CustomEvent('open-settings')` + `window.api.shell`.
+ *     wrappers over `CustomEvent('open-settings')` + the `app.shell.*` mutations.
  *
- * Both are memoized with empty deps (the underlying `window.api` is a stable
- * singleton), so the returned object identities stay fixed across renders and
- * don't churn the autocomplete accept-context.
+ * Both are memoized on the (stable) tRPC client so the returned object
+ * identities stay fixed across renders and don't churn the autocomplete
+ * accept-context.
  */
 export function useChatActions(): UseChatActionsResult {
-  const chatApi = useMemo<ChatActions>(() => {
-    const api = (
-      window as unknown as {
-        api?: {
-          chat?: {
-            kill: (tabId: string) => Promise<void>
-            remove: (tabId: string) => Promise<void>
-            reset: (opts: {
-              tabId: string
-              taskId: string
-              mode: string
-              cwd: string
-              providerFlagsOverride?: string | null
-            }) => Promise<unknown>
-            hydrate: (opts: {
-              tabId: string
-              taskId: string
-              mode: string
-              cwd: string
-              providerFlagsOverride?: string | null
-            }) => Promise<unknown>
-            start: (opts: {
-              tabId: string
-              taskId: string
-              mode: string
-              cwd: string
-              providerFlagsOverride?: string | null
-            }) => Promise<unknown>
-            send: (tabId: string, text: string) => Promise<boolean>
-            interrupt: (opts: {
-              tabId: string
-              taskId: string
-              mode: string
-              cwd: string
-              providerFlagsOverride?: string | null
-            }) => Promise<unknown>
-          }
-        }
-      }
-    ).api
-    const chat = api?.chat
-    return {
-      kill: (id) => chat?.kill(id) ?? Promise.resolve(),
-      remove: (id) => chat?.remove(id) ?? Promise.resolve(),
-      reset: (opts) => chat?.reset(opts) ?? Promise.resolve(null),
-      hydrate: (opts) => chat?.hydrate(opts) ?? Promise.resolve(null),
-      start: (opts) => chat?.start(opts) ?? Promise.resolve(null),
-      send: (id, text) => chat?.send(id, text) ?? Promise.resolve(false),
-      interrupt: (o) => chat?.interrupt(o) ?? Promise.resolve(null)
-    }
-  }, [])
+  const trpcClient = useTRPCClient()
+
+  const chatApi = useMemo<ChatActions>(
+    () => ({
+      kill: (tabId) => trpcClient.chat.kill.mutate({ tabId }).then(() => undefined),
+      remove: (tabId) => trpcClient.chat.remove.mutate({ tabId }).then(() => undefined),
+      reset: (opts) => trpcClient.chat.reset.mutate(opts),
+      hydrate: (opts) => trpcClient.chat.hydrate.mutate(opts),
+      start: (opts) => trpcClient.chat.start.mutate(opts),
+      send: (tabId, text) => trpcClient.chat.send.mutate({ tabId, text }),
+      interrupt: (opts) => trpcClient.chat.interrupt.mutate(opts)
+    }),
+    [trpcClient]
+  )
 
   const navigate = useMemo<NavigateActions>(
     () => ({
@@ -78,23 +41,13 @@ export function useChatActions(): UseChatActionsResult {
         window.dispatchEvent(new CustomEvent('open-settings', { detail: tab ?? 'appearance' }))
       },
       openExternal(url) {
-        const api = (
-          window as unknown as {
-            api?: { shell?: { openExternal: (url: string) => Promise<unknown> } }
-          }
-        ).api
-        void api?.shell?.openExternal(url)
+        void trpcClient.app.shell.openExternal.mutate({ url })
       },
       openFile(absPath) {
-        const api = (
-          window as unknown as {
-            api?: { shell?: { openPath: (p: string) => Promise<string> } }
-          }
-        ).api
-        void api?.shell?.openPath(absPath)
+        void trpcClient.app.shell.openPath.mutate({ absPath })
       }
     }),
-    []
+    [trpcClient]
   )
 
   return { chatApi, navigate }

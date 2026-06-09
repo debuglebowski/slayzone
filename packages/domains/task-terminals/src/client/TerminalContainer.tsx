@@ -7,6 +7,8 @@ import {
   forwardRef,
   useImperativeHandle
 } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { usePty } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import {
@@ -118,6 +120,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
     const shortcutActive = hasShortcutFocus ?? isActive
 
+    const trpc = useTRPC()
+    const claimSessionMutation = useMutation(trpc.app.taskWindows.claimSession.mutationOptions())
     const { subscribePrompt, subscribeTitle } = usePty()
     const { terminalOverrideThemeId, contentVariant } = useTheme()
     const terminalPanelStyle = useMemo(() => {
@@ -160,13 +164,13 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       const claimAll = () => {
         for (const tab of tabs) {
           const sid = getSessionId(tab.id)
-          if (sid) void window.api.pty.claimSession(sid)
+          if (sid) claimSessionMutation.mutate({ sessionId: sid })
         }
       }
       claimAll()
       window.addEventListener('focus', claimAll)
       return () => window.removeEventListener('focus', claimAll)
-    }, [tabs, getSessionId])
+    }, [tabs, getSessionId, claimSessionMutation])
 
     // Track terminal process titles for tab labels
     const [terminalTitles, setTerminalTitles] = useState<Map<string, string>>(new Map())

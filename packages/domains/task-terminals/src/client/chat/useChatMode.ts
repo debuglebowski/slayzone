@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { toast, type AgentMode, type AutoModeCapability } from '@slayzone/ui'
 import { rawPermissionModeToChatMode } from '@slayzone/terminal/shared'
 
@@ -23,23 +24,6 @@ interface UseChatModeOpts {
    * start / kill+respawn (turn-init).
    */
   livePermissionMode?: string | null
-}
-
-interface ChatModeApi {
-  setMode: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    chatMode: AgentMode
-  }) => Promise<SessionInfoLite>
-  getMode: (taskId: string, mode: string) => Promise<AgentMode>
-  getInfo: (tabId: string) => Promise<SessionInfoLite | null>
-  getAutoEligibility?: () => Promise<AutoModeCapability>
-}
-
-function getApi(): ChatModeApi {
-  return (window as unknown as { api: { chat: ChatModeApi } }).api.chat
 }
 
 /**
@@ -70,6 +54,7 @@ function getApi(): ChatModeApi {
  * keep mode wiring testable in isolation.
  */
 export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: UseChatModeOpts) {
+  const trpcClient = useTRPCClient()
   const [chatMode, setChatModeState] = useState<AgentMode>('auto-accept')
   const [autoCapability, setAutoCapability] = useState<AutoModeCapability>({
     eligible: false,
@@ -91,14 +76,14 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
     let cancelled = false
     void (async () => {
       try {
-        const info = await getApi().getInfo(tabId)
+        const info = (await trpcClient.chat.getInfo.query({ tabId })) as SessionInfoLite | null
         if (cancelled) return
         if (info?.chatMode) {
           setChatModeState(info.chatMode)
           confirmedModeRef.current = info.chatMode
           return
         }
-        const cached = await getApi().getMode(taskId, mode)
+        const cached = (await trpcClient.chat.getMode.query({ taskId, mode })) as AgentMode
         if (!cancelled) {
           setChatModeState(cached)
           confirmedModeRef.current = cached
@@ -110,6 +95,7 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, mode, tabId])
 
   // Drift sync: apply live permission mode only on transitions. A stale
@@ -131,9 +117,8 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
 
   useEffect(() => {
     let cancelled = false
-    const fn = getApi().getAutoEligibility
-    if (!fn) return
-    void fn()
+    void trpcClient.chat.getAutoEligibility
+      .query()
       .then((cap) => {
         if (!cancelled) setAutoCapability(cap)
       })
@@ -143,6 +128,7 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleModeChange = useCallback(
@@ -170,7 +156,13 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
           const target: AgentMode = pendingModeRef.current
           let info: SessionInfoLite
           try {
-            info = await getApi().setMode({ tabId, taskId, mode, cwd, chatMode: target })
+            info = (await trpcClient.chat.setMode.mutate({
+              tabId,
+              taskId,
+              mode,
+              cwd,
+              chatMode: target
+            })) as SessionInfoLite
           } catch (err) {
             lastError = err
             break
@@ -202,7 +194,7 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
         throw lastError
       }
     },
-    [chatMode, autoCapability.optedIn, tabId, taskId, mode, cwd]
+    [chatMode, autoCapability.optedIn, tabId, taskId, mode, cwd, trpcClient]
   )
 
   return { chatMode, handleModeChange, autoCapability }

@@ -1,5 +1,5 @@
 import type { CommandInfo } from '@slayzone/terminal/shared'
-import type { AutocompleteSource, SubmitTransform } from '../types'
+import type { AutocompleteSource, ChatListApi, SubmitTransform } from '../types'
 import { rankByName } from '../ranking'
 import { spliceReplace } from '../useAutocomplete'
 import { renderCommandItem } from './render-command'
@@ -35,7 +35,8 @@ export function transformCommandSubmit(
 }
 
 export function createCommandsSource(
-  onSend: (text: string) => Promise<boolean>
+  onSend: (text: string) => Promise<boolean>,
+  listApi?: ChatListApi
 ): AutocompleteSource<CommandInfo> {
   return {
     id: 'commands',
@@ -48,14 +49,8 @@ export function createCommandsSource(
       return { query: rest, tokenStart: 0, tokenEnd: cursorPos }
     },
     async fetch({ cwd }) {
-      const api = (
-        window as unknown as {
-          api?: { chat?: { listCommands?: (cwd: string) => Promise<CommandInfo[]> } }
-        }
-      ).api
-      const fn = api?.chat?.listCommands
-      if (!fn) return []
-      return fn(cwd)
+      if (!listApi) return []
+      return listApi.listCommands(cwd)
     },
     filter: filterCommands,
     getKey: (c) => `${c.source}:${c.name}`,

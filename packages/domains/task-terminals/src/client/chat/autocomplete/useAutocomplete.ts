@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { AcceptCtx, AutocompleteSource, FetchCtx, TriggerMatch } from './types'
 import { rankAcrossSources, type MergedEntry, type UsageLookup } from './ranking'
 
@@ -12,15 +13,6 @@ export interface UseAutocompleteOptions {
 }
 
 type UsageMap = Record<string, Record<string, number>>
-
-interface AutocompleteApi {
-  getAutocompleteUsage?: () => Promise<UsageMap>
-  bumpAutocompleteUsage?: (source: string, name: string) => Promise<void>
-}
-
-function getApi(): AutocompleteApi | undefined {
-  return (window as unknown as { api?: { chat?: AutocompleteApi } }).api?.chat
-}
 
 export interface ActiveMatch {
   match: TriggerMatch
@@ -58,6 +50,7 @@ export interface UseAutocompleteResult {
  */
 export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteResult {
   const { sources, draft, setDraft, cursorPos, acceptCtx, fetchCtx } = opts
+  const trpcClient = useTRPCClient()
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [itemsBySource, setItemsBySource] = useState<Record<string, unknown[]>>({})
   const [dismissed, setDismissed] = useState<{ source: string; match: TriggerMatch } | null>(null)
@@ -68,9 +61,8 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
   // Load usage map once on mount. Refreshed after each bump.
   useEffect(() => {
     let cancelled = false
-    const fn = getApi()?.getAutocompleteUsage
-    if (!fn) return
-    void fn()
+    void trpcClient.chat.getAutocompleteUsage
+      .query()
       .then((m) => {
         if (!cancelled) setUsage(m ?? {})
       })
@@ -80,6 +72,7 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Fetch items per source once (cwd-scoped). Sources are stable refs.
@@ -237,8 +230,6 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
 
   const bumpUsageFromMessage = useCallback(
     async (text: string) => {
-      const fn = getApi()?.bumpAutocompleteUsage
-      if (!fn) return
       // Match `/<token>` only at start-of-string or after whitespace; tokens are
       // [a-zA-Z0-9_-]+, mirroring how skills/commands/agents/builtins name themselves.
       const tokenRe = /(?:^|\s)\/([a-zA-Z0-9_-]+)/g
@@ -272,23 +263,24 @@ export function useAutocomplete(opts: UseAutocompleteOptions): UseAutocompleteRe
         const key = `${resolved.sourceId}:${resolved.name}`
         if (bumped.has(key)) continue
         bumped.add(key)
-        bumps.push(fn(resolved.sourceId, resolved.name).catch(() => undefined))
+        bumps.push(
+          trpcClient.chat.bumpAutocompleteUsage
+            .mutate({ source: resolved.sourceId, name: resolved.name })
+            .catch(() => undefined)
+        )
       }
       pickedRef.current.clear()
       if (bumps.length === 0) return
       await Promise.all(bumps)
       // Refresh usage map so the next ranking sees the new counts.
-      const getFn = getApi()?.getAutocompleteUsage
-      if (getFn) {
-        try {
-          const m = await getFn()
-          setUsage(m ?? {})
-        } catch {
-          /* best-effort */
-        }
+      try {
+        const m = await trpcClient.chat.getAutocompleteUsage.query()
+        setUsage(m ?? {})
+      } catch {
+        /* best-effort */
       }
     },
-    [sources, itemsBySource]
+    [sources, itemsBySource, trpcClient]
   )
 
   return {

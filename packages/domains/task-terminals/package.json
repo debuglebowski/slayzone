@@ -21,8 +21,10 @@
     "@slayzone/settings": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
+    "@tanstack/react-query": "^5.100.9",
     "fzf": "^0.5.2",
     "lucide-react": "^0.562.0",
     "@slayzone/platform": "workspace:*"

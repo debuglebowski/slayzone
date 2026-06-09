@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import { DEFAULT_CHAT_COLLABORATION, type ChatCollaborationMode } from '@slayzone/terminal/shared'
 
@@ -13,22 +14,6 @@ interface UseChatCollaborationOpts {
   cwd: string
 }
 
-interface ChatCollaborationApi {
-  setCollaboration: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    chatCollaboration: ChatCollaborationMode
-  }) => Promise<SessionInfoLite>
-  getCollaboration: (taskId: string, mode: string) => Promise<ChatCollaborationMode | null>
-  getInfo: (tabId: string) => Promise<SessionInfoLite | null>
-}
-
-function getApi(): ChatCollaborationApi {
-  return (window as unknown as { api: { chat: ChatCollaborationApi } }).api.chat
-}
-
 /**
  * Owns chat collaboration-mode state (Codex `plan`/`default`). Mirrors
  * useChatEffort: server-authoritative, hydrate from live session > DB cache,
@@ -38,6 +23,7 @@ function getApi(): ChatCollaborationApi {
  * Only meaningful for `codex-chat`; the dropdown is hidden for other modes.
  */
 export function useChatCollaboration({ taskId, mode, tabId, cwd }: UseChatCollaborationOpts) {
+  const trpcClient = useTRPCClient()
   const [chatCollaboration, setChatCollaborationState] =
     useState<ChatCollaborationMode>(DEFAULT_CHAT_COLLABORATION)
   const [collaborationChanging, setCollaborationChanging] = useState(false)
@@ -46,13 +32,16 @@ export function useChatCollaboration({ taskId, mode, tabId, cwd }: UseChatCollab
     let cancelled = false
     void (async () => {
       try {
-        const info = await getApi().getInfo(tabId)
+        const info = (await trpcClient.chat.getInfo.query({ tabId })) as SessionInfoLite | null
         if (cancelled) return
         if (info && info.chatCollaboration) {
           setChatCollaborationState(info.chatCollaboration)
           return
         }
-        const cached = await getApi().getCollaboration(taskId, mode)
+        const cached = (await trpcClient.chat.getCollaboration.query({
+          taskId,
+          mode
+        })) as ChatCollaborationMode | null
         if (!cancelled) setChatCollaborationState(cached ?? DEFAULT_CHAT_COLLABORATION)
       } catch {
         /* keep DEFAULT_CHAT_COLLABORATION */
@@ -61,6 +50,7 @@ export function useChatCollaboration({ taskId, mode, tabId, cwd }: UseChatCollab
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, mode, tabId])
 
   const handleCollaborationChange = useCallback(
@@ -68,13 +58,13 @@ export function useChatCollaboration({ taskId, mode, tabId, cwd }: UseChatCollab
       if (next === chatCollaboration || collaborationChanging) return
       setCollaborationChanging(true)
       try {
-        const info = await getApi().setCollaboration({
+        const info = (await trpcClient.chat.setCollaboration.mutate({
           tabId,
           taskId,
           mode,
           cwd,
           chatCollaboration: next
-        })
+        })) as SessionInfoLite
         if (info && info.chatCollaboration) setChatCollaborationState(info.chatCollaboration)
         else setChatCollaborationState(next)
       } catch (err) {
@@ -85,7 +75,7 @@ export function useChatCollaboration({ taskId, mode, tabId, cwd }: UseChatCollab
         setCollaborationChanging(false)
       }
     },
-    [chatCollaboration, collaborationChanging, tabId, taskId, mode, cwd]
+    [chatCollaboration, collaborationChanging, tabId, taskId, mode, cwd, trpcClient]
   )
 
   return { chatCollaboration, collaborationChanging, handleCollaborationChange }

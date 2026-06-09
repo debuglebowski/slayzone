@@ -70,6 +70,20 @@ export interface NavigateActions {
   openFile: (path: string) => void
 }
 
+/**
+ * Project-metadata lookups the autocomplete sources need (skills / commands /
+ * agents / file matches). Threaded into each source factory by `useChatComposer`
+ * (built from the tRPC client) so the plain factory functions stay React-free
+ * and testable — passing `undefined` makes every `fetch` resolve to `[]`,
+ * mirroring the previous null-guarded `window.api.chat` access.
+ */
+export interface ChatListApi {
+  listSkills: (cwd: string) => Promise<SkillInfo[]>
+  listCommands: (cwd: string) => Promise<CommandInfo[]>
+  listAgents: (cwd: string) => Promise<AgentInfo[]>
+  listFiles: (cwd: string, query: string, limit?: number) => Promise<FileMatch[]>
+}
+
 export interface AcceptCtx {
   draft: string
   setDraft: (v: string) => void

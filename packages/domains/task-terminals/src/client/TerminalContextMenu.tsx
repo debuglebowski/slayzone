@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -59,6 +61,9 @@ export function TerminalContextMenu({
 }: TerminalContextMenuProps) {
   const [hasSelection, setHasSelection] = useState(false)
   const { terminalFontSize } = useAppearance()
+  const trpc = useTRPC()
+  const ptyWriteMutation = useMutation(trpc.pty.write.mutationOptions())
+  const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
 
   const searchShortcut = useShortcutDisplay('terminal-search')
   const clearShortcut = useShortcutDisplay('terminal-clear')
@@ -85,9 +90,9 @@ export function TerminalContextMenu({
 
   const handlePaste = useCallback(() => {
     void navigator.clipboard.readText().then((text) => {
-      if (text) window.api.pty.write(sessionId, text)
+      if (text) ptyWriteMutation.mutate({ sessionId, data: text })
     })
-  }, [sessionId])
+  }, [ptyWriteMutation, sessionId])
 
   const handleSelectAll = useCallback(() => {
     terminalRef.current?.selectAll()
@@ -109,11 +114,14 @@ export function TerminalContextMenu({
     if (conversationId) void navigator.clipboard.writeText(conversationId)
   }, [conversationId])
 
-  const updateFontSize = useCallback((size: number) => {
-    const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, size))
-    void window.api.settings.set('terminal_font_size', String(clamped))
-    window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-  }, [])
+  const updateFontSize = useCallback(
+    (size: number) => {
+      const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, size))
+      settingsSetMutation.mutate({ key: 'terminal_font_size', value: String(clamped) })
+      window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+    },
+    [settingsSetMutation]
+  )
 
   return (
     <ContextMenu onOpenChange={handleOpenChange}>

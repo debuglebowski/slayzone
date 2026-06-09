@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { toast, type AgentModel } from '@slayzone/ui'
 
 interface SessionInfoLite {
@@ -12,22 +13,6 @@ interface UseChatModelOpts {
   cwd: string
 }
 
-interface ChatModelApi {
-  setModel: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    chatModel: AgentModel
-  }) => Promise<SessionInfoLite>
-  getModel: (taskId: string, mode: string) => Promise<AgentModel>
-  getInfo: (tabId: string) => Promise<SessionInfoLite | null>
-}
-
-function getApi(): ChatModelApi {
-  return (window as unknown as { api: { chat: ChatModelApi } }).api.chat
-}
-
 /**
  * Owns chat-model state. Mirrors useChatMode: server-authoritative, hydrate
  * from live session > DB cache, kill+respawn on change so the new flag set
@@ -35,6 +20,7 @@ function getApi(): ChatModelApi {
  * or skeletonize the pill while loading.
  */
 export function useChatModel({ taskId, mode, tabId, cwd }: UseChatModelOpts) {
+  const trpcClient = useTRPCClient()
   const [chatModel, setChatModelState] = useState<AgentModel | null>(null)
   const [modelChanging, setModelChanging] = useState(false)
 
@@ -42,13 +28,13 @@ export function useChatModel({ taskId, mode, tabId, cwd }: UseChatModelOpts) {
     let cancelled = false
     void (async () => {
       try {
-        const info = await getApi().getInfo(tabId)
+        const info = (await trpcClient.chat.getInfo.query({ tabId })) as SessionInfoLite | null
         if (cancelled) return
         if (info?.chatModel) {
           setChatModelState(info.chatModel)
           return
         }
-        const cached = await getApi().getModel(taskId, mode)
+        const cached = (await trpcClient.chat.getModel.query({ taskId, mode })) as AgentModel
         if (!cancelled) setChatModelState(cached)
       } catch {
         /* leave null */
@@ -57,6 +43,7 @@ export function useChatModel({ taskId, mode, tabId, cwd }: UseChatModelOpts) {
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, mode, tabId])
 
   const handleModelChange = useCallback(
@@ -64,7 +51,13 @@ export function useChatModel({ taskId, mode, tabId, cwd }: UseChatModelOpts) {
       if (next === chatModel || modelChanging) return
       setModelChanging(true)
       try {
-        const info = await getApi().setModel({ tabId, taskId, mode, cwd, chatModel: next })
+        const info = (await trpcClient.chat.setModel.mutate({
+          tabId,
+          taskId,
+          mode,
+          cwd,
+          chatModel: next
+        })) as SessionInfoLite
         if (info?.chatModel) setChatModelState(info.chatModel)
         else setChatModelState(next)
       } catch (err) {
@@ -73,7 +66,7 @@ export function useChatModel({ taskId, mode, tabId, cwd }: UseChatModelOpts) {
         setModelChanging(false)
       }
     },
-    [chatModel, modelChanging, tabId, taskId, mode, cwd]
+    [chatModel, modelChanging, tabId, taskId, mode, cwd, trpcClient]
   )
 
   return { chatModel, modelChanging, handleModelChange }

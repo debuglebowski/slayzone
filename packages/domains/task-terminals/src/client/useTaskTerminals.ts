@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { TerminalTab, TerminalGroup } from '../shared/types'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { usePty } from '@slayzone/terminal'
@@ -51,10 +53,23 @@ export function useTaskTerminals(
   taskId: string,
   defaultMode: TerminalMode
 ): UseTaskTerminalsResult {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [tabs, setTabs] = useState<TerminalTab[]>([])
   const [activeGroupId, setActiveGroupId] = useState<string>(taskId) // Main group id = taskId
   const closingTabIdsRef = useRef<Set<string>>(new Set())
   const { subscribeExit } = usePty()
+
+  // Tab CRUD mutations. The hook keeps its own optimistic `tabs` state (created
+  // tab pushed, deleted tab filtered) so these are imperative `mutateAsync`
+  // calls — list refetch is driven by the server `onChanged` broadcast below.
+  const createMutation = useMutation(trpc.taskTerminals.create.mutationOptions())
+  const splitMutation = useMutation(trpc.taskTerminals.split.mutationOptions())
+  const deleteMutation = useMutation(trpc.taskTerminals.delete.mutationOptions())
+  const moveToGroupMutation = useMutation(trpc.taskTerminals.moveToGroup.mutationOptions())
+  const updateMutation = useMutation(trpc.taskTerminals.update.mutationOptions())
+  const ptyKillMutation = useMutation(trpc.pty.kill.mutationOptions())
+  const chatRemoveMutation = useMutation(trpc.chat.remove.mutationOptions())
 
   const groups = useMemo(() => computeGroups(tabs), [tabs])
 
@@ -62,8 +77,8 @@ export function useTaskTerminals(
   useEffect(() => {
     const loadTabs = async () => {
       try {
-        await window.api.tabs.ensureMain(taskId, defaultMode)
-        const loadedTabs = await window.api.tabs.list(taskId)
+        await trpcClient.taskTerminals.ensureMain.mutate({ taskId, mode: defaultMode })
+        const loadedTabs = await trpcClient.taskTerminals.list.query({ taskId })
         setTabs(loadedTabs)
         // Set active to main group if current active doesn't exist
         const loadedGroups = computeGroups(loadedTabs)
@@ -79,59 +94,65 @@ export function useTaskTerminals(
   }, [taskId, defaultMode])
 
   // Re-fetch when an external actor (CLI via REST, other window) mutates tabs.
-  // Optionally focus the new tab's group if `focusTabId` is provided.
-  useEffect(() => {
-    return window.api.tabs.onChanged(async ({ taskId: changedTaskId, focusTabId }) => {
-      if (changedTaskId !== taskId) return
-      try {
-        const loadedTabs = await window.api.tabs.list(taskId)
-        setTabs(loadedTabs)
-        if (focusTabId) {
-          const target = loadedTabs.find((t) => t.id === focusTabId)
-          if (target) setActiveGroupId(target.groupId)
+  // Optionally focus the new tab's group if `focusTabId` is provided. Server
+  // fan-out is global; filter by taskId in onData.
+  useSubscription(
+    trpc.taskTerminals.onChanged.subscriptionOptions(undefined, {
+      onData: async ({ taskId: changedTaskId, focusTabId }) => {
+        if (changedTaskId !== taskId) return
+        try {
+          const loadedTabs = await trpcClient.taskTerminals.list.query({ taskId })
+          setTabs(loadedTabs)
+          if (focusTabId) {
+            const target = loadedTabs.find((t) => t.id === focusTabId)
+            if (target) setActiveGroupId(target.groupId)
+          }
+        } catch (err) {
+          console.error('[useTaskTerminals] Failed to refresh tabs:', err)
         }
-      } catch (err) {
-        console.error('[useTaskTerminals] Failed to refresh tabs:', err)
       }
     })
-  }, [taskId])
+  )
 
   // Create a new group with one terminal
   const createTab = useCallback(
     async (mode?: TerminalMode): Promise<TerminalTab> => {
-      const newTab = await window.api.tabs.create({ taskId, mode: mode || 'terminal' })
+      const newTab = await createMutation.mutateAsync({ taskId, mode: mode || 'terminal' })
       setTabs((prev) => [...prev, newTab])
       setActiveGroupId(newTab.groupId)
       return newTab
     },
-    [taskId]
+    [createMutation, taskId]
   )
 
   // Split: add a new pane to the same group as the target tab
-  const splitTab = useCallback(async (tabId: string): Promise<TerminalTab | null> => {
-    const newTab = await window.api.tabs.split(tabId)
-    if (newTab) {
-      setTabs((prev) => [...prev, newTab])
-    }
-    return newTab
-  }, [])
+  const splitTab = useCallback(
+    async (tabId: string): Promise<TerminalTab | null> => {
+      const newTab = await splitMutation.mutateAsync({ tabId })
+      if (newTab) {
+        setTabs((prev) => [...prev, newTab])
+      }
+      return newTab
+    },
+    [splitMutation]
+  )
 
   const closeTabInternal = useCallback(
     async (tabId: string, skipKill: boolean): Promise<boolean> => {
       if (closingTabIdsRef.current.has(tabId)) return false
       closingTabIdsRef.current.add(tabId)
       try {
-        const success = await window.api.tabs.delete(tabId)
+        const success = await deleteMutation.mutateAsync({ tabId })
         if (success) {
           const sessionId = `${taskId}:${tabId}`
           if (!skipKill) {
-            await window.api.pty.kill(sessionId)
+            await ptyKillMutation.mutateAsync({ sessionId })
           }
-          // Reap chat session for this tab regardless of mode — chat:remove is
+          // Reap chat session for this tab regardless of mode — chat.remove is
           // a no-op when no session exists. Without this, a chat-mode tab's claude
           // subprocess + in-memory session map entry leak until app shutdown.
           try {
-            await window.api.chat?.remove(tabId)
+            await chatRemoveMutation.mutateAsync({ tabId })
           } catch {
             /* ignore — chat session may not exist */
           }
@@ -154,7 +175,7 @@ export function useTaskTerminals(
         closingTabIdsRef.current.delete(tabId)
       }
     },
-    [taskId]
+    [chatRemoveMutation, deleteMutation, ptyKillMutation, taskId]
   )
 
   const closeTab = useCallback(
@@ -194,20 +215,23 @@ export function useTaskTerminals(
   // Move a pane to a different group (null = new standalone group)
   const movePane = useCallback(
     async (tabId: string, targetGroupId: string | null): Promise<void> => {
-      const updated = await window.api.tabs.moveToGroup(tabId, targetGroupId)
+      const updated = await moveToGroupMutation.mutateAsync({ tabId, targetGroupId })
       if (updated) {
         setTabs((prev) => prev.map((t) => (t.id === tabId ? updated : t)))
       }
     },
-    []
+    [moveToGroupMutation]
   )
 
-  const renameTab = useCallback(async (tabId: string, label: string | null): Promise<void> => {
-    const updated = await window.api.tabs.update({ id: tabId, label })
-    if (updated) {
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? updated : t)))
-    }
-  }, [])
+  const renameTab = useCallback(
+    async (tabId: string, label: string | null): Promise<void> => {
+      const updated = await updateMutation.mutateAsync({ id: tabId, label })
+      if (updated) {
+        setTabs((prev) => prev.map((t) => (t.id === tabId ? updated : t)))
+      }
+    },
+    [updateMutation]
+  )
 
   const getSessionId = useCallback(
     (tabId: string): string => {

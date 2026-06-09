@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { toast, type AgentEffort } from '@slayzone/ui'
 import { DEFAULT_CHAT_EFFORT } from '@slayzone/terminal/shared'
 
@@ -13,22 +14,6 @@ interface UseChatEffortOpts {
   cwd: string
 }
 
-interface ChatEffortApi {
-  setEffort: (opts: {
-    tabId: string
-    taskId: string
-    mode: string
-    cwd: string
-    chatEffort: AgentEffort
-  }) => Promise<SessionInfoLite>
-  getEffort: (taskId: string, mode: string) => Promise<AgentEffort | null>
-  getInfo: (tabId: string) => Promise<SessionInfoLite | null>
-}
-
-function getApi(): ChatEffortApi {
-  return (window as unknown as { api: { chat: ChatEffortApi } }).api.chat
-}
-
 /**
  * Owns chat-effort state. Mirrors useChatModel: server-authoritative, hydrate
  * from live session > DB cache, kill+respawn on change so the new --effort
@@ -39,6 +24,7 @@ function getApi(): ChatEffortApi {
  * user picks a level.
  */
 export function useChatEffort({ taskId, mode, tabId, cwd }: UseChatEffortOpts) {
+  const trpcClient = useTRPCClient()
   const [chatEffort, setChatEffortState] = useState<AgentEffort>(DEFAULT_CHAT_EFFORT)
   const [effortChanging, setEffortChanging] = useState(false)
 
@@ -46,13 +32,16 @@ export function useChatEffort({ taskId, mode, tabId, cwd }: UseChatEffortOpts) {
     let cancelled = false
     void (async () => {
       try {
-        const info = await getApi().getInfo(tabId)
+        const info = (await trpcClient.chat.getInfo.query({ tabId })) as SessionInfoLite | null
         if (cancelled) return
         if (info && info.chatEffort) {
           setChatEffortState(info.chatEffort)
           return
         }
-        const cached = await getApi().getEffort(taskId, mode)
+        const cached = (await trpcClient.chat.getEffort.query({
+          taskId,
+          mode
+        })) as AgentEffort | null
         if (!cancelled) setChatEffortState(cached ?? DEFAULT_CHAT_EFFORT)
       } catch {
         /* keep DEFAULT_CHAT_EFFORT */
@@ -61,6 +50,7 @@ export function useChatEffort({ taskId, mode, tabId, cwd }: UseChatEffortOpts) {
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, mode, tabId])
 
   const handleEffortChange = useCallback(
@@ -68,7 +58,13 @@ export function useChatEffort({ taskId, mode, tabId, cwd }: UseChatEffortOpts) {
       if (next === chatEffort || effortChanging) return
       setEffortChanging(true)
       try {
-        const info = await getApi().setEffort({ tabId, taskId, mode, cwd, chatEffort: next })
+        const info = (await trpcClient.chat.setEffort.mutate({
+          tabId,
+          taskId,
+          mode,
+          cwd,
+          chatEffort: next
+        })) as SessionInfoLite
         if (info && info.chatEffort) setChatEffortState(info.chatEffort)
         else setChatEffortState(next)
       } catch (err) {
@@ -77,7 +73,7 @@ export function useChatEffort({ taskId, mode, tabId, cwd }: UseChatEffortOpts) {
         setEffortChanging(false)
       }
     },
-    [chatEffort, effortChanging, tabId, taskId, mode, cwd]
+    [chatEffort, effortChanging, tabId, taskId, mode, cwd, trpcClient]
   )
 
   return { chatEffort, effortChanging, handleEffortChange }

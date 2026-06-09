@@ -1,5 +1,7 @@
 import { useState, useEffect, forwardRef, useRef, useImperativeHandle } from 'react'
 import { Play, Moon } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
   Terminal,
   type TerminalHandle,
@@ -71,6 +73,11 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     const { terminalThemeId, contentVariant } = useTheme()
     const themeColors = getThemeTerminalColors(terminalThemeId, contentVariant)
 
+    const trpc = useTRPC()
+    const trpcClient = useTRPCClient()
+    const ptyTouchMutation = useMutation(trpc.pty.touch.mutationOptions())
+    const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
+
     useEffect(() => {
       let cancelled = false
       // Persisted hibernation wins: show the "Reopen … (resumes)" screen, don't
@@ -109,8 +116,8 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
         }
       }
       void Promise.all([
-        window.api.pty.exists(sessionId),
-        window.api.settings.get('terminal_auto_start')
+        trpcClient.pty.exists.query({ sessionId }),
+        trpcClient.settings.get.query({ key: 'terminal_auto_start' })
       ]).then(([exists, autoStart]) => {
         if (cancelled) return
         // Temp tasks always auto-start (scratch terminals are "always live");
@@ -122,36 +129,43 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
       return () => {
         cancelled = true
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sessionId, wasSpawned, hibernated, isTemporary, conversationHydrated])
 
     // Idle-close (hibernation) signals from main. `warn` arms a visual
     // countdown; `cancelled` aborts it; `hibernated` means main killed the PTY
-    // → swap to the Start screen (reopen resumes via conversation id).
-    useEffect(() => {
-      const offWarn = window.api.pty.onHibernateWarn((sid, graceSeconds) => {
-        if (sid !== sessionId) return
-        setCountdown(graceSeconds)
+    // → swap to the Start screen (reopen resumes via conversation id). Server
+    // fan-out is global; filter by sessionId in onData.
+    useSubscription(
+      trpc.pty.onHibernateWarn.subscriptionOptions(undefined, {
+        onData: ({ sessionId: sid, graceSecs }) => {
+          if (sid !== sessionId) return
+          setCountdown(graceSecs)
+        }
       })
-      const offCancelled = window.api.pty.onHibernateCancelled((sid) => {
-        if (sid !== sessionId) return
-        setCountdown(null)
+    )
+    useSubscription(
+      trpc.pty.onHibernateCancelled.subscriptionOptions(undefined, {
+        onData: ({ sessionId: sid }) => {
+          if (sid !== sessionId) return
+          setCountdown(null)
+        }
       })
-      const offHibernated = window.api.pty.onHibernated((sid) => {
-        if (sid !== sessionId) return
-        setCountdown(null)
-        // Dispose (don't cache) the dead xterm so reopen builds a fresh one
-        // showing the resumed session.
-        markSkipCache(sessionId)
-        setReason('hibernated')
-        setExistsChecked(true)
-        setStarted(false)
+    )
+    useSubscription(
+      trpc.pty.onHibernated.subscriptionOptions(undefined, {
+        onData: ({ sessionId: sid }) => {
+          if (sid !== sessionId) return
+          setCountdown(null)
+          // Dispose (don't cache) the dead xterm so reopen builds a fresh one
+          // showing the resumed session.
+          markSkipCache(sessionId)
+          setReason('hibernated')
+          setExistsChecked(true)
+          setStarted(false)
+        }
       })
-      return () => {
-        offWarn()
-        offCancelled()
-        offHibernated()
-      }
-    }, [sessionId])
+    )
 
     useVisibleInterval(
       () =>
@@ -185,7 +199,7 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     if (started) {
       const handleCancelCountdown = (): void => {
         setCountdown(null)
-        void window.api.pty.touch(sessionId)
+        ptyTouchMutation.mutate({ sessionId })
       }
       return (
         <div className="relative h-full w-full">
@@ -225,8 +239,9 @@ export const TerminalStarter = forwardRef<TerminalHandle, TerminalStarterProps>(
     const handleStart = () => {
       if (dontShowAgain) {
         // The checkbox disables whichever feature put us on this screen.
-        if (isHibernated) void window.api.settings.set('terminal_auto_close_idle', '0')
-        else void window.api.settings.set('terminal_auto_start', '1')
+        if (isHibernated)
+          settingsSetMutation.mutate({ key: 'terminal_auto_close_idle', value: '0' })
+        else settingsSetMutation.mutate({ key: 'terminal_auto_start', value: '1' })
       }
       setReason('initial')
       setStarted(true)

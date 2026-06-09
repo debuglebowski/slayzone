@@ -1,5 +1,5 @@
 import type { FileMatch } from '@slayzone/terminal/shared'
-import type { AutocompleteSource } from '../types'
+import type { AutocompleteSource, ChatListApi } from '../types'
 import { spliceReplace } from '../useAutocomplete'
 import { renderFileItem } from './render-file'
 
@@ -34,24 +34,14 @@ function detectFileTrigger(
  * once per cwd and re-filter in the renderer to keep keystroke latency to zero.
  * For very large repos (>10k files) we could move filtering main-side.
  */
-export function createFilesSource(): AutocompleteSource<FileMatch> {
+export function createFilesSource(listApi?: ChatListApi): AutocompleteSource<FileMatch> {
   return {
     id: 'files',
     detect: detectFileTrigger,
     async fetch({ cwd }) {
-      const api = (
-        window as unknown as {
-          api?: {
-            chat?: {
-              listFiles?: (cwd: string, query: string, limit?: number) => Promise<FileMatch[]>
-            }
-          }
-        }
-      ).api
-      const fn = api?.chat?.listFiles
-      if (!fn) return []
+      if (!listApi) return []
       // Prefetch w/ empty query, cap 2000. Source filters locally.
-      return fn(cwd, '', 2000)
+      return listApi.listFiles(cwd, '', 2000)
     },
     filter(items, query) {
       if (!query) return items.slice(0, 50)

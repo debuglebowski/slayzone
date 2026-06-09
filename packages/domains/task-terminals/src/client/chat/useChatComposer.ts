@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast, type AgentEffort } from '@slayzone/ui'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { ArtifactRef } from '@slayzone/editor/hooks'
 import { useChatQueue } from './useChatQueue'
 import { useAutocomplete } from './autocomplete/useAutocomplete'
@@ -8,7 +9,12 @@ import { createCommandsSource } from './autocomplete/sources/commands'
 import { createAgentsSource } from './autocomplete/sources/agents'
 import { createBuiltinsSource } from './autocomplete/sources/builtins'
 import { createFilesSource } from './autocomplete/sources/files'
-import type { AutocompleteSource, ChatActions, NavigateActions } from './autocomplete/types'
+import type {
+  AutocompleteSource,
+  ChatActions,
+  ChatListApi,
+  NavigateActions
+} from './autocomplete/types'
 
 export interface UseChatComposerOpts {
   tabId: string
@@ -60,6 +66,7 @@ export function useChatComposer({
   scrollToBottom,
   handleEffortChange
 }: UseChatComposerOpts) {
+  const trpcClient = useTRPCClient()
   const [draft, setDraft] = useState('')
   const [cursorPos, setCursorPos] = useState(0)
   // Forward-declared ref — wired to autocomplete.bumpUsageFromMessage further
@@ -98,15 +105,27 @@ export function useChatComposer({
     if (isActive) textareaRef.current?.focus()
   }, [isActive])
 
+  // Project-metadata facade for the autocomplete sources. tRPC client is a stable
+  // context singleton, so this object identity is fixed across renders.
+  const listApi = useMemo<ChatListApi>(
+    () => ({
+      listSkills: (cwd) => trpcClient.chat.listSkills.query({ cwd }),
+      listCommands: (cwd) => trpcClient.chat.listCommands.query({ cwd }),
+      listAgents: (cwd) => trpcClient.chat.listAgents.query({ cwd }),
+      listFiles: (cwd, query, limit) => trpcClient.chat.listFiles.query({ cwd, query, limit })
+    }),
+    [trpcClient]
+  )
+
   const sources = useMemo(
     () => [
-      createFilesSource(),
-      createCommandsSource((text) => sendMessage(text).then(() => true)),
-      createAgentsSource(),
+      createFilesSource(listApi),
+      createCommandsSource((text) => sendMessage(text).then(() => true), listApi),
+      createAgentsSource(listApi),
       createBuiltinsSource(),
-      createSkillsSource()
+      createSkillsSource(listApi)
     ],
-    [sendMessage]
+    [sendMessage, listApi]
   ) as AutocompleteSource[]
 
   const autocomplete = useAutocomplete({

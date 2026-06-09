@@ -1,5 +1,7 @@
 import { type Dispatch, type Key, type SetStateAction } from 'react'
 import { ArrowDown, Sparkles } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   cn,
   ContextMenu,
@@ -94,6 +96,8 @@ export function ChatTimeline({
   handleReset,
   resetting
 }: ChatTimelineProps) {
+  const trpc = useTRPC()
+  const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
   const widthClass = appearance.chatWidth === 'wide' ? 'max-w-none' : 'max-w-4xl'
   return (
     <>
@@ -207,7 +211,7 @@ export function ChatTimeline({
               <ContextMenuRadioGroup
                 value={appearance.chatWidth}
                 onValueChange={(v) => {
-                  window.api.settings.set('chat_width', v)
+                  settingsSetMutation.mutate({ key: 'chat_width', value: v })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               >

@@ -1,5 +1,7 @@
 import { type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { ArrowUp, Square, X as XIcon, RotateCcw, Filter } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   cn,
   AgentModePill,
@@ -127,6 +129,8 @@ export function ChatComposer({
   handleFastModeChange,
   fastModeChanging
 }: ChatComposerProps) {
+  const trpc = useTRPC()
+  const settingsSetMutation = useMutation(trpc.settings.set.mutationOptions())
   const composerWidthClass = appearance.chatWidth === 'wide' ? 'max-w-4xl' : 'max-w-2xl'
   return (
     <div className="bg-background px-4 pt-6 pb-1">
@@ -361,7 +365,7 @@ export function ChatComposer({
                 description="Show all tool calls inline. When off, only user messages + final assistant reply per turn."
                 checked={appearance.chatShowTools}
                 onCheckedChange={(c) => {
-                  window.api.settings.set('chat_show_tools', c ? '1' : '0')
+                  settingsSetMutation.mutate({ key: 'chat_show_tools', value: c ? '1' : '0' })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />
@@ -371,7 +375,10 @@ export function ChatComposer({
                 checked={appearance.chatShowLastMessageTools}
                 disabled={appearance.chatShowTools}
                 onCheckedChange={(c) => {
-                  window.api.settings.set('chat_show_last_message_tools', c ? '1' : '0')
+                  settingsSetMutation.mutate({
+                    key: 'chat_show_last_message_tools',
+                    value: c ? '1' : '0'
+                  })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />
@@ -380,7 +387,10 @@ export function ChatComposer({
                 description="Auto-expand Edit and Write tool cards."
                 checked={appearance.chatFileEditsOpenByDefault}
                 onCheckedChange={(c) => {
-                  window.api.settings.set('chat_file_edits_open_by_default', c ? '1' : '0')
+                  settingsSetMutation.mutate({
+                    key: 'chat_file_edits_open_by_default',
+                    value: c ? '1' : '0'
+                  })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />
@@ -389,7 +399,7 @@ export function ChatComposer({
                 description="Per-turn footer with duration, cost, and turn count."
                 checked={appearance.chatShowMessageMeta}
                 onCheckedChange={(c) => {
-                  window.api.settings.set('chat_show_message_meta', c ? '1' : '0')
+                  settingsSetMutation.mutate({ key: 'chat_show_message_meta', value: c ? '1' : '0' })
                   window.dispatchEvent(new CustomEvent('sz:settings-changed'))
                 }}
               />

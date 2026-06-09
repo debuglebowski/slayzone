@@ -1,5 +1,5 @@
 import type { AgentInfo } from '@slayzone/terminal/shared'
-import type { AutocompleteSource } from '../types'
+import type { AutocompleteSource, ChatListApi } from '../types'
 import { rankByName } from '../ranking'
 import { spliceReplace } from '../useAutocomplete'
 import { renderAgentItem } from './render-agent'
@@ -11,7 +11,7 @@ export function filterAgents(items: AgentInfo[], filter: string): AgentInfo[] {
   })
 }
 
-export function createAgentsSource(): AutocompleteSource<AgentInfo> {
+export function createAgentsSource(listApi?: ChatListApi): AutocompleteSource<AgentInfo> {
   return {
     id: 'agents',
     detect(draft, cursorPos) {
@@ -21,14 +21,8 @@ export function createAgentsSource(): AutocompleteSource<AgentInfo> {
       return { query: rest, tokenStart: 0, tokenEnd: cursorPos }
     },
     async fetch({ cwd }) {
-      const api = (
-        window as unknown as {
-          api?: { chat?: { listAgents?: (cwd: string) => Promise<AgentInfo[]> } }
-        }
-      ).api
-      const fn = api?.chat?.listAgents
-      if (!fn) return []
-      return fn(cwd)
+      if (!listApi) return []
+      return listApi.listAgents(cwd)
     },
     filter: filterAgents,
     getKey: (a) => `${a.source}:${a.name}`,
