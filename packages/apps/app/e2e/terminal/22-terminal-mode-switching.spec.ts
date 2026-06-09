@@ -2,19 +2,24 @@ import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, switchTerminalMode } from '../fixtures/terminal'
 
-// Simulate native menu accelerators by sending IPC directly from main process.
+// Simulate a native menu accelerator by invoking the real menu item from the
+// main process. The renderer consumes these signals via the tRPC `menu.*`
+// subscriptions (fed by `menuEvents`); the legacy `webContents.send('app:*')`
+// broadcasts are orphaned post-cutover, so driving them is a no-op.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function sendAppShortcut(electronApp: any, channel: string): Promise<void> {
+async function clickMenuItem(electronApp: any, labels: string[]): Promise<void> {
   await electronApp.evaluate(
-    (
-      { BrowserWindow }: { BrowserWindow: typeof Electron.CrossProcessExports.BrowserWindow },
-      ch: string
-    ) => {
-      BrowserWindow.getAllWindows()
-        .find((w) => !w.isDestroyed() && !w.webContents.getURL().startsWith('data:'))
-        ?.webContents.send(ch)
+    ({ Menu }: { Menu: typeof Electron.CrossProcessExports.Menu }, path: string[]) => {
+      let items = Menu.getApplicationMenu()?.items ?? []
+      let current: Electron.MenuItem | undefined
+      for (const label of path) {
+        current = items.find((item) => item.label === label)
+        if (!current) throw new Error(`Menu item not found: ${label}`)
+        items = current.submenu?.items ?? []
+      }
+      current?.click?.(undefined as never, undefined as never, undefined as never)
     },
-    channel
+    labels
   )
 }
 
@@ -218,7 +223,7 @@ test.describe('Terminal mode switching', () => {
       projectAbbrev,
       taskTitle: 'Mode switch temporary auto-delete'
     })
-    await sendAppShortcut(electronApp, 'app:close-active-task')
+    await clickMenuItem(electronApp, ['Window', 'Close Task'])
 
     await expect
       .poll(
