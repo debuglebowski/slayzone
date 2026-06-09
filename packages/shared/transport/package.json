@@ -18,6 +18,7 @@
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
+    "@slayzone/feedback": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/history": "workspace:*",
     "@slayzone/integrations": "workspace:*",

@@ -1860,6 +1860,9 @@ importers:
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../../domains/diagnostics
+      '@slayzone/feedback':
+        specifier: workspace:*
+        version: link:../../domains/feedback
       '@slayzone/file-editor':
         specifier: workspace:*
         version: link:../../domains/file-editor

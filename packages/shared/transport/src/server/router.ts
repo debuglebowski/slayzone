@@ -5,6 +5,7 @@ import { agentTurnsRouter } from './routers/agent-turns'
 import { automationsRouter } from './routers/automations'
 import { chatRouter } from './routers/chat'
 import { diagnosticsRouter } from './routers/diagnostics'
+import { feedbackRouter } from './routers/feedback'
 import { fileEditorRouter } from './routers/file-editor'
 import { historyRouter } from './routers/history'
 import { integrationsRouter } from './routers/integrations'
@@ -31,6 +32,7 @@ export const appRouter = router({
   artifacts: artifactsRouter,
   chat: chatRouter,
   diagnostics: diagnosticsRouter,
+  feedback: feedbackRouter,
   fileEditor: fileEditorRouter,
   history: historyRouter,
   integrations: integrationsRouter,
