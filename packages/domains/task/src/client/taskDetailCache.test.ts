@@ -33,7 +33,8 @@ const trpcClientMock = {
   task: {
     get: { query: vi.fn() },
     getSubTasks: { query: vi.fn() },
-    getAll: { query: vi.fn() }
+    getAll: { query: vi.fn() },
+    getByProject: { query: vi.fn() }
   },
   tags: {
     list: { query: vi.fn() },
@@ -58,6 +59,7 @@ beforeEach(() => {
   trpcClientMock.task.get.query.mockResolvedValue(makeTask())
   trpcClientMock.task.getSubTasks.query.mockResolvedValue([])
   trpcClientMock.task.getAll.query.mockResolvedValue([])
+  trpcClientMock.task.getByProject.query.mockResolvedValue([])
   trpcClientMock.tags.list.query.mockResolvedValue([makeTag()])
   trpcClientMock.tags.getForTask.query.mockResolvedValue([makeTag()])
   trpcClientMock.projects.list.query.mockResolvedValue([makeProject()])
@@ -101,17 +103,17 @@ describe('fetchTaskDetail', () => {
       activeTabId: 't1'
     }
     trpcClientMock.task.get.query.mockResolvedValue(makeTask({ browser_tabs: tabs }))
-    trpcClientMock.task.getAll.query.mockClear()
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.browserTabs).toEqual(tabs)
-    // Should NOT call getAll (no fallback needed)
+    // Should NOT hit any fallback query
     expect(trpcClientMock.task.getAll.query).not.toHaveBeenCalled()
+    expect(trpcClientMock.task.getByProject.query).not.toHaveBeenCalled()
   })
 
-  it('falls back to first URL from other tasks when browser_tabs is null', async () => {
+  it('falls back to first URL from same-project tasks when browser_tabs is null', async () => {
     trpcClientMock.task.get.query.mockResolvedValue(makeTask({ id: 'task-1', browser_tabs: null }))
-    trpcClientMock.task.getAll.query.mockResolvedValue([
+    trpcClientMock.task.getByProject.query.mockResolvedValue([
       makeTask({ id: 'task-1', browser_tabs: null }),
       makeTask({
         id: 'task-2',
@@ -124,14 +126,20 @@ describe('fetchTaskDetail', () => {
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.browserTabs.tabs[0].url).toBe('http://example.com')
+    expect(trpcClientMock.task.getByProject.query).toHaveBeenCalledWith({ projectId: 'proj-1' })
+    // Must never consult tasks outside the project — cross-project URL leak
+    expect(trpcClientMock.task.getAll.query).not.toHaveBeenCalled()
   })
 
-  it('falls back to about:blank when no other tasks have URLs', async () => {
+  it('falls back to about:blank when no same-project tasks have URLs', async () => {
     trpcClientMock.task.get.query.mockResolvedValue(makeTask({ browser_tabs: null }))
-    trpcClientMock.task.getAll.query.mockResolvedValue([makeTask({ id: 'task-1', browser_tabs: null })])
+    trpcClientMock.task.getByProject.query.mockResolvedValue([
+      makeTask({ id: 'task-1', browser_tabs: null })
+    ])
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.browserTabs.tabs[0].url).toBe('about:blank')
+    expect(trpcClientMock.task.getAll.query).not.toHaveBeenCalled()
   })
 
   it('merges panel_visibility with defaults', async () => {

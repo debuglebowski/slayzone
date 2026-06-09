@@ -74,14 +74,17 @@ async function fetchTaskDetail(taskId: string): Promise<TaskDetailData | null> {
   // masquerade as per-task overrides).
   const panelSizes: PanelSizes = normalizeOverrides(loadedTask.panel_sizes)
 
-  // Resolve browser tabs (including fallback to first URL from other tasks)
+  // Resolve browser tabs. Fallback URLs come from sibling tasks in the SAME
+  // project only — browser state must never leak across projects.
   let browserTabs: BrowserTabsState
   if (loadedTask.browser_tabs) {
     browserTabs = loadedTask.browser_tabs
   } else {
-    const allTasks = await trpc.task.getAll.query()
+    const projectTasks = await trpc.task.getByProject
+      .query({ projectId: loadedTask.project_id })
+      .catch(() => [] as Task[])
     let firstUrl = 'about:blank'
-    for (const t of allTasks) {
+    for (const t of projectTasks) {
       if (t.id === loadedTask.id) continue
       const url = t.browser_tabs?.tabs?.find((tab) => tab.url && tab.url !== 'about:blank')?.url
       if (url) {
