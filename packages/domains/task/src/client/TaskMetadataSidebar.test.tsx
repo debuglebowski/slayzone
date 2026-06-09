@@ -2,7 +2,6 @@
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { TaskMetadataSidebar } from './TaskMetadataSidebar'
 
 vi.mock('@slayzone/ui', () => {
   const Passthrough = ({ children }: any) => <>{children}</>
@@ -85,14 +84,6 @@ vi.mock('@slayzone/projects/shared', () => ({
     return column?.category === 'completed' || status === 'done'
   }
 }))
-
-afterEach(() => cleanup())
-
-globalThis.ResizeObserver = class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-} as any
 
 function makeTask(overrides: Record<string, unknown> = {}) {
   return {
@@ -193,6 +184,90 @@ const doneTask = makeTask({
   project_id: 'project-1'
 })
 
+// All tasks (old `window.api.db.getTasks`) and current blockers (old
+// `window.api.taskDependencies.getBlockers`) now flow through useTRPC + react-query
+// `useQuery`. Stable refs so the data-mirror effect doesn't loop.
+const allTasksList = [blockerTask, extraBlockerTask, availableTask, doneTask]
+const blockersList = [blockerTask, extraBlockerTask]
+
+const queryData: Record<string, () => unknown> = {
+  'task.getAll': () => allTasksList,
+  'task.getBlockers': () => blockersList,
+  'projects.list': () => projects
+}
+
+// Mutations live in the real child cards (BlockedBySection / ProjectStatusCard /
+// …) via `useMutation(trpc.X.mutationOptions())`. Route each mutation key to its
+// own spy so the old `window.api.*` call assertions map 1:1.
+const mutationMocks: Record<string, ReturnType<typeof vi.fn>> = {
+  'task.update': vi.fn(),
+  'task.addBlocker': vi.fn(),
+  'task.removeBlocker': vi.fn(),
+  'tags.setForTask': vi.fn()
+}
+
+vi.mock('@slayzone/transport/client', () => ({
+  useTRPC: () => ({
+    task: {
+      getAll: {
+        queryOptions: () => ({ queryKey: ['task.getAll'], queryFn: queryData['task.getAll'] })
+      },
+      getBlockers: {
+        queryOptions: (input: { taskId: string }) => ({
+          queryKey: ['task.getBlockers', input],
+          queryFn: queryData['task.getBlockers']
+        })
+      },
+      update: { mutationOptions: () => ({ __mutationKey: 'task.update' }) },
+      addBlocker: { mutationOptions: () => ({ __mutationKey: 'task.addBlocker' }) },
+      removeBlocker: { mutationOptions: () => ({ __mutationKey: 'task.removeBlocker' }) }
+    },
+    projects: {
+      list: {
+        queryOptions: () => ({ queryKey: ['projects.list'], queryFn: queryData['projects.list'] })
+      }
+    },
+    tags: {
+      setForTask: { mutationOptions: () => ({ __mutationKey: 'tags.setForTask' }) }
+    }
+  }),
+  useSubscription: () => undefined
+}))
+
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: (opts: { queryFn: () => unknown }) => ({
+    data: opts.queryFn(),
+    isLoading: false,
+    isPending: false,
+    error: null,
+    refetch: vi.fn()
+  }),
+  useMutation: (opts: { __mutationKey: string }) => ({
+    mutateAsync: mutationMocks[opts.__mutationKey],
+    mutate: mutationMocks[opts.__mutationKey],
+    isPending: false,
+    reset: vi.fn()
+  })
+}))
+
+import { TaskMetadataSidebar } from './TaskMetadataSidebar'
+
+afterEach(() => cleanup())
+
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as any
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mutationMocks['task.update'].mockResolvedValue(makeTask())
+  mutationMocks['task.addBlocker'].mockResolvedValue(undefined)
+  mutationMocks['task.removeBlocker'].mockResolvedValue(undefined)
+  mutationMocks['tags.setForTask'].mockResolvedValue(undefined)
+})
+
 function renderSidebar(taskOverrides?: Record<string, unknown>) {
   return render(
     <TaskMetadataSidebar
@@ -204,28 +279,6 @@ function renderSidebar(taskOverrides?: Record<string, unknown>) {
     />
   )
 }
-
-beforeEach(() => {
-  ;(window as any).api = {
-    db: {
-      getTasks: vi.fn().mockResolvedValue([blockerTask, extraBlockerTask, availableTask, doneTask]),
-      getProjects: vi.fn().mockResolvedValue(projects),
-      updateTask: vi.fn().mockResolvedValue(makeTask())
-    },
-    taskDependencies: {
-      getBlockers: vi.fn().mockResolvedValue([blockerTask, extraBlockerTask]),
-      addBlocker: vi.fn().mockResolvedValue(undefined),
-      removeBlocker: vi.fn().mockResolvedValue(undefined)
-    },
-    taskTags: {
-      setTagsForTask: vi.fn().mockResolvedValue(undefined)
-    },
-    integrations: {
-      getLink: vi.fn().mockResolvedValue(null),
-      getTaskSyncStatus: vi.fn().mockResolvedValue(null)
-    }
-  }
-})
 
 describe('TaskMetadataSidebar', () => {
   it('renders status icons using project-specific status config for blocker rows and available blockers', async () => {
@@ -253,7 +306,10 @@ describe('TaskMetadataSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ship docs' }))
 
     await waitFor(() => {
-      expect(window.api.taskDependencies.addBlocker).toHaveBeenCalledWith('task-1', 'candidate-1')
+      expect(mutationMocks['task.addBlocker']).toHaveBeenCalledWith({
+        taskId: 'task-1',
+        blockerTaskId: 'candidate-1'
+      })
     })
 
     expect(screen.getByText('No tasks available')).toBeDefined()
@@ -271,7 +327,10 @@ describe('TaskMetadataSidebar', () => {
     fireEvent.click(within(row as HTMLElement).getByRole('button'))
 
     await waitFor(() => {
-      expect(window.api.taskDependencies.removeBlocker).toHaveBeenCalledWith('task-1', 'blocker-1')
+      expect(mutationMocks['task.removeBlocker']).toHaveBeenCalledWith({
+        taskId: 'task-1',
+        blockerTaskId: 'blocker-1'
+      })
     })
 
     expect(within(blockerResults).queryByText('Fix API')).toBeNull()
@@ -294,7 +353,7 @@ describe('TaskMetadataSidebar', () => {
     await screen.findByText('Fix API')
     fireEvent.click(screen.getAllByRole('button', { name: 'Set blocked' })[0])
     await waitFor(() => {
-      expect(window.api.db.updateTask).toHaveBeenCalledWith({ id: 'task-1', isBlocked: true })
+      expect(mutationMocks['task.update']).toHaveBeenCalledWith({ id: 'task-1', isBlocked: true })
     })
   })
 
@@ -303,7 +362,7 @@ describe('TaskMetadataSidebar', () => {
     await screen.findByText('Fix API')
     fireEvent.click(screen.getByRole('button', { name: 'Unblock' }))
     await waitFor(() => {
-      expect(window.api.db.updateTask).toHaveBeenCalledWith({
+      expect(mutationMocks['task.update']).toHaveBeenCalledWith({
         id: 'task-1',
         isBlocked: false,
         blockedComment: null
@@ -323,7 +382,10 @@ describe('TaskMetadataSidebar', () => {
     const removeBtn = commentText.closest('div')!.querySelector('button')!
     fireEvent.click(removeBtn)
     await waitFor(() => {
-      expect(window.api.db.updateTask).toHaveBeenCalledWith({ id: 'task-1', blockedComment: null })
+      expect(mutationMocks['task.update']).toHaveBeenCalledWith({
+        id: 'task-1',
+        blockedComment: null
+      })
     })
   })
 })

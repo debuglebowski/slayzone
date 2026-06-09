@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import React from 'react'
 import { render, screen, cleanup } from '@testing-library/react'
 import type { TaskDetailData } from './taskDetailCache'
@@ -31,11 +31,21 @@ vi.mock('@slayzone/terminal', () => ({
   serializeTerminalHistory: () => '',
   LoopModeBanner: () => null,
   LoopModeDialog: () => null,
-  isLoopActive: () => false
+  isLoopActive: () => false,
+  useSlayNudge: () => ({ showBanner: false, dismiss: vi.fn(), recheck: vi.fn() })
 }))
 
 vi.mock('@slayzone/settings/client', () => ({
-  useTheme: () => ({ editorThemeId: 'default', contentVariant: 'dark' })
+  useTheme: () => ({ editorThemeId: 'default', contentVariant: 'dark' }),
+  useTabStore: (selector: (s: any) => unknown) =>
+    selector({
+      taskHeaderPanelMode: 'tabs',
+      taskHeaderPanelAlign: 'right',
+      taskHeaderTitleAlign: 'left'
+    }),
+  useDialogStore: Object.assign(() => ({}), {
+    getState: () => ({ openSearch: vi.fn() })
+  })
 }))
 
 vi.mock('@slayzone/ui', () => {
@@ -118,6 +128,7 @@ vi.mock('@slayzone/projects/shared', () => ({
   getDefaultStatus: () => 'todo',
   getDoneStatus: () => 'done',
   isTerminalStatus: () => false,
+  isCompletedStatus: () => false,
   resolveRepoPath: () => ({ path: null, detected: false })
 }))
 
@@ -188,8 +199,74 @@ vi.mock('./usePanelSizes', () => ({
 }))
 
 vi.mock('./usePanelConfig', () => ({
-  usePanelConfig: () => ({ enabledWebPanels: [], isBuiltinEnabled: () => true })
+  usePanelConfig: () => ({
+    config: { order: [], webPanels: [] },
+    updateConfig: vi.fn().mockResolvedValue(undefined),
+    enabledWebPanels: [],
+    isBuiltinEnabled: () => true,
+    getOrderedTaskIds: () => []
+  })
 }))
+
+// useDevServerDetection reads the pty buffer as a string (`buf.match(...)`). The
+// transport proxy resolves every call to [] (universal-safe for list consumers),
+// which is truthy and trips its `.match` — irrelevant to this render test, so stub
+// it. Stable singleton return so its refs don't churn dep arrays.
+vi.mock('./task-detail/useDevServerDetection', () => {
+  const value = {
+    detectedDevUrl: null,
+    setDetectedDevUrl: vi.fn(),
+    browserOpenRef: { current: false },
+    devServerAutoOpenCallbackRef: { current: null },
+    devUrlToastDismissedRef: { current: false }
+  }
+  return { useDevServerDetection: () => value }
+})
+
+// tRPC transport — the page (+ nested usePanelOwnership) reads useTRPC /
+// useTRPCClient / useSubscription. The test only asserts which header renders, so
+// a deep proxy is enough: any `.x.y.query()/.mutate()` resolves to [] (safe for
+// .map/.find/.includes + property reads), and `.queryOptions()/.mutationOptions()/
+// .subscriptionOptions()` return harmlessly (consumed only by mocked react-query /
+// useSubscription).
+vi.mock('@slayzone/transport/client', () => {
+  // Single self-referential proxy: every property access returns the SAME proxy
+  // and every call resolves to []. Stability is load-bearing — returning a fresh
+  // proxy per hook call makes `trpcClient` unstable, re-firing every effect that
+  // deps on it (`[trpcClient]`) → setState → re-render → infinite loop.
+  const handler: ProxyHandler<any> = {
+    get: (_t, prop) => (prop === 'then' ? undefined : proxy),
+    apply: () => Promise.resolve([])
+  }
+  const proxy: any = new Proxy(() => Promise.resolve([]), handler)
+  return {
+    useTRPC: () => proxy,
+    useTRPCClient: () => proxy,
+    useSubscription: () => undefined
+  }
+})
+
+vi.mock('@tanstack/react-query', () => {
+  // Stable singletons — fresh objects per render would churn dep arrays and loop.
+  const mutation = {
+    mutate: vi.fn(),
+    mutateAsync: vi.fn().mockResolvedValue(undefined),
+    isPending: false,
+    reset: vi.fn()
+  }
+  const query = { data: undefined, isLoading: false, isPending: false, error: null, refetch: vi.fn() }
+  const queryClient = {
+    invalidateQueries: vi.fn(),
+    fetchQuery: vi.fn(),
+    setQueryData: vi.fn(),
+    getQueryData: vi.fn()
+  }
+  return {
+    useMutation: () => mutation,
+    useQuery: () => query,
+    useQueryClient: () => queryClient
+  }
+})
 
 // --- Import component after mocks ---
 import { TaskDetailPage } from './TaskDetailPage'
@@ -267,22 +344,6 @@ globalThis.ResizeObserver = class {
   unobserve() {}
   disconnect() {}
 } as any
-
-// --- Minimal window.api mock ---
-beforeEach(() => {
-  ;(window as any).api = {
-    db: { updateTask: vi.fn().mockResolvedValue(null), getTask: vi.fn().mockResolvedValue(null) },
-    settings: { get: vi.fn().mockResolvedValue(null) },
-    app: {
-      isLoopModeEnabled: vi.fn().mockResolvedValue(false),
-      onTasksChanged: vi.fn(() => vi.fn()),
-      onSettingsChanged: vi.fn(() => vi.fn())
-    },
-    taskTags: { getTagsForTask: vi.fn().mockResolvedValue([]) },
-    taskTemplates: { getByProject: vi.fn().mockResolvedValue([]) },
-    pty: { getBuffer: vi.fn().mockResolvedValue(null) }
-  }
-})
 
 afterEach(cleanup)
 

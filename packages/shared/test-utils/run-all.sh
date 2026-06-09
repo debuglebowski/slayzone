@@ -189,6 +189,22 @@ if [ -n "$GITHUB_TOKEN" ]; then
   run_test_no_loader packages/domains/integrations/src/main/handlers.integration.github.test.ts
 fi
 
+# jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) can't run
+# under the tsx/electron runners above — they need the vitest runner. The app
+# vitest config wires @vitejs/plugin-react. Explicit file paths override vitest's
+# default include glob so only these run (no sweep of the tsx-harness *.test.ts).
+echo ""
+echo "=== vitest (jsdom client suites) ==="
+if pnpm exec vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**' \
+  packages/domains/task/src/client/TaskDetailPage.test.tsx \
+  packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
+  packages/domains/task/src/client/TaskHistoryPanel.test.tsx \
+  packages/domains/task/src/client/taskDetailCache.test.ts; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+fi
+
 echo ""
 echo "=== Summary ==="
 echo "Suites: $PASS passed, $FAIL failed"

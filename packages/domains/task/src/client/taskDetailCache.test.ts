@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fetchTaskDetail } from './taskDetailCache'
 
 // Minimal Task factory — only fields fetchTaskDetail uses
 function makeTask(overrides: Record<string, unknown> = {}) {
@@ -27,58 +26,70 @@ function makeTag(overrides: Record<string, unknown> = {}) {
   return { id: 'tag-1', name: 'bug', color: '#f00', ...overrides }
 }
 
-// Mock window.api
-const mockApi = {
-  db: {
-    getTask: vi.fn(),
-    getTags: vi.fn().mockResolvedValue([]),
-    getProjects: vi.fn().mockResolvedValue([]),
-    getSubTasks: vi.fn().mockResolvedValue([]),
-    getTasks: vi.fn().mockResolvedValue([])
+// tRPC client mock — taskDetailCache now reads the module-scope vanilla client
+// via getTrpcClient() instead of window.api.*. The mock mirrors the tanstack
+// client shape: nested router → procedure → { query }.
+const trpcClientMock = {
+  task: {
+    get: { query: vi.fn() },
+    getSubTasks: { query: vi.fn() },
+    getAll: { query: vi.fn() }
   },
-  tags: { getTags: vi.fn().mockResolvedValue([]) },
-  taskTags: { getTagsForTask: vi.fn().mockResolvedValue([]) },
-  files: { pathExists: vi.fn().mockResolvedValue(true) }
+  tags: {
+    list: { query: vi.fn() },
+    getForTask: { query: vi.fn() }
+  },
+  projects: {
+    list: { query: vi.fn() }
+  },
+  app: {
+    files: { pathExists: { query: vi.fn() } }
+  }
 }
 
+vi.mock('@slayzone/transport/client', () => ({
+  getTrpcClient: () => trpcClientMock
+}))
+
+const { fetchTaskDetail } = await import('./taskDetailCache')
+
 beforeEach(() => {
-  vi.restoreAllMocks()
-  ;(globalThis as any).window = { api: mockApi }
-  mockApi.db.getTask.mockResolvedValue(makeTask())
-  mockApi.db.getProjects.mockResolvedValue([makeProject()])
-  mockApi.tags.getTags.mockResolvedValue([makeTag()])
-  mockApi.taskTags.getTagsForTask.mockResolvedValue([makeTag()])
-  mockApi.db.getSubTasks.mockResolvedValue([])
-  mockApi.db.getTasks.mockResolvedValue([])
-  mockApi.files.pathExists.mockResolvedValue(true)
+  vi.clearAllMocks()
+  trpcClientMock.task.get.query.mockResolvedValue(makeTask())
+  trpcClientMock.task.getSubTasks.query.mockResolvedValue([])
+  trpcClientMock.task.getAll.query.mockResolvedValue([])
+  trpcClientMock.tags.list.query.mockResolvedValue([makeTag()])
+  trpcClientMock.tags.getForTask.query.mockResolvedValue([makeTag()])
+  trpcClientMock.projects.list.query.mockResolvedValue([makeProject()])
+  trpcClientMock.app.files.pathExists.query.mockResolvedValue(true)
 })
 
 describe('fetchTaskDetail', () => {
   it('returns null when task not found', async () => {
-    mockApi.db.getTask.mockResolvedValue(null)
+    trpcClientMock.task.get.query.mockResolvedValue(null)
     const result = await fetchTaskDetail('missing')
     expect(result).toBeNull()
   })
 
   it('resolves project by task.project_id', async () => {
     const proj = makeProject({ id: 'proj-2', name: 'Other' })
-    mockApi.db.getTask.mockResolvedValue(makeTask({ project_id: 'proj-2' }))
-    mockApi.db.getProjects.mockResolvedValue([makeProject(), proj])
+    trpcClientMock.task.get.query.mockResolvedValue(makeTask({ project_id: 'proj-2' }))
+    trpcClientMock.projects.list.query.mockResolvedValue([makeProject(), proj])
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.project!.id).toBe('proj-2')
   })
 
   it('sets project to null when no matching project', async () => {
-    mockApi.db.getTask.mockResolvedValue(makeTask({ project_id: 'nonexistent' }))
-    mockApi.db.getProjects.mockResolvedValue([makeProject()])
+    trpcClientMock.task.get.query.mockResolvedValue(makeTask({ project_id: 'nonexistent' }))
+    trpcClientMock.projects.list.query.mockResolvedValue([makeProject()])
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.project).toBeNull()
   })
 
   it('sets projectPathMissing when project path does not exist', async () => {
-    mockApi.files.pathExists.mockResolvedValue(false)
+    trpcClientMock.app.files.pathExists.query.mockResolvedValue(false)
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.projectPathMissing).toBe(true)
@@ -89,18 +100,18 @@ describe('fetchTaskDetail', () => {
       tabs: [{ id: 't1', url: 'http://localhost:3000', title: 'Dev' }],
       activeTabId: 't1'
     }
-    mockApi.db.getTask.mockResolvedValue(makeTask({ browser_tabs: tabs }))
-    mockApi.db.getTasks.mockClear()
+    trpcClientMock.task.get.query.mockResolvedValue(makeTask({ browser_tabs: tabs }))
+    trpcClientMock.task.getAll.query.mockClear()
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.browserTabs).toEqual(tabs)
-    // Should NOT call getTasks (no fallback needed)
-    expect(mockApi.db.getTasks).not.toHaveBeenCalled()
+    // Should NOT call getAll (no fallback needed)
+    expect(trpcClientMock.task.getAll.query).not.toHaveBeenCalled()
   })
 
   it('falls back to first URL from other tasks when browser_tabs is null', async () => {
-    mockApi.db.getTask.mockResolvedValue(makeTask({ id: 'task-1', browser_tabs: null }))
-    mockApi.db.getTasks.mockResolvedValue([
+    trpcClientMock.task.get.query.mockResolvedValue(makeTask({ id: 'task-1', browser_tabs: null }))
+    trpcClientMock.task.getAll.query.mockResolvedValue([
       makeTask({ id: 'task-1', browser_tabs: null }),
       makeTask({
         id: 'task-2',
@@ -116,15 +127,15 @@ describe('fetchTaskDetail', () => {
   })
 
   it('falls back to about:blank when no other tasks have URLs', async () => {
-    mockApi.db.getTask.mockResolvedValue(makeTask({ browser_tabs: null }))
-    mockApi.db.getTasks.mockResolvedValue([makeTask({ id: 'task-1', browser_tabs: null })])
+    trpcClientMock.task.get.query.mockResolvedValue(makeTask({ browser_tabs: null }))
+    trpcClientMock.task.getAll.query.mockResolvedValue([makeTask({ id: 'task-1', browser_tabs: null })])
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.browserTabs.tabs[0].url).toBe('about:blank')
   })
 
   it('merges panel_visibility with defaults', async () => {
-    mockApi.db.getTask.mockResolvedValue(
+    trpcClientMock.task.get.query.mockResolvedValue(
       makeTask({ panel_visibility: { browser: true, editor: true } })
     )
 
@@ -141,14 +152,14 @@ describe('fetchTaskDetail', () => {
   })
 
   it('disables settings panel for temporary tasks', async () => {
-    mockApi.db.getTask.mockResolvedValue(makeTask({ is_temporary: true }))
+    trpcClientMock.task.get.query.mockResolvedValue(makeTask({ is_temporary: true }))
 
     const result = await fetchTaskDetail('task-1')
     expect(result!.panelVisibility.settings).toBe(false)
   })
 
   it('maps taskTagIds from tag objects', async () => {
-    mockApi.taskTags.getTagsForTask.mockResolvedValue([
+    trpcClientMock.tags.getForTask.query.mockResolvedValue([
       makeTag({ id: 'tag-a' }),
       makeTag({ id: 'tag-b' })
     ])
