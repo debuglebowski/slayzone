@@ -59,6 +59,8 @@ export const tabsShim = {
       isMain: true,
       position: 0,
       createdAt: nowIso(),
+      wasSpawned: false,
+      hibernated: false,
     }
     replaceList(taskId, [...existing, tab])
     return tab
@@ -80,6 +82,8 @@ export const tabsShim = {
       isMain: false,
       position: existing.length,
       createdAt: nowIso(),
+      wasSpawned: false,
+      hibernated: false,
     }
     replaceList(input.taskId, [...existing, tab])
     return tab
@@ -98,6 +102,8 @@ export const tabsShim = {
       isMain: false,
       position: listFor(found.task).length,
       createdAt: nowIso(),
+      wasSpawned: false,
+      hibernated: false,
     }
     replaceList(found.task, [...listFor(found.task), newTab])
     return newTab

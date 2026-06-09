@@ -10,27 +10,27 @@
 // without the live notification.
 
 import type {
-  TaskAsset,
-  AssetFolder,
-  CreateAssetInput,
-  UpdateAssetInput,
-  CreateAssetFolderInput,
-  UpdateAssetFolderInput,
+  TaskArtifact,
+  ArtifactFolder,
+  CreateArtifactInput,
+  UpdateArtifactInput,
+  CreateArtifactFolderInput,
+  UpdateArtifactFolderInput,
 } from '@slayzone/task/shared'
 import { jsonRpcCall } from '../transport/mojo'
 
 export const assetsShim = {
-  getByTask: (taskId: string): Promise<TaskAsset[]> =>
-    jsonRpcCall<TaskAsset[]>('db:assets:getByTask', { params: [taskId] }),
+  getByTask: (taskId: string): Promise<TaskArtifact[]> =>
+    jsonRpcCall<TaskArtifact[]>('db:assets:getByTask', { params: [taskId] }),
 
-  get: (id: string): Promise<TaskAsset | null> =>
-    jsonRpcCall<TaskAsset | null>('db:assets:get', { params: [id] }),
+  get: (id: string): Promise<TaskArtifact | null> =>
+    jsonRpcCall<TaskArtifact | null>('db:assets:get', { params: [id] }),
 
-  create: (data: CreateAssetInput): Promise<TaskAsset> =>
-    jsonRpcCall<TaskAsset>('db:assets:create', data as unknown as Record<string, unknown>),
+  create: (data: CreateArtifactInput): Promise<TaskArtifact> =>
+    jsonRpcCall<TaskArtifact>('db:assets:create', data as unknown as Record<string, unknown>),
 
-  update: (data: UpdateAssetInput): Promise<TaskAsset | null> =>
-    jsonRpcCall<TaskAsset | null>('db:assets:update', data as unknown as Record<string, unknown>),
+  update: (data: UpdateArtifactInput): Promise<TaskArtifact | null> =>
+    jsonRpcCall<TaskArtifact | null>('db:assets:update', data as unknown as Record<string, unknown>),
 
   delete: (id: string): Promise<boolean> =>
     jsonRpcCall<boolean>('db:assets:delete', { params: [id] }),
@@ -57,8 +57,8 @@ export const assetsShim = {
     }
   },
 
-  upload: (data: { taskId: string; sourcePath: string; title?: string }): Promise<TaskAsset> =>
-    jsonRpcCall<TaskAsset>('db:assets:upload', data as unknown as Record<string, unknown>),
+  upload: (data: { taskId: string; sourcePath: string; title?: string }): Promise<TaskArtifact> =>
+    jsonRpcCall<TaskArtifact>('db:assets:upload', data as unknown as Record<string, unknown>),
 
   getFileSize: (id: string): Promise<number | null> =>
     jsonRpcCall<number | null>('db:assets:getFileSize', { params: [id] }),
@@ -71,8 +71,8 @@ export const assetsShim = {
     taskId: string
     dirPath: string
     parentFolderId: string | null
-  }): Promise<{ folders: AssetFolder[]; assets: TaskAsset[] }> =>
-    jsonRpcCall<{ folders: AssetFolder[]; assets: TaskAsset[] }>(
+  }): Promise<{ folders: ArtifactFolder[]; assets: TaskArtifact[] }> =>
+    jsonRpcCall<{ folders: ArtifactFolder[]; assets: TaskArtifact[] }>(
       'db:assets:uploadDir',
       data as unknown as Record<string, unknown>,
     ),
@@ -97,14 +97,14 @@ export const assetsShim = {
 }
 
 export const assetFoldersShim = {
-  getByTask: (taskId: string): Promise<AssetFolder[]> =>
-    jsonRpcCall<AssetFolder[]>('db:assetFolders:getByTask', { params: [taskId] }),
+  getByTask: (taskId: string): Promise<ArtifactFolder[]> =>
+    jsonRpcCall<ArtifactFolder[]>('db:assetFolders:getByTask', { params: [taskId] }),
 
-  create: (data: CreateAssetFolderInput): Promise<AssetFolder> =>
-    jsonRpcCall<AssetFolder>('db:assetFolders:create', data as unknown as Record<string, unknown>),
+  create: (data: CreateArtifactFolderInput): Promise<ArtifactFolder> =>
+    jsonRpcCall<ArtifactFolder>('db:assetFolders:create', data as unknown as Record<string, unknown>),
 
-  update: (data: UpdateAssetFolderInput): Promise<AssetFolder | null> =>
-    jsonRpcCall<AssetFolder | null>(
+  update: (data: UpdateArtifactFolderInput): Promise<ArtifactFolder | null> =>
+    jsonRpcCall<ArtifactFolder | null>(
       'db:assetFolders:update',
       data as unknown as Record<string, unknown>,
     ),

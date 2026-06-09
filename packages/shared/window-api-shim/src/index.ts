@@ -10,6 +10,10 @@ import type { ElectronAPI } from '@slayzone/types'
 import { buildApi } from './shims/index'
 import { installTestInvoke } from './shims/test-invoke'
 
+// cap-layout-p4 — native overlay control (LayoutHost.ShowOverlay) for the
+// shell host to expose to the renderer (dialogs above the live embedded tab).
+export { setNativeOverlay } from './transport/mojo'
+
 export function setupWindowApi(): ElectronAPI {
   // cap-shell-16 — expose window.__testInvoke / __testEmit so Playwright
   // specs that came from the Electron suite route test channels to the

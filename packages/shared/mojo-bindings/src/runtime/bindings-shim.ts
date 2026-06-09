@@ -82,6 +82,7 @@ export namespace mojo {
         bindNewPipeAndPassReceiver(): any {
           return { bindInBrowser: () => {} }
         }
+        close(): void {}
       }
 
       export class InterfaceReceiverHelperInternal<_R, _P> {
@@ -94,6 +95,10 @@ export namespace mojo {
 
       export class InterfaceReceiverHelper<_R, _P> {
         constructor(..._args: any[]) {}
+        bindNewPipeAndPassRemote(): any {
+          return {}
+        }
+        close(): void {}
       }
 
       export class CallbackRouter {
@@ -122,9 +127,6 @@ export namespace mojo {
   }
 }
 
-declare global {
-  // Chromium exposes MojoHandle as a host object in WebUI contexts. In our
-  // dev/test typecheck we only need a name — real calls route through the
-  // Mojo runtime delivered by the browser.
-  type MojoHandle = unknown
-}
+// MojoHandle's global declaration lives in ../ambient.d.ts (single source —
+// declaring it here too is a TS2300 duplicate when both files are in one
+// program). Consumers that include this shim must include ambient.d.ts too.

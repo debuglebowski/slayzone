@@ -13,6 +13,7 @@ import type {
   NativeDialogHostRemote,
   EmbeddedTabHostRemote,
   JsonRpcHostRemote,
+  LayoutHostRemote,
 } from '@slayzone/mojo-bindings'
 
 let tasklistPromise: Promise<TasklistHostRemote> | null = null
@@ -22,6 +23,7 @@ let settingsPromise: Promise<SettingsHostRemote> | null = null
 let nativeDialogPromise: Promise<NativeDialogHostRemote> | null = null
 let embeddedTabPromise: Promise<EmbeddedTabHostRemote> | null = null
 let jsonRpcPromise: Promise<JsonRpcHostRemote> | null = null
+let layoutPromise: Promise<LayoutHostRemote> | null = null
 
 function hasMojo(): boolean {
   return typeof globalThis !== 'undefined' && 'Mojo' in (globalThis as Record<string, unknown>)
@@ -78,6 +80,28 @@ export function jsonRpcRemote(): Promise<JsonRpcHostRemote> {
     jsonRpcPromise = import('@slayzone/mojo-bindings').then((m) => m.JsonRpcHost.getRemote())
   }
   return jsonRpcPromise
+}
+
+export function layoutRemote(): Promise<LayoutHostRemote> {
+  if (!layoutPromise) {
+    layoutPromise = import('@slayzone/mojo-bindings').then((m) => m.LayoutHost.getRemote())
+  }
+  return layoutPromise
+}
+
+// cap-layout-p4 — raise/clear the native overlay surface (LayoutHost.ShowOverlay).
+// `setNativeOverlay('dialog')` shows the shell-rendered dialog surface above the
+// live embedded tab; `setNativeOverlay('')` closes the active overlay. Resolves
+// false when the id is unknown or no transport/BrowserView is available.
+export async function setNativeOverlay(overlayId: string): Promise<boolean> {
+  if (!hasMojo()) return false
+  try {
+    const remote = await layoutRemote()
+    const { ok } = await remote.showOverlay(overlayId)
+    return ok
+  } catch {
+    return false
+  }
 }
 
 // JsonRpcHost escape hatch — long-tail shims (fs, feedback, cli-install,

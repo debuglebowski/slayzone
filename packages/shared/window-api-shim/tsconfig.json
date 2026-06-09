@@ -1,7 +1,12 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "paths": {
+      "//resources/mojo/mojo/public/js/bindings.js": [
+        "../mojo-bindings/src/runtime/bindings-shim.ts"
+      ]
+    }
   },
-  "include": ["src/**/*", "../mojo-bindings/src/runtime/bindings-shim.ts"]
+  "include": ["src/**/*", "../mojo-bindings/src/runtime/bindings-shim.ts", "../mojo-bindings/src/ambient.d.ts"]
 }

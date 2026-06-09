@@ -16,6 +16,7 @@
     "@slayzone/projects": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/task-terminals": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/types": "workspace:*"
   },

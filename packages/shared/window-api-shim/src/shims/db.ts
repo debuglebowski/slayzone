@@ -6,8 +6,9 @@
 // widens the mojom or switches to a richer GetBoardData composite.
 
 import type { Project, CreateProjectInput, UpdateProjectInput } from '@slayzone/projects/shared'
-import type { Task, CreateTaskInput, UpdateTaskInput, TerminalMode } from '@slayzone/task/shared'
+import type { Task, CreateTaskInput, UpdateTaskInput } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
+import type { TerminalMode } from '@slayzone/terminal/shared'
 import { DEFAULT_TERMINAL_MODES } from '@slayzone/terminal/shared'
 import { jsonRpcCall, projectsRemote, tasklistRemote, tagsRemote } from '../transport/mojo'
 import { terminalModesShim } from './terminalModes'
@@ -201,6 +202,8 @@ function synthProject(entry: {
     worktree_source_branch: null,
     worktree_copy_behavior: null,
     worktree_copy_paths: null,
+    worktree_submodule_init: null,
+    group_id: null,
     columns_config: parseColumnsConfig(entry.columns_config),
     execution_context: parseExecutionContext(entry.execution_context),
     selected_repo: null,

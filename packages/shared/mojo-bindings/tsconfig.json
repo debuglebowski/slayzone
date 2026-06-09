@@ -1,4 +1,9 @@
 {
   "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "//resources/mojo/mojo/public/js/bindings.js": ["./src/runtime/bindings-shim.ts"]
+    }
+  },
   "include": ["src/**/*", "scripts/**/*"]
 }

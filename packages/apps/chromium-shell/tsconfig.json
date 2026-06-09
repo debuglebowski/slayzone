@@ -4,11 +4,13 @@
     "src/**/*",
     "src/**/*.tsx",
     "../../renderer-app/src/env.d.ts",
-    "../../shared/mojo-bindings/src/runtime/bindings-shim.ts"
+    "../../shared/mojo-bindings/src/runtime/bindings-shim.ts",
+    "../../shared/mojo-bindings/src/ambient.d.ts"
   ],
   "compilerOptions": {
     "composite": false,
     "jsx": "react-jsx",
+    "types": ["vite/client", "node"],
     "paths": {
       "@/*": ["../../renderer-app/src/*"],
       "convex/_generated/*": ["../../../convex/_generated/*"],

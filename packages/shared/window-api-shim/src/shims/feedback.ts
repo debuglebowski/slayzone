@@ -39,10 +39,10 @@ export const feedbackShim = {
     jsonRpcCall<FeedbackMessage[]>('feedback:getMessages', { params: [threadId] }).catch(() => []),
 
   createThread: (input: CreateThreadInput): Promise<FeedbackThread> =>
-    jsonRpcCall<FeedbackThread>('feedback:createThread', input),
+    jsonRpcCall<FeedbackThread>('feedback:createThread', input as unknown as Record<string, unknown>),
 
   addMessage: (input: AddMessageInput): Promise<FeedbackMessage> =>
-    jsonRpcCall<FeedbackMessage>('feedback:addMessage', input),
+    jsonRpcCall<FeedbackMessage>('feedback:addMessage', input as unknown as Record<string, unknown>),
 
   deleteThread: async (id: string): Promise<void> => {
     await jsonRpcCall('feedback:deleteThread', { params: [id] })
