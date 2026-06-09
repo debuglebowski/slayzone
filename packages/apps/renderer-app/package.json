@@ -10,6 +10,7 @@
     "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@slayzone/layout": "workspace:*",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"
   },

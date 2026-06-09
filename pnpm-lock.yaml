@@ -413,6 +413,9 @@ importers:
 
   packages/apps/renderer-app:
     dependencies:
+      '@slayzone/layout':
+        specifier: workspace:*
+        version: link:../../shared/layout
       react:
         specifier: ^19.2.1
         version: 19.2.3
@@ -1728,6 +1731,40 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/shared/layout:
+    dependencies:
+      zustand:
+        specifier: ^5.0.0
+        version: 5.0.11(@types/react@19.2.8)(immer@11.1.8)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
+    devDependencies:
+      '@testing-library/react':
+        specifier: ^16.3.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.8
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.8)
+      '@vitejs/plugin-react':
+        specifier: ^5.1.1
+        version: 5.1.2(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+      jsdom:
+        specifier: ^26.0.0
+        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.3(react@19.2.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@24.12.0)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
 
   packages/shared/markdown:
     dependencies:
