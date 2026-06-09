@@ -29,6 +29,7 @@ export function TerminalPanelSettings({
   const {
     panelConfig,
     savePanelConfig,
+    setSetting,
     terminalAutoStart,
     setTerminalAutoStart,
     terminalPrewarmEnabled,
@@ -93,7 +94,7 @@ export function TerminalPanelSettings({
               checked={terminalAutoStart}
               onCheckedChange={(c) => {
                 setTerminalAutoStart(c)
-                window.api.settings.set('terminal_auto_start', c ? '1' : '0')
+                setSetting('terminal_auto_start', c ? '1' : '0')
               }}
             />
             <span className="text-xs text-muted-foreground">
@@ -108,7 +109,7 @@ export function TerminalPanelSettings({
               checked={terminalPrewarmEnabled}
               onCheckedChange={(c) => {
                 setTerminalPrewarmEnabled(c)
-                window.api.settings.set('terminal_prewarm_enabled', c ? '1' : '0')
+                setSetting('terminal_prewarm_enabled', c ? '1' : '0')
               }}
             />
             <span className="text-xs text-muted-foreground">
@@ -124,7 +125,7 @@ export function TerminalPanelSettings({
               checked={terminalAutoCloseIdle}
               onCheckedChange={(c) => {
                 setTerminalAutoCloseIdle(c)
-                window.api.settings.set('terminal_auto_close_idle', c ? '1' : '0')
+                setSetting('terminal_auto_close_idle', c ? '1' : '0')
               }}
             />
             <span className="text-xs text-muted-foreground">
@@ -146,7 +147,7 @@ export function TerminalPanelSettings({
                   const n = Math.max(1, Math.floor(Number(terminalIdleCloseValue) || 30))
                   const v = String(n)
                   setTerminalIdleCloseValue(v)
-                  window.api.settings.set('terminal_idle_close_value', v)
+                  setSetting('terminal_idle_close_value', v)
                 }}
                 className="w-24"
               />
@@ -154,7 +155,7 @@ export function TerminalPanelSettings({
                 value={terminalIdleCloseUnit}
                 onValueChange={(u) => {
                   setTerminalIdleCloseUnit(u)
-                  window.api.settings.set('terminal_idle_close_unit', u)
+                  setSetting('terminal_idle_close_unit', u)
                 }}
               >
                 <SelectTrigger className="w-32">
@@ -174,9 +175,7 @@ export function TerminalPanelSettings({
           <Input
             value={terminalFontFamily}
             onChange={(e) => setTerminalFontFamily(e.target.value)}
-            onBlur={() =>
-              window.api.settings.set('terminal_font_family', terminalFontFamily.trim())
-            }
+            onBlur={() => setSetting('terminal_font_family', terminalFontFamily.trim())}
           />
         </div>
         <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
@@ -188,7 +187,7 @@ export function TerminalPanelSettings({
             onChange={(e) => setTerminalScrollback(e.target.value)}
             onBlur={() => {
               const n = parseInt(terminalScrollback, 10)
-              if (n >= 0) window.api.settings.set('terminal_scrollback', String(n))
+              if (n >= 0) setSetting('terminal_scrollback', String(n))
             }}
           />
         </div>
@@ -199,10 +198,7 @@ export function TerminalPanelSettings({
               checked={terminalForceCompatibilityRenderer}
               onCheckedChange={(c) => {
                 setTerminalForceCompatibilityRenderer(c)
-                window.api.settings.set(
-                  'terminal_force_compatibility_renderer',
-                  c ? '1' : '0'
-                )
+                setSetting('terminal_force_compatibility_renderer', c ? '1' : '0')
               }}
             />
             <span className="text-xs text-muted-foreground">

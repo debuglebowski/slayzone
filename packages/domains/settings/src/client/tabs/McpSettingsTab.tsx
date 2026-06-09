@@ -1,15 +1,27 @@
 import { useState, useEffect } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Input, Label } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function McpSettingsTab() {
+  const trpc = useTRPC()
   const [preferredPort, setPreferredPort] = useState('')
   const [actualPort, setActualPort] = useState('')
 
+  const preferredPortQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: 'mcp_preferred_port' })
+  )
+  const actualPortQuery = useQuery(trpc.settings.get.queryOptions({ key: 'mcp_server_port' }))
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+
   useEffect(() => {
-    window.api.settings.get('mcp_preferred_port').then((val) => setPreferredPort(val ?? ''))
-    window.api.settings.get('mcp_server_port').then((val) => setActualPort(val ?? ''))
-  }, [])
+    if (preferredPortQuery.data !== undefined) setPreferredPort(preferredPortQuery.data ?? '')
+  }, [preferredPortQuery.data])
+
+  useEffect(() => {
+    if (actualPortQuery.data !== undefined) setActualPort(actualPortQuery.data ?? '')
+  }, [actualPortQuery.data])
 
   return (
     <>
@@ -28,10 +40,10 @@ export function McpSettingsTab() {
             onBlur={() => {
               const port = parseInt(preferredPort, 10)
               if (preferredPort === '' || (port >= 1024 && port <= 65535)) {
-                window.api.settings.set(
-                  'mcp_preferred_port',
-                  preferredPort === '' ? '' : String(port)
-                )
+                setSettingMutation.mutate({
+                  key: 'mcp_preferred_port',
+                  value: preferredPort === '' ? '' : String(port)
+                })
               }
             }}
           />

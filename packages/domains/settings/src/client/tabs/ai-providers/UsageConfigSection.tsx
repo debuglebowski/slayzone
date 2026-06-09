@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { HelpCircle, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
 import {
   Button,
@@ -59,6 +61,8 @@ export function UsageConfigSection({
   mode: TerminalModeInfo
   onUpdate: (id: string, updates: UpdateTerminalModeInput) => Promise<TerminalModeInfo | null>
 }) {
+  const trpc = useTRPC()
+  const usageTestMutation = useMutation(trpc.app.usage.test.mutationOptions())
   const config: UsageProviderConfig = mode.usageConfig ?? EMPTY_USAGE_CONFIG
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{
@@ -85,7 +89,7 @@ export function UsageConfigSection({
     setTesting(true)
     setTestResult(null)
     try {
-      const res = await window.api.usage.test(config)
+      const res = await usageTestMutation.mutateAsync(config)
       setTestResult(res)
       if (res.ok) toast.success(`Found ${res.windows?.length ?? 0} usage window(s)`)
       else toast.error(res.error ?? 'Test failed')

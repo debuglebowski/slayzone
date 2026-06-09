@@ -31,6 +31,8 @@
     "@slayzone/tags": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/transport": "workspace:*",
+    "@tanstack/react-query": "^5.100.9",
     "lucide-react": "^0.562.0",
     "zustand": "^5.0.0",
     "@slayzone/platform": "workspace:*"

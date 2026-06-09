@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Button,
   Card,
@@ -18,6 +20,7 @@ import type { DiagnosticsConfig } from '@slayzone/types'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function DiagnosticsSettingsTab() {
+  const trpc = useTRPC()
   const [diagnosticsConfig, setDiagnosticsConfig] = useState<DiagnosticsConfig | null>(null)
   const [retentionDaysInput, setRetentionDaysInput] = useState('14')
   const [exportRange, setExportRange] = useState<'15m' | '1h' | '24h' | '7d'>('1h')
@@ -28,12 +31,18 @@ export function DiagnosticsSettingsTab() {
   > | null>(null)
   const mountedRef = useRef(true)
 
+  const diagnosticsConfigQuery = useQuery(trpc.diagnostics.getConfig.queryOptions())
+  const setDiagnosticsConfigMutation = useMutation(trpc.diagnostics.setConfig.mutationOptions())
+
   useEffect(() => {
-    window.api.diagnostics.getConfig().then((config) => {
-      if (!mountedRef.current) return
+    const config = diagnosticsConfigQuery.data
+    if (config) {
       setDiagnosticsConfig(config)
       setRetentionDaysInput(String(config.retentionDays))
-    })
+    }
+  }, [diagnosticsConfigQuery.data])
+
+  useEffect(() => {
     return () => {
       mountedRef.current = false
     }
@@ -41,6 +50,8 @@ export function DiagnosticsSettingsTab() {
 
   // Poll the dark-launch side-car status while this tab is mounted. 5s feels
   // live; 3s was unnecessarily aggressive for a manual settings screen.
+  // app.getSidecarStatus / app.revealSidecarLog have no tRPC router yet, so
+  // they stay on window.api.
   useVisibleInterval(
     () => {
       void window.api.app.getSidecarStatus().then((s) => {
@@ -52,7 +63,7 @@ export function DiagnosticsSettingsTab() {
   )
 
   const updateDiagnosticsConfig = async (partial: Partial<DiagnosticsConfig>) => {
-    const next = await window.api.diagnostics.setConfig(partial)
+    const next = await setDiagnosticsConfigMutation.mutateAsync(partial)
     setDiagnosticsConfig(next)
     setRetentionDaysInput(String(next.retentionDays))
     return next

@@ -1,4 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSubscription, useTRPC } from '@slayzone/transport/client'
 import type { Theme, ThemePreference } from '@slayzone/settings/shared'
 import { track } from '@slayzone/telemetry/client'
 import { applyTheme } from './apply-theme'
@@ -53,6 +55,11 @@ function migrateThemeId(id: string): string {
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const setThemeMutation = useMutation(trpc.settings.setTheme.mutationOptions())
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+
   const [theme, setTheme] = useState<Theme>('dark')
   const [preference, setPreferenceState] = useState<ThemePreference>('dark')
 
@@ -78,6 +85,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     let disposed = false
     performance.mark('sz:theme:start')
 
+    const getSetting = (key: string): Promise<string | null> =>
+      queryClient.fetchQuery(trpc.settings.get.queryOptions({ key }))
+
     const initialize = async () => {
       const [
         effective,
@@ -89,25 +99,25 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         savedTermOvrId,
         savedEditorOvrId
       ] = await Promise.all([
-        window.api.theme.getEffective(),
-        window.api.theme.getSource(),
-        window.api.settings.get('app_theme_id'),
-        window.api.settings.get('app_theme_split'),
-        window.api.settings.get('app_theme_id_dark'),
-        window.api.settings.get('app_theme_id_light'),
-        window.api.settings.get('terminal_override_theme_id'),
-        window.api.settings.get('editor_override_theme_id')
+        queryClient.fetchQuery(trpc.settings.getEffectiveTheme.queryOptions()),
+        queryClient.fetchQuery(trpc.settings.getThemeSource.queryOptions()),
+        getSetting('app_theme_id'),
+        getSetting('app_theme_split'),
+        getSetting('app_theme_id_dark'),
+        getSetting('app_theme_id_light'),
+        getSetting('terminal_override_theme_id'),
+        getSetting('editor_override_theme_id')
       ])
       if (disposed) return
 
       // Migrate single theme from legacy
       let resolvedId = savedThemeId
       if (!resolvedId) {
-        const legacyId = await window.api.settings
-          .get('content_theme_dark')
-          .then((v) => v ?? window.api.settings.get('terminal_theme_dark'))
+        const legacyId = await getSetting('content_theme_dark').then(
+          (v) => v ?? getSetting('terminal_theme_dark')
+        )
         resolvedId = migrateThemeId(legacyId ?? DEFAULT_THEME_ID)
-        window.api.settings.set('app_theme_id', resolvedId)
+        setSettingMutation.mutate({ key: 'app_theme_id', value: resolvedId })
       } else {
         resolvedId = migrateThemeId(resolvedId)
       }
@@ -139,16 +149,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       performance.mark('sz:theme:end')
     })
 
-    const unsubscribe = window.api.theme.onChange((effective) => {
-      if (disposed) return
-      setTheme(effective)
-    })
-
     return () => {
       disposed = true
-      unsubscribe()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Replaces window.api.theme.onChange: fires on OS dark/light toggle (when
+  // source === 'system') or an explicit setTheme.
+  useSubscription(
+    trpc.settings.onThemeChanged.subscriptionOptions(undefined, {
+      onData: (effective) => setTheme(effective)
+    })
+  )
 
   // Re-apply chrome whenever resolved themeId or theme changes
   useEffect(() => {
@@ -156,7 +169,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme, themeId])
 
   const setPreference = async (nextPreference: ThemePreference) => {
-    const effective = await window.api.theme.set(nextPreference)
+    const effective = await setThemeMutation.mutateAsync(nextPreference)
     setPreferenceState(nextPreference)
     setTheme(effective)
     track('theme_changed', { mode: nextPreference as 'light' | 'dark' | 'system' })
@@ -164,7 +177,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setThemeId = (id: string) => {
     setSingleThemeId(id)
-    window.api.settings.set('app_theme_id', id)
+    setSettingMutation.mutate({ key: 'app_theme_id', value: id })
     track('theme_changed', { themeId: id })
   }
 
@@ -172,31 +185,31 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (enabled) {
       setThemeIdDarkState(singleThemeId)
       setThemeIdLightState(singleThemeId)
-      window.api.settings.set('app_theme_id_dark', singleThemeId)
-      window.api.settings.set('app_theme_id_light', singleThemeId)
+      setSettingMutation.mutate({ key: 'app_theme_id_dark', value: singleThemeId })
+      setSettingMutation.mutate({ key: 'app_theme_id_light', value: singleThemeId })
     }
     setSplitThemesState(enabled)
-    window.api.settings.set('app_theme_split', enabled ? '1' : '0')
+    setSettingMutation.mutate({ key: 'app_theme_split', value: enabled ? '1' : '0' })
   }
 
   const setThemeIdDark = (id: string) => {
     setThemeIdDarkState(id)
-    window.api.settings.set('app_theme_id_dark', id)
+    setSettingMutation.mutate({ key: 'app_theme_id_dark', value: id })
   }
 
   const setThemeIdLight = (id: string) => {
     setThemeIdLightState(id)
-    window.api.settings.set('app_theme_id_light', id)
+    setSettingMutation.mutate({ key: 'app_theme_id_light', value: id })
   }
 
   const setTerminalOverrideThemeId = (id: string) => {
     setTerminalOverrideThemeIdState(id)
-    window.api.settings.set('terminal_override_theme_id', id)
+    setSettingMutation.mutate({ key: 'terminal_override_theme_id', value: id })
   }
 
   const setEditorOverrideThemeId = (id: string) => {
     setEditorOverrideThemeIdState(id)
-    window.api.settings.set('editor_override_theme_id', id)
+    setSettingMutation.mutate({ key: 'editor_override_theme_id', value: id })
   }
 
   const value = useMemo<ThemeContextValue>(

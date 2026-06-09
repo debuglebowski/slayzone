@@ -15,6 +15,7 @@ export function EditorPanelSettings({ state }: { state: PanelSettingsState }) {
   const {
     panelConfig,
     savePanelConfig,
+    setSetting,
     editorWordWrap,
     setEditorWordWrap,
     editorRenderWhitespace,
@@ -37,7 +38,7 @@ export function EditorPanelSettings({ state }: { state: PanelSettingsState }) {
             onCheckedChange={(c) => {
               const v = c ? 'on' : 'off'
               setEditorWordWrap(v)
-              window.api.settings.set('editor_word_wrap', v)
+              setSetting('editor_word_wrap', v)
             }}
           />
         </div>
@@ -48,7 +49,7 @@ export function EditorPanelSettings({ state }: { state: PanelSettingsState }) {
             onCheckedChange={(c) => {
               const v = c ? 'all' : 'none'
               setEditorRenderWhitespace(v)
-              window.api.settings.set('editor_render_whitespace', v)
+              setSetting('editor_render_whitespace', v)
             }}
           />
         </div>
@@ -58,7 +59,7 @@ export function EditorPanelSettings({ state }: { state: PanelSettingsState }) {
             value={editorTabSize}
             onValueChange={(v) => {
               setEditorTabSize(v as any)
-              window.api.settings.set('editor_tab_size', v)
+              setSetting('editor_tab_size', v)
             }}
           >
             <SelectTrigger className="max-w-24">
@@ -76,7 +77,7 @@ export function EditorPanelSettings({ state }: { state: PanelSettingsState }) {
             checked={editorIndentTabs}
             onCheckedChange={(c) => {
               setEditorIndentTabs(c)
-              window.api.settings.set('editor_indent_tabs', c ? '1' : '0')
+              setSetting('editor_indent_tabs', c ? '1' : '0')
             }}
           />
         </div>
@@ -86,7 +87,7 @@ export function EditorPanelSettings({ state }: { state: PanelSettingsState }) {
             value={editorMarkdownViewMode}
             onValueChange={(v) => {
               setEditorMarkdownViewMode(v as any)
-              window.api.settings.set('editor_markdown_view_mode', v)
+              setSetting('editor_markdown_view_mode', v)
               window.dispatchEvent(new Event('sz:settings-changed'))
             }}
           >

@@ -850,12 +850,18 @@ importers:
       '@slayzone/test-panel':
         specifier: workspace:*
         version: link:../test-panel
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
       '@slayzone/workflow':
         specifier: workspace:*
         version: link:../../shared/workflow
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       electron:
         specifier: ^41.0.0
         version: 41.0.3
@@ -911,12 +917,18 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/types':
         specifier: workspace:*
         version: link:../../shared/types
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       electron:
         specifier: ^41.0.0
         version: 41.0.3
@@ -1179,9 +1191,15 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)
@@ -1546,9 +1564,15 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       '@tanstack/react-virtual':
         specifier: ^3.13.22
         version: 3.13.22(react-dom@19.2.3(react@19.2.3))(react@19.2.3)

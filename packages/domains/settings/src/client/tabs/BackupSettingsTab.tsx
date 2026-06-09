@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { FolderOpen, Trash2, RotateCcw, Download, Loader2, Pencil, Check, X } from 'lucide-react'
 import {
   Button,
@@ -57,7 +59,11 @@ function formatTimestamp(iso: string): string {
 }
 
 export function BackupSettingsTab() {
-  const [backups, setBackups] = useState<BackupInfo[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const backupsQuery = useQuery(trpc.app.backup.list.queryOptions())
+  const backupSettingsQuery = useQuery(trpc.app.backup.getSettings.queryOptions())
+  const backups: BackupInfo[] = backupsQuery.data ?? []
   const [settings, setSettings] = useState<BackupSettings>({
     autoEnabled: false,
     intervalMinutes: 60,
@@ -71,22 +77,28 @@ export function BackupSettingsTab() {
   const [editingFilename, setEditingFilename] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
 
-  const loadData = useCallback(async () => {
-    const [b, s] = await Promise.all([window.api.backup.list(), window.api.backup.getSettings()])
-    setBackups(b)
-    setSettings(s)
-  }, [])
+  const createMutation = useMutation(trpc.app.backup.create.mutationOptions())
+  const deleteMutation = useMutation(trpc.app.backup.delete.mutationOptions())
+  const restoreMutation = useMutation(trpc.app.backup.restore.mutationOptions())
+  const renameMutation = useMutation(trpc.app.backup.rename.mutationOptions())
+  const setSettingsMutation = useMutation(trpc.app.backup.setSettings.mutationOptions())
+  const revealInFinderMutation = useMutation(trpc.app.backup.revealInFinder.mutationOptions())
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    if (backupSettingsQuery.data) setSettings(backupSettingsQuery.data)
+  }, [backupSettingsQuery.data])
+
+  const reloadBackups = useCallback(() => {
+    void queryClient.invalidateQueries(trpc.app.backup.list.queryFilter())
+    void queryClient.invalidateQueries(trpc.app.backup.getSettings.queryFilter())
+  }, [queryClient, trpc])
 
   const handleCreate = async () => {
     setCreating(true)
     try {
-      const backup = await window.api.backup.create()
+      const backup = await createMutation.mutateAsync(undefined)
       toast.success(`Backup created (${formatBytes(backup.sizeBytes)})`)
-      loadData()
+      reloadBackups()
     } catch (err: any) {
       toast.error(`Backup failed: ${err.message}`)
     } finally {
@@ -97,9 +109,9 @@ export function BackupSettingsTab() {
   const handleDelete = async () => {
     if (!deleteTarget) return
     try {
-      await window.api.backup.delete(deleteTarget.filename)
+      await deleteMutation.mutateAsync({ filename: deleteTarget.filename })
       toast.success('Backup deleted')
-      loadData()
+      reloadBackups()
     } catch (err: any) {
       toast.error(`Delete failed: ${err.message}`)
     }
@@ -110,9 +122,9 @@ export function BackupSettingsTab() {
     if (!restoreTarget) return
     try {
       if (createSafetyBackup) {
-        await window.api.backup.create()
+        await createMutation.mutateAsync(undefined)
       }
-      await window.api.backup.restore(restoreTarget.filename)
+      await restoreMutation.mutateAsync({ filename: restoreTarget.filename })
     } catch (err: any) {
       toast.error(`Restore failed: ${err.message}`)
     }
@@ -121,7 +133,7 @@ export function BackupSettingsTab() {
 
   const updateSettings = async (partial: Partial<BackupSettings>) => {
     try {
-      const updated = await window.api.backup.setSettings(partial)
+      const updated = await setSettingsMutation.mutateAsync(partial)
       setSettings(updated)
     } catch (err: any) {
       toast.error(`Failed to save settings: ${err.message}`)
@@ -144,7 +156,7 @@ export function BackupSettingsTab() {
           )}
           Create Backup
         </Button>
-        <Button variant="ghost" onClick={() => window.api.backup.revealInFinder()}>
+        <Button variant="ghost" onClick={() => revealInFinderMutation.mutate()}>
           <FolderOpen className="mr-2 size-4" />
           Open Folder
         </Button>
@@ -235,8 +247,11 @@ export function BackupSettingsTab() {
                       onSubmit={async (e) => {
                         e.preventDefault()
                         if (editingName.trim()) {
-                          await window.api.backup.rename(backup.filename, editingName.trim())
-                          loadData()
+                          await renameMutation.mutateAsync({
+                            filename: backup.filename,
+                            name: editingName.trim()
+                          })
+                          reloadBackups()
                         }
                         setEditingFilename(null)
                       }}

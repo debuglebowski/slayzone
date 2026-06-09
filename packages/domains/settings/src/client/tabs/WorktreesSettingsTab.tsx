@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Plus, Trash2 } from 'lucide-react'
 import {
   Input,
@@ -29,36 +31,75 @@ const FALLBACK_PRESETS: CopyPreset[] = [
 ]
 
 export function WorktreesSettingsTab() {
+  const trpc = useTRPC()
   const [worktreeBasePath, setWorktreeBasePath] = useState('')
   const [autoCreateWorktreeOnTaskCreate, setAutoCreateWorktreeOnTaskCreate] = useState(false)
   const [copyBehavior, setCopyBehavior] = useState<WorktreeCopyBehavior>('ask')
   const [submoduleInit, setSubmoduleInit] = useState<WorktreeSubmoduleInit>('auto')
   const [presets, setPresets] = useState<CopyPreset[]>([])
 
-  useEffect(() => {
-    window.api.settings.get('worktree_base_path').then((val) => setWorktreeBasePath(val ?? ''))
-    window.api.settings
-      .get('auto_create_worktree_on_task_create')
-      .then((val) => setAutoCreateWorktreeOnTaskCreate(val === '1'))
-    window.api.settings
-      .get('worktree_copy_behavior')
-      .then((val) => setCopyBehavior((val as WorktreeCopyBehavior) ?? 'ask'))
-    window.api.settings
-      .get('worktree_submodule_init')
-      .then((val) => setSubmoduleInit((val as WorktreeSubmoduleInit) ?? 'auto'))
-    window.api.settings
-      .get('worktree_copy_presets')
-      .then((val) => {
-        const parsed = val ? (JSON.parse(val) as CopyPreset[]) : null
-        setPresets(parsed && parsed.length > 0 ? parsed : FALLBACK_PRESETS)
-      })
-      .catch(() => setPresets(FALLBACK_PRESETS))
-  }, [])
+  const basePathQuery = useQuery(trpc.settings.get.queryOptions({ key: 'worktree_base_path' }))
+  const autoCreateQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: 'auto_create_worktree_on_task_create' })
+  )
+  const copyBehaviorQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: 'worktree_copy_behavior' })
+  )
+  const submoduleInitQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: 'worktree_submodule_init' })
+  )
+  const presetsQuery = useQuery(trpc.settings.get.queryOptions({ key: 'worktree_copy_presets' }))
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 
-  const savePresets = useCallback((updated: CopyPreset[]) => {
-    setPresets(updated)
-    window.api.settings.set('worktree_copy_presets', JSON.stringify(updated))
-  }, [])
+  useEffect(() => {
+    if (basePathQuery.data !== undefined) setWorktreeBasePath(basePathQuery.data ?? '')
+  }, [basePathQuery.data])
+
+  useEffect(() => {
+    if (autoCreateQuery.data !== undefined) {
+      setAutoCreateWorktreeOnTaskCreate(autoCreateQuery.data === '1')
+    }
+  }, [autoCreateQuery.data])
+
+  useEffect(() => {
+    if (copyBehaviorQuery.data !== undefined) {
+      setCopyBehavior((copyBehaviorQuery.data as WorktreeCopyBehavior) ?? 'ask')
+    }
+  }, [copyBehaviorQuery.data])
+
+  useEffect(() => {
+    if (submoduleInitQuery.data !== undefined) {
+      setSubmoduleInit((submoduleInitQuery.data as WorktreeSubmoduleInit) ?? 'auto')
+    }
+  }, [submoduleInitQuery.data])
+
+  useEffect(() => {
+    if (presetsQuery.isError) {
+      setPresets(FALLBACK_PRESETS)
+      return
+    }
+    if (presetsQuery.data !== undefined) {
+      try {
+        const parsed = presetsQuery.data
+          ? (JSON.parse(presetsQuery.data) as CopyPreset[])
+          : null
+        setPresets(parsed && parsed.length > 0 ? parsed : FALLBACK_PRESETS)
+      } catch {
+        setPresets(FALLBACK_PRESETS)
+      }
+    }
+  }, [presetsQuery.data, presetsQuery.isError])
+
+  const savePresets = useCallback(
+    (updated: CopyPreset[]) => {
+      setPresets(updated)
+      setSettingMutation.mutate({
+        key: 'worktree_copy_presets',
+        value: JSON.stringify(updated)
+      })
+    },
+    [setSettingMutation]
+  )
 
   const addPreset = () => {
     const id = `preset-${Date.now()}`
@@ -105,7 +146,10 @@ export function WorktreesSettingsTab() {
             value={worktreeBasePath}
             onChange={(e) => setWorktreeBasePath(e.target.value)}
             onBlur={() => {
-              window.api.settings.set('worktree_base_path', worktreeBasePath.trim())
+              setSettingMutation.mutate({
+                key: 'worktree_base_path',
+                value: worktreeBasePath.trim()
+              })
             }}
           />
         </div>
@@ -118,7 +162,10 @@ export function WorktreesSettingsTab() {
               onChange={(e) => {
                 const enabled = e.target.checked
                 setAutoCreateWorktreeOnTaskCreate(enabled)
-                window.api.settings.set('auto_create_worktree_on_task_create', enabled ? '1' : '0')
+                setSettingMutation.mutate({
+                  key: 'auto_create_worktree_on_task_create',
+                  value: enabled ? '1' : '0'
+                })
               }}
             />
             <span>Create worktree for every new task</span>
@@ -143,7 +190,7 @@ export function WorktreesSettingsTab() {
             onValueChange={(value) => {
               const v = value as WorktreeCopyBehavior
               setCopyBehavior(v)
-              window.api.settings.set('worktree_copy_behavior', v)
+              setSettingMutation.mutate({ key: 'worktree_copy_behavior', value: v })
             }}
           >
             <SelectTrigger className="max-w-sm">
@@ -170,7 +217,7 @@ export function WorktreesSettingsTab() {
             onValueChange={(value) => {
               const v = value as WorktreeSubmoduleInit
               setSubmoduleInit(v)
-              window.api.settings.set('worktree_submodule_init', v)
+              setSettingMutation.mutate({ key: 'worktree_submodule_init', value: v })
             }}
           >
             <SelectTrigger className="max-w-sm">

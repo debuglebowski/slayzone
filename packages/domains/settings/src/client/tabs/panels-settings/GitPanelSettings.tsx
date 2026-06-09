@@ -28,6 +28,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
   const {
     panelConfig,
     savePanelConfig,
+    setSetting,
     togglePanel,
     sensors,
     graphCollapsed,
@@ -67,7 +68,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
     if ('showBranches' in patch) setGraphShowBranches(next.showBranches as boolean)
     if ('breakOnTags' in patch) setGraphBreakOnTags(next.breakOnTags as boolean)
     if ('breakOnMerges' in patch) setGraphBreakOnMerges(next.breakOnMerges as boolean)
-    window.api.settings.set('commit_graph_config', JSON.stringify(next))
+    setSetting('commit_graph_config', JSON.stringify(next))
   }
   const handleGitTabDragEnd = (e: DragEndEvent) => {
     const { active, over } = e
@@ -77,13 +78,13 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
     if (oldIdx < 0 || newIdx < 0) return
     const next = arrayMove(gitTabOrder, oldIdx, newIdx)
     setGitTabOrder(next)
-    window.api.settings.set('git_tab_order', JSON.stringify(next))
+    setSetting('git_tab_order', JSON.stringify(next))
     window.dispatchEvent(new Event('sz:settings-changed'))
   }
   const toggleGitTab = (id: GitTabId, enabled: boolean) => {
     const next: GitTabVisibility = { ...gitTabVisibility, [id]: enabled }
     setGitTabVisibility(next)
-    window.api.settings.set('git_tab_visibility', JSON.stringify(next))
+    setSetting('git_tab_visibility', JSON.stringify(next))
     window.dispatchEvent(new Event('sz:settings-changed'))
   }
   return (
@@ -139,7 +140,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
                 value={diffContextLines}
                 onValueChange={(v) => {
                   setDiffContextLines(v as any)
-                  window.api.settings.set('diff_context_lines', v)
+                  setSetting('diff_context_lines', v)
                 }}
               >
                 <SelectTrigger className="max-w-32">
@@ -159,7 +160,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
                 checked={diffIgnoreWhitespace}
                 onCheckedChange={(c) => {
                   setDiffIgnoreWhitespace(c)
-                  window.api.settings.set('diff_ignore_whitespace', c ? '1' : '0')
+                  setSetting('diff_ignore_whitespace', c ? '1' : '0')
                 }}
               />
             </div>
@@ -169,7 +170,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
                 checked={diffContinuousFlow}
                 onCheckedChange={(c) => {
                   setDiffContinuousFlow(c)
-                  window.api.settings.set('diff_continuous_flow', c ? '1' : '0')
+                  setSetting('diff_continuous_flow', c ? '1' : '0')
                   window.dispatchEvent(new Event('sz:settings-changed'))
                 }}
               />
@@ -180,7 +181,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
                 checked={diffTreeCollapsed}
                 onCheckedChange={(c) => {
                   setDiffTreeCollapsed(c)
-                  window.api.settings.set('diff_tree_collapsed', c ? '1' : '0')
+                  setSetting('diff_tree_collapsed', c ? '1' : '0')
                   window.dispatchEvent(new Event('sz:settings-changed'))
                 }}
               />
@@ -191,7 +192,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
                 checked={diffSideBySide}
                 onCheckedChange={(c) => {
                   setDiffSideBySide(c)
-                  window.api.settings.set('diff_side_by_side', c ? '1' : '0')
+                  setSetting('diff_side_by_side', c ? '1' : '0')
                   window.dispatchEvent(new Event('sz:settings-changed'))
                 }}
               />
@@ -202,7 +203,7 @@ export function GitPanelSettings({ state }: { state: PanelSettingsState }) {
                 checked={diffWrap}
                 onCheckedChange={(c) => {
                   setDiffWrap(c)
-                  window.api.settings.set('diff_wrap', c ? '1' : '0')
+                  setSetting('diff_wrap', c ? '1' : '0')
                   window.dispatchEvent(new Event('sz:settings-changed'))
                 }}
               />

@@ -7,6 +7,7 @@ export function BrowserPanelSettings({ state }: { state: PanelSettingsState }) {
   const {
     panelConfig,
     savePanelConfig,
+    setSetting,
     devServerToastEnabled,
     setDevServerToastEnabled,
     devServerAutoOpenBrowser,
@@ -31,7 +32,7 @@ export function BrowserPanelSettings({ state }: { state: PanelSettingsState }) {
               checked={devServerToastEnabled}
               onChange={(e) => {
                 setDevServerToastEnabled(e.target.checked)
-                window.api.settings.set('dev_server_toast_enabled', e.target.checked ? '1' : '0')
+                setSetting('dev_server_toast_enabled', e.target.checked ? '1' : '0')
               }}
             />
             <span>Show toast when detected</span>
@@ -42,10 +43,7 @@ export function BrowserPanelSettings({ state }: { state: PanelSettingsState }) {
               checked={devServerAutoOpenBrowser}
               onChange={(e) => {
                 setDevServerAutoOpenBrowser(e.target.checked)
-                window.api.settings.set(
-                  'dev_server_auto_open_browser',
-                  e.target.checked ? '1' : '0'
-                )
+                setSetting('dev_server_auto_open_browser', e.target.checked ? '1' : '0')
               }}
             />
             <span>Auto-open when detected</span>
@@ -56,9 +54,7 @@ export function BrowserPanelSettings({ state }: { state: PanelSettingsState }) {
           <Input
             value={browserDefaultUrl}
             onChange={(e) => setBrowserDefaultUrl(e.target.value)}
-            onBlur={() =>
-              window.api.settings.set('browser_default_url', browserDefaultUrl.trim())
-            }
+            onBlur={() => setSetting('browser_default_url', browserDefaultUrl.trim())}
           />
         </div>
         <div className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
@@ -70,7 +66,7 @@ export function BrowserPanelSettings({ state }: { state: PanelSettingsState }) {
             onChange={(e) => setBrowserDefaultZoom(e.target.value)}
             onBlur={() => {
               const n = parseInt(browserDefaultZoom, 10)
-              if (n >= 50 && n <= 200) window.api.settings.set('browser_default_zoom', String(n))
+              if (n >= 50 && n <= 200) setSetting('browser_default_zoom', String(n))
             }}
           />
         </div>

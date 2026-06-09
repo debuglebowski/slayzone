@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Button, Label } from '@slayzone/ui'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
@@ -10,19 +12,35 @@ interface TagsSettingsTabProps {
 }
 
 export function TagsSettingsTab({ projectId }: TagsSettingsTabProps) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const tagsQuery = useQuery(trpc.tags.list.queryOptions())
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [dialogState, setDialogState] = useState<
     { mode: 'create' } | { mode: 'edit'; tag: Tag } | null
   >(null)
 
+  // Mirror the query into local state so optimistic mutations (delete/reorder/
+  // create/update) can keep editing the list as the original code did.
   useEffect(() => {
-    window.api.tags.getTags().then(setAllTags)
-  }, [])
+    if (tagsQuery.data) setAllTags(tagsQuery.data)
+  }, [tagsQuery.data])
+
+  const deleteTagMutation = useMutation(
+    trpc.tags.delete.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries(trpc.tags.list.queryFilter())
+    })
+  )
+  const reorderTagsMutation = useMutation(
+    trpc.tags.reorder.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries(trpc.tags.list.queryFilter())
+    })
+  )
 
   const tags = allTags.filter((t) => t.project_id === projectId)
 
   const handleDeleteTag = async (id: string) => {
-    await window.api.tags.deleteTag(id)
+    await deleteTagMutation.mutateAsync({ id })
     setAllTags(allTags.filter((t) => t.id !== id))
   }
 
@@ -34,7 +52,7 @@ export function TagsSettingsTab({ projectId }: TagsSettingsTabProps) {
     reordered[index] = reordered[swapIndex]
     reordered[swapIndex] = tmp
     const reorderedIds = reordered.map((t) => t.id)
-    await window.api.tags.reorderTags(reorderedIds)
+    await reorderTagsMutation.mutateAsync({ tagIds: reorderedIds })
     const updatedAll = allTags.map((t) => {
       const idx = reorderedIds.indexOf(t.id)
       return idx >= 0 ? { ...t, sort_order: idx } : t

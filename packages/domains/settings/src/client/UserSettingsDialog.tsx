@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { XIcon } from 'lucide-react'
 import { Dialog, DialogContent, SettingsLayout } from '@slayzone/ui'
 import { useTerminalModes } from '@slayzone/terminal'
@@ -59,22 +61,28 @@ export function UserSettingsDialog({
     resetToDefaultState
   } = useTerminalModes()
 
+  const trpc = useTRPC()
   const [activeTab, setActiveTab] = useState(initialTab)
   const [defaultTerminalMode, setDefaultTerminalMode] = useState<TerminalMode>('claude-code')
 
-  useEffect(() => {
-    if (open) {
-      window.api.settings.get('default_terminal_mode').then((m) => {
-        if (m) setDefaultTerminalMode(m as TerminalMode)
-      })
-    }
-  }, [open])
+  const defaultModeQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: 'default_terminal_mode' }, { enabled: open })
+  )
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
 
-  const onDefaultTerminalModeChange = useCallback((mode: TerminalMode) => {
-    setDefaultTerminalMode(mode)
-    window.api.settings.set('default_terminal_mode', mode)
-    window.dispatchEvent(new CustomEvent('sz:settings-changed'))
-  }, [])
+  useEffect(() => {
+    const m = defaultModeQuery.data
+    if (open && m) setDefaultTerminalMode(m as TerminalMode)
+  }, [open, defaultModeQuery.data])
+
+  const onDefaultTerminalModeChange = useCallback(
+    (mode: TerminalMode) => {
+      setDefaultTerminalMode(mode)
+      setSettingMutation.mutate({ key: 'default_terminal_mode', value: mode })
+      window.dispatchEvent(new CustomEvent('sz:settings-changed'))
+    },
+    [setSettingMutation]
+  )
 
   useEffect(() => {
     if (open) setActiveTab(initialTab)

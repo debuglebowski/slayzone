@@ -1,29 +1,40 @@
 import { useState, useEffect } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Button, Label } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function AboutSettingsTab() {
+  const trpc = useTRPC()
   const [dbPath, setDbPath] = useState<string>('')
   const [cliInstalled, setCliInstalled] = useState(false)
   const [cliPath, setCliPath] = useState<string>('')
   const [cliInstalling, setCliInstalling] = useState(false)
   const [cliMessage, setCliMessage] = useState('')
 
+  const dbPathQuery = useQuery(trpc.settings.get.queryOptions({ key: 'database_path' }))
+  const cliStatusQuery = useQuery(trpc.app.meta.checkCliInstalled.queryOptions())
+  const installCliMutation = useMutation(trpc.app.meta.installCli.mutationOptions())
+
   useEffect(() => {
-    window.api.settings
-      .get('database_path')
-      .then((path) => setDbPath(path ?? 'Default location (userData)'))
-    window.api.app.cliStatus().then((status) => {
+    if (dbPathQuery.data !== undefined) {
+      setDbPath(dbPathQuery.data ?? 'Default location (userData)')
+    }
+  }, [dbPathQuery.data])
+
+  useEffect(() => {
+    const status = cliStatusQuery.data
+    if (status) {
       setCliInstalled(status.installed)
       if (status.path) setCliPath(status.path)
-    })
-  }, [])
+    }
+  }, [cliStatusQuery.data])
 
   const handleInstallCli = async () => {
     setCliInstalling(true)
     setCliMessage('')
     try {
-      const result = await window.api.app.installCli()
+      const result = await installCliMutation.mutateAsync()
       if (result.ok) {
         setCliInstalled(true)
         if (result.path) setCliPath(result.path)

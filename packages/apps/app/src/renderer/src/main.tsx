@@ -43,25 +43,34 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 // Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
+// Still needs TrpcProvider: ThemeProvider (and PtyProvider) now talk tRPC.
 if (isFloatingGlobalAgentPanel) {
-  createRoot(document.getElementById('root')!).render(
-    <PtyProvider>
-      <ThemeProvider>
-        <FloatingGlobalAgentPanel />
-      </ThemeProvider>
-    </PtyProvider>
-  )
+  window.api.app.getTrpcPort().then((trpcPort) => {
+    createRoot(document.getElementById('root')!).render(
+      <TrpcProvider url={`ws://127.0.0.1:${trpcPort}/trpc`}>
+        <PtyProvider>
+          <ThemeProvider>
+            <FloatingGlobalAgentPanel />
+          </ThemeProvider>
+        </PtyProvider>
+      </TrpcProvider>
+    )
+  })
 } else if (taskWindowId) {
   // Secondary task window: full TaskDetailPage scoped to one task. No tab store / sidebar.
-  createRoot(document.getElementById('root')!).render(
-    <PtyProvider>
-      <ThemeProvider>
-        <UndoProvider>
-          <SecondaryTaskWindow taskId={taskWindowId} />
-        </UndoProvider>
-      </ThemeProvider>
-    </PtyProvider>
-  )
+  window.api.app.getTrpcPort().then((trpcPort) => {
+    createRoot(document.getElementById('root')!).render(
+      <TrpcProvider url={`ws://127.0.0.1:${trpcPort}/trpc`}>
+        <PtyProvider>
+          <ThemeProvider>
+            <UndoProvider>
+              <SecondaryTaskWindow taskId={taskWindowId} />
+            </UndoProvider>
+          </ThemeProvider>
+        </PtyProvider>
+      </TrpcProvider>
+    )
+  })
 } else {
   window.api.app.bootMark?.('renderer script entered')
   // Wait for tab store + tRPC port discovery before rendering. Tab store

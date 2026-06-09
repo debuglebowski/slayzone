@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Info } from 'lucide-react'
 import {
   Card,
@@ -58,6 +60,9 @@ function ThemeSelect({ value, onChange }: { value: string; onChange: (id: string
 }
 
 export function AppearanceSettingsTab() {
+  const trpc = useTRPC()
+  const allSettingsQuery = useQuery(trpc.settings.getAll.queryOptions())
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
   const projectScopedTabs = useTabStore((s) => s.projectScopedTabs)
   const {
     preference,
@@ -90,37 +95,22 @@ export function AppearanceSettingsTab() {
   const [chatWidth, setChatWidth] = useState<'narrow' | 'wide'>('narrow')
 
   useEffect(() => {
-    window.api.settings
-      .get('project_color_tints_enabled')
-      .then((val) => setProjectColorTints(val !== '0'))
-    window.api.settings
-      .get('show_context_manager')
-      .then((val) => setShowContextManager(val !== '0'))
-    window.api.settings.get('terminal_font_size').then((val) => setTerminalFontSize(val ?? '13'))
-    window.api.settings.get('editor_font_size').then((val) => setEditorFontSize(val ?? '13'))
-    window.api.settings.get('reduce_motion').then((val) => setReduceMotion(val === '1'))
-    window.api.settings
-      .get('notes_font_family')
-      .then((val) => setNotesFontFamily(val === 'mono' ? 'mono' : 'sans'))
-    Promise.all([
-      window.api.settings.get('notes_readability'),
-      window.api.settings.get('notes_line_spacing')
-    ]).then(([readability, legacy]) => {
-      const value = readability || legacy
-      setNotesReadability(value === 'compact' ? 'compact' : 'normal')
-    })
-    window.api.settings
-      .get('notes_width')
-      .then((val) => setNotesWidth(val === 'wide' ? 'wide' : 'narrow'))
-    window.api.settings
-      .get('notes_checked_highlight')
-      .then((val) => setNotesCheckedHighlight(val === '1'))
-    window.api.settings.get('notes_show_toolbar').then((val) => setNotesShowToolbar(val === '1'))
-    window.api.settings.get('notes_spellcheck').then((val) => setNotesSpellcheck(val !== '0'))
-    window.api.settings
-      .get('chat_width')
-      .then((val) => setChatWidth(val === 'wide' ? 'wide' : 'narrow'))
-  }, [])
+    const all = allSettingsQuery.data
+    if (!all) return
+    setProjectColorTints(all['project_color_tints_enabled'] !== '0')
+    setShowContextManager(all['show_context_manager'] !== '0')
+    setTerminalFontSize(all['terminal_font_size'] ?? '13')
+    setEditorFontSize(all['editor_font_size'] ?? '13')
+    setReduceMotion(all['reduce_motion'] === '1')
+    setNotesFontFamily(all['notes_font_family'] === 'mono' ? 'mono' : 'sans')
+    const readabilityValue = all['notes_readability'] || all['notes_line_spacing']
+    setNotesReadability(readabilityValue === 'compact' ? 'compact' : 'normal')
+    setNotesWidth(all['notes_width'] === 'wide' ? 'wide' : 'narrow')
+    setNotesCheckedHighlight(all['notes_checked_highlight'] === '1')
+    setNotesShowToolbar(all['notes_show_toolbar'] === '1')
+    setNotesSpellcheck(all['notes_spellcheck'] !== '0')
+    setChatWidth(all['chat_width'] === 'wide' ? 'wide' : 'narrow')
+  }, [allSettingsQuery.data])
 
   return (
     <>
@@ -194,7 +184,7 @@ export function AppearanceSettingsTab() {
               value={terminalFontSize}
               onValueChange={(v) => {
                 setTerminalFontSize(v)
-                window.api.settings.set('terminal_font_size', v)
+                setSettingMutation.mutate({ key: 'terminal_font_size', value: v })
               }}
             >
               <SelectTrigger className="w-24">
@@ -233,7 +223,7 @@ export function AppearanceSettingsTab() {
               value={editorFontSize}
               onValueChange={(v) => {
                 setEditorFontSize(v)
-                window.api.settings.set('editor_font_size', v)
+                setSettingMutation.mutate({ key: 'editor_font_size', value: v })
               }}
             >
               <SelectTrigger className="w-24">
@@ -263,7 +253,7 @@ export function AppearanceSettingsTab() {
               value={notesFontFamily}
               onValueChange={(v) => {
                 setNotesFontFamily(v as 'sans' | 'mono')
-                window.api.settings.set('notes_font_family', v)
+                setSettingMutation.mutate({ key: 'notes_font_family', value: v })
               }}
             >
               <SelectTrigger className="w-48">
@@ -283,7 +273,7 @@ export function AppearanceSettingsTab() {
               value={notesReadability}
               onValueChange={(v) => {
                 setNotesReadability(v as 'compact' | 'normal')
-                window.api.settings.set('notes_readability', v)
+                setSettingMutation.mutate({ key: 'notes_readability', value: v })
               }}
             >
               <SelectTrigger className="w-48">
@@ -303,7 +293,7 @@ export function AppearanceSettingsTab() {
               value={notesWidth}
               onValueChange={(v) => {
                 setNotesWidth(v as 'narrow' | 'wide')
-                window.api.settings.set('notes_width', v)
+                setSettingMutation.mutate({ key: 'notes_width', value: v })
               }}
             >
               <SelectTrigger className="w-48">
@@ -323,7 +313,10 @@ export function AppearanceSettingsTab() {
               checked={notesCheckedHighlight}
               onCheckedChange={(checked) => {
                 setNotesCheckedHighlight(checked)
-                window.api.settings.set('notes_checked_highlight', checked ? '1' : '0')
+                setSettingMutation.mutate({
+                  key: 'notes_checked_highlight',
+                  value: checked ? '1' : '0'
+                })
               }}
             />
           </div>
@@ -335,7 +328,10 @@ export function AppearanceSettingsTab() {
               checked={notesShowToolbar}
               onCheckedChange={(checked) => {
                 setNotesShowToolbar(checked)
-                window.api.settings.set('notes_show_toolbar', checked ? '1' : '0')
+                setSettingMutation.mutate({
+                  key: 'notes_show_toolbar',
+                  value: checked ? '1' : '0'
+                })
               }}
             />
           </div>
@@ -347,7 +343,7 @@ export function AppearanceSettingsTab() {
               checked={notesSpellcheck}
               onCheckedChange={(checked) => {
                 setNotesSpellcheck(checked)
-                window.api.settings.set('notes_spellcheck', checked ? '1' : '0')
+                setSettingMutation.mutate({ key: 'notes_spellcheck', value: checked ? '1' : '0' })
               }}
             />
           </div>
@@ -368,7 +364,7 @@ export function AppearanceSettingsTab() {
               value={chatWidth}
               onValueChange={(v) => {
                 setChatWidth(v as 'narrow' | 'wide')
-                window.api.settings.set('chat_width', v)
+                setSettingMutation.mutate({ key: 'chat_width', value: v })
               }}
             >
               <SelectTrigger className="w-48">
@@ -397,7 +393,10 @@ export function AppearanceSettingsTab() {
               checked={projectColorTints}
               onCheckedChange={(checked) => {
                 setProjectColorTints(checked)
-                window.api.settings.set('project_color_tints_enabled', checked ? '1' : '0')
+                setSettingMutation.mutate({
+                  key: 'project_color_tints_enabled',
+                  value: checked ? '1' : '0'
+                })
               }}
             />
           </div>
@@ -407,7 +406,7 @@ export function AppearanceSettingsTab() {
               checked={reduceMotion}
               onCheckedChange={(checked) => {
                 setReduceMotion(checked)
-                window.api.settings.set('reduce_motion', checked ? '1' : '0')
+                setSettingMutation.mutate({ key: 'reduce_motion', value: checked ? '1' : '0' })
               }}
             />
           </div>
@@ -428,7 +427,10 @@ export function AppearanceSettingsTab() {
               checked={showContextManager}
               onCheckedChange={(checked) => {
                 setShowContextManager(checked)
-                window.api.settings.set('show_context_manager', checked ? '1' : '0')
+                setSettingMutation.mutate({
+                  key: 'show_context_manager',
+                  value: checked ? '1' : '0'
+                })
               }}
             />
           </div>

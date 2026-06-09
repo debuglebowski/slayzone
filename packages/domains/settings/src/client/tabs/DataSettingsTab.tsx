@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { FolderOpen } from 'lucide-react'
 import {
   Button,
@@ -15,15 +17,18 @@ import {
 import { SettingsTabIntro } from './SettingsTabIntro'
 
 export function DataSettingsTab() {
-  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([])
+  const trpc = useTRPC()
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+  const projects = projectsQuery.data ?? []
   const [exportProjectId, setExportProjectId] = useState('')
   const [importedProjects, setImportedProjects] = useState<
     Array<{ id: string; name: string; path: string }>
   >([])
 
-  useEffect(() => {
-    window.api.db.getProjects().then(setProjects)
-  }, [])
+  const exportProjectMutation = useMutation(trpc.app.exportImport.exportProject.mutationOptions())
+  const importMutation = useMutation(trpc.app.exportImport.import.mutationOptions())
+  const showOpenDialogMutation = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
+  const updateProjectMutation = useMutation(trpc.projects.update.mutationOptions())
 
   return (
     <div className="space-y-6">
@@ -50,7 +55,7 @@ export function DataSettingsTab() {
             variant="outline"
             disabled={!exportProjectId}
             onClick={async () => {
-              const result = await window.api.exportImport.exportProject(exportProjectId)
+              const result = await exportProjectMutation.mutateAsync({ projectId: exportProjectId })
               if (result.canceled) return
               if (result.success) {
                 toast.success(`Exported to ${result.path}`)
@@ -67,7 +72,7 @@ export function DataSettingsTab() {
         <Button
           variant="outline"
           onClick={async () => {
-            const result = await window.api.exportImport.import()
+            const result = await importMutation.mutateAsync()
             if (result.canceled) return
             if (result.success) {
               toast.success(
@@ -107,7 +112,7 @@ export function DataSettingsTab() {
                   variant="outline"
                   aria-label="Browse folder"
                   onClick={async () => {
-                    const result = await window.api.dialog.showOpenDialog({
+                    const result = await showOpenDialogMutation.mutateAsync({
                       title: 'Select Project Directory',
                       defaultPath: p.path || undefined,
                       properties: ['openDirectory']
@@ -131,7 +136,7 @@ export function DataSettingsTab() {
               onClick={async () => {
                 for (const p of importedProjects) {
                   if (p.path.trim()) {
-                    await window.api.db.updateProject({ id: p.id, path: p.path.trim() })
+                    await updateProjectMutation.mutateAsync({ id: p.id, path: p.path.trim() })
                   }
                 }
                 const saved = importedProjects.filter((p) => p.path.trim()).length

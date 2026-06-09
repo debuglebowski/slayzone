@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Label, Switch } from '@slayzone/ui'
 import { SettingsTabIntro } from './SettingsTabIntro'
 
@@ -6,25 +8,34 @@ const LABS_FEATURES = [
   {
     key: 'labs_tests_panel',
     label: 'Tests Panel',
-    description: 'Show test runner panel in the home tab',
-    loader: () => window.api.app.isTestsPanelEnabled()
+    description: 'Show test runner panel in the home tab'
   },
   {
     key: 'labs_loop_mode',
     label: 'Loop Command',
-    description: 'Repeat a prompt until acceptance criteria are met',
-    loader: () => window.api.app.isLoopModeEnabled()
+    description: 'Repeat a prompt until acceptance criteria are met'
   }
 ] as const
 
 export function LabsSettingsTab() {
+  const trpc = useTRPC()
   const [state, setState] = useState<Record<string, boolean>>({})
 
+  const testsPanelQuery = useQuery(trpc.app.meta.isTestsPanelEnabled.queryOptions())
+  const loopModeQuery = useQuery(trpc.app.meta.isLoopModeEnabled.queryOptions())
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+
   useEffect(() => {
-    for (const f of LABS_FEATURES) {
-      f.loader().then((v) => setState((prev) => ({ ...prev, [f.key]: v })))
+    if (testsPanelQuery.data !== undefined) {
+      setState((prev) => ({ ...prev, labs_tests_panel: !!testsPanelQuery.data }))
     }
-  }, [])
+  }, [testsPanelQuery.data])
+
+  useEffect(() => {
+    if (loopModeQuery.data !== undefined) {
+      setState((prev) => ({ ...prev, labs_loop_mode: !!loopModeQuery.data }))
+    }
+  }, [loopModeQuery.data])
 
   return (
     <div className="space-y-6">
@@ -44,7 +55,7 @@ export function LabsSettingsTab() {
               checked={state[f.key] ?? false}
               onCheckedChange={async (checked) => {
                 setState((prev) => ({ ...prev, [f.key]: checked }))
-                await window.api.settings.set(f.key, checked ? '1' : '0')
+                await setSettingMutation.mutateAsync({ key: f.key, value: checked ? '1' : '0' })
               }}
             />
           </div>
