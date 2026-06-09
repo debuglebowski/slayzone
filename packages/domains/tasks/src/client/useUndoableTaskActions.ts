@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import { toast, type UndoableAction } from '@slayzone/ui'
 
@@ -24,6 +25,7 @@ interface TaskMutations {
  * Returns drop-in replacements that push onto the undo stack and show toast.
  */
 export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) {
+  const trpcClient = useTRPCClient()
   const {
     updateTask,
     setTasks,
@@ -79,7 +81,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
       undo.push({
         label: `Archived "${task.title}"`,
         undo: async () => {
-          const restored = await window.api.db.unarchiveTask(taskId)
+          const restored = await trpcClient.task.unarchive.mutate({ id: taskId })
           if (restored) updateTask(restored)
         },
         redo: () => rawArchive(taskId)
@@ -88,7 +90,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         action: { label: 'Undo', onClick: () => void undo.undo() }
       })
     },
-    [rawArchive, updateTask, undo]
+    [rawArchive, updateTask, undo, trpcClient]
   )
 
   const archiveTasks = useCallback(
@@ -101,7 +103,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         label: `Archived ${archived.length} tasks`,
         undo: async () => {
           for (const id of taskIds) {
-            const restored = await window.api.db.unarchiveTask(id)
+            const restored = await trpcClient.task.unarchive.mutate({ id })
             if (restored) updateTask(restored)
           }
         },
@@ -111,7 +113,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         action: { label: 'Undo', onClick: () => void undo.undo() }
       })
     },
-    [rawArchiveMany, updateTask, undo]
+    [rawArchiveMany, updateTask, undo, trpcClient]
   )
 
   const deleteTask = useCallback(
@@ -123,7 +125,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
       undo.push({
         label: `Deleted "${task.title}"`,
         undo: async () => {
-          const restored = await window.api.db.restoreTask(taskId)
+          const restored = await trpcClient.task.restore.mutate({ id: taskId })
           if (restored) setTasks((prev) => [restored, ...prev])
         },
         redo: () => rawDelete(taskId)
@@ -132,7 +134,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         action: { label: 'Undo', onClick: () => void undo.undo() }
       })
     },
-    [rawDelete, setTasks, undo]
+    [rawDelete, setTasks, undo, trpcClient]
   )
 
   const bulkContextMenuUpdate = useCallback(
@@ -186,7 +188,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         label: `Deleted ${removed.length} tasks`,
         undo: async () => {
           for (const id of taskIds) {
-            const restored = await window.api.db.restoreTask(id)
+            const restored = await trpcClient.task.restore.mutate({ id })
             if (restored) setTasks((prev) => [restored, ...prev])
           }
         },
@@ -196,7 +198,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         action: { label: 'Undo', onClick: () => void undo.undo() }
       })
     },
-    [rawBulkDelete, setTasks, undo]
+    [rawBulkDelete, setTasks, undo, trpcClient]
   )
 
   return {

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import type { Task, TaskStatus } from '@slayzone/task/shared'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
@@ -84,6 +86,10 @@ interface UseTasksDataReturn {
 }
 
 export function useTasksData(): UseTasksDataReturn {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const queryClient = useQueryClient()
+
   const [tasks, setTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([])
@@ -91,47 +97,87 @@ export function useTasksData(): UseTasksDataReturn {
   const [taskTags, setTaskTags] = useState<Map<string, string[]>>(new Map())
   const [blockedTaskIds, setBlockedTaskIds] = useState<Set<string>>(new Set())
 
-  // Load data on mount + allow external refresh (E2E tests)
-  useEffect(() => {
-    let inFlight = false
-    let pending = false
-    let firstLoad = true
+  // Board data spine: declarative query is the source of truth; the useState
+  // mirrors below stay so the many optimistic mutation handlers keep working
+  // unchanged and consumers keep reading synchronous arrays.
+  const boardQ = useQuery(trpc.task.loadBoardData.queryOptions(undefined, { staleTime: 30_000 }))
 
-    const loadData = () => {
-      if (inFlight) {
-        pending = true
-        return
-      }
-      inFlight = true
-      pending = false
-      if (firstLoad) {
-        performance.mark('sz:loadBoardData:start')
-        window.api.app.bootMark?.('loadBoardData start')
-      }
-      Promise.all([window.api.db.loadBoardData(), window.api.db.getProjectGroups()])
-        .then(([data, groups]) => {
-          setTasks(data.tasks as Task[])
-          setProjects(data.projects as Project[])
-          setProjectGroups(groups as ProjectGroup[])
-          setTags(data.tags as Tag[])
-          setTaskTags(new Map(Object.entries(data.taskTags)))
-          setBlockedTaskIds(new Set(data.blockedTaskIds))
-        })
-        .finally(() => {
-          if (firstLoad) {
-            performance.mark('sz:loadBoardData:end')
-            firstLoad = false
-            performance.mark('sz:dataReady')
-            window.api.app.bootMark?.('dataReady (loadBoardData done)')
-            window.api.app.dataReady()
-          }
-          inFlight = false
-          if (pending) loadData()
-        })
+  // Boot timing: mark the board-load start once on mount (the query auto-fires
+  // here). Paired with the end/dataReady marks below. `app.bootMark` has no
+  // tRPC router, so it stays on the IPC bridge.
+  useEffect(() => {
+    performance.mark('sz:loadBoardData:start')
+    window.api.app.bootMark?.('loadBoardData start')
+  }, [])
+
+  // Project groups have no tRPC router yet (only `db:projectGroups:*` IPC
+  // handlers), so this scope stays on the IPC bridge — loaded imperatively and
+  // mirrored into `projectGroups`. The `__slayzone_refreshData` bridge and the
+  // onTasksChanged subscription both re-run this loader alongside the board query.
+  const loadGroups = useCallback(() => {
+    return window.api.db.getProjectGroups().then((groups) => {
+      setProjectGroups(groups as ProjectGroup[])
+    })
+  }, [])
+
+  // Seed the useState mirrors from the board query result.
+  useEffect(() => {
+    const d = boardQ.data
+    if (!d) return
+    setTasks(d.tasks as Task[])
+    setProjects(d.projects as Project[])
+    setTags(d.tags as Tag[])
+    setTaskTags(new Map(Object.entries(d.taskTags)))
+    setBlockedTaskIds(new Set(d.blockedTaskIds))
+  }, [boardQ.data])
+
+  // Initial groups load (mount-only; refresh paths re-run loadGroups directly).
+  useEffect(() => {
+    void loadGroups()
+  }, [loadGroups])
+
+  // Boot instrumentation: fire bootMark/dataReady once the board query first
+  // lands, preserving the legacy single-shot signal. `app.bootMark`/`dataReady`
+  // have no tRPC router, so they stay on the IPC bridge.
+  useEffect(() => {
+    if (boardQ.isPending) return
+    performance.mark('sz:loadBoardData:end')
+    performance.mark('sz:dataReady')
+    window.api.app.bootMark?.('dataReady (loadBoardData done)')
+    window.api.app.dataReady()
+    // Fire exactly once, on the first non-pending state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardQ.isPending])
+
+  // Bridge the global to REFETCH (not invalidate): callers `await
+  // __slayzone_refreshData()` and need it to resolve AFTER fresh data lands.
+  // Re-runs the board refetch + the groups IPC load together.
+  useEffect(() => {
+    ;(window as any).__slayzone_refreshData = () =>
+      Promise.all([
+        queryClient.refetchQueries(trpc.task.loadBoardData.queryFilter()),
+        loadGroups()
+      ])
+    return () => {
+      delete (window as any).__slayzone_refreshData
     }
-    loadData()
-    ;(window as any).__slayzone_refreshData = loadData
-    const cleanup = window.api?.app?.onTasksChanged?.(loadData)
+  }, [queryClient, trpc, loadGroups])
+
+  // External changes: when a `tasks-changed` signal fires (CLI → REST → notify
+  // bus), invalidate the board query and reload groups. Replaces the legacy
+  // `app.onTasksChanged` IPC listener.
+  useSubscription(
+    trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
+      onData: () => {
+        void queryClient.invalidateQueries(trpc.task.loadBoardData.queryFilter())
+        void loadGroups()
+      }
+    })
+  )
+
+  // Tag CustomEvents patch local tags state directly (instant cross-component
+  // sync without a board refetch). Blocked-changed re-pulls the blocked id set.
+  useEffect(() => {
     const handleTagCreated = (e: Event) => {
       const tag = (e as CustomEvent).detail as Tag
       setTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, tag]))
@@ -141,21 +187,19 @@ export function useTasksData(): UseTasksDataReturn {
       setTags((prev) => prev.map((t) => (t.id === tag.id ? tag : t)))
     }
     const handleBlockedChanged = () => {
-      window.api.taskDependencies
-        .getAllBlockedTaskIds()
+      void trpcClient.task.getAllBlockedTaskIds
+        .query()
         .then((ids) => setBlockedTaskIds(new Set(ids)))
     }
     window.addEventListener('slayzone:tag-created', handleTagCreated)
     window.addEventListener('slayzone:tag-updated', handleTagUpdated)
     window.addEventListener('slayzone:blocked-changed', handleBlockedChanged)
     return () => {
-      delete (window as any).__slayzone_refreshData
-      cleanup?.()
       window.removeEventListener('slayzone:tag-created', handleTagCreated)
       window.removeEventListener('slayzone:tag-updated', handleTagUpdated)
       window.removeEventListener('slayzone:blocked-changed', handleBlockedChanged)
     }
-  }, [])
+  }, [trpcClient])
 
   // Update (or insert) a single task in state — upsert handles the race window
   // where a subtask exists in DB but loadBoardData hasn't refreshed yet
@@ -211,13 +255,13 @@ export function useTasksData(): UseTasksDataReturn {
           : { id: taskId, priority: parseInt(newColumnId.slice(1), 10) }
 
       Promise.all([
-        window.api.db.updateTask(updatePayload),
-        window.api.db.reorderTasks(newColumnTaskIds)
+        trpcClient.task.update.mutate(updatePayload),
+        trpcClient.task.reorder.mutate({ taskIds: newColumnTaskIds })
       ]).catch(() => {
         setTasks(snapshot)
       })
     },
-    []
+    [trpcClient]
   )
 
   // Move multiple tasks to another column at targetIndex (cross-column).
@@ -264,34 +308,37 @@ export function useTasksData(): UseTasksDataReturn {
           : { priority: parseInt(newColumnId.slice(1), 10) }
 
       Promise.all([
-        window.api.db.updateTasks({ ids: taskIds, updates: updatePayload }),
-        window.api.db.reorderTasks(newColumnTaskIds)
+        trpcClient.task.updateMany.mutate({ ids: taskIds, updates: updatePayload }),
+        trpcClient.task.reorder.mutate({ taskIds: newColumnTaskIds })
       ]).catch(() => {
         setTasks(snapshot)
       })
     },
-    []
+    [trpcClient]
   )
 
   // Reorder tasks within column
-  const reorderTasks = useCallback((taskIds: string[]) => {
-    let snapshot: Task[] = []
+  const reorderTasks = useCallback(
+    (taskIds: string[]) => {
+      let snapshot: Task[] = []
 
-    setTasks((prevTasks) => {
-      snapshot = prevTasks
-      return prevTasks.map((t) => {
-        const newOrder = taskIds.indexOf(t.id)
-        if (newOrder >= 0) {
-          return { ...t, order: newOrder }
-        }
-        return t
+      setTasks((prevTasks) => {
+        snapshot = prevTasks
+        return prevTasks.map((t) => {
+          const newOrder = taskIds.indexOf(t.id)
+          if (newOrder >= 0) {
+            return { ...t, order: newOrder }
+          }
+          return t
+        })
       })
-    })
 
-    window.api.db.reorderTasks(taskIds).catch(() => {
-      setTasks(snapshot)
-    })
-  }, [])
+      trpcClient.task.reorder.mutate({ taskIds }).catch(() => {
+        setTasks(snapshot)
+      })
+    },
+    [trpcClient]
+  )
 
   // Reparent task + reorder its new sibling list. Used by tree drag-into-task.
   const reparentTask = useCallback(
@@ -310,11 +357,11 @@ export function useTasksData(): UseTasksDataReturn {
         })
       })
       Promise.all([
-        window.api.db.updateTask({ id: taskId, parentId: newParentId }),
-        window.api.db.reorderTasks(newSiblingTaskIds)
+        trpcClient.task.update.mutate({ id: taskId, parentId: newParentId }),
+        trpcClient.task.reorder.mutate({ taskIds: newSiblingTaskIds })
       ]).catch(() => setTasks(snapshot))
     },
-    []
+    [trpcClient]
   )
 
   // Bulk variant — used when dragging a multi-selection in the tree view.
@@ -339,175 +386,199 @@ export function useTasksData(): UseTasksDataReturn {
         })
       })
       Promise.all([
-        window.api.db.updateTasks({ ids: taskIds, updates: { parentId: newParentId } }),
-        window.api.db.reorderTasks(newSiblingTaskIds)
+        trpcClient.task.updateMany.mutate({ ids: taskIds, updates: { parentId: newParentId } }),
+        trpcClient.task.reorder.mutate({ taskIds: newSiblingTaskIds })
       ]).catch(() => setTasks(snapshot))
     },
-    []
+    [trpcClient]
   )
 
   // Archive single task
-  const archiveTask = useCallback(async (taskId: string) => {
-    const now = new Date().toISOString()
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, archived_at: now } : t)))
-    await window.api.db.archiveTask(taskId)
-  }, [])
+  const archiveTask = useCallback(
+    async (taskId: string) => {
+      const now = new Date().toISOString()
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, archived_at: now } : t)))
+      await trpcClient.task.archive.mutate({ id: taskId })
+    },
+    [trpcClient]
+  )
 
   // Archive multiple tasks
-  const archiveTasks = useCallback(async (taskIds: string[]) => {
-    const now = new Date().toISOString()
-    setTasks((prev) => prev.map((t) => (taskIds.includes(t.id) ? { ...t, archived_at: now } : t)))
-    await window.api.db.archiveTasks(taskIds)
-  }, [])
+  const archiveTasks = useCallback(
+    async (taskIds: string[]) => {
+      const now = new Date().toISOString()
+      setTasks((prev) => prev.map((t) => (taskIds.includes(t.id) ? { ...t, archived_at: now } : t)))
+      await trpcClient.task.archiveMany.mutate({ ids: taskIds })
+    },
+    [trpcClient]
+  )
 
   // Delete task
-  const deleteTask = useCallback(async (taskId: string) => {
-    setTasks((prev) => prev.filter((t) => t.id !== taskId))
-    await window.api.db.deleteTask(taskId)
-  }, [])
+  const deleteTask = useCallback(
+    async (taskId: string) => {
+      setTasks((prev) => prev.filter((t) => t.id !== taskId))
+      await trpcClient.task.delete.mutate({ id: taskId })
+    },
+    [trpcClient]
+  )
 
   // Bulk delete
-  const bulkDelete = useCallback(async (taskIds: string[]) => {
-    if (taskIds.length === 0) return
-    const idSet = new Set(taskIds)
-    let snapshot: Task[] = []
-    setTasks((prev) => {
-      snapshot = prev
-      return prev.filter((t) => !idSet.has(t.id))
-    })
-    try {
-      await window.api.db.deleteTasks(taskIds)
-    } catch {
-      setTasks(snapshot)
-    }
-  }, [])
+  const bulkDelete = useCallback(
+    async (taskIds: string[]) => {
+      if (taskIds.length === 0) return
+      const idSet = new Set(taskIds)
+      let snapshot: Task[] = []
+      setTasks((prev) => {
+        snapshot = prev
+        return prev.filter((t) => !idSet.has(t.id))
+      })
+      try {
+        await trpcClient.task.deleteMany.mutate({ ids: taskIds })
+      } catch {
+        setTasks(snapshot)
+      }
+    },
+    [trpcClient]
+  )
 
   // Context menu update (status, priority, project, blocked).
   // Snapshot pattern keeps deps empty so the callback ref stays stable across
   // renders — prevents fanout re-renders in consumers (e.g. useUndoableTaskActions).
-  const contextMenuUpdate = useCallback(async (taskId: string, updates: Partial<Task>) => {
-    let previousTasks: Task[] = []
-    setTasks((prev) => {
-      previousTasks = prev
-      return prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
-    })
-
-    if (updates.is_blocked !== undefined) {
-      setBlockedTaskIds((prev) => {
-        const next = new Set(prev)
-        if (updates.is_blocked) next.add(taskId)
-        else next.delete(taskId)
-        return next
+  const contextMenuUpdate = useCallback(
+    async (taskId: string, updates: Partial<Task>) => {
+      let previousTasks: Task[] = []
+      setTasks((prev) => {
+        previousTasks = prev
+        return prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
       })
-    }
 
-    try {
-      await window.api.db.updateTask({
-        id: taskId,
-        ...toUpdateTaskFields(updates)
-      })
-    } catch {
-      setTasks(previousTasks)
       if (updates.is_blocked !== undefined) {
         setBlockedTaskIds((prev) => {
           const next = new Set(prev)
-          if (updates.is_blocked) next.delete(taskId)
-          else next.add(taskId)
+          if (updates.is_blocked) next.add(taskId)
+          else next.delete(taskId)
           return next
         })
       }
-    }
-  }, [])
+
+      try {
+        await trpcClient.task.update.mutate({
+          id: taskId,
+          ...toUpdateTaskFields(updates)
+        })
+      } catch {
+        setTasks(previousTasks)
+        if (updates.is_blocked !== undefined) {
+          setBlockedTaskIds((prev) => {
+            const next = new Set(prev)
+            if (updates.is_blocked) next.delete(taskId)
+            else next.add(taskId)
+            return next
+          })
+        }
+      }
+    },
+    [trpcClient]
+  )
 
   // Bulk context-menu update (status, priority, project, blocked, ...)
-  const bulkContextMenuUpdate = useCallback(async (taskIds: string[], updates: Partial<Task>) => {
-    if (taskIds.length === 0) return
-    const idSet = new Set(taskIds)
-    let previousTasks: Task[] = []
-    setTasks((prev) => {
-      previousTasks = prev
-      return prev.map((t) => (idSet.has(t.id) ? { ...t, ...updates } : t))
-    })
-
-    if (updates.is_blocked !== undefined) {
-      setBlockedTaskIds((prev) => {
-        const next = new Set(prev)
-        if (updates.is_blocked) for (const id of taskIds) next.add(id)
-        else for (const id of taskIds) next.delete(id)
-        return next
+  const bulkContextMenuUpdate = useCallback(
+    async (taskIds: string[], updates: Partial<Task>) => {
+      if (taskIds.length === 0) return
+      const idSet = new Set(taskIds)
+      let previousTasks: Task[] = []
+      setTasks((prev) => {
+        previousTasks = prev
+        return prev.map((t) => (idSet.has(t.id) ? { ...t, ...updates } : t))
       })
-    }
 
-    try {
-      await window.api.db.updateTasks({
-        ids: taskIds,
-        updates: toUpdateTaskFields(updates)
-      })
-    } catch {
-      setTasks(previousTasks)
       if (updates.is_blocked !== undefined) {
         setBlockedTaskIds((prev) => {
           const next = new Set(prev)
-          if (updates.is_blocked) for (const id of taskIds) next.delete(id)
-          else for (const id of taskIds) next.add(id)
+          if (updates.is_blocked) for (const id of taskIds) next.add(id)
+          else for (const id of taskIds) next.delete(id)
           return next
         })
       }
-    }
-  }, [])
+
+      try {
+        await trpcClient.task.updateMany.mutate({
+          ids: taskIds,
+          updates: toUpdateTaskFields(updates)
+        })
+      } catch {
+        setTasks(previousTasks)
+        if (updates.is_blocked !== undefined) {
+          setBlockedTaskIds((prev) => {
+            const next = new Set(prev)
+            if (updates.is_blocked) for (const id of taskIds) next.delete(id)
+            else for (const id of taskIds) next.add(id)
+            return next
+          })
+        }
+      }
+    },
+    [trpcClient]
+  )
 
   // Reorder the pinned group — writes `pin_order = index` for the ordered ids
   // in one bulk IPC. Optimistic with rollback.
-  const reorderPinnedTasks = useCallback((taskIds: string[]) => {
-    if (taskIds.length === 0) return
-    const orderById = new Map(taskIds.map((id, i) => [id, i]))
-    let snapshot: Task[] = []
-    setTasks((prev) => {
-      snapshot = prev
-      return prev.map((t) =>
-        orderById.has(t.id)
-          ? { ...t, pinned: true, pin_order: orderById.get(t.id) as number }
-          : t
-      )
-    })
-    window.api.db.reorderPinnedTasks(taskIds).catch(() => setTasks(snapshot))
-  }, [])
-
-  // Pin / unpin tasks in the sidebar tree. Pinning appends after the current
-  // pinned list and renumbers it (one bulk IPC); unpinning clears `pinned` /
-  // `pin_order` (one bulk IPC). `pinned` / `pin_order` are task-intrinsic cols.
-  const setTasksPinned = useCallback((taskIds: string[], pinned: boolean) => {
-    if (taskIds.length === 0) return
-    const idSet = new Set(taskIds)
-    let snapshot: Task[] = []
-    let orderedPinnedIds: string[] = []
-    setTasks((prev) => {
-      snapshot = prev
-      if (pinned) {
-        const existing = prev
-          .filter((t) => t.pinned && !idSet.has(t.id))
-          .sort((a, b) => a.pin_order - b.pin_order)
-          .map((t) => t.id)
-        orderedPinnedIds = [...existing, ...taskIds]
-        const orderById = new Map(orderedPinnedIds.map((id, i) => [id, i]))
+  const reorderPinnedTasks = useCallback(
+    (taskIds: string[]) => {
+      if (taskIds.length === 0) return
+      const orderById = new Map(taskIds.map((id, i) => [id, i]))
+      let snapshot: Task[] = []
+      setTasks((prev) => {
+        snapshot = prev
         return prev.map((t) =>
           orderById.has(t.id)
             ? { ...t, pinned: true, pin_order: orderById.get(t.id) as number }
             : t
         )
-      }
-      return prev.map((t) =>
-        idSet.has(t.id) ? { ...t, pinned: false, pin_order: 0 } : t
-      )
-    })
-    const write = pinned
-      ? window.api.db.reorderPinnedTasks(orderedPinnedIds)
-      : window.api.db.updateTasks({
-          ids: taskIds,
-          updates: { pinned: false, pinOrder: 0 }
-        })
-    write.catch(() => setTasks(snapshot))
-  }, [])
+      })
+      trpcClient.task.reorderPinned.mutate({ taskIds }).catch(() => setTasks(snapshot))
+    },
+    [trpcClient]
+  )
+
+  // Pin / unpin tasks in the sidebar tree. Pinning appends after the current
+  // pinned list and renumbers it (one bulk IPC); unpinning clears `pinned` /
+  // `pin_order` (one bulk IPC). `pinned` / `pin_order` are task-intrinsic cols.
+  const setTasksPinned = useCallback(
+    (taskIds: string[], pinned: boolean) => {
+      if (taskIds.length === 0) return
+      const idSet = new Set(taskIds)
+      let snapshot: Task[] = []
+      let orderedPinnedIds: string[] = []
+      setTasks((prev) => {
+        snapshot = prev
+        if (pinned) {
+          const existing = prev
+            .filter((t) => t.pinned && !idSet.has(t.id))
+            .sort((a, b) => a.pin_order - b.pin_order)
+            .map((t) => t.id)
+          orderedPinnedIds = [...existing, ...taskIds]
+          const orderById = new Map(orderedPinnedIds.map((id, i) => [id, i]))
+          return prev.map((t) =>
+            orderById.has(t.id)
+              ? { ...t, pinned: true, pin_order: orderById.get(t.id) as number }
+              : t
+          )
+        }
+        return prev.map((t) =>
+          idSet.has(t.id) ? { ...t, pinned: false, pin_order: 0 } : t
+        )
+      })
+      const write = pinned
+        ? trpcClient.task.reorderPinned.mutate({ taskIds: orderedPinnedIds })
+        : trpcClient.task.updateMany.mutate({
+            ids: taskIds,
+            updates: { pinned: false, pinOrder: 0 }
+          })
+      write.catch(() => setTasks(snapshot))
+    },
+    [trpcClient]
+  )
 
   const setTaskPinned = useCallback(
     (taskId: string, pinned: boolean) => setTasksPinned([taskId], pinned),
@@ -515,50 +586,59 @@ export function useTasksData(): UseTasksDataReturn {
   )
 
   // Collapse / expand a task's sub-tasks in the sidebar tree.
-  const setTaskCollapsed = useCallback((taskId: string, collapsed: boolean) => {
-    let snapshot: Task[] = []
-    setTasks((prev) => {
-      snapshot = prev
-      return prev.map((t) => (t.id === taskId ? { ...t, tree_collapsed: collapsed } : t))
-    })
-    window.api.db
-      .updateTask({ id: taskId, treeCollapsed: collapsed })
-      .catch(() => setTasks(snapshot))
-  }, [])
+  const setTaskCollapsed = useCallback(
+    (taskId: string, collapsed: boolean) => {
+      let snapshot: Task[] = []
+      setTasks((prev) => {
+        snapshot = prev
+        return prev.map((t) => (t.id === taskId ? { ...t, tree_collapsed: collapsed } : t))
+      })
+      trpcClient.task.update
+        .mutate({ id: taskId, treeCollapsed: collapsed })
+        .catch(() => setTasks(snapshot))
+    },
+    [trpcClient]
+  )
 
   // Clear all dependency blockers (used when dragging out of __blocked__ col)
-  const clearBlockers = useCallback(async (taskId: string) => {
-    await window.api.taskDependencies.setBlockers(taskId, [])
-    setBlockedTaskIds((prev) => {
-      const next = new Set(prev)
-      next.delete(taskId)
-      return next
-    })
-    window.dispatchEvent(new CustomEvent('slayzone:blocked-changed'))
-  }, [])
+  const clearBlockers = useCallback(
+    async (taskId: string) => {
+      await trpcClient.task.setBlockers.mutate({ taskId, blockerTaskIds: [] })
+      setBlockedTaskIds((prev) => {
+        const next = new Set(prev)
+        next.delete(taskId)
+        return next
+      })
+      window.dispatchEvent(new CustomEvent('slayzone:blocked-changed'))
+    },
+    [trpcClient]
+  )
 
   // Reorder projects
-  const reorderProjects = useCallback((projectIds: string[]) => {
-    let snapshot: Project[] = []
+  const reorderProjects = useCallback(
+    (projectIds: string[]) => {
+      let snapshot: Project[] = []
 
-    setProjects((prev) => {
-      snapshot = prev
-      const byId = new Map(prev.map((p) => [p.id, p]))
-      const reordered = projectIds
-        .map((id, index) => {
-          const p = byId.get(id)
-          return p ? { ...p, sort_order: index } : null
-        })
-        .filter((p): p is Project => p !== null)
-      const seen = new Set(projectIds)
-      const rest = prev.filter((p) => !seen.has(p.id))
-      return [...reordered, ...rest]
-    })
+      setProjects((prev) => {
+        snapshot = prev
+        const byId = new Map(prev.map((p) => [p.id, p]))
+        const reordered = projectIds
+          .map((id, index) => {
+            const p = byId.get(id)
+            return p ? { ...p, sort_order: index } : null
+          })
+          .filter((p): p is Project => p !== null)
+        const seen = new Set(projectIds)
+        const rest = prev.filter((p) => !seen.has(p.id))
+        return [...reordered, ...rest]
+      })
 
-    window.api.db.reorderProjects(projectIds).catch(() => {
-      setProjects(snapshot)
-    })
-  }, [])
+      trpcClient.projects.reorder.mutate({ projectIds }).catch(() => {
+        setProjects(snapshot)
+      })
+    },
+    [trpcClient]
+  )
 
   // Update project in state
   const updateProject = useCallback((project: Project) => {
@@ -581,6 +661,11 @@ export function useTasksData(): UseTasksDataReturn {
   )
 
   // ── Project groups ───────────────────────────────────────────────────────
+  // NOTE: project-group procedures have NO tRPC router yet (only the legacy
+  // `db:projectGroups:*` IPC handlers exist server-side). Until a router is
+  // added these handlers stay on the `window.api.db.*` IPC bridge — they are
+  // intentionally not converted in this slice.
+  //
   // Ordering mutations return an authoritative { projects, groups } snapshot
   // (the server re-packs both scopes to contiguous 0..n-1). We snapshot current
   // state for rollback, then replace with the server's truth on success. No

@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useMemo } from 'react'
 import { create } from 'zustand'
+import { getTrpcClient } from '@slayzone/transport/client'
 import {
   type FilterState,
   type ViewConfig,
@@ -108,7 +109,10 @@ function flushOne(projectId: string): void {
   const pending = pendingSaves.get(projectId)
   if (pending) {
     pendingSaves.delete(projectId)
-    window.api.settings.set(getFilterKey(projectId), JSON.stringify(pending))
+    void getTrpcClient().settings.set.mutate({
+      key: getFilterKey(projectId),
+      value: JSON.stringify(pending)
+    })
   }
 }
 
@@ -120,24 +124,26 @@ export const useFilterStore = create<FilterStore>((set, get) => ({
     const s = get()
     if (s.loaded[projectId] || s.loading[projectId]) return
     set({ loading: { ...s.loading, [projectId]: true } })
-    window.api.settings.get(getFilterKey(projectId)).then((value) => {
-      let next: FilterState = defaultFilterState
-      if (value) {
-        try {
-          next = migrateFilterState(JSON.parse(value))
-        } catch {
-          /* keep default */
+    getTrpcClient()
+      .settings.get.query({ key: getFilterKey(projectId) })
+      .then((value) => {
+        let next: FilterState = defaultFilterState
+        if (value) {
+          try {
+            next = migrateFilterState(JSON.parse(value))
+          } catch {
+            /* keep default */
+          }
         }
-      }
-      set((s2) => {
-        const { [projectId]: _omit, ...restLoading } = s2.loading
-        return {
-          filters: { ...s2.filters, [projectId]: next },
-          loaded: { ...s2.loaded, [projectId]: true },
-          loading: restLoading
-        }
+        set((s2) => {
+          const { [projectId]: _omit, ...restLoading } = s2.loading
+          return {
+            filters: { ...s2.filters, [projectId]: next },
+            loaded: { ...s2.loaded, [projectId]: true },
+            loading: restLoading
+          }
+        })
       })
-    })
   },
   setFilter: (projectId, filter) => {
     set((s) => ({
