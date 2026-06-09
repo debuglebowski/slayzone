@@ -1,3 +1,5 @@
+import { getTrpcClient } from '@slayzone/transport/client'
+
 type DiagnosticsContext = Record<string, unknown>
 
 let diagnosticsContext: DiagnosticsContext = {}
@@ -12,7 +14,7 @@ export function getDiagnosticsContext(): DiagnosticsContext {
 
 export function recordDiagnosticsTimeline(event: string, payload?: Record<string, unknown>): void {
   try {
-    window.api.diagnostics.recordClientEvent({
+    void getTrpcClient().diagnostics.recordClientEvent.mutate({
       event: `renderer.timeline.${event}`,
       level: 'info',
       message: event,
@@ -22,6 +24,6 @@ export function recordDiagnosticsTimeline(event: string, payload?: Record<string
       }
     })
   } catch {
-    // ignore diagnostics failures
+    // ignore diagnostics failures (incl. tRPC client not yet ready)
   }
 }

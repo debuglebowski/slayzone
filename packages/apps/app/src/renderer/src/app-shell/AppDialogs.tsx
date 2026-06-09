@@ -1,4 +1,6 @@
 import React, { Suspense, type ComponentProps, type Dispatch, type SetStateAction } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -186,6 +188,9 @@ export function AppDialogs({
   updateVersion,
   setUpdateToastDismissed
 }: AppDialogsProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const restartForUpdate = useMutation(trpc.app.meta.restartForUpdate.mutationOptions())
   return (
     <>
       {/* Dialogs — lazy-mounted on first trigger, stay mounted for close/reopen animations */}
@@ -336,12 +341,12 @@ export function AppDialogs({
             onExternalClose={async () => {
               useDialogStore.getState().closeOnboarding()
               const [onboardingCompleted, prompted] = await Promise.all([
-                window.api.settings.get('onboarding_completed'),
-                window.api.settings.get('tutorial_prompted')
+                trpcClient.settings.get.query({ key: 'onboarding_completed' }),
+                trpcClient.settings.get.query({ key: 'tutorial_prompted' })
               ])
               if (onboardingCompleted === 'true') markSetupGuideCompleted()
               if (!prompted) {
-                void window.api.settings.set('tutorial_prompted', 'true')
+                void trpcClient.settings.set.mutate({ key: 'tutorial_prompted', value: 'true' })
                 toast('Want a quick tour?', {
                   duration: 8000,
                   action: { label: 'Take the tour', onClick: startTour }
@@ -397,7 +402,7 @@ export function AppDialogs({
       </AlertDialog>
       <UpdateToast
         version={updateToastDismissed ? null : updateVersion}
-        onRestart={() => window.api.app.restartForUpdate()}
+        onRestart={() => restartForUpdate.mutate()}
         onDismiss={() => setUpdateToastDismissed(true)}
       />
       <Suspense fallback={null}>

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 export interface GlobalAgentPanelState {
   isOpen: boolean
@@ -25,27 +27,33 @@ export function useGlobalAgentPanelState(): [
   GlobalAgentPanelState,
   (updates: Partial<GlobalAgentPanelState>) => void
 ] {
+  const trpc = useTRPC()
   const [state, setState] = useState<GlobalAgentPanelState>(DEFAULT_STATE)
 
-  useEffect(() => {
-    window.api.settings.get(SETTINGS_KEY).then((stored) => {
-      if (stored) {
-        try {
-          setState({ ...DEFAULT_STATE, ...JSON.parse(stored) })
-        } catch {
-          // ignore parse errors
-        }
-      }
-    })
-  }, [])
+  const storedQuery = useQuery(trpc.settings.get.queryOptions({ key: SETTINGS_KEY }))
+  const setSettings = useMutation(trpc.settings.set.mutationOptions())
 
-  const updateState = useCallback((updates: Partial<GlobalAgentPanelState>) => {
-    setState((prev) => {
-      const next = { ...prev, ...updates }
-      window.api.settings.set(SETTINGS_KEY, JSON.stringify(next))
-      return next
-    })
-  }, [])
+  useEffect(() => {
+    const stored = storedQuery.data
+    if (stored) {
+      try {
+        setState({ ...DEFAULT_STATE, ...JSON.parse(stored) })
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }, [storedQuery.data])
+
+  const updateState = useCallback(
+    (updates: Partial<GlobalAgentPanelState>) => {
+      setState((prev) => {
+        const next = { ...prev, ...updates }
+        setSettings.mutate({ key: SETTINGS_KEY, value: JSON.stringify(next) })
+        return next
+      })
+    },
+    [setSettings]
+  )
 
   return [state, updateState]
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Command, CommandInput, CommandList, Dialog, DialogContent, cn } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/settings'
 import type { ActionId, FilterKind, SearchDialogProps, TaskTab } from './SearchDialog.types'
 import { FILTERS, MAX_RECENT } from './SearchDialog.constants'
@@ -26,6 +27,7 @@ export function SearchDialog({
   onOpenChangelog,
   onOpenSettings
 }: SearchDialogProps) {
+  const trpcClient = useTRPCClient()
   const fileContext = useDialogStore((s) => s.searchFileContext)
   const [allFiles, setAllFiles] = useState<string[]>([])
   const [search, setSearch] = useState('')
@@ -42,11 +44,11 @@ export function SearchDialog({
       setAllFiles(cacheRef.current.files)
       return
     }
-    window.api.fs.listAllFiles(path).then((list) => {
+    trpcClient.fileEditor.listAllFiles.query({ rootPath: path }).then((list) => {
       cacheRef.current = { path, files: list }
       setAllFiles(list)
     })
-  }, [open, fileContext])
+  }, [open, fileContext, trpcClient])
 
   useEffect(() => {
     if (open) {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn, Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 const PROMO_END = new Date('2026-03-29T07:59:00Z') // March 28 11:59 PM PT
 const PEAK_START = 5 // 5 AM PT
@@ -84,6 +85,7 @@ function formatCountdown(ms: number): string {
 }
 
 function useBoostStatus() {
+  const trpcClient = useTRPCClient()
   const [visible, setVisible] = useState(false)
   const [status, setStatus] = useState<BoostStatus>({
     isBoosted: false,
@@ -96,7 +98,7 @@ function useBoostStatus() {
   useEffect(() => {
     if (Date.now() >= PROMO_END.getTime()) return
 
-    window.api.settings.get('default_terminal_mode').then((mode) => {
+    trpcClient.settings.get.query({ key: 'default_terminal_mode' }).then((mode) => {
       if (!mode || !mode.toLowerCase().includes('claude')) return
       setVisible(true)
 
@@ -116,7 +118,7 @@ function useBoostStatus() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [])
+  }, [trpcClient])
 
   return { visible, ...status }
 }

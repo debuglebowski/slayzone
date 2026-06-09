@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { useLeaderboardAuth } from '@/lib/convexAuth'
 import { api } from 'convex/_generated/api'
 import type { Period } from './LeaderboardPage.constants'
@@ -12,6 +13,7 @@ import {
 } from './LeaderboardPage.utils'
 
 export function useLeaderboardController(auth: ReturnType<typeof useLeaderboardAuth>) {
+  const trpcClient = useTRPCClient()
   const [period, setPeriod] = useState<Period>('all-time')
   const [authBusy, setAuthBusy] = useState(false)
 
@@ -91,8 +93,8 @@ export function useLeaderboardController(auth: ReturnType<typeof useLeaderboardA
   useEffect(() => {
     if (!import.meta.env.DEV) return
     let cancelled = false
-    void window.api.app
-      .getProtocolClientStatus()
+    void trpcClient.app.meta.getProtocolClientStatus
+      .query()
       .then((status) => {
         if (cancelled) return
         if (status.reason === 'dev-skipped') {
@@ -113,12 +115,12 @@ export function useLeaderboardController(auth: ReturnType<typeof useLeaderboardA
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [trpcClient])
 
   async function syncStats(): Promise<void> {
     setSyncing(true)
     try {
-      const stats = await window.api.leaderboard?.getLocalStats()
+      const stats = await trpcClient.app.leaderboard.getLocalStats.query()
       if (stats?.days.length) await syncDailyStats({ days: stats.days })
     } catch {
       /* best-effort */

@@ -7,6 +7,7 @@ import React, {
   type KeyboardEventHandler
 } from 'react'
 import { Kanban, GitBranch, FileCode, Cpu, FlaskConical, Zap, Lock, AlertTriangle } from 'lucide-react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { Button, PanelToggle, cn } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -168,6 +169,7 @@ export function HomeDetail({
   panelTestsShortcut,
   panelAutomationsShortcut
 }: HomeDetailProps): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   return (
     <div id="home-detail" className="flex flex-col flex-1 h-full p-4">
       {durationLocked && selectedProject?.lock_config ? (
@@ -489,7 +491,7 @@ export function HomeDetail({
                             projects={projects}
                             onTaskClick={(t) => handleTaskClick(t)}
                             onUpdateTask={(data) =>
-                              window.api.db.updateTask(data).then((t) => {
+                              trpcClient.task.update.mutate(data).then((t) => {
                                 updateTask(t)
                                 return t
                               })

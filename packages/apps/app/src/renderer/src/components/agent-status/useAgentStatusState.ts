@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 
 export interface AgentStatusState {
   isLocked: boolean
@@ -22,27 +24,33 @@ export function useAgentStatusState(): [
   AgentStatusState,
   (updates: Partial<AgentStatusState>) => void
 ] {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [state, setState] = useState<AgentStatusState>(DEFAULT_STATE)
 
-  useEffect(() => {
-    window.api.settings.get(SETTINGS_KEY).then((stored) => {
-      if (stored) {
-        try {
-          setState({ ...DEFAULT_STATE, ...JSON.parse(stored) })
-        } catch {
-          // ignore parse errors
-        }
-      }
-    })
-  }, [])
+  const storedQuery = useQuery(trpc.settings.get.queryOptions({ key: SETTINGS_KEY }))
+  const stored = storedQuery.data
 
-  const updateState = useCallback((updates: Partial<AgentStatusState>) => {
-    setState((prev) => {
-      const next = { ...prev, ...updates }
-      window.api.settings.set(SETTINGS_KEY, JSON.stringify(next))
-      return next
-    })
-  }, [])
+  useEffect(() => {
+    if (stored) {
+      try {
+        setState({ ...DEFAULT_STATE, ...JSON.parse(stored) })
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }, [stored])
+
+  const updateState = useCallback(
+    (updates: Partial<AgentStatusState>) => {
+      setState((prev) => {
+        const next = { ...prev, ...updates }
+        void trpcClient.settings.set.mutate({ key: SETTINGS_KEY, value: JSON.stringify(next) })
+        return next
+      })
+    },
+    [trpcClient]
+  )
 
   return [state, updateState]
 }

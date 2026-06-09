@@ -1,5 +1,7 @@
 import { motion } from 'framer-motion'
 import { useEffect, useState, useRef } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import logo from '@/assets/logo-solid.svg'
 
 const FIRST = 'Breath...'
@@ -12,16 +14,14 @@ const PAUSE_AFTER_ERASE = 200
 const HOLD_AFTER_DONE = 600
 
 export function LoadingScreen({ onDone }: { onDone?: () => void }): React.JSX.Element {
-  const [version, setVersion] = useState('')
+  const trpc = useTRPC()
+  const versionQuery = useQuery(trpc.app.meta.getVersion.queryOptions())
+  const version = versionQuery.data ?? ''
   const [text, setText] = useState('')
   const onDoneRef = useRef(onDone)
   useEffect(() => {
     onDoneRef.current = onDone
   })
-
-  useEffect(() => {
-    window.api.app.getVersion().then(setVersion)
-  }, [])
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = []

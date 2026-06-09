@@ -10,6 +10,8 @@ import React, {
 } from 'react'
 import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, BookOpen } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project, ColumnConfig } from '@slayzone/projects/shared'
 import {
@@ -98,6 +100,8 @@ import type {
 
 function App(): React.JSX.Element {
   performance.mark('sz:app:render')
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const shouldMount = useLazyMounted()
   // Core data from domain hook
   const {
@@ -236,6 +240,7 @@ function App(): React.JSX.Element {
   const orderedHomeIds = useMemo(() => getOrderedHomeIds(), [getOrderedHomeIds])
   const { updateVersion, updateDownloadPercent, updateToastDismissed, setUpdateToastDismissed } =
     useAppUpdates()
+  const restartForUpdate = useMutation(trpc.app.meta.restartForUpdate.mutationOptions())
 
   // Warm keystroke-triggered lazy chunks (Cmd+K palette) on idle → no blank gap on first open.
   useIdlePreload()
@@ -266,13 +271,13 @@ function App(): React.JSX.Element {
   const handleHomeRepoChange = useCallback(
     (repoName: string) => {
       if (!homeSelectedProject) return
-      window.api.db
-        .updateProject({ id: homeSelectedProject.id, selectedRepo: repoName })
+      trpcClient.projects.update
+        .mutate({ id: homeSelectedProject.id, selectedRepo: repoName })
         .then((updated) => {
           updateProject(updated)
         })
     },
-    [homeSelectedProject?.id, updateProject]
+    [homeSelectedProject?.id, updateProject, trpcClient]
   )
 
   // Project path validation (extracted — validates on select + window focus)
@@ -331,11 +336,11 @@ function App(): React.JSX.Element {
     useTabStore.getState().setActiveView('leaderboard')
   }, [])
   const handleChecklistJoinCommunity = useCallback((): void => {
-    void window.api.shell.openExternal(COMMUNITY_DISCORD_URL)
-  }, [])
+    void trpcClient.app.shell.openExternal.mutate({ url: COMMUNITY_DISCORD_URL })
+  }, [trpcClient])
   const handleChecklistFollowOnX = useCallback((): void => {
-    void window.api.shell.openExternal(COMMUNITY_X_URL)
-  }, [])
+    void trpcClient.app.shell.openExternal.mutate({ url: COMMUNITY_X_URL })
+  }, [trpcClient])
 
   const hasCreatedTask = useMemo(() => tasks.some((task) => !task.is_temporary), [tasks])
   const {
@@ -396,18 +401,18 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     Promise.all([
-      window.api.settings.get('onboarding_completed'),
-      window.api.settings.get('tutorial_prompted')
+      trpcClient.settings.get.query({ key: 'onboarding_completed' }),
+      trpcClient.settings.get.query({ key: 'tutorial_prompted' })
     ]).then(([onboarded, prompted]) => {
       if (onboarded === 'true' && !prompted) {
-        void window.api.settings.set('tutorial_prompted', 'true')
+        void trpcClient.settings.set.mutate({ key: 'tutorial_prompted', value: 'true' })
         toast('Want a quick tour?', {
           duration: 8000,
           action: { label: 'Take the tour', onClick: startTour }
         })
       }
     })
-  }, [startTour])
+  }, [startTour, trpcClient])
 
   useEffect(() => {
     if (onboardingOpen) {
@@ -417,7 +422,7 @@ function App(): React.JSX.Element {
 
     let cancelled = false
 
-    window.api.settings.get('onboarding_completed').then((value) => {
+    trpcClient.settings.get.query({ key: 'onboarding_completed' }).then((value) => {
       if (!cancelled && value !== 'true') {
         setShouldMountOnboarding(true)
       }
@@ -426,7 +431,7 @@ function App(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [onboardingOpen])
+  }, [onboardingOpen, trpcClient])
 
   // Usage, agent panel & agent-status panel state
   const { data: usageData, refresh: refreshUsage } = useUsage()
@@ -438,30 +443,36 @@ function App(): React.JSX.Element {
   const agentMode = globalAgentPanelState.mode ?? 'claude-code'
   useEffect(() => {
     if (globalAgentPanelState.mode) return
-    window.api.settings.get('default_terminal_mode').then((m) => {
+    trpcClient.settings.get.query({ key: 'default_terminal_mode' }).then((m) => {
       if (m) setGlobalAgentPanelState({ mode: m })
     })
-  }, [globalAgentPanelState.mode, setGlobalAgentPanelState])
+  }, [globalAgentPanelState.mode, setGlobalAgentPanelState, trpcClient])
   const columnsByProjectId = useMemo(() => {
     const map = new Map<string, ColumnConfig[] | null>()
     for (const p of projects) map.set(p.id, p.columns_config)
     return map
   }, [projects])
   const { idleTasks: rawIdleTasks } = useIdleTasks(tasks, null, columnsByProjectId)
-  const shutdownAgentForTask = useCallback(async (taskId: string) => {
-    const [ptys, chats] = await Promise.all([window.api.pty.list(), window.api.chat.list()])
-    const ptyKills = ptys
-      .filter((p) => p.taskId === taskId)
-      .map((p) => window.api.pty.kill(p.sessionId))
-    const chatKills = chats
-      .filter((c) => c.taskId === taskId)
-      .map((c) => {
-        const idx = c.sessionId.indexOf(':')
-        const tabId = idx >= 0 ? c.sessionId.slice(idx + 1) : c.sessionId
-        return window.api.chat.kill(tabId)
-      })
-    await Promise.all([...ptyKills, ...chatKills])
-  }, [])
+  const shutdownAgentForTask = useCallback(
+    async (taskId: string) => {
+      const [ptys, chats] = await Promise.all([
+        trpcClient.pty.list.query(),
+        trpcClient.pty.chatList.query()
+      ])
+      const ptyKills = ptys
+        .filter((p) => p.taskId === taskId)
+        .map((p) => trpcClient.pty.kill.mutate({ sessionId: p.sessionId }))
+      const chatKills = chats
+        .filter((c) => c.taskId === taskId)
+        .map((c) => {
+          const idx = c.sessionId.indexOf(':')
+          const tabId = idx >= 0 ? c.sessionId.slice(idx + 1) : c.sessionId
+          return trpcClient.chat.kill.mutate({ tabId })
+        })
+      await Promise.all([...ptyKills, ...chatKills])
+    },
+    [trpcClient]
+  )
   const [dismissedIdle, setDismissedIdle] = useState<Map<string, number>>(new Map())
   const handleDismissIdle = useCallback((sessionId: string) => {
     setDismissedIdle((prev) => {
@@ -547,14 +558,14 @@ function App(): React.JSX.Element {
       if (tab?.type === 'task') {
         const task = store._taskLookup.tasks.find((t) => t.id === tab.taskId)
         if (task?.is_temporary) {
-          window.api.pty.kill(`${tab.taskId}:${tab.taskId}`)
-          window.api.db.deleteTask(tab.taskId)
+          void trpcClient.pty.kill.mutate({ sessionId: `${tab.taskId}:${tab.taskId}` })
+          void trpcClient.task.delete.mutate({ id: tab.taskId })
           setTasks((prev) => prev.filter((t) => t.id !== tab.taskId))
         }
       }
       store.closeTab(index)
     },
-    [setTasks]
+    [setTasks, trpcClient]
   )
 
   const closeTabByTaskId = useCallback(
@@ -613,8 +624,8 @@ function App(): React.JSX.Element {
   // Broadcast primary's active task ID so secondary windows in "Follow current tab" mode swap
   useEffect(() => {
     const id = activeTab?.type === 'task' ? activeTab.taskId : null
-    void window.api.taskWindow.setPrimaryActive(id)
-  }, [activeTab])
+    void trpcClient.app.taskWindows.setPrimaryActive.mutate({ taskId: id })
+  }, [activeTab, trpcClient])
 
   // Mark a task "read" (clear needs_attention) when the user *navigates into* it —
   // i.e. it becomes the active tab. Deliberately NOT cleared while the task merely
@@ -643,9 +654,9 @@ function App(): React.JSX.Element {
     if (!task) return // data not loaded yet — wait for the next tasksMap update
     readConsumedRef.current = activeTaskId
     if (task.needs_attention) {
-      void window.api.db.updateTask({ id: activeTaskId, needsAttention: false }).catch(() => {})
+      void trpcClient.task.update.mutate({ id: activeTaskId, needsAttention: false }).catch(() => {})
     }
-  }, [activeTab, tasksMap])
+  }, [activeTab, tasksMap, trpcClient])
   useEffect(() => {
     if (activeTaskProjectId && activeTaskProjectId !== selectedProjectId)
       setSelectedProjectId(activeTaskProjectId)
@@ -653,12 +664,14 @@ function App(): React.JSX.Element {
 
   // Read settings on mount and whenever settings change
   useEffect(() => {
-    window.api.settings
-      .get('project_color_tints_enabled')
+    trpcClient.settings.get
+      .query({ key: 'project_color_tints_enabled' })
       .then((v) => setColorTintsEnabled(v !== '0'))
-    window.api.settings.get('show_context_manager').then((v) => setShowContextManager(v !== '0'))
-    window.api.app.isTestsPanelEnabled().then(setTestsPanelEnabled)
-  }, [settingsRevision])
+    trpcClient.settings.get
+      .query({ key: 'show_context_manager' })
+      .then((v) => setShowContextManager(v !== '0'))
+    trpcClient.app.meta.isTestsPanelEnabled.query().then(setTestsPanelEnabled)
+  }, [settingsRevision, trpcClient])
 
   // Close context manager when hidden
   useEffect(() => {
@@ -688,7 +701,7 @@ function App(): React.JSX.Element {
   )
 
   const handleTaskTagsChange = async (taskId: string, tagIds: string[]) => {
-    await window.api.taskTags.setTagsForTask(taskId, tagIds)
+    await trpcClient.tags.setForTask.mutate({ taskId, tagIds })
     setTaskTags((prev) => {
       const next = new Map(prev)
       next.set(taskId, tagIds)
@@ -756,35 +769,41 @@ function App(): React.JSX.Element {
     : null
 
   const handleAgentNewSession = useCallback(async () => {
-    if (agentSessionId) await window.api.pty.kill(agentSessionId)
+    if (agentSessionId) await trpcClient.pty.kill.mutate({ sessionId: agentSessionId })
     setGlobalAgentPanelState({ sessionIndex: (globalAgentPanelState.sessionIndex ?? 0) + 1 })
-  }, [agentSessionId, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState])
+  }, [agentSessionId, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState, trpcClient])
 
   const handleAgentModeChange = useCallback(
     async (nextMode: string) => {
       if (nextMode === agentMode) return
-      if (agentSessionId) await window.api.pty.kill(agentSessionId)
+      if (agentSessionId) await trpcClient.pty.kill.mutate({ sessionId: agentSessionId })
       setGlobalAgentPanelState({
         mode: nextMode,
         sessionIndex: (globalAgentPanelState.sessionIndex ?? 0) + 1
       })
     },
-    [agentMode, agentSessionId, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState]
+    [agentMode, agentSessionId, globalAgentPanelState.sessionIndex, setGlobalAgentPanelState, trpcClient]
   )
 
   // Floating agent panel: push context to main-process state machine.
   // All detach/reattach decisions happen in main; renderer just keeps ctx in sync.
   useEffect(() => {
-    window.api.floatingGlobalAgentPanel.setSessionId(agentSessionId)
-  }, [agentSessionId])
+    void trpcClient.app.floatingAgent.setSessionId.mutate({ sessionId: agentSessionId })
+  }, [agentSessionId, trpcClient])
   useEffect(() => {
-    window.api.floatingGlobalAgentPanel.setPanelOpen(globalAgentPanelState.isOpen)
-  }, [globalAgentPanelState.isOpen])
+    void trpcClient.app.floatingAgent.setPanelOpen.mutate({ isOpen: globalAgentPanelState.isOpen })
+  }, [globalAgentPanelState.isOpen, trpcClient])
   useEffect(() => {
-    window.api.floatingGlobalAgentPanel.setEnabled(globalAgentPanelState.floatingEnabled)
-  }, [globalAgentPanelState.floatingEnabled])
+    void trpcClient.app.floatingAgent.setEnabled.mutate({
+      enabled: globalAgentPanelState.floatingEnabled
+    })
+  }, [globalAgentPanelState.floatingEnabled, trpcClient])
 
   // Subscribe to floating-global-agent-panel state for menu label + sidebar visibility.
+  // STAYS ON BRIDGE: `floatingAgent.getState()` returns `unknown` and the
+  // `floatingAgent.onState` subscription emits `unknown` server-side, so the
+  // typed `{ kind, mode }` shape this reads is unavailable via tRPC without a
+  // client-side cast. Keep on the IPC bridge until the router types its payload.
   const [floatingGlobalAgentPanelState, setFloatingGlobalAgentPanelState] = useState<{
     kind: 'attached' | 'detached' | 'disabled'
     mode: 'auto' | 'manual' | null
@@ -840,7 +859,7 @@ function App(): React.JSX.Element {
     const project = projectsMap.get(task.project_id)
     const doneStatus = getDoneStatus(project?.columns_config)
     const prevStatus = task.status
-    await window.api.db.updateTask({ id: activeTab.taskId, status: doneStatus })
+    await trpcClient.task.update.mutate({ id: activeTab.taskId, status: doneStatus })
     updateTask({ ...task, status: doneStatus })
     closeTab(activeTabIndex)
     useDialogStore.getState().closeCompleteTaskDialog()
@@ -848,11 +867,11 @@ function App(): React.JSX.Element {
       pushUndo({
         label: `Completed "${task.title}"`,
         undo: async () => {
-          await window.api.db.updateTask({ id: task.id, status: prevStatus })
+          await trpcClient.task.update.mutate({ id: task.id, status: prevStatus })
           setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: prevStatus } : t)))
         },
         redo: async () => {
-          await window.api.db.updateTask({ id: task.id, status: doneStatus })
+          await trpcClient.task.update.mutate({ id: task.id, status: doneStatus })
           setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: doneStatus } : t)))
         }
       })
@@ -877,7 +896,7 @@ function App(): React.JSX.Element {
         .map((m) => parseInt(m![1], 10))
       const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
       const status = getDefaultStatus(project?.columns_config)
-      const task = await window.api.db.createTask({
+      const task = await trpcClient.task.create.mutate({
         projectId,
         title: `Terminal ${next}`,
         status,
@@ -890,7 +909,7 @@ function App(): React.JSX.Element {
       useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
       openTask(task.id, project)
     },
-    [selectedProjectId, projects, tasks, setTasks, openTask, durationLocked]
+    [selectedProjectId, projects, tasks, setTasks, openTask, durationLocked, trpcClient]
   )
 
   // Expose a programmatic task-opener so domain UI (e.g. Manager sidebar) can open a task as a tab.
@@ -903,11 +922,13 @@ function App(): React.JSX.Element {
     }
   }, [openTask])
 
-  useEffect(() => {
-    return window.api.app.onNewTemporaryTask(() => {
-      handleCreateScratchTerminal()
+  useSubscription(
+    trpc.menu.onNewTemporaryTask.subscriptionOptions(undefined, {
+      onData: () => {
+        handleCreateScratchTerminal()
+      }
     })
-  }, [handleCreateScratchTerminal])
+  )
 
   // Task handlers
   const handleTaskCreated = (task: Task): void => {
@@ -950,7 +971,7 @@ function App(): React.JSX.Element {
       const project = useTabStore
         .getState()
         ._taskLookup.projects.find((item) => item.id === task.project_id)
-      const converted = await window.api.db.updateTask({
+      const converted = await trpcClient.task.update.mutate({
         id: task.id,
         title: 'Untitled task',
         status:
@@ -961,7 +982,7 @@ function App(): React.JSX.Element {
       updateTask(converted)
       return converted
     },
-    [updateTask]
+    [updateTask, trpcClient]
   )
 
   const handleTaskDeleted = (): void => {
@@ -1077,7 +1098,7 @@ function App(): React.JSX.Element {
     const project = projects.find((p) => p.id === selectedProjectId)
     if (project && trimmed !== project.name) {
       try {
-        const updated = await window.api.db.updateProject({
+        const updated = await trpcClient.projects.update.mutate({
           id: selectedProjectId,
           name: trimmed,
           color: project.color
@@ -1147,6 +1168,8 @@ function App(): React.JSX.Element {
   //   TabBar (default x=10 sits near the rail's icon center at ~36px).
   useEffect(() => {
     const pos = sidebarView === 'tree' ? { x: 22, y: 20 } : { x: 9, y: 15 }
+    // STAYS ON BRIDGE: no `app.window.setTrafficLightPosition` tRPC proc exists
+    // (app.window router only has getContentBounds/getDisplayScaleFactor/close).
     window.api.window.setTrafficLightPosition(pos)
   }, [sidebarView])
   const activePtyCount = usePtyStatus().size
@@ -1264,7 +1287,7 @@ function App(): React.JSX.Element {
                   ? {
                       phase: 'ready',
                       version: updateVersion,
-                      onRestart: () => window.api.app.restartForUpdate()
+                      onRestart: () => restartForUpdate.mutate()
                     }
                   : null
             }
@@ -1343,7 +1366,7 @@ function App(): React.JSX.Element {
                     onTabClose={(i) => closeTab(toFullIndex(i))}
                     onTabReorder={(from, to) => reorderTabs(toFullIndex(from), toFullIndex(to))}
                     onTabRename={async (taskId, title) => {
-                      const t = await window.api.db.updateTask({ id: taskId, title })
+                      const t = await trpcClient.task.update.mutate({ id: taskId, title })
                       updateTask(t)
                     }}
                     leftContent={

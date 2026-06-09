@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { Project } from '@slayzone/projects/shared'
 
 export interface ProjectPathGuardApi {
@@ -15,16 +16,19 @@ export function useProjectPathGuard(
   projects: Project[],
   updateProject: (project: Project) => void
 ): ProjectPathGuardApi {
+  const trpcClient = useTRPCClient()
   const [projectPathMissing, setProjectPathMissing] = useState(false)
-  const validateProjectPath = useCallback(async (project: Project | undefined) => {
-    if (!project?.path) {
-      setProjectPathMissing(false)
-      return
-    }
-    const fn = window.api.files?.pathExists
-    if (typeof fn !== 'function') return
-    setProjectPathMissing(!(await fn(project.path)))
-  }, [])
+  const validateProjectPath = useCallback(
+    async (project: Project | undefined) => {
+      if (!project?.path) {
+        setProjectPathMissing(false)
+        return
+      }
+      const exists = await trpcClient.app.files.pathExists.query({ filePath: project.path })
+      setProjectPathMissing(!exists)
+    },
+    [trpcClient]
+  )
 
   useEffect(() => {
     validateProjectPath(projects.find((p) => p.id === selectedProjectId))
@@ -43,16 +47,19 @@ export function useProjectPathGuard(
   const handleFixProjectPath = useCallback(async (): Promise<void> => {
     const project = projects.find((p) => p.id === selectedProjectId)
     if (!project) return
-    const result = await window.api.dialog.showOpenDialog({
+    const result = await trpcClient.app.dialog.showOpenDialog.mutate({
       title: 'Select Project Directory',
       defaultPath: project.path || undefined,
       properties: ['openDirectory']
     })
     if (result.canceled || !result.filePaths[0]) return
-    const updated = await window.api.db.updateProject({ id: project.id, path: result.filePaths[0] })
+    const updated = await trpcClient.projects.update.mutate({
+      id: project.id,
+      path: result.filePaths[0]
+    })
     updateProject(updated)
     validateProjectPath(updated)
-  }, [selectedProjectId, projects, updateProject, validateProjectPath])
+  }, [selectedProjectId, projects, updateProject, validateProjectPath, trpcClient])
 
   return { projectPathMissing, validateProjectPath, handleFixProjectPath }
 }

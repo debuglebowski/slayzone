@@ -1,4 +1,6 @@
 import React, { Suspense, type ComponentProps, type Dispatch, type SetStateAction } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Project } from '@slayzone/projects/shared'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import { ResizeHandle } from '@slayzone/task/client/ResizeHandle'
@@ -62,6 +64,9 @@ export function AppSidePanels({
   handleDismissIdle,
   columnsByProjectId
 }: AppSidePanelsProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const detachFloatingAgent = useMutation(trpc.app.floatingAgent.detach.mutationOptions())
+  const reattachFloatingAgent = useMutation(trpc.app.floatingAgent.reattach.mutationOptions())
   return (
     <>
       {agentSessionId &&
@@ -118,8 +123,8 @@ export function AppSidePanels({
                 })
               }
               floatingState={floatingState}
-              onDetach={() => window.api.floatingGlobalAgentPanel.detach()}
-              onReattach={() => window.api.floatingGlobalAgentPanel.reattach()}
+              onDetach={() => detachFloatingAgent.mutate()}
+              onReattach={() => reattachFloatingAgent.mutate()}
             />
           </Suspense>
         </div>

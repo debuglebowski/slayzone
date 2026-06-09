@@ -14,6 +14,8 @@ import {
   Kanban,
   PanelLeftClose
 } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -64,6 +66,8 @@ export function CompactFooter({
   sidebarAutoHide,
   updateVersion
 }: CompactFooterProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const restartForUpdate = useMutation(trpc.app.meta.restartForUpdate.mutationOptions())
   return (
     <div className="flex items-center justify-between gap-2 px-2 py-1">
       <div className="min-w-0 flex items-center">
@@ -202,7 +206,7 @@ export function CompactFooter({
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onSelect={() => window.api.app.restartForUpdate()}
+                  onSelect={() => restartForUpdate.mutate()}
                   className="cursor-pointer text-green-500"
                 >
                   <span>Restart to install v{updateVersion}</span>

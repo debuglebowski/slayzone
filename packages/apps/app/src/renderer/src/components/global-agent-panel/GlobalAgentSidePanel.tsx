@@ -7,6 +7,7 @@ import {
   groupTerminalModes
 } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Button,
   Select,
@@ -60,6 +61,7 @@ export function GlobalAgentSidePanel({
   onDetach,
   onReattach
 }: GlobalAgentSidePanelProps) {
+  const trpcClient = useTRPCClient()
   const { modes } = useTerminalModes()
   const visibleModes = getVisibleModes(modes, mode)
   const { builtin, custom } = groupTerminalModes(visibleModes)
@@ -69,13 +71,13 @@ export function GlobalAgentSidePanel({
   // the previously-bound window. Claim redirects the session + replays buffer here.
   useEffect(() => {
     if (!isActive || !sessionId) return
-    window.api.pty.claimSession(sessionId)
+    void trpcClient.app.taskWindows.claimSession.mutate({ sessionId })
     const onFocus = () => {
-      window.api.pty.claimSession(sessionId)
+      void trpcClient.app.taskWindows.claimSession.mutate({ sessionId })
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [isActive, sessionId])
+  }, [isActive, sessionId, trpcClient])
 
   return (
     <div

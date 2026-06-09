@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useVisibleInterval } from '@slayzone/ui'
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import type { IntegrationConnectionPublic } from '@slayzone/integrations/shared'
 
 export interface AuthFailedConnection {
@@ -7,51 +8,74 @@ export interface AuthFailedConnection {
   projectIds: string[]
 }
 
-// 2 min — `focus` + `tasks:changed` IPC catch any user-visible change near
-// instantly, so the periodic poll is just a backstop.
+// 2 min — react-query's window-focus refetch + the `notify.onTasksChanged`
+// subscription catch any user-visible change near instantly, so the periodic
+// poll is just a backstop.
 const POLL_MS = 120_000
 
 export function useAuthFailedConnections(): {
   failed: AuthFailedConnection[]
   refetch: () => void
 } {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [failed, setFailed] = useState<AuthFailedConnection[]>([])
 
-  const refetch = useCallback(async () => {
-    try {
-      const all = await window.api.integrations.listConnections()
-      const flagged = all.filter((c) => Boolean(c.auth_error))
-      if (flagged.length === 0) {
-        setFailed((prev) => (prev.length === 0 ? prev : []))
-        return
-      }
-      const enriched: AuthFailedConnection[] = await Promise.all(
-        flagged.map(async (connection) => {
-          const usage = await window.api.integrations.getConnectionUsage(connection.id)
-          return {
-            connection,
-            projectIds: usage.projects.filter((p) => p.has_mapping).map((p) => p.project_id)
-          }
-        })
-      )
-      setFailed(enriched.filter((f) => f.projectIds.length > 0))
-    } catch {
-      // ignore — banner just stays in last-known state
-    }
-  }, [])
+  // Backstop poll: only while the window is visible (refetchIntervalInBackground:
+  // false), plus react-query's default window-focus refetch.
+  const connectionsQuery = useQuery(
+    trpc.integrations.listConnections.queryOptions(undefined, {
+      refetchInterval: POLL_MS,
+      refetchIntervalInBackground: false
+    })
+  )
 
+  const refetch = (): void => void connectionsQuery.refetch()
+
+  // Re-enrich whenever the connections list changes. The auth_error filter +
+  // per-connection usage fan-out can't be expressed as a pure derivation, so it
+  // runs imperatively and writes the enriched result into local state.
   useEffect(() => {
-    void refetch()
-    const onFocus = (): void => void refetch()
-    window.addEventListener('focus', onFocus)
-    const unsub = window.api?.app?.onTasksChanged?.(() => void refetch())
-    return () => {
-      window.removeEventListener('focus', onFocus)
-      unsub?.()
+    const all = connectionsQuery.data
+    if (!all) return
+    let cancelled = false
+
+    const enrich = async (): Promise<void> => {
+      try {
+        const flagged = all.filter((c) => Boolean(c.auth_error))
+        if (flagged.length === 0) {
+          if (!cancelled) setFailed((prev) => (prev.length === 0 ? prev : []))
+          return
+        }
+        const enriched: AuthFailedConnection[] = await Promise.all(
+          flagged.map(async (connection) => {
+            const usage = await trpcClient.integrations.getConnectionUsage.query({
+              connectionId: connection.id
+            })
+            return {
+              connection,
+              projectIds: usage.projects.filter((p) => p.has_mapping).map((p) => p.project_id)
+            }
+          })
+        )
+        if (!cancelled) setFailed(enriched.filter((f) => f.projectIds.length > 0))
+      } catch {
+        // ignore — banner just stays in last-known state
+      }
     }
-  }, [refetch])
 
-  useVisibleInterval(() => void refetch(), POLL_MS)
+    void enrich()
+    return () => {
+      cancelled = true
+    }
+  }, [connectionsQuery.data, trpcClient])
 
-  return { failed, refetch: () => void refetch() }
+  // `tasks:changed` fan-out — refetch the connections list when it fires.
+  useSubscription(
+    trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
+      onData: () => void connectionsQuery.refetch()
+    })
+  )
+
+  return { failed, refetch }
 }

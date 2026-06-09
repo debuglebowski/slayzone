@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAction } from 'convex/react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { MessageSquare, Plus, Send, ArrowLeft, Trash2 } from 'lucide-react'
 import {
   Button,
@@ -61,20 +62,24 @@ export function FeedbackDialog(): React.JSX.Element {
   const [sending, setSending] = useState(false)
   const [composingNew, setComposingNew] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const trpcClient = useTRPCClient()
   const submit = useAction(api.feedback.submit)
   const markDeleted = useAction(api.feedback.markDeleted)
 
   const selectedThread = threads.find((t) => t.id === selectedId) ?? null
 
   const loadThreads = useCallback(async () => {
-    const rows = await window.api.feedback.listThreads()
+    const rows = await trpcClient.feedback.listThreads.query()
     setThreads(rows)
-  }, [])
+  }, [trpcClient])
 
-  const loadMessages = useCallback(async (threadId: string) => {
-    const rows = await window.api.feedback.getMessages(threadId)
-    setMessages(rows)
-  }, [])
+  const loadMessages = useCallback(
+    async (threadId: string) => {
+      const rows = await trpcClient.feedback.getMessages.query({ threadId })
+      setMessages(rows)
+    },
+    [trpcClient]
+  )
 
   useEffect(() => {
     if (open) {
@@ -118,7 +123,7 @@ export function FeedbackDialog(): React.JSX.Element {
         if (thread.discord_thread_id) {
           await markDeleted({ threadId: thread.discord_thread_id }).catch(() => {})
         }
-        await window.api.feedback.deleteThread(thread.id)
+        await trpcClient.feedback.deleteThread.mutate({ threadId: thread.id })
         if (selectedId === thread.id) {
           setSelectedId(null)
           setMessages([])
@@ -129,7 +134,7 @@ export function FeedbackDialog(): React.JSX.Element {
         toast.error('Failed to delete feedback')
       }
     },
-    [selectedId, markDeleted, loadThreads]
+    [selectedId, markDeleted, loadThreads, trpcClient]
   )
 
   const handleSend = useCallback(async () => {
@@ -138,7 +143,7 @@ export function FeedbackDialog(): React.JSX.Element {
 
     setSending(true)
     try {
-      const version = await window.api.app.getVersion()
+      const version = await trpcClient.app.meta.getVersion.query()
 
       if (composingNew || !selectedThread) {
         const threadId = crypto.randomUUID()
@@ -149,12 +154,12 @@ export function FeedbackDialog(): React.JSX.Element {
           metadata: { appVersion: version }
         })
 
-        await window.api.feedback.createThread({
+        await trpcClient.feedback.createThread.mutate({
           id: threadId,
           title,
           discord_thread_id: result.threadId ?? null
         })
-        await window.api.feedback.addMessage({
+        await trpcClient.feedback.addMessage.mutate({
           id: crypto.randomUUID(),
           thread_id: threadId,
           content: text
@@ -171,10 +176,13 @@ export function FeedbackDialog(): React.JSX.Element {
         })
 
         if (result.threadId && !selectedThread.discord_thread_id) {
-          await window.api.feedback.updateThreadDiscordId(selectedThread.id, result.threadId)
+          await trpcClient.feedback.updateThreadDiscordId.mutate({
+            threadId: selectedThread.id,
+            discordThreadId: result.threadId
+          })
         }
 
-        await window.api.feedback.addMessage({
+        await trpcClient.feedback.addMessage.mutate({
           id: crypto.randomUUID(),
           thread_id: selectedThread.id,
           content: text
@@ -191,7 +199,7 @@ export function FeedbackDialog(): React.JSX.Element {
     } finally {
       setSending(false)
     }
-  }, [content, composingNew, selectedThread, submit, loadThreads, loadMessages])
+  }, [content, composingNew, selectedThread, submit, loadThreads, loadMessages, trpcClient])
 
   const showCompose = composingNew || selectedThread
 

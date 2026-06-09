@@ -9,6 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger
 } from '@slayzone/ui'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { ProviderUsage, UsageWindow } from '@slayzone/terminal/shared'
 
 type PinnedBars = Record<string, string[]>
@@ -170,12 +171,13 @@ function totalPinCount(pins: PinnedBars): number {
 }
 
 export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
+  const trpcClient = useTRPCClient()
   const [open, setOpen] = useState(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout>>(null)
   const [pinned, setPinned] = useState<PinnedBars | null>(null)
 
   useEffect(() => {
-    window.api.settings.get('usage_pinned_bars').then((raw) => {
+    trpcClient.settings.get.query({ key: 'usage_pinned_bars' }).then((raw) => {
       if (raw) {
         try {
           setPinned(JSON.parse(raw))
@@ -184,7 +186,7 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
         }
       }
     })
-  }, [])
+  }, [trpcClient])
 
   // Resolve effective pins: saved or default (first window per provider)
   const effectivePinned = pinned ?? defaultPins(data)
@@ -205,11 +207,14 @@ export function UsagePopover({ data, onRefresh }: UsagePopoverProps) {
         } else {
           next[provider] = [...arr, windowKey]
         }
-        window.api.settings.set('usage_pinned_bars', JSON.stringify(next))
+        void trpcClient.settings.set.mutate({
+          key: 'usage_pinned_bars',
+          value: JSON.stringify(next)
+        })
         return next
       })
     },
-    [data]
+    [data, trpcClient]
   )
 
   const handleEnter = () => {

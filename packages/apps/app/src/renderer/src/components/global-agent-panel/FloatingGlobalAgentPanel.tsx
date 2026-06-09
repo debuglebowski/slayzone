@@ -3,6 +3,7 @@ import { Frame, X } from 'lucide-react'
 import { Terminal } from '@slayzone/terminal/client/LazyTerminal'
 import { useSessionState } from '@slayzone/terminal/client'
 import type { TerminalMode } from '@slayzone/terminal/shared'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import { FloatingGlobalAgentPanelCollapsed } from './FloatingGlobalAgentPanelCollapsed'
 import { FloatingGlobalAgentPanelCollapsedIcon } from './FloatingGlobalAgentPanelCollapsedIcon'
 
@@ -12,7 +13,27 @@ interface FloatingSession {
   mode: TerminalMode
 }
 
+// Shapes returned by the floatingAgent.get* queries + onState subscription.
+// The router types these procedures as `unknown` (app.ts floatingAgent.getState/
+// getSession/getConfig/onState all return unknown), so the renderer applies the
+// documented payload shapes locally — same contract the preload encoded before
+// the cutover.
+interface FloatingSessionPayload {
+  sessionId: string
+  cwd: string
+  mode: string
+}
+interface FloatingConfigPayload {
+  style: string
+}
+interface FloatingStatePayload {
+  mode: 'auto' | 'manual' | null
+  hasCustomSize: boolean
+}
+
 export function FloatingGlobalAgentPanel() {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [session, setSession] = useState<FloatingSession | null>(null)
   const [collapsed, setCollapsed] = useState(true)
   const [style, setStyle] = useState<'widget' | 'icon'>('widget')
@@ -22,59 +43,72 @@ export function FloatingGlobalAgentPanel() {
   // Terminal state from the reactive store (hydrates this renderer on wire).
   const terminalState = useSessionState(session?.sessionId ?? '')
 
-  useEffect(() => {
-    window.api.floatingGlobalAgentPanel.getSession().then((data) => {
-      if (data)
-        setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
-    })
-    window.api.floatingGlobalAgentPanel.getConfig().then((config) => {
-      if (config) setStyle(config.style as 'widget' | 'icon')
-    })
-    const unsub = window.api.floatingGlobalAgentPanel.onSessionChanged(() => {
-      window.api.floatingGlobalAgentPanel.getSession().then((data) => {
-        if (data)
-          setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
-      })
-      window.api.floatingGlobalAgentPanel.getConfig().then((config) => {
-        if (config) setStyle(config.style as 'widget' | 'icon')
-      })
-    })
-    return unsub
-  }, [])
+  const loadSessionAndConfig = useCallback(async () => {
+    const data = (await trpcClient.app.floatingAgent.getSession.query()) as
+      | FloatingSessionPayload
+      | null
+    if (data)
+      setSession({ sessionId: data.sessionId, cwd: data.cwd, mode: data.mode as TerminalMode })
+    const config = (await trpcClient.app.floatingAgent.getConfig.query()) as
+      | FloatingConfigPayload
+      | null
+    if (config) setStyle(config.style as 'widget' | 'icon')
+  }, [trpcClient])
 
   useEffect(() => {
-    return window.api.floatingGlobalAgentPanel.onCollapseChanged((c) => {
-      setCollapsed(c)
-      if (c) {
-        setShowTerminal(false)
-      } else {
-        setTimeout(() => setShowTerminal(true), 150)
+    void loadSessionAndConfig()
+  }, [loadSessionAndConfig])
+
+  useSubscription(
+    trpc.app.floatingAgent.onSessionChanged.subscriptionOptions(undefined, {
+      onData: () => {
+        void loadSessionAndConfig()
       }
     })
-  }, [])
+  )
+
+  useSubscription(
+    trpc.app.floatingAgent.onCollapseChanged.subscriptionOptions(undefined, {
+      onData: ({ collapsed: c }) => {
+        setCollapsed(c)
+        if (c) {
+          setShowTerminal(false)
+        } else {
+          setTimeout(() => setShowTerminal(true), 150)
+        }
+      }
+    })
+  )
 
   useEffect(() => {
-    window.api.floatingGlobalAgentPanel.getState().then((s) => {
+    void trpcClient.app.floatingAgent.getState.query().then((raw) => {
+      const s = raw as FloatingStatePayload
       setDetachMode(s.mode)
       setHasCustomSize(s.hasCustomSize)
     })
-    return window.api.floatingGlobalAgentPanel.onState((s) => {
-      setDetachMode(s.mode)
-      setHasCustomSize(s.hasCustomSize)
+  }, [trpcClient])
+
+  useSubscription(
+    trpc.app.floatingAgent.onState.subscriptionOptions(undefined, {
+      onData: (raw) => {
+        const s = raw as FloatingStatePayload
+        setDetachMode(s.mode)
+        setHasCustomSize(s.hasCustomSize)
+      }
     })
-  }, [])
+  )
 
   const handleToggle = useCallback(() => {
-    window.api.floatingGlobalAgentPanel.toggleCollapse()
-  }, [])
+    trpcClient.app.floatingAgent.toggleCollapse.mutate()
+  }, [trpcClient])
 
   const handleResetSize = useCallback(() => {
-    window.api.floatingGlobalAgentPanel.resetSize()
-  }, [])
+    trpcClient.app.floatingAgent.resetSize.mutate()
+  }, [trpcClient])
 
   const handleClose = useCallback(() => {
-    window.api.floatingGlobalAgentPanel.reattach()
-  }, [])
+    trpcClient.app.floatingAgent.reattach.mutate()
+  }, [trpcClient])
 
   const showClose = detachMode === 'manual'
   const showReset = hasCustomSize

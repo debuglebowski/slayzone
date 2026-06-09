@@ -2,8 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Terminal } from 'lucide-react'
 import { Button, Checkbox, Dialog, DialogContent } from '@slayzone/ui'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 export function CliInstallDialog() {
+  const trpcClient = useTRPCClient()
   const [open, setOpen] = useState(false)
   const [dontAsk, setDontAsk] = useState(false)
   const [installing, setInstalling] = useState(false)
@@ -15,21 +17,21 @@ export function CliInstallDialog() {
     if (checked.current) return
     checked.current = true
     Promise.all([
-      window.api.settings.get('onboarding_completed'),
-      window.api.settings.get('cli_install_dismissed'),
-      window.api.app.cliStatus()
+      trpcClient.settings.get.query({ key: 'onboarding_completed' }),
+      trpcClient.settings.get.query({ key: 'cli_install_dismissed' }),
+      trpcClient.app.meta.checkCliInstalled.query()
     ]).then(([onboarded, dismissed, status]) => {
       if (onboarded === 'true' && dismissed !== 'true' && !status.installed) {
         setOpen(true)
       }
     })
-  }, [])
+  }, [trpcClient])
 
   const handleInstall = async () => {
     setInstalling(true)
     setMessage('')
     try {
-      const result = await window.api.app.installCli()
+      const result = await trpcClient.app.meta.installCli.mutate()
       if (result.ok) {
         setInstalled(true)
         let msg = 'Installed successfully.'
@@ -52,7 +54,8 @@ export function CliInstallDialog() {
   }
 
   const handleClose = () => {
-    if (dontAsk) window.api.settings.set('cli_install_dismissed', 'true')
+    if (dontAsk)
+      void trpcClient.settings.set.mutate({ key: 'cli_install_dismissed', value: 'true' })
     setOpen(false)
   }
 

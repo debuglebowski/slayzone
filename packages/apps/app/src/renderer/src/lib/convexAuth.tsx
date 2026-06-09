@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ConvexReactClient, useMutation, useConvexAuth } from 'convex/react'
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react'
 import { useVisibleInterval } from '@slayzone/ui'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { api } from 'convex/_generated/api'
 
 const ONE_DAY = 24 * 60 * 60 * 1000
@@ -51,9 +52,21 @@ function clearConvexAuthStorage(): void {
   }
 }
 
+// Shape returned by app.auth.githubSystemSignIn — the router types it as
+// `unknown` (app-deps authGithubSystemSignIn: () => Promise<unknown>), so the
+// renderer applies the documented result shape locally.
+interface GithubSystemSignInResult {
+  ok?: boolean
+  code?: string
+  verifier?: string
+  cancelled?: boolean
+  error?: string
+}
+
 function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JSX.Element {
   const { isLoading, isAuthenticated } = useConvexAuth()
   const actions = useAuthActions()
+  const trpcClient = useTRPCClient()
   const [lastError, setLastError] = useState<string | null>(null)
   const handledOAuthCodesRef = useRef<Set<string>>(new Set())
 
@@ -84,17 +97,11 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
       signInWithGitHub: async () => {
         try {
           setLastError(null)
-          const authApi = window.api?.auth
           if (convexUrl) {
-            if (!authApi?.githubSystemSignIn) {
-              setLastError('GitHub sign-in unavailable: system auth transport is not exposed.')
-              return
-            }
-
-            const signInResult = await authApi.githubSystemSignIn({
+            const signInResult = (await trpcClient.app.auth.githubSystemSignIn.mutate({
               convexUrl,
               redirectTo: OAUTH_REDIRECT_URI
-            })
+            })) as GithubSystemSignInResult
 
             if (signInResult.ok && signInResult.code && signInResult.verifier) {
               window.localStorage.setItem(
@@ -141,19 +148,19 @@ function ConvexAuthBridge({ children }: { children: React.ReactNode }): React.JS
         }
       }
     }),
-    [actions, completeOAuthCode, isAuthenticated, isLoading, lastError]
+    [actions, completeOAuthCode, isAuthenticated, isLoading, lastError, trpcClient]
   )
 
   // Background leaderboard stats sync once a day
   const syncDailyStats = useMutation(api.leaderboard.syncDailyStats)
   const sync = useCallback((): void => {
-    window.api.leaderboard
-      ?.getLocalStats()
+    trpcClient.app.leaderboard.getLocalStats
+      .query()
       .then((stats) => {
         if (stats.days.length > 0) syncDailyStats({ days: stats.days })
       })
       .catch(() => {})
-  }, [syncDailyStats])
+  }, [syncDailyStats, trpcClient])
 
   useEffect(() => {
     if (!isAuthenticated) return

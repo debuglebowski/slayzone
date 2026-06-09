@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useDialogStore } from '@slayzone/settings'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 const CHECKLIST_SETTINGS_KEY = 'onboarding_checklist_state'
 const CHECKLIST_STATE_VERSION = 1 as const
@@ -116,21 +117,28 @@ export function useOnboardingChecklist({
   onJoinCommunity,
   onFollowOnX
 }: UseOnboardingChecklistOptions): UseOnboardingChecklistResult {
+  const trpcClient = useTRPCClient()
   const [persistedState, setPersistedState] =
     useState<PersistedChecklistStateV1>(DEFAULT_PERSISTED_STATE)
 
-  const persistState = useCallback(async (state: PersistedChecklistStateV1): Promise<void> => {
-    await window.api.settings.set(CHECKLIST_SETTINGS_KEY, JSON.stringify(state))
-  }, [])
+  const persistState = useCallback(
+    async (state: PersistedChecklistStateV1): Promise<void> => {
+      await trpcClient.settings.set.mutate({
+        key: CHECKLIST_SETTINGS_KEY,
+        value: JSON.stringify(state)
+      })
+    },
+    [trpcClient]
+  )
 
   const loadLegacyState = useCallback(async (): Promise<PersistedChecklistStateV1> => {
     const [setupGuideRaw, takeTourRaw, joinCommunityRaw, followOnXRaw, dismissedRaw] =
       await Promise.all([
-        window.api.settings.get('onboarding_completed'),
-        window.api.settings.get('onboarding_tour_completed'),
-        window.api.settings.get('onboarding_joined_discord'),
-        window.api.settings.get('onboarding_followed_x'),
-        window.api.settings.get('onboarding_checklist_dismissed')
+        trpcClient.settings.get.query({ key: 'onboarding_completed' }),
+        trpcClient.settings.get.query({ key: 'onboarding_tour_completed' }),
+        trpcClient.settings.get.query({ key: 'onboarding_joined_discord' }),
+        trpcClient.settings.get.query({ key: 'onboarding_followed_x' }),
+        trpcClient.settings.get.query({ key: 'onboarding_checklist_dismissed' })
       ])
 
     const dismissed = isTruthy(dismissedRaw)
@@ -159,13 +167,13 @@ export function useOnboardingChecklist({
         followOnX: isTruthy(followOnXRaw)
       }
     }
-  }, [])
+  }, [trpcClient])
 
   useEffect(() => {
     let isCancelled = false
 
     const loadState = async (): Promise<void> => {
-      const storedRaw = await window.api.settings.get(CHECKLIST_SETTINGS_KEY)
+      const storedRaw = await trpcClient.settings.get.query({ key: CHECKLIST_SETTINGS_KEY })
       const stored = parsePersistedChecklistState(storedRaw)
       if (stored) {
         if (!isCancelled) setPersistedState(stored)
@@ -182,7 +190,7 @@ export function useOnboardingChecklist({
     return () => {
       isCancelled = true
     }
-  }, [loadLegacyState, persistState])
+  }, [loadLegacyState, persistState, trpcClient])
 
   const updatePersistedState = useCallback(
     (updater: (previous: PersistedChecklistStateV1) => PersistedChecklistStateV1): void => {

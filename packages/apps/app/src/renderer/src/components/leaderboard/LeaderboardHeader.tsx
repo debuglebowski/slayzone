@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@slayzone/ui'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { useLeaderboardAuth } from '@/lib/convexAuth'
 import { PERIODS } from './LeaderboardPage.constants'
 import type { useLeaderboardController } from './useLeaderboardController'
@@ -20,6 +21,7 @@ export function LeaderboardHeader({
   auth: ReturnType<typeof useLeaderboardAuth>
   ctl: ReturnType<typeof useLeaderboardController>
 }): React.JSX.Element {
+  const trpcClient = useTRPCClient()
   const {
     period,
     setPeriod,
@@ -111,7 +113,7 @@ export function LeaderboardHeader({
                       disabled={!githubProfileUrl}
                       onClick={() => {
                         if (!githubProfileUrl) return
-                        void window.api.shell.openExternal(githubProfileUrl)
+                        void trpcClient.app.shell.openExternal.mutate({ url: githubProfileUrl })
                       }}
                     >
                       <Github className="size-4" />

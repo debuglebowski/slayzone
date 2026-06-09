@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 
 type HomePanel = 'kanban' | 'git' | 'editor' | 'processes' | 'tests' | 'automations'
 
@@ -38,6 +39,7 @@ function parse(value: string): HomePanelState {
 export function useHomePanelState(
   projectId: string
 ): [HomePanelState, (updater: (prev: HomePanelState) => HomePanelState) => void] {
+  const trpcClient = useTRPCClient()
   const [state, setState] = useState<HomePanelState>(DEFAULTS)
   const stateRef = useRef(state)
   stateRef.current = state
@@ -47,15 +49,18 @@ export function useHomePanelState(
   const flushSave = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (pendingRef.current) {
-      window.api.settings.set(getKey(projectId), JSON.stringify(pendingRef.current))
+      trpcClient.settings.set.mutate({
+        key: getKey(projectId),
+        value: JSON.stringify(pendingRef.current)
+      })
       pendingRef.current = null
     }
-  }, [projectId])
+  }, [projectId, trpcClient])
 
   // Load on mount / project change
   useEffect(() => {
     setState(DEFAULTS)
-    window.api.settings.get(getKey(projectId)).then((value) => {
+    void trpcClient.settings.get.query({ key: getKey(projectId) }).then((value) => {
       if (value) {
         try {
           setState(parse(value))
@@ -64,7 +69,7 @@ export function useHomePanelState(
         }
       }
     })
-  }, [projectId])
+  }, [projectId, trpcClient])
 
   // Flush pending save on project change / unmount
   useEffect(() => {
@@ -87,10 +92,10 @@ export function useHomePanelState(
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => {
         pendingRef.current = null
-        window.api.settings.set(getKey(projectId), JSON.stringify(next))
+        trpcClient.settings.set.mutate({ key: getKey(projectId), value: JSON.stringify(next) })
       }, 500)
     },
-    [projectId]
+    [projectId, trpcClient]
   )
 
   return [state, update]

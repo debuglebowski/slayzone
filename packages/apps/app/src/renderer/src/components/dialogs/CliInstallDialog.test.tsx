@@ -23,29 +23,46 @@ vi.mock('lucide-react', () => ({
   Terminal: () => <span data-testid="terminal-icon" />
 }))
 
+// tRPC client mock — CliInstallDialog now calls trpcClient.* (imperative vanilla
+// client) instead of window.api.*. The mock mirrors the tanstack client shape:
+// nested router → procedure → { query | mutate }.
+const trpcClientMock = {
+  settings: {
+    get: { query: vi.fn() },
+    set: { mutate: vi.fn() }
+  },
+  app: {
+    meta: {
+      checkCliInstalled: { query: vi.fn() },
+      installCli: { mutate: vi.fn() }
+    }
+  }
+}
+
+vi.mock('@slayzone/transport/client', () => ({
+  useTRPCClient: () => trpcClientMock
+}))
+
 import { CliInstallDialog } from './CliInstallDialog'
 
 function mockApi(
   overrides: { onboarded?: string | null; dismissed?: string | null; installed?: boolean } = {}
 ) {
   const { onboarded = 'true', dismissed = null, installed = true } = overrides
-  ;(window as any).api = {
-    settings: {
-      get: vi.fn().mockImplementation((key: string) => {
-        if (key === 'onboarding_completed') return Promise.resolve(onboarded)
-        if (key === 'cli_install_dismissed') return Promise.resolve(dismissed)
-        return Promise.resolve(null)
-      }),
-      set: vi.fn().mockResolvedValue(undefined)
-    },
-    app: {
-      cliStatus: vi.fn().mockResolvedValue({ installed }),
-      installCli: vi.fn().mockResolvedValue({ ok: true })
-    }
-  }
+  trpcClientMock.settings.get.query.mockImplementation((input: { key: string }) => {
+    if (input.key === 'onboarding_completed') return Promise.resolve(onboarded)
+    if (input.key === 'cli_install_dismissed') return Promise.resolve(dismissed)
+    return Promise.resolve(null)
+  })
+  trpcClientMock.settings.set.mutate.mockResolvedValue(undefined)
+  trpcClientMock.app.meta.checkCliInstalled.query.mockResolvedValue({ installed })
+  trpcClientMock.app.meta.installCli.mutate.mockResolvedValue({ ok: true })
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
 
 describe('CliInstallDialog', () => {
   it('should NOT show when CLI is installed', async () => {
@@ -54,7 +71,7 @@ describe('CliInstallDialog', () => {
 
     // Wait for async check to complete
     await waitFor(() => {
-      expect(window.api.app.cliStatus).toHaveBeenCalled()
+      expect(trpcClientMock.app.meta.checkCliInstalled.query).toHaveBeenCalled()
     })
 
     expect(screen.queryByText('Install the slay CLI')).toBeNull()
@@ -74,7 +91,7 @@ describe('CliInstallDialog', () => {
     render(<CliInstallDialog />)
 
     await waitFor(() => {
-      expect(window.api.app.cliStatus).toHaveBeenCalled()
+      expect(trpcClientMock.app.meta.checkCliInstalled.query).toHaveBeenCalled()
     })
 
     expect(screen.queryByText('Install the slay CLI')).toBeNull()
@@ -85,7 +102,7 @@ describe('CliInstallDialog', () => {
     render(<CliInstallDialog />)
 
     await waitFor(() => {
-      expect(window.api.app.cliStatus).toHaveBeenCalled()
+      expect(trpcClientMock.app.meta.checkCliInstalled.query).toHaveBeenCalled()
     })
 
     expect(screen.queryByText('Install the slay CLI')).toBeNull()

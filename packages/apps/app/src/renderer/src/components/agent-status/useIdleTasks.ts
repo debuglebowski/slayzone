@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { PtyInfo, ChatSessionStateEntry, TerminalState } from '@slayzone/terminal/shared'
 import { isAliveTerminalState } from '@slayzone/terminal/shared'
 import type { Task } from '@slayzone/task/shared'
@@ -95,34 +96,43 @@ export function useIdleTasks(
   filterProjectId: string | null,
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
 ): UseIdleTasksResult {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [rows, setRows] = useState<AgentSessionRow[]>([])
   const recheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async () => {
-    const [ptys, chats] = await Promise.all([window.api.pty.list(), window.api.chat.list()])
+    const [ptys, chats] = await Promise.all([
+      trpcClient.pty.list.query(),
+      trpcClient.pty.chatList.query()
+    ])
     setRows([...ptys.map(ptyToRow), ...chats.map(chatToRow)])
-  }, [])
+  }, [trpcClient])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  useEffect(() => {
-    // pty:state-change carries both PTY and chat transitions (chat-transport-manager
-    // broadcasts on the same channel via session-registry).
-    const unsubStateChange = window.api.pty.onStateChange((_sessionId, newState: TerminalState) => {
-      refresh()
-      // Threshold means a freshly-idle session won't appear yet — recheck once threshold passes.
-      if (newState === 'idle') {
-        if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
-        recheckTimerRef.current = setTimeout(refresh, IDLE_AGE_RECHECK_DELAY_MS)
+  // pty:state-change carries both PTY and chat transitions (chat-transport-manager
+  // broadcasts on the same channel via session-registry).
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: ({ newState }) => {
+        refresh()
+        // Threshold means a freshly-idle session won't appear yet — recheck once threshold passes.
+        if (newState === 'idle') {
+          if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
+          recheckTimerRef.current = setTimeout(refresh, IDLE_AGE_RECHECK_DELAY_MS)
+        }
       }
     })
+  )
+
+  useEffect(() => {
     return () => {
-      unsubStateChange()
       if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current)
     }
-  }, [refresh])
+  }, [])
 
   const idleTasks: IdleTask[] = useMemo(
     () => buildIdleTasks(rows, tasks, filterProjectId, Date.now(), columnsByProjectId),
@@ -157,25 +167,29 @@ export function buildActiveSessionTaskIds(
  * excluded so the badge clears as soon as the process exits.
  */
 export function useActiveSessionTaskIds(): Set<string> {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [taskIds, setTaskIds] = useState<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
-    const [ptys, chats] = await Promise.all([window.api.pty.list(), window.api.chat.list()])
+    const [ptys, chats] = await Promise.all([
+      trpcClient.pty.list.query(),
+      trpcClient.pty.chatList.query()
+    ])
     setTaskIds(buildActiveSessionTaskIds(ptys, chats))
-  }, [])
+  }, [trpcClient])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  useEffect(() => {
-    const unsub = window.api.pty.onStateChange(() => {
-      refresh()
+  useSubscription(
+    trpc.pty.onStateChange.subscriptionOptions(undefined, {
+      onData: () => {
+        refresh()
+      }
     })
-    return () => {
-      unsub()
-    }
-  }, [refresh])
+  )
 
   return taskIds
 }
