@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Tag } from '@slayzone/tags/shared'
 import { TagSelector } from '@slayzone/tags/client'
 import { Popover, PopoverContent, PopoverTrigger } from '@slayzone/ui'
@@ -22,10 +24,13 @@ export function TagsCard({
   onTagsChange,
   onTagCreated
 }: TagsCardProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const setTagsForTask = useMutation(trpc.tags.setForTask.mutationOptions())
+
   const handleTagToggle = async (tagId: string, checked: boolean): Promise<void> => {
     if (checked) track('tag_assigned')
     const newTagIds = checked ? [...taskTagIds, tagId] : taskTagIds.filter((id) => id !== tagId)
-    await window.api.taskTags.setTagsForTask(taskId, newTagIds)
+    await setTagsForTask.mutateAsync({ taskId, tagIds: newTagIds })
     onTagsChange(newTagIds)
   }
 

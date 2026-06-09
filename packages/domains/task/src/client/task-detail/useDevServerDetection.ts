@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import { DEV_SERVER_URL_PATTERN } from '@slayzone/terminal/shared'
 
@@ -34,6 +35,7 @@ export function useDevServerDetection({
   subscribeDevServer,
   getMainSessionId
 }: UseDevServerDetectionParams): UseDevServerDetectionResult {
+  const trpcClient = useTRPCClient()
   const [detectedDevUrl, setDetectedDevUrl] = useState<string | null>(null)
   const devUrlDismissedRef = useRef<Set<string>>(new Set())
   const devServerToastEnabledRef = useRef(true)
@@ -51,13 +53,13 @@ export function useDevServerDetection({
   // Load dev server settings (re-read on settingsRevision change)
   useEffect(() => {
     Promise.all([
-      window.api.settings.get('dev_server_toast_enabled'),
-      window.api.settings.get('dev_server_auto_open_browser')
+      trpcClient.settings.get.query({ key: 'dev_server_toast_enabled' }),
+      trpcClient.settings.get.query({ key: 'dev_server_auto_open_browser' })
     ]).then(([toast, autoOpen]) => {
       devServerToastEnabledRef.current = toast !== '0'
       devServerAutoOpenRef.current = autoOpen === '1'
     })
-  }, [settingsRevision])
+  }, [settingsRevision, trpcClient])
 
   useEffect(() => {
     if (!task) return
@@ -77,7 +79,7 @@ export function useDevServerDetection({
     // Subscribe first, then check buffer (avoids race where URL emits between read and subscribe)
     const unsub = subscribeDevServer(sid, handleUrl)
 
-    window.api.pty.getBuffer(sid).then((buf) => {
+    trpcClient.pty.getBuffer.query({ sessionId: sid }).then((buf) => {
       if (!buf || browserOpenRef.current) return
       DEV_SERVER_URL_PATTERN.lastIndex = 0
       const match = buf.match(DEV_SERVER_URL_PATTERN)
@@ -88,7 +90,7 @@ export function useDevServerDetection({
     })
 
     return unsub
-  }, [task?.id, subscribeDevServer, getMainSessionId])
+  }, [task?.id, subscribeDevServer, getMainSessionId, trpcClient])
 
   useEffect(() => {
     if (browserVisible) setDetectedDevUrl(null)

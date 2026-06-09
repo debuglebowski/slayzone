@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -43,6 +45,8 @@ export function TaskStatusMenu({
   statusOptions,
   onTaskUpdate
 }: TaskStatusMenuProps): React.JSX.Element | null {
+  const trpc = useTRPC()
+  const updateTask = useMutation(trpc.task.update.mutationOptions())
   const [blockerOpen, setBlockerOpen] = useState(false)
   const [commentOpen, setCommentOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
@@ -55,7 +59,7 @@ export function TaskStatusMenu({
   const isSnoozed = Boolean(task.snoozed_until && new Date(task.snoozed_until) > new Date())
 
   const update = async (patch: Partial<Task>): Promise<void> => {
-    const updated = await window.api.db.updateTask({ id: task.id, ...patch })
+    const updated = await updateTask.mutateAsync({ id: task.id, ...patch })
     onTaskUpdate(updated)
   }
 

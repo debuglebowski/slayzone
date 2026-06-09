@@ -1,4 +1,6 @@
 import React from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Check,
   Eye,
@@ -36,6 +38,8 @@ export function TaskCompletedScreen({
   onShowDetails,
   onTaskUpdate
 }: TaskCompletedScreenProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const updateTask = useMutation(trpc.task.update.mutationOptions())
   const actionButtonClass =
     'inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-surface-1/80 backdrop-blur px-3 py-1.5 text-sm cursor-pointer hover:bg-accent'
   const actionButtons = (
@@ -59,7 +63,7 @@ export function TaskCompletedScreen({
               type="button"
               className={actionButtonClass}
               onClick={async () => {
-                const updated = await window.api.db.updateTask({
+                const updated = await updateTask.mutateAsync({
                   id: task.id,
                   status: col.id
                 })

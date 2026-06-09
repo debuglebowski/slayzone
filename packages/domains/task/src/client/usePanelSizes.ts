@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type {
   PanelLayout,
   PanelDimension,
@@ -358,11 +360,14 @@ export function useGlobalPanelSizes(): [
   (updates: Partial<PanelSizes>) => void,
   (panel: string) => void
 ] {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const setSetting = useMutation(trpc.settings.set.mutationOptions())
   const [sizes, setSizes] = useState<PanelSizes>({})
   const loaded = useRef(false)
 
   useEffect(() => {
-    window.api.settings.get(GLOBAL_SETTINGS_KEY).then((stored) => {
+    trpcClient.settings.get.query({ key: GLOBAL_SETTINGS_KEY }).then((stored) => {
       if (stored) {
         try {
           setSizes(normalizeOverrides(JSON.parse(stored)))
@@ -372,10 +377,10 @@ export function useGlobalPanelSizes(): [
       }
       loaded.current = true
     })
-  }, [])
+  }, [trpcClient])
 
   const persist = (next: PanelSizes): void => {
-    window.api.settings.set(GLOBAL_SETTINGS_KEY, JSON.stringify(next))
+    setSetting.mutate({ key: GLOBAL_SETTINGS_KEY, value: JSON.stringify(next) })
   }
 
   const updateSizes = useCallback((updates: Partial<PanelSizes>) => {

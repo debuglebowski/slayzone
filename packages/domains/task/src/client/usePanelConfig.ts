@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC, useSubscription, getTrpcClient } from '@slayzone/transport/client'
 import type { PanelConfig, PanelView, WebPanelDefinition } from '../shared/types'
 import {
   DEFAULT_PANEL_CONFIG,
@@ -12,21 +14,23 @@ const SETTINGS_KEY = 'panel_config'
 const CHANGE_EVENT = 'panel-config-changed'
 
 function loadConfig(): Promise<PanelConfig> {
-  return window.api.settings.get(SETTINGS_KEY).then((raw) => {
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as PanelConfig
-        // Tolerate partial configs: the merge helpers index `webPanels`, so a
-        // config missing it must not throw — that would silently reset the
-        // user's entire panel layout back to defaults.
-        if (!Array.isArray(parsed.webPanels)) parsed.webPanels = []
-        return mergePanelOrder(mergePredefinedWebPanels(parsed))
-      } catch {
-        /* ignore */
+  return getTrpcClient()
+    .settings.get.query({ key: SETTINGS_KEY })
+    .then((raw) => {
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as PanelConfig
+          // Tolerate partial configs: the merge helpers index `webPanels`, so a
+          // config missing it must not throw — that would silently reset the
+          // user's entire panel layout back to defaults.
+          if (!Array.isArray(parsed.webPanels)) parsed.webPanels = []
+          return mergePanelOrder(mergePredefinedWebPanels(parsed))
+        } catch {
+          /* ignore */
+        }
       }
-    }
-    return DEFAULT_PANEL_CONFIG
-  })
+      return DEFAULT_PANEL_CONFIG
+    })
 }
 
 export function usePanelConfig(): {
@@ -39,27 +43,41 @@ export function usePanelConfig(): {
   /** Returns ordered home-view panel IDs (e.g. 'git','editor','processes','web:*'). Omits task-only panels. */
   getOrderedHomeIds: () => string[]
 } {
+  const trpc = useTRPC()
+  const setSetting = useMutation(trpc.settings.set.mutationOptions())
   const [config, setConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG)
 
   useEffect(() => {
     void loadConfig().then(setConfig)
 
+    // Cross-component refresh: another instance of this hook (same window) writes
+    // the config and dispatches this window CustomEvent. Keep it for in-window sync.
     const onChanged = () => {
       void loadConfig().then(setConfig)
     }
     window.addEventListener(CHANGE_EVENT, onChanged)
-    const cleanupIpc = window.api?.app?.onSettingsChanged?.(onChanged)
     return () => {
       window.removeEventListener(CHANGE_EVENT, onChanged)
-      cleanupIpc?.()
     }
   }, [])
 
-  const updateConfig = useCallback(async (next: PanelConfig) => {
-    setConfig(next)
-    await window.api.settings.set(SETTINGS_KEY, JSON.stringify(next))
-    window.dispatchEvent(new CustomEvent(CHANGE_EVENT))
-  }, [])
+  // External settings changes (CLI, other windows) — replaces `app.onSettingsChanged`.
+  useSubscription(
+    trpc.notify.onSettingsChanged.subscriptionOptions(undefined, {
+      onData: () => {
+        void loadConfig().then(setConfig)
+      }
+    })
+  )
+
+  const updateConfig = useCallback(
+    async (next: PanelConfig) => {
+      setConfig(next)
+      await setSetting.mutateAsync({ key: SETTINGS_KEY, value: JSON.stringify(next) })
+      window.dispatchEvent(new CustomEvent(CHANGE_EVENT))
+    },
+    [setSetting]
+  )
 
   const enabledWebPanels = useMemo(
     () => config.webPanels.filter((wp) => isPanelEnabled(config, wp.id, 'task')),

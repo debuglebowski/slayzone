@@ -28,6 +28,8 @@ import {
   PanelsTopLeft
 } from 'lucide-react'
 import { IconArrowsVertical, IconArrowsMaximize } from '@tabler/icons-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import type { ArtifactsPanelHandle } from '@slayzone/task-artifacts/client'
 import { useArtifacts } from '@slayzone/task-artifacts/client'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
@@ -246,6 +248,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
   const shortcutActive = hasShortcutFocus ?? isActive
+
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const updateTaskMutation = useMutation(trpc.task.update.mutationOptions())
 
   const { modes } = useTerminalModes()
 
@@ -479,9 +485,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (!isSecondaryWindow || !task?.id) return
     const releasingTaskId = task.id
     return () => {
-      void window.api.panels.releaseAllForTask(releasingTaskId)
+      void trpcClient.app.taskWindows.releaseAllForTask.mutate({ taskId: releasingTaskId })
     }
-  }, [isSecondaryWindow, task?.id])
+  }, [isSecondaryWindow, task?.id, trpcClient])
 
   // Panel ownership across windows (multi-window support)
   const ownership = usePanelOwnership(task?.id)
@@ -490,15 +496,18 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [openTaskWindowIds, setOpenTaskWindowIds] = useState<string[]>([])
   useEffect(() => {
     let alive = true
-    window.api.taskWindow.list().then((ids) => {
+    trpcClient.app.taskWindows.list.query().then((ids) => {
       if (alive) setOpenTaskWindowIds(ids)
     })
-    const unsub = window.api.taskWindow.onListChanged((ids) => setOpenTaskWindowIds(ids))
     return () => {
       alive = false
-      unsub()
     }
-  }, [])
+  }, [trpcClient])
+  useSubscription(
+    trpc.app.taskWindows.onListChanged.subscriptionOptions(undefined, {
+      onData: (ids) => setOpenTaskWindowIds(ids)
+    })
+  )
   const hasOpenSecondary = !!task && openTaskWindowIds.includes(task.id)
 
   // Sync description from global state when changed externally
@@ -590,25 +599,27 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [ownership.releasedOnClose, ownership])
 
   // "Take over and close" from another window: flip local visibility false (no DB write)
-  useEffect(() => {
-    return window.api.panels.onCloseRequest((payload) => {
-      if (!task || payload.taskId !== task.id) return
-      setPanelVisibility((prev) =>
-        prev[payload.panelId] ? { ...prev, [payload.panelId]: false } : prev
-      )
+  useSubscription(
+    trpc.app.taskWindows.onPanelCloseRequest.subscriptionOptions(undefined, {
+      onData: (payload) => {
+        if (!task || payload.taskId !== task.id) return
+        setPanelVisibility((prev) =>
+          prev[payload.panelId] ? { ...prev, [payload.panelId]: false } : prev
+        )
+      }
     })
-  }, [task?.id])
+  )
 
   // Panel sizes for resizable panels — per-task, persisted to the DB (mirrors
   // panel_visibility). Secondary windows keep sizes local (no DB write).
   const persistPanelSizes = useCallback(
     (sizes: PanelSizes) => {
       if (!task || isSecondaryWindow) return
-      void window.api.db.updateTask({ id: task.id, panelSizes: sizes }).then((updated) => {
+      void updateTaskMutation.mutateAsync({ id: task.id, panelSizes: sizes }).then((updated) => {
         if (updated) onTaskUpdated(updated)
       })
     },
-    [task?.id, isSecondaryWindow, onTaskUpdated] // eslint-disable-line react-hooks/exhaustive-deps
+    [task?.id, isSecondaryWindow, onTaskUpdated, updateTaskMutation] // eslint-disable-line react-hooks/exhaustive-deps
   )
   const [panelSizes, updatePanelSizes, commitPanelSizes, resetPanelSize, resetAllPanels] =
     usePanelSizes(initialData?.panelSizes, persistPanelSizes)
@@ -697,17 +708,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     task?.loop_config != null &&
     !!(task.loop_config.prompt.trim() && task.loop_config.criteriaPattern.trim())
   useEffect(() => {
-    window.api.app.isLoopModeEnabled().then(setLoopModeAvailable)
-  }, [])
+    trpcClient.app.meta.isLoopModeEnabled.query().then(setLoopModeAvailable)
+  }, [trpcClient])
   const mainSessionId = task ? getMainSessionId(task.id) : ''
   const handleLoopConfigChange = useCallback(
     (cfg: LoopConfig | null) => {
       if (!task) return
-      window.api.db.updateTask({ id: task.id, loopConfig: cfg }).then((updated) => {
+      updateTaskMutation.mutateAsync({ id: task.id, loopConfig: cfg }).then((updated) => {
         if (updated) onTaskUpdated(updated)
       })
     },
-    [task?.id, onTaskUpdated]
+    [task?.id, onTaskUpdated, updateTaskMutation]
   )
   const {
     status: loopStatus,
@@ -759,7 +770,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const handleGitTabChange = (tab: GitTabId) => {
     setGitDefaultTab(tab)
     gitTabSyncedRef.current = true
-    if (task?.id) void window.api.db.updateTask({ id: task.id, gitActiveTab: tab })
+    if (task?.id) void updateTaskMutation.mutateAsync({ id: task.id, gitActiveTab: tab })
   }
   const fileEditorRef = useRef<FileEditorViewHandle>(null)
   const terminalContainerRef = useRef<TerminalContainerHandle>(null)
@@ -782,19 +793,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   useEffect(() => {
     if (!project?.path) return
 
-    const checkProjectPathExists = async (path: string): Promise<boolean> => {
-      const pathExists = window.api.files?.pathExists
-      if (typeof pathExists === 'function') return pathExists(path)
-      console.warn('window.api.files.pathExists is unavailable; skipping path validation')
-      return true
-    }
-
     const handleFocus = (): void => {
-      checkProjectPathExists(project.path!).then((exists) => setProjectPathMissing(!exists))
+      trpcClient.app.files.pathExists
+        .query({ filePath: project.path! })
+        .then((exists) => setProjectPathMissing(!exists))
     }
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)
-  }, [project?.path])
+  }, [project?.path, trpcClient])
 
   // Check project path exists when project changes
   useEffect(() => {
@@ -802,16 +808,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setProjectPathMissing(false)
       return
     }
-    const pathExists = window.api.files?.pathExists
-    if (typeof pathExists !== 'function') return
     let cancelled = false
-    pathExists(project.path).then((exists) => {
+    trpcClient.app.files.pathExists.query({ filePath: project.path }).then((exists) => {
       if (!cancelled) setProjectPathMissing(!exists)
     })
     return () => {
       cancelled = true
     }
-  }, [project?.path])
+  }, [project?.path, trpcClient])
 
   // Handle terminal ready - memoized to prevent effect cascade
   const handleTerminalReady = useCallback(
@@ -864,13 +868,16 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [task])
 
   // Screenshot: capture browser view and inject path into terminal
-  const handleScreenshot = useCallback(async (viewId: string) => {
-    const result = await window.api.screenshot.captureView(viewId)
-    if (!result.success || !result.path) return
-    track('screenshot_captured')
-    const escaped = result.path.includes(' ') ? `"${result.path}"` : result.path
-    await terminalApiRef.current?.write(escaped)
-  }, [])
+  const handleScreenshot = useCallback(
+    async (viewId: string) => {
+      const result = await trpcClient.app.screenshot.captureView.mutate({ viewId })
+      if (!result.success || !result.path) return
+      track('screenshot_captured')
+      const escaped = result.path.includes(' ') ? `"${result.path}"` : result.path
+      await terminalApiRef.current?.write(escaped)
+    },
+    [trpcClient]
+  )
 
   const handleInsertElementSnippet = useCallback(
     async (snippet: string) => {
@@ -878,9 +885,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       const text = snippet.trim()
       if (!text) return
       const mainSessionId = `${task.id}:${task.id}`
-      await window.api.pty.write(mainSessionId, text)
+      await trpcClient.pty.write.mutate({ sessionId: mainSessionId, data: text })
     },
-    [task]
+    [task, trpcClient]
   )
 
   // Inject task description into terminal (no execute)
@@ -923,13 +930,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [shortcutActive, handleInjectTitle, handleInjectDescription, handleRestartTerminal])
 
   // Cmd+Shift+S screenshot trigger from main process
-  useEffect(() => {
-    if (!shortcutActive) return
-    return window.api.app.onScreenshotTrigger(() => {
-      const viewId = browserPanelRef.current?.getActiveViewId()
-      if (viewId) void handleScreenshot(viewId)
+  useSubscription(
+    trpc.menu.onScreenshotTrigger.subscriptionOptions(undefined, {
+      enabled: !!shortcutActive,
+      onData: () => {
+        const viewId = browserPanelRef.current?.getActiveViewId()
+        if (viewId) void handleScreenshot(viewId)
+      }
     })
-  }, [shortcutActive, handleScreenshot])
+  )
 
   // Keep a ref so the onCloseCurrent handler always sees current browserTabs without re-subscribing
   const browserTabsRef = useRef(browserTabs)
@@ -972,34 +981,36 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Cmd+W: close focused sub-item (terminal group, browser tab, editor file),
   // or fall through to close the task tab if nothing to close
-  useEffect(() => {
-    if (!shortcutActive) return
-    return window.api.app.onCloseCurrent(async () => {
-      const panel = lastFocusedPanelRef.current
-      if (panel === 'terminal') {
-        const closed = (await terminalContainerRef.current?.closeActiveGroup()) ?? true
-        if (closed) return
-      } else if (panel === 'editor') {
-        const closed = fileEditorRef.current?.closeActiveFile()
-        if (closed) return
-      } else if (panel === 'browser') {
-        const bt = browserTabsRef.current
-        if (bt.tabs.length > 1) {
-          const idx = bt.tabs.findIndex((t) => t.id === bt.activeTabId)
-          const newTabs = bt.tabs.filter((t) => t.id !== bt.activeTabId)
-          const newActiveId = newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null
-          setBrowserTabs({ tabs: newTabs, activeTabId: newActiveId })
-          return
-        } else if (bt.tabs.length === 1) {
-          setBrowserTabs({ tabs: [], activeTabId: null })
-          handlePanelToggleRef.current('browser', false)
-          return
+  useSubscription(
+    trpc.menu.onCloseCurrentFocus.subscriptionOptions(undefined, {
+      enabled: !!shortcutActive,
+      onData: async () => {
+        const panel = lastFocusedPanelRef.current
+        if (panel === 'terminal') {
+          const closed = (await terminalContainerRef.current?.closeActiveGroup()) ?? true
+          if (closed) return
+        } else if (panel === 'editor') {
+          const closed = fileEditorRef.current?.closeActiveFile()
+          if (closed) return
+        } else if (panel === 'browser') {
+          const bt = browserTabsRef.current
+          if (bt.tabs.length > 1) {
+            const idx = bt.tabs.findIndex((t) => t.id === bt.activeTabId)
+            const newTabs = bt.tabs.filter((t) => t.id !== bt.activeTabId)
+            const newActiveId = newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null
+            setBrowserTabs({ tabs: newTabs, activeTabId: newActiveId })
+            return
+          } else if (bt.tabs.length === 1) {
+            setBrowserTabs({ tabs: [], activeTabId: null })
+            handlePanelToggleRef.current('browser', false)
+            return
+          }
         }
+        // Nothing was closed — close the task tab
+        onCloseTabRef.current?.(taskId)
       }
-      // Nothing was closed — close the task tab
-      onCloseTabRef.current?.(taskId)
     })
-  }, [shortcutActive, setBrowserTabs])
+  )
 
   // Cmd+R browser reload is handled globally in App.tsx
 
@@ -1023,11 +1034,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       // Reset state FIRST to ignore any in-flight data
       resetTaskState(mainSessionId)
       // Now kill the PTY (any data it sends will be ignored)
-      await window.api.pty.kill(mainSessionId)
+      await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
       // Small delay to let any remaining PTY data be processed and ignored
       await new Promise((r) => setTimeout(r, 100))
       // Update mode and clear all conversation IDs (fresh start)
-      const updated = await window.api.db.updateTask({
+      const updated = await updateTaskMutation.mutateAsync({
         id: task.id,
         terminalMode: mode,
         providerConfig: clearAllConversationIds(task.provider_config)
@@ -1039,7 +1050,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setTerminalKey((k) => k + 1)
       track('terminal_mode_switched', { from: oldMode, to: mode })
     },
-    [task, onTaskUpdated, resetTaskState]
+    [task, onTaskUpdated, resetTaskState, trpcClient, updateTaskMutation]
   )
 
   const getMainHistory = useCallback(() => {
@@ -1074,17 +1085,17 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         providerConfig: setProviderFlags(task.provider_config, task.terminal_mode, nextValue)
       }
 
-      const updated = await window.api.db.updateTask(update)
+      const updated = await updateTaskMutation.mutateAsync(update)
       onTaskUpdated(updated)
 
       const mainSessionId = `${task.id}:${task.id}`
       resetTaskState(mainSessionId)
-      await window.api.pty.kill(mainSessionId)
+      await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
       await new Promise((r) => setTimeout(r, 100))
       markSkipCache(mainSessionId)
       setTerminalKey((k) => k + 1)
     },
-    [task, getProviderFlagsForMode, onTaskUpdated, resetTaskState]
+    [task, getProviderFlagsForMode, onTaskUpdated, resetTaskState, trpcClient, updateTaskMutation]
   )
 
   const handleSetDefaultFlags = useCallback(async () => {
@@ -1130,13 +1141,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       }
       // Persist to DB only for primary window — secondary's visibility is local-only
       if (isSecondaryWindow) return
-      const updated = await window.api.db.updateTask({
+      const updated = await updateTaskMutation.mutateAsync({
         id: task.id,
         panelVisibility: newVisibility
       })
       onTaskUpdated(updated)
     },
-    [task, panelVisibility, onTaskUpdated, resetPanelSize, ownership, isSecondaryWindow]
+    [task, panelVisibility, onTaskUpdated, resetPanelSize, ownership, isSecondaryWindow, updateTaskMutation]
   )
   handlePanelToggleRef.current = handlePanelToggle
 
@@ -1146,9 +1157,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (!panelVisibility.artifacts) handlePanelToggle('artifacts', true)
     artifactsPanelRef.current?.selectArtifact(artifactId)
   }
-  useEffect(
-    () => window.api.app.onOpenArtifact((tid, aid) => openArtifactRef.current(tid, aid)),
-    []
+  useSubscription(
+    trpc.menu.onOpenArtifact.subscriptionOptions(undefined, {
+      onData: ({ taskId: tid, artifactId: aid }) => openArtifactRef.current(tid, aid)
+    })
   )
 
   const handleQuickOpenFile = useCallback(
@@ -1326,7 +1338,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (!task || !descriptionDirty.current) return
     descriptionDirty.current = false
 
-    const updated = await window.api.db.updateTask({
+    const updated = await updateTaskMutation.mutateAsync({
       id: task.id,
       description: descriptionValue || undefined
     })
@@ -1368,11 +1380,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       if (modeChanged) {
         const mainSessionId = getMainSessionId(task.id)
         resetTaskState(mainSessionId)
-        await window.api.pty.kill(mainSessionId)
+        await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
         markSkipCache(mainSessionId)
       }
 
-      const updated = await window.api.db.updateTask(updates)
+      const updated = await updateTaskMutation.mutateAsync(updates)
       handleTaskUpdate(updated)
 
       if (template.panel_visibility) setPanelVisibility(template.panel_visibility)
@@ -1383,7 +1395,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         setTerminalKey((k) => k + 1)
       }
     },
-    [task, getMainSessionId, resetTaskState]
+    [task, getMainSessionId, resetTaskState, trpcClient, updateTaskMutation]
   )
 
   // Wrapper for GitPanel that calls API and notifies parent
@@ -1405,11 +1417,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (cwdChanged) {
       const mainSessionId = `${data.id}:${data.id}`
       resetTaskState(mainSessionId)
-      await window.api.pty.kill(mainSessionId)
+      await trpcClient.pty.kill.mutate({ sessionId: mainSessionId })
       markSkipCache(mainSessionId)
     }
 
-    const updated = await window.api.db.updateTask(data)
+    const updated = await updateTaskMutation.mutateAsync(data)
     handleTaskUpdate(updated)
 
     // Force terminal remount if effective cwd changed
@@ -1426,12 +1438,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setBrowserTabs(tabs)
       if (!task) return
       // Persist to DB (debounced via the tab state itself)
-      await window.api.db.updateTask({
+      await updateTaskMutation.mutateAsync({
         id: task.id,
         browserTabs: tabs
       })
     },
-    [task]
+    [task, updateTaskMutation]
   )
 
   // Debounced persistence of web-panel URLs, editor open-files, and active artifact id
@@ -1462,44 +1474,48 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [openDevServerInBrowser])
 
   // CLI: open browser panel when requested by main process (slay tasks browser --panel=visible)
-  useEffect(() => {
-    if (!task) return
-    return window.api.app.onBrowserEnsurePanelOpen((taskId, url, tabId) => {
-      if (taskId !== task.id) return
-      if (tabId) {
-        // CLI targeted an existing tab — open panel and switch to that tab.
-        // The navigate route will load `url` into the targeted tab's webContents.
-        handlePanelToggle('browser', true)
-        const tabs = browserTabsRef.current
-        if (tabs.tabs.some((t) => t.id === tabId) && tabs.activeTabId !== tabId) {
-          handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
+  useSubscription(
+    trpc.menu.onBrowserEnsurePanelOpen.subscriptionOptions(undefined, {
+      enabled: !!task,
+      onData: ({ taskId, url, tabId }) => {
+        if (!task || taskId !== task.id) return
+        if (tabId) {
+          // CLI targeted an existing tab — open panel and switch to that tab.
+          // The navigate route will load `url` into the targeted tab's webContents.
+          handlePanelToggle('browser', true)
+          const tabs = browserTabsRef.current
+          if (tabs.tabs.some((t) => t.id === tabId) && tabs.activeTabId !== tabId) {
+            handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
+          }
+        } else if (url) {
+          openDevServerInBrowser(url)
+        } else {
+          handlePanelToggle('browser', true)
         }
-      } else if (url) {
-        openDevServerInBrowser(url)
-      } else {
-        handlePanelToggle('browser', true)
       }
     })
-  }, [task?.id, openDevServerInBrowser, handlePanelToggle, handleBrowserTabsChange])
+  )
 
   // CLI: create a new browser tab with a server-supplied tabId (slay tasks browser new)
-  useEffect(() => {
-    if (!task) return
-    return window.api.app.onBrowserCreateTab(({ taskId, tabId, url, background }) => {
-      if (taskId !== task.id) return
-      handlePanelToggle('browser', true)
-      const tabUrl = url ?? 'about:blank'
-      const newTab = {
-        id: tabId,
-        url: tabUrl,
-        title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl
+  useSubscription(
+    trpc.menu.onBrowserCreateTab.subscriptionOptions(undefined, {
+      enabled: !!task,
+      onData: ({ taskId, tabId, url, background }) => {
+        if (!task || taskId !== task.id) return
+        handlePanelToggle('browser', true)
+        const tabUrl = url ?? 'about:blank'
+        const newTab = {
+          id: tabId,
+          url: tabUrl,
+          title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl
+        }
+        const current = browserTabsRef.current
+        if (current.tabs.some((t) => t.id === tabId)) return
+        const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
+        handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
       }
-      const current = browserTabsRef.current
-      if (current.tabs.some((t) => t.id === tabId)) return
-      const nextActive = background && current.tabs.length > 0 ? current.activeTabId : tabId
-      handleBrowserTabsChange({ tabs: [...current.tabs, newTab], activeTabId: nextActive })
     })
-  }, [task?.id, handlePanelToggle, handleBrowserTabsChange])
+  )
 
   const handleTagsChange = (newTagIds: string[]): void => {
     setTaskTagIds(newTagIds)
@@ -1509,7 +1525,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   const handleUnarchive = async (): Promise<void> => {
     if (!task) return
-    const restored = await window.api.db.unarchiveTask(task.id)
+    const restored = await trpcClient.task.unarchive.mutate({ id: task.id })
     handleTaskUpdate(restored)
   }
 
@@ -1518,7 +1534,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     if (onArchiveTask) {
       await onArchiveTask(task.id)
     } else {
-      await window.api.db.archiveTask(task.id)
+      await trpcClient.task.archive.mutate({ id: task.id })
     }
     handleTaskUpdate({ ...task, archived_at: new Date().toISOString() })
     setArchiveDialogOpen(false)
@@ -1581,7 +1597,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                             isCurrent && 'bg-accent font-medium'
                           )}
                           onClick={async () => {
-                            const updated = await window.api.db.updateTask({
+                            const updated = await updateTaskMutation.mutateAsync({
                               id: task.id,
                               status: opt.value
                             })
@@ -1621,7 +1637,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       opt.value === task.priority && 'bg-accent font-medium'
                     )}
                     onClick={async () => {
-                      const updated = await window.api.db.updateTask({
+                      const updated = await updateTaskMutation.mutateAsync({
                         id: task.id,
                         priority: opt.value
                       })
@@ -1756,7 +1772,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       href="#"
                       onClick={(e) => {
                         e.preventDefault()
-                        window.api.shell.openExternal(task.linear_url!)
+                        void trpcClient.app.shell.openExternal.mutate({ url: task.linear_url! })
                       }}
                       className="shrink-0 rounded bg-indigo-500/10 px-1.5 py-0.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-500/20 dark:text-indigo-400"
                     >
@@ -1784,8 +1800,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                             isSecondaryWindow ? 'Reattach task' : 'Detach task to new window'
                           }
                           onClick={() => {
-                            if (isSecondaryWindow) window.api.window.close()
-                            else window.api.taskWindow.open(task.id)
+                            if (isSecondaryWindow) void trpcClient.app.window.close.mutate()
+                            else void trpcClient.app.taskWindows.open.mutate({ taskId: task.id })
                           }}
                           className="shrink-0 inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                         >
@@ -1801,8 +1817,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       type="button"
                       aria-label={isSecondaryWindow ? 'Reattach task' : 'Detach task to new window'}
                       onClick={() => {
-                        if (isSecondaryWindow) window.api.window.close()
-                        else window.api.taskWindow.open(task.id)
+                        if (isSecondaryWindow) void trpcClient.app.window.close.mutate()
+                        else void trpcClient.app.taskWindows.open.mutate({ taskId: task.id })
                       }}
                       className="shrink-0 flex items-center gap-1.5 rounded-full bg-muted/50 hover:bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                     >
@@ -1975,7 +1991,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
             setDetectedDevUrl(null)
             if (task?.id) {
               devUrlToastDismissedRef.current = true
-              void window.api.db.updateTask({ id: task.id, devUrlToastDismissed: true })
+              void updateTaskMutation.mutateAsync({ id: task.id, devUrlToastDismissed: true })
             }
           }}
         />
@@ -2803,7 +2819,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                                   className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
                                   title="Change working directory"
                                   onClick={async () => {
-                                    const result = await window.api.dialog.showOpenDialog({
+                                    const result = await trpcClient.app.dialog.showOpenDialog.mutate({
                                       title: 'Select Working Directory',
                                       defaultPath: task.base_dir ?? effectiveRepoPath ?? undefined,
                                       properties: ['openDirectory']

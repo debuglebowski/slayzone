@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 import { Plus, Cpu, Info, Loader2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { ProcessDialog } from './ProcessDialog'
-import type { ProcessEntry } from './ProcessesPanel.types'
+import type { ProcessEntry, ProcessStatus } from './ProcessesPanel.types'
 import { extractUrlFromLine } from './ProcessesPanel.utils'
 import { ProcessRow } from './ProcessRow'
 
@@ -29,6 +31,11 @@ export function ProcessesPanel({
   terminalSessionId?: string
   onOpenUrl?: (url: string) => void
 }) {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const killMutation = useMutation(trpc.processes.kill.mutationOptions())
+  const stopMutation = useMutation(trpc.processes.stop.mutationOptions())
+  const restartMutation = useMutation(trpc.processes.restart.mutationOptions())
   const [processes, setProcesses] = useState<ProcessEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
@@ -39,7 +46,7 @@ export function ProcessesPanel({
 
   useEffect(() => {
     setLoading(true)
-    window.api.processes.listForTask(taskId, projectId).then((list) => {
+    trpcClient.processes.listForTask.query({ taskId, projectId }).then((list) => {
       const entries = (list as ProcessEntry[]).map((p) => {
         if (p.serverUrl || p.status !== 'running') return p
         for (let i = p.logBuffer.length - 1; i >= 0; i--) {
@@ -51,48 +58,57 @@ export function ProcessesPanel({
       setProcesses(entries)
       setLoading(false)
     })
-  }, [taskId, projectId])
+  }, [taskId, projectId, trpcClient])
 
-  useEffect(() => {
-    const unsub = window.api.processes.onLog((processId, line) => {
-      const url = extractUrlFromLine(line)
-      setProcesses((prev) =>
-        prev.map((p) =>
-          p.id === processId
-            ? { ...p, logBuffer: [...p.logBuffer.slice(-499), line], serverUrl: url ?? p.serverUrl }
-            : p
+  useSubscription(
+    trpc.processes.onLog.subscriptionOptions(undefined, {
+      onData: ({ id: processId, line }) => {
+        const url = extractUrlFromLine(line)
+        setProcesses((prev) =>
+          prev.map((p) =>
+            p.id === processId
+              ? {
+                  ...p,
+                  logBuffer: [...p.logBuffer.slice(-499), line],
+                  serverUrl: url ?? p.serverUrl
+                }
+              : p
+          )
         )
-      )
+      }
     })
-    return unsub
-  }, [])
+  )
 
-  useEffect(() => {
-    const unsub = window.api.processes.onStatus((processId, status) => {
-      setProcesses((prev) =>
-        prev.map((p) =>
-          p.id === processId
-            ? { ...p, status, serverUrl: status === 'running' ? p.serverUrl : null }
-            : p
+  useSubscription(
+    trpc.processes.onStatus.subscriptionOptions(undefined, {
+      onData: ({ id: processId, status }) => {
+        const procStatus = status as ProcessStatus
+        setProcesses((prev) =>
+          prev.map((p) =>
+            p.id === processId
+              ? { ...p, status: procStatus, serverUrl: procStatus === 'running' ? p.serverUrl : null }
+              : p
+          )
         )
-      )
+      }
     })
-    return unsub
-  }, [])
+  )
 
-  useEffect(() => {
-    const unsub = window.api.processes.onStats((s) => setStats(s))
-    return unsub
-  }, [])
-
-  useEffect(() => {
-    const unsub = window.api.processes.onTitle((processId, title) => {
-      setProcesses((prev) =>
-        prev.map((p) => (p.id === processId ? { ...p, processTitle: title } : p))
-      )
+  useSubscription(
+    trpc.processes.onStats.subscriptionOptions(undefined, {
+      onData: (s) => setStats(s)
     })
-    return unsub
-  }, [])
+  )
+
+  useSubscription(
+    trpc.processes.onTitle.subscriptionOptions(undefined, {
+      onData: ({ id: processId, title }) => {
+        setProcesses((prev) =>
+          prev.map((p) => (p.id === processId ? { ...p, processTitle: title } : p))
+        )
+      }
+    })
+  )
 
   useEffect(() => {
     for (const id of expandedLogs) {
@@ -101,9 +117,9 @@ export function ProcessesPanel({
   }, [processes, expandedLogs])
 
   const refreshList = useCallback(async () => {
-    const list = await window.api.processes.listForTask(taskId, projectId)
+    const list = await trpcClient.processes.listForTask.query({ taskId, projectId })
     setProcesses(list as ProcessEntry[])
-  }, [taskId, projectId])
+  }, [taskId, projectId, trpcClient])
 
   const toggleLog = useCallback((id: string) => {
     setExpandedLogs((prev) => {
@@ -114,31 +130,43 @@ export function ProcessesPanel({
     })
   }, [])
 
-  const handleKill = useCallback(async (id: string) => {
-    await window.api.processes.kill(id)
-    setProcesses((prev) => prev.filter((p) => p.id !== id))
-    setExpandedLogs((prev) => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
-  }, [])
+  const handleKill = useCallback(
+    async (id: string) => {
+      await killMutation.mutateAsync({ processId: id })
+      setProcesses((prev) => prev.filter((p) => p.id !== id))
+      setExpandedLogs((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    },
+    [killMutation]
+  )
 
-  const handleStop = useCallback(async (id: string) => {
-    await window.api.processes.stop(id)
-  }, [])
+  const handleStop = useCallback(
+    async (id: string) => {
+      await stopMutation.mutateAsync({ processId: id })
+    },
+    [stopMutation]
+  )
 
-  const handleRestart = useCallback(async (id: string) => {
-    await window.api.processes.restart(id)
-  }, [])
+  const handleRestart = useCallback(
+    async (id: string) => {
+      await restartMutation.mutateAsync({ processId: id })
+    },
+    [restartMutation]
+  )
 
   const handleInject = useCallback(
     (proc: ProcessEntry) => {
       if (proc.logBuffer.length === 0) return
       const output = `\r\n--- ${proc.label} output ---\r\n${proc.logBuffer.join('\r\n')}\r\n---\r\n`
-      void window.api.pty.write(terminalSessionId ?? `${taskId}:${taskId}`, output)
+      void trpcClient.pty.write.mutate({
+        sessionId: terminalSessionId ?? `${taskId}:${taskId}`,
+        data: output
+      })
     },
-    [taskId, terminalSessionId]
+    [taskId, terminalSessionId, trpcClient]
   )
 
   const openNewDialog = useCallback(() => {

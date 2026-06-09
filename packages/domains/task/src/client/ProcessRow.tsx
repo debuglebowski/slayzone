@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import {
   Play,
   Square,
@@ -58,6 +59,7 @@ export function ProcessRow({
   onOpenUrl?: (url: string) => void
   logEndRef: (el: HTMLDivElement | null) => void
 }) {
+  const trpcClient = useTRPCClient()
   const serverUrl = proc.status === 'running' ? (proc.serverUrl ?? null) : null
   return (
     <div className="rounded-lg border border-border bg-surface-3 overflow-hidden group/row">
@@ -170,7 +172,7 @@ export function ProcessRow({
             onClick={(e) => {
               e.preventDefault()
               if (onOpenUrl) onOpenUrl(serverUrl)
-              else void window.api.shell.openExternal(serverUrl)
+              else void trpcClient.app.shell.openExternal.mutate({ url: serverUrl })
             }}
             className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 text-sky-400 bg-sky-400/10 border-sky-400/20 hover:bg-sky-400/20 transition-colors"
             title={`Open ${serverUrl}`}

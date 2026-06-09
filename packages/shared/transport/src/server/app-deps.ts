@@ -439,14 +439,14 @@ export type AppDeps = {
   taskWindows: {
     open: (taskId: string) => unknown
     close: (taskId: string) => unknown
-    list: () => unknown
+    list: () => string[]
     setPrimaryActive: (taskId: string | null, callerWindowId: number | null) => unknown
     getPrimaryActive: () => unknown
     claimPanel: (taskId: string, panelId: string, ownerWindowId: number) => unknown
     releasePanel: (taskId: string, panelId: string, callerWindowId: number) => unknown
     releaseAllForTask: (taskId: string, callerWindowId: number) => unknown
-    getOwnership: (taskId: string) => unknown
-    getWindowId: (callerWindowId: number) => unknown
+    getOwnership: (taskId: string) => Array<{ panelId: string; ownerWindowId: number }>
+    getWindowId: (callerWindowId: number) => number | null
     claimAndCloseOther: (taskId: string, panelId: string, ownerWindowId: number) => unknown
     claimSession: (sessionId: string, callerWindowId: number) => unknown
     events: EventEmitter & {

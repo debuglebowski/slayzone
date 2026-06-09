@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { ListChecks, MessageSquare, SearchIcon, X } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
@@ -37,12 +39,16 @@ export function BlockedBySection({
   addBlockerSearch,
   setAddBlockerSearch
 }: BlockedBySectionProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const updateTask = useMutation(trpc.task.update.mutationOptions())
+  const addBlocker = useMutation(trpc.task.addBlocker.mutationOptions())
+  const removeBlocker = useMutation(trpc.task.removeBlocker.mutationOptions())
   const [blockerDialogOpen, setBlockerDialogOpen] = useState(false)
   const [commentDialogOpen, setCommentDialogOpen] = useState(false)
   const [blockedComment, setBlockedComment] = useState('')
 
   const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
-    await window.api.taskDependencies.addBlocker(task.id, blockerTaskId)
+    await addBlocker.mutateAsync({ taskId: task.id, blockerTaskId })
     const blockerTask = allTasks.find((t) => t.id === blockerTaskId)
     if (blockerTask) {
       setBlockers([...blockers, blockerTask])
@@ -51,19 +57,19 @@ export function BlockedBySection({
   }
 
   const handleRemoveBlocker = async (blockerTaskId: string): Promise<void> => {
-    await window.api.taskDependencies.removeBlocker(task.id, blockerTaskId)
+    await removeBlocker.mutateAsync({ taskId: task.id, blockerTaskId })
     setBlockers(blockers.filter((b) => b.id !== blockerTaskId))
   }
 
   const handleSetBlocked = async (): Promise<void> => {
     track('task_blocked', {})
-    const updated = await window.api.db.updateTask({ id: task.id, isBlocked: true })
+    const updated = await updateTask.mutateAsync({ id: task.id, isBlocked: true })
     onUpdate(updated)
   }
 
   const handleUnblock = async (): Promise<void> => {
     track('task_unblocked')
-    const updated = await window.api.db.updateTask({
+    const updated = await updateTask.mutateAsync({
       id: task.id,
       isBlocked: false,
       blockedComment: null
@@ -73,7 +79,7 @@ export function BlockedBySection({
 
   const handleSetBlockedWithComment = async (): Promise<void> => {
     track('task_blocked', { hasComment: 'true' })
-    const updated = await window.api.db.updateTask({
+    const updated = await updateTask.mutateAsync({
       id: task.id,
       isBlocked: true,
       blockedComment: blockedComment.trim() || null
@@ -100,7 +106,7 @@ export function BlockedBySection({
           <span className="flex-1 whitespace-pre-wrap">{task.blocked_comment}</span>
           <button
             onClick={async () => {
-              const updated = await window.api.db.updateTask({
+              const updated = await updateTask.mutateAsync({
                 id: task.id,
                 blockedComment: null
               })

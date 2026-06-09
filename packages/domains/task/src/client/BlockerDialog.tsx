@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
 import { Input } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
@@ -18,8 +20,7 @@ export function BlockerDialog({
   projects,
   onClose
 }: BlockerDialogProps): React.JSX.Element {
-  const [allTasks, setAllTasks] = useState<Task[]>([])
-  const [blockers, setBlockers] = useState<Task[]>([])
+  const trpc = useTRPC()
   const [search, setSearch] = useState('')
 
   const columnsByProject = useMemo(
@@ -29,20 +30,27 @@ export function BlockerDialog({
 
   const open = taskId !== null
 
+  const allTasksQuery = useQuery(trpc.task.getAll.queryOptions(undefined, { enabled: open }))
+  const blockersQuery = useQuery(
+    trpc.task.getBlockers.queryOptions({ taskId: taskId ?? '' }, { enabled: open && !!taskId })
+  )
+
+  const allTasks: Task[] = useMemo(
+    () => (allTasksQuery.data ?? []).filter((t) => t.id !== taskId),
+    [allTasksQuery.data, taskId]
+  )
+  const blockers: Task[] = blockersQuery.data ?? []
+
+  // Reset the search box when the dialog (re)opens for a task.
   useEffect(() => {
-    if (!open || !taskId) return
-    Promise.all([window.api.db.getTasks(), window.api.taskDependencies.getBlockers(taskId)]).then(
-      ([tasks, currentBlockers]) => {
-        setAllTasks(tasks.filter((t) => t.id !== taskId))
-        setBlockers(currentBlockers)
-        setSearch('')
-      }
-    )
+    if (open) setSearch('')
   }, [open, taskId])
+
+  const addBlocker = useMutation(trpc.task.addBlocker.mutationOptions())
 
   const handleAddBlocker = async (blockerTaskId: string): Promise<void> => {
     if (!taskId) return
-    await window.api.taskDependencies.addBlocker(taskId, blockerTaskId)
+    await addBlocker.mutateAsync({ taskId, blockerTaskId })
     onClose()
     window.dispatchEvent(new CustomEvent('slayzone:blocked-changed'))
   }

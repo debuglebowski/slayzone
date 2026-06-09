@@ -1,3 +1,5 @@
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { isTerminalStatus } from '@slayzone/projects/shared'
@@ -17,6 +19,8 @@ export function ProjectStatusCard({
   onUpdate,
   columnsConfig
 }: ProjectStatusCardProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const updateTask = useMutation(trpc.task.update.mutationOptions())
   const statusOptions = buildStatusOptions(columnsConfig)
 
   const handleStatusChange = async (status: string): Promise<void> => {
@@ -27,13 +31,13 @@ export function ProjectStatusCard({
         had_worktree: Boolean(task.worktree_path)
       })
     }
-    const updated = await window.api.db.updateTask({ id: task.id, status })
+    const updated = await updateTask.mutateAsync({ id: task.id, status })
     onUpdate(updated)
   }
 
   const handleProjectChange = async (projectId: string): Promise<void> => {
     track('task_moved_to_project')
-    const updated = await window.api.db.updateTask({ id: task.id, projectId })
+    const updated = await updateTask.mutateAsync({ id: task.id, projectId })
     onUpdate(updated)
   }
 

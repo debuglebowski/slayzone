@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { ProjectStatusCard } from './ProjectStatusCard'
 import { PriorityDueDateCard } from './PriorityDueDateCard'
@@ -28,26 +29,26 @@ export function TaskMetadataSidebar({
   onTagsChange,
   onTagCreated
 }: TaskMetadataSidebarProps): React.JSX.Element {
-  const [allTasks, setAllTasks] = useState<Task[]>([])
+  const trpc = useTRPC()
   const [blockers, setBlockers] = useState<Task[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
   const [addBlockerSearch, setAddBlockerSearch] = useState('')
 
-  // Load all tasks and current blockers
+  // Load all tasks, current blockers, and projects.
+  const allTasksQuery = useQuery(trpc.task.getAll.queryOptions())
+  const blockersQuery = useQuery(trpc.task.getBlockers.queryOptions({ taskId: task.id }))
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions())
+
+  const allTasks = (allTasksQuery.data ?? []).filter((t) => t.id !== task.id)
+  const projects = projectsQuery.data ?? []
+
+  // Mirror fetched blockers into local state so BlockedBySection can optimistically
+  // add/remove via setBlockers. Reset the search box on task change.
   useEffect(() => {
-    const loadData = async () => {
-      const [tasks, currentBlockers, allProjects] = await Promise.all([
-        window.api.db.getTasks(),
-        window.api.taskDependencies.getBlockers(task.id),
-        window.api.db.getProjects()
-      ])
-      setAllTasks(tasks.filter((t) => t.id !== task.id))
-      setBlockers(currentBlockers)
-      setProjects(allProjects)
-      setAddBlockerSearch('')
-    }
-    loadData()
+    setAddBlockerSearch('')
   }, [task.id])
+  useEffect(() => {
+    if (blockersQuery.data) setBlockers(blockersQuery.data)
+  }, [blockersQuery.data])
 
   const columnsByProject = new Map(projects.map((project) => [project.id, project.columns_config]))
   const selectedProject = projects.find((project) => project.id === task.project_id)

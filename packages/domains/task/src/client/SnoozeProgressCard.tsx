@@ -1,5 +1,7 @@
 import { format } from 'date-fns'
 import { AlarmClock, Gauge, X } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import type { Project } from '@slayzone/projects/shared'
 import { isCompletedStatus } from '@slayzone/projects/shared'
@@ -21,21 +23,24 @@ export function SnoozeProgressCard({
   onUpdate,
   columnsConfig
 }: SnoozeProgressCardProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const updateTask = useMutation(trpc.task.update.mutationOptions())
+
   const handleSnooze = async (until: string): Promise<void> => {
     track('task_snoozed')
-    const updated = await window.api.db.updateTask({ id: task.id, snoozedUntil: until })
+    const updated = await updateTask.mutateAsync({ id: task.id, snoozedUntil: until })
     onUpdate(updated)
   }
 
   const handleUnsnooze = async (): Promise<void> => {
     track('task_unsnoozed')
-    const updated = await window.api.db.updateTask({ id: task.id, snoozedUntil: null })
+    const updated = await updateTask.mutateAsync({ id: task.id, snoozedUntil: null })
     onUpdate(updated)
   }
 
   const handleProgressChange = async (progress: number): Promise<void> => {
     track('task_progress_changed', { value: String(progress) })
-    const updated = await window.api.db.updateTask({ id: task.id, progress })
+    const updated = await updateTask.mutateAsync({ id: task.id, progress })
     onUpdate(updated)
   }
 

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient, useSubscription } from '@slayzone/transport/client'
 
 interface OwnershipEntry {
   panelId: string
@@ -11,7 +13,8 @@ interface OwnershipEntry {
  * show a stub.
  */
 export function usePanelOwnership(taskId: string | undefined) {
-  const [windowId, setWindowId] = useState<number | null>(null)
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const [entries, setEntries] = useState<OwnershipEntry[]>([])
   const [releasedOnClose, setReleasedOnClose] = useState<Array<{
     taskId: string
@@ -19,15 +22,8 @@ export function usePanelOwnership(taskId: string | undefined) {
   }> | null>(null)
 
   // Resolve this window's webContents id once
-  useEffect(() => {
-    let alive = true
-    window.api.panels.getWindowId().then((id) => {
-      if (alive) setWindowId(id)
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
+  const windowIdQuery = useQuery(trpc.app.taskWindows.getWindowId.queryOptions())
+  const windowId = windowIdQuery.data ?? null
 
   // Refresh ownership snapshot + subscribe to live changes
   useEffect(() => {
@@ -36,26 +32,34 @@ export function usePanelOwnership(taskId: string | undefined) {
       return
     }
     let alive = true
-    window.api.panels.getOwnership(taskId).then((list) => {
+    trpcClient.app.taskWindows.getOwnership.query({ taskId }).then((list) => {
       if (alive) setEntries(list)
-    })
-    const unsub = window.api.panels.onOwnershipChanged((payload) => {
-      if (payload.taskId === taskId) setEntries(payload.ownership)
     })
     return () => {
       alive = false
-      unsub()
     }
-  }, [taskId])
+  }, [taskId, trpcClient])
+
+  useSubscription(
+    trpc.app.taskWindows.onOwnershipChanged.subscriptionOptions(undefined, {
+      enabled: !!taskId,
+      onData: (payload) => {
+        if (payload.taskId === taskId) setEntries(payload.ownership)
+      }
+    })
+  )
 
   // Listen for window-close releases so the owning window's renderer can react
-  useEffect(() => {
-    return window.api.panels.onReleasedOnClose((payload) => {
-      if (!taskId) return
-      const forThisTask = payload.released.filter((r) => r.taskId === taskId)
-      if (forThisTask.length > 0) setReleasedOnClose(forThisTask)
+  useSubscription(
+    trpc.app.taskWindows.onPanelsReleasedOnClose.subscriptionOptions(undefined, {
+      enabled: !!taskId,
+      onData: (payload) => {
+        if (!taskId) return
+        const forThisTask = payload.released.filter((r) => r.taskId === taskId)
+        if (forThisTask.length > 0) setReleasedOnClose(forThisTask)
+      }
     })
-  }, [taskId])
+  )
 
   const ownerOf = useCallback(
     (panelId: string): number | null =>
@@ -82,25 +86,25 @@ export function usePanelOwnership(taskId: string | undefined) {
   const claim = useCallback(
     async (panelId: string) => {
       if (!taskId) return { ok: false }
-      return window.api.panels.claim(taskId, panelId)
+      return trpcClient.app.taskWindows.claimPanel.mutate({ taskId, panelId })
     },
-    [taskId]
+    [taskId, trpcClient]
   )
 
   const claimAndCloseOther = useCallback(
     async (panelId: string) => {
       if (!taskId) return { ok: false }
-      return window.api.panels.claimAndCloseOther(taskId, panelId)
+      return trpcClient.app.taskWindows.claimAndCloseOther.mutate({ taskId, panelId })
     },
-    [taskId]
+    [taskId, trpcClient]
   )
 
   const release = useCallback(
     async (panelId: string) => {
       if (!taskId) return { ok: false }
-      return window.api.panels.release(taskId, panelId)
+      return trpcClient.app.taskWindows.releasePanel.mutate({ taskId, panelId })
     },
-    [taskId]
+    [taskId, trpcClient]
   )
 
   const consumeReleasedOnClose = useCallback(() => {

@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC, useSubscription } from '@slayzone/transport/client'
 import type { DragEndEvent } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
 import type { Task } from '@slayzone/task/shared'
@@ -20,27 +22,34 @@ export function useSubTasks(
   parentId: string | null | undefined,
   initialSubTasks?: Task[]
 ): UseSubTasksReturn {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [subTasks, setSubTasks] = useState<Task[]>(initialSubTasks ?? [])
 
-  // Re-fetch subtasks on external changes (CLI, MCP)
-  useEffect(() => {
-    if (!parentId) return
-    const refresh = (): void => {
-      window.api.db
-        .getSubTasks(parentId)
-        .then(setSubTasks)
-        .catch(() => {})
-    }
-    const cleanup = window.api?.app?.onTasksChanged?.(refresh)
-    return () => {
-      cleanup?.()
-    }
-  }, [parentId])
+  const createMutation = useMutation(trpc.task.create.mutationOptions())
+  const updateMutation = useMutation(trpc.task.update.mutationOptions())
+  const deleteMutation = useMutation(trpc.task.delete.mutationOptions())
+  const reorderMutation = useMutation(trpc.task.reorder.mutationOptions())
+
+  // Re-fetch subtasks on external changes (CLI, MCP). Mirrors the legacy
+  // `app.onTasksChanged` IPC listener via the `tasks-changed` subscription.
+  useSubscription(
+    trpc.notify.onTasksChanged.subscriptionOptions(undefined, {
+      enabled: !!parentId,
+      onData: () => {
+        if (!parentId) return
+        void queryClient
+          .fetchQuery(trpc.task.getSubTasks.queryOptions({ parentId }))
+          .then(setSubTasks)
+          .catch(() => {})
+      }
+    })
+  )
 
   const createSubTask = useCallback(
     async (params: { projectId: string; title: string; status: string }): Promise<Task | null> => {
       if (!parentId) return null
-      const sub = await window.api.db.createTask({
+      const sub = await createMutation.mutateAsync({
         projectId: params.projectId,
         title: params.title,
         parentId,
@@ -52,35 +61,41 @@ export function useSubTasks(
       }
       return sub
     },
-    [parentId]
+    [parentId, createMutation]
   )
 
   const updateSubTask = useCallback(
     async (subId: string, updates: Record<string, unknown>): Promise<void> => {
-      const updated = await window.api.db.updateTask({ id: subId, ...updates })
+      const updated = await updateMutation.mutateAsync({ id: subId, ...updates })
       if (updated) {
         setSubTasks((prev) => prev.map((s) => (s.id === subId ? updated : s)))
       }
     },
-    []
+    [updateMutation]
   )
 
-  const deleteSubTask = useCallback(async (subId: string): Promise<void> => {
-    await window.api.db.deleteTask(subId)
-    setSubTasks((prev) => prev.filter((s) => s.id !== subId))
-  }, [])
+  const deleteSubTask = useCallback(
+    async (subId: string): Promise<void> => {
+      await deleteMutation.mutateAsync({ id: subId })
+      setSubTasks((prev) => prev.filter((s) => s.id !== subId))
+    },
+    [deleteMutation]
+  )
 
-  const handleDragEnd = useCallback((event: DragEndEvent): void => {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    setSubTasks((prev) => {
-      const oldIndex = prev.findIndex((s) => s.id === active.id)
-      const newIndex = prev.findIndex((s) => s.id === over.id)
-      const reordered = arrayMove(prev, oldIndex, newIndex)
-      window.api.db.reorderTasks(reordered.map((t) => t.id))
-      return reordered
-    })
-  }, [])
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent): void => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+      setSubTasks((prev) => {
+        const oldIndex = prev.findIndex((s) => s.id === active.id)
+        const newIndex = prev.findIndex((s) => s.id === over.id)
+        const reordered = arrayMove(prev, oldIndex, newIndex)
+        void reorderMutation.mutateAsync({ taskIds: reordered.map((t) => t.id) })
+        return reordered
+      })
+    },
+    [reorderMutation]
+  )
 
   return { subTasks, createSubTask, updateSubTask, deleteSubTask, handleDragEnd }
 }

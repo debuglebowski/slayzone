@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { RotateCw, X, Globe, Copy, Check, RotateCcw } from 'lucide-react'
 import { IconButton, Tooltip, TooltipTrigger, TooltipContent, useAppearance } from '@slayzone/ui'
 import { useBrowserView } from '@slayzone/task-browser'
@@ -44,6 +45,7 @@ export function WebPanelView({
   isResizing,
   isActive
 }: WebPanelViewProps) {
+  const trpcClient = useTRPCClient()
   const [copied, setCopied] = useState(false)
   const { browserDefaultZoom } = useAppearance()
 
@@ -75,14 +77,14 @@ export function WebPanelView({
         return
       }
 
-      void window.api.shell
-        .openExternal(
-          popupUrl,
-          desktopHandoffPolicy ? { desktopHandoff: desktopHandoffPolicy } : undefined
-        )
+      void trpcClient.app.shell.openExternal
+        .mutate({
+          url: popupUrl,
+          options: desktopHandoffPolicy ? { desktopHandoff: desktopHandoffPolicy } : undefined
+        })
         .catch(() => {})
     },
-    [desktopHandoffPolicy]
+    [desktopHandoffPolicy, trpcClient]
   )
 
   const { viewId, state, actions, placeholderRef } = useBrowserView({

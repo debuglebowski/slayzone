@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Dialog,
   DialogContent,
@@ -45,6 +47,11 @@ export function ProcessDialog({
   onSaved,
   onSpawned
 }: ProcessDialogProps) {
+  const trpc = useTRPC()
+  const updateProcess = useMutation(trpc.processes.update.mutationOptions())
+  const createProcess = useMutation(trpc.processes.create.mutationOptions())
+  const spawnProcess = useMutation(trpc.processes.spawn.mutationOptions())
+  const restartProcess = useMutation(trpc.processes.restart.mutationOptions())
   const [form, setForm] = useState<AddFormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -83,22 +90,25 @@ export function ProcessDialog({
     try {
       const { tid, pid } = resolveScope()
       if (process) {
-        await window.api.processes.update(process.id, {
-          label: form.label.trim(),
-          command: form.command.trim(),
-          autoRestart: form.autoRestart,
-          taskId: tid,
-          projectId: pid
+        await updateProcess.mutateAsync({
+          processId: process.id,
+          updates: {
+            label: form.label.trim(),
+            command: form.command.trim(),
+            autoRestart: form.autoRestart,
+            taskId: tid,
+            projectId: pid
+          }
         })
       } else {
-        await window.api.processes.create(
-          pid,
-          tid,
-          form.label.trim(),
-          form.command.trim(),
-          cwd ?? '',
-          form.autoRestart
-        )
+        await createProcess.mutateAsync({
+          projectId: pid,
+          taskId: tid,
+          label: form.label.trim(),
+          command: form.command.trim(),
+          cwd: cwd ?? '',
+          autoRestart: form.autoRestart
+        })
       }
       onSaved()
       onOpenChange(false)
@@ -107,7 +117,7 @@ export function ProcessDialog({
     } finally {
       setSaving(false)
     }
-  }, [isValid, form, process, cwd, resolveScope, onSaved, onOpenChange])
+  }, [isValid, form, process, cwd, resolveScope, onSaved, onOpenChange, updateProcess, createProcess])
 
   const handleSpawn = useCallback(async () => {
     if (!isValid) return
@@ -117,24 +127,27 @@ export function ProcessDialog({
       const { tid, pid } = resolveScope()
       let id: string
       if (process) {
-        await window.api.processes.update(process.id, {
-          label: form.label.trim(),
-          command: form.command.trim(),
-          autoRestart: form.autoRestart,
-          taskId: tid,
-          projectId: pid
+        await updateProcess.mutateAsync({
+          processId: process.id,
+          updates: {
+            label: form.label.trim(),
+            command: form.command.trim(),
+            autoRestart: form.autoRestart,
+            taskId: tid,
+            projectId: pid
+          }
         })
-        await window.api.processes.restart(process.id)
+        await restartProcess.mutateAsync({ processId: process.id })
         id = process.id
       } else {
-        id = await window.api.processes.spawn(
-          pid,
-          tid,
-          form.label.trim(),
-          form.command.trim(),
-          cwd ?? '',
-          form.autoRestart
-        )
+        id = await spawnProcess.mutateAsync({
+          projectId: pid,
+          taskId: tid,
+          label: form.label.trim(),
+          command: form.command.trim(),
+          cwd: cwd ?? '',
+          autoRestart: form.autoRestart
+        })
       }
       onSpawned(id)
       onOpenChange(false)
@@ -143,7 +156,7 @@ export function ProcessDialog({
     } finally {
       setSaving(false)
     }
-  }, [isValid, form, process, cwd, resolveScope, onSpawned, onOpenChange])
+  }, [isValid, form, process, cwd, resolveScope, onSpawned, onOpenChange, updateProcess, restartProcess, spawnProcess])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

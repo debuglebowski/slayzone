@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 
 export interface UseTaskTitleEditingResult {
@@ -16,6 +18,8 @@ export function useTaskTitleEditing(
   task: Task | null,
   onTaskUpdated: (task: Task) => void
 ): UseTaskTitleEditingResult {
+  const trpc = useTRPC()
+  const updateTask = useMutation(trpc.task.update.mutationOptions())
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState(task?.title ?? '')
   const titleInputRef = useRef<HTMLInputElement>(null)
@@ -39,7 +43,7 @@ export function useTaskTitleEditing(
       return
     }
 
-    const updated = await window.api.db.updateTask({
+    const updated = await updateTask.mutateAsync({
       id: task.id,
       title: titleValue
     })

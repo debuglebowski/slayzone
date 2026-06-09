@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { format } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
-import type { Project } from '@slayzone/projects/shared'
 import { getDefaultStatus } from '@slayzone/projects/shared'
 import { updateTaskSchema, type UpdateTaskFormData, priorityOptions } from '@slayzone/task/shared'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@slayzone/ui'
@@ -30,7 +31,10 @@ export function EditTaskDialog({
   onOpenChange,
   onUpdated
 }: EditTaskDialogProps): React.JSX.Element {
-  const [projects, setProjects] = useState<Project[]>([])
+  const trpc = useTRPC()
+  const updateMutation = useMutation(trpc.task.update.mutationOptions())
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions(undefined, { enabled: open }))
+  const projects = projectsQuery.data ?? []
   const form = useForm<UpdateTaskFormData>({
     resolver: zodResolver(updateTaskSchema),
     defaultValues: {
@@ -57,11 +61,6 @@ export function EditTaskDialog({
     }
   }, [task, form])
 
-  useEffect(() => {
-    if (!open) return
-    window.api.db.getProjects().then((list) => setProjects(list))
-  }, [open])
-
   const selectedProject = projects.find((project) => project.id === task?.project_id)
   const projectStatusOptions = buildStatusOptions(selectedProject?.columns_config)
 
@@ -74,7 +73,7 @@ export function EditTaskDialog({
   }, [task, projectStatusOptions, selectedProject, form])
 
   const onSubmit = async (data: UpdateTaskFormData): Promise<void> => {
-    const updated = await window.api.db.updateTask({
+    const updated = await updateMutation.mutateAsync({
       id: data.id,
       title: data.title,
       description: data.description,

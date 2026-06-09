@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { ArrowDownToLineIcon, ArrowUpToLineIcon, Loader2 } from 'lucide-react'
 import type { Task } from '@slayzone/task/shared'
 import type { ExternalLink, TaskSyncStatus } from '@slayzone/integrations/shared'
@@ -37,6 +38,7 @@ function toUnknownSyncStatus(link: ExternalLink, taskId: string): TaskSyncStatus
 }
 
 export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
+  const trpcClient = useTRPCClient()
   const [links, setLinks] = useState<ExternalLink[]>([])
   const [syncStatusByLinkId, setSyncStatusByLinkId] = useState<Record<string, TaskSyncStatus>>({})
   const [linkLoadingById, setLinkLoadingById] = useState<
@@ -48,8 +50,8 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     void (async () => {
       try {
         const [linearLink, githubLink] = await Promise.all([
-          window.api.integrations.getLink(taskId, 'linear'),
-          window.api.integrations.getLink(taskId, 'github')
+          trpcClient.integrations.getLink.query({ taskId, provider: 'linear' }),
+          trpcClient.integrations.getLink.query({ taskId, provider: 'github' })
         ])
 
         const loadedLinks = [linearLink, githubLink].filter((link): link is ExternalLink =>
@@ -66,7 +68,10 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
         const statusEntries = await Promise.all(
           loadedLinks.map(async (link) => {
             try {
-              const status = await window.api.integrations.getTaskSyncStatus(taskId, link.provider)
+              const status = await trpcClient.integrations.getTaskSyncStatus.query({
+                taskId,
+                provider: link.provider
+              })
               return [link.id, status] as const
             } catch {
               return [link.id, toUnknownSyncStatus(link, taskId)] as const
@@ -85,11 +90,14 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     return () => {
       cancelled = true
     }
-  }, [taskId])
+  }, [taskId, trpcClient])
 
   const refreshLinkSyncStatus = async (link: ExternalLink) => {
     try {
-      const status = await window.api.integrations.getTaskSyncStatus(taskId, link.provider)
+      const status = await trpcClient.integrations.getTaskSyncStatus.query({
+        taskId,
+        provider: link.provider
+      })
       setSyncStatusByLinkId((current) => ({ ...current, [link.id]: status }))
     } catch {
       setSyncStatusByLinkId((current) => ({
@@ -115,7 +123,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     if (!link.external_url) return
     setLinkLoading(link.id, 'open')
     try {
-      await window.api.shell.openExternal(link.external_url)
+      await trpcClient.app.shell.openExternal.mutate({ url: link.external_url })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     } finally {
@@ -128,17 +136,17 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     setLinkLoading(link.id, 'pull')
     try {
       if (link.provider === 'linear') {
-        const result = await window.api.integrations.syncNow({ taskId })
+        const result = await trpcClient.integrations.syncNow.mutate({ taskId })
         const errSuffix = result.errors.length > 0 ? ` (${result.errors.length} errors)` : ''
         const message = `${PROVIDER_LABELS[link.provider]} synced: ${result.pulled} pulled, ${result.pushed} pushed${errSuffix}`
         if (result.errors.length > 0) toast.error(message)
         else toast.success(message)
-        const refreshedTask = await window.api.db.getTask(taskId)
+        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
         return
       }
 
-      const result = await window.api.integrations.pullTask({
+      const result = await trpcClient.integrations.pullTask.mutate({
         taskId,
         provider: 'github'
       })
@@ -148,7 +156,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
       if (result.pulled) toast.success(message)
       else toast(message)
       if (result.pulled) {
-        const refreshedTask = await window.api.db.getTask(taskId)
+        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
       }
     } catch (error) {
@@ -163,20 +171,20 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
     setLinkLoading(link.id, 'push')
     try {
       if (link.provider === 'linear') {
-        const result = await window.api.integrations.syncNow({ taskId })
+        const result = await trpcClient.integrations.syncNow.mutate({ taskId })
         const errSuffix = result.errors.length > 0 ? ` (${result.errors.length} errors)` : ''
         const message = `${PROVIDER_LABELS[link.provider]} synced: ${result.pulled} pulled, ${result.pushed} pushed${errSuffix}`
         if (result.pushed > 0) toast.success(message)
         else if (result.errors.length > 0) toast.error(message)
         else toast(message)
         if (result.pulled > 0) {
-          const refreshedTask = await window.api.db.getTask(taskId)
+          const refreshedTask = await trpcClient.task.get.query({ id: taskId })
           if (refreshedTask) onUpdate(refreshedTask)
         }
         return
       }
 
-      const result = await window.api.integrations.pushTask({
+      const result = await trpcClient.integrations.pushTask.mutate({
         taskId,
         provider: 'github'
       })
@@ -185,7 +193,7 @@ export function ExternalSyncCard({ taskId, onUpdate }: ExternalSyncCardProps) {
       if (result.pushed) toast.success(message)
       else toast(message)
       if (result.pushed) {
-        const refreshedTask = await window.api.db.getTask(taskId)
+        const refreshedTask = await trpcClient.task.get.query({ id: taskId })
         if (refreshedTask) onUpdate(refreshedTask)
       }
     } catch (error) {

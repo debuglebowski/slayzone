@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Button, Label, Switch, Input, Tooltip, TooltipTrigger, TooltipContent } from '@slayzone/ui'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slayzone/ui'
 import { Plus, Pencil, Trash2, Star, Info } from 'lucide-react'
@@ -37,26 +39,33 @@ interface TemplatesSettingsTabProps {
 }
 
 export function TemplatesSettingsTab({ projectId }: TemplatesSettingsTabProps) {
-  const [templates, setTemplates] = useState<TaskTemplate[]>([])
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [editingTemplate, setEditingTemplate] = useState<TaskTemplate | null>(null)
   const [showDialog, setShowDialog] = useState(false)
 
-  const load = useCallback(() => {
-    window.api.taskTemplates.getByProject(projectId).then(setTemplates)
-  }, [projectId])
+  const templatesQuery = useQuery(trpc.template.getByProject.queryOptions({ projectId }))
+  const templates = templatesQuery.data ?? []
 
-  useEffect(() => {
-    load()
-  }, [load])
+  const invalidate = (): Promise<void> =>
+    queryClient.invalidateQueries(trpc.template.getByProject.queryFilter({ projectId }))
+
+  const deleteMutation = useMutation(
+    trpc.template.delete.mutationOptions({ onSuccess: () => void invalidate() })
+  )
+  const setDefaultMutation = useMutation(
+    trpc.template.setDefault.mutationOptions({ onSuccess: () => void invalidate() })
+  )
 
   const handleDelete = async (id: string) => {
-    await window.api.taskTemplates.delete(id)
-    load()
+    await deleteMutation.mutateAsync({ id })
   }
 
   const handleSetDefault = async (templateId: string, isDefault: boolean) => {
-    await window.api.taskTemplates.setDefault(projectId, isDefault ? templateId : null)
-    load()
+    await setDefaultMutation.mutateAsync({
+      projectId,
+      templateId: isDefault ? templateId : null
+    })
   }
 
   const openCreate = () => {
@@ -157,7 +166,7 @@ export function TemplatesSettingsTab({ projectId }: TemplatesSettingsTabProps) {
           projectId={projectId}
           template={editingTemplate}
           onClose={() => setShowDialog(false)}
-          onSaved={load}
+          onSaved={() => void invalidate()}
         />
       )}
     </div>
@@ -188,6 +197,9 @@ interface TemplateFormDialogProps {
 }
 
 function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateFormDialogProps) {
+  const trpc = useTRPC()
+  const createMutation = useMutation(trpc.template.create.mutationOptions())
+  const updateMutation = useMutation(trpc.template.update.mutationOptions())
   const isEdit = !!template
   const [name, setName] = useState(template?.name ?? '')
   const [description, setDescription] = useState(template?.description ?? '')
@@ -202,16 +214,10 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
   const [isDefault, setIsDefault] = useState(template?.is_default ?? false)
   const [saving, setSaving] = useState(false)
 
-  const [modes, setModes] = useState<Array<{ id: string; label: string }>>([])
-  useEffect(() => {
-    window.api.terminalModes
-      .list()
-      .then((m) =>
-        setModes(
-          m.filter((mode) => mode.enabled).map((mode) => ({ id: mode.id, label: mode.label }))
-        )
-      )
-  }, [])
+  const modesQuery = useQuery(trpc.pty.modesList.queryOptions())
+  const modes = (modesQuery.data ?? [])
+    .filter((mode) => mode.enabled)
+    .map((mode) => ({ id: mode.id, label: mode.label }))
 
   const handleSave = async () => {
     if (!name.trim()) return
@@ -229,7 +235,7 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
           panelVisibility,
           isDefault
         }
-        await window.api.taskTemplates.update(data)
+        await updateMutation.mutateAsync(data)
       } else {
         const data: CreateTaskTemplateInput = {
           projectId,
@@ -242,7 +248,7 @@ function TemplateFormDialog({ projectId, template, onClose, onSaved }: TemplateF
           panelVisibility,
           isDefault
         }
-        await window.api.taskTemplates.create(data)
+        await createMutation.mutateAsync(data)
       }
       onSaved()
       onClose()

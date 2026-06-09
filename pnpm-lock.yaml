@@ -819,9 +819,15 @@ importers:
       '@slayzone/telemetry':
         specifier: workspace:*
         version: link:../telemetry
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       framer-motion:
         specifier: ^12.29.0
         version: 12.29.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -1066,12 +1072,18 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
       '@slayzone/worktrees':
         specifier: workspace:*
         version: link:../worktrees
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       '@types/archiver':
         specifier: ^7.0.0
         version: 7.0.0
@@ -1304,9 +1316,15 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
@@ -1338,9 +1356,15 @@ importers:
       '@posthog/react':
         specifier: ^1
         version: 1.7.1(@types/react@19.2.8)(posthog-js@1.347.2)(react@19.2.3)
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@tanstack/react-query':
+        specifier: ^5.100.9
+        version: 5.100.10(react@19.2.3)
       posthog-js:
         specifier: ^1
         version: 1.347.2

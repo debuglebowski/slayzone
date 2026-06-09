@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
 import { CalendarIcon, Plus } from 'lucide-react'
-import type { Task, TaskTemplate } from '@slayzone/task/shared'
+import type { Task } from '@slayzone/task/shared'
 import type { CreateTaskDraft } from '@slayzone/task/shared'
 import type { Tag } from '@slayzone/tags/shared'
 import { CreateTagDialog } from '@slayzone/tags/client'
-import type { Project } from '@slayzone/projects/shared'
 import { getDefaultStatus } from '@slayzone/projects/shared'
 import { track } from '@slayzone/telemetry/client'
 import { createTaskSchema, type CreateTaskFormData, priorityOptions } from '@slayzone/task/shared'
@@ -44,9 +45,11 @@ export function CreateTaskDialog({
   tags,
   onTagCreated
 }: CreateTaskDialogProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  const createMutation = useMutation(trpc.task.create.mutationOptions())
+  const setTagsMutation = useMutation(trpc.tags.setForTask.mutationOptions())
   const [createTagOpen, setCreateTagOpen] = useState(false)
-  const [projects, setProjects] = useState<Project[]>([])
-  const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('__none__')
   const form = useForm<CreateTaskFormData>({
     resolver: zodResolver(createTaskSchema),
@@ -62,29 +65,33 @@ export function CreateTaskDialog({
     prevOpenRef.current = open
   }, [open, draft, form])
 
-  useEffect(() => {
-    if (!open) return
-    window.api.db.getProjects().then((list) => setProjects(list))
-  }, [open])
+  const projectsQuery = useQuery(trpc.projects.list.queryOptions(undefined, { enabled: open }))
+  const projects = projectsQuery.data ?? []
 
   const selectedProjectId = form.watch('projectId')
   const selectedProject = projects.find((project) => project.id === selectedProjectId)
   const projectStatusOptions = buildStatusOptions(selectedProject?.columns_config)
 
   // Fetch templates when project changes. Skip on close so UI doesn't mutate during exit animation.
+  const templatesQuery = useQuery(
+    trpc.template.getByProject.queryOptions(
+      { projectId: selectedProjectId ?? '' },
+      { enabled: open && !!selectedProjectId }
+    )
+  )
+  const templates = open && selectedProjectId ? (templatesQuery.data ?? []) : []
+
+  // Select the project's default template (or none) whenever the loaded list changes.
   useEffect(() => {
     if (!open) return
     if (!selectedProjectId) {
-      setTemplates([])
       setSelectedTemplateId('__none__')
       return
     }
-    window.api.taskTemplates.getByProject(selectedProjectId).then((list) => {
-      setTemplates(list)
-      const def = list.find((t) => t.is_default)
-      setSelectedTemplateId(def?.id ?? '__none__')
-    })
-  }, [open, selectedProjectId])
+    if (!templatesQuery.data) return
+    const def = templatesQuery.data.find((t) => t.is_default)
+    setSelectedTemplateId(def?.id ?? '__none__')
+  }, [open, selectedProjectId, templatesQuery.data])
 
   // Apply template values to form when template changes
   useEffect(() => {
@@ -110,11 +117,11 @@ export function CreateTaskDialog({
     opts?: { statusOverride?: Task['status']; andOpen?: boolean }
   ): Promise<void> => {
     const isAutoCreateEnabledForProject = async (projectId: string): Promise<boolean> => {
-      const [globalSetting, projects] = await Promise.all([
-        window.api.settings.get('auto_create_worktree_on_task_create'),
-        window.api.db.getProjects()
+      const [globalSetting, projectList] = await Promise.all([
+        trpcClient.settings.get.query({ key: 'auto_create_worktree_on_task_create' }),
+        trpcClient.projects.list.query()
       ])
-      const project = projects.find((p) => p.id === projectId)
+      const project = projectList.find((p) => p.id === projectId)
       const override = project?.auto_create_worktree_on_task_create
       if (override === 1) return true
       if (override === 0) return false
@@ -128,7 +135,7 @@ export function CreateTaskDialog({
       shouldAutoCreateWorktree = false
     }
 
-    const task = await window.api.db.createTask({
+    const task = await createMutation.mutateAsync({
       projectId: data.projectId,
       title: data.title,
       description: data.description || undefined,
@@ -138,7 +145,7 @@ export function CreateTaskDialog({
       templateId: selectedTemplateId === '__none__' ? undefined : selectedTemplateId
     })
     if (data.tagIds.length > 0) {
-      await window.api.taskTags.setTagsForTask(task.id, data.tagIds)
+      await setTagsMutation.mutateAsync({ taskId: task.id, tagIds: data.tagIds })
     }
     if (shouldAutoCreateWorktree && !task.worktree_path) {
       window.alert(

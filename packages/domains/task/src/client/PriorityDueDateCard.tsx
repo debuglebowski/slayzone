@@ -14,6 +14,8 @@ import {
   SelectValue
 } from '@slayzone/ui'
 import { track } from '@slayzone/telemetry/client'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 interface PriorityDueDateCardProps {
   task: Task
@@ -24,16 +26,19 @@ export function PriorityDueDateCard({
   task,
   onUpdate
 }: PriorityDueDateCardProps): React.JSX.Element {
+  const trpc = useTRPC()
+  const updateTask = useMutation(trpc.task.update.mutationOptions())
+
   const handlePriorityChange = async (priority: number): Promise<void> => {
     track('task_priority_changed', { priority: String(priority) })
-    const updated = await window.api.db.updateTask({ id: task.id, priority })
+    const updated = await updateTask.mutateAsync({ id: task.id, priority })
     onUpdate(updated)
   }
 
   const handleDueDateChange = async (date: Date | undefined): Promise<void> => {
     track('due_date_set')
     const dueDate = date ? format(date, 'yyyy-MM-dd') : null
-    const updated = await window.api.db.updateTask({ id: task.id, dueDate })
+    const updated = await updateTask.mutateAsync({ id: task.id, dueDate })
     onUpdate(updated)
   }
 
