@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { ChevronDown, Loader2, Download, Upload } from 'lucide-react'
 import {
   Button,
@@ -29,6 +31,9 @@ interface RemoteSectionProps {
 }
 
 export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: RemoteSectionProps) {
+  const trpc = useTRPC()
+  const pushMutation = useMutation(trpc.worktrees.push.mutationOptions())
+  const pullMutation = useMutation(trpc.worktrees.pull.mutationOptions())
   const [pushing, setPushing] = useState(false)
   const [pulling, setPulling] = useState(false)
   const [pushMenuOpen, setPushMenuOpen] = useState(false)
@@ -40,7 +45,11 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
       setPushMenuOpen(false)
       setForcePushConfirmOpen(false)
       try {
-        const result = await window.api.git.push(targetPath, branch ?? undefined, force)
+        const result = await pushMutation.mutateAsync({
+          path: targetPath,
+          branch: branch ?? undefined,
+          force
+        })
         if (!result.success) {
           toast(result.error ?? 'Push failed')
         } else {
@@ -53,13 +62,13 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
         setPushing(false)
       }
     },
-    [targetPath, branch, onSyncDone]
+    [targetPath, branch, onSyncDone, pushMutation]
   )
 
   const handlePull = useCallback(async () => {
     setPulling(true)
     try {
-      const result = await window.api.git.pull(targetPath)
+      const result = await pullMutation.mutateAsync({ path: targetPath })
       if (!result.success) {
         toast(result.error ?? 'Pull failed')
       } else {
@@ -71,7 +80,7 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
     } finally {
       setPulling(false)
     }
-  }, [targetPath, onSyncDone])
+  }, [targetPath, onSyncDone, pullMutation])
 
   const behind = upstreamAB?.behind ?? 0
   const ahead = upstreamAB?.ahead ?? 0

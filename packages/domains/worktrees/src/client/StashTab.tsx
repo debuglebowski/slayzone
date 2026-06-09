@@ -1,12 +1,13 @@
 import {
   useState,
-  useEffect,
-  useCallback,
   useMemo,
   useRef,
+  useCallback,
   forwardRef,
   useImperativeHandle
 } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Archive, FileText } from 'lucide-react'
 import { cn, PulseGrid, useStablePoll } from '@slayzone/ui'
 import type { StashEntry } from '../shared/types'
@@ -39,14 +40,14 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
   { visible, pollIntervalMs = 5000, showAll },
   ref
 ) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const { projectPath, activeTask } = useGitPanelContext()
   const repoPath = activeTask?.worktree_path ?? projectPath
 
   const [stashes, setStashes] = useState<StashEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
-  const [diff, setDiff] = useState<FileDiff[]>([])
-  const [diffLoading, setDiffLoading] = useState(false)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
 
   const lastHashRef = useRef<string>('')
@@ -56,8 +57,10 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
     setLoading(true)
     try {
       const [list, branch] = await Promise.all([
-        window.api.git.listStashes(repoPath),
-        window.api.git.getCurrentBranch(repoPath).catch(() => null)
+        queryClient.fetchQuery(trpc.worktrees.listStashes.queryOptions({ repoPath })),
+        queryClient
+          .fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: repoPath }))
+          .catch(() => null)
       ])
       const hash = JSON.stringify({ list, branch })
       if (hash !== lastHashRef.current) {
@@ -74,7 +77,7 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
     } finally {
       setLoading(false)
     }
-  }, [repoPath])
+  }, [repoPath, queryClient, trpc])
 
   const { refetch } = useStablePoll(load, {
     enabled: visible && !!repoPath,
@@ -93,26 +96,17 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
     [stashes, selectedIndex]
   )
 
-  useEffect(() => {
-    if (!repoPath || selected === null) {
-      setDiff([])
-      return
-    }
-    let cancelled = false
-    setDiffLoading(true)
-    window.api.git
-      .getStashDiff(repoPath, selected.index)
-      .then((patch) => {
-        if (cancelled) return
-        setDiff(parseUnifiedDiff(patch))
-      })
-      .finally(() => {
-        if (!cancelled) setDiffLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [repoPath, selected])
+  const diffQuery = useQuery(
+    trpc.worktrees.getStashDiff.queryOptions(
+      { repoPath: repoPath ?? '', index: selected?.index ?? -1 },
+      { enabled: !!repoPath && selected !== null }
+    )
+  )
+  const diff: FileDiff[] = useMemo(
+    () => (diffQuery.data ? parseUnifiedDiff(diffQuery.data) : []),
+    [diffQuery.data]
+  )
+  const diffLoading = !!repoPath && selected !== null && diffQuery.isFetching
 
   if (!repoPath) {
     return (

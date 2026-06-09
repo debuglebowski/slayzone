@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { useStablePoll } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type { GhPullRequest } from '../shared/types'
@@ -16,6 +18,8 @@ export function usePullRequestTab({
   onUpdateTask: (data: UpdateTaskInput) => Promise<Task>
   onTaskUpdated: (task: Task) => void
 }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [ghInstalled, setGhInstalled] = useState<boolean | null>(null)
   const [pr, setPr] = useState<GhPullRequest | null>(null)
   const [loading, setLoading] = useState(true)
@@ -30,7 +34,9 @@ export function usePullRequestTab({
     let cancelled = false
     ;(async () => {
       try {
-        const installed = await window.api.git.checkGhInstalled()
+        const installed = await queryClient.fetchQuery(
+          trpc.worktrees.checkGhInstalled.queryOptions()
+        )
         if (cancelled) return
         setGhInstalled(installed)
         if (!installed) {
@@ -39,7 +45,9 @@ export function usePullRequestTab({
         }
 
         if (task.pr_url) {
-          const data = await window.api.git.getPrByUrl(projectPath, task.pr_url)
+          const data = await queryClient.fetchQuery(
+            trpc.worktrees.getPrByUrl.queryOptions({ repoPath: projectPath, url: task.pr_url })
+          )
           if (!cancelled) setPr(data)
         }
       } catch {
@@ -50,7 +58,7 @@ export function usePullRequestTab({
     return () => {
       cancelled = true
     }
-  }, [visible, projectPath, task.pr_url])
+  }, [visible, projectPath, task.pr_url, queryClient, trpc])
 
   const lastPrHashRef = useRef<string>('')
 
@@ -58,7 +66,9 @@ export function usePullRequestTab({
   const refreshPr = useCallback(async () => {
     if (!projectPath || !task.pr_url) return null
     try {
-      const data = await window.api.git.getPrByUrl(projectPath, task.pr_url)
+      const data = await queryClient.fetchQuery(
+        trpc.worktrees.getPrByUrl.queryOptions({ repoPath: projectPath, url: task.pr_url })
+      )
       const hash = JSON.stringify(data)
       if (hash !== lastPrHashRef.current) {
         lastPrHashRef.current = hash
@@ -68,7 +78,7 @@ export function usePullRequestTab({
     } catch {
       return null
     }
-  }, [projectPath, task.pr_url])
+  }, [projectPath, task.pr_url, queryClient, trpc])
 
   // Poll PR status when linked (faster when checks are pending)
   const prPollMs = pr?.statusCheckRollup === 'PENDING' ? 10000 : 30000
@@ -90,7 +100,9 @@ export function usePullRequestTab({
         const updated = await onUpdateTask({ id: task.id, prUrl: url })
         onTaskUpdated(updated)
         if (projectPath) {
-          const data = await window.api.git.getPrByUrl(projectPath, url)
+          const data = await queryClient.fetchQuery(
+            trpc.worktrees.getPrByUrl.queryOptions({ repoPath: projectPath, url })
+          )
           setPr(data)
         }
         setLinkOpen(false)
@@ -98,7 +110,7 @@ export function usePullRequestTab({
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [task.id, projectPath, onUpdateTask, onTaskUpdated]
+    [task.id, projectPath, onUpdateTask, onTaskUpdated, queryClient, trpc]
   )
 
   const handleCreated = useCallback(
@@ -106,12 +118,14 @@ export function usePullRequestTab({
       const updated = await onUpdateTask({ id: task.id, prUrl: url })
       onTaskUpdated(updated)
       if (projectPath) {
-        const data = await window.api.git.getPrByUrl(projectPath, url)
+        const data = await queryClient.fetchQuery(
+          trpc.worktrees.getPrByUrl.queryOptions({ repoPath: projectPath, url })
+        )
         setPr(data)
       }
       setCreateOpen(false)
     },
-    [task.id, projectPath, onUpdateTask, onTaskUpdated]
+    [task.id, projectPath, onUpdateTask, onTaskUpdated, queryClient, trpc]
   )
 
   return {

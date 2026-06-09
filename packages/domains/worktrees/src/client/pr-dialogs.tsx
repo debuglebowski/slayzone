@@ -1,5 +1,7 @@
 import type React from 'react'
 import { useState, useEffect } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { GitPullRequest, Loader2 } from 'lucide-react'
 import {
   Button,
@@ -12,7 +14,6 @@ import {
   DialogDescription
 } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
-import type { GhPullRequest } from '../shared/types'
 import { PrStateIcon } from './pr-badges'
 
 // --- Create PR dialog ---
@@ -30,6 +31,7 @@ export function CreatePrDialog({
   projectPath: string
   onCreated: (url: string) => void
 }) {
+  const trpc = useTRPC()
   const targetPath = task.worktree_path ?? projectPath
   const [baseBranch, setBaseBranch] = useState(task.worktree_parent_branch ?? '')
   const [title, setTitle] = useState(task.title)
@@ -37,15 +39,20 @@ export function CreatePrDialog({
   const [draft, setDraft] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const createPrMutation = useMutation(trpc.worktrees.createPr.mutationOptions())
 
   // Resolve default branch when worktree_parent_branch is not set
+  const defaultBranchQuery = useQuery(
+    trpc.worktrees.getDefaultBranch.queryOptions(
+      { path: projectPath },
+      { enabled: open && !task.worktree_parent_branch }
+    )
+  )
   useEffect(() => {
     if (!open || task.worktree_parent_branch) return
-    window.api.git
-      .getDefaultBranch(projectPath)
-      .then(setBaseBranch)
-      .catch(() => setBaseBranch('main'))
-  }, [open, projectPath, task.worktree_parent_branch])
+    if (defaultBranchQuery.isSuccess) setBaseBranch(defaultBranchQuery.data ?? 'main')
+    else if (defaultBranchQuery.isError) setBaseBranch('main')
+  }, [open, task.worktree_parent_branch, defaultBranchQuery.isSuccess, defaultBranchQuery.isError, defaultBranchQuery.data])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,7 +60,7 @@ export function CreatePrDialog({
     setCreating(true)
     setError(null)
     try {
-      const result = await window.api.git.createPr({
+      const result = await createPrMutation.mutateAsync({
         repoPath: targetPath,
         title: title.trim(),
         body: body.trim(),
@@ -145,25 +152,17 @@ export function LinkPrDialog({
   onLink: (url: string) => void
   error: string | null
 }) {
-  const [prs, setPrs] = useState<GhPullRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [fetchError, setFetchError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setLoading(true)
-    setFetchError(null)
-    ;(async () => {
-      try {
-        const list = await window.api.git.listOpenPrs(projectPath)
-        setPrs(list)
-      } catch (err) {
-        setFetchError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [projectPath, open])
+  const trpc = useTRPC()
+  const prsQuery = useQuery(
+    trpc.worktrees.listOpenPrs.queryOptions({ repoPath: projectPath }, { enabled: open })
+  )
+  const prs = prsQuery.data ?? []
+  const loading = prsQuery.isFetching
+  const fetchError = prsQuery.error
+    ? prsQuery.error instanceof Error
+      ? prsQuery.error.message
+      : String(prsQuery.error)
+    : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

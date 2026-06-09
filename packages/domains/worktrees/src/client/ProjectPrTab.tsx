@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { ExternalLink, GitPullRequest, GitMerge, CircleDot, CircleX } from 'lucide-react'
 import { cn, PulseGrid } from '@slayzone/ui'
 import type { Task } from '@slayzone/task/shared'
@@ -24,21 +26,27 @@ const DEFAULT_FILTER: PrFilterState = {
 }
 
 function usePrFilterState(projectId: string | null) {
+  const trpc = useTRPC()
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
   const [filter, setFilter] = useState<PrFilterState>(DEFAULT_FILTER)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const key = projectId ? `pr-filter:${projectId}` : null
 
+  const filterQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: key ?? '' }, { enabled: !!key })
+  )
+  // Seed the editable filter state from the persisted value once it loads.
   useEffect(() => {
-    if (!key) return
-    ;(async () => {
+    if (!key || !filterQuery.isSuccess) return
+    const value = filterQuery.data
+    if (value) {
       try {
-        const value = await window.api.settings.get(key)
-        if (value) setFilter({ ...DEFAULT_FILTER, ...JSON.parse(value) })
+        setFilter({ ...DEFAULT_FILTER, ...JSON.parse(value) })
       } catch {
         /* ignore */
       }
-    })()
-  }, [key])
+    }
+  }, [key, filterQuery.isSuccess, filterQuery.data])
 
   const updateFilter = useCallback(
     (next: Partial<PrFilterState>) => {
@@ -47,46 +55,39 @@ function usePrFilterState(projectId: string | null) {
         if (key) {
           clearTimeout(saveTimerRef.current)
           saveTimerRef.current = setTimeout(() => {
-            window.api.settings.set(key, JSON.stringify(updated))
+            setSettingMutation.mutate({ key, value: JSON.stringify(updated) })
           }, 500)
         }
         return updated
       })
     },
-    [key]
+    [key, setSettingMutation]
   )
 
   return { filter, updateFilter }
 }
 
 export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: ProjectPrTabProps) {
-  const [prs, setPrs] = useState<GhPullRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const trpc = useTRPC()
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
 
   // Extract projectId from path for persistence key
   const projectId = projectPath
   const { filter, updateFilter } = usePrFilterState(projectId)
 
-  useEffect(() => {
-    if (!visible || !projectPath) return
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const list = await window.api.git.listOpenPrs(projectPath)
-        if (!cancelled) setPrs(list)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [visible, projectPath])
+  const prsQuery = useQuery(
+    trpc.worktrees.listOpenPrs.queryOptions(
+      { repoPath: projectPath ?? '' },
+      { enabled: visible && !!projectPath }
+    )
+  )
+  const prs = prsQuery.data ?? []
+  const loading = prsQuery.isPending
+  const error = prsQuery.error
+    ? prsQuery.error instanceof Error
+      ? prsQuery.error.message
+      : String(prsQuery.error)
+    : null
 
   // Build map of PR URL → task
   const prTaskMap = new Map<string, Task>()
@@ -236,7 +237,7 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
                   </div>
                   <button
                     className="shrink-0 p-1 hover:bg-accent rounded"
-                    onClick={() => window.api.shell.openExternal(pr.url)}
+                    onClick={() => openExternalMutation.mutate({ url: pr.url })}
                     title="Open in browser"
                   >
                     <ExternalLink className="h-3 w-3 text-muted-foreground" />

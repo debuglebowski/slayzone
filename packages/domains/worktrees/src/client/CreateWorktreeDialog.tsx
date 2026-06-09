@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { FolderOpen } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, toast } from '@slayzone/ui'
 import { Button, IconButton } from '@slayzone/ui'
@@ -28,6 +30,10 @@ export function CreateWorktreeDialog({
   projectId,
   onCreated
 }: CreateWorktreeDialogProps) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const showOpenDialogMutation = useMutation(trpc.app.dialog.showOpenDialog.mutationOptions())
+  const createWorktreeMutation = useMutation(trpc.worktrees.createWorktree.mutationOptions())
   const [path, setPath] = useState('')
   const [branch, setBranch] = useState('')
   const [loading, setLoading] = useState(false)
@@ -35,7 +41,7 @@ export function CreateWorktreeDialog({
   const [phase, setPhase] = useState<CreateWorktreePhase | null>(null)
 
   const handleBrowse = async () => {
-    const result = await window.api.dialog.showOpenDialog({
+    const result = await showOpenDialogMutation.mutateAsync({
       title: 'Select Worktree Directory',
       properties: ['openDirectory', 'createDirectory', 'promptToCreate']
     })
@@ -52,14 +58,19 @@ export function CreateWorktreeDialog({
     setError(null)
     setPhase(null)
 
+    // NOTE: `onCreateWorktreePhase` has no tRPC subscription proc (createWorktree
+    // is a plain mutation server-side, no phase observable), so it stays on
+    // window.api. The requestId still flows through the createWorktree input.
     const requestId = crypto.randomUUID()
     const unsubscribe = window.api.git.onCreateWorktreePhase(requestId, setPhase)
 
     try {
       // Capture parent branch before creating worktree
-      const parentBranch = await window.api.git.getCurrentBranch(projectPath)
+      const parentBranch = await queryClient.fetchQuery(
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })
+      )
 
-      const result = await window.api.git.createWorktree({
+      const result = await createWorktreeMutation.mutateAsync({
         repoPath: projectPath,
         targetPath: path,
         branch: branch || undefined,

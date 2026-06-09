@@ -1,5 +1,7 @@
 import type React from 'react'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { useStablePoll } from '@slayzone/ui'
 import type { GhPullRequest, GhPrComment, GhPrTimelineEvent, MergeStrategy } from '../shared/types'
 import { parseUnifiedDiff } from './parse-diff'
@@ -19,6 +21,11 @@ export function useLinkedPrView({
   visible: boolean
   onRefreshPr: () => Promise<void>
 }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const addPrCommentMutation = useMutation(trpc.worktrees.addPrComment.mutationOptions())
+  const editPrCommentMutation = useMutation(trpc.worktrees.editPrComment.mutationOptions())
+  const mergePrMutation = useMutation(trpc.worktrees.mergePr.mutationOptions())
   const [comments, setComments] = useState<GhPrTimelineEvent[]>([])
   const [loadingComments, setLoadingComments] = useState(true)
   const [commentBody, setCommentBody] = useState('')
@@ -49,13 +56,15 @@ export function useLinkedPrView({
 
   const fetchComments = useCallback(async () => {
     try {
-      const data = await window.api.git.getPrComments(projectPath, pr.number)
+      const data = await queryClient.fetchQuery(
+        trpc.worktrees.getPrComments.queryOptions({ repoPath: projectPath, prNumber: pr.number })
+      )
       setComments(data)
     } catch {
       /* ignore */
     }
     setLoadingComments(false)
-  }, [projectPath, pr.number])
+  }, [projectPath, pr.number, queryClient, trpc])
 
   const refreshAll = useCallback(async () => {
     await Promise.all([onRefreshPr(), fetchComments()])
@@ -66,7 +75,9 @@ export function useLinkedPrView({
   const fetchCommentsPoll = useCallback(async () => {
     if (!projectPath) return null
     try {
-      const data = await window.api.git.getPrComments(projectPath, pr.number)
+      const data = await queryClient.fetchQuery(
+        trpc.worktrees.getPrComments.queryOptions({ repoPath: projectPath, prNumber: pr.number })
+      )
       const hash = JSON.stringify(data)
       if (hash !== lastCommentsHashRef.current) {
         lastCommentsHashRef.current = hash
@@ -76,7 +87,7 @@ export function useLinkedPrView({
     } catch {
       return null
     }
-  }, [projectPath, pr.number])
+  }, [projectPath, pr.number, queryClient, trpc])
 
   useStablePoll(fetchCommentsPoll, { enabled: visible, baseDelayMs: 30_000 })
 
@@ -85,13 +96,15 @@ export function useLinkedPrView({
     if (!visible) return
     ;(async () => {
       try {
-        const user = await window.api.git.getGhUser(projectPath)
+        const user = await queryClient.fetchQuery(
+          trpc.worktrees.getGhUser.queryOptions({ repoPath: projectPath })
+        )
         setGhUser(user)
       } catch {
         /* ignore */
       }
     })()
-  }, [visible, projectPath])
+  }, [visible, projectPath, queryClient, trpc])
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -113,7 +126,11 @@ export function useLinkedPrView({
     setSubmitting(true)
     setCommentError(null)
     try {
-      await window.api.git.addPrComment(projectPath, pr.number, commentBody.trim())
+      await addPrCommentMutation.mutateAsync({
+        repoPath: projectPath,
+        prNumber: pr.number,
+        body: commentBody.trim()
+      })
       setCommentBody('')
       if (textareaRef.current) textareaRef.current.style.height = 'auto'
       await fetchComments()
@@ -147,7 +164,7 @@ export function useLinkedPrView({
     if (!editingId || !editBody.trim()) return
     setEditSubmitting(true)
     try {
-      await window.api.git.editPrComment({
+      await editPrCommentMutation.mutateAsync({
         repoPath: projectPath,
         commentId: editingId,
         body: editBody.trim()
@@ -159,7 +176,7 @@ export function useLinkedPrView({
       setCommentError(err instanceof Error ? err.message : 'Failed to edit comment')
     }
     setEditSubmitting(false)
-  }, [editingId, editBody, projectPath, fetchComments])
+  }, [editingId, editBody, projectPath, fetchComments, editPrCommentMutation])
 
   const handleCancelEdit = useCallback(() => {
     setEditingId(null)
@@ -206,7 +223,7 @@ export function useLinkedPrView({
     setMerging(true)
     setMergeError(null)
     try {
-      await window.api.git.mergePr({
+      await mergePrMutation.mutateAsync({
         repoPath: projectPath,
         prNumber: pr.number,
         strategy: mergeStrategy,
@@ -227,13 +244,15 @@ export function useLinkedPrView({
     setDiffLoading(true)
     setDiffError(null)
     try {
-      const raw = await window.api.git.getPrDiff(projectPath, pr.number)
+      const raw = await queryClient.fetchQuery(
+        trpc.worktrees.getPrDiff.queryOptions({ repoPath: projectPath, prNumber: pr.number })
+      )
       setDiffFiles(parseUnifiedDiff(raw))
     } catch (err) {
       setDiffError(err instanceof Error ? err.message : 'Failed to load diff')
     }
     setDiffLoading(false)
-  }, [diffFiles.length, diffLoading, projectPath, pr.number])
+  }, [diffFiles.length, diffLoading, projectPath, pr.number, queryClient, trpc])
 
   const toggleFileExpand = useCallback((path: string) => {
     setExpandedFiles((prev) => {

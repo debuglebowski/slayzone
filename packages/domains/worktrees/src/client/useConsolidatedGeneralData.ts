@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import type {
   AheadBehind,
@@ -97,6 +99,17 @@ export function useConsolidatedGeneralData(
   pollIntervalMs: number,
   onUpdateTask: (data: UpdateTaskInput) => Promise<Task>
 ): ConsolidatedGeneralData {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const initMutation = useMutation(trpc.worktrees.init.mutationOptions())
+  const createWorktreeMutation = useMutation(trpc.worktrees.createWorktree.mutationOptions())
+  const copyIgnoredFilesMutation = useMutation(trpc.worktrees.copyIgnoredFiles.mutationOptions())
+  const removeWorktreeMutation = useMutation(trpc.worktrees.removeWorktree.mutationOptions())
+  const rebaseOntoMutation = useMutation(trpc.worktrees.rebaseOnto.mutationOptions())
+  const mergeFromMutation = useMutation(trpc.worktrees.mergeFrom.mutationOptions())
+  const mergeIntoParentMutation = useMutation(trpc.worktrees.mergeIntoParent.mutationOptions())
+  const pushMutation = useMutation(trpc.worktrees.push.mutationOptions())
+  const pullMutation = useMutation(trpc.worktrees.pull.mutationOptions())
   const hasWorktree = !!task.worktree_path
   const targetPath = task.worktree_path ?? task.base_dir ?? projectPath
   const parentBranch = task.worktree_parent_branch
@@ -145,7 +158,9 @@ export function useConsolidatedGeneralData(
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
     try {
-      const isRepo = await window.api.git.isGitRepo(projectPath)
+      const isRepo = await queryClient.fetchQuery(
+        trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
+      )
       if (!isRepo) {
         const hash = JSON.stringify({ isRepo: false })
         if (hash !== lastGitHashRef.current) {
@@ -156,8 +171,8 @@ export function useConsolidatedGeneralData(
       }
 
       const [branch, remote] = await Promise.all([
-        window.api.git.getCurrentBranch(projectPath),
-        window.api.git.getRemoteUrl(projectPath)
+        queryClient.fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })),
+        queryClient.fetchQuery(trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }))
       ])
 
       let status: StatusSummary | null = null
@@ -165,9 +180,16 @@ export function useConsolidatedGeneralData(
       if (targetPath) {
         const activeBranch = hasWorktree ? worktreeBranch : branch
         ;[status, uab] = await Promise.all([
-          window.api.git.getStatusSummary(targetPath),
+          queryClient.fetchQuery(
+            trpc.worktrees.getStatusSummary.queryOptions({ repoPath: targetPath })
+          ),
           activeBranch
-            ? window.api.git.getAheadBehindUpstream(targetPath, activeBranch)
+            ? queryClient.fetchQuery(
+                trpc.worktrees.getAheadBehindUpstream.queryOptions({
+                  path: targetPath,
+                  branch: activeBranch
+                })
+              )
             : Promise.resolve(null)
         ])
       }
@@ -187,13 +209,15 @@ export function useConsolidatedGeneralData(
     } catch {
       return null
     }
-  }, [projectPath, targetPath, hasWorktree, worktreeBranch])
+  }, [projectPath, targetPath, hasWorktree, worktreeBranch, queryClient, trpc])
 
   // Fetch branch comparison data
   const fetchBranchData = useCallback(async () => {
     if (!targetPath || !parentBranch) return null
     try {
-      const branch = await window.api.git.getCurrentBranch(targetPath)
+      const branch = await queryClient.fetchQuery(
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: targetPath })
+      )
       if (!branch) {
         const hash = JSON.stringify({ branch: null })
         if (hash !== lastBranchHashRef.current) {
@@ -204,16 +228,20 @@ export function useConsolidatedGeneralData(
       }
 
       const repoPath = projectPath || targetPath
-      const result = await window.api.git.getResolvedForkGraph(
-        targetPath,
-        repoPath,
-        branch,
-        parentBranch,
-        branch,
-        parentBranch
+      const result = await queryClient.fetchQuery(
+        trpc.worktrees.getResolvedForkGraph.queryOptions({
+          targetPath,
+          repoPath,
+          activeBranch: branch,
+          compareBranch: parentBranch,
+          activeBranchLabel: branch,
+          compareBranchLabel: parentBranch
+        })
       )
       const stats = result?.forkPoint
-        ? await window.api.git.getDiffStats(targetPath, parentBranch)
+        ? await queryClient.fetchQuery(
+            trpc.worktrees.getDiffStats.queryOptions({ path: targetPath, ref: parentBranch })
+          )
         : null
 
       // Hash only the values that drive setState — exclude `result.graph`
@@ -245,7 +273,7 @@ export function useConsolidatedGeneralData(
       }
       return null
     }
-  }, [targetPath, projectPath, parentBranch])
+  }, [targetPath, projectPath, parentBranch, queryClient, trpc])
 
   // Worktree branch
   useEffect(() => {
@@ -253,11 +281,11 @@ export function useConsolidatedGeneralData(
       setWorktreeBranch(null)
       return
     }
-    window.api.git
-      .getCurrentBranch(task.worktree_path)
+    queryClient
+      .fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path }))
       .then(setWorktreeBranch)
       .catch(() => setWorktreeBranch(null))
-  }, [task.worktree_path])
+  }, [task.worktree_path, queryClient, trpc])
 
   useStablePoll(fetchGitData, { enabled: visible && !!projectPath, baseDelayMs: pollIntervalMs })
   useStablePoll(fetchBranchData, {
@@ -277,26 +305,26 @@ export function useConsolidatedGeneralData(
     const repoPath = projectPath || targetPath
     if (!repoPath) return
     if (task.pr_url) {
-      window.api.git
-        .getPrByUrl(repoPath, task.pr_url)
+      queryClient
+        .fetchQuery(trpc.worktrees.getPrByUrl.queryOptions({ repoPath, url: task.pr_url }))
         .then(setPr)
         .catch(() => setPr(null))
     } else if (activeBranch) {
-      window.api.git
-        .listOpenPrs(repoPath)
+      queryClient
+        .fetchQuery(trpc.worktrees.listOpenPrs.queryOptions({ repoPath }))
         .then((prs) => setPr(prs.find((p) => p.headRefName === activeBranch) ?? null))
         .catch(() => setPr(null))
     }
-  }, [task.pr_url, activeBranch, projectPath, targetPath])
+  }, [task.pr_url, activeBranch, projectPath, targetPath, queryClient, trpc])
 
   // Metadata — one-time per worktree path
   useEffect(() => {
     if (!task.worktree_path) return
-    window.api.git
-      .getWorktreeMetadata(task.worktree_path)
+    queryClient
+      .fetchQuery(trpc.worktrees.getWorktreeMetadata.queryOptions({ path: task.worktree_path }))
       .then(setMetadata)
       .catch(() => setMetadata(null))
-  }, [task.worktree_path])
+  }, [task.worktree_path, queryClient, trpc])
 
   // Reset on path change
   useEffect(() => {
@@ -308,27 +336,31 @@ export function useConsolidatedGeneralData(
     if (!projectPath) return
     setInitializing(true)
     try {
-      await window.api.git.init(projectPath)
+      await initMutation.mutateAsync({ path: projectPath })
       setIsGitRepo(true)
-      const branch = await window.api.git.getCurrentBranch(projectPath)
+      const branch = await queryClient.fetchQuery(
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })
+      )
       setCurrentBranch(branch)
     } catch {
       /* ignore */
     } finally {
       setInitializing(false)
     }
-  }, [projectPath])
+  }, [projectPath, initMutation, queryClient, trpc])
 
   /** Resolve worktree path params (shared by direct create and ask-dialog flows) */
   const resolveWorktreeParams = useCallback(async () => {
     if (!projectPath) return null
     const basePathTemplate =
-      (await window.api.settings.get('worktree_base_path')) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+      (await queryClient.fetchQuery(
+        trpc.settings.get.queryOptions({ key: 'worktree_base_path' })
+      )) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
     const basePath = resolveWorktreeBasePathTemplate(basePathTemplate, projectPath)
     const branch = slugify(task.title) || `task-${task.id.slice(0, 8)}`
     const worktreePath = joinWorktreePath(basePath, branch)
     return { branch, worktreePath }
-  }, [projectPath, task.title, task.id])
+  }, [projectPath, task.title, task.id, queryClient, trpc])
 
   /** Create worktree (no auto-copy), optionally copy specific files, then link to task */
   const createWorktreeAndLink = useCallback(
@@ -340,19 +372,29 @@ export function useConsolidatedGeneralData(
     ) => {
       if (!projectPath) return
       // Omit projectId so server skips copy resolution — we handle it here
-      await window.api.git.createWorktree({
+      await createWorktreeMutation.mutateAsync({
         repoPath: projectPath,
         targetPath: worktreePath,
         ...(useExistingBranch ? { sourceBranch: branch } : { branch })
       })
       if (filesToCopy === 'all') {
-        await window.api.git.copyIgnoredFiles(projectPath, worktreePath, [], 'all')
+        await copyIgnoredFilesMutation.mutateAsync({
+          repoPath: projectPath,
+          worktreePath,
+          paths: [],
+          mode: 'all'
+        })
       } else if (Array.isArray(filesToCopy) && filesToCopy.length > 0) {
-        await window.api.git.copyIgnoredFiles(projectPath, worktreePath, filesToCopy, 'custom')
+        await copyIgnoredFilesMutation.mutateAsync({
+          repoPath: projectPath,
+          worktreePath,
+          paths: filesToCopy,
+          mode: 'custom'
+        })
       }
       await onUpdateTask({ id: task.id, worktreePath, worktreeParentBranch: currentBranch })
     },
-    [projectPath, task.id, currentBranch, onUpdateTask]
+    [projectPath, task.id, currentBranch, onUpdateTask, createWorktreeMutation, copyIgnoredFilesMutation]
   )
 
   const handleAddWorktree = useCallback(async () => {
@@ -363,7 +405,9 @@ export function useConsolidatedGeneralData(
       if (!params) return
 
       // Check copy behavior before creating
-      const { behavior } = await window.api.git.resolveCopyBehavior(task.project_id)
+      const { behavior } = await queryClient.fetchQuery(
+        trpc.worktrees.resolveCopyBehavior.queryOptions({ projectId: task.project_id })
+      )
       if (behavior === 'ask') {
         // Show dialog — worktree created on confirm
         setCopyFilesDialog({
@@ -378,7 +422,7 @@ export function useConsolidatedGeneralData(
 
       // Non-ask: create immediately (server handles copy for all/custom/none)
       setCreating(true)
-      await window.api.git.createWorktree({
+      await createWorktreeMutation.mutateAsync({
         repoPath: projectPath,
         targetPath: params.worktreePath,
         branch: params.branch,
@@ -394,7 +438,17 @@ export function useConsolidatedGeneralData(
     } finally {
       setCreating(false)
     }
-  }, [projectPath, task.id, task.project_id, currentBranch, onUpdateTask, resolveWorktreeParams])
+  }, [
+    projectPath,
+    task.id,
+    task.project_id,
+    currentBranch,
+    onUpdateTask,
+    resolveWorktreeParams,
+    queryClient,
+    trpc,
+    createWorktreeMutation
+  ])
 
   const handleAddWorktreeFromBranch = useCallback(
     async (sourceBranch: string) => {
@@ -402,14 +456,17 @@ export function useConsolidatedGeneralData(
       setCreateError(null)
       try {
         const basePathTemplate =
-          (await window.api.settings.get('worktree_base_path')) ||
-          DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
+          (await queryClient.fetchQuery(
+            trpc.settings.get.queryOptions({ key: 'worktree_base_path' })
+          )) || DEFAULT_WORKTREE_BASE_PATH_TEMPLATE
         const basePath = resolveWorktreeBasePathTemplate(basePathTemplate, projectPath)
         // Use the branch name as the directory name
         const dirName = sourceBranch.replace(/\//g, '-')
         const worktreePath = joinWorktreePath(basePath, dirName)
 
-        const { behavior } = await window.api.git.resolveCopyBehavior(task.project_id)
+        const { behavior } = await queryClient.fetchQuery(
+          trpc.worktrees.resolveCopyBehavior.queryOptions({ projectId: task.project_id })
+        )
         if (behavior === 'ask') {
           setCopyFilesDialog({
             open: true,
@@ -423,7 +480,7 @@ export function useConsolidatedGeneralData(
         }
 
         setCreating(true)
-        await window.api.git.createWorktree({
+        await createWorktreeMutation.mutateAsync({
           repoPath: projectPath,
           targetPath: worktreePath,
           sourceBranch,
@@ -436,7 +493,16 @@ export function useConsolidatedGeneralData(
         setCreating(false)
       }
     },
-    [projectPath, task.id, task.project_id, currentBranch, onUpdateTask]
+    [
+      projectPath,
+      task.id,
+      task.project_id,
+      currentBranch,
+      onUpdateTask,
+      queryClient,
+      trpc,
+      createWorktreeMutation
+    ]
   )
 
   const handleCopyFilesConfirm = useCallback(
@@ -493,11 +559,11 @@ export function useConsolidatedGeneralData(
       if (!projectPath || !task.worktree_path) return
       setRemoving(true)
       try {
-        const result = await window.api.git.removeWorktree(
-          projectPath,
-          task.worktree_path,
-          branchToDelete
-        )
+        const result = await removeWorktreeMutation.mutateAsync({
+          repoPath: projectPath,
+          worktreePath: task.worktree_path,
+          branchHint: branchToDelete
+        })
         await onUpdateTask({ id: task.id, worktreePath: null, worktreeParentBranch: null })
         if (result.branchError) {
           toast(result.branchError)
@@ -508,7 +574,7 @@ export function useConsolidatedGeneralData(
         setRemoving(false)
       }
     },
-    [projectPath, task.id, task.worktree_path, onUpdateTask]
+    [projectPath, task.id, task.worktree_path, onUpdateTask, removeWorktreeMutation]
   )
 
   // Fetch detected worktrees when no worktree is linked
@@ -517,11 +583,11 @@ export function useConsolidatedGeneralData(
       setDetectedWorktrees([])
       return
     }
-    window.api.git
-      .detectWorktrees(projectPath)
+    queryClient
+      .fetchQuery(trpc.worktrees.detectWorktrees.queryOptions({ repoPath: projectPath }))
       .then((wts) => setDetectedWorktrees(wts.filter((w) => !w.isMain)))
       .catch(() => setDetectedWorktrees([]))
-  }, [hasWorktree, projectPath])
+  }, [hasWorktree, projectPath, queryClient, trpc])
 
   const handleAction = useCallback(
     async (action: string) => {
@@ -529,14 +595,20 @@ export function useConsolidatedGeneralData(
       setActionLoading(action)
       try {
         if (action === 'rebase') {
-          const result = await window.api.git.rebaseOnto(targetPath, parentBranch)
+          const result = await rebaseOntoMutation.mutateAsync({
+            path: targetPath,
+            ontoBranch: parentBranch
+          })
           if (result.success) {
             toast('Rebase complete')
             fetchBranchData()
           } else if (result.conflicted) toast(result.error ?? 'Rebase has conflicts')
           else toast(result.error ?? 'Rebase failed')
         } else if (action === 'merge') {
-          const result = await window.api.git.mergeFrom(targetPath, parentBranch)
+          const result = await mergeFromMutation.mutateAsync({
+            path: targetPath,
+            branch: parentBranch
+          })
           if (result.success) {
             toast(`Merged ${parentBranch}`)
             fetchBranchData()
@@ -544,17 +616,21 @@ export function useConsolidatedGeneralData(
           else toast(result.error ?? 'Merge failed')
         } else if (action === 'mergeToParent') {
           if (!projectPath) return
-          const result = await window.api.git.mergeIntoParent(projectPath, parentBranch, taskBranch)
+          const result = await mergeIntoParentMutation.mutateAsync({
+            projectPath,
+            parentBranch,
+            sourceBranch: taskBranch
+          })
           if (result.success) {
             toast(`Merged into ${parentBranch}`)
             fetchBranchData()
           } else if (result.conflicted) toast(result.error ?? 'Merge has conflicts')
           else toast(result.error ?? 'Merge failed')
         } else if (action === 'push') {
-          const result = await window.api.git.push(targetPath, taskBranch)
+          const result = await pushMutation.mutateAsync({ path: targetPath, branch: taskBranch })
           toast(result.success ? 'Pushed' : (result.error ?? 'Push failed'))
         } else if (action === 'pull') {
-          const result = await window.api.git.pull(targetPath)
+          const result = await pullMutation.mutateAsync({ path: targetPath })
           if (result.success) {
             toast('Pulled')
             fetchBranchData()
@@ -566,7 +642,18 @@ export function useConsolidatedGeneralData(
         setActionLoading(null)
       }
     },
-    [targetPath, parentBranch, taskBranch, fetchBranchData]
+    [
+      targetPath,
+      parentBranch,
+      taskBranch,
+      projectPath,
+      fetchBranchData,
+      rebaseOntoMutation,
+      mergeFromMutation,
+      mergeIntoParentMutation,
+      pushMutation,
+      pullMutation
+    ]
   )
 
   const handleConfirmedAction = useCallback(
@@ -588,10 +675,12 @@ export function useConsolidatedGeneralData(
   const handleMergeToParent = useCallback(
     async (deleteWorktree: boolean) => {
       if (!projectPath || !parentBranch || !taskBranch) return
-      const hasChanges = await window.api.git.hasUncommittedChanges(projectPath)
+      const hasChanges = await queryClient.fetchQuery(
+        trpc.worktrees.hasUncommittedChanges.queryOptions({ path: projectPath })
+      )
       setMergeToParentDialog({ open: true, hasMainChanges: hasChanges, deleteWorktree })
     },
-    [projectPath, parentBranch, taskBranch]
+    [projectPath, parentBranch, taskBranch, queryClient, trpc]
   )
 
   const confirmMergeToParent = useCallback(async () => {

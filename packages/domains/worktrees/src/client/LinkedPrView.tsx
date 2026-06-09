@@ -10,6 +10,8 @@ import {
   RefreshCw,
   ChevronsUpDown
 } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   Button,
   IconButton,
@@ -49,6 +51,8 @@ export function LinkedPrView({
   onUnlink: () => void
   onRefreshPr: () => Promise<void>
 }) {
+  const trpc = useTRPC()
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
   const {
     comments,
     loadingComments,
@@ -156,7 +160,7 @@ export function LinkedPrView({
                     aria-label="Open in browser"
                     variant="ghost"
                     className="h-6 w-6"
-                    onClick={() => window.api.shell.openExternal(pr.url)}
+                    onClick={() => openExternalMutation.mutate({ url: pr.url })}
                   >
                     <ExternalLink className="h-3 w-3" />
                   </IconButton>

@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import {
   GitBranch,
   GitMerge,
@@ -313,19 +315,16 @@ function BranchPickerDialog({
   projectPath: string | null
   onSelect: (branch: string) => void
 }) {
-  const [branches, setBranches] = useState<string[]>([])
+  const trpc = useTRPC()
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!open || !projectPath) return
-    setLoading(true)
-    window.api.git
-      .listBranches(projectPath)
-      .then(setBranches)
-      .catch(() => setBranches([]))
-      .finally(() => setLoading(false))
-  }, [open, projectPath])
+  const branchesQuery = useQuery(
+    trpc.worktrees.listBranches.queryOptions(
+      { path: projectPath ?? '' },
+      { enabled: open && !!projectPath }
+    )
+  )
+  const branches = branchesQuery.data ?? []
+  const loading = branchesQuery.isFetching
 
   const filtered = branches.filter((b) => b.toLowerCase().includes(search.toLowerCase()))
 

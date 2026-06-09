@@ -1,4 +1,6 @@
 import { GitPullRequest, Link2, Plus, Unlink, AlertTriangle } from 'lucide-react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Button, PulseGrid } from '@slayzone/ui'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 import { LinkedPrView } from './LinkedPrView'
@@ -22,6 +24,8 @@ export function PullRequestTab({
   onUpdateTask,
   onTaskUpdated
 }: PullRequestTabProps) {
+  const trpc = useTRPC()
+  const openExternalMutation = useMutation(trpc.app.shell.openExternal.mutationOptions())
   const {
     ghInstalled,
     pr,
@@ -87,7 +91,7 @@ export function PullRequestTab({
             href="#"
             onClick={(e) => {
               e.preventDefault()
-              window.api.shell.openExternal(task.pr_url!)
+              openExternalMutation.mutate({ url: task.pr_url! })
             }}
           >
             {task.pr_url}

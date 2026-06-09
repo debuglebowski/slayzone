@@ -1,4 +1,6 @@
 import { useMemo } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { useDialogStore } from '@slayzone/settings/client'
 import {
   FolderGit2,
@@ -39,6 +41,8 @@ export function WorktreeCard({
   onRemove: () => void
   onAssign: () => void
 }) {
+  const trpc = useTRPC()
+  const revealInFinderMutation = useMutation(trpc.worktrees.revealInFinder.mutationOptions())
   const { tasks, activeTask } = useGitPanelContext()
   const displayTitle = node.isMain ? 'Main Repository' : node.branch || 'detached HEAD'
   const isActive =
@@ -187,7 +191,9 @@ export function WorktreeCard({
                   </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => window.api.git.revealInFinder(node.path)}>
+                  <DropdownMenuItem
+                    onClick={() => revealInFinderMutation.mutate({ path: node.path })}
+                  >
                     <FolderSearch className="h-3.5 w-3.5 mr-2" /> Reveal in Finder
                   </DropdownMenuItem>
                   {!node.task && (

@@ -4,8 +4,9 @@
  * Tests for git-diff-store.ts — shared, refcounted snapshot poll store.
  *
  * Exercises the pure module surface (subscribeEntry via useGitDiffSnapshot),
- * not the React render output. `window.api.git.*` is stubbed with a
- * controllable mock. Fake timers drive poll intervals.
+ * not the React render output. The tRPC transport is stubbed via
+ * `_setGitDiffStoreTransport`; fs-watcher events are driven through
+ * `notifyDiffChanged`. Fake timers drive poll intervals.
  *
  * Run: pnpm --filter @slayzone/worktrees exec vitest run src/client/git-diff-store.test.ts
  */
@@ -17,11 +18,36 @@ import {
   _storeStats,
   _storeEntryKeys,
   _resetStore,
-  _pathWatcherStats
+  _pathWatcherStats,
+  _setGitDiffStoreTransport,
+  notifyDiffChanged
 } from './git-diff-store'
 import type { GitDiffSnapshot } from '../shared/types'
 
-// ── Stub window.api.git ────────────────────────────────────────────────
+// useGitDiffSnapshot now reads useTRPC/useTRPCClient/useQueryClient/useSubscription
+// to wire the store transport + fs-watcher subscriptions. The store itself uses
+// only the injected transport (set below), so stub the transport hooks to inert
+// no-ops — the test drives the store directly via _setGitDiffStoreTransport +
+// notifyDiffChanged.
+vi.mock('@slayzone/transport/client', () => ({
+  useTRPC: () => ({
+    worktrees: {
+      getWorkingDiff: { queryOptions: () => ({}) },
+      watchStart: {},
+      watchStop: {},
+      onDiffChanged: { subscriptionOptions: () => ({}) },
+      onDiffWatchFailed: { subscriptionOptions: () => ({}) }
+    }
+  }),
+  useTRPCClient: () => ({}),
+  useSubscription: () => undefined
+}))
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>()
+  return { ...actual, useQueryClient: () => ({ fetchQuery: () => Promise.resolve(undefined) }) }
+})
+
+// ── Transport stub ─────────────────────────────────────────────────────
 //
 // `getWorkingDiff` returns the NEXT queued snapshot (or the last one forever
 // if the queue is drained). Each test pushes specific snapshots. If no
@@ -45,13 +71,8 @@ const gitStub = {
   getWorkingDiff: vi.fn<() => Promise<GitDiffSnapshot>>(),
   watchStart: vi.fn<(p: string) => Promise<void>>(),
   watchStop: vi.fn<(p: string) => Promise<void>>(),
-  diffChangedListeners: new Set<(p: string) => void>(),
-  onDiffChanged(cb: (p: string) => void): () => void {
-    gitStub.diffChangedListeners.add(cb)
-    return () => gitStub.diffChangedListeners.delete(cb)
-  },
   _emitDiffChanged(path: string): void {
-    for (const cb of gitStub.diffChangedListeners) cb(path)
+    notifyDiffChanged(path)
   }
 }
 
@@ -61,7 +82,6 @@ beforeEach(() => {
   gitStub.getWorkingDiff.mockReset()
   gitStub.watchStart.mockReset()
   gitStub.watchStop.mockReset()
-  gitStub.diffChangedListeners.clear()
   // Default: resolve to a fresh empty snapshot unless test overrides.
   gitStub.getWorkingDiff.mockImplementation(async () => makeSnapshot(''))
   // Default: watchStart never resolves (keeps watcher inactive) so poll-only
@@ -69,14 +89,17 @@ beforeEach(() => {
   gitStub.watchStart.mockImplementation(() => new Promise(() => {}))
   gitStub.watchStop.mockResolvedValue(undefined)
 
-  // Install the stub on window.api.
-  ;(globalThis as unknown as { window: { api: { git: typeof gitStub } } }).window = {
-    api: { git: gitStub }
-  }
+  // Wire the store transport to the controllable stub.
+  _setGitDiffStoreTransport({
+    getWorkingDiff: gitStub.getWorkingDiff,
+    watchStart: gitStub.watchStart,
+    watchStop: gitStub.watchStop
+  })
 })
 
 afterEach(() => {
   _resetStore()
+  _setGitDiffStoreTransport(null)
   vi.useRealTimers()
 })
 

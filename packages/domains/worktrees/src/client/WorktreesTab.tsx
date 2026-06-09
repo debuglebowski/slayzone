@@ -7,6 +7,8 @@ import {
   useImperativeHandle,
   forwardRef
 } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { FolderGit2 } from 'lucide-react'
 import {
   AlertDialog,
@@ -42,6 +44,9 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   { visible, pollIntervalMs = 5000 },
   ref
 ) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const removeWorktreeMutation = useMutation(trpc.worktrees.removeWorktree.mutationOptions())
   const { projectPath, tasks, activeTask, onUpdateTask } = useGitPanelContext()
 
   const [worktrees, setWorktrees] = useState<DetectedWorktree[]>([])
@@ -71,7 +76,9 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   const fetchWorktrees = useCallback(async () => {
     if (!projectPath) return null
     try {
-      const detected = await window.api.git.detectWorktrees(projectPath)
+      const detected = await queryClient.fetchQuery(
+        trpc.worktrees.detectWorktrees.queryOptions({ repoPath: projectPath })
+      )
       const hash = JSON.stringify(detected)
       if (hash !== lastWorktreesHashRef.current) {
         lastWorktreesHashRef.current = hash
@@ -83,7 +90,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
       setLoading(false)
       return null
     }
-  }, [projectPath])
+  }, [projectPath, queryClient, trpc])
 
   useEffect(() => {
     if (visible && projectPath && worktrees.length === 0) setLoading(true)
@@ -99,7 +106,9 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
     const activePath = activeTask?.worktree_path || worktrees.find((wt) => wt.isMain)?.path
     let activeDirty: boolean | null = null
     if (activePath) {
-      activeDirty = await window.api.git.isDirty(activePath)
+      activeDirty = await queryClient.fetchQuery(
+        trpc.worktrees.isDirty.queryOptions({ path: activePath })
+      )
       setDirtyStatuses((prev) => {
         if (prev[activePath] === activeDirty) return prev
         return { ...prev, [activePath]: activeDirty as boolean }
@@ -111,14 +120,16 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
     if (backgroundWts.length > 0) {
       const randomWt = backgroundWts[Math.floor(Math.random() * backgroundWts.length)]
       bgKey = randomWt.path
-      bgDirty = await window.api.git.isDirty(randomWt.path)
+      bgDirty = await queryClient.fetchQuery(
+        trpc.worktrees.isDirty.queryOptions({ path: randomWt.path })
+      )
       setDirtyStatuses((prev) => {
         if (prev[randomWt.path] === bgDirty) return prev
         return { ...prev, [randomWt.path]: bgDirty as boolean }
       })
     }
     return JSON.stringify({ activePath, activeDirty, bgKey, bgDirty })
-  }, [worktrees, activeTask?.worktree_path])
+  }, [worktrees, activeTask?.worktree_path, queryClient, trpc])
 
   useStablePoll(pollDirty, { enabled: visible && worktrees.length > 0, baseDelayMs: 10_000 })
 
@@ -128,7 +139,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   const handleRemoveWorktree = async (path: string) => {
     if (!projectPath) return
     try {
-      await window.api.git.removeWorktree(projectPath, path)
+      await removeWorktreeMutation.mutateAsync({ repoPath: projectPath, worktreePath: path })
       const task = tasks.find((t) => t.worktree_path === path)
       if (task && onUpdateTask) {
         await onUpdateTask({ id: task.id, worktreePath: null })

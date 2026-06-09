@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { buildFileTree } from '@slayzone/ui'
 import { parseUnifiedDiff } from './parse-diff'
 import type { FileDiff as FileDiffType } from './parse-diff'
@@ -34,6 +36,8 @@ export function useGitDiffData(
     onSnapshotChange
   }: UseGitDiffDataOptions
 ) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const [untrackedDiffs, setUntrackedDiffs] = useState<Map<string, FileDiffType>>(new Map())
 
   // Shared snapshot: identity-stable across panels hitting the same worktree,
@@ -153,8 +157,10 @@ export function useGitDiffData(
 
     const added = curr.filter((f) => !prevSet.has(f))
     for (const filePath of added) {
-      window.api.git
-        .getUntrackedFileDiff(targetPath, filePath)
+      queryClient
+        .fetchQuery(
+          trpc.worktrees.getUntrackedFileDiff.queryOptions({ repoPath: targetPath, filePath })
+        )
         .then((patch) => {
           const parsed = parseUnifiedDiff(patch)
           if (parsed.length > 0) {
@@ -165,7 +171,7 @@ export function useGitDiffData(
           // ignore — file may be binary or inaccessible
         })
     }
-  }, [snapshot, targetPath])
+  }, [snapshot, targetPath, queryClient, trpc])
 
   const hasAnyChanges =
     !!snapshot &&

@@ -1,4 +1,6 @@
 import { useCallback } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Task, UpdateTaskInput } from '@slayzone/task/shared'
 
 export function useGitMergeActions({
@@ -14,24 +16,36 @@ export function useGitMergeActions({
   onUpdateTask?: (data: UpdateTaskInput) => Promise<Task>
   onTaskUpdated?: (task: Task) => void
 }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const stageAllMutation = useMutation(trpc.worktrees.stageAll.mutationOptions())
+  const commitFilesMutation = useMutation(trpc.worktrees.commitFiles.mutationOptions())
+  const mergeWithAiMutation = useMutation(trpc.worktrees.mergeWithAI.mutationOptions())
+  const abortMergeMutation = useMutation(trpc.worktrees.abortMerge.mutationOptions())
+
   // Merge-mode: commit and continue merge
   const handleCommitAndContinueMerge = useCallback(async () => {
     if (!task || !onUpdateTask || !onTaskUpdated) return
     const targetPath = task.worktree_path ?? projectPath
     if (!targetPath) return
 
-    await window.api.git.stageAll(targetPath)
-    await window.api.git.commitFiles(targetPath, 'WIP: changes before merge')
+    await stageAllMutation.mutateAsync({ path: targetPath })
+    await commitFilesMutation.mutateAsync({
+      repoPath: targetPath,
+      message: 'WIP: changes before merge'
+    })
 
-    const sourceBranch = await window.api.git.getCurrentBranch(task.worktree_path!)
+    const sourceBranch = await queryClient.fetchQuery(
+      trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path! })
+    )
     if (!sourceBranch) throw new Error('Cannot merge: detached HEAD in worktree')
 
-    const result = await window.api.git.mergeWithAI(
-      projectPath!,
-      task.worktree_path!,
-      task.worktree_parent_branch!,
+    const result = await mergeWithAiMutation.mutateAsync({
+      projectPath: projectPath!,
+      worktreePath: task.worktree_path!,
+      parentBranch: task.worktree_parent_branch!,
       sourceBranch
-    )
+    })
 
     if (result.success) {
       const updated = await onUpdateTask({
@@ -42,7 +56,9 @@ export function useGitMergeActions({
       })
       onTaskUpdated(updated)
     } else if (result.resolving) {
-      const ctx = await window.api.git.getMergeContext(projectPath!)
+      const ctx = await queryClient.fetchQuery(
+        trpc.worktrees.getMergeContext.queryOptions({ repoPath: projectPath! })
+      )
       const updated = await onUpdateTask({
         id: task.id,
         mergeState: 'conflicts',
@@ -56,20 +72,31 @@ export function useGitMergeActions({
     } else if (result.error) {
       throw new Error(result.error)
     }
-  }, [task, projectPath, completedStatus, onUpdateTask, onTaskUpdated])
+  }, [
+    task,
+    projectPath,
+    completedStatus,
+    onUpdateTask,
+    onTaskUpdated,
+    queryClient,
+    trpc,
+    stageAllMutation,
+    commitFilesMutation,
+    mergeWithAiMutation
+  ])
 
   const handleAbortMerge = useCallback(async () => {
     if (!task || !onUpdateTask || !onTaskUpdated) return
     if (projectPath) {
       try {
-        await window.api.git.abortMerge(projectPath)
+        await abortMergeMutation.mutateAsync({ path: projectPath })
       } catch {
         /* already aborted */
       }
     }
     const updated = await onUpdateTask({ id: task.id, mergeState: null, mergeContext: null })
     onTaskUpdated(updated)
-  }, [task, projectPath, onUpdateTask, onTaskUpdated])
+  }, [task, projectPath, onUpdateTask, onTaskUpdated, abortMergeMutation])
 
   return { handleCommitAndContinueMerge, handleAbortMerge }
 }

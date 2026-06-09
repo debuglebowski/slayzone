@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Sparkles, Check, ArrowLeft, ArrowRight, Info, Layers } from 'lucide-react'
 import { Button, Tooltip, TooltipContent, TooltipTrigger, cn } from '@slayzone/ui'
 import { useAppearance } from '@slayzone/settings/client'
@@ -8,7 +10,7 @@ import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
 import { buildCodeMirrorTheme } from './codemirror-theme'
-import type { ConflictFileContent, ConflictAnalysis } from '../shared/types'
+import type { ConflictAnalysis } from '../shared/types'
 import type { MergeContext } from '@slayzone/task/shared'
 
 interface ConflictFileViewProps {
@@ -51,6 +53,10 @@ export function ConflictFileView({
   onResolved,
   branchContext
 }: ConflictFileViewProps) {
+  const trpc = useTRPC()
+  const writeResolvedFileMutation = useMutation(trpc.worktrees.writeResolvedFile.mutationOptions())
+  const stageFileMutation = useMutation(trpc.worktrees.stageFile.mutationOptions())
+  const analyzeConflictMutation = useMutation(trpc.worktrees.analyzeConflict.mutationOptions())
   const { editorThemeId, contentVariant } = useTheme()
   const { editorFontSize } = useAppearance()
   const resolvedEditorColors = getThemeEditorColors(editorThemeId, contentVariant)
@@ -67,7 +73,10 @@ export function ConflictFileView({
       }),
     [editorFontSize]
   )
-  const [content, setContent] = useState<ConflictFileContent | null>(null)
+  const contentQuery = useQuery(
+    trpc.worktrees.getConflictContent.queryOptions({ repoPath, filePath })
+  )
+  const content = contentQuery.data ?? null
   const [analysis, setAnalysis] = useState<ConflictAnalysis | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [resolved, setResolved] = useState(false)
@@ -85,11 +94,6 @@ export function ConflictFileView({
   const togglePanel = useCallback((id: PanelId) => {
     setVisiblePanels((prev) => ({ ...prev, [id]: !prev[id] }))
   }, [])
-
-  // Load conflict content
-  useEffect(() => {
-    window.api.git.getConflictContent(repoPath, filePath).then(setContent)
-  }, [repoPath, filePath])
 
   // Init CodeMirror editor
   useEffect(() => {
@@ -148,15 +152,15 @@ export function ConflictFileView({
     async (text: string) => {
       setError(null)
       try {
-        await window.api.git.writeResolvedFile(repoPath, filePath, text)
-        await window.api.git.stageFile(repoPath, filePath)
+        await writeResolvedFileMutation.mutateAsync({ repoPath, filePath, content: text })
+        await stageFileMutation.mutateAsync({ path: repoPath, filePath })
         setResolved(true)
         onResolved()
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [repoPath, filePath, onResolved]
+    [repoPath, filePath, onResolved, writeResolvedFileMutation, stageFileMutation]
   )
 
   const handleAnalyze = useCallback(async () => {
@@ -164,20 +168,20 @@ export function ConflictFileView({
     setAnalyzing(true)
     setError(null)
     try {
-      const result = await window.api.git.analyzeConflict(
-        terminalMode,
+      const result = await analyzeConflictMutation.mutateAsync({
+        mode: terminalMode,
         filePath,
-        content.base,
-        content.ours,
-        content.theirs
-      )
+        base: content.base,
+        ours: content.ours,
+        theirs: content.theirs
+      })
       setAnalysis(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setAnalyzing(false)
     }
-  }, [content, terminalMode, filePath])
+  }, [content, terminalMode, filePath, analyzeConflictMutation])
 
   if (!content) {
     return (

@@ -1,12 +1,12 @@
 import { type ForwardedRef, useCallback, useEffect, useImperativeHandle, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task/shared'
 import {
-  DEFAULT_GIT_TAB_ORDER,
   isGitTabEnabled,
   normalizeGitTabOrder,
   normalizeGitTabVisibility,
-  type GitTabId,
-  type GitTabVisibility
+  type GitTabId
 } from '@slayzone/task/shared'
 import type { UnifiedGitPanelHandle } from './UnifiedGitPanel.types'
 
@@ -24,6 +24,7 @@ export function useGitPanelTabs(
     projectPath: string | null
   }
 ) {
+  const trpc = useTRPC()
   const [activeTab, setActiveTabRaw] = useState<GitTabId>(defaultTab)
   const setActiveTab = useCallback(
     (tab: GitTabId) => {
@@ -47,9 +48,24 @@ export function useGitPanelTabs(
   const isRebase = !!task && task.merge_state === 'rebase-conflicts'
 
   const showWorktrees = !task
-  const [hasGithubRemote, setHasGithubRemote] = useState(false)
-  const [tabOrder, setTabOrder] = useState<GitTabId[]>(() => [...DEFAULT_GIT_TAB_ORDER])
-  const [tabVisibility, setTabVisibility] = useState<GitTabVisibility>({})
+
+  // Settings: tab order + visibility. Re-fetched on the `sz:settings-changed`
+  // window event (legacy broadcast still in use elsewhere).
+  const tabOrderQuery = useQuery(trpc.settings.get.queryOptions({ key: 'git_tab_order' }))
+  const tabVisibilityQuery = useQuery(
+    trpc.settings.get.queryOptions({ key: 'git_tab_visibility' })
+  )
+  const tabOrder = normalizeGitTabOrder(tabOrderQuery.data ?? null)
+  const tabVisibility = normalizeGitTabVisibility(tabVisibilityQuery.data ?? null)
+
+  // GitHub remote presence — drives whether the PR tab is shown.
+  const hasGithubRemoteQuery = useQuery(
+    trpc.worktrees.hasGithubRemote.queryOptions(
+      { repoPath: projectPath ?? '' },
+      { enabled: !!projectPath }
+    )
+  )
+  const hasGithubRemote = projectPath ? (hasGithubRemoteQuery.data ?? false) : false
 
   // Single predicate used by both render + auto-switch fallback.
   // Conflicts tab bypasses the user toggle — always shown when merge/rebase conflicts are live.
@@ -64,38 +80,19 @@ export function useGitPanelTabs(
     [hasConflicts, tabVisibility, showWorktrees, hasGithubRemote, task]
   )
 
+  // Re-fetch tab settings when the legacy `sz:settings-changed` broadcast fires.
+  const refetchTabOrder = tabOrderQuery.refetch
+  const refetchTabVisibility = tabVisibilityQuery.refetch
   useEffect(() => {
-    let cancelled = false
-    const load = () => {
-      Promise.all([
-        window.api.settings.get('git_tab_order'),
-        window.api.settings.get('git_tab_visibility')
-      ]).then(([order, vis]) => {
-        if (cancelled) return
-        setTabOrder(normalizeGitTabOrder(order))
-        setTabVisibility(normalizeGitTabVisibility(vis))
-      })
+    const handler = (): void => {
+      void refetchTabOrder()
+      void refetchTabVisibility()
     }
-    load()
-    const handler = () => load()
     window.addEventListener('sz:settings-changed', handler)
     return () => {
-      cancelled = true
       window.removeEventListener('sz:settings-changed', handler)
     }
-  }, [])
-
-  // Check if repo has a GitHub remote
-  useEffect(() => {
-    if (!projectPath) {
-      setHasGithubRemote(false)
-      return
-    }
-    window.api.git
-      .hasGithubRemote(projectPath)
-      .then(setHasGithubRemote)
-      .catch(() => setHasGithubRemote(false))
-  }, [projectPath])
+  }, [refetchTabOrder, refetchTabVisibility])
 
   // Auto-switch to conflicts tab when conflicts detected
   useEffect(() => {

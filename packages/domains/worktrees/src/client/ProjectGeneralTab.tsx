@@ -1,4 +1,6 @@
 import { useState, useCallback, useRef, useMemo } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { GitBranch, ChevronDown, Check, Loader2, Plus, Copy, FolderGit2 } from 'lucide-react'
 import {
   Button,
@@ -33,6 +35,12 @@ export function ProjectGeneralTab({
   visible,
   onSwitchToDiff
 }: ProjectGeneralTabProps) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
+  const initMutation = useMutation(trpc.worktrees.init.mutationOptions())
+  const checkoutBranchMutation = useMutation(trpc.worktrees.checkoutBranch.mutationOptions())
+  const createBranchMutation = useMutation(trpc.worktrees.createBranch.mutationOptions())
   const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null)
   const [currentBranch, setCurrentBranch] = useState<string | null>(null)
   const [statusSummary, setStatusSummary] = useState<StatusSummary | null>(null)
@@ -55,20 +63,25 @@ export function ProjectGeneralTab({
     () => ({
       key: `project:${projectId}`,
       load: async () => {
-        const json = await window.api.settings.get(`commit_graph:project:${projectId}`)
+        const json = await queryClient.fetchQuery(
+          trpc.settings.get.queryOptions({ key: `commit_graph:project:${projectId}` })
+        )
         return json ? JSON.parse(json) : null
       },
       save: (cfg) => {
-        void window.api.settings.set(
-          `commit_graph:project:${projectId}`,
-          JSON.stringify(cfg)
-        )
+        setSettingMutation.mutate({
+          key: `commit_graph:project:${projectId}`,
+          value: JSON.stringify(cfg)
+        })
       },
       clear: async () => {
-        await window.api.settings.set(`commit_graph:project:${projectId}`, '')
+        await setSettingMutation.mutateAsync({
+          key: `commit_graph:project:${projectId}`,
+          value: ''
+        })
       }
     }),
-    [projectId]
+    [projectId, queryClient, trpc, setSettingMutation]
   )
   const branchGraph = useBranchGraph(
     projectPath,
@@ -82,7 +95,9 @@ export function ProjectGeneralTab({
   const fetchGitData = useCallback(async () => {
     if (!projectPath) return null
     try {
-      const isRepo = await window.api.git.isGitRepo(projectPath)
+      const isRepo = await queryClient.fetchQuery(
+        trpc.worktrees.isGitRepo.queryOptions({ path: projectPath })
+      )
       if (!isRepo) {
         const hash = JSON.stringify({ isRepo: false })
         if (hash !== lastHashRef.current) {
@@ -92,11 +107,15 @@ export function ProjectGeneralTab({
         return hash
       }
       const [branch, status, remote] = await Promise.all([
-        window.api.git.getCurrentBranch(projectPath),
-        window.api.git.getStatusSummary(projectPath),
-        window.api.git.getRemoteUrl(projectPath)
+        queryClient.fetchQuery(trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })),
+        queryClient.fetchQuery(trpc.worktrees.getStatusSummary.queryOptions({ repoPath: projectPath })),
+        queryClient.fetchQuery(trpc.worktrees.getRemoteUrl.queryOptions({ path: projectPath }))
       ])
-      const uab = branch ? await window.api.git.getAheadBehindUpstream(projectPath, branch) : null
+      const uab = branch
+        ? await queryClient.fetchQuery(
+            trpc.worktrees.getAheadBehindUpstream.queryOptions({ path: projectPath, branch })
+          )
+        : null
       const hash = JSON.stringify({ isRepo: true, branch, status, remote, uab })
       if (hash !== lastHashRef.current) {
         lastHashRef.current = hash
@@ -110,7 +129,7 @@ export function ProjectGeneralTab({
     } catch {
       return null
     }
-  }, [projectPath])
+  }, [projectPath, queryClient, trpc])
 
   useStablePoll(fetchGitData, { enabled: visible && !!projectPath, baseDelayMs: 5000 })
 
@@ -119,8 +138,8 @@ export function ProjectGeneralTab({
     if (open && projectPath) {
       setLoadingBranches(true)
       setBranchError(null)
-      window.api.git
-        .listBranches(projectPath)
+      queryClient
+        .fetchQuery(trpc.worktrees.listBranches.queryOptions({ path: projectPath }))
         .then(setBranches)
         .catch(() => setBranches([]))
         .finally(() => setLoadingBranches(false))
@@ -136,12 +155,14 @@ export function ProjectGeneralTab({
     setSwitching(true)
     setBranchError(null)
     try {
-      const hasChanges = await window.api.git.hasUncommittedChanges(projectPath)
+      const hasChanges = await queryClient.fetchQuery(
+        trpc.worktrees.hasUncommittedChanges.queryOptions({ path: projectPath })
+      )
       if (hasChanges) {
         setBranchError('Uncommitted changes — commit or stash first')
         return
       }
-      await window.api.git.checkoutBranch(projectPath, branch)
+      await checkoutBranchMutation.mutateAsync({ path: projectPath, branch })
       setCurrentBranch(branch)
       setBranchPopoverOpen(false)
     } catch (err) {
@@ -156,7 +177,7 @@ export function ProjectGeneralTab({
     setSwitching(true)
     setBranchError(null)
     try {
-      await window.api.git.createBranch(projectPath, newBranchName.trim())
+      await createBranchMutation.mutateAsync({ path: projectPath, branch: newBranchName.trim() })
       setCurrentBranch(newBranchName.trim())
       setNewBranchName('')
       setBranchPopoverOpen(false)
@@ -171,9 +192,11 @@ export function ProjectGeneralTab({
     if (!projectPath) return
     setInitializing(true)
     try {
-      await window.api.git.init(projectPath)
+      await initMutation.mutateAsync({ path: projectPath })
       setIsGitRepo(true)
-      const branch = await window.api.git.getCurrentBranch(projectPath)
+      const branch = await queryClient.fetchQuery(
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })
+      )
       setCurrentBranch(branch)
     } catch {
       /* ignore */

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { toast, useStablePoll } from '@slayzone/ui'
 import type { CommitGraphConfig, ResolvedGraph } from '../shared/types'
 import { DEFAULT_CONFIG, FETCH_LIMIT } from './branches-tab.constants'
@@ -11,6 +13,9 @@ export function useBranchGraph(
   /** Per-instance config persistence (task column or project settings key). */
   persistence?: CommitGraphPersistence
 ): BranchGraphState {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const fetchMutation = useMutation(trpc.worktrees.fetch.mutationOptions())
   const [dagGraph, setDagGraph] = useState<ResolvedGraph | null>(null)
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
@@ -31,7 +36,9 @@ export function useBranchGraph(
         setConfig({ ...DEFAULT_CONFIG, ...instance, baseBranch: '' })
         return
       }
-      const globalJson = await window.api.settings.get('commit_graph_config')
+      const globalJson = await queryClient.fetchQuery(
+        trpc.settings.get.queryOptions({ key: 'commit_graph_config' })
+      )
       if (globalJson) {
         setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' })
       } else {
@@ -39,7 +46,7 @@ export function useBranchGraph(
       }
     }
     load()
-  }, [persistence])
+  }, [persistence, queryClient, trpc])
 
   // Save full config to this instance
   const updateConfig = useCallback(
@@ -61,13 +68,15 @@ export function useBranchGraph(
     if (persistence) {
       await persistence.clear()
     }
-    const globalJson = await window.api.settings.get('commit_graph_config')
+    const globalJson = await queryClient.fetchQuery(
+      trpc.settings.get.queryOptions({ key: 'commit_graph_config' })
+    )
     if (globalJson) {
       setConfig({ ...DEFAULT_CONFIG, ...JSON.parse(globalJson), baseBranch: '' })
     } else {
       setConfig(DEFAULT_CONFIG)
     }
-  }, [persistence])
+  }, [persistence, queryClient, trpc])
 
   const effectiveBaseBranch = useMemo(
     () => config.baseBranch || defaultBaseBranch || currentBranch || 'main',
@@ -79,22 +88,28 @@ export function useBranchGraph(
   const fetchData = useCallback(async () => {
     if (!projectPath) return null
     try {
-      const branch = await window.api.git.getCurrentBranch(projectPath)
+      const branch = await queryClient.fetchQuery(
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: projectPath })
+      )
       const baseBranch = config.baseBranch || defaultBaseBranch || branch || 'main'
 
       const branchSet = new Set<string>([baseBranch])
 
       if (config.showBranches) {
-        const result = await window.api.git.resolveChildBranches(projectPath, baseBranch)
+        const result = await queryClient.fetchQuery(
+          trpc.worktrees.resolveChildBranches.queryOptions({ path: projectPath, baseBranch })
+        )
         for (const child of result.children) branchSet.add(child)
         for (const merged of result.merged) branchSet.add(merged)
       }
 
-      const graph = await window.api.git.getResolvedCommitDag(
-        projectPath,
-        FETCH_LIMIT,
-        [...branchSet],
-        baseBranch
+      const graph = await queryClient.fetchQuery(
+        trpc.worktrees.getResolvedCommitDag.queryOptions({
+          path: projectPath,
+          limit: FETCH_LIMIT,
+          branches: [...branchSet],
+          baseBranch
+        })
       )
       // Hash excludes `relativeDate` — that string updates over time
       // ("3 minutes ago") even when the commit hash is unchanged, which would
@@ -124,7 +139,7 @@ export function useBranchGraph(
       }
       return null
     }
-  }, [projectPath, config, defaultBaseBranch])
+  }, [projectPath, config, defaultBaseBranch, queryClient, trpc])
 
   useEffect(() => {
     initialLoad.current = false
@@ -137,7 +152,7 @@ export function useBranchGraph(
     if (!projectPath) return
     setFetching(true)
     try {
-      await window.api.git.fetch(projectPath)
+      await fetchMutation.mutateAsync({ path: projectPath })
       await fetchData()
       toast('Fetched from remote')
     } catch {
@@ -146,7 +161,7 @@ export function useBranchGraph(
       setFetching(false)
     }
     // refresh is wrapped above
-  }, [projectPath, fetchData])
+  }, [projectPath, fetchData, fetchMutation])
 
   const refresh = useCallback(async (): Promise<void> => {
     await fetchData()

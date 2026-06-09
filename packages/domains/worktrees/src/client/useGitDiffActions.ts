@@ -1,4 +1,6 @@
 import { useCallback } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 
 interface UseGitDiffActionsParams {
   targetPath: string | null
@@ -11,21 +13,28 @@ interface UseGitDiffActionsParams {
  * because the next poll corrects state.
  */
 export function useGitDiffActions({ targetPath, refreshRef }: UseGitDiffActionsParams) {
+  const trpc = useTRPC()
+  const stageAllMutation = useMutation(trpc.worktrees.stageAll.mutationOptions())
+  const unstageAllMutation = useMutation(trpc.worktrees.unstageAll.mutationOptions())
+  const stageFileMutation = useMutation(trpc.worktrees.stageFile.mutationOptions())
+  const unstageFileMutation = useMutation(trpc.worktrees.unstageFile.mutationOptions())
+  const discardFileMutation = useMutation(trpc.worktrees.discardFile.mutationOptions())
+
   const handleBulkAction = useCallback(
     async (action: 'stageAll' | 'unstageAll') => {
       if (!targetPath) return
       try {
         if (action === 'stageAll') {
-          await window.api.git.stageAll(targetPath)
+          await stageAllMutation.mutateAsync({ path: targetPath })
         } else {
-          await window.api.git.unstageAll(targetPath)
+          await unstageAllMutation.mutateAsync({ path: targetPath })
         }
         await refreshRef.current()
       } catch {
         // silently fail — next poll will correct state
       }
     },
-    [targetPath, refreshRef]
+    [targetPath, refreshRef, stageAllMutation, unstageAllMutation]
   )
 
   const handleStageAction = useCallback(
@@ -33,29 +42,29 @@ export function useGitDiffActions({ targetPath, refreshRef }: UseGitDiffActionsP
       if (!targetPath) return
       try {
         if (source === 'unstaged') {
-          await window.api.git.stageFile(targetPath, filePath)
+          await stageFileMutation.mutateAsync({ path: targetPath, filePath })
         } else {
-          await window.api.git.unstageFile(targetPath, filePath)
+          await unstageFileMutation.mutateAsync({ path: targetPath, filePath })
         }
         await refreshRef.current()
       } catch {
         // silently fail — next poll will correct state
       }
     },
-    [targetPath, refreshRef]
+    [targetPath, refreshRef, stageFileMutation, unstageFileMutation]
   )
 
   const handleDiscardFile = useCallback(
     async (filePath: string, untracked?: boolean) => {
       if (!targetPath) return
       try {
-        await window.api.git.discardFile(targetPath, filePath, untracked)
+        await discardFileMutation.mutateAsync({ path: targetPath, filePath, untracked })
         await refreshRef.current()
       } catch {
         // silently fail — next poll will correct state
       }
     },
-    [targetPath, refreshRef]
+    [targetPath, refreshRef, discardFileMutation]
   )
 
   const handleStageFolderAction = useCallback(
@@ -63,16 +72,16 @@ export function useGitDiffActions({ targetPath, refreshRef }: UseGitDiffActionsP
       if (!targetPath) return
       try {
         if (source === 'unstaged') {
-          await window.api.git.stageFile(targetPath, folderPath)
+          await stageFileMutation.mutateAsync({ path: targetPath, filePath: folderPath })
         } else {
-          await window.api.git.unstageFile(targetPath, folderPath)
+          await unstageFileMutation.mutateAsync({ path: targetPath, filePath: folderPath })
         }
         await refreshRef.current()
       } catch {
         // silently fail — next poll will correct state
       }
     },
-    [targetPath, refreshRef]
+    [targetPath, refreshRef, stageFileMutation, unstageFileMutation]
   )
 
   return { handleBulkAction, handleStageAction, handleDiscardFile, handleStageFolderAction }

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTRPC } from '@slayzone/transport/client'
 import { Check, X } from 'lucide-react'
 import { Button, Checkbox, cn } from '@slayzone/ui'
 import type { Task, UpdateTaskInput, MergeContext } from '@slayzone/task/shared'
@@ -24,6 +26,13 @@ export function ConflictPhaseContent({
   onTaskUpdated: (task: Task) => void
   onToolbarChange: (data: ConflictToolbarData) => void
 }) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const commitFilesMutation = useMutation(trpc.worktrees.commitFiles.mutationOptions())
+  const continueRebaseMutation = useMutation(trpc.worktrees.continueRebase.mutationOptions())
+  const skipRebaseCommitMutation = useMutation(trpc.worktrees.skipRebaseCommit.mutationOptions())
+  const abortRebaseMutation = useMutation(trpc.worktrees.abortRebase.mutationOptions())
+  const abortMergeMutation = useMutation(trpc.worktrees.abortMerge.mutationOptions())
   const [conflictedFiles, setConflictedFiles] = useState<string[]>([])
   const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
@@ -35,22 +44,26 @@ export function ConflictPhaseContent({
   // Load merge context if not on task
   useEffect(() => {
     if (!mergeContext) {
-      window.api.git.getMergeContext(projectPath).then((ctx) => {
-        if (ctx) {
-          setMergeContext(ctx)
-          onUpdateTask({ id: task.id, mergeContext: ctx })
-        }
-      })
+      queryClient
+        .fetchQuery(trpc.worktrees.getMergeContext.queryOptions({ repoPath: projectPath }))
+        .then((ctx) => {
+          if (ctx) {
+            setMergeContext(ctx)
+            onUpdateTask({ id: task.id, mergeContext: ctx })
+          }
+        })
     }
-  }, [projectPath, mergeContext])
+  }, [projectPath, mergeContext, queryClient, trpc])
 
   // Load conflicted files
   useEffect(() => {
-    window.api.git.getConflictedFiles(projectPath).then((files) => {
-      setConflictedFiles(files)
-      if (files.length > 0 && !selectedFile) setSelectedFile(files[0])
-    })
-  }, [projectPath])
+    queryClient
+      .fetchQuery(trpc.worktrees.getConflictedFiles.queryOptions({ path: projectPath }))
+      .then((files) => {
+        setConflictedFiles(files)
+        if (files.length > 0 && !selectedFile) setSelectedFile(files[0])
+      })
+  }, [projectPath, queryClient, trpc])
 
   const handleFileResolved = useCallback((filePath: string) => {
     setResolvedFiles((prev) => new Set(prev).add(filePath))
@@ -63,11 +76,13 @@ export function ConflictPhaseContent({
     setCompleting(true)
     setError(null)
     try {
-      const sourceBranch = await window.api.git.getCurrentBranch(task.worktree_path!)
-      await window.api.git.commitFiles(
-        projectPath,
-        `Merge ${sourceBranch ?? 'branch'} into ${task.worktree_parent_branch}`
+      const sourceBranch = await queryClient.fetchQuery(
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path! })
       )
+      await commitFilesMutation.mutateAsync({
+        repoPath: projectPath,
+        message: `Merge ${sourceBranch ?? 'branch'} into ${task.worktree_parent_branch}`
+      })
       const updates: UpdateTaskInput = { id: task.id, mergeState: null, mergeContext: null }
       if (markDone) updates.status = completedStatus
       const updated = await onUpdateTask(updates)
@@ -77,13 +92,23 @@ export function ConflictPhaseContent({
     } finally {
       setCompleting(false)
     }
-  }, [task, projectPath, completedStatus, markDone, onUpdateTask, onTaskUpdated])
+  }, [
+    task,
+    projectPath,
+    completedStatus,
+    markDone,
+    onUpdateTask,
+    onTaskUpdated,
+    queryClient,
+    trpc,
+    commitFilesMutation
+  ])
 
   const handleContinueRebase = useCallback(async () => {
     setCompleting(true)
     setError(null)
     try {
-      const result = await window.api.git.continueRebase(projectPath)
+      const result = await continueRebaseMutation.mutateAsync({ path: projectPath })
       if (result.done) {
         const updates: UpdateTaskInput = { id: task.id, mergeState: null, mergeContext: null }
         if (markDone) updates.status = completedStatus
@@ -99,12 +124,12 @@ export function ConflictPhaseContent({
     } finally {
       setCompleting(false)
     }
-  }, [task, projectPath, completedStatus, markDone, onUpdateTask, onTaskUpdated])
+  }, [task, projectPath, completedStatus, markDone, onUpdateTask, onTaskUpdated, continueRebaseMutation])
 
   const handleSkipCommit = useCallback(async () => {
     setError(null)
     try {
-      const result = await window.api.git.skipRebaseCommit(projectPath)
+      const result = await skipRebaseCommitMutation.mutateAsync({ path: projectPath })
       if (result.done) {
         const updates: UpdateTaskInput = { id: task.id, mergeState: null, mergeContext: null }
         const updated = await onUpdateTask(updates)
@@ -117,21 +142,21 @@ export function ConflictPhaseContent({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }, [task, projectPath, onUpdateTask, onTaskUpdated])
+  }, [task, projectPath, onUpdateTask, onTaskUpdated, skipRebaseCommitMutation])
 
   const handleAbort = useCallback(async () => {
     try {
       if (isRebase) {
-        await window.api.git.abortRebase(projectPath)
+        await abortRebaseMutation.mutateAsync({ path: projectPath })
       } else {
-        await window.api.git.abortMerge(projectPath)
+        await abortMergeMutation.mutateAsync({ path: projectPath })
       }
     } catch {
       /* already aborted */
     }
     const updated = await onUpdateTask({ id: task.id, mergeState: null, mergeContext: null })
     onTaskUpdated(updated)
-  }, [task.id, projectPath, isRebase, onUpdateTask, onTaskUpdated])
+  }, [task.id, projectPath, isRebase, onUpdateTask, onTaskUpdated, abortRebaseMutation, abortMergeMutation])
 
   // Push toolbar data to parent for unified header
   useEffect(() => {
