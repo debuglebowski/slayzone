@@ -149,15 +149,19 @@ export function useTasksData(): UseTasksDataReturn {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardQ.isPending])
 
-  // Bridge the global to REFETCH (not invalidate): callers `await
-  // __slayzone_refreshData()` and need it to resolve AFTER fresh data lands.
-  // Re-runs the board refetch + the groups IPC load together.
+  // Bridge the global to REFETCH (not invalidate the board): callers `await
+  // __slayzone_refreshData()` and need it to resolve AFTER fresh board data
+  // lands. ALSO invalidate every other tRPC query so the cross-domain "refresh
+  // everything" contract holds — external writes (CLI, IPC, e2e seeds, other
+  // windows) that don't go through a tRPC mutation become visible app-wide.
   useEffect(() => {
-    ;(window as any).__slayzone_refreshData = () =>
-      Promise.all([
+    ;(window as any).__slayzone_refreshData = () => {
+      void queryClient.invalidateQueries()
+      return Promise.all([
         queryClient.refetchQueries(trpc.task.loadBoardData.queryFilter()),
         loadGroups()
       ])
+    }
     return () => {
       delete (window as any).__slayzone_refreshData
     }
