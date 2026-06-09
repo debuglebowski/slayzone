@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { ThemeProvider, tabStoreReady, useTabStore } from '@slayzone/settings'
 import { PtyProvider } from '@slayzone/terminal'
 import { TelemetryProvider } from '@slayzone/telemetry/client'
-import { TrpcProvider, createTrpcWsClient } from '@slayzone/transport/client'
+import { TrpcProvider, initTrpcClient } from '@slayzone/transport/client'
 import { UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
 import App from './App'
@@ -78,6 +78,13 @@ if (isFloatingGlobalAgentPanel) {
   // port is needed to construct the WS URL passed to TrpcProvider.
   Promise.all([tabStoreReady, window.api.app.getTrpcPort()]).then(([, trpcPort]) => {
     window.api.app.bootMark?.('tabStoreReady resolved')
+
+    const trpcUrl = `ws://127.0.0.1:${trpcPort}/trpc`
+    // Initialize the tRPC client singleton NOW (before prefetch / React mount) so
+    // module-scope callers — incl. taskDetailCache.prefetch below and getTrpcClient()
+    // in stores — work. TrpcProvider reuses this same client (one WS connection).
+    initTrpcClient(trpcUrl)
+
     // Prefetch task details for open tabs — warms Suspense cache before React mounts.
     // Fire-and-forget: the cache's resolved-value tracking + notify ensures immediate
     // re-render when data arrives, eliminating the 250ms use() scheduling delay.
@@ -85,23 +92,22 @@ if (isFloatingGlobalAgentPanel) {
       if (tab.type === 'task') taskDetailCache.prefetch('taskDetail', tab.taskId)
     }
 
-    const trpcUrl = `ws://127.0.0.1:${trpcPort}/trpc`
-    // E2E: expose a lazy vanilla tRPC client so specs can call
+    // E2E: expose the vanilla tRPC client so specs can call
     // page.evaluate(() => window.getTrpcVanillaClient().task.getAll.query()).
-    // Reuses the discovered port; connects only on first use.
     if (window.api.app.isPlaywright) {
-      let cached: ReturnType<typeof createTrpcWsClient>['client'] | null = null
       ;(
         window as typeof window & {
-          getTrpcVanillaClient?: () => ReturnType<typeof createTrpcWsClient>['client']
+          getTrpcVanillaClient?: () => ReturnType<typeof initTrpcClient>['client']
         }
-      ).getTrpcVanillaClient = () => (cached ??= createTrpcWsClient({ url: trpcUrl }).client)
+      ).getTrpcVanillaClient = () => initTrpcClient(trpcUrl).client
     }
     performance.mark('sz:reactMount')
     window.api.app.bootMark?.('reactMount')
     createRoot(document.getElementById('root')!).render(
-      <ConvexAuthBootstrap>
-        <TrpcProvider url={trpcUrl}>
+      // TrpcProvider must be OUTERMOST: ConvexAuthBootstrap (and Pty/Theme/
+      // Telemetry providers) now call tRPC hooks, so they need the tRPC context.
+      <TrpcProvider url={trpcUrl}>
+        <ConvexAuthBootstrap>
           <PtyProvider>
             <ThemeProvider>
               <TelemetryProvider>
@@ -113,8 +119,8 @@ if (isFloatingGlobalAgentPanel) {
               </TelemetryProvider>
             </ThemeProvider>
           </PtyProvider>
-        </TrpcProvider>
-      </ConvexAuthBootstrap>
+        </ConvexAuthBootstrap>
+      </TrpcProvider>
     )
   })
 }

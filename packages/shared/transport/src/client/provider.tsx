@@ -1,6 +1,6 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { TRPCProvider, createTrpcWsClient, _setTrpcClientSingleton } from './trpc'
+import { TRPCProvider, initTrpcClient } from './trpc'
 
 export type TrpcProviderProps = {
   url: string
@@ -25,19 +25,9 @@ function makeQueryClient(): QueryClient {
 
 export function TrpcProvider({ url, children }: TrpcProviderProps): ReactNode {
   const [queryClient] = useState(makeQueryClient)
-  const [{ wsClient, client }] = useState(() => {
-    const created = createTrpcWsClient({ url })
-    // Expose to module-scope (non-React) callers via getTrpcClient().
-    _setTrpcClientSingleton(created.client)
-    return created
-  })
-
-  useEffect(() => {
-    return () => {
-      wsClient.close()
-      _setTrpcClientSingleton(null)
-    }
-  }, [wsClient])
+  // Reuse the boot-initialized singleton (one WS shared by React + module-scope
+  // getTrpcClient() callers); creates it if boot didn't.
+  const [{ client }] = useState(() => initTrpcClient(url))
 
   return (
     <QueryClientProvider client={queryClient}>

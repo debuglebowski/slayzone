@@ -32,14 +32,33 @@ export type TrpcVanillaClient = ReturnType<typeof createTrpcWsClient>['client']
 // before the provider has connected — callers running at app boot (before port
 // discovery) must guard or stay on the bridge.
 let vanillaClientSingleton: TrpcVanillaClient | null = null
+let wsClientSingleton: ReturnType<typeof createTrpcWsClient>['wsClient'] | null = null
 
 export function _setTrpcClientSingleton(client: TrpcVanillaClient | null): void {
   vanillaClientSingleton = client
 }
 
+/**
+ * Idempotently create + register the singleton tRPC client. Call this once at
+ * boot (before React mounts / before any module-scope getTrpcClient() use), and
+ * again inside TrpcProvider — the second call reuses the first, so there is one
+ * WS connection shared by React and non-React callers.
+ */
+export function initTrpcClient(url: string): {
+  client: TrpcVanillaClient
+  wsClient: ReturnType<typeof createTrpcWsClient>['wsClient']
+} {
+  if (!vanillaClientSingleton || !wsClientSingleton) {
+    const created = createTrpcWsClient({ url })
+    vanillaClientSingleton = created.client
+    wsClientSingleton = created.wsClient
+  }
+  return { client: vanillaClientSingleton, wsClient: wsClientSingleton }
+}
+
 export function getTrpcClient(): TrpcVanillaClient {
   if (!vanillaClientSingleton) {
-    throw new Error('tRPC client not ready — getTrpcClient() called before TrpcProvider mounted')
+    throw new Error('tRPC client not ready — getTrpcClient() called before initTrpcClient()')
   }
   return vanillaClientSingleton
 }

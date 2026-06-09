@@ -3,6 +3,7 @@ export {
   useTRPCClient,
   createTrpcWsClient,
   getTrpcClient,
+  initTrpcClient,
   type CreateTrpcClientOpts,
   type TrpcVanillaClient
 } from './trpc'
