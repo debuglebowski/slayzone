@@ -32,7 +32,12 @@ import {
  *  sub-views consume the returned view-model; nothing here owns layout/render. */
 export function usePanelSettings(activeTab: string, navigateTo: (tab: string) => void) {
   const trpc = useTRPC()
-  const allSettingsQuery = useQuery(trpc.settings.getAll.queryOptions())
+  // staleTime:0 — settings are real-time (CLI / other windows write them out of
+  // band). The dialog unmounts on close, so the onSettingsChanged refetch below
+  // is inactive when an external write lands; on re-open the query must hit the
+  // server, not return a globally-cached snapshot (otherwise a panel created via
+  // `slay panels create` is invisible until the cache expires).
+  const allSettingsQuery = useQuery(trpc.settings.getAll.queryOptions(undefined, { staleTime: 0 }))
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
   const [panelConfig, setPanelConfig] = useState<PanelConfig>(DEFAULT_PANEL_CONFIG)
   const sensors = useSensors(
