@@ -32,7 +32,7 @@ export function useGitDiffCommit({ targetPath, stagedCount, refreshRef }: UseGit
     } finally {
       setCommitting(false)
     }
-  }, [targetPath, commitMessage, stagedCount, refreshRef, commitFilesMutation])
+  }, [targetPath, commitMessage, stagedCount, refreshRef])
 
   return {
     commitMessage,

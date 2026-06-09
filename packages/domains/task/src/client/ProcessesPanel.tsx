@@ -140,21 +140,21 @@ export function ProcessesPanel({
         return next
       })
     },
-    [killMutation]
+    []
   )
 
   const handleStop = useCallback(
     async (id: string) => {
       await stopMutation.mutateAsync({ processId: id })
     },
-    [stopMutation]
+    []
   )
 
   const handleRestart = useCallback(
     async (id: string) => {
       await restartMutation.mutateAsync({ processId: id })
     },
-    [restartMutation]
+    []
   )
 
   const handleInject = useCallback(

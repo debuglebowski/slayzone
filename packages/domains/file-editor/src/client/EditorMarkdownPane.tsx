@@ -110,7 +110,7 @@ export function MarkdownFilePane({
         void openPathMutation.mutateAsync({ absPath })
       }
     },
-    [projectPath, onOpenFile, openExternalMutation, openPathMutation]
+    [projectPath, onOpenFile]
   )
 
   return (

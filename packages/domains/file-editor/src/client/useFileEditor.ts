@@ -387,7 +387,7 @@ export function useFileEditor(
         )
       )
     },
-    [projectPath, openFiles, writeFileMutation]
+    [projectPath, openFiles]
   )
 
   const closeFile = useCallback(

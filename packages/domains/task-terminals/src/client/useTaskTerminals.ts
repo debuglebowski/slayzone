@@ -122,7 +122,7 @@ export function useTaskTerminals(
       setActiveGroupId(newTab.groupId)
       return newTab
     },
-    [createMutation, taskId]
+    [taskId]
   )
 
   // Split: add a new pane to the same group as the target tab
@@ -134,7 +134,7 @@ export function useTaskTerminals(
       }
       return newTab
     },
-    [splitMutation]
+    []
   )
 
   const closeTabInternal = useCallback(
@@ -175,7 +175,7 @@ export function useTaskTerminals(
         closingTabIdsRef.current.delete(tabId)
       }
     },
-    [chatRemoveMutation, deleteMutation, ptyKillMutation, taskId]
+    [taskId]
   )
 
   const closeTab = useCallback(
@@ -220,7 +220,7 @@ export function useTaskTerminals(
         setTabs((prev) => prev.map((t) => (t.id === tabId ? updated : t)))
       }
     },
-    [moveToGroupMutation]
+    []
   )
 
   const renameTab = useCallback(
@@ -230,7 +230,7 @@ export function useTaskTerminals(
         setTabs((prev) => prev.map((t) => (t.id === tabId ? updated : t)))
       }
     },
-    [updateMutation]
+    []
   )
 
   const getSessionId = useCallback(

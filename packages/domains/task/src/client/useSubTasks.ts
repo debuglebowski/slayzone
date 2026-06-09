@@ -61,7 +61,7 @@ export function useSubTasks(
       }
       return sub
     },
-    [parentId, createMutation]
+    [parentId]
   )
 
   const updateSubTask = useCallback(
@@ -71,7 +71,7 @@ export function useSubTasks(
         setSubTasks((prev) => prev.map((s) => (s.id === subId ? updated : s)))
       }
     },
-    [updateMutation]
+    []
   )
 
   const deleteSubTask = useCallback(
@@ -79,7 +79,7 @@ export function useSubTasks(
       await deleteMutation.mutateAsync({ id: subId })
       setSubTasks((prev) => prev.filter((s) => s.id !== subId))
     },
-    [deleteMutation]
+    []
   )
 
   const handleDragEnd = useCallback(
@@ -94,7 +94,7 @@ export function useSubTasks(
         return reordered
       })
     },
-    [reorderMutation]
+    []
   )
 
   return { subTasks, createSubTask, updateSubTask, deleteSubTask, handleDragEnd }

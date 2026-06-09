@@ -81,7 +81,7 @@ export function ProjectGeneralTab({
         })
       }
     }),
-    [projectId, queryClient, trpc, setSettingMutation]
+    [projectId, queryClient, trpc]
   )
   const branchGraph = useBranchGraph(
     projectPath,

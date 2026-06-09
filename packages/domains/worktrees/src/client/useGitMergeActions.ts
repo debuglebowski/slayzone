@@ -96,7 +96,7 @@ export function useGitMergeActions({
     }
     const updated = await onUpdateTask({ id: task.id, mergeState: null, mergeContext: null })
     onTaskUpdated(updated)
-  }, [task, projectPath, onUpdateTask, onTaskUpdated, abortMergeMutation])
+  }, [task, projectPath, onUpdateTask, onTaskUpdated])
 
   return { handleCommitAndContinueMerge, handleAbortMerge }
 }

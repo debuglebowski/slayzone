@@ -308,7 +308,7 @@ export const FileEditorView = forwardRef<FileEditorViewHandle, FileEditorViewPro
       (filePath: string) => {
         void showInFinderMutation.mutateAsync({ rootPath: projectPath, targetPath: filePath })
       },
-      [projectPath, showInFinderMutation]
+      [projectPath]
     )
 
     return (

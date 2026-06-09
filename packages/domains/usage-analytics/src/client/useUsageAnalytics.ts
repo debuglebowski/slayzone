@@ -118,7 +118,7 @@ export function useUsageAnalytics() {
     } catch {
       /* swallow — matches the old refresh's finally-only handling */
     }
-  }, [refreshMutation, range])
+  }, [range])
 
   return {
     data,

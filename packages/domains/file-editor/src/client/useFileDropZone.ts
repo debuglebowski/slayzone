@@ -81,7 +81,7 @@ export function useFileDropZone(
         }
       }
     },
-    [projectPath, openFile, copyInMutation]
+    [projectPath, openFile]
   )
 
   return {

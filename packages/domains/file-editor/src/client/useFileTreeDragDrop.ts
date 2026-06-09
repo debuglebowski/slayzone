@@ -147,7 +147,7 @@ export function useFileTreeDragDrop({
         console.error('Move failed:', err)
       }
     },
-    [projectPath, loadDir, isValidDropTarget, onFileRenamed, setExpandedFolders, renameMutation]
+    [projectPath, loadDir, isValidDropTarget, onFileRenamed, setExpandedFolders]
   )
 
   return {

@@ -62,7 +62,7 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
         setPushing(false)
       }
     },
-    [targetPath, branch, onSyncDone, pushMutation]
+    [targetPath, branch, onSyncDone]
   )
 
   const handlePull = useCallback(async () => {
@@ -80,7 +80,7 @@ export function RemoteSection({ upstreamAB, targetPath, branch, onSyncDone }: Re
     } finally {
       setPulling(false)
     }
-  }, [targetPath, onSyncDone, pullMutation])
+  }, [targetPath, onSyncDone])
 
   const behind = upstreamAB?.behind ?? 0
   const ahead = upstreamAB?.ahead ?? 0

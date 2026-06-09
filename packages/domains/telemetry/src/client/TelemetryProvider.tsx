@@ -97,7 +97,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
       setTelemetryTierInternal(newTier)
       setTierMutation.mutate({ key: SETTINGS_KEY, value: newTier })
     },
-    [setTierMutation]
+    []
   )
 
   return (

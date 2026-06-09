@@ -121,7 +121,7 @@ export function useBrowserExtensions() {
         activateMutation.mutate({ extensionId })
       })
     },
-    [activateMutation]
+    []
   )
 
   const importMutation = useMutation(
@@ -144,7 +144,7 @@ export function useBrowserExtensions() {
         setExtensionsError(message)
       }
     },
-    [importMutation]
+    []
   )
 
   const loadMutation = useMutation(
@@ -165,7 +165,7 @@ export function useBrowserExtensions() {
       const message = error instanceof Error ? error.message : 'Failed to load unpacked extension'
       setExtensionsError(message)
     }
-  }, [loadMutation])
+  }, [])
 
   const removeMutation = useMutation(
     trpc.app.browser.removeExtension.mutationOptions({
@@ -183,7 +183,7 @@ export function useBrowserExtensions() {
         setExtensionsError(message)
       }
     },
-    [removeMutation]
+    []
   )
 
   return {

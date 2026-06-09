@@ -176,7 +176,7 @@ export function useLinkedPrView({
       setCommentError(err instanceof Error ? err.message : 'Failed to edit comment')
     }
     setEditSubmitting(false)
-  }, [editingId, editBody, projectPath, fetchComments, editPrCommentMutation])
+  }, [editingId, editBody, projectPath, fetchComments])
 
   const handleCancelEdit = useCallback(() => {
     setEditingId(null)

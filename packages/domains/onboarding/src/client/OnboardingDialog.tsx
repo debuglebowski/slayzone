@@ -78,7 +78,7 @@ export function OnboardingDialog({
       setAutoOpen(false)
       onExternalClose?.()
     },
-    [setTier, onExternalClose, setSettingMutation]
+    [setTier, onExternalClose]
   )
 
   const handleAnalyticsChoice = (tier: 'anonymous' | 'opted_in'): void => {

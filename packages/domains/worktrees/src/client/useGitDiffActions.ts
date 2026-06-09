@@ -34,7 +34,7 @@ export function useGitDiffActions({ targetPath, refreshRef }: UseGitDiffActionsP
         // silently fail — next poll will correct state
       }
     },
-    [targetPath, refreshRef, stageAllMutation, unstageAllMutation]
+    [targetPath, refreshRef]
   )
 
   const handleStageAction = useCallback(
@@ -51,7 +51,7 @@ export function useGitDiffActions({ targetPath, refreshRef }: UseGitDiffActionsP
         // silently fail — next poll will correct state
       }
     },
-    [targetPath, refreshRef, stageFileMutation, unstageFileMutation]
+    [targetPath, refreshRef]
   )
 
   const handleDiscardFile = useCallback(
@@ -64,7 +64,7 @@ export function useGitDiffActions({ targetPath, refreshRef }: UseGitDiffActionsP
         // silently fail — next poll will correct state
       }
     },
-    [targetPath, refreshRef, discardFileMutation]
+    [targetPath, refreshRef]
   )
 
   const handleStageFolderAction = useCallback(
@@ -81,7 +81,7 @@ export function useGitDiffActions({ targetPath, refreshRef }: UseGitDiffActionsP
         // silently fail — next poll will correct state
       }
     },
-    [targetPath, refreshRef, stageFileMutation, unstageFileMutation]
+    [targetPath, refreshRef]
   )
 
   return { handleBulkAction, handleStageAction, handleDiscardFile, handleStageFolderAction }

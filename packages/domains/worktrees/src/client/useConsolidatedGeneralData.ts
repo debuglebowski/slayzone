@@ -347,7 +347,7 @@ export function useConsolidatedGeneralData(
     } finally {
       setInitializing(false)
     }
-  }, [projectPath, initMutation, queryClient, trpc])
+  }, [projectPath, queryClient, trpc])
 
   /** Resolve worktree path params (shared by direct create and ask-dialog flows) */
   const resolveWorktreeParams = useCallback(async () => {
@@ -394,7 +394,7 @@ export function useConsolidatedGeneralData(
       }
       await onUpdateTask({ id: task.id, worktreePath, worktreeParentBranch: currentBranch })
     },
-    [projectPath, task.id, currentBranch, onUpdateTask, createWorktreeMutation, copyIgnoredFilesMutation]
+    [projectPath, task.id, currentBranch, onUpdateTask]
   )
 
   const handleAddWorktree = useCallback(async () => {
@@ -574,7 +574,7 @@ export function useConsolidatedGeneralData(
         setRemoving(false)
       }
     },
-    [projectPath, task.id, task.worktree_path, onUpdateTask, removeWorktreeMutation]
+    [projectPath, task.id, task.worktree_path, onUpdateTask]
   )
 
   // Fetch detected worktrees when no worktree is linked

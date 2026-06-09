@@ -124,7 +124,7 @@ export function ConflictPhaseContent({
     } finally {
       setCompleting(false)
     }
-  }, [task, projectPath, completedStatus, markDone, onUpdateTask, onTaskUpdated, continueRebaseMutation])
+  }, [task, projectPath, completedStatus, markDone, onUpdateTask, onTaskUpdated])
 
   const handleSkipCommit = useCallback(async () => {
     setError(null)
@@ -142,7 +142,7 @@ export function ConflictPhaseContent({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }, [task, projectPath, onUpdateTask, onTaskUpdated, skipRebaseCommitMutation])
+  }, [task, projectPath, onUpdateTask, onTaskUpdated])
 
   const handleAbort = useCallback(async () => {
     try {
@@ -156,7 +156,7 @@ export function ConflictPhaseContent({
     }
     const updated = await onUpdateTask({ id: task.id, mergeState: null, mergeContext: null })
     onTaskUpdated(updated)
-  }, [task.id, projectPath, isRebase, onUpdateTask, onTaskUpdated, abortRebaseMutation, abortMergeMutation])
+  }, [task.id, projectPath, isRebase, onUpdateTask, onTaskUpdated])
 
   // Push toolbar data to parent for unified header
   useEffect(() => {

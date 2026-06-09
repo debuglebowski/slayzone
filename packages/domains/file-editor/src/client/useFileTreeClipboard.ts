@@ -45,7 +45,7 @@ export function useFileTreeClipboard({
       const absolute = relPaths.map((p) => `${projectPath}/${p}`)
       void writeFilePathsMutation.mutateAsync({ paths: absolute })
     },
-    [projectPath, writeFilePathsMutation]
+    [projectPath]
   )
 
   const handleCopy = useCallback(
@@ -196,7 +196,7 @@ export function useFileTreeClipboard({
       track('file_duplicated')
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, dirContents, loadDir, copyMutation]
+    [projectPath, dirContents, loadDir]
   )
 
   const handleCopyPath = useCallback(
@@ -213,7 +213,7 @@ export function useFileTreeClipboard({
       void showInFinderMutation.mutateAsync({ rootPath: projectPath, targetPath: entry.path })
       track('reveal_in_finder')
     },
-    [projectPath, showInFinderMutation]
+    [projectPath]
   )
 
   return {

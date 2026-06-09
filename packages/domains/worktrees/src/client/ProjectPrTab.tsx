@@ -61,7 +61,7 @@ function usePrFilterState(projectId: string | null) {
         return updated
       })
     },
-    [key, setSettingMutation]
+    [key]
   )
 
   return { filter, updateFilter }

@@ -96,7 +96,7 @@ export function useArtifactClipboard({
       )
       await writeFilePathsMutation.mutateAsync({ paths })
     },
-    [getFilePath, writeFilePathsMutation]
+    [getFilePath]
   )
 
   const handleArtifactCopy = useCallback(
@@ -163,7 +163,7 @@ export function useArtifactClipboard({
         destFolderId
       })
     },
-    [getFilePath, artifacts, taskId, pasteFilesMutation]
+    [getFilePath, artifacts, taskId]
   )
 
   const handleDeleteSelected = async (ids: string[]) => {

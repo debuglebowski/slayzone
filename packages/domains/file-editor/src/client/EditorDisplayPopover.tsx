@@ -33,7 +33,7 @@ export function EditorDisplayPopover({
       void setSettingMutation.mutateAsync({ key, value })
       window.dispatchEvent(new Event('sz:settings-changed'))
     },
-    [setSettingMutation]
+    []
   )
 
   return (

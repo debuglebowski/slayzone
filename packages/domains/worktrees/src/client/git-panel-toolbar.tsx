@@ -67,7 +67,7 @@ export function GitPanelToolbar({
       setSettingMutation.mutate({ key, value: value ? '1' : '0' })
       window.dispatchEvent(new CustomEvent('sz:settings-changed'))
     },
-    [setSettingMutation]
+    []
   )
 
   return (

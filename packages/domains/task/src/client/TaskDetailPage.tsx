@@ -619,7 +619,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         if (updated) onTaskUpdated(updated)
       })
     },
-    [task?.id, isSecondaryWindow, onTaskUpdated, updateTaskMutation] // eslint-disable-line react-hooks/exhaustive-deps
+    [task?.id, isSecondaryWindow, onTaskUpdated] // eslint-disable-line react-hooks/exhaustive-deps
   )
   const [panelSizes, updatePanelSizes, commitPanelSizes, resetPanelSize, resetAllPanels] =
     usePanelSizes(initialData?.panelSizes, persistPanelSizes)
@@ -718,7 +718,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         if (updated) onTaskUpdated(updated)
       })
     },
-    [task?.id, onTaskUpdated, updateTaskMutation]
+    [task?.id, onTaskUpdated]
   )
   const {
     status: loopStatus,
@@ -1050,7 +1050,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       setTerminalKey((k) => k + 1)
       track('terminal_mode_switched', { from: oldMode, to: mode })
     },
-    [task, onTaskUpdated, resetTaskState, trpcClient, updateTaskMutation]
+    [task, onTaskUpdated, resetTaskState, trpcClient]
   )
 
   const getMainHistory = useCallback(() => {
@@ -1095,7 +1095,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       markSkipCache(mainSessionId)
       setTerminalKey((k) => k + 1)
     },
-    [task, getProviderFlagsForMode, onTaskUpdated, resetTaskState, trpcClient, updateTaskMutation]
+    [task, getProviderFlagsForMode, onTaskUpdated, resetTaskState, trpcClient]
   )
 
   const handleSetDefaultFlags = useCallback(async () => {
@@ -1147,7 +1147,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       })
       onTaskUpdated(updated)
     },
-    [task, panelVisibility, onTaskUpdated, resetPanelSize, ownership, isSecondaryWindow, updateTaskMutation]
+    [task, panelVisibility, onTaskUpdated, resetPanelSize, ownership, isSecondaryWindow]
   )
   handlePanelToggleRef.current = handlePanelToggle
 
@@ -1395,7 +1395,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         setTerminalKey((k) => k + 1)
       }
     },
-    [task, getMainSessionId, resetTaskState, trpcClient, updateTaskMutation]
+    [task, getMainSessionId, resetTaskState, trpcClient]
   )
 
   // Wrapper for GitPanel that calls API and notifies parent
@@ -1443,7 +1443,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         browserTabs: tabs
       })
     },
-    [task, updateTaskMutation]
+    [task]
   )
 
   // Debounced persistence of web-panel URLs, editor open-files, and active artifact id

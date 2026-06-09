@@ -98,7 +98,7 @@ export function WorktreesSettingsTab() {
         value: JSON.stringify(updated)
       })
     },
-    [setSettingMutation]
+    []
   )
 
   const addPreset = () => {

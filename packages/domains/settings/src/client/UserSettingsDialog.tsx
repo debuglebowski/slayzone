@@ -81,7 +81,7 @@ export function UserSettingsDialog({
       setSettingMutation.mutate({ key: 'default_terminal_mode', value: mode })
       window.dispatchEvent(new CustomEvent('sz:settings-changed'))
     },
-    [setSettingMutation]
+    []
   )
 
   useEffect(() => {

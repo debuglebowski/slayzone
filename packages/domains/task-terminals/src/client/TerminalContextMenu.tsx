@@ -92,7 +92,7 @@ export function TerminalContextMenu({
     void navigator.clipboard.readText().then((text) => {
       if (text) ptyWriteMutation.mutate({ sessionId, data: text })
     })
-  }, [ptyWriteMutation, sessionId])
+  }, [sessionId])
 
   const handleSelectAll = useCallback(() => {
     terminalRef.current?.selectAll()
@@ -120,7 +120,7 @@ export function TerminalContextMenu({
       settingsSetMutation.mutate({ key: 'terminal_font_size', value: String(clamped) })
       window.dispatchEvent(new CustomEvent('sz:settings-changed'))
     },
-    [settingsSetMutation]
+    []
   )
 
   return (

@@ -160,7 +160,7 @@ export function ConflictFileView({
         setError(err instanceof Error ? err.message : String(err))
       }
     },
-    [repoPath, filePath, onResolved, writeResolvedFileMutation, stageFileMutation]
+    [repoPath, filePath, onResolved]
   )
 
   const handleAnalyze = useCallback(async () => {
@@ -181,7 +181,7 @@ export function ConflictFileView({
     } finally {
       setAnalyzing(false)
     }
-  }, [content, terminalMode, filePath, analyzeConflictMutation])
+  }, [content, terminalMode, filePath])
 
   if (!content) {
     return (

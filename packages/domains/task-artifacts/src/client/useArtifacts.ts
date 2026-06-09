@@ -208,7 +208,7 @@ export function useArtifacts(
       }
       return artifact
     },
-    [taskId, createMutation]
+    [taskId]
   )
 
   const updateArtifact = useCallback(
@@ -218,7 +218,7 @@ export function useArtifacts(
         setArtifacts((prev) => prev.map((a) => (a.id === data.id ? updated : a)))
       }
     },
-    [updateMutation]
+    []
   )
 
   const deleteArtifact = useCallback(
@@ -228,7 +228,7 @@ export function useArtifacts(
       setSelectedId((prev) => (prev === id ? null : prev))
       track('asset_deleted')
     },
-    [deleteMutation]
+    []
   )
 
   const renameArtifact = useCallback(
@@ -238,7 +238,7 @@ export function useArtifacts(
         setArtifacts((prev) => prev.map((a) => (a.id === id ? updated : a)))
       }
     },
-    [updateMutation]
+    []
   )
 
   const moveArtifactToFolder = useCallback(
@@ -248,7 +248,7 @@ export function useArtifacts(
         setArtifacts((prev) => prev.map((a) => (a.id === artifactId ? updated : a)))
       }
     },
-    [updateMutation]
+    []
   )
 
   const readContent = useCallback(
@@ -264,7 +264,7 @@ export function useArtifacts(
       // "Create version" action is the only UI path that creates new versions.
       await updateMutation.mutateAsync({ id, content, mutateVersion: true })
     },
-    [updateMutation]
+    []
   )
 
   const uploadArtifact = useCallback(
@@ -278,7 +278,7 @@ export function useArtifacts(
       }
       return artifact
     },
-    [taskId, uploadMutation]
+    [taskId]
   )
 
   const getFilePath = useCallback(
@@ -292,41 +292,41 @@ export function useArtifacts(
     async (id: string): Promise<boolean> => {
       return downloadFileMutation.mutateAsync({ id })
     },
-    [downloadFileMutation]
+    []
   )
 
   const downloadFolder = useCallback(
     async (id: string): Promise<boolean> => {
       return downloadFolderMutation.mutateAsync({ folderId: id })
     },
-    [downloadFolderMutation]
+    []
   )
 
   const downloadAsPdf = useCallback(
     async (id: string): Promise<boolean> => {
       return downloadAsPdfMutation.mutateAsync({ id })
     },
-    [downloadAsPdfMutation]
+    []
   )
 
   const downloadAsPng = useCallback(
     async (id: string): Promise<boolean> => {
       return downloadAsPngMutation.mutateAsync({ id })
     },
-    [downloadAsPngMutation]
+    []
   )
 
   const downloadAsHtml = useCallback(
     async (id: string): Promise<boolean> => {
       return downloadAsHtmlMutation.mutateAsync({ id })
     },
-    [downloadAsHtmlMutation]
+    []
   )
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false
     return downloadAllAsZipMutation.mutateAsync({ taskId })
-  }, [taskId, downloadAllAsZipMutation])
+  }, [taskId])
 
   const uploadDir = useCallback(
     async (dirPath: string, parentFolderId?: string | null): Promise<void> => {
@@ -344,7 +344,7 @@ export function useArtifacts(
       setArtifacts(newArtifacts)
       setFolders(newFolders)
     },
-    [taskId, uploadDirMutation, queryClient, trpc]
+    [taskId, queryClient, trpc]
   )
 
   // --- Versions ---
@@ -374,7 +374,7 @@ export function useArtifacts(
     async (artifactId: string, name?: string | null): Promise<ArtifactVersion> => {
       return versionsCreateMutation.mutateAsync({ artifactId, name })
     },
-    [versionsCreateMutation]
+    []
   )
 
   const renameVersion = useCallback(
@@ -385,7 +385,7 @@ export function useArtifacts(
     ): Promise<ArtifactVersion> => {
       return versionsRenameMutation.mutateAsync({ artifactId, versionRef, newName })
     },
-    [versionsRenameMutation]
+    []
   )
 
   const diffVersions = useCallback(
@@ -404,7 +404,7 @@ export function useArtifacts(
     ): Promise<PruneReport> => {
       return versionsPruneMutation.mutateAsync({ artifactId, ...opts })
     },
-    [versionsPruneMutation]
+    []
   )
 
   const setCurrentVersion = useCallback(
@@ -419,7 +419,7 @@ export function useArtifacts(
       }
       return v
     },
-    [taskId, versionsSetCurrentMutation, queryClient, trpc]
+    [taskId, queryClient, trpc]
   )
 
   // --- Folder CRUD ---
@@ -433,7 +433,7 @@ export function useArtifacts(
       }
       return folder
     },
-    [taskId, foldersCreateMutation]
+    [taskId]
   )
 
   const updateFolder = useCallback(
@@ -443,7 +443,7 @@ export function useArtifacts(
         setFolders((prev) => prev.map((f) => (f.id === data.id ? updated : f)))
       }
     },
-    [foldersUpdateMutation]
+    []
   )
 
   const deleteFolder = useCallback(
@@ -453,7 +453,7 @@ export function useArtifacts(
       // Artifacts in deleted folder get folder_id = NULL (DB handles it), refresh local state
       setArtifacts((prev) => prev.map((a) => (a.folder_id === id ? { ...a, folder_id: null } : a)))
     },
-    [foldersDeleteMutation]
+    []
   )
 
   const renameFolder = useCallback(
@@ -463,7 +463,7 @@ export function useArtifacts(
         setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)))
       }
     },
-    [foldersUpdateMutation]
+    []
   )
 
   return {

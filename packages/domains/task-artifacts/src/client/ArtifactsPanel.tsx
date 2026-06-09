@@ -327,7 +327,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       for (const filePath of result.filePaths) {
         await uploadArtifact(filePath)
       }
-    }, [uploadArtifact, showOpenDialogMutation])
+    }, [uploadArtifact])
 
     const handleFileDrop = useCallback(
       async (e: DragEvent) => {

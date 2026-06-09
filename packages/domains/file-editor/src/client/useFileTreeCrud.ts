@@ -77,7 +77,7 @@ export function useFileTreeCrud({
       }
       setCreating(null)
     },
-    [creating, projectPath, loadDir, onOpenFile, createFileMutation, createDirMutation]
+    [creating, projectPath, loadDir, onOpenFile]
   )
 
   const handleRename = useCallback(
@@ -115,7 +115,7 @@ export function useFileTreeCrud({
       }
       setRenaming(null)
     },
-    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders, renameMutation]
+    [renaming, projectPath, loadDir, onFileRenamed, setExpandedFolders]
   )
 
   const executeDelete = useCallback(
@@ -133,7 +133,7 @@ export function useFileTreeCrud({
       setSelectedPaths(new Set())
       for (const dir of dirsToReload) await loadDir(dir)
     },
-    [projectPath, loadDir, setSelectedPaths, deleteMutation]
+    [projectPath, loadDir, setSelectedPaths]
   )
 
   const handleDeleteSelected = useCallback(

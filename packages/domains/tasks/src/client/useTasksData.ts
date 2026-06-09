@@ -702,32 +702,32 @@ export function useTasksData(): UseTasksDataReturn {
 
   const createProjectGroup = useCallback(
     (name?: string) => runGroupMutation(() => window.api.db.createProjectGroup({ name })),
-    [runGroupMutation]
+    []
   )
   const createFolderWithProjects = useCallback(
     (projectIds: string[]) => {
       if (projectIds.length === 0) return
       runGroupMutation(() => window.api.db.createFolderWithProjects(projectIds))
     },
-    [runGroupMutation]
+    []
   )
   const deleteProjectGroup = useCallback(
     (id: string) => runGroupMutation(() => window.api.db.deleteProjectGroup(id)),
-    [runGroupMutation]
+    []
   )
   const reorderTopLevel = useCallback(
     (entries: TopLevelEntryRef[]) => runGroupMutation(() => window.api.db.reorderTopLevel(entries)),
-    [runGroupMutation]
+    []
   )
   const moveProjectToGroup = useCallback(
     (projectId: string, groupId: string | null, targetIndex: number) =>
       runGroupMutation(() => window.api.db.moveProjectToGroup(projectId, groupId, targetIndex)),
-    [runGroupMutation]
+    []
   )
   const reorderProjectsInGroup = useCallback(
     (groupId: string, projectIds: string[]) =>
       runGroupMutation(() => window.api.db.reorderProjectsInGroup(groupId, projectIds)),
-    [runGroupMutation]
+    []
   )
 
   // Rename / collapse return a single group → optimistic patch (instant toggle).

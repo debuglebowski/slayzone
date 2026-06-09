@@ -161,7 +161,7 @@ export function useBranchGraph(
       setFetching(false)
     }
     // refresh is wrapped above
-  }, [projectPath, fetchData, fetchMutation])
+  }, [projectPath, fetchData])
 
   const refresh = useCallback(async (): Promise<void> => {
     await fetchData()
