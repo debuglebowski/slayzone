@@ -7,8 +7,7 @@ import {
   forwardRef,
   useImperativeHandle
 } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from '@slayzone/transport/client'
+import { useTRPCClient } from '@slayzone/transport/client'
 import { usePty } from '@slayzone/terminal'
 import type { TerminalMode } from '@slayzone/terminal/shared'
 import {
@@ -120,8 +119,10 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
     const shortcutActive = hasShortcutFocus ?? isActive
 
-    const trpc = useTRPC()
-    const claimSessionMutation = useMutation(trpc.app.taskWindows.claimSession.mutationOptions())
+    // Vanilla client (stable ref) — claimSession is fire-and-forget. Using
+    // useMutation here returns a NEW object each render; putting it in the
+    // claim effect's deps caused an infinite mutate→render→mutate loop.
+    const trpcClient = useTRPCClient()
     const { subscribePrompt, subscribeTitle } = usePty()
     const { terminalOverrideThemeId, contentVariant } = useTheme()
     const terminalPanelStyle = useMemo(() => {
@@ -164,13 +165,13 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       const claimAll = () => {
         for (const tab of tabs) {
           const sid = getSessionId(tab.id)
-          if (sid) claimSessionMutation.mutate({ sessionId: sid })
+          if (sid) void trpcClient.app.taskWindows.claimSession.mutate({ sessionId: sid })
         }
       }
       claimAll()
       window.addEventListener('focus', claimAll)
       return () => window.removeEventListener('focus', claimAll)
-    }, [tabs, getSessionId, claimSessionMutation])
+    }, [tabs, getSessionId, trpcClient])
 
     // Track terminal process titles for tab labels
     const [terminalTitles, setTerminalTitles] = useState<Map<string, string>>(new Map())

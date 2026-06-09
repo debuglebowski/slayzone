@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSubscription, useTRPC } from '@slayzone/transport/client'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSubscription, useTRPC, useTRPCClient } from '@slayzone/transport/client'
 import type { QueuedChatMessage } from '@slayzone/terminal/shared'
 
 /**
@@ -29,6 +29,7 @@ export function useChatQueue(
   onDrained?: (original: string) => void
 ): UseChatQueueResult {
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
 
   const listQuery = useQuery(trpc.chat.queue.list.queryOptions({ tabId }, { enabled: !!tabId }))
@@ -59,28 +60,27 @@ export function useChatQueue(
     })
   )
 
-  const pushMutation = useMutation(trpc.chat.queue.push.mutationOptions())
-  const removeMutation = useMutation(trpc.chat.queue.remove.mutationOptions())
-  const clearMutation = useMutation(trpc.chat.queue.clear.mutationOptions())
-
+  // Fire-and-forget RPC facade via the STABLE vanilla client. (useMutation
+  // returns a new object each render; wrapping it in these callbacks made them
+  // unstable, and a consumer effect keyed on `clear` looped infinitely.)
   const push = useCallback(
     async (send: string, original: string) => {
-      await pushMutation.mutateAsync({ tabId, send, original })
+      await trpcClient.chat.queue.push.mutate({ tabId, send, original })
       // No optimistic update — onQueueChanged fires post-insert and triggers refetch.
     },
-    [pushMutation, tabId]
+    [trpcClient, tabId]
   )
 
   const remove = useCallback(
     async (id: string) => {
-      await removeMutation.mutateAsync({ id })
+      await trpcClient.chat.queue.remove.mutate({ id })
     },
-    [removeMutation]
+    [trpcClient]
   )
 
   const clear = useCallback(async () => {
-    await clearMutation.mutateAsync({ tabId })
-  }, [clearMutation, tabId])
+    await trpcClient.chat.queue.clear.mutate({ tabId })
+  }, [trpcClient, tabId])
 
   return { items: listQuery.data ?? [], push, remove, clear }
 }
