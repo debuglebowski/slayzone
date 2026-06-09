@@ -45,41 +45,51 @@ window.addEventListener('unhandledrejection', (event) => {
 // Floating global agent panel: minimal renderer — skip tab store, telemetry, convex, etc.
 // Still needs TrpcProvider: ThemeProvider (and PtyProvider) now talk tRPC.
 if (isFloatingGlobalAgentPanel) {
-  window.api.app.getTrpcPort().then((trpcPort) => {
-    createRoot(document.getElementById('root')!).render(
-      <TrpcProvider url={`ws://127.0.0.1:${trpcPort}/trpc`}>
-        <PtyProvider>
-          <ThemeProvider>
-            <FloatingGlobalAgentPanel />
-          </ThemeProvider>
-        </PtyProvider>
-      </TrpcProvider>
-    )
-  })
+  Promise.all([window.api.app.getTrpcPort(), window.api.panels.getWindowId()]).then(
+    ([trpcPort, windowId]) => {
+      createRoot(document.getElementById('root')!).render(
+        <TrpcProvider url={`ws://127.0.0.1:${trpcPort}/trpc?windowId=${windowId}`}>
+          <PtyProvider>
+            <ThemeProvider>
+              <FloatingGlobalAgentPanel />
+            </ThemeProvider>
+          </PtyProvider>
+        </TrpcProvider>
+      )
+    }
+  )
 } else if (taskWindowId) {
   // Secondary task window: full TaskDetailPage scoped to one task. No tab store / sidebar.
-  window.api.app.getTrpcPort().then((trpcPort) => {
-    createRoot(document.getElementById('root')!).render(
-      <TrpcProvider url={`ws://127.0.0.1:${trpcPort}/trpc`}>
-        <PtyProvider>
-          <ThemeProvider>
-            <UndoProvider>
-              <SecondaryTaskWindow taskId={taskWindowId} />
-            </UndoProvider>
-          </ThemeProvider>
-        </PtyProvider>
-      </TrpcProvider>
-    )
-  })
+  Promise.all([window.api.app.getTrpcPort(), window.api.panels.getWindowId()]).then(
+    ([trpcPort, windowId]) => {
+      createRoot(document.getElementById('root')!).render(
+        <TrpcProvider url={`ws://127.0.0.1:${trpcPort}/trpc?windowId=${windowId}`}>
+          <PtyProvider>
+            <ThemeProvider>
+              <UndoProvider>
+                <SecondaryTaskWindow taskId={taskWindowId} />
+              </UndoProvider>
+            </ThemeProvider>
+          </PtyProvider>
+        </TrpcProvider>
+      )
+    }
+  )
 } else {
   window.api.app.bootMark?.('renderer script entered')
   // Wait for tab store + tRPC port discovery before rendering. Tab store
   // hydrates from SQLite (prevents effect race wiping persisted tabs); tRPC
   // port is needed to construct the WS URL passed to TrpcProvider.
-  Promise.all([tabStoreReady, window.api.app.getTrpcPort()]).then(([, trpcPort]) => {
+  Promise.all([
+    tabStoreReady,
+    window.api.app.getTrpcPort(),
+    window.api.panels.getWindowId()
+  ]).then(([, trpcPort, windowId]) => {
     window.api.app.bootMark?.('tabStoreReady resolved')
 
-    const trpcUrl = `ws://127.0.0.1:${trpcPort}/trpc`
+    // windowId in the WS query → server ctx.windowId (= webContents.id). Required
+    // by claimSession + panel-ownership procs; without it they throw "windowId required".
+    const trpcUrl = `ws://127.0.0.1:${trpcPort}/trpc?windowId=${windowId}`
     // Initialize the tRPC client singleton NOW (before prefetch / React mount) so
     // module-scope callers — incl. taskDetailCache.prefetch below and getTrpcClient()
     // in stores — work. TrpcProvider reuses this same client (one WS connection).
