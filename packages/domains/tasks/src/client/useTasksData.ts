@@ -110,15 +110,16 @@ export function useTasksData(): UseTasksDataReturn {
     window.api.app.bootMark?.('loadBoardData start')
   }, [])
 
-  // Project groups have no tRPC router yet (only `db:projectGroups:*` IPC
-  // handlers), so this scope stays on the IPC bridge — loaded imperatively and
-  // mirrored into `projectGroups`. The `__slayzone_refreshData` bridge and the
-  // onTasksChanged subscription both re-run this loader alongside the board query.
+  // Project groups loaded imperatively via the `projectGroups` tRPC router and
+  // mirrored into `projectGroups` state (the many optimistic mutation handlers
+  // below keep reading a synchronous array). The `__slayzone_refreshData` bridge
+  // and the onTasksChanged subscription both re-run this loader alongside the
+  // board query. Vanilla client (stable ref) — fire-and-forget, no hook deps churn.
   const loadGroups = useCallback(() => {
-    return window.api.db.getProjectGroups().then((groups) => {
+    return trpcClient.projectGroups.list.query().then((groups) => {
       setProjectGroups(groups as ProjectGroup[])
     })
-  }, [])
+  }, [trpcClient])
 
   // Seed the useState mirrors from the board query result.
   useEffect(() => {
@@ -665,10 +666,8 @@ export function useTasksData(): UseTasksDataReturn {
   )
 
   // ── Project groups ───────────────────────────────────────────────────────
-  // NOTE: project-group procedures have NO tRPC router yet (only the legacy
-  // `db:projectGroups:*` IPC handlers exist server-side). Until a router is
-  // added these handlers stay on the `window.api.db.*` IPC bridge — they are
-  // intentionally not converted in this slice.
+  // On the `projectGroups` tRPC router (vanilla client — stable ref, fire-and-
+  // forget, safe in hook deps).
   //
   // Ordering mutations return an authoritative { projects, groups } snapshot
   // (the server re-packs both scopes to contiguous 0..n-1). We snapshot current
@@ -701,52 +700,65 @@ export function useTasksData(): UseTasksDataReturn {
   )
 
   const createProjectGroup = useCallback(
-    (name?: string) => runGroupMutation(() => window.api.db.createProjectGroup({ name })),
-    []
+    (name?: string) => runGroupMutation(() => trpcClient.projectGroups.create.mutate({ name })),
+    [trpcClient]
   )
   const createFolderWithProjects = useCallback(
     (projectIds: string[]) => {
       if (projectIds.length === 0) return
-      runGroupMutation(() => window.api.db.createFolderWithProjects(projectIds))
+      runGroupMutation(() =>
+        trpcClient.projectGroups.createFolderWithProjects.mutate({ projectIds })
+      )
     },
-    []
+    [trpcClient]
   )
   const deleteProjectGroup = useCallback(
-    (id: string) => runGroupMutation(() => window.api.db.deleteProjectGroup(id)),
-    []
+    (id: string) => runGroupMutation(() => trpcClient.projectGroups.delete.mutate({ id })),
+    [trpcClient]
   )
   const reorderTopLevel = useCallback(
-    (entries: TopLevelEntryRef[]) => runGroupMutation(() => window.api.db.reorderTopLevel(entries)),
-    []
+    (entries: TopLevelEntryRef[]) =>
+      runGroupMutation(() => trpcClient.projectGroups.reorderTopLevel.mutate({ entries })),
+    [trpcClient]
   )
   const moveProjectToGroup = useCallback(
     (projectId: string, groupId: string | null, targetIndex: number) =>
-      runGroupMutation(() => window.api.db.moveProjectToGroup(projectId, groupId, targetIndex)),
-    []
+      runGroupMutation(() =>
+        trpcClient.projectGroups.moveProject.mutate({ projectId, groupId, targetIndex })
+      ),
+    [trpcClient]
   )
   const reorderProjectsInGroup = useCallback(
     (groupId: string, projectIds: string[]) =>
-      runGroupMutation(() => window.api.db.reorderProjectsInGroup(groupId, projectIds)),
-    []
+      runGroupMutation(() =>
+        trpcClient.projectGroups.reorderProjectsInGroup.mutate({ groupId, projectIds })
+      ),
+    [trpcClient]
   )
 
   // Rename / collapse return a single group → optimistic patch (instant toggle).
-  const renameProjectGroup = useCallback((id: string, name: string) => {
-    let snap: ProjectGroup[] = []
-    setProjectGroups((prev) => {
-      snap = prev
-      return prev.map((g) => (g.id === id ? { ...g, name } : g))
-    })
-    window.api.db.updateProjectGroup({ id, name }).catch(() => setProjectGroups(snap))
-  }, [])
-  const setGroupCollapsed = useCallback((id: string, collapsed: boolean) => {
-    let snap: ProjectGroup[] = []
-    setProjectGroups((prev) => {
-      snap = prev
-      return prev.map((g) => (g.id === id ? { ...g, collapsed: collapsed ? 1 : 0 } : g))
-    })
-    window.api.db.updateProjectGroup({ id, collapsed }).catch(() => setProjectGroups(snap))
-  }, [])
+  const renameProjectGroup = useCallback(
+    (id: string, name: string) => {
+      let snap: ProjectGroup[] = []
+      setProjectGroups((prev) => {
+        snap = prev
+        return prev.map((g) => (g.id === id ? { ...g, name } : g))
+      })
+      trpcClient.projectGroups.update.mutate({ id, name }).catch(() => setProjectGroups(snap))
+    },
+    [trpcClient]
+  )
+  const setGroupCollapsed = useCallback(
+    (id: string, collapsed: boolean) => {
+      let snap: ProjectGroup[] = []
+      setProjectGroups((prev) => {
+        snap = prev
+        return prev.map((g) => (g.id === id ? { ...g, collapsed: collapsed ? 1 : 0 } : g))
+      })
+      trpcClient.projectGroups.update.mutate({ id, collapsed }).catch(() => setProjectGroups(snap))
+    },
+    [trpcClient]
+  )
 
   return {
     tasks,

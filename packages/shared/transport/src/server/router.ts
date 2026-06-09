@@ -13,6 +13,7 @@ import { menuRouter } from './routers/menu'
 import { notifyRouter } from './routers/notify'
 import { processesRouter } from './routers/processes'
 import { projectsRouter } from './routers/projects'
+import { projectGroupsRouter } from './routers/project-groups'
 import { ptyRouter } from './routers/pty'
 import { settingsRouter } from './routers/settings'
 import { tagsRouter } from './routers/tags'
@@ -40,6 +41,7 @@ export const appRouter = router({
   notify: notifyRouter,
   processes: processesRouter,
   projects: projectsRouter,
+  projectGroups: projectGroupsRouter,
   pty: ptyRouter,
   settings: settingsRouter,
   tags: tagsRouter,
